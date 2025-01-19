@@ -1,0 +1,2 @@
+npm run build # per creare build pronta per deploy
+firebase deploy # per fare il deploy su firebase
