@@ -2,6 +2,7 @@
 # uvicorn main:app --reload
 
 import os
+import json
 from fastapi import FastAPI
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -9,7 +10,10 @@ from firebase_admin import credentials, firestore
 app = FastAPI()
 
 # Path to the service account file:
-cred = credentials.Certificate("firestoreServiceAccountKey.json")
+service_account_info = json.loads(r'/etc/secrets/firestoreServiceAccountKey.json')
+print("FIREBASE_SERVICE_ACCOUNT:" + str(service_account_info))
+# cred = credentials.Certificate("firestoreServiceAccountKey.json")
+cred = credentials.Certificate(service_account_info)
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
