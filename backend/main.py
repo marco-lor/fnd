@@ -58,7 +58,7 @@ def get_characters():
     characters_ref = db.collection('characters').stream()
     # characters = {doc.id: doc.to_dict() for doc in characters_ref}
     characters = {doc.id for doc in characters_ref}
-    # print(characters)
+    print(characters)
     return {"characters": characters}
 
 @app.post("/characters")
