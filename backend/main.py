@@ -25,6 +25,7 @@ app.add_middleware(
 
 # Determine if running locally or on Render
 run_local = os.getenv("RENDER") is None  # If the RENDER environment variable is not set, assume local
+print(f"Running {'locally' if run_local else 'on Render'}")
 
 # The path to your secret file:
 service_account_path = "/etc/secrets/firestoreServiceAccountKey.json"
