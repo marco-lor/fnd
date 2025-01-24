@@ -4,6 +4,8 @@ import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "fire
 import { auth } from './firebaseConfig';
 import { useNavigate } from 'react-router-dom';
 import './Login.css';  // New CSS file for better styling
+import { setDoc, doc } from "firebase/firestore";
+import { db } from "./firebaseConfig";
 
 function Login() {
   const [email, setEmail] = useState("");
@@ -32,8 +34,22 @@ function Login() {
   const handleSignup = async (e) => {
     e.preventDefault();
     setError("");
+
     try {
-      await createUserWithEmailAndPassword(auth, email, password);
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      // Set user document in Firestore
+      await setDoc(doc(db, "users", user.uid), {
+        email: user.email,
+        username: email.split("@")[0], // Default username
+        imageUrl: "", // Empty, can be updated later
+        characterId: null,
+        inventory: [],
+        stats: { level: 1, hp: 100, xp: 0 },
+        settings: { theme: "dark", notifications: true },
+      });
+
     } catch (err) {
       setError(err.message);
     }
