@@ -1,40 +1,27 @@
 /* file .frontend/src/App.css */
 .App {
   text-align: center;
-  margin: 0 auto;
-  max-width: 600px; /* Keeps content centered and neat on large screens */
-  padding: 1rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh; /* Ensures it takes the full viewport height */
+  width: 100vw; /* Ensures it spans the full width */
 }
 
+/* Adjust central band */
 .App-header {
-  background-color: #282c34;
-  min-height: 100vh;   /* Fill the viewport height */
+  background-color: rgba(40, 40, 60, 0.7); /* Slight transparency */
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
-  padding: 2rem;
+  width: 80vw; /* Enlarged width */
+  max-width: 900px; /* Prevents it from being too wide */
+  height: 100vh; /* Ensures full-page height */
+  border-radius: 15px; /* Rounded corners for aesthetics */
+  box-shadow: 0 4px 15px rgba(100, 100, 200, 0.3); /* Add a slight glow */
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
-}
-
-/* Rotating logo animation */
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-.App-logo {
-  animation: App-logo-spin infinite 20s linear;
-}
 
 /* Main Title styling */
 .main-title {
@@ -42,23 +29,7 @@
   margin: 1rem 0;
 }
 
-/* Starring list styling */
-.starring-list {
-  list-style-type: none;
-  padding: 0;
-  margin: 0.5rem 0 2rem 0;
-}
-
-.starring-list li {
-  margin: 0.25rem 0;
-}
-
-/* Development status styling */
-.dev-status {
-  font-size: 1.2rem;
-  margin-top: 2rem;
-}
-
+/* Button styling */
 .full-screen {
   width: 100vw;
   height: 100vh;

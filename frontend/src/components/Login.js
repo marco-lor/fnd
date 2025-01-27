@@ -1,11 +1,10 @@
-// file ./frontend/src/components/Login.js
-import React, { useState } from 'react';
+// file: ./frontend/src/components/Login.js
+import React, { useState } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
-import { auth } from './firebaseConfig';
-import { useNavigate } from 'react-router-dom';
-import './Login.css';  // New CSS file for better styling
+import { auth, db } from "./firebaseConfig";
+import { useNavigate } from "react-router-dom";
 import { setDoc, doc } from "firebase/firestore";
-import { db } from "./firebaseConfig";
+import "./Login.css";
 
 function Login() {
   const [email, setEmail] = useState("");
@@ -18,16 +17,15 @@ function Login() {
     setError("");
 
     if (!email.includes("@") || password.length < 6) {
-      setError("Invalid email format or password too short (min 6 characters).");
+      setError("Invalid email or password too short (min 6 characters).");
       return;
     }
 
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      window.location.reload();
+      navigate("/home"); // Redirect to home after login
     } catch (err) {
       setError("Login failed. Check credentials and try again.");
-      console.error("Firebase Auth Error:", err.message);
     }
   };
 
@@ -39,17 +37,17 @@ function Login() {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Set user document in Firestore
+      // Create user profile in Firestore
       await setDoc(doc(db, "users", user.uid), {
         email: user.email,
         username: email.split("@")[0], // Default username
-        imageUrl: "", // Empty, can be updated later
         characterId: null,
         inventory: [],
         stats: { level: 1, hp: 100, xp: 0 },
         settings: { theme: "dark", notifications: true },
       });
 
+      navigate("/home");
     } catch (err) {
       setError(err.message);
     }
@@ -62,21 +60,23 @@ function Login() {
         <form onSubmit={handleLogin}>
           <input
             type="email"
-            placeholder="Enter your sacred email"
+            placeholder="Enter your email"
             className="login-input"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            required
           />
           <input
             type="password"
-            placeholder="Forge your secret password"
+            placeholder="Enter your password"
             className="login-input"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            required
           />
-          <button type="submit" className="login-button">Enter</button>
+          <button type="submit" className="login-button">Login</button>
         </form>
-        <button onClick={handleSignup} className="signup-button">Join the Order</button>
+        <button onClick={handleSignup} className="signup-button">Sign Up</button>
         {error && <p className="error-message">{error}</p>}
       </div>
     </div>

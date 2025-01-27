@@ -1,46 +1,48 @@
-/* Center the login box */
+/* file: ./frontend/src/components/Login.css */
 .login-container {
   display: flex;
   justify-content: center;
   align-items: center;
   height: 100vh;
   width: 100vw;
-  background: rgba(20, 20, 30, 0.6); /* Soft dark mist */
-  backdrop-filter: blur(10px); /* Light blur for a mystical effect */
+  background: rgba(20, 20, 30, 0.6);
+  backdrop-filter: blur(10px);
 }
 
-/* Style the login box */
+/* Login box */
 .login-box {
-  background: rgba(40, 40, 60, 0.5); /* Softer translucent dark */
+  background: rgba(40, 40, 60, 0.5);
   padding: 2rem;
   border-radius: 15px;
   text-align: center;
   width: 350px;
   box-shadow: 0 4px 15px rgba(100, 100, 200, 0.2);
-  backdrop-filter: blur(5px);
   border: 1px solid rgba(150, 150, 255, 0.2);
 }
 
-/* Epic fantasy title */
 .login-box h1 {
   font-family: 'Cinzel', serif;
   font-size: 2rem;
   margin-bottom: 1rem;
-  color: #D4AF37; /* Gold but slightly muted */
+  color: #D4AF37;
   text-shadow: 0 0 8px rgba(255, 215, 0, 0.4);
 }
 
-/* Input styles */
-.login-input {
+/* Input fields */
+.login-input, .login-button, .signup-button {
   width: 100%;
+  max-width: 300px;
   padding: 12px;
   margin: 10px 0;
   border: none;
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.15); /* Softer glow */
-  color: white;
   font-size: 1rem;
   outline: none;
+}
+
+.login-input {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
   transition: 0.3s;
 }
 
@@ -48,47 +50,34 @@
   color: rgba(255, 255, 255, 0.7);
 }
 
-/* Input focus effect */
 .login-input:focus {
   background: rgba(255, 255, 255, 0.2);
   box-shadow: 0 0 10px rgba(150, 150, 255, 0.3);
 }
 
 /* Buttons */
-.login-button, .signup-button {
-  width: 100%;
-  padding: 12px;
-  margin-top: 10px;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 1rem;
-  transition: 0.3s;
-  font-weight: bold;
-}
-
-/* Different button styles */
 .login-button {
   background: linear-gradient(90deg, #FFD700 0%, #FFDD44 100%);
   color: black;
-  box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
+  font-weight: bold;
+  cursor: pointer;
+  transition: 0.3s;
 }
 
 .signup-button {
   background: linear-gradient(90deg, #8B0000 0%, #B22222 100%);
   color: white;
-  box-shadow: 0 0 10px rgba(255, 0, 0, 0.2);
+  font-weight: bold;
+  cursor: pointer;
+  transition: 0.3s;
 }
 
-/* Hover effects */
 .login-button:hover {
   background: linear-gradient(90deg, #FFC107 0%, #FFD700 100%);
-  box-shadow: 0 0 15px rgba(255, 215, 0, 0.5);
 }
 
 .signup-button:hover {
   background: linear-gradient(90deg, #B22222 0%, #FF6347 100%);
-  box-shadow: 0 0 15px rgba(255, 0, 0, 0.5);
 }
 
 /* Error message */
