@@ -2,7 +2,7 @@
 /* Apply a global fantasy-style background */
 body {
   margin: 0;
-  font-family: 'Cinzel', serif; /* More epic medieval font */
+  font-family: 'Cinzel', serif;
   background: url('assets/images/epic_fantasy_pattern_background.jpg') no-repeat center center fixed;
   background-size: cover;
   height: 100vh;
@@ -12,15 +12,9 @@ body {
   color: white;
 }
 
-/* Remove any unwanted margin or padding */
 html, body, #root {
   height: 100%;
   width: 100%;
   margin: 0;
   padding: 0;
-}
-
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
 }

@@ -9,7 +9,6 @@
   backdrop-filter: blur(10px);
 }
 
-/* Login box */
 .login-box {
   background: rgba(40, 40, 60, 0.5);
   padding: 2rem;
@@ -28,7 +27,6 @@
   text-shadow: 0 0 8px rgba(255, 215, 0, 0.4);
 }
 
-/* Input fields */
 .login-input, .login-button, .signup-button {
   width: 100%;
   max-width: 300px;
@@ -43,25 +41,17 @@
 .login-input {
   background: rgba(255, 255, 255, 0.15);
   color: white;
-  transition: 0.3s;
 }
 
 .login-input::placeholder {
   color: rgba(255, 255, 255, 0.7);
 }
 
-.login-input:focus {
-  background: rgba(255, 255, 255, 0.2);
-  box-shadow: 0 0 10px rgba(150, 150, 255, 0.3);
-}
-
-/* Buttons */
 .login-button {
   background: linear-gradient(90deg, #FFD700 0%, #FFDD44 100%);
   color: black;
   font-weight: bold;
   cursor: pointer;
-  transition: 0.3s;
 }
 
 .signup-button {
@@ -69,18 +59,8 @@
   color: white;
   font-weight: bold;
   cursor: pointer;
-  transition: 0.3s;
 }
 
-.login-button:hover {
-  background: linear-gradient(90deg, #FFC107 0%, #FFD700 100%);
-}
-
-.signup-button:hover {
-  background: linear-gradient(90deg, #B22222 0%, #FF6347 100%);
-}
-
-/* Error message */
 .error-message {
   color: #FF4C4C;
   margin-top: 10px;

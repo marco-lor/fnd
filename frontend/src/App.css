@@ -4,62 +4,24 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 100vh; /* Ensures it takes the full viewport height */
-  width: 100vw; /* Ensures it spans the full width */
+  height: 100vh;
+  width: 100vw;
 }
 
-/* Adjust central band */
 .App-header {
-  background-color: rgba(40, 40, 60, 0.7); /* Slight transparency */
+  background-color: rgba(40, 40, 60, 0.7);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 80vw; /* Enlarged width */
-  max-width: 900px; /* Prevents it from being too wide */
-  height: 100vh; /* Ensures full-page height */
-  border-radius: 15px; /* Rounded corners for aesthetics */
-  box-shadow: 0 4px 15px rgba(100, 100, 200, 0.3); /* Add a slight glow */
+  width: 80vw;
+  max-width: 900px;
+  height: 100vh;
+  border-radius: 15px;
+  box-shadow: 0 4px 15px rgba(100, 100, 200, 0.3);
 }
 
-
-/* Main Title styling */
 .main-title {
   font-size: 2.5rem;
   margin: 1rem 0;
-}
-
-/* Button styling */
-.full-screen {
-  width: 100vw;
-  height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: url('assets/images/epic_fantasy_pattern_background.jpg') no-repeat center center fixed;
-  background-size: cover;
-}
-
-.logout-button {
-  background: #8B0000; /* Deep red */
-  color: white;
-  padding: 10px 15px;
-  border: none;
-  border-radius: 5px;
-  font-size: 1rem;
-  cursor: pointer;
-  transition: 0.3s;
-  margin-top: 20px;
-}
-
-.logout-button:hover {
-  background: #B22222;
-}
-
-.profile-image {
-  width: 150px;
-  height: 150px;
-  border-radius: 50%;
-  object-fit: cover;
-  margin-bottom: 10px;
 }
