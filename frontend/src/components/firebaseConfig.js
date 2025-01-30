@@ -4,8 +4,7 @@ import { getAnalytics } from "firebase/analytics";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
-
-// Your existing config
+// Your Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyAVSeJEuvgzpsVJoxXPZe_jhFJbyAdfCWY",
   authDomain: "fatins.firebaseapp.com",
@@ -13,8 +12,27 @@ const firebaseConfig = {
   storageBucket: "fatins.firebasestorage.app",
   messagingSenderId: "65565416227",
   appId: "1:65565416227:web:77dcc904f276932d424a96",
-  measurementId: "G-ME2YPD5ZHC"
+  measurementId: "G-ME2YPD5ZHC",
 };
+
+// Log the window location hostname for debugging
+console.log("Window Location Hostname:", window.location.hostname);
+
+// Dynamically set our backend URL
+const isLocalhost = window.location.hostname === "localhost";
+const API_BASE_URL = isLocalhost
+  ? "http://127.0.0.1:8000"   // Your local FastAPI endpoint
+  : "https://fnd-64ts.onrender.com"; // Your Render URL
+
+// Detect if the app is hosted on Firebase
+// const isFirebaseHosted =
+//   window.location.hostname.includes("firebaseapp.com") ||
+//   window.location.hostname.includes("web.app");
+
+// Set API base URL dynamically
+// const API_BASE_URL = isFirebaseHosted
+//   ? "https://fnd-64ts.onrender.com" // Hosted on Render when on Firebase
+//   : "http://127.0.0.1:8000"; // Local development
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
@@ -22,6 +40,5 @@ const analytics = getAnalytics(app);
 const auth = getAuth(app);
 const db = getFirestore(app); // Initialize Firestore
 
-// Export Firestore to use in other components
-export { auth, db };
-
+// Export Firebase services and API base URL
+export { auth, db, API_BASE_URL };

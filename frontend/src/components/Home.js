@@ -1,6 +1,7 @@
 // file ./frontend/src/components/Home.js
 import React, { useEffect, useState } from "react";
 import { auth, db } from "./firebaseConfig";
+import { API_BASE_URL } from "./firebaseConfig"; // Import dynamic API URL
 import { doc, getDoc } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
@@ -44,7 +45,7 @@ function Home() {
 
   const handleTestButtonClick = async () => {
     try {
-      const response = await fetch("http://127.0.0.1:8000/test-endpoint"); // Replace with your actual FastAPI endpoint
+      const response = await fetch(`${API_BASE_URL}/test-endpoint`); // Use dynamic API URL
       const data = await response.json();
       console.log("API Response:", data);
     } catch (error) {
