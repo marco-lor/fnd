@@ -24,16 +24,6 @@ const API_BASE_URL = isLocalhost
   ? "http://127.0.0.1:8000"   // Your local FastAPI endpoint
   : "https://fnd-64ts.onrender.com"; // Your Render URL
 
-// Detect if the app is hosted on Firebase
-// const isFirebaseHosted =
-//   window.location.hostname.includes("firebaseapp.com") ||
-//   window.location.hostname.includes("web.app");
-
-// Set API base URL dynamically
-// const API_BASE_URL = isFirebaseHosted
-//   ? "https://fnd-64ts.onrender.com" // Hosted on Render when on Firebase
-//   : "http://127.0.0.1:8000"; // Local development
-
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const analytics = getAnalytics(app);
