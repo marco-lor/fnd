@@ -1,5 +1,4 @@
 // file: ./frontend/src/components/Login.js
-// file: ./frontend/src/components/Login.js
 import React, { useState } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "./firebaseConfig";

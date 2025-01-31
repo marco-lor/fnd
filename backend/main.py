@@ -36,28 +36,45 @@ def test_firebase():
     print("Testing Firebase Connection...")
 
     try:
-        # Read all document IDs
-        characters_ref = db.collection('characters').stream()
-        characters = {doc.id for doc in characters_ref}
-        print("Characters in Database:", characters)
+        selected_document = db.collection('users').document('DOwwzU7WDwSk84LA4gzOu4YskNI3').get()
+        if selected_document.exists:
+            print("Document data:", selected_document.to_dict())
+            doc_data = selected_document.to_dict()
+        else:
+            print("No such document!")
 
-        # Add a test character
-        test_character = {"name": "Test Character", "class": "Wizard", "level": 1}
-        doc_ref = db.collection('characters').document()
-        doc_ref.set(test_character)
-        print(f"Added Test Character with ID: {doc_ref.id}")
+        # Read all document IDs
+        selected_collection = db.collection('users').stream()
+        uids = {doc.id for doc in selected_collection}
+
+        print("Characters in Database:", uids)
+
+        # Add "Parametri Base" field to each user
+        for uid in uids:
+            user_ref = db.collection('users').document(uid)
+            user_ref.update({
+                "ParametriBase": {
+                    "Forza": 0,
+                    "Destrezza": 0,
+                    "Costituzione": 0,
+                    "Saggezza": 0,
+                    "Intelligenza": 0,
+                    "Fortuna": 0
+                }
+            })
+            print(f"Updated user {uid} with Parametri Base")
 
     except Exception as e:
         print("Error connecting to Firebase:", e)
 
 @app.get("/test-endpoint")
 def test_endpoint():
-    # return {"message": "API Call Successful! Pippo"}
+    test_firebase()
     return {"message": "API Call Successful! Pippo"}
 
 # Run Uvicorn server only if the script is executed directly
 if __name__ == "__main__":
     print("Starting FastAPI server...")
     test_firebase()  # Test the Firebase connection
-
+    print("Firebase Connection Successful!")
     uvicorn.run(app, host="127.0.0.1", port=8000, reload=True)
