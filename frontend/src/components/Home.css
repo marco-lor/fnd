@@ -1,86 +1,168 @@
-/* file: ./frontend/src/components/Home.css */
+/* Overall container: vertical layout */
 .home-container {
-  text-align: center;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100vh;
   width: 100vw;
-}
-
-.home-header {
-  background-color: rgba(40, 40, 60, 0.7);
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-start;
-  width: 80vw;
-  max-width: 900px;
-  height: 100vh;
-  border-radius: 15px;
-  box-shadow: 0 4px 15px rgba(100, 100, 200, 0.3);
-  position: relative;
   padding: 20px;
+  box-sizing: border-box;
 }
 
-/* Top section to hold profile image and logout button */
+/* Central area at the top */
+.central-container {
+  width: 80%;
+  background: rgba(40, 40, 60, 0.7);
+  padding: 20px;
+  border-radius: 15px;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 20px;
+  box-sizing: border-box;
+}
+
+/* Top section with profile pic and logout */
 .top-section {
-  width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between; /* Align profile image to left, button to right */
-  padding: 10px;
-  position: relative;
+  justify-content: space-between;
+  width: 100%;
 }
 
-/* Profile image aligned to the left */
 .profile-image {
-  width: 80px;
-  height: 80px;
+  width: 80px; /* Increased from 60px */
+  height: 80px; /* Increased from 60px */
   border-radius: 50%;
   object-fit: cover;
-  margin-left: 10px;
 }
 
-/* Logout button aligned to the right */
+.welcome-text-top {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: white;
+  flex-grow: 1;
+  margin: 0 20px;
+  text-align: center;
+}
+
 .logout-button {
   background: #8B0000;
   color: white;
   padding: 10px 15px;
   border: none;
   border-radius: 5px;
-  font-size: 1rem;
   cursor: pointer;
-  transition: 0.3s;
-  margin-right: 10px;
+  transition: background 0.3s;
 }
 
 .logout-button:hover {
   background: #B22222;
 }
 
-/* Welcome text centered below */
-.welcome-text-top {
-  font-size: 1.5rem;
-  font-weight: bold;
-  text-align: center;
-  flex-grow: 1;
-  margin: 0 20px; /* Add some margin to separate from image and button */
-}
-
-/* Test button styling */
-.test-button {
-  background: #FFD700;
-  color: black;
-  font-size: 1rem;
-  padding: 10px 15px;
+/* Placeholder button */
+.placeholder-button {
+  background: #007BFF;
+  color: white;
+  font-size: 1.2rem;
+  padding: 15px 25px;
   border: none;
-  border-radius: 5px;
+  border-radius: 8px;
   cursor: pointer;
-  font-weight: bold;
-  transition: 0.3s;
+  margin: 20px 0;
+  transition: background 0.3s;
 }
 
-.test-button:hover {
-  background: #FFDD44;
+.placeholder-button:hover {
+  background: #0056b3;
+}
+
+/* Tables container */
+.tables-container {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: stretch; /* Ensures tables stretch to the same height */
+  gap: 20px;
+  width: 100%;
+  max-width: 1200px;
+  box-sizing: border-box;
+}
+
+/* Table container styling */
+.table-container {
+  background: rgba(40, 40, 60, 0.7);
+  padding: 15px;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  flex-grow: 1;
+  display: flex;                 /* Added */
+  flex-direction: column;        /* Added */
+  box-sizing: border-box;
+  /* Optional: enforce minimum height */
+  /* min-height: 400px; */
+}
+
+.table-container h2 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  color: white;
+  font-size: 1.2rem;
+}
+
+/* New table-wrapper */
+.table-wrapper {
+  flex-grow: 1;                  /* Makes the wrapper fill the available space */
+  display: flex;                 /* Makes wrapper a flex container */
+  flex-direction: column;
+}
+
+/* Table styling */
+.stat-table {
+  width: 100%;
+  flex-grow: 1;                  /* Allows the table to fill the wrapper */
+  border-collapse: collapse;
+  color: white;
+  border-radius: 8px;
+  overflow: hidden;              /* Ensure rounded corners */
+}
+
+.stat-table th,
+.stat-table td {
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 8px;
+  text-align: center;
+  word-wrap: break-word;
+}
+
+/* Set first column width */
+.stat-table th:first-child,
+.stat-table td:first-child {
+  width: 30%;
+  text-align: left;
+  padding-left: 10px;
+}
+
+/* Highlight 'Tot' column */
+.stat-table th:last-child,
+.stat-table td:last-child {
+  background-color: rgba(255, 215, 0, 0.3); /* Light golden */
+  font-weight: bold;
+}
+
+/* Alternate row shading for a softer look */
+.stat-table tr:nth-child(even) {
+  background-color: rgba(60, 60, 80, 0.3);
+}
+
+/* Responsive layout for small screens: tables stack vertically */
+@media (max-width: 800px) {
+  .tables-container {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .table-container {
+    width: 100%;
+    max-width: none;
+  }
 }

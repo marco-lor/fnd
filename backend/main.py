@@ -28,53 +28,55 @@ def add_character(character: dict):
     return {"status": "success", "id": doc_ref.id}
 
 # Optional: Interactive Firebase Testing
-def test_firebase():
-    """
-    Function to interact with Firebase directly in the Python console.
-    Run this manually to check database operations.
-    """
-    print("Testing Firebase Connection...")
+def crea_params():
+    # selected_document = db.collection('users').document('DOwwzU7WDwSk84LA4gzOu4YskNI3').get()
+    # if selected_document.exists:
+    #     print("Document data:", selected_document.to_dict())
+    #     doc_data = selected_document.to_dict()
+    # else:
+    #     print("No such document!")
 
-    try:
-        selected_document = db.collection('users').document('DOwwzU7WDwSk84LA4gzOu4YskNI3').get()
-        if selected_document.exists:
-            print("Document data:", selected_document.to_dict())
-            doc_data = selected_document.to_dict()
-        else:
-            print("No such document!")
+    # Read all document IDs
+    selected_collection = db.collection('users').stream()
+    uids = {doc.id for doc in selected_collection}
 
-        # Read all document IDs
-        selected_collection = db.collection('users').stream()
-        uids = {doc.id for doc in selected_collection}
+    print("Characters in Database:", uids)
 
-        print("Characters in Database:", uids)
-
-        # Add "Parametri Base" field to each user
-        for uid in uids:
-            user_ref = db.collection('users').document(uid)
-            user_ref.update({
-                "ParametriBase": {
-                    "Forza": 0,
-                    "Destrezza": 0,
-                    "Costituzione": 0,
-                    "Saggezza": 0,
-                    "Intelligenza": 0,
-                    "Fortuna": 0
+    # Add "Parametri Base" field to each user
+    for uid in uids:
+        user_ref = db.collection('users').document(uid)
+        user_ref.update({
+            "Parametri": {
+                "Base": {
+                    "Forza": {'Base': 0, 'Anima': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
+                    "Destrezza": {'Base': 0, 'Anima': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
+                    "Costituzione": {'Base': 0, 'Anima': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
+                    "Saggezza": {'Base': 0, 'Anima': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
+                    "Intelligenza": {'Base': 0, 'Anima': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
+                    "Fortuna": {'Base': 0, 'Anima': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
+                    },
+                "Combattimento": {
+                    "Salute": {'Base': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
+                    "Mira": {'Base': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
+                    "Attacco": {'Base': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
+                    "Critico": {'Base': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
+                    "Difesa": {'Base': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
+                    "RiduzioneDanni": {'Base': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
+                    "Disciplina": {'Base': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
+                    },
                 }
-            })
-            print(f"Updated user {uid} with Parametri Base")
+        })
+        print(f"Updated user {uid} with Parametri Base")
 
-    except Exception as e:
-        print("Error connecting to Firebase:", e)
 
 @app.get("/test-endpoint")
 def test_endpoint():
-    test_firebase()
+    crea_params()
     return {"message": "API Call Successful! Pippo"}
 
 # Run Uvicorn server only if the script is executed directly
 if __name__ == "__main__":
     print("Starting FastAPI server...")
-    test_firebase()  # Test the Firebase connection
+    test_endpoint()  # Test the Firebase connection
     print("Firebase Connection Successful!")
     uvicorn.run(app, host="127.0.0.1", port=8000, reload=True)
