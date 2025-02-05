@@ -1,8 +1,7 @@
 // file: ./frontend/src/components/Home.js
 import React, { useEffect, useState } from "react";
-import { auth, db } from "./firebaseConfig";
-import { API_BASE_URL } from "./firebaseConfig"; // Import dynamic API URL
-import { doc, getDoc } from "firebase/firestore";
+import { auth, db, API_BASE_URL } from "./firebaseConfig";
+import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import "./Home.css";
@@ -10,30 +9,63 @@ import "./Home.css";
 function Home() {
   const [user, setUser] = useState(null);
   const [userData, setUserData] = useState(null);
+  // Local state for editable Base and Combat stats
+  const [editableBase, setEditableBase] = useState(null);
+  const [editableComb, setEditableComb] = useState(null);
   const [imageUrl, setImageUrl] = useState(null);
+  // Global cooldown state: if true, no arrow click will be processed.
+  const [cooldown, setCooldown] = useState(false);
   const navigate = useNavigate();
 
+  // Listen for authentication state changes.
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
-        const userRef = doc(db, "users", currentUser.uid);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists()) {
-          const data = userSnap.data();
-          setUserData(data);
-          if (data.imageUrl) {
-            setImageUrl(data.imageUrl);
+        setUser(currentUser);
+      } else {
+        navigate("/"); // Redirect to login if not authenticated
+      }
+    });
+    return () => unsubscribeAuth();
+  }, [navigate]);
+
+  // Set up a real-time listener on the user's document.
+  useEffect(() => {
+    if (!user) return;
+
+    const userRef = doc(db, "users", user.uid);
+    const unsubscribeSnapshot = onSnapshot(userRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setUserData(data);
+
+        if (data.imageUrl) {
+          setImageUrl(data.imageUrl);
+        }
+
+        if (data.Parametri) {
+          if (data.Parametri.Base) {
+            setEditableBase(data.Parametri.Base);
+          }
+          if (data.Parametri.Combattimento) {
+            setEditableComb(data.Parametri.Combattimento);
           }
         }
-      } else {
-        navigate("/"); // Redirect to login if no user is found
       }
     });
 
-    return () => unsubscribe();
-  }, [navigate]);
+    return () => unsubscribeSnapshot();
+  }, [user]);
 
+  // Helper function to trigger a 500ms cooldown.
+  const triggerCooldown = () => {
+    setCooldown(true);
+    setTimeout(() => {
+      setCooldown(false);
+    }, 500);
+  };
+
+  // Logout handler
   const handleLogout = async () => {
     try {
       await signOut(auth);
@@ -43,9 +75,10 @@ function Home() {
     }
   };
 
+  // Test API Call handler
   const handleTestButtonClick = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/test-endpoint`); // Use dynamic API URL
+      const response = await fetch(`${API_BASE_URL}/test-endpoint`);
       const data = await response.json();
       console.log("API Response:", data);
     } catch (error) {
@@ -53,12 +86,114 @@ function Home() {
     }
   };
 
-  // Helper to render the Base stats table
+  // --- Base Stats Handlers ---
+  const handleIncrease = async (statName) => {
+    // Check for cooldown to prevent rapid updates.
+    if (cooldown) return;
+    triggerCooldown();
+
+    if (!user || !editableBase) return;
+    const currentValue = Number(editableBase[statName].Base) || 0;
+    const newValue = currentValue + 1;
+
+    // Update local state
+    setEditableBase((prev) => ({
+      ...prev,
+      [statName]: { ...prev[statName], Base: newValue },
+    }));
+
+    // Update Firestore
+    try {
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
+        [`Parametri.Base.${statName}.Base`]: newValue,
+      });
+      console.log(`Increased ${statName} to ${newValue}`);
+    } catch (error) {
+      console.error("Error updating stat", error);
+    }
+  };
+
+  const handleDecrease = async (statName) => {
+    if (cooldown) return;
+    triggerCooldown();
+
+    if (!user || !editableBase) return;
+    const currentValue = Number(editableBase[statName].Base) || 0;
+    const newValue = currentValue - 1;
+
+    setEditableBase((prev) => ({
+      ...prev,
+      [statName]: { ...prev[statName], Base: newValue },
+    }));
+
+    try {
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
+        [`Parametri.Base.${statName}.Base`]: newValue,
+      });
+      console.log(`Decreased ${statName} to ${newValue}`);
+    } catch (error) {
+      console.error("Error updating stat", error);
+    }
+  };
+
+  // --- Combat Stats Handlers (for the Base column only) ---
+  const handleCombIncrease = async (statName) => {
+    if (cooldown) return;
+    triggerCooldown();
+
+    if (!user || !editableComb) return;
+    const currentValue = Number(editableComb[statName].Base) || 0;
+    const newValue = currentValue + 1;
+
+    setEditableComb((prev) => ({
+      ...prev,
+      [statName]: { ...prev[statName], Base: newValue },
+    }));
+
+    try {
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
+        [`Parametri.Combattimento.${statName}.Base`]: newValue,
+      });
+      console.log(`Increased combat ${statName} to ${newValue}`);
+    } catch (error) {
+      console.error("Error updating combat stat", error);
+    }
+  };
+
+  const handleCombDecrease = async (statName) => {
+    if (cooldown) return;
+    triggerCooldown();
+
+    if (!user || !editableComb) return;
+    const currentValue = Number(editableComb[statName].Base) || 0;
+    const newValue = currentValue - 1;
+
+    setEditableComb((prev) => ({
+      ...prev,
+      [statName]: { ...prev[statName], Base: newValue },
+    }));
+
+    try {
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
+        [`Parametri.Combattimento.${statName}.Base`]: newValue,
+      });
+      console.log(`Decreased combat ${statName} to ${newValue}`);
+    } catch (error) {
+      console.error("Error updating combat stat", error);
+    }
+  };
+
+  // --- Rendering Functions ---
   const renderBaseTable = (baseObj) => {
     if (!baseObj) return null;
     const columns = ["Base", "Anima", "Equip", "Mod", "Tot"];
+    const orderedStats = Object.keys(baseObj).sort();
     return (
-      <div className="table-wrapper"> {/* Added wrapper */}
+      <div className="table-wrapper">
         <table className="stat-table">
           <thead>
             <tr>
@@ -69,26 +204,51 @@ function Home() {
             </tr>
           </thead>
           <tbody>
-            {Object.entries(baseObj).map(([statName, statValues]) => (
-              <tr key={statName}>
-                <td>{statName}</td>
-                {columns.map((col) => (
-                  <td key={col}>{statValues[col]}</td>
-                ))}
-              </tr>
-            ))}
+            {orderedStats.map((statName) => {
+              const statValues = baseObj[statName];
+              return (
+                <tr key={statName}>
+                  <td>{statName}</td>
+                  {columns.map((col) => (
+                    <td key={col}>
+                      {col === "Base" ? (
+                        <div className="arrow-container">
+                          <button
+                            disabled={cooldown}
+                            className="arrow-button"
+                            onClick={() => handleDecrease(statName)}
+                          >
+                            ◀
+                          </button>
+                          <span>{statValues[col]}</span>
+                          <button
+                            disabled={cooldown}
+                            className="arrow-button"
+                            onClick={() => handleIncrease(statName)}
+                          >
+                            ▶
+                          </button>
+                        </div>
+                      ) : (
+                        statValues[col]
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
     );
   };
 
-  // Helper to render the Combattimento stats table
   const renderCombattimentoTable = (combObj) => {
     if (!combObj) return null;
     const columns = ["Base", "Equip", "Mod", "Tot"];
+    const orderedStats = Object.keys(combObj).sort();
     return (
-      <div className="table-wrapper"> {/* Added wrapper */}
+      <div className="table-wrapper">
         <table className="stat-table">
           <thead>
             <tr>
@@ -99,14 +259,39 @@ function Home() {
             </tr>
           </thead>
           <tbody>
-            {Object.entries(combObj).map(([statName, statValues]) => (
-              <tr key={statName}>
-                <td>{statName}</td>
-                {columns.map((col) => (
-                  <td key={col}>{statValues[col]}</td>
-                ))}
-              </tr>
-            ))}
+            {orderedStats.map((statName) => {
+              const statValues = combObj[statName];
+              return (
+                <tr key={statName}>
+                  <td>{statName}</td>
+                  {columns.map((col) => (
+                    <td key={col}>
+                      {col === "Base" ? (
+                        <div className="arrow-container">
+                          <button
+                            disabled={cooldown}
+                            className="arrow-button"
+                            onClick={() => handleCombDecrease(statName)}
+                          >
+                            ◀
+                          </button>
+                          <span>{statValues[col]}</span>
+                          <button
+                            disabled={cooldown}
+                            className="arrow-button"
+                            onClick={() => handleCombIncrease(statName)}
+                          >
+                            ▶
+                          </button>
+                        </div>
+                      ) : (
+                        statValues[col]
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -117,17 +302,20 @@ function Home() {
     return <p>Loading...</p>;
   }
 
-  // Extract the stats if available
-  const baseParams = userData?.Parametri?.Base;
-  const combParams = userData?.Parametri?.Combattimento;
+  // Use the real-time states for rendering.
+  const baseParams = editableBase;
+  const combParams = editableComb;
 
   return (
     <div className="home-container">
-      {/* Central Profile Area */}
       <div className="central-container">
         <div className="top-section">
           {imageUrl && (
-            <img src={imageUrl} alt="Character Avatar" className="profile-image" />
+            <img
+              src={imageUrl}
+              alt="Character Avatar"
+              className="profile-image"
+            />
           )}
           <h1 className="welcome-text-top">
             Welcome, {userData?.characterId || user.email}!
@@ -138,14 +326,11 @@ function Home() {
         </div>
       </div>
 
-      {/* Placeholder button with onClick handler */}
       <button className="placeholder-button" onClick={handleTestButtonClick}>
         Test API Call
       </button>
 
-      {/* Tables Container */}
       <div className="tables-container">
-        {/* Left Table */}
         {baseParams && (
           <div className="table-container left-table">
             <h2>Base Stats</h2>
@@ -153,7 +338,6 @@ function Home() {
           </div>
         )}
 
-        {/* Right Table */}
         {combParams && (
           <div className="table-container right-table">
             <h2>Combat Stats</h2>

@@ -12,7 +12,7 @@
 /* Central area at the top */
 .central-container {
   width: 80%;
-  background: rgba(40, 40, 60, 0.7);
+  background: rgba(40, 40, 60, 0.8);
   padding: 20px;
   border-radius: 15px;
   display: flex;
@@ -90,10 +90,10 @@
 
 /* Table container styling */
 .table-container {
-  background: rgba(40, 40, 60, 0.7);
+  background: rgba(40, 40, 60, 0.8);
   padding: 15px;
   border-radius: 10px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   flex-grow: 1;
   display: flex;                 /* Added */
   flex-direction: column;        /* Added */
@@ -145,13 +145,13 @@
 /* Highlight 'Tot' column */
 .stat-table th:last-child,
 .stat-table td:last-child {
-  background-color: rgba(255, 215, 0, 0.3); /* Light golden */
+  background-color: rgba(25, 50, 128, 0.4); /* Light golden */
   font-weight: bold;
 }
 
 /* Alternate row shading for a softer look */
 .stat-table tr:nth-child(even) {
-  background-color: rgba(60, 60, 80, 0.3);
+  background-color: rgba(60, 60, 80, 0.4);
 }
 
 /* Responsive layout for small screens: tables stack vertically */
@@ -165,4 +165,41 @@
     width: 100%;
     max-width: none;
   }
+}
+
+.stat-table input {
+  width: 100%;
+  background: transparent;
+  color: white;
+  border: none;
+  text-align: center;
+}
+
+/* Arrow container now uses a horizontal layout */
+.arrow-container {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Style for the arrow buttons */
+.arrow-button {
+  background: transparent;
+  border: none;
+  color: white;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 5px;
+}
+
+.arrow-button:hover {
+  color: #ffd700; /* Changes color on hover */
+}
+
+/* Ensure the number is centered between the arrows */
+.arrow-container span {
+  margin: 0 5px;
+  min-width: 20px;
+  text-align: center;
 }
