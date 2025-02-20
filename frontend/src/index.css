@@ -1,5 +1,9 @@
 /* file .frontend/src/index.css */
 /* Apply a global fantasy-style background */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 body {
   margin: 0;
   font-family: 'Cinzel', serif;

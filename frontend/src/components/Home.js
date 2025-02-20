@@ -2,18 +2,15 @@
 import React, { useEffect, useState } from "react";
 import { auth, db, API_BASE_URL } from "./firebaseConfig";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
-import "./Home.css";
+import DnDBackground from "./DnDBackground";
+import Navbar from "./navbar";
 
 function Home() {
   const [user, setUser] = useState(null);
-  const [userData, setUserData] = useState(null);
-  // Local state for editable Base and Combat stats
   const [editableBase, setEditableBase] = useState(null);
   const [editableComb, setEditableComb] = useState(null);
-  const [imageUrl, setImageUrl] = useState(null);
-  // Global cooldown state: if true, no arrow click will be processed.
   const [cooldown, setCooldown] = useState(false);
   const navigate = useNavigate();
 
@@ -32,17 +29,10 @@ function Home() {
   // Set up a real-time listener on the user's document.
   useEffect(() => {
     if (!user) return;
-
     const userRef = doc(db, "users", user.uid);
     const unsubscribeSnapshot = onSnapshot(userRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        setUserData(data);
-
-        if (data.imageUrl) {
-          setImageUrl(data.imageUrl);
-        }
-
         if (data.Parametri) {
           if (data.Parametri.Base) {
             setEditableBase(data.Parametri.Base);
@@ -53,7 +43,6 @@ function Home() {
         }
       }
     });
-
     return () => unsubscribeSnapshot();
   }, [user]);
 
@@ -63,16 +52,6 @@ function Home() {
     setTimeout(() => {
       setCooldown(false);
     }, 500);
-  };
-
-  // Logout handler
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      navigate("/");
-    } catch (error) {
-      console.error("Logout failed:", error);
-    }
   };
 
   // Test API Call handler
@@ -88,21 +67,15 @@ function Home() {
 
   // --- Base Stats Handlers ---
   const handleIncrease = async (statName) => {
-    // Check for cooldown to prevent rapid updates.
     if (cooldown) return;
     triggerCooldown();
-
     if (!user || !editableBase) return;
     const currentValue = Number(editableBase[statName].Base) || 0;
     const newValue = currentValue + 1;
-
-    // Update local state
     setEditableBase((prev) => ({
       ...prev,
       [statName]: { ...prev[statName], Base: newValue },
     }));
-
-    // Update Firestore
     try {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
@@ -117,16 +90,13 @@ function Home() {
   const handleDecrease = async (statName) => {
     if (cooldown) return;
     triggerCooldown();
-
     if (!user || !editableBase) return;
     const currentValue = Number(editableBase[statName].Base) || 0;
     const newValue = currentValue - 1;
-
     setEditableBase((prev) => ({
       ...prev,
       [statName]: { ...prev[statName], Base: newValue },
     }));
-
     try {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
@@ -138,20 +108,17 @@ function Home() {
     }
   };
 
-  // --- Combat Stats Handlers (for the Base column only) ---
+  // --- Combat Stats Handlers ---
   const handleCombIncrease = async (statName) => {
     if (cooldown) return;
     triggerCooldown();
-
     if (!user || !editableComb) return;
     const currentValue = Number(editableComb[statName].Base) || 0;
     const newValue = currentValue + 1;
-
     setEditableComb((prev) => ({
       ...prev,
       [statName]: { ...prev[statName], Base: newValue },
     }));
-
     try {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
@@ -166,16 +133,13 @@ function Home() {
   const handleCombDecrease = async (statName) => {
     if (cooldown) return;
     triggerCooldown();
-
     if (!user || !editableComb) return;
     const currentValue = Number(editableComb[statName].Base) || 0;
     const newValue = currentValue - 1;
-
     setEditableComb((prev) => ({
       ...prev,
       [statName]: { ...prev[statName], Base: newValue },
     }));
-
     try {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
@@ -193,47 +157,76 @@ function Home() {
     const columns = ["Base", "Anima", "Equip", "Mod", "Tot"];
     const orderedStats = Object.keys(baseObj).sort();
     return (
-      <div className="table-wrapper">
-        <table className="stat-table">
+      <div className="flex-grow flex flex-col">
+        <table className="w-full flex-grow border-collapse text-white rounded-[8px] overflow-hidden">
           <thead>
             <tr>
-              <th>Stat</th>
-              {columns.map((col) => (
-                <th key={col}>{col}</th>
-              ))}
+              <th className="border border-[rgba(255,255,255,0.3)] p-2 text-left pl-[10px]">
+                Stat
+              </th>
+              {columns.map((col) => {
+                let thClasses =
+                  "border border-[rgba(255,255,255,0.3)] p-2 text-center";
+                if (col === "Tot") {
+                  thClasses += " bg-[rgba(25,50,128,0.4)] font-bold";
+                }
+                return (
+                  <th key={col} className={thClasses}>
+                    {col}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
             {orderedStats.map((statName) => {
               const statValues = baseObj[statName];
               return (
-                <tr key={statName}>
-                  <td>{statName}</td>
-                  {columns.map((col) => (
-                    <td key={col}>
-                      {col === "Base" ? (
-                        <div className="arrow-container">
-                          <button
-                            disabled={cooldown}
-                            className="arrow-button"
-                            onClick={() => handleDecrease(statName)}
-                          >
-                            ◀
-                          </button>
-                          <span>{statValues[col]}</span>
-                          <button
-                            disabled={cooldown}
-                            className="arrow-button"
-                            onClick={() => handleIncrease(statName)}
-                          >
-                            ▶
-                          </button>
-                        </div>
-                      ) : (
-                        statValues[col]
-                      )}
-                    </td>
-                  ))}
+                <tr key={statName} className="even:bg-[rgba(60,60,80,0.4)]">
+                  <td className="border border-[rgba(255,255,255,0.3)] p-2 text-left pl-[10px]">
+                    {statName}
+                  </td>
+                  {columns.map((col) => {
+                    if (col === "Base") {
+                      return (
+                        <td
+                          key={col}
+                          className="border border-[rgba(255,255,255,0.3)] p-2 text-center"
+                        >
+                          <div className="flex flex-row items-center justify-center">
+                            <button
+                              disabled={cooldown}
+                              className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
+                              onClick={() => handleDecrease(statName)}
+                            >
+                              ◀
+                            </button>
+                            <span className="mx-[5px] min-w-[20px] text-center">
+                              {statValues[col]}
+                            </span>
+                            <button
+                              disabled={cooldown}
+                              className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
+                              onClick={() => handleIncrease(statName)}
+                            >
+                              ▶
+                            </button>
+                          </div>
+                        </td>
+                      );
+                    } else {
+                      let tdClasses =
+                        "border border-[rgba(255,255,255,0.3)] p-2 text-center";
+                      if (col === "Tot") {
+                        tdClasses += " bg-[rgba(25,50,128,0.4)] font-bold";
+                      }
+                      return (
+                        <td key={col} className={tdClasses}>
+                          {statValues[col]}
+                        </td>
+                      );
+                    }
+                  })}
                 </tr>
               );
             })}
@@ -248,47 +241,76 @@ function Home() {
     const columns = ["Base", "Equip", "Mod", "Tot"];
     const orderedStats = Object.keys(combObj).sort();
     return (
-      <div className="table-wrapper">
-        <table className="stat-table">
+      <div className="flex-grow flex flex-col">
+        <table className="w-full flex-grow border-collapse text-white rounded-[8px] overflow-hidden">
           <thead>
             <tr>
-              <th>Stat</th>
-              {columns.map((col) => (
-                <th key={col}>{col}</th>
-              ))}
+              <th className="border border-[rgba(255,255,255,0.3)] p-2 text-left pl-[10px]">
+                Stat
+              </th>
+              {columns.map((col) => {
+                let thClasses =
+                  "border border-[rgba(255,255,255,0.3)] p-2 text-center";
+                if (col === "Tot") {
+                  thClasses += " bg-[rgba(25,50,128,0.4)] font-bold";
+                }
+                return (
+                  <th key={col} className={thClasses}>
+                    {col}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
             {orderedStats.map((statName) => {
               const statValues = combObj[statName];
               return (
-                <tr key={statName}>
-                  <td>{statName}</td>
-                  {columns.map((col) => (
-                    <td key={col}>
-                      {col === "Base" ? (
-                        <div className="arrow-container">
-                          <button
-                            disabled={cooldown}
-                            className="arrow-button"
-                            onClick={() => handleCombDecrease(statName)}
-                          >
-                            ◀
-                          </button>
-                          <span>{statValues[col]}</span>
-                          <button
-                            disabled={cooldown}
-                            className="arrow-button"
-                            onClick={() => handleCombIncrease(statName)}
-                          >
-                            ▶
-                          </button>
-                        </div>
-                      ) : (
-                        statValues[col]
-                      )}
-                    </td>
-                  ))}
+                <tr key={statName} className="even:bg-[rgba(60,60,80,0.4)]">
+                  <td className="border border-[rgba(255,255,255,0.3)] p-2 text-left pl-[10px]">
+                    {statName}
+                  </td>
+                  {columns.map((col) => {
+                    if (col === "Base") {
+                      return (
+                        <td
+                          key={col}
+                          className="border border-[rgba(255,255,255,0.3)] p-2 text-center"
+                        >
+                          <div className="flex flex-row items-center justify-center">
+                            <button
+                              disabled={cooldown}
+                              className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
+                              onClick={() => handleCombDecrease(statName)}
+                            >
+                              ◀
+                            </button>
+                            <span className="mx-[5px] min-w-[20px] text-center">
+                              {statValues[col]}
+                            </span>
+                            <button
+                              disabled={cooldown}
+                              className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
+                              onClick={() => handleCombIncrease(statName)}
+                            >
+                              ▶
+                            </button>
+                          </div>
+                        </td>
+                      );
+                    } else {
+                      let tdClasses =
+                        "border border-[rgba(255,255,255,0.3)] p-2 text-center";
+                      if (col === "Tot") {
+                        tdClasses += " bg-[rgba(25,50,128,0.4)] font-bold";
+                      }
+                      return (
+                        <td key={col} className={tdClasses}>
+                          {statValues[col]}
+                        </td>
+                      );
+                    }
+                  })}
                 </tr>
               );
             })}
@@ -302,48 +324,35 @@ function Home() {
     return <p>Loading...</p>;
   }
 
-  // Use the real-time states for rendering.
-  const baseParams = editableBase;
-  const combParams = editableComb;
-
   return (
-    <div className="home-container">
-      <div className="central-container">
-        <div className="top-section">
-          {imageUrl && (
-            <img
-              src={imageUrl}
-              alt="Character Avatar"
-              className="profile-image"
-            />
-          )}
-          <h1 className="welcome-text-top">
-            Welcome, {userData?.characterId || user.email}!
-          </h1>
-          <button className="logout-button" onClick={handleLogout}>
-            Logout
-          </button>
-        </div>
-      </div>
-
-      <button className="placeholder-button" onClick={handleTestButtonClick}>
-        Test API Call
-      </button>
-
-      <div className="tables-container">
-        {baseParams && (
-          <div className="table-container left-table">
-            <h2>Base Stats</h2>
-            {renderBaseTable(baseParams)}
+    <div className="relative w-screen min-h-screen overflow-hidden">
+      <DnDBackground />
+      <div className="relative z-10 flex flex-col">
+        <Navbar />
+        <main className="flex flex-col items-center justify-center p-5">
+          <div className="mb-5">
+            <button
+              className="bg-[#007BFF] text-white text-lg py-2 px-4 rounded-[8px] cursor-pointer transition-colors duration-300 hover:bg-[#0056b3]"
+              onClick={handleTestButtonClick}
+            >
+              Test API Call
+            </button>
           </div>
-        )}
-
-        {combParams && (
-          <div className="table-container right-table">
-            <h2>Combat Stats</h2>
-            {renderCombattimentoTable(combParams)}
+          <div className="flex flex-row gap-5 w-full max-w-[1200px]">
+            {editableBase && (
+              <div className="bg-[rgba(40,40,60,0.8)] p-4 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.4)] flex flex-col flex-1">
+                <h2 className="mb-3 text-white text-xl">Base Stats</h2>
+                {renderBaseTable(editableBase)}
+              </div>
+            )}
+            {editableComb && (
+              <div className="bg-[rgba(40,40,60,0.8)] p-4 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.4)] flex flex-col flex-1">
+                <h2 className="mb-3 text-white text-xl">Combat Stats</h2>
+                {renderCombattimentoTable(editableComb)}
+              </div>
+            )}
           </div>
-        )}
+        </main>
       </div>
     </div>
   );
