@@ -1,24 +1,23 @@
 /* file .frontend/src/index.css */
-/* Apply a global fantasy-style background */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body {
-  margin: 0;
-  font-family: 'Cinzel', serif;
-  background: url('assets/images/epic_fantasy_pattern_background.jpg') no-repeat center center fixed;
-  background-size: cover;
-  height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-}
-
+/* Set a default background color to prevent a white flash during transitions */
 html, body, #root {
   height: 100%;
   width: 100%;
   margin: 0;
   padding: 0;
+  background-color: #121212; /* Change this color to match your design */
+}
+
+body {
+  margin: 0;
+  font-family: 'Cinzel', serif;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
 }

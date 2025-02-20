@@ -11,7 +11,7 @@ const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(
   <React.StrictMode>
     <FirebaseProvider>
-      <BrowserRouter>  {/* This should be the ONLY BrowserRouter */}
+      <BrowserRouter>
         <App />
       </BrowserRouter>
     </FirebaseProvider>
