@@ -10,6 +10,7 @@
 
 import {onDocumentWritten} from "firebase-functions/v2/firestore";
 import * as admin from "firebase-admin";
+import {updateHpTotal} from "./updateHpTotal";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -79,3 +80,6 @@ export const updateTotParameters = onDocumentWritten(
     }
   }
 );
+
+// Re-export updateHpTotal so that Firebase deploys both functions.
+export {updateHpTotal};
