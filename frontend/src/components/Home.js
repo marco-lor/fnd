@@ -4,8 +4,8 @@ import { auth, db, API_BASE_URL } from "./firebaseConfig";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
-import DnDBackground from "./DnDBackground";
-import Navbar from "./navbar";
+import DnDBackground from "./backgrounds/DnDBackground";
+import Navbar from "./elements/navbar";
 
 function Home() {
   const [user, setUser] = useState(null);

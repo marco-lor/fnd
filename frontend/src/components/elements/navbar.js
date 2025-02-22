@@ -1,9 +1,9 @@
-// file: ./frontend/src/components/navbar.js
+// file: ./frontend/src/components/elements/navbar.js
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { signOut, onAuthStateChanged } from 'firebase/auth';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
-import { auth, db } from './firebaseConfig';
+import { auth, db } from '../firebaseConfig';
 import { FaRedo, FaPlus, FaMinus, FaPlusSquare, FaMinusSquare } from 'react-icons/fa';
 
 const Navbar = ({ imageUrl: propImageUrl, userData: propUserData, user: propUser }) => {

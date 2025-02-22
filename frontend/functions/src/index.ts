@@ -11,6 +11,7 @@
 import {onDocumentWritten} from "firebase-functions/v2/firestore";
 import * as admin from "firebase-admin";
 import {updateHpTotal} from "./updateHpTotal";
+import {updateManaTotal} from "./updateManaTotal"; // new function import
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -44,7 +45,10 @@ export const updateTotParameters = onDocumentWritten(
     }
 
     const parametri: Parametri = afterData.Parametri;
+    // Clone the object to avoid mutating the original data.
     const updatedParams: Parametri = {...parametri};
+
+    let changes = false; // Flag to track if any Tot value changes.
 
     const computeTotal = (param: SingleParam): number => {
       return (
@@ -55,18 +59,40 @@ export const updateTotParameters = onDocumentWritten(
       );
     };
 
+    // Process Base section if available.
     if (updatedParams.Base) {
       for (const key of Object.keys(updatedParams.Base)) {
         const p = updatedParams.Base[key];
-        if (p) p.Tot = computeTotal(p);
+        if (p) {
+          const newTot = computeTotal(p);
+          // Only update if the computed total differs.
+          if (p.Tot !== newTot) {
+            p.Tot = newTot;
+            changes = true;
+          }
+        }
       }
     }
 
+    // Process Combattimento section if available.
     if (updatedParams.Combattimento) {
       for (const key of Object.keys(updatedParams.Combattimento)) {
         const p = updatedParams.Combattimento[key];
-        if (p) p.Tot = computeTotal(p);
+        if (p) {
+          const newTot = computeTotal(p);
+          // Only update if the computed total differs.
+          if (p.Tot !== newTot) {
+            p.Tot = newTot;
+            changes = true;
+          }
+        }
       }
+    }
+
+    // If no Tot values changed, skip the Firestore update.
+    if (!changes) {
+      console.log("No changes in Tot values; skipping update.");
+      return;
     }
 
     try {
@@ -81,5 +107,5 @@ export const updateTotParameters = onDocumentWritten(
   }
 );
 
-// Re-export updateHpTotal so that Firebase deploys both functions.
-export {updateHpTotal};
+// Re-export functions so that Firebase deploys both.
+export {updateHpTotal, updateManaTotal};

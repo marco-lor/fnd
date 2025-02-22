@@ -1,9 +1,8 @@
 // file: ./frontend/src/components/Bazaar.js
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import ReactDOMServer from 'react-dom/server';
-import { GiBroadsword, GiShield } from 'react-icons/gi';
-import Navbar from './navbar';
+import Navbar from './elements/navbar';
+import InteractiveBackground from './backgrounds/InteractiveBackground';
 
 const ITEMS = [
   {
@@ -33,146 +32,6 @@ const ITEMS = [
   // ... additional items ...
 ];
 
-function getIconDataURL(IconComponent, color = 'gray', size = 50) {
-  const svgString = ReactDOMServer.renderToStaticMarkup(
-    <IconComponent color={color} size={size} />
-  );
-  const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-  return URL.createObjectURL(svgBlob);
-}
-
-function InteractiveBackground() {
-  const canvasRef = useRef(null);
-  const [mousePos, setMousePos] = useState({
-    x: window.innerWidth / 2,
-    y: window.innerHeight / 2,
-  });
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    let width = window.innerWidth;
-    let height = window.innerHeight;
-    canvas.width = width;
-    canvas.height = height;
-
-    const swordIcon = new Image();
-    const shieldIcon = new Image();
-    swordIcon.src = getIconDataURL(GiBroadsword, 'gray', 50);
-    shieldIcon.src = getIconDataURL(GiShield, 'gray', 50);
-
-    let imagesLoaded = 0;
-    const onImageLoad = () => {
-      imagesLoaded++;
-      if (imagesLoaded === 2) {
-        initAnimation();
-      }
-    };
-    swordIcon.onload = onImageLoad;
-    shieldIcon.onload = onImageLoad;
-
-    const icons = [];
-    const iconCount = 15;
-    for (let i = 0; i < iconCount; i++) {
-      const type = Math.random() < 0.5 ? 'sword' : 'shield';
-      const x = Math.random() * width;
-      const y = Math.random() * height;
-      const vx = (Math.random() - 0.5) * 1.5;
-      const vy = (Math.random() - 0.5) * 1.5;
-      const rotation = Math.random() * Math.PI * 2;
-      const rotationSpeed = (Math.random() - 0.5) * 0.02;
-      const size = 0.7 + Math.random() * 0.5;
-      icons.push({ type, x, y, vx, vy, rotation, rotationSpeed, size });
-    }
-
-    const handleResize = () => {
-      width = window.innerWidth;
-      height = window.innerHeight;
-      canvas.width = width;
-      canvas.height = height;
-    };
-    window.addEventListener('resize', handleResize);
-
-    const threshold = 100;
-    const repulsionStrength = 0.5;
-    let animationFrameId;
-
-    function drawIcon(img, x, y, sizeFactor, rotation) {
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.rotate(rotation);
-      const iconSize = 50 * sizeFactor;
-      ctx.drawImage(img, -iconSize / 2, -iconSize / 2, iconSize, iconSize);
-      ctx.restore();
-    }
-
-    const initAnimation = () => {
-      const draw = () => {
-        ctx.fillStyle = '#1a1a1a';
-        ctx.fillRect(0, 0, width, height);
-        icons.forEach(icon => {
-          const dx = icon.x - mousePos.x;
-          const dy = icon.y - mousePos.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < threshold && dist > 0) {
-            const factor = repulsionStrength * (threshold - dist) / threshold;
-            icon.vx += (dx / dist) * factor;
-            icon.vy += (dy / dist) * factor;
-          }
-          icon.x += icon.vx;
-          icon.y += icon.vy;
-          icon.rotation += icon.rotationSpeed;
-          // Bounce from edges
-          if (icon.x < 0 || icon.x > width) {
-            icon.vx = -icon.vx;
-          }
-          if (icon.y < 0 || icon.y > height) {
-            icon.vy = -icon.vy;
-          }
-          // Draw icons
-          if (icon.type === 'sword') {
-            drawIcon(swordIcon, icon.x, icon.y, icon.size, icon.rotation);
-          } else {
-            drawIcon(shieldIcon, icon.x, icon.y, icon.size, icon.rotation);
-          }
-        });
-        animationFrameId = requestAnimationFrame(draw);
-      };
-      draw();
-    };
-
-    // If the images are already cached
-    if (swordIcon.complete && shieldIcon.complete) {
-      onImageLoad();
-      onImageLoad();
-    }
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener('resize', handleResize);
-    };
-  }, [mousePos]);
-
-  const handleMouseMove = (e) => {
-    setMousePos({ x: e.clientX, y: e.clientY });
-  };
-
-  return (
-    <canvas
-      ref={canvasRef}
-      onMouseMove={handleMouseMove}
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        zIndex: -1,
-      }}
-    />
-  );
-}
-
 function ComparisonPanel({ item }) {
   return (
     <motion.div
@@ -180,7 +39,6 @@ function ComparisonPanel({ item }) {
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: 300, opacity: 0 }}
       transition={{ duration: 0.3 }}
-      // Right panel
       className="fixed right-0 bg-gray-900 bg-opacity-90 p-4 overflow-y-auto z-50"
       style={{
         top: '14rem',
@@ -280,7 +138,6 @@ export default function Bazaar() {
   };
 
   const handleHoverItem = (item) => {
-    // Only set hovered if not locked
     if (!lockedItem) {
       setHoveredItem(item);
     }
@@ -306,16 +163,13 @@ export default function Bazaar() {
   const panelItem = lockedItem || hoveredItem;
 
   return (
-    <div className="min-h-screen relative" style={{ fontFamily: 'Papyrus, fantasy' }}>
-      {/* Fixed Navbar at the top */}
+    <div className="min-h-screen relative" style={{ fontFamily: 'Papyrus, fantasy', backgroundColor: 'transparent' }}>
       <div className="fixed top-0 left-0 w-full z-50">
         <Navbar />
       </div>
 
-      {/* Background animation */}
       <InteractiveBackground />
 
-      {/* Left Filter Panel */}
       <div
         className="fixed left-0 bg-gray-800 bg-opacity-90 p-4 overflow-y-auto z-40"
         style={{
@@ -380,7 +234,6 @@ export default function Bazaar() {
         </div>
       </div>
 
-      {/* Main Content */}
       <div
         className="relative p-6"
         style={{
@@ -389,7 +242,6 @@ export default function Bazaar() {
           marginTop: '9rem'
         }}
       >
-        {/* Search Bar */}
         <div className="flex flex-col gap-4 mb-4">
           <input
             type="text"
@@ -399,8 +251,6 @@ export default function Bazaar() {
             className="border border-white rounded-lg px-4 py-2 focus:outline-none focus:border-gray-300 flex-1 bg-gray-800 text-white"
           />
         </div>
-
-        {/* Item List */}
         <div className="flex flex-col gap-2">
           {filteredItems.map((item, index) => (
             <ItemCard
@@ -421,7 +271,6 @@ export default function Bazaar() {
         </div>
       </div>
 
-      {/* Right Comparison Panel */}
       <AnimatePresence>
         {panelItem && <ComparisonPanel item={panelItem} key="comparisonPanel" />}
       </AnimatePresence>

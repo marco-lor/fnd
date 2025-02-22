@@ -4,7 +4,7 @@ import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "fire
 import { auth, db } from "./firebaseConfig";
 import { useNavigate } from "react-router-dom";
 import { setDoc, doc } from "firebase/firestore";
-import "./Login.css";
+import DnDBackground from "./backgrounds/DnDBackground";
 
 function Login() {
   const [email, setEmail] = useState("");
@@ -23,7 +23,7 @@ function Login() {
 
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      navigate("/home"); // Redirect to home after login
+      navigate("/home");
     } catch (err) {
       setError("Login failed. Check credentials and try again.");
     }
@@ -37,35 +37,63 @@ function Login() {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Create user profile in Firestore
       await setDoc(doc(db, "users", user.uid), {
         email: user.email,
-        characterId: email.split("@")[0], // Default character ID
-        imageUrl: "https://example.com/default-avatar.png", // Default avatar
+        characterId: email.split("@")[0],
+        imageUrl: "https://example.com/default-avatar.png",
         stats: { level: 1, hp: 100, xp: 0 },
         inventory: [{ name: "Basic Sword", type: "Weapon" }],
       });
 
-      navigate("/home"); // Redirect to home after signup
+      navigate("/home");
     } catch (err) {
       setError(err.message);
     }
   };
 
   return (
-    <div className="login-container">
-      <div className="login-box">
-        <h1>Enter Etherium</h1>
-        <form onSubmit={handleLogin}>
-          <input type="email" placeholder="Enter your email" className="login-input" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          <input type="password" placeholder="Enter your password" className="login-input" value={password} onChange={(e) => setPassword(e.target.value)} required />
-          <button type="submit" className="login-button">Login</button>
-        </form>
-
-        {/* Signup Button */}
-        <button onClick={handleSignup} className="signup-button">Sign Up</button>
-
-        {error && <p className="error-message">{error}</p>}
+    <div className="relative w-screen h-screen overflow-hidden">
+      <DnDBackground />
+      <div className="relative z-10 flex justify-center items-center h-full">
+        <div className="bg-[rgba(40,40,60,0.5)] p-8 rounded-[15px] text-center w-[350px] shadow-[0_4px_15px_rgba(100,100,200,0.2)] border border-[rgba(150,150,255,0.2)]">
+          <h1
+            className="text-2xl mb-4 text-[#D4AF37]"
+            style={{ textShadow: "0 0 8px rgba(255,215,0,0.4)" }}
+          >
+            Enter Etherium
+          </h1>
+          <form onSubmit={handleLogin}>
+            <input
+              type="email"
+              placeholder="Enter your email"
+              className="w-full max-w-[300px] p-3 my-[10px] rounded-[5px] text-base bg-[rgba(255,255,255,0.15)] text-white placeholder-white/70 focus:outline-none"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+            <input
+              type="password"
+              placeholder="Enter your password"
+              className="w-full max-w-[300px] p-3 my-[10px] rounded-[5px] text-base bg-[rgba(255,255,255,0.15)] text-white placeholder-white/70 focus:outline-none"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+            <button
+              type="submit"
+              className="w-full max-w-[300px] p-3 my-[10px] rounded-[5px] text-base bg-gradient-to-r from-[#FFD700] to-[#FFDD44] text-black font-bold cursor-pointer"
+            >
+              Login
+            </button>
+          </form>
+          <button
+            onClick={handleSignup}
+            className="w-full max-w-[300px] p-3 my-[10px] rounded-[5px] text-base bg-gradient-to-r from-[#8B0000] to-[#B22222] text-white font-bold cursor-pointer"
+          >
+            Sign Up
+          </button>
+          {error && <p className="text-[#FF4C4C] mt-[10px] font-bold">{error}</p>}
+        </div>
       </div>
     </div>
   );
