@@ -3,6 +3,7 @@ import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 
 // Your Firebase configuration
 const firebaseConfig = {
@@ -28,7 +29,8 @@ const API_BASE_URL = isLocalhost
 const app = initializeApp(firebaseConfig);
 const analytics = getAnalytics(app);
 const auth = getAuth(app);
-const db = getFirestore(app); // Initialize Firestore
+const db = getFirestore(app);
+const storage = getStorage(app); // Initialize Storage
 
 // Export Firebase services and API base URL
-export { auth, db, API_BASE_URL };
+export { auth, db, storage, API_BASE_URL };

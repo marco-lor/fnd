@@ -1,11 +1,15 @@
 // file: ./frontend/src/components/elements/addItem.js
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebaseConfig'; // Import Firestore instance from firebaseConfig.js
+import ReactDOM from 'react-dom';
+import { db, auth, storage } from '../firebaseConfig'; // Import auth for user permissions, and storage for Firebase Storage
 import { doc, getDoc, setDoc } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 export function AddItemOverlay({ onClose }) {
   const [schema, setSchema] = useState(null);
   const [itemFormData, setItemFormData] = useState({});
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
 
   useEffect(() => {
     // Fetch the schema from Firebase when the overlay mounts
@@ -61,6 +65,14 @@ export function AddItemOverlay({ onClose }) {
     fetchSchema();
   }, []);
 
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setImageFile(file);
+      setImagePreviewUrl(URL.createObjectURL(file));
+    }
+  };
+
   const handleSaveItem = async () => {
     try {
       const itemName = itemFormData.Nome ? itemFormData.Nome.trim() : "";
@@ -69,102 +81,140 @@ export function AddItemOverlay({ onClose }) {
         return;
       }
       const docId = itemName.replace(/\s+/g, "_");
-      // Check if an item with the same name (docId) already exists in the database
+      // Check if an item with the same name already exists
       const itemDocRef = doc(db, "items", docId);
       const existingDocSnap = await getDoc(itemDocRef);
       if (existingDocSnap.exists()) {
         alert("Item already exists. Please change the name.");
         return;
       }
-      await setDoc(itemDocRef, itemFormData);
+
+      let updatedFormData = { ...itemFormData };
+
+      // If an image file is selected, upload it to Firebase Storage under the "items" folder
+      if (imageFile) {
+        const fileName = `${docId}_${imageFile.name}`;
+        const imageRef = ref(storage, 'items/' + fileName);
+        await uploadBytes(imageRef, imageFile);
+        const downloadURL = await getDownloadURL(imageRef);
+        updatedFormData.image_url = downloadURL;
+      }
+
+      await setDoc(itemDocRef, updatedFormData);
       alert("Item saved successfully");
-      onClose(); // Close the overlay after saving
+      onClose();
     } catch (error) {
       console.error("Error saving item:", error);
       alert("Error saving item");
     }
   };
 
-  // Render the basic fields in the required order: Nome, Slot, Tipo, Hands, Effetto.
+  // Render the basic fields using a grid layout:
+  // Row 1: Nome, Slot, and Image Slot (spanning two rows)
+  // Row 2: Tipo and Hands
+  // Below the grid: full-width Effetto field.
   const renderBasicFields = () => {
     if (!schema) return null;
     return (
-      <>
-        {schema.Nome !== undefined && (
-          <div className="mb-4">
-            <label className="block text-white mb-1">Nome</label>
+      <div>
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            {schema.Nome !== undefined && (
+              <div className="mb-4">
+                <label className="block text-white mb-1">Nome</label>
+                <input
+                  type="text"
+                  value={itemFormData.Nome || ''}
+                  onChange={(e) => setItemFormData({ ...itemFormData, Nome: e.target.value })}
+                  className="w-full p-2 rounded bg-gray-700 text-white"
+                  placeholder="Enter Nome"
+                />
+              </div>
+            )}
+          </div>
+          <div>
+            {schema.Slot !== undefined && Array.isArray(schema.Slot) && (
+              <div className="mb-4">
+                <label className="block text-white mb-1">Slot</label>
+                <select
+                  value={itemFormData.Slot || ''}
+                  onChange={(e) => setItemFormData({ ...itemFormData, Slot: e.target.value })}
+                  className="w-full p-2 rounded bg-gray-700 text-white"
+                >
+                  {schema.Slot.map(option => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+          <div className="row-span-2">
+            <label className="block text-white mb-1">Image</label>
             <input
-              type="text"
-              value={itemFormData.Nome || ''}
-              onChange={(e) => setItemFormData({ ...itemFormData, Nome: e.target.value })}
-              className="w-full p-2 rounded bg-gray-700 text-white"
-              placeholder="Enter Nome"
+              type="file"
+              accept="image/*"
+              onChange={handleImageChange}
+              className="w-full text-white"
             />
+            {imagePreviewUrl && (
+              <img src={imagePreviewUrl} alt="Preview" className="mt-2 w-24 h-auto rounded" />
+            )}
           </div>
-        )}
-        {schema.Slot !== undefined && Array.isArray(schema.Slot) && (
-          <div className="mb-4">
-            <label className="block text-white mb-1">Slot</label>
-            <select
-              value={itemFormData.Slot || ''}
-              onChange={(e) => setItemFormData({ ...itemFormData, Slot: e.target.value })}
-              className="w-full p-2 rounded bg-gray-700 text-white"
-            >
-              {schema.Slot.map(option => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
+          <div>
+            {schema.Tipo !== undefined && Array.isArray(schema.Tipo) && (
+              <div className="mb-4">
+                <label className="block text-white mb-1">Tipo</label>
+                <select
+                  value={itemFormData.Tipo || ''}
+                  onChange={(e) => setItemFormData({ ...itemFormData, Tipo: e.target.value })}
+                  className="w-full p-2 rounded bg-gray-700 text-white"
+                >
+                  {schema.Tipo.map(option => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
-        )}
-        {schema.Tipo !== undefined && Array.isArray(schema.Tipo) && (
-          <div className="mb-4">
-            <label className="block text-white mb-1">Tipo</label>
-            <select
-              value={itemFormData.Tipo || ''}
-              onChange={(e) => setItemFormData({ ...itemFormData, Tipo: e.target.value })}
-              className="w-full p-2 rounded bg-gray-700 text-white"
-            >
-              {schema.Tipo.map(option => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
+          <div>
+            {schema.Hands !== undefined && Array.isArray(schema.Hands) && (
+              <div className="mb-4">
+                <label className="block text-white mb-1">Hands</label>
+                <select
+                  value={itemFormData.Hands || ''}
+                  onChange={(e) => setItemFormData({ ...itemFormData, Hands: e.target.value })}
+                  className="w-full p-2 rounded bg-gray-700 text-white"
+                >
+                  {schema.Hands.map(option => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
-        )}
-        {schema.Hands !== undefined && Array.isArray(schema.Hands) && (
-          <div className="mb-4">
-            <label className="block text-white mb-1">Hands</label>
-            <select
-              value={itemFormData.Hands || ''}
-              onChange={(e) => setItemFormData({ ...itemFormData, Hands: e.target.value })}
-              className="w-full p-2 rounded bg-gray-700 text-white"
-            >
-              {schema.Hands.map(option => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
-          </div>
-        )}
-        {schema.Effetto !== undefined && typeof schema.Effetto === "string" && (
-          <div className="mb-4">
-            <label className="block text-white mb-1">Effetto</label>
-            <input
-              type="text"
-              value={itemFormData.Effetto || ''}
-              onChange={(e) => setItemFormData({ ...itemFormData, Effetto: e.target.value })}
-              className="w-full p-2 rounded bg-gray-700 text-white"
-              placeholder="Enter Effetto"
-            />
-          </div>
-        )}
-      </>
+        </div>
+        <div className="mt-4">
+          {schema.Effetto !== undefined && typeof schema.Effetto === "string" && (
+            <div className="mb-4">
+              <label className="block text-white mb-1">Effetto</label>
+              <input
+                type="text"
+                value={itemFormData.Effetto || ''}
+                onChange={(e) => setItemFormData({ ...itemFormData, Effetto: e.target.value })}
+                className="w-full p-2 rounded bg-gray-700 text-white"
+                placeholder="Enter Effetto"
+              />
+            </div>
+          )}
+        </div>
+      </div>
     );
   };
 
-  // Render three tables side by side: Special Params, Parametri Base, and Parametri Combattimento.
+  // Render three tables: Special Params, Parametri Base, and Parametri Combattimento.
   const renderTablesSection = () => {
     if (!schema) return null;
 
-    // Special Params fields to combine into one table
     const specialFields = ["Penetrazione", "Danno", "Bonus Danno", "Danno Critico", "Bonus Danno Critico"];
     const hasSpecialFields = specialFields.some(field => schema[field] !== undefined);
 
@@ -210,7 +260,6 @@ export function AddItemOverlay({ onClose }) {
       </div>
     );
 
-    // For Parametri Base and Parametri Combattimento, we assume the "Parametri" field contains both.
     const baseParams = (schema.Parametri && schema.Parametri["Base"]) || null;
     const combatParams = (schema.Parametri && schema.Parametri["Combattimento"]) || null;
 
@@ -299,7 +348,7 @@ export function AddItemOverlay({ onClose }) {
     );
 
     return (
-      <div className="flex gap-4">
+      <div className="flex gap-4 mt-4">
         {hasSpecialFields && renderSpecialTable()}
         {baseParams && renderParamTable("Base", "Parametri Base")}
         {combatParams && renderParamTable("Combattimento", "Parametri Combattimento")}
@@ -307,10 +356,9 @@ export function AddItemOverlay({ onClose }) {
     );
   };
 
-  return (
-    <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-60">
-      {/* Increased overlay width from 800px to 1600px */}
-      <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-[1600px] max-h-[80vh] overflow-y-auto">
+  const overlayContent = (
+    <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-[9999]">
+      <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-4/5 max-h-[80vh] overflow-y-auto">
         <h2 className="text-xl text-white mb-4">Add New Item</h2>
         <form onSubmit={(e) => { e.preventDefault(); handleSaveItem(); }}>
           {renderBasicFields()}
@@ -334,4 +382,6 @@ export function AddItemOverlay({ onClose }) {
       </div>
     </div>
   );
+
+  return ReactDOM.createPortal(overlayContent, document.body);
 }

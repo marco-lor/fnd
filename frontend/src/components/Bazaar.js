@@ -39,8 +39,8 @@ function ComparisonPanel({ item }) {
 }
 
 function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked }) {
-  const imageUrl = item.Image
-    ? item.Image
+  const imageUrl = item.image_url
+    ? item.image_url
     : `https://via.placeholder.com/150x150?text=${encodeURIComponent(item.Nome)}`;
   const title = item.Nome;
 
@@ -151,7 +151,7 @@ export default function Bazaar() {
   const filteredItems = items.filter((item) => {
     const matchesSearch =
       (item.Nome && item.Nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (item.Image && item.Image.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (item.image_url && item.image_url.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (item.Tipo && item.Tipo.toLowerCase().includes(searchTerm.toLowerCase()));
 
     const matchesSlot = selectedSlot.includes('All') || selectedSlot.includes(item.Slot);
