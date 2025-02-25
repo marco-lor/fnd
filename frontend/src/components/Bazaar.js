@@ -1,36 +1,11 @@
 // file: ./frontend/src/components/Bazaar.js
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from './elements/navbar';
 import InteractiveBackground from './backgrounds/InteractiveBackground';
-
-const ITEMS = [
-  {
-    Image: "",
-    Nome: "Bastone Magico",
-    Slot: "",
-    Hands: "2",
-    Tipo: "Distanza",
-    BonusLevels: "3 Mira, 3 Attacco, 3 Disciplina",
-    BonusDanno: "0",
-    Penetrazione: "0",
-    Danno: "1d4",
-    DannoCritico: "1d4",
-    BonusDannoCritico:
-      "Per essere equipaggiato la somma di saggezza e intelligenza deve essere almeno 3 riduce di 6 il costo di mana incantesimi",
-    Effetto: "0",
-    Salute: "0",
-    Mira: "3",
-    Attacco: "3",
-    Crit: "0",
-    Difesa: "0",
-    RiduzioneDanni: "0",
-    Disciplina: "3",
-    DannoMod: "1d4",
-    DannoCriticoMod: "1d4"
-  },
-  // ... additional items ...
-];
+import { collection, getDocs } from "firebase/firestore";
+import { db } from './firebaseConfig';
+import { AddItemOverlay } from './elements/addItem';
 
 function ComparisonPanel({ item }) {
   return (
@@ -51,7 +26,11 @@ function ComparisonPanel({ item }) {
         {Object.entries(item).map(([key, value]) => (
           <React.Fragment key={key}>
             <span className="font-semibold text-white">{key}</span>
-            <span className="text-gray-300">{value || '-'}</span>
+            <span className="text-gray-300">
+              {typeof value === 'object' && value !== null
+                ? JSON.stringify(value)
+                : value || '-'}
+            </span>
           </React.Fragment>
         ))}
       </div>
@@ -60,14 +39,14 @@ function ComparisonPanel({ item }) {
 }
 
 function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked }) {
-  const imageUrl = `https://via.placeholder.com/150x150?text=${encodeURIComponent(item.Image)}`;
-  const title = item.Nome || item.Image;
+  const imageUrl = item.Image
+    ? item.Image
+    : `https://via.placeholder.com/150x150?text=${encodeURIComponent(item.Nome)}`;
+  const title = item.Nome;
 
   return (
     <motion.div
-      className={`flex items-center p-2 bg-gray-800 bg-opacity-80 shadow rounded-lg hover:bg-gray-700 transition-colors cursor-pointer ${
-        isLocked ? 'border-2 border-blue-500' : ''
-      }`}
+      className={`flex items-center p-2 bg-gray-800 bg-opacity-80 shadow rounded-lg hover:bg-gray-700 transition-colors cursor-pointer ${isLocked ? 'border-2 border-blue-500' : ''}`}
       whileHover={{ scale: 1.02 }}
       onMouseEnter={() => onHoverItem(item)}
       onMouseLeave={() => onHoverItem(null)}
@@ -94,16 +73,41 @@ function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked }) {
 }
 
 export default function Bazaar() {
+  const [items, setItems] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSlot, setSelectedSlot] = useState(['All']);
   const [selectedHands, setSelectedHands] = useState(['All']);
   const [selectedTipo, setSelectedTipo] = useState(['All']);
   const [hoveredItem, setHoveredItem] = useState(null);
   const [lockedItem, setLockedItem] = useState(null);
+  const [showOverlay, setShowOverlay] = useState(false);
 
-  const slots = ['All', ...Array.from(new Set(ITEMS.map((item) => item.Slot)))];
-  const hands = ['All', ...Array.from(new Set(ITEMS.map((item) => item.Hands)))];
-  const tipos = ['All', ...Array.from(new Set(ITEMS.map((item) => item.Tipo)))];
+  // Fetch items from the "items" collection in Firestore
+  useEffect(() => {
+    const fetchItems = async () => {
+      try {
+        const itemsCollection = collection(db, "items");
+        const querySnapshot = await getDocs(itemsCollection);
+        const fetchedItems = [];
+        querySnapshot.forEach((doc) => {
+          // Exclude the schema document
+          if (doc.id !== "schema_arma") {
+            fetchedItems.push({ id: doc.id, ...doc.data() });
+          }
+        });
+        setItems(fetchedItems);
+      } catch (error) {
+        console.error("Error fetching items: ", error);
+      }
+    };
+
+    fetchItems();
+  }, []);
+
+  // Compute filter options dynamically from fetched items
+  const slots = ['All', ...Array.from(new Set(items.map((item) => item.Slot)))];
+  const hands = ['All', ...Array.from(new Set(items.map((item) => item.Hands)))];
+  const tipos = ['All', ...Array.from(new Set(items.map((item) => item.Tipo)))];
 
   const handleSearchChange = (event) => {
     setSearchTerm(event.target.value);
@@ -143,7 +147,8 @@ export default function Bazaar() {
     }
   };
 
-  const filteredItems = ITEMS.filter((item) => {
+  // Filter items based on search term and selected filters
+  const filteredItems = items.filter((item) => {
     const matchesSearch =
       (item.Nome && item.Nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (item.Image && item.Image.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -157,7 +162,11 @@ export default function Bazaar() {
   });
 
   const handlePurchase = (item) => {
-    alert(`Purchasing item: ${item.Nome || item.Image}`);
+    alert(`Purchasing item: ${item.Nome}`);
+  };
+
+  const handleAddItemClick = () => {
+    setShowOverlay(true);
   };
 
   const panelItem = lockedItem || hoveredItem;
@@ -242,6 +251,14 @@ export default function Bazaar() {
           marginTop: '9rem'
         }}
       >
+        <div className="mb-4">
+          <button
+            onClick={handleAddItemClick}
+            className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+          >
+            Aggiungi Oggetto
+          </button>
+        </div>
         <div className="flex flex-col gap-4 mb-4">
           <input
             type="text"
@@ -252,20 +269,20 @@ export default function Bazaar() {
           />
         </div>
         <div className="flex flex-col gap-2">
-          {filteredItems.map((item, index) => (
+          {filteredItems.map((item) => (
             <ItemCard
-              key={index}
+              key={item.id}
               item={item}
               onPurchase={handlePurchase}
               onHoverItem={handleHoverItem}
               onLockToggle={() => {
-                if (lockedItem && lockedItem === item) {
+                if (lockedItem && lockedItem.id === item.id) {
                   setLockedItem(null);
                 } else {
                   setLockedItem(item);
                 }
               }}
-              isLocked={lockedItem && lockedItem === item}
+              isLocked={lockedItem && lockedItem.id === item.id}
             />
           ))}
         </div>
@@ -274,6 +291,8 @@ export default function Bazaar() {
       <AnimatePresence>
         {panelItem && <ComparisonPanel item={panelItem} key="comparisonPanel" />}
       </AnimatePresence>
+
+      {showOverlay && <AddItemOverlay onClose={() => setShowOverlay(false)} />}
     </div>
   );
 }
