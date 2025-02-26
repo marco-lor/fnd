@@ -1,42 +1,13 @@
 // file: ./frontend/src/components/Bazaar.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from './elements/navbar';
 import InteractiveBackground from './backgrounds/InteractiveBackground';
 import { collection, getDocs } from "firebase/firestore";
 import { db } from './firebaseConfig';
+import { AuthContext } from '../AuthContext'; // Adjust path if needed
 import { AddItemOverlay } from './elements/addItem';
-
-function ComparisonPanel({ item }) {
-  return (
-    <motion.div
-      initial={{ x: 300, opacity: 0 }}
-      animate={{ x: 0, opacity: 1 }}
-      exit={{ x: 300, opacity: 0 }}
-      transition={{ duration: 0.3 }}
-      className="fixed right-0 bg-gray-900 bg-opacity-90 p-4 overflow-y-auto z-50"
-      style={{
-        top: '14rem',
-        width: '25vw',
-        height: 'calc(100% - 4rem)'
-      }}
-    >
-      <h2 className="text-2xl font-bold text-white mb-4">{item.Nome}</h2>
-      <div className="grid grid-cols-2 gap-2">
-        {Object.entries(item).map(([key, value]) => (
-          <React.Fragment key={key}>
-            <span className="font-semibold text-white">{key}</span>
-            <span className="text-gray-300">
-              {typeof value === 'object' && value !== null
-                ? JSON.stringify(value)
-                : value || '-'}
-            </span>
-          </React.Fragment>
-        ))}
-      </div>
-    </motion.div>
-  );
-}
+import ComparisonPanel from './elements/comparisonComponent';
 
 function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked }) {
   const imageUrl = item.image_url
@@ -82,7 +53,10 @@ export default function Bazaar() {
   const [lockedItem, setLockedItem] = useState(null);
   const [showOverlay, setShowOverlay] = useState(false);
 
-  // Fetch items from the "items" collection in Firestore
+  // Use the AuthContext to get the current user
+  const { user } = useContext(AuthContext);
+
+  // Fetch items from the "items" collection in Firestore.
   useEffect(() => {
     const fetchItems = async () => {
       try {
@@ -90,7 +64,7 @@ export default function Bazaar() {
         const querySnapshot = await getDocs(itemsCollection);
         const fetchedItems = [];
         querySnapshot.forEach((doc) => {
-          // Exclude the schema document
+          // Exclude the schema document.
           if (doc.id !== "schema_arma") {
             fetchedItems.push({ id: doc.id, ...doc.data() });
           }
@@ -104,7 +78,7 @@ export default function Bazaar() {
     fetchItems();
   }, []);
 
-  // Compute filter options dynamically from fetched items
+  // Compute filter options dynamically from fetched items.
   const slots = ['All', ...Array.from(new Set(items.map((item) => item.Slot)))];
   const hands = ['All', ...Array.from(new Set(items.map((item) => item.Hands)))];
   const tipos = ['All', ...Array.from(new Set(items.map((item) => item.Tipo)))];
@@ -147,7 +121,7 @@ export default function Bazaar() {
     }
   };
 
-  // Filter items based on search term and selected filters
+  // Filter items based on search term and selected filters.
   const filteredItems = items.filter((item) => {
     const matchesSearch =
       (item.Nome && item.Nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -289,7 +263,7 @@ export default function Bazaar() {
       </div>
 
       <AnimatePresence>
-        {panelItem && <ComparisonPanel item={panelItem} key="comparisonPanel" />}
+        {panelItem && <ComparisonPanel item={panelItem} user={user} key="comparisonPanel" />}
       </AnimatePresence>
 
       {showOverlay && <AddItemOverlay onClose={() => setShowOverlay(false)} />}

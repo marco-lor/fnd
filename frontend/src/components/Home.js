@@ -1,32 +1,27 @@
 // file: ./frontend/src/components/Home.js
-import React, { useEffect, useState } from "react";
-import { auth, db, API_BASE_URL } from "./firebaseConfig";
+import React, { useEffect, useState, useContext } from "react";
+import { db, API_BASE_URL } from "./firebaseConfig";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
-import { onAuthStateChanged } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import DnDBackground from "./backgrounds/DnDBackground";
 import Navbar from "./elements/navbar";
+import { AuthContext } from "../AuthContext"; // Adjust path if needed
 
 function Home() {
-  const [user, setUser] = useState(null);
+  const { user } = useContext(AuthContext);
   const [editableBase, setEditableBase] = useState(null);
   const [editableComb, setEditableComb] = useState(null);
   const [cooldown, setCooldown] = useState(false);
   const navigate = useNavigate();
 
-  // Listen for authentication state changes.
+  // Redirect if not authenticated
   useEffect(() => {
-    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
-      if (currentUser) {
-        setUser(currentUser);
-      } else {
-        navigate("/"); // Redirect to login if not authenticated
-      }
-    });
-    return () => unsubscribeAuth();
-  }, [navigate]);
+    if (!user) {
+      navigate("/");
+    }
+  }, [user, navigate]);
 
-  // Set up a real-time listener on the user's document.
+  // Set up a real-time listener on the user's document when user is available.
   useEffect(() => {
     if (!user) return;
     const userRef = doc(db, "users", user.uid);
@@ -34,12 +29,8 @@ function Home() {
       if (docSnap.exists()) {
         const data = docSnap.data();
         if (data.Parametri) {
-          if (data.Parametri.Base) {
-            setEditableBase(data.Parametri.Base);
-          }
-          if (data.Parametri.Combattimento) {
-            setEditableComb(data.Parametri.Combattimento);
-          }
+          setEditableBase(data.Parametri.Base || null);
+          setEditableComb(data.Parametri.Combattimento || null);
         }
       }
     });

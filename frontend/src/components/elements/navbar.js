@@ -1,53 +1,69 @@
 // file: ./frontend/src/components/elements/navbar.js
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useContext } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { signOut, onAuthStateChanged } from 'firebase/auth';
+import { signOut } from 'firebase/auth';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../firebaseConfig';
+import { AuthContext } from '../../AuthContext'; // Adjust the path as needed
 import { FaRedo, FaPlus, FaMinus, FaPlusSquare, FaMinusSquare } from 'react-icons/fa';
 
-const Navbar = ({ imageUrl: propImageUrl, userData: propUserData, user: propUser }) => {
+const Navbar = ({ imageUrl: propImageUrl, userData: propUserData }) => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Use props if available; otherwise, load from Firebase.
-  const [user, setUser] = useState(propUser || null);
+  // Use AuthContext to obtain the user.
+  const { user } = useContext(AuthContext);
+
   const [userData, setUserData] = useState(propUserData || null);
   const [imageUrl, setImageUrl] = useState(propImageUrl || '');
 
   // Refs for long-press intervals.
   const hpIntervalRef = useRef(null);
   const manaIntervalRef = useRef(null);
+  // Ref for the snapshot unsubscribe function.
+  const unsubscribeSnapshotRef = useRef(null);
 
   useEffect(() => {
-    if (!user) {
-      const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
-        if (currentUser) {
-          setUser(currentUser);
-          const userRef = doc(db, "users", currentUser.uid);
-          const unsubscribeSnapshot = onSnapshot(userRef, (docSnap) => {
-            if (docSnap.exists()) {
-              const data = docSnap.data();
-              setUserData(data);
-              if (data.imageUrl) {
-                setImageUrl(data.imageUrl);
-              }
+    // Only subscribe if user is available
+    if (user) {
+      const userRef = doc(db, "users", user.uid);
+      unsubscribeSnapshotRef.current = onSnapshot(
+        userRef,
+        (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            setUserData(data);
+            if (data.imageUrl) {
+              setImageUrl(data.imageUrl);
             }
-          });
-          return () => unsubscribeSnapshot();
-        } else {
-          navigate("/"); // Redirect to login if not authenticated
+          }
+        },
+        (error) => {
+          console.error("Error in snapshot listener:", error);
+          // Optionally, handle permission errors gracefully here.
         }
-      });
-      return () => unsubscribeAuth();
+      );
+    } else {
+      // Redirect to login if not authenticated.
+      navigate("/");
     }
+
+    return () => {
+      if (unsubscribeSnapshotRef.current) {
+        unsubscribeSnapshotRef.current();
+        unsubscribeSnapshotRef.current = null;
+      }
+    };
   }, [user, navigate]);
 
-  // Check the active route.
   const isActive = (path) => location.pathname === path;
 
   const handleLogout = async () => {
     try {
+      if (unsubscribeSnapshotRef.current) {
+        unsubscribeSnapshotRef.current();
+        unsubscribeSnapshotRef.current = null;
+      }
       await signOut(auth);
       navigate("/");
     } catch (error) {
