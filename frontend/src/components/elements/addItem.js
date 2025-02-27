@@ -1,7 +1,7 @@
 // file: ./frontend/src/components/elements/addItem.js
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { db, auth, storage } from '../firebaseConfig'; // Import auth for user permissions, and storage for Firebase Storage
+import { db, auth, storage } from '../firebaseConfig';
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -12,7 +12,6 @@ export function AddItemOverlay({ onClose }) {
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
 
   useEffect(() => {
-    // Fetch the schema from Firebase when the overlay mounts
     const fetchSchema = async () => {
       try {
         const schemaDocRef = doc(db, "items", "schema_arma");
@@ -20,16 +19,13 @@ export function AddItemOverlay({ onClose }) {
         if (docSnap.exists()) {
           const schemaData = docSnap.data();
           setSchema(schemaData);
-          // Initialize form data based on the schema structure
           let initialData = {};
           Object.keys(schemaData).forEach(field => {
             if (["Slot", "Hands", "Tipo"].includes(field) && Array.isArray(schemaData[field])) {
               initialData[field] = schemaData[field][0] || "";
             } else if (typeof schemaData[field] === "string") {
               initialData[field] = "";
-            }
-            // Special handling for Parametri field – assume it contains categories "Base" and "Combattimento"
-            else if (field === "Parametri" && typeof schemaData[field] === "object") {
+            } else if (field === "Parametri" && typeof schemaData[field] === "object") {
               initialData[field] = {};
               Object.keys(schemaData[field]).forEach(category => {
                 initialData[field][category] = {};
@@ -37,16 +33,12 @@ export function AddItemOverlay({ onClose }) {
                   initialData[field][category][subField] = { "1": "", "4": "", "7": "", "10": "" };
                 });
               });
-            }
-            // For special table fields (to be combined into one table)
-            else if (
+            } else if (
               ["Penetrazione", "Danno", "Danno Critico", "Bonus Danno Critico", "Bonus Danno"].includes(field) &&
               typeof schemaData[field] === "object"
             ) {
               initialData[field] = { "1": "", "4": "", "7": "", "10": "" };
-            }
-            // For other nested map fields
-            else if (typeof schemaData[field] === "object" && !Array.isArray(schemaData[field])) {
+            } else if (typeof schemaData[field] === "object" && !Array.isArray(schemaData[field])) {
               initialData[field] = {};
               Object.keys(schemaData[field]).forEach(subKey => {
                 initialData[field][subKey] = "";
@@ -81,17 +73,13 @@ export function AddItemOverlay({ onClose }) {
         return;
       }
       const docId = itemName.replace(/\s+/g, "_");
-      // Check if an item with the same name already exists
       const itemDocRef = doc(db, "items", docId);
       const existingDocSnap = await getDoc(itemDocRef);
       if (existingDocSnap.exists()) {
         alert("Item already exists. Please change the name.");
         return;
       }
-
       let updatedFormData = { ...itemFormData };
-
-      // If an image file is selected, upload it to Firebase Storage under the "items" folder
       if (imageFile) {
         const fileName = `${docId}_${imageFile.name}`;
         const imageRef = ref(storage, 'items/' + fileName);
@@ -99,20 +87,15 @@ export function AddItemOverlay({ onClose }) {
         const downloadURL = await getDownloadURL(imageRef);
         updatedFormData.image_url = downloadURL;
       }
-
       await setDoc(itemDocRef, updatedFormData);
-      alert("Item saved successfully");
-      onClose();
+      // Immediately close the overlay and notify success by passing true.
+      onClose(true);
     } catch (error) {
       console.error("Error saving item:", error);
       alert("Error saving item");
     }
   };
 
-  // Render the basic fields using a grid layout:
-  // Row 1: Nome, Slot, and Image Slot (spanning two rows)
-  // Row 2: Tipo and Hands
-  // Below the grid: full-width Effetto field.
   const renderBasicFields = () => {
     if (!schema) return null;
     return (
@@ -150,12 +133,7 @@ export function AddItemOverlay({ onClose }) {
           </div>
           <div className="row-span-2">
             <label className="block text-white mb-1">Image</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleImageChange}
-              className="w-full text-white"
-            />
+            <input type="file" accept="image/*" onChange={handleImageChange} className="w-full text-white" />
             {imagePreviewUrl && (
               <img src={imagePreviewUrl} alt="Preview" className="mt-2 w-24 h-auto rounded" />
             )}
@@ -211,7 +189,6 @@ export function AddItemOverlay({ onClose }) {
     );
   };
 
-  // Render three tables: Special Params, Parametri Base, and Parametri Combattimento.
   const renderTablesSection = () => {
     if (!schema) return null;
 
@@ -243,7 +220,8 @@ export function AddItemOverlay({ onClose }) {
                         value={(itemFormData[field] && itemFormData[field][col]) || ''}
                         onChange={(e) => {
                           const newData = { ...itemFormData };
-                          if (!newData[field]) newData[field] = { "1": "", "4": "", "7": "", "10": "" };
+                          if (!newData[field])
+                            newData[field] = { "1": "", "4": "", "7": "", "10": "" };
                           newData[field][col] = e.target.value;
                           setItemFormData(newData);
                         }}
@@ -366,7 +344,7 @@ export function AddItemOverlay({ onClose }) {
           <div className="flex justify-end gap-2 mt-4">
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => onClose(false)}
               className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
             >
               Cancel

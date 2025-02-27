@@ -6,10 +6,9 @@ import { db } from "../firebaseConfig";
 import { AuthContext } from "../../AuthContext";
 
 export default function ComparisonPanel({ item }) {
-  // Get the user from the shared AuthContext.
   const { user } = useContext(AuthContext);
-  // Local state to hold additional user data from Firestore (including the role)
   const [userData, setUserData] = useState(null);
+  const [showConfirmation, setShowConfirmation] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -91,15 +90,23 @@ export default function ComparisonPanel({ item }) {
   const filteredBaseGroup = baseGroup.filter(field => shouldShowRow(baseParams[field.key]));
   const filteredCombatGroup = combatGroup.filter(field => shouldShowRow(combatParams[field.key]));
 
-  // Handler to delete the document from Firestore
-  const handleDelete = async () => {
+  // Delete handlers with confirmation dialog
+  const handleDeleteClick = () => {
+    setShowConfirmation(true);
+  };
+
+  const handleConfirmDelete = async () => {
     try {
-      // Adjust "items" to match your Firestore collection name if necessary.
       await deleteDoc(doc(db, "items", item.id));
       console.log("Document deleted successfully");
+      setShowConfirmation(false);
     } catch (error) {
       console.error("Error deleting document:", error);
     }
+  };
+
+  const handleCancelDelete = () => {
+    setShowConfirmation(false);
   };
 
   return (
@@ -116,10 +123,31 @@ export default function ComparisonPanel({ item }) {
       }}
     >
       <div className="relative h-full">
+        {/* Confirmation Dialog */}
+        {showConfirmation && (
+          <div className="absolute top-0 left-0 right-0 z-40 p-4 bg-gray-800 bg-opacity-95 rounded-lg shadow-lg border border-gray-700">
+            <p className="text-white mb-4">Sei sicuro di voler eliminare questo oggetto?</p>
+            <div className="flex justify-end space-x-2">
+              <button
+                onClick={handleCancelDelete}
+                className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+              >
+                Annulla
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+              >
+                Elimina
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Conditionally render the delete button for authorized roles */}
         {(userData?.role === 'webmaster' || userData?.role === 'dm') && (
           <button
-            onClick={handleDelete}
+            onClick={handleDeleteClick}
             className="absolute top-2 right-2 z-30 flex items-center space-x-1 bg-transparent border-none cursor-pointer"
           >
             <svg
@@ -133,7 +161,7 @@ export default function ComparisonPanel({ item }) {
                 d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7h6m2 0a2 2 0 012 2v1a2 2 0 01-2 2H7a2 2 0 01-2-2V9a2 2 0 012-2h10z"
               />
             </svg>
-            <span className="text-red-500 font-bold">Elimina Oggetto</span>
+            <span className="text-red-500 font-bold"></span>
           </button>
         )}
 

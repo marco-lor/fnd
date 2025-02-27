@@ -3,9 +3,9 @@ import React, { useState, useContext, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from './elements/navbar';
 import InteractiveBackground from './backgrounds/InteractiveBackground';
-import { collection, getDocs } from "firebase/firestore";
+import { collection, onSnapshot } from "firebase/firestore";
 import { db } from './firebaseConfig';
-import { AuthContext } from '../AuthContext'; // Adjust path if needed
+import { AuthContext } from '../AuthContext';
 import { AddItemOverlay } from './elements/addItem';
 import ComparisonPanel from './elements/comparisonComponent';
 
@@ -52,33 +52,40 @@ export default function Bazaar() {
   const [hoveredItem, setHoveredItem] = useState(null);
   const [lockedItem, setLockedItem] = useState(null);
   const [showOverlay, setShowOverlay] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [confirmationMessage, setConfirmationMessage] = useState("");
 
-  // Use the AuthContext to get the current user
   const { user } = useContext(AuthContext);
 
-  // Fetch items from the "items" collection in Firestore.
   useEffect(() => {
-    const fetchItems = async () => {
-      try {
-        const itemsCollection = collection(db, "items");
-        const querySnapshot = await getDocs(itemsCollection);
+    const itemsRef = collection(db, "items");
+    const unsubscribe = onSnapshot(
+      itemsRef,
+      (snapshot) => {
         const fetchedItems = [];
-        querySnapshot.forEach((doc) => {
-          // Exclude the schema document.
+        snapshot.forEach((doc) => {
           if (doc.id !== "schema_arma") {
             fetchedItems.push({ id: doc.id, ...doc.data() });
           }
         });
         setItems(fetchedItems);
-      } catch (error) {
-        console.error("Error fetching items: ", error);
+      },
+      (error) => {
+        console.error("Error listening to items collection:", error);
       }
-    };
-
-    fetchItems();
+    );
+    return () => unsubscribe();
   }, []);
 
-  // Compute filter options dynamically from fetched items.
+  useEffect(() => {
+    if (lockedItem && !items.find(item => item.id === lockedItem.id)) {
+      setLockedItem(null);
+    }
+    if (hoveredItem && !items.find(item => item.id === hoveredItem.id)) {
+      setHoveredItem(null);
+    }
+  }, [items, lockedItem, hoveredItem]);
+
   const slots = ['All', ...Array.from(new Set(items.map((item) => item.Slot)))];
   const hands = ['All', ...Array.from(new Set(items.map((item) => item.Hands)))];
   const tipos = ['All', ...Array.from(new Set(items.map((item) => item.Tipo)))];
@@ -121,22 +128,29 @@ export default function Bazaar() {
     }
   };
 
-  // Filter items based on search term and selected filters.
   const filteredItems = items.filter((item) => {
     const matchesSearch =
       (item.Nome && item.Nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (item.image_url && item.image_url.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (item.Tipo && item.Tipo.toLowerCase().includes(searchTerm.toLowerCase()));
-
     const matchesSlot = selectedSlot.includes('All') || selectedSlot.includes(item.Slot);
     const matchesHands = selectedHands.includes('All') || selectedHands.includes(item.Hands);
     const matchesTipo = selectedTipo.includes('All') || selectedTipo.includes(item.Tipo);
-
     return matchesSearch && matchesSlot && matchesHands && matchesTipo;
   });
 
+  // Helper function to display confirmation messages
+  const displayConfirmation = (message) => {
+    setConfirmationMessage(message);
+    setShowConfirmation(true);
+    setTimeout(() => {
+      setShowConfirmation(false);
+    }, 1000);
+  };
+
+  // Updated purchase handler for the acquire button
   const handlePurchase = (item) => {
-    alert(`Purchasing item: ${item.Nome}`);
+    displayConfirmation("Oggetto Acquistato");
   };
 
   const handleAddItemClick = () => {
@@ -154,9 +168,9 @@ export default function Bazaar() {
       <InteractiveBackground />
 
       <div
-        className="fixed left-0 bg-gray-800 bg-opacity-90 p-4 overflow-y-auto z-40"
+        className="fixed left-0 p-4 overflow-y-auto z-40"
         style={{
-          top: '14rem',
+          top: '10rem',
           width: '15vw',
           height: 'calc(100% - 4rem)'
         }}
@@ -266,7 +280,31 @@ export default function Bazaar() {
         {panelItem && <ComparisonPanel item={panelItem} user={user} key="comparisonPanel" />}
       </AnimatePresence>
 
-      {showOverlay && <AddItemOverlay onClose={() => setShowOverlay(false)} />}
+      {showOverlay && (
+        <AddItemOverlay onClose={(success) => {
+          setShowOverlay(false);
+          if (success) {
+            displayConfirmation("Oggetto Creato!");
+          }
+        }} />
+      )}
+
+      {/* Custom Confirmation Message */}
+      <AnimatePresence>
+        {showConfirmation && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            transition={{ duration: 0.3 }}
+            className="fixed inset-0 flex items-center justify-center z-50"
+          >
+            <div className="bg-gradient-to-r from-green-400 to-green-600 text-white px-8 py-4 rounded-lg shadow-xl">
+              {confirmationMessage}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
