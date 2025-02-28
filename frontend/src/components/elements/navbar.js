@@ -1,4 +1,4 @@
-// file: ./frontend/src/components/elements/navbar.js
+// file: ./frontend/src/components/elements/navbar.js # do not remove this line
 import React, { useEffect, useState, useRef, useContext } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
@@ -469,6 +469,18 @@ const Navbar = ({ imageUrl: propImageUrl, userData: propUserData }) => {
         >
           Bazaar
         </button>
+        {userData?.role === "dm" && (
+          <button
+            onClick={() => navigate("/dm-dashboard")}
+            className={`px-4 py-2 rounded-md transition-colors ${
+              isActive("/dm-dashboard")
+                ? "bg-[#FFA500] text-white"
+                : "bg-transparent text-white hover:bg-[#e69500]"
+            }`}
+          >
+            DM Dashboard
+          </button>
+        )}
       </div>
 
       {/* Right Column: Logout Button */}

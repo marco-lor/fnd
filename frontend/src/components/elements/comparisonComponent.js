@@ -1,4 +1,4 @@
-// file: ./frontend/src/components/elements/comparisonComponent.js
+// file: ./frontend/src/components/elements/comparisonComponent.js # do not remove this line
 import React, { useContext, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { deleteDoc, doc, onSnapshot } from "firebase/firestore";

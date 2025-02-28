@@ -1,4 +1,4 @@
-// file: ./frontend/src/components/Home.js
+// file: ./frontend/src/components/Home.js # do not remove this line
 import React, { useEffect, useState, useContext } from "react";
 import { db, API_BASE_URL } from "./firebaseConfig";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";

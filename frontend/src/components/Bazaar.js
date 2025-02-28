@@ -1,4 +1,4 @@
-// file: ./frontend/src/components/Bazaar.js
+// file: ./frontend/src/components/Bazaar.js # do not remove this line
 import React, { useState, useContext, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from './elements/navbar';

@@ -1,4 +1,4 @@
-// file ./frontend/src/index.js
+// file ./frontend/src/index.js # do not remove this line
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom"; // BrowserRouter is here!

@@ -1,4 +1,4 @@
-// file ./frontend/src/components/firebaseConfig.js
+// file ./frontend/src/components/firebaseConfig.js # do not remove this line
 import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
 import { getAuth } from "firebase/auth";
