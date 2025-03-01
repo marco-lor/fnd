@@ -1,4 +1,4 @@
-// file: ./frontend/src/components/Home.js # do not remove this line
+// file: ./frontend/src/components/Home.js
 import React, { useEffect, useState, useContext } from "react";
 import { db, API_BASE_URL } from "./firebaseConfig";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
@@ -11,7 +11,10 @@ function Home() {
   const { user } = useContext(AuthContext);
   const [editableBase, setEditableBase] = useState(null);
   const [editableComb, setEditableComb] = useState(null);
+  const [token, setToken] = useState(null);
   const [cooldown, setCooldown] = useState(false);
+  const [lockParamBase, setLockParamBase] = useState(false);
+  const [lockParamCombat, setLockParamCombat] = useState(false);
   const navigate = useNavigate();
 
   // Redirect if not authenticated
@@ -31,6 +34,18 @@ function Home() {
         if (data.Parametri) {
           setEditableBase(data.Parametri.Base || null);
           setEditableComb(data.Parametri.Combattimento || null);
+        }
+        if (data.settings) {
+          if (typeof data.settings.lock_param_base !== "undefined") {
+            setLockParamBase(data.settings.lock_param_base);
+          }
+          if (typeof data.settings.lock_param_combat !== "undefined") {
+            setLockParamCombat(data.settings.lock_param_combat);
+          }
+        }
+        // Listen for changes on the token field inside stats.
+        if (data.stats && typeof data.stats.token !== "undefined") {
+          setToken(data.stats.token);
         }
       }
     });
@@ -184,25 +199,31 @@ function Home() {
                           key={col}
                           className="border border-[rgba(255,255,255,0.3)] p-2 text-center"
                         >
-                          <div className="flex flex-row items-center justify-center">
-                            <button
-                              disabled={cooldown}
-                              className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
-                              onClick={() => handleDecrease(statName)}
-                            >
-                              ◀
-                            </button>
+                          {!lockParamBase ? (
+                            <div className="flex flex-row items-center justify-center">
+                              <button
+                                disabled={cooldown}
+                                className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
+                                onClick={() => handleDecrease(statName)}
+                              >
+                                ◀
+                              </button>
+                              <span className="mx-[5px] min-w-[20px] text-center">
+                                {statValues[col]}
+                              </span>
+                              <button
+                                disabled={cooldown}
+                                className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
+                                onClick={() => handleIncrease(statName)}
+                              >
+                                ▶
+                              </button>
+                            </div>
+                          ) : (
                             <span className="mx-[5px] min-w-[20px] text-center">
                               {statValues[col]}
                             </span>
-                            <button
-                              disabled={cooldown}
-                              className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
-                              onClick={() => handleIncrease(statName)}
-                            >
-                              ▶
-                            </button>
-                          </div>
+                          )}
                         </td>
                       );
                     } else {
@@ -231,10 +252,20 @@ function Home() {
     if (!combObj) return null;
     const columns = ["Base", "Equip", "Mod", "Tot"];
     const orderedStats = Object.keys(combObj).sort();
+
     return (
       <div className="flex-grow flex flex-col">
         <table className="w-full flex-grow border-collapse text-white rounded-[8px] overflow-hidden">
           <thead>
+            {/* Extra row for the token reference in the top-right */}
+            <tr>
+              <th
+                colSpan={columns.length + 1} // 4 columns + the first "Stat" column
+                className="p-2 text-right border border-[rgba(255,255,255,0.3)] bg-[rgba(25,50,128,0.4)]"
+              >
+                Token: {token}
+              </th>
+            </tr>
             <tr>
               <th className="border border-[rgba(255,255,255,0.3)] p-2 text-left pl-[10px]">
                 Stat
@@ -268,25 +299,31 @@ function Home() {
                           key={col}
                           className="border border-[rgba(255,255,255,0.3)] p-2 text-center"
                         >
-                          <div className="flex flex-row items-center justify-center">
-                            <button
-                              disabled={cooldown}
-                              className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
-                              onClick={() => handleCombDecrease(statName)}
-                            >
-                              ◀
-                            </button>
+                          {!lockParamCombat ? (
+                            <div className="flex flex-row items-center justify-center">
+                              <button
+                                disabled={cooldown}
+                                className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
+                                onClick={() => handleCombDecrease(statName)}
+                              >
+                                ◀
+                              </button>
+                              <span className="mx-[5px] min-w-[20px] text-center">
+                                {statValues[col]}
+                              </span>
+                              <button
+                                disabled={cooldown}
+                                className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
+                                onClick={() => handleCombIncrease(statName)}
+                              >
+                                ▶
+                              </button>
+                            </div>
+                          ) : (
                             <span className="mx-[5px] min-w-[20px] text-center">
                               {statValues[col]}
                             </span>
-                            <button
-                              disabled={cooldown}
-                              className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
-                              onClick={() => handleCombIncrease(statName)}
-                            >
-                              ▶
-                            </button>
-                          </div>
+                          )}
                         </td>
                       );
                     } else {

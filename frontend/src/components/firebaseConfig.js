@@ -1,6 +1,6 @@
 // file ./frontend/src/components/firebaseConfig.js # do not remove this line
 import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
+// import { getAnalytics } from "firebase/analytics";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
@@ -27,7 +27,7 @@ const API_BASE_URL = isLocalhost
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+// const analytics = getAnalytics(app);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app); // Initialize Storage
