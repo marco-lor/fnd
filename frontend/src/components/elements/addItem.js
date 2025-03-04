@@ -1,4 +1,4 @@
-// file: ./frontend/src/components/elements/addItem.js # do not remove this line
+// file: ./frontend/src/components/elements/addItem.js
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { db, storage } from '../firebaseConfig';
@@ -110,7 +110,7 @@ export function AddItemOverlay({ onClose }) {
                   value={itemFormData.Nome || ''}
                   onChange={(e) => setItemFormData({ ...itemFormData, Nome: e.target.value })}
                   className="w-full p-2 rounded bg-gray-700 text-white"
-                  placeholder="Enter Nome"
+                  placeholder="Inserisci nome oggetto"
                 />
               </div>
             )}
@@ -180,11 +180,45 @@ export function AddItemOverlay({ onClose }) {
                 value={itemFormData.Effetto || ''}
                 onChange={(e) => setItemFormData({ ...itemFormData, Effetto: e.target.value })}
                 className="w-full p-2 rounded bg-gray-700 text-white"
-                placeholder="Enter Effetto"
+                placeholder="Inserisci effetto oggetto"
               />
             </div>
           )}
         </div>
+        <div className="mt-4 grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-white mb-1">Requisiti</label>
+            <input
+              type="text"
+              value={itemFormData.requisiti || ''}
+              onChange={(e) => setItemFormData({ ...itemFormData, requisiti: e.target.value })}
+              className="w-full p-2 rounded bg-gray-700 text-white"
+              placeholder="Inserisci requisiti per essere equipaggiato"
+            />
+          </div>
+          <div>
+            <label className="block text-white mb-1">Prezzo</label>
+            <input
+              type="text"
+              value={itemFormData.prezzo || ''}
+              onChange={(e) => setItemFormData({ ...itemFormData, prezzo: e.target.value })}
+              className="w-full p-2 rounded bg-gray-700 text-white"
+              placeholder="Inserisci prezzo"
+            />
+          </div>
+        </div>
+        {itemFormData.Slot === "Cintura" && (
+          <div className="mt-4">
+            <label className="block text-white mb-1">Slot Cintura</label>
+            <input
+              type="text"
+              value={itemFormData.slotCintura || ''}
+              onChange={(e) => setItemFormData({ ...itemFormData, slotCintura: e.target.value })}
+              className="w-full p-2 rounded bg-gray-700 text-white"
+              placeholder="Inserire numero di slot consumabili nella cintura"
+            />
+          </div>
+        )}
       </div>
     );
   };
@@ -192,29 +226,43 @@ export function AddItemOverlay({ onClose }) {
   const renderTablesSection = () => {
     if (!schema) return null;
 
-    const specialFields = ["Penetrazione", "Danno", "Bonus Danno", "Danno Critico", "Bonus Danno Critico"];
+    const specialFields = ["Penetrazione", "Danno", "Bonus Danno", "Danno Critico", "Bonus Danno Critico", "ridCostoSpell", "ridCostoTec"];
+    const specialFieldLabels = {
+      "Penetrazione": "Penetrazione",
+      "Danno": "Danno",
+      "Bonus Danno": "Bonus Danno",
+      "Danno Critico": "Danno Critico",
+      "Bonus Danno Critico": "Bonus Danno Critico",
+      "ridCostoSpell": "Riduz. Costo Spell",
+      "ridCostoTec": "Riduz. Costo Tecniche"
+    };
     const hasSpecialFields = specialFields.some(field => schema[field] !== undefined);
 
     const renderSpecialTable = () => (
-      <div className="w-1/3 border p-2 rounded">
-        <h3 className="text-white mb-2">Special Params</h3>
+      <div className="w-1/3 bg-gray-800/70 p-4 rounded-xl shadow-lg backdrop-blur-sm">
+        <h3 className="text-white mb-3 font-medium">Special Params</h3>
         <table className="w-full text-white">
           <thead>
             <tr>
-              <th className="border px-2 py-1">Param</th>
-              {["1", "4", "7", "10"].map(col => (
-                <th key={col} className="border px-2 py-1">{col}</th>
+              <th className="bg-gray-700/50 px-3 py-2 rounded-tl-lg text-left"></th>
+              {["1", "4", "7", "10"].map((col, i) => (
+                <th key={col} className={`bg-gray-700/50 px-3 py-2 ${i === 3 ? 'rounded-tr-lg' : ''} text-center`}>
+                  {col}
+                </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {specialFields.map(field => {
+            {specialFields.map((field, i) => {
               if (schema[field] === undefined) return null;
+              const isLast = i === specialFields.filter(f => schema[f] !== undefined).length - 1;
               return (
                 <tr key={field}>
-                  <td className="border px-2 py-1">{field}</td>
-                  {["1", "4", "7", "10"].map(col => (
-                    <td key={col} className="border px-2 py-1">
+                  <td className={`bg-gray-700/30 px-3 py-2 ${isLast ? 'rounded-bl-lg' : ''} text-left`}>
+                    {specialFieldLabels[field] || field}
+                  </td>
+                  {["1", "4", "7", "10"].map((col, j) => (
+                    <td key={col} className={`bg-gray-700/30 px-3 py-2 ${isLast && j === 3 ? 'rounded-br-lg' : ''}`}>
                       <input
                         type="text"
                         value={(itemFormData[field] && itemFormData[field][col]) || ''}
@@ -225,8 +273,8 @@ export function AddItemOverlay({ onClose }) {
                           newData[field][col] = e.target.value;
                           setItemFormData(newData);
                         }}
-                        className="w-full p-1 rounded bg-gray-700 text-white"
-                        placeholder={`Enter ${col}`}
+                        className="w-full p-1 rounded-md bg-gray-600/70 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                        placeholder={`-`}
                       />
                     </td>
                   ))}
@@ -242,83 +290,91 @@ export function AddItemOverlay({ onClose }) {
     const combatParams = (schema.Parametri && schema.Parametri["Combattimento"]) || null;
 
     const renderParamTable = (category, title) => (
-      <div className="w-1/3 border p-2 rounded">
-        <h3 className="text-white mb-2">{title}</h3>
+      <div className="w-1/3 bg-gray-800/70 p-4 rounded-xl shadow-lg backdrop-blur-sm">
+        <h3 className="text-white mb-3 font-medium">{title}</h3>
         <table className="w-full text-white">
           <thead>
             <tr>
-              <th className="border px-2 py-1">Field</th>
-              {["1", "4", "7", "10"].map(col => (
-                <th key={col} className="border px-2 py-1">{col}</th>
+              <th className="bg-gray-700/50 px-3 py-2 rounded-tl-lg"></th>
+              {["1", "4", "7", "10"].map((col, i) => (
+                <th key={col} className={`bg-gray-700/50 px-3 py-2 ${i === 3 ? 'rounded-tr-lg' : ''} text-center`}>
+                  {col}
+                </th>
               ))}
             </tr>
           </thead>
           <tbody>
             {category === "Base" &&
-              baseParams && Object.keys(baseParams).map(subField => (
-                <tr key={subField}>
-                  <td className="border px-2 py-1">{subField}</td>
-                  {["1", "4", "7", "10"].map(col => (
-                    <td key={col} className="border px-2 py-1">
-                      <input
-                        type="text"
-                        value={
-                          (itemFormData.Parametri &&
-                            itemFormData.Parametri["Base"] &&
-                            itemFormData.Parametri["Base"][subField] &&
-                            itemFormData.Parametri["Base"][subField][col]
-                          ) || ''
-                        }
-                        onChange={(e) => {
-                          const newData = { ...itemFormData };
-                          if (!newData.Parametri) newData.Parametri = {};
-                          if (!newData.Parametri["Base"]) newData.Parametri["Base"] = {};
-                          if (!newData.Parametri["Base"][subField]) {
-                            newData.Parametri["Base"][subField] = { "1": "", "4": "", "7": "", "10": "" };
+              baseParams && Object.keys(baseParams).map((subField, i) => {
+                const isLast = i === Object.keys(baseParams).length - 1;
+                return (
+                  <tr key={subField}>
+                    <td className={`bg-gray-700/30 px-3 py-2 ${isLast ? 'rounded-bl-lg' : ''} text-left`}>{subField}</td>
+                    {["1", "4", "7", "10"].map((col, j) => (
+                      <td key={col} className={`bg-gray-700/30 px-3 py-2 ${isLast && j === 3 ? 'rounded-br-lg' : ''}`}>
+                        <input
+                          type="text"
+                          value={
+                            (itemFormData.Parametri &&
+                              itemFormData.Parametri["Base"] &&
+                              itemFormData.Parametri["Base"][subField] &&
+                              itemFormData.Parametri["Base"][subField][col]
+                            ) || ''
                           }
-                          newData.Parametri["Base"][subField][col] = e.target.value;
-                          setItemFormData(newData);
-                        }}
-                        className="w-full p-1 rounded bg-gray-700 text-white"
-                        placeholder={`Enter ${col}`}
-                      />
-                    </td>
-                  ))}
-                </tr>
-              ))
+                          onChange={(e) => {
+                            const newData = { ...itemFormData };
+                            if (!newData.Parametri) newData.Parametri = {};
+                            if (!newData.Parametri["Base"]) newData.Parametri["Base"] = {};
+                            if (!newData.Parametri["Base"][subField]) {
+                              newData.Parametri["Base"][subField] = { "1": "", "4": "", "7": "", "10": "" };
+                            }
+                            newData.Parametri["Base"][subField][col] = e.target.value;
+                            setItemFormData(newData);
+                          }}
+                          className="w-full p-1 rounded-md bg-gray-600/70 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                          placeholder={`-`}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })
             }
             {category === "Combattimento" &&
-              combatParams && Object.keys(combatParams).map(subField => (
-                <tr key={subField}>
-                  <td className="border px-2 py-1">{subField}</td>
-                  {["1", "4", "7", "10"].map(col => (
-                    <td key={col} className="border px-2 py-1">
-                      <input
-                        type="text"
-                        value={
-                          (itemFormData.Parametri &&
-                            itemFormData.Parametri["Combattimento"] &&
-                            itemFormData.Parametri["Combattimento"][subField] &&
-                            itemFormData.Parametri["Combattimento"][subField][col]
-                          ) || ''
-                        }
-                        onChange={(e) => {
-                          const newData = { ...itemFormData };
-                          if (!newData.Parametri) newData.Parametri = {};
-                          if (!newData.Parametri["Combattimento"]) newData.Parametri["Combattimento"] = {};
-                          if (!newData.Parametri["Combattimento"][subField]) {
-                            newData.Parametri["Combattimento"][subField] = { "1": "", "4": "", "7": "", "10": "" };
+              combatParams && Object.keys(combatParams).map((subField, i) => {
+                const isLast = i === Object.keys(combatParams).length - 1;
+                return (
+                  <tr key={subField}>
+                    <td className={`bg-gray-700/30 px-3 py-2 ${isLast ? 'rounded-bl-lg' : ''} text-left`}>{subField}</td>
+                    {["1", "4", "7", "10"].map((col, j) => (
+                      <td key={col} className={`bg-gray-700/30 px-3 py-2 ${isLast && j === 3 ? 'rounded-br-lg' : ''}`}>
+                        <input
+                          type="text"
+                          value={
+                            (itemFormData.Parametri &&
+                              itemFormData.Parametri["Combattimento"] &&
+                              itemFormData.Parametri["Combattimento"][subField] &&
+                              itemFormData.Parametri["Combattimento"][subField][col]
+                            ) || ''
                           }
-                          newData.Parametri["Combattimento"][subField][col] = e.target.value;
-                          setItemFormData(newData);
-                        }}
-                        className="w-full p-1 rounded bg-gray-700 text-white"
-                        placeholder={`Enter ${col}`}
-                      />
-                    </td>
-                  ))}
-                </tr>
-              ))
+                          onChange={(e) => {
+                            const newData = { ...itemFormData };
+                            if (!newData.Parametri) newData.Parametri = {};
+                            if (!newData.Parametri["Combattimento"]) newData.Parametri["Combattimento"] = {};
+                            if (!newData.Parametri["Combattimento"][subField]) {
+                              newData.Parametri["Combattimento"][subField] = { "1": "", "4": "", "7": "", "10": "" };
+                            }
+                            newData.Parametri["Combattimento"][subField][col] = e.target.value;
+                            setItemFormData(newData);
+                          }}
+                          className="w-full p-1 rounded-md bg-gray-600/70 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                          placeholder={`-`}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })
             }
           </tbody>
         </table>

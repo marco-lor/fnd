@@ -1,4 +1,4 @@
-// file: ./frontend/src/components/elements/comparisonComponent.js # do not remove this line
+// file: ./frontend/src/components/elements/comparisonComponent.js
 import React, { useContext, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { deleteDoc, doc, onSnapshot } from "firebase/firestore";
@@ -9,6 +9,7 @@ export default function ComparisonPanel({ item }) {
   const { user } = useContext(AuthContext);
   const [userData, setUserData] = useState(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -35,10 +36,17 @@ export default function ComparisonPanel({ item }) {
   const baseParams = parametri.Base || {};
   const combatParams = parametri.Combattimento || {};
 
-  // Compute the image URL (using a placeholder if not provided)
-  const imageUrl = item.image_url
-    ? item.image_url
-    : `https://via.placeholder.com/150x150?text=${encodeURIComponent(item.Nome)}`;
+  // Proactively load the image and set error state if it fails
+  useEffect(() => {
+    if (item.image_url) {
+      const img = new Image();
+      img.onload = () => setImageError(false);
+      img.onerror = () => setImageError(true);
+      img.src = item.image_url;
+    } else {
+      setImageError(true);
+    }
+  }, [item.image_url]);
 
   // Define the field groups with their display order and labels
   const itemGroup = [
@@ -165,10 +173,20 @@ export default function ComparisonPanel({ item }) {
           </button>
         )}
 
-        <div
-          className="absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: `url(${imageUrl})` }}
-        ></div>
+        {/* Background image with fallback */}
+        {!imageError && item.image_url ? (
+          <div
+            className="absolute inset-0 bg-cover bg-center"
+            style={{ backgroundImage: `url(${item.image_url})` }}
+          ></div>
+        ) : (
+          <div className="absolute inset-0 bg-gray-800 flex items-center justify-center">
+            <div className="text-6xl text-gray-600 font-bold">
+              {item.Nome?.charAt(0) || "?"}
+            </div>
+          </div>
+        )}
+
         <div className="absolute inset-0 bg-black opacity-70"></div>
         <div className="absolute inset-0 bg-gradient-to-b from-transparent to-gray-900"></div>
         <div className="relative z-10 p-4">

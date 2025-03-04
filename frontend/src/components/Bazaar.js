@@ -1,18 +1,16 @@
-// file: ./frontend/src/components/Bazaar.js # do not remove this line
+// file: ./frontend/src/components/Bazaar.js
 import React, { useState, useContext, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from './elements/navbar';
 import InteractiveBackground from './backgrounds/InteractiveBackground';
-import { collection, onSnapshot } from "firebase/firestore";
+import { collection, doc, onSnapshot } from "firebase/firestore";
 import { db } from './firebaseConfig';
 import { AuthContext } from '../AuthContext';
 import { AddItemOverlay } from './elements/addItem';
 import ComparisonPanel from './elements/comparisonComponent';
 
 function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked }) {
-  const imageUrl = item.image_url
-    ? item.image_url
-    : `https://via.placeholder.com/150x150?text=${encodeURIComponent(item.Nome)}`;
+  const [imageError, setImageError] = useState(false);
   const title = item.Nome;
 
   return (
@@ -23,7 +21,18 @@ function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked }) {
       onMouseLeave={() => onHoverItem(null)}
       onClick={onLockToggle}
     >
-      <img src={imageUrl} alt={title} className="w-16 h-16 object-cover rounded-lg mr-4" />
+      {item.image_url && !imageError ? (
+        <img
+          src={item.image_url}
+          alt={title}
+          className="w-16 h-16 object-cover rounded-lg mr-4"
+          onError={() => setImageError(true)}
+        />
+      ) : (
+        <div className="w-16 h-16 bg-gray-600 rounded-lg mr-4 flex items-center justify-center text-white text-xs text-center">
+          {title?.charAt(0) || "?"}
+        </div>
+      )}
       <div className="flex-grow">
         <h2 className="text-lg font-bold text-white">{title}</h2>
         <p className="text-sm text-gray-300">
@@ -56,6 +65,26 @@ export default function Bazaar() {
   const [confirmationMessage, setConfirmationMessage] = useState("");
 
   const { user } = useContext(AuthContext);
+  const [userData, setUserData] = useState(null);
+
+  // Fetch user data from Firestore based on AuthContext user
+  useEffect(() => {
+    if (user) {
+      const userRef = doc(db, "users", user.uid);
+      const unsubscribe = onSnapshot(
+        userRef,
+        (docSnap) => {
+          if (docSnap.exists()) {
+            setUserData(docSnap.data());
+          }
+        },
+        (error) => {
+          console.error("Error fetching user data:", error);
+        }
+      );
+      return () => unsubscribe();
+    }
+  }, [user]);
 
   useEffect(() => {
     const itemsRef = collection(db, "items");
@@ -167,14 +196,7 @@ export default function Bazaar() {
 
       <InteractiveBackground />
 
-      <div
-        className="fixed left-0 p-4 overflow-y-auto z-40"
-        style={{
-          top: '10rem',
-          width: '15vw',
-          height: 'calc(100% - 4rem)'
-        }}
-      >
+      <div className="fixed left-0 p-4 overflow-y-auto z-40" style={{ top: '10rem', width: '15vw', height: 'calc(100% - 4rem)' }}>
         <div className="mb-6">
           <p className="text-white font-bold mb-2">Filter by Slot:</p>
           <div className="flex flex-wrap gap-2">
@@ -182,11 +204,7 @@ export default function Bazaar() {
               <button
                 key={slot}
                 onClick={() => handleToggleSlot(slot)}
-                className={`px-4 py-2 rounded-lg border transition-colors ${
-                  selectedSlot.includes(slot)
-                    ? 'bg-[rgba(25,50,128,0.4)] text-white'
-                    : 'bg-white text-[rgba(25,50,128,0.4)]'
-                }`}
+                className={`px-4 py-2 rounded-lg border transition-colors ${selectedSlot.includes(slot) ? 'bg-[rgba(25,50,128,0.4)] text-white' : 'bg-white text-[rgba(25,50,128,0.4)]'}`}
               >
                 {slot || 'None'}
               </button>
@@ -200,11 +218,7 @@ export default function Bazaar() {
               <button
                 key={hand}
                 onClick={() => handleToggleHands(hand)}
-                className={`px-4 py-2 rounded-lg border transition-colors ${
-                  selectedHands.includes(hand)
-                    ? 'bg-[rgba(25,50,128,0.4)] text-white'
-                    : 'bg-white text-[rgba(25,50,128,0.4)]'
-                }`}
+                className={`px-4 py-2 rounded-lg border transition-colors ${selectedHands.includes(hand) ? 'bg-[rgba(25,50,128,0.4)] text-white' : 'bg-white text-[rgba(25,50,128,0.4)]'}`}
               >
                 {hand}
               </button>
@@ -218,11 +232,7 @@ export default function Bazaar() {
               <button
                 key={tipo}
                 onClick={() => handleToggleTipo(tipo)}
-                className={`px-4 py-2 rounded-lg border transition-colors ${
-                  selectedTipo.includes(tipo)
-                    ? 'bg-[rgba(25,50,128,0.4)] text-white'
-                    : 'bg-white text-[rgba(25,50,128,0.4)]'
-                }`}
+                className={`px-4 py-2 rounded-lg border transition-colors ${selectedTipo.includes(tipo) ? 'bg-[rgba(25,50,128,0.4)] text-white' : 'bg-white text-[rgba(25,50,128,0.4)]'}`}
               >
                 {tipo}
               </button>
@@ -231,22 +241,17 @@ export default function Bazaar() {
         </div>
       </div>
 
-      <div
-        className="relative p-6"
-        style={{
-          marginLeft: '15vw',
-          marginRight: '25vw',
-          marginTop: '9rem'
-        }}
-      >
-        <div className="mb-4">
-          <button
-            onClick={handleAddItemClick}
-            className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
-          >
-            Aggiungi Oggetto
-          </button>
-        </div>
+      <div className="relative p-6" style={{ marginLeft: '15vw', marginRight: '25vw', marginTop: '9rem' }}>
+        {(userData?.role === 'webmaster' || userData?.role === 'dm') && (
+          <div className="mb-4">
+            <button
+              onClick={handleAddItemClick}
+              className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+            >
+              Aggiungi Oggetto
+            </button>
+          </div>
+        )}
         <div className="flex flex-col gap-4 mb-4">
           <input
             type="text"
@@ -289,7 +294,6 @@ export default function Bazaar() {
         }} />
       )}
 
-      {/* Custom Confirmation Message */}
       <AnimatePresence>
         {showConfirmation && (
           <motion.div
