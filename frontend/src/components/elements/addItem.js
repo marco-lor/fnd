@@ -14,7 +14,7 @@ export function AddItemOverlay({ onClose }) {
   useEffect(() => {
     const fetchSchema = async () => {
       try {
-        const schemaDocRef = doc(db, "items", "schema_arma");
+        const schemaDocRef = doc(db, "utils", "schema_arma");
         const docSnap = await getDoc(schemaDocRef);
         if (docSnap.exists()) {
           const schemaData = docSnap.data();
@@ -47,7 +47,7 @@ export function AddItemOverlay({ onClose }) {
           });
           setItemFormData(initialData);
         } else {
-          console.error("Schema not found at /items/schema_arma");
+          console.error("Schema not found at /utils/schema_arma");
         }
       } catch (error) {
         console.error("Error fetching schema:", error);
@@ -76,7 +76,7 @@ export function AddItemOverlay({ onClose }) {
       const itemDocRef = doc(db, "items", docId);
       const existingDocSnap = await getDoc(itemDocRef);
       if (existingDocSnap.exists()) {
-        alert("Item already exists. Please change the name.");
+        alert("Weapon already exists. Please change the name.");
         return;
       }
       let updatedFormData = { ...itemFormData };
@@ -88,11 +88,10 @@ export function AddItemOverlay({ onClose }) {
         updatedFormData.image_url = downloadURL;
       }
       await setDoc(itemDocRef, updatedFormData);
-      // Immediately close the overlay and notify success by passing true.
       onClose(true);
     } catch (error) {
-      console.error("Error saving item:", error);
-      alert("Error saving item");
+      console.error("Error saving weapon:", error);
+      alert("Error saving weapon");
     }
   };
 
@@ -110,7 +109,7 @@ export function AddItemOverlay({ onClose }) {
                   value={itemFormData.Nome || ''}
                   onChange={(e) => setItemFormData({ ...itemFormData, Nome: e.target.value })}
                   className="w-full p-2 rounded bg-gray-700 text-white"
-                  placeholder="Inserisci nome oggetto"
+                  placeholder="Inserisci nome arma"
                 />
               </div>
             )}
@@ -180,7 +179,7 @@ export function AddItemOverlay({ onClose }) {
                 value={itemFormData.Effetto || ''}
                 onChange={(e) => setItemFormData({ ...itemFormData, Effetto: e.target.value })}
                 className="w-full p-2 rounded bg-gray-700 text-white"
-                placeholder="Inserisci effetto oggetto"
+                placeholder="Inserisci effetto arma"
               />
             </div>
           )}
@@ -207,18 +206,6 @@ export function AddItemOverlay({ onClose }) {
             />
           </div>
         </div>
-        {itemFormData.Slot === "Cintura" && (
-          <div className="mt-4">
-            <label className="block text-white mb-1">Slot Cintura</label>
-            <input
-              type="text"
-              value={itemFormData.slotCintura || ''}
-              onChange={(e) => setItemFormData({ ...itemFormData, slotCintura: e.target.value })}
-              className="w-full p-2 rounded bg-gray-700 text-white"
-              placeholder="Inserire numero di slot consumabili nella cintura"
-            />
-          </div>
-        )}
       </div>
     );
   };
@@ -393,7 +380,7 @@ export function AddItemOverlay({ onClose }) {
   const overlayContent = (
     <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-[9999]">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-4/5 max-h-[80vh] overflow-y-auto">
-        <h2 className="text-xl text-white mb-4">Add New Item</h2>
+        <h2 className="text-xl text-white mb-4">Add New Weapon</h2>
         <form onSubmit={(e) => { e.preventDefault(); handleSaveItem(); }}>
           {renderBasicFields()}
           {renderTablesSection()}

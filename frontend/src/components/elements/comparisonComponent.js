@@ -1,8 +1,8 @@
-// file: ./frontend/src/components/elements/comparisonComponent.js
 import React, { useContext, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { deleteDoc, doc, onSnapshot } from "firebase/firestore";
-import { db } from "../firebaseConfig";
+import { ref, deleteObject } from "firebase/storage"; // Added Firebase storage functions
+import { db, storage } from "../firebaseConfig"; // Imported storage alongside db
 import { AuthContext } from "../../AuthContext";
 
 export default function ComparisonPanel({ item }) {
@@ -105,8 +105,23 @@ export default function ComparisonPanel({ item }) {
 
   const handleConfirmDelete = async () => {
     try {
+      // First, delete the Firestore document
       await deleteDoc(doc(db, "items", item.id));
       console.log("Document deleted successfully");
+
+      // Then, delete the associated image from Firebase storage if it exists
+      if (item.image_url) {
+        try {
+          // Extract the file path from the URL
+          const urlPath = decodeURIComponent(item.image_url.split('/o/')[1].split('?')[0]);
+          const imageRef = ref(storage, urlPath);
+          await deleteObject(imageRef);
+          console.log("Image deleted successfully from storage");
+        } catch (imageError) {
+          console.error("Error deleting image from storage:", imageError);
+        }
+      }
+
       setShowConfirmation(false);
     } catch (error) {
       console.error("Error deleting document:", error);
