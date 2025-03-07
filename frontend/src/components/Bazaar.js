@@ -6,7 +6,7 @@ import InteractiveBackground from './backgrounds/InteractiveBackground';
 import { collection, doc, onSnapshot } from "firebase/firestore";
 import { db } from './firebaseConfig';
 import { AuthContext } from '../AuthContext';
-import { AddItemOverlay } from './elements/addItem';
+import { AddWeaponOverlay } from './elements/addWeapon';
 import ComparisonPanel from './elements/comparisonComponent';
 
 function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked }) {
@@ -182,7 +182,7 @@ export default function Bazaar() {
     displayConfirmation("Oggetto Acquistato");
   };
 
-  const handleAddItemClick = () => {
+  const handleAddWeaponClick = () => {
     setShowOverlay(true);
   };
 
@@ -244,12 +244,38 @@ export default function Bazaar() {
       <div className="relative p-6" style={{ marginLeft: '15vw', marginRight: '25vw', marginTop: '9rem' }}>
         {(userData?.role === 'webmaster' || userData?.role === 'dm') && (
           <div className="mb-4">
-            <button
-              onClick={handleAddItemClick}
-              className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
-            >
-              Aggiungi Oggetto
-            </button>
+            <div className="flex space-x-2">
+              <button
+                onClick={handleAddWeaponClick}
+                className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+              >
+                Aggiungi Arma
+              </button>
+              <button
+                onClick={() => displayConfirmation("Funzionalità Armatura in arrivo!")}
+                className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+              >
+                Aggiungi Armatura
+              </button>
+              <button
+                onClick={() => displayConfirmation("Funzionalità Accessorio in arrivo!")}
+                className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+              >
+                Aggiungi Accessorio
+              </button>
+              <button
+                onClick={() => displayConfirmation("Funzionalità Consumabile in arrivo!")}
+                className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+              >
+                Aggiungi Consumabile
+              </button>
+              <button
+                onClick={() => displayConfirmation("Funzionalità Munizione in arrivo!")}
+                className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+              >
+                Aggiungi Munizione
+              </button>
+            </div>
           </div>
         )}
         <div className="flex flex-col gap-4 mb-4">
@@ -286,7 +312,7 @@ export default function Bazaar() {
       </AnimatePresence>
 
       {showOverlay && (
-        <AddItemOverlay onClose={(success) => {
+        <AddWeaponOverlay onClose={(success) => {
           setShowOverlay(false);
           if (success) {
             displayConfirmation("Oggetto Creato!");

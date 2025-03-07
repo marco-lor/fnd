@@ -1,13 +1,13 @@
-// file: ./frontend/src/components/elements/addItem.js
+// file: ./frontend/src/components/elements/addWeapon.js
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { db, storage } from '../firebaseConfig';
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
-export function AddItemOverlay({ onClose }) {
+export function AddWeaponOverlay({ onClose }) {
   const [schema, setSchema] = useState(null);
-  const [itemFormData, setItemFormData] = useState({});
+  const [weaponFormData, setWeaponFormData] = useState({});
   const [imageFile, setImageFile] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
 
@@ -45,7 +45,7 @@ export function AddItemOverlay({ onClose }) {
               });
             }
           });
-          setItemFormData(initialData);
+          setWeaponFormData(initialData);
         } else {
           console.error("Schema not found at /utils/schema_arma");
         }
@@ -65,21 +65,21 @@ export function AddItemOverlay({ onClose }) {
     }
   };
 
-  const handleSaveItem = async () => {
+  const handleSaveWeapon = async () => {
     try {
-      const itemName = itemFormData.Nome ? itemFormData.Nome.trim() : "";
-      if (!itemName) {
+      const weaponName = weaponFormData.Nome ? weaponFormData.Nome.trim() : "";
+      if (!weaponName) {
         alert("Nome is required");
         return;
       }
-      const docId = itemName.replace(/\s+/g, "_");
-      const itemDocRef = doc(db, "items", docId);
-      const existingDocSnap = await getDoc(itemDocRef);
+      const docId = weaponName.replace(/\s+/g, "_");
+      const weaponDocRef = doc(db, "items", docId);
+      const existingDocSnap = await getDoc(weaponDocRef);
       if (existingDocSnap.exists()) {
         alert("Weapon already exists. Please change the name.");
         return;
       }
-      let updatedFormData = { ...itemFormData };
+      let updatedFormData = { ...weaponFormData };
       if (imageFile) {
         const fileName = `${docId}_${imageFile.name}`;
         const imageRef = ref(storage, 'items/' + fileName);
@@ -87,7 +87,7 @@ export function AddItemOverlay({ onClose }) {
         const downloadURL = await getDownloadURL(imageRef);
         updatedFormData.image_url = downloadURL;
       }
-      await setDoc(itemDocRef, updatedFormData);
+      await setDoc(weaponDocRef, updatedFormData);
       onClose(true);
     } catch (error) {
       console.error("Error saving weapon:", error);
@@ -106,8 +106,8 @@ export function AddItemOverlay({ onClose }) {
                 <label className="block text-white mb-1">Nome</label>
                 <input
                   type="text"
-                  value={itemFormData.Nome || ''}
-                  onChange={(e) => setItemFormData({ ...itemFormData, Nome: e.target.value })}
+                  value={weaponFormData.Nome || ''}
+                  onChange={(e) => setWeaponFormData({ ...weaponFormData, Nome: e.target.value })}
                   className="w-full p-2 rounded bg-gray-700 text-white"
                   placeholder="Inserisci nome arma"
                 />
@@ -119,8 +119,8 @@ export function AddItemOverlay({ onClose }) {
               <div className="mb-4">
                 <label className="block text-white mb-1">Slot</label>
                 <select
-                  value={itemFormData.Slot || ''}
-                  onChange={(e) => setItemFormData({ ...itemFormData, Slot: e.target.value })}
+                  value={weaponFormData.Slot || ''}
+                  onChange={(e) => setWeaponFormData({ ...weaponFormData, Slot: e.target.value })}
                   className="w-full p-2 rounded bg-gray-700 text-white"
                 >
                   {schema.Slot.map(option => (
@@ -142,8 +142,8 @@ export function AddItemOverlay({ onClose }) {
               <div className="mb-4">
                 <label className="block text-white mb-1">Tipo</label>
                 <select
-                  value={itemFormData.Tipo || ''}
-                  onChange={(e) => setItemFormData({ ...itemFormData, Tipo: e.target.value })}
+                  value={weaponFormData.Tipo || ''}
+                  onChange={(e) => setWeaponFormData({ ...weaponFormData, Tipo: e.target.value })}
                   className="w-full p-2 rounded bg-gray-700 text-white"
                 >
                   {schema.Tipo.map(option => (
@@ -158,8 +158,8 @@ export function AddItemOverlay({ onClose }) {
               <div className="mb-4">
                 <label className="block text-white mb-1">Hands</label>
                 <select
-                  value={itemFormData.Hands || ''}
-                  onChange={(e) => setItemFormData({ ...itemFormData, Hands: e.target.value })}
+                  value={weaponFormData.Hands || ''}
+                  onChange={(e) => setWeaponFormData({ ...weaponFormData, Hands: e.target.value })}
                   className="w-full p-2 rounded bg-gray-700 text-white"
                 >
                   {schema.Hands.map(option => (
@@ -176,8 +176,8 @@ export function AddItemOverlay({ onClose }) {
               <label className="block text-white mb-1">Effetto</label>
               <input
                 type="text"
-                value={itemFormData.Effetto || ''}
-                onChange={(e) => setItemFormData({ ...itemFormData, Effetto: e.target.value })}
+                value={weaponFormData.Effetto || ''}
+                onChange={(e) => setWeaponFormData({ ...weaponFormData, Effetto: e.target.value })}
                 className="w-full p-2 rounded bg-gray-700 text-white"
                 placeholder="Inserisci effetto arma"
               />
@@ -189,8 +189,8 @@ export function AddItemOverlay({ onClose }) {
             <label className="block text-white mb-1">Requisiti</label>
             <input
               type="text"
-              value={itemFormData.requisiti || ''}
-              onChange={(e) => setItemFormData({ ...itemFormData, requisiti: e.target.value })}
+              value={weaponFormData.requisiti || ''}
+              onChange={(e) => setWeaponFormData({ ...weaponFormData, requisiti: e.target.value })}
               className="w-full p-2 rounded bg-gray-700 text-white"
               placeholder="Inserisci requisiti per essere equipaggiato"
             />
@@ -199,8 +199,8 @@ export function AddItemOverlay({ onClose }) {
             <label className="block text-white mb-1">Prezzo</label>
             <input
               type="text"
-              value={itemFormData.prezzo || ''}
-              onChange={(e) => setItemFormData({ ...itemFormData, prezzo: e.target.value })}
+              value={weaponFormData.prezzo || ''}
+              onChange={(e) => setWeaponFormData({ ...weaponFormData, prezzo: e.target.value })}
               className="w-full p-2 rounded bg-gray-700 text-white"
               placeholder="Inserisci prezzo"
             />
@@ -252,13 +252,13 @@ export function AddItemOverlay({ onClose }) {
                     <td key={col} className={`bg-gray-700/30 px-3 py-2 ${isLast && j === 3 ? 'rounded-br-lg' : ''}`}>
                       <input
                         type="text"
-                        value={(itemFormData[field] && itemFormData[field][col]) || ''}
+                        value={(weaponFormData[field] && weaponFormData[field][col]) || ''}
                         onChange={(e) => {
-                          const newData = { ...itemFormData };
+                          const newData = { ...weaponFormData };
                           if (!newData[field])
                             newData[field] = { "1": "", "4": "", "7": "", "10": "" };
                           newData[field][col] = e.target.value;
-                          setItemFormData(newData);
+                          setWeaponFormData(newData);
                         }}
                         className="w-full p-1 rounded-md bg-gray-600/70 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                         placeholder={`-`}
@@ -302,21 +302,21 @@ export function AddItemOverlay({ onClose }) {
                         <input
                           type="text"
                           value={
-                            (itemFormData.Parametri &&
-                              itemFormData.Parametri["Base"] &&
-                              itemFormData.Parametri["Base"][subField] &&
-                              itemFormData.Parametri["Base"][subField][col]
+                            (weaponFormData.Parametri &&
+                              weaponFormData.Parametri["Base"] &&
+                              weaponFormData.Parametri["Base"][subField] &&
+                              weaponFormData.Parametri["Base"][subField][col]
                             ) || ''
                           }
                           onChange={(e) => {
-                            const newData = { ...itemFormData };
+                            const newData = { ...weaponFormData };
                             if (!newData.Parametri) newData.Parametri = {};
                             if (!newData.Parametri["Base"]) newData.Parametri["Base"] = {};
                             if (!newData.Parametri["Base"][subField]) {
                               newData.Parametri["Base"][subField] = { "1": "", "4": "", "7": "", "10": "" };
                             }
                             newData.Parametri["Base"][subField][col] = e.target.value;
-                            setItemFormData(newData);
+                            setWeaponFormData(newData);
                           }}
                           className="w-full p-1 rounded-md bg-gray-600/70 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                           placeholder={`-`}
@@ -338,21 +338,21 @@ export function AddItemOverlay({ onClose }) {
                         <input
                           type="text"
                           value={
-                            (itemFormData.Parametri &&
-                              itemFormData.Parametri["Combattimento"] &&
-                              itemFormData.Parametri["Combattimento"][subField] &&
-                              itemFormData.Parametri["Combattimento"][subField][col]
+                            (weaponFormData.Parametri &&
+                              weaponFormData.Parametri["Combattimento"] &&
+                              weaponFormData.Parametri["Combattimento"][subField] &&
+                              weaponFormData.Parametri["Combattimento"][subField][col]
                             ) || ''
                           }
                           onChange={(e) => {
-                            const newData = { ...itemFormData };
+                            const newData = { ...weaponFormData };
                             if (!newData.Parametri) newData.Parametri = {};
                             if (!newData.Parametri["Combattimento"]) newData.Parametri["Combattimento"] = {};
                             if (!newData.Parametri["Combattimento"][subField]) {
                               newData.Parametri["Combattimento"][subField] = { "1": "", "4": "", "7": "", "10": "" };
                             }
                             newData.Parametri["Combattimento"][subField][col] = e.target.value;
-                            setItemFormData(newData);
+                            setWeaponFormData(newData);
                           }}
                           className="w-full p-1 rounded-md bg-gray-600/70 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                           placeholder={`-`}
@@ -381,7 +381,7 @@ export function AddItemOverlay({ onClose }) {
     <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-[9999]">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-4/5 max-h-[80vh] overflow-y-auto">
         <h2 className="text-xl text-white mb-4">Add New Weapon</h2>
-        <form onSubmit={(e) => { e.preventDefault(); handleSaveItem(); }}>
+        <form onSubmit={(e) => { e.preventDefault(); handleSaveWeapon(); }}>
           {renderBasicFields()}
           {renderTablesSection()}
           <div className="flex justify-end gap-2 mt-4">
