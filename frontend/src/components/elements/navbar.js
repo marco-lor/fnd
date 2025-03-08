@@ -9,19 +9,25 @@ import { AuthContext } from '../../AuthContext';
 const Navbar = ({ imageUrl: propImageUrl, userData: propUserData }) => {
   const navigate = useNavigate();
   const location = useLocation();
-
-  // Use AuthContext to obtain the user.
   const { user } = useContext(AuthContext);
 
-  const [userData, setUserData] = useState(propUserData || null);
-  const [imageUrl, setImageUrl] = useState(propImageUrl || '');
+  // Use state with localStorage for persistence between navigations
+  const [userData, setUserData] = useState(() => {
+    const cached = localStorage.getItem('userData');
+    return propUserData || (cached ? JSON.parse(cached) : null);
+  });
 
-  // Ref for the snapshot unsubscribe function.
+  const [imageUrl, setImageUrl] = useState(() => {
+    return propImageUrl || localStorage.getItem('userImageUrl') || '';
+  });
+
+  // Add a loading state that is true if userData isn't already loaded
+  const [isLoading, setIsLoading] = useState(!userData);
   const unsubscribeSnapshotRef = useRef(null);
 
   useEffect(() => {
-    // Only subscribe if user is available
     if (user) {
+      setIsLoading(true);
       const userRef = doc(db, "users", user.uid);
       unsubscribeSnapshotRef.current = onSnapshot(
         userRef,
@@ -29,18 +35,21 @@ const Navbar = ({ imageUrl: propImageUrl, userData: propUserData }) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
             setUserData(data);
+            localStorage.setItem('userData', JSON.stringify(data));
+
             if (data.imageUrl) {
               setImageUrl(data.imageUrl);
+              localStorage.setItem('userImageUrl', data.imageUrl);
             }
           }
+          setIsLoading(false);
         },
         (error) => {
           console.error("Error in snapshot listener:", error);
-          // Optionally, handle permission errors gracefully here.
+          setIsLoading(false);
         }
       );
     } else {
-      // Redirect to login if not authenticated.
       navigate("/");
     }
 
@@ -71,24 +80,32 @@ const Navbar = ({ imageUrl: propImageUrl, userData: propUserData }) => {
     <header className="w-full bg-[rgba(40,40,60,0.8)] p-3 grid grid-cols-3 items-center">
       {/* Left Column: Profile Picture and Character Name */}
       <div className="flex items-center">
-        {imageUrl && (
-          <div className="relative mr-3">
-            <img
-              src={imageUrl}
-              alt="Character Avatar"
-              className="w-20 h-20 rounded-full object-cover border-2 border-white"
-            />
-            {userData?.stats?.level && (
-              <div className="absolute bottom-0 left-0 bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center border-2 border-white">
-                {userData.stats.level}
-              </div>
-            )}
-          </div>
+        {isLoading ? (
+          <div className="w-20 h-20 rounded-full bg-gray-600 animate-pulse mr-3"></div>
+        ) : (
+          imageUrl && (
+            <div className="relative mr-3">
+              <img
+                src={imageUrl}
+                alt="Character Avatar"
+                className="w-20 h-20 rounded-full object-cover border-2 border-white"
+              />
+              {userData?.stats?.level && (
+                <div className="absolute bottom-0 left-0 bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center border-2 border-white">
+                  {userData.stats.level}
+                </div>
+              )}
+            </div>
+          )
         )}
         <div className="flex flex-col">
-          <h1 className="text-2xl font-bold text-white">
-            {userData?.characterId || (user && user.email)}
-          </h1>
+          {isLoading ? (
+            <div className="h-6 w-32 bg-gray-600 animate-pulse rounded"></div>
+          ) : (
+            <h1 className="text-2xl font-bold text-white">
+              {userData?.characterId || (user && user.email)}
+            </h1>
+          )}
         </div>
       </div>
 
@@ -113,6 +130,16 @@ const Navbar = ({ imageUrl: propImageUrl, userData: propUserData }) => {
           }`}
         >
           Bazaar
+        </button>
+        <button
+          onClick={() => navigate("/tecniche-spell")}
+          className={`px-4 py-2 rounded-md transition-colors ${
+            isActive("/tecniche-spell")
+              ? "bg-[#FFA500] text-white"
+              : "bg-transparent text-white hover:bg-[#e69500]"
+          }`}
+        >
+          Tecniche/Spell
         </button>
         {userData?.role === "dm" && (
           <button

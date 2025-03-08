@@ -189,7 +189,7 @@ export default function Bazaar() {
   const panelItem = lockedItem || hoveredItem;
 
   return (
-    <div className="min-h-screen relative" style={{ fontFamily: 'Papyrus, fantasy', backgroundColor: 'transparent' }}>
+    <div className="min-h-screen relative" style={{ backgroundColor: 'transparent' }}>
       <div className="fixed top-0 left-0 w-full z-50">
         <Navbar />
       </div>

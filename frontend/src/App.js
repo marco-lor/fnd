@@ -5,6 +5,7 @@ import Login from "./components/Login";
 import Home from "./components/Home";
 import Bazaar from "./components/Bazaar";
 import DMDashboard from "./components/DMDashboard"; // New DM page
+import TecnicheSpell from "./components/TecnicheSpell"; // New import for TecnicheSpell
 import { AuthProvider, useAuth } from "./AuthContext";
 import "./App.css";
 
@@ -23,6 +24,7 @@ function AppRoutes() {
       <Route path="/" element={<Login />} />
       <Route path="/home" element={<Home />} />
       <Route path="/bazaar" element={<Bazaar />} />
+      <Route path="/tecniche-spell" element={<TecnicheSpell />} /> {/* New route */}
       <Route
         path="/dm-dashboard"
         element={
