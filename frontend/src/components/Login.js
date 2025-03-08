@@ -1,3 +1,4 @@
+// file: ./frontend/src/components/Login.js
 // Import the CSS file at the top of Login.js
 import React, { useState } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
