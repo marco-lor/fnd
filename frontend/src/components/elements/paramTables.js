@@ -1,7 +1,8 @@
+// file: ./frontend/src/components/elements/paramTables.js
 import React, { useState, useEffect } from "react";
 import { doc, updateDoc, onSnapshot } from "firebase/firestore";
-import { db } from "./firebaseConfig";
-import { useAuth } from "../AuthContext";
+import { db } from "../firebaseConfig";
+import { useAuth } from "../../AuthContext";
 
 // Component for the Base Stats Table
 export function BaseStatsTable() {
@@ -25,7 +26,7 @@ export function BaseStatsTable() {
     }
   }, [userData]);
 
-  // Real-time listener for settings and ability points changes
+  // Enhanced real-time listener for base stats, settings and ability points changes
   useEffect(() => {
     if (!user) return;
 
@@ -41,6 +42,10 @@ export function BaseStatsTable() {
           if (data.settings) {
             setLockParamBase(data.settings.lock_param_base || false);
           }
+          // Listen for changes in Base parameters
+          if (data.Parametri && data.Parametri.Base) {
+            setBaseStats(data.Parametri.Base);
+          }
         }
       },
       (error) => {
@@ -51,27 +56,24 @@ export function BaseStatsTable() {
     return () => unsubscribe();
   }, [user]);
 
+  // Rest of the BaseStatsTable component code remains unchanged
   const triggerCooldown = () => {
     setCooldown(true);
     setTimeout(() => setCooldown(false), 500);
   };
 
-  // Handlers update stat values - ability points will be updated automatically via onSnapshot
   const handleIncrease = async (statName) => {
     if (cooldown) return;
     triggerCooldown();
     if (!user || !baseStats) return;
     const currentValue = Number(baseStats[statName].Base) || 0;
     const newValue = currentValue + 1;
-    setBaseStats((prev) => ({
-      ...prev,
-      [statName]: { ...prev[statName], Base: newValue },
-    }));
     try {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
         [`Parametri.Base.${statName}.Base`]: newValue,
       });
+      // No need to manually update state since onSnapshot will handle it
     } catch (error) {
       console.error("Error updating stat", error);
     }
@@ -83,10 +85,6 @@ export function BaseStatsTable() {
     if (!user || !baseStats) return;
     const currentValue = Number(baseStats[statName].Base) || 0;
     const newValue = currentValue - 1;
-    setBaseStats((prev) => ({
-      ...prev,
-      [statName]: { ...prev[statName], Base: newValue },
-    }));
     try {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
@@ -103,10 +101,6 @@ export function BaseStatsTable() {
     if (!user || !baseStats) return;
     const currentValue = Number(baseStats[statName].Mod) || 0;
     const newValue = currentValue + 1;
-    setBaseStats((prev) => ({
-      ...prev,
-      [statName]: { ...prev[statName], Mod: newValue },
-    }));
     try {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
@@ -123,10 +117,6 @@ export function BaseStatsTable() {
     if (!user || !baseStats) return;
     const currentValue = Number(baseStats[statName].Mod) || 0;
     const newValue = currentValue - 1;
-    setBaseStats((prev) => ({
-      ...prev,
-      [statName]: { ...prev[statName], Mod: newValue },
-    }));
     try {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
@@ -138,15 +128,15 @@ export function BaseStatsTable() {
   };
 
   const renderTable = () => {
+    // Table rendering code remains unchanged
     if (!baseStats) return null;
     const columns = ["Base", "Anima", "Equip", "Mod", "Tot"];
     const orderedStats = Object.keys(baseStats).sort();
 
     return (
       <div className="flex-grow flex flex-col">
-        {/* Display updated ability points */}
         <div className="p-2 text-right text-white bg-[rgba(25,50,128,0.4)] border border-[rgba(255,255,255,0.3)]">
-          Punti Abilità: {abilityPoints}
+          Punti Base: {abilityPoints}
         </div>
         <table className="w-full flex-grow border-collapse text-white rounded-[8px] overflow-hidden">
           <thead>
@@ -281,7 +271,7 @@ export function CombatStatsTable() {
     }
   }, [userData]);
 
-  // Real-time listener for settings and token value changes
+  // Enhanced real-time listener for combat stats, settings and token value changes
   useEffect(() => {
     if (!user) return;
 
@@ -296,6 +286,10 @@ export function CombatStatsTable() {
           }
           if (data.settings) {
             setLockParamCombat(data.settings.lock_param_combat || false);
+          }
+          // Listen for changes in Combat parameters
+          if (data.Parametri && data.Parametri.Combattimento) {
+            setCombStats(data.Parametri.Combattimento);
           }
         }
       },
@@ -312,22 +306,18 @@ export function CombatStatsTable() {
     setTimeout(() => setCooldown(false), 500);
   };
 
-  // Handlers update combat stats - token value will be updated automatically via onSnapshot
   const handleCombIncrease = async (statName) => {
     if (cooldown) return;
     triggerCooldown();
     if (!user || !combStats) return;
     const currentValue = Number(combStats[statName].Base) || 0;
     const newValue = currentValue + 1;
-    setCombStats((prev) => ({
-      ...prev,
-      [statName]: { ...prev[statName], Base: newValue },
-    }));
     try {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
         [`Parametri.Combattimento.${statName}.Base`]: newValue,
       });
+      // No need to manually update state since onSnapshot will handle it
     } catch (error) {
       console.error("Error updating combat stat", error);
     }
@@ -339,10 +329,6 @@ export function CombatStatsTable() {
     if (!user || !combStats) return;
     const currentValue = Number(combStats[statName].Base) || 0;
     const newValue = currentValue - 1;
-    setCombStats((prev) => ({
-      ...prev,
-      [statName]: { ...prev[statName], Base: newValue },
-    }));
     try {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
@@ -359,10 +345,6 @@ export function CombatStatsTable() {
     if (!user || !combStats) return;
     const currentValue = Number(combStats[statName].Mod) || 0;
     const newValue = currentValue + 1;
-    setCombStats((prev) => ({
-      ...prev,
-      [statName]: { ...prev[statName], Mod: newValue },
-    }));
     try {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
@@ -379,10 +361,6 @@ export function CombatStatsTable() {
     if (!user || !combStats) return;
     const currentValue = Number(combStats[statName].Mod) || 0;
     const newValue = currentValue - 1;
-    setCombStats((prev) => ({
-      ...prev,
-      [statName]: { ...prev[statName], Mod: newValue },
-    }));
     try {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
@@ -394,13 +372,13 @@ export function CombatStatsTable() {
   };
 
   const renderTable = () => {
+    // Table rendering code remains unchanged
     if (!combStats) return null;
     const columns = ["Base", "Equip", "Mod", "Tot"];
     const orderedStats = Object.keys(combStats).sort();
 
     return (
       <div className="flex-grow flex flex-col">
-        {/* Display updated token value */}
         <div className="p-2 text-right text-white bg-[rgba(25,50,128,0.4)] border border-[rgba(255,255,255,0.3)]">
           Token: {tokenValue}
         </div>

@@ -10,7 +10,7 @@ import { faLock, faLockOpen, faEdit, faTrash } from "@fortawesome/free-solid-svg
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { AddTecnicaPersonaleOverlay } from "./dmElements/addTecnicaPersonale";
 import { EditTecnicaPersonale } from "./dmElements/editTecnicaPersonale";
-import { DelTecnicaPersonale } from "./dmElements/delTecnicaPersonale"; // Add this import
+import { DelTecnicaPersonale } from "./dmElements/delTecnicaPersonale";
 
 // Add icons to library
 library.add(faLock, faLockOpen, faEdit, faTrash);
@@ -228,10 +228,13 @@ const DMDashboard = () => {
                 {users.map((user) => (
                   <td key={`${user.id}-action`} className="border px-4 py-2 text-center">
                     <button
-                      className="px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs"
+                      className="px-3 py-1.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-medium rounded-md shadow-md transition-all duration-200 transform hover:scale-105 flex items-center justify-center space-x-1"
                       onClick={() => handleAddTecnicaClick(user.id)}
                     >
-                      Aggiungi Tecnica Personale
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
+                      </svg>
+                      <span>Aggiungi Tecnica</span>
                     </button>
                   </td>
                 ))}

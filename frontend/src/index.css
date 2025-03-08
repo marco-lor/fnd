@@ -1,4 +1,4 @@
-/* file .frontend/src/index.css */
+/* file: ./frontend/src/index.css */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -14,7 +14,7 @@ html, body, #root {
 
 body {
   margin: 0;
-  font-family: 'Cinzel', serif;
+  font-family: 'Poppins', sans-serif;
   height: 100vh;
   display: flex;
   align-items: center;

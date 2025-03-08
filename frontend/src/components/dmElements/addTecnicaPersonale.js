@@ -68,19 +68,26 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
         return;
       }
 
-      // Convert Costo to an integer before saving
+      // Create a clean object with only the needed fields
       let tecnicaData = {
-        ...tecnicaFormData,
-        Costo: parseInt(tecnicaFormData.Costo) || 0  // Convert to integer
+        Nome: tecnicaFormData.Nome || "",
+        Costo: parseInt(tecnicaFormData.Costo) || 0,
+        Azione: tecnicaFormData.Azione || "",
+        Effetto: tecnicaFormData.Effetto || ""
       };
 
       // Upload image if present
       if (imageFile) {
-        const safeFileName = `tecnica_${userId}_${tecnicaName.replace(/\s+/g, "_")}_${Date.now()}`;
-        const imageRef = ref(storage, 'tecnicas/' + safeFileName);
-        await uploadBytes(imageRef, imageFile);
-        const downloadURL = await getDownloadURL(imageRef);
-        tecnicaData.image_url = downloadURL;
+        try {
+          const safeFileName = `tecnica_${userId}_${tecnicaName.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}`;
+          const imageRef = ref(storage, 'tecnicas/' + safeFileName);
+          await uploadBytes(imageRef, imageFile);
+          const downloadURL = await getDownloadURL(imageRef);
+          tecnicaData.image_url = downloadURL;
+        } catch (imageError) {
+          console.error("Error uploading image:", imageError);
+          // Continue without the image
+        }
       }
 
       // Update the user's tecniche field
@@ -94,6 +101,12 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
         // Add or replace the tecnica
         updatedTecniche[tecnicaName] = tecnicaData;
 
+        // Check document size (Firestore limit is 1MB)
+        if (JSON.stringify(updatedTecniche).length > 900000) {
+          alert("Data too large. Try using a smaller image.");
+          return;
+        }
+
         await updateDoc(userRef, { tecniche: updatedTecniche });
         onClose(true);
       } else {
@@ -101,7 +114,10 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
       }
     } catch (error) {
       console.error("Error saving tecnica:", error);
-      alert("Error saving tecnica");
+      if (error.code) {
+        console.error("Firebase error code:", error.code);
+      }
+      alert("Error saving tecnica. Check console for details.");
     }
   };
 
@@ -180,13 +196,13 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
             <button
               type="button"
               onClick={() => onClose(false)}
-              className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+              className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-md shadow-md transition-all duration-200"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+              className="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-md shadow-md transition-all duration-200"
             >
               Save
             </button>
