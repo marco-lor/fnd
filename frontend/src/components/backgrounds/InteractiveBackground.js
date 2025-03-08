@@ -1,5 +1,5 @@
 // file: ./frontend/src/components/backgrounds/InteractiveBackground.js
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import {
   GiBroadsword,
   GiShield,
@@ -13,13 +13,15 @@ const EquipmentBackground = () => {
   const [icons, setIcons] = useState([]);
   // Track mouse position in a ref so updates don't trigger re-renders
   const mousePos = useRef({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-  const iconComponents = [
+
+  // Memoize iconComponents so its reference doesn't change on each render
+  const iconComponents = useMemo(() => [
     GiBroadsword,
     GiShield,
     GiCrossedSwords,
     GiSpartanHelmet,
     GiBowArrow,
-  ];
+  ], []);
 
   // Initialize icons with random positions, velocities, and sizes
   useEffect(() => {
@@ -37,7 +39,7 @@ const EquipmentBackground = () => {
       initialIcons.push({ id: i, x, y, vx, vy, size, IconComponent });
     }
     setIcons(initialIcons);
-  }, []);
+  }, [iconComponents]);
 
   // Update mouse position on movement
   useEffect(() => {

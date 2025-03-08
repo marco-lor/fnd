@@ -2,18 +2,30 @@
 import React, { useEffect, useState } from "react";
 import { FaDragon } from "react-icons/fa";
 
+// Move the dragonsConfig outside of the component to avoid re-creation on each render.
+const dragonsConfig = [
+  { id: 1, baseX: 10, baseY: 10, size: 120 },
+  { id: 2, baseX: 70, baseY: 20, size: 150 },
+  { id: 3, baseX: 50, baseY: 80, size: 100 },
+  { id: 4, baseX: 20, baseY: 70, size: 130 },
+  { id: 5, baseX: 80, baseY: 50, size: 110 },
+  { id: 6, baseX: 30, baseY: 30, size: 140 },
+  { id: 7, baseX: 60, baseY: 60, size: 115 },
+  { id: 8, baseX: 40, baseY: 40, size: 125 },
+];
+
 const DnDBackground = () => {
-  // Track mouse position for repulsion
+  // Track mouse position for repulsion.
   const [mousePos, setMousePos] = useState({
     x: window.innerWidth / 2,
     y: window.innerHeight / 2,
   });
-  // We'll store each dragon’s physics state here (position and velocity)
+  // Store each dragon’s physics state (position and velocity).
   const [dragons, setDragons] = useState([]);
-  // State for triggering the spin animation
+  // State for triggering the spin animation.
   const [spin, setSpin] = useState(false);
 
-  // Update mouse position on movement
+  // Update mouse position on movement.
   useEffect(() => {
     const handleMouseMove = (e) => {
       setMousePos({ x: e.clientX, y: e.clientY });
@@ -22,35 +34,23 @@ const DnDBackground = () => {
     return () => window.removeEventListener("mousemove", handleMouseMove);
   }, []);
 
-  // Listen for global click events to trigger spin animation
+  // Listen for global click events to trigger spin animation.
   useEffect(() => {
     const handleClick = () => {
       setSpin(true);
-      // Reset spin after 1 second (matches animation duration)
+      // Reset spin after 1 second (matches animation duration).
       setTimeout(() => setSpin(false), 1000);
     };
     window.addEventListener("click", handleClick);
     return () => window.removeEventListener("click", handleClick);
   }, []);
 
-  // Define the original configuration for each dragon.
-  const dragonsConfig = [
-    { id: 1, baseX: 10, baseY: 10, size: 120 },
-    { id: 2, baseX: 70, baseY: 20, size: 150 },
-    { id: 3, baseX: 50, baseY: 80, size: 100 },
-    { id: 4, baseX: 20, baseY: 70, size: 130 },
-    { id: 5, baseX: 80, baseY: 50, size: 110 },
-    { id: 6, baseX: 30, baseY: 30, size: 140 },
-    { id: 7, baseX: 60, baseY: 60, size: 115 },
-    { id: 8, baseX: 40, baseY: 40, size: 125 },
-  ];
-
-  // Initialize each dragon’s physics state
+  // Initialize each dragon’s physics state.
   useEffect(() => {
     const initialDragons = dragonsConfig.map((dragon) => {
       const x = window.innerWidth * (dragon.baseX / 100);
       const y = window.innerHeight * (dragon.baseY / 100);
-      const speed = 1 + Math.random(); // random speed between 1 and 2
+      const speed = 1 + Math.random(); // random speed between 1 and 2.
       const angle = Math.random() * 2 * Math.PI;
       const vx = Math.cos(angle) * speed;
       const vy = Math.sin(angle) * speed;
@@ -59,7 +59,7 @@ const DnDBackground = () => {
     setDragons(initialDragons);
   }, []);
 
-  // Animation loop: update positions with bouncing and mouse repulsion
+  // Animation loop: update positions with bouncing and mouse repulsion.
   useEffect(() => {
     let animationFrameId;
     const update = () => {
@@ -69,7 +69,7 @@ const DnDBackground = () => {
           let newX = x + vx;
           let newY = y + vy;
 
-          // Bounce off the screen edges with damping
+          // Bounce off the screen edges with damping.
           const damping = 0.8;
           if (newX < 0) {
             newX = 0;
@@ -86,7 +86,7 @@ const DnDBackground = () => {
             vy = -vy * damping;
           }
 
-          // Mouse repulsion: if the dragon’s center is within 100px of the mouse, apply a force away from it
+          // Mouse repulsion: if the dragon’s center is within 100px of the mouse, apply a force away from it.
           const centerX = newX + size / 2;
           const centerY = newY + size / 2;
           const dx = centerX - mousePos.x;
@@ -99,7 +99,7 @@ const DnDBackground = () => {
             vy += (dy / dist) * force * 2;
           }
 
-          // Limit maximum speed to avoid excessive acceleration
+          // Limit maximum speed to avoid excessive acceleration.
           const currentSpeed = Math.sqrt(vx * vx + vy * vy);
           const maxSpeed = 3;
           if (currentSpeed > maxSpeed) {
@@ -127,7 +127,7 @@ const DnDBackground = () => {
           style={{
             left: dragon.x,
             top: dragon.y,
-            // Apply a full 360deg spin if 'spin' is true
+            // Apply a full 360deg spin if 'spin' is true.
             transform: spin ? "rotate(360deg)" : "rotate(0deg)",
           }}
           size={dragon.size}

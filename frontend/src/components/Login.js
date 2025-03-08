@@ -1,10 +1,11 @@
-// file: ./frontend/src/components/Login.js
+// Import the CSS file at the top of Login.js
 import React, { useState } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "./firebaseConfig";
 import { useNavigate } from "react-router-dom";
 import { setDoc, doc } from "firebase/firestore";
 import DnDBackground from "./backgrounds/DnDBackground";
+import "./LoginAnimations.css"; // Added import
 
 function Login() {
   const [email, setEmail] = useState("");
@@ -402,62 +403,6 @@ function Login() {
           {error && <p className="text-[#FF4C4C] mt-[10px] font-bold">{error}</p>}
         </div>
       </div>
-      <style jsx>{`
-        @keyframes rotateRed {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        @keyframes rotateGreen {
-          from { transform: rotate(120deg); }
-          to { transform: rotate(480deg); }
-        }
-        @keyframes rotateBlue {
-          from { transform: rotate(240deg); }
-          to { transform: rotate(600deg); }
-        }
-        @keyframes shimmer {
-          0% { opacity: 0.3; transform: scale(1); }
-          100% { opacity: 0.7; transform: scale(1.05); }
-        }
-        @keyframes liquidBubble {
-          0% { border-radius: 60% 40% 70% 30% / 50% 60% 40% 50%; }
-          25% { border-radius: 40% 60% 30% 70% / 60% 30% 50% 40%; }
-          50% { border-radius: 70% 30% 50% 50% / 40% 40% 60% 60%; }
-          75% { border-radius: 30% 60% 70% 40% / 50% 60% 30% 50%; }
-          100% { border-radius: 60% 40% 70% 30% / 50% 60% 40% 50%; }
-        }
-        @keyframes liquidBubble2 {
-          0% { border-radius: 50% 70% 40% 60% / 60% 40% 70% 50%; }
-          33% { border-radius: 70% 50% 60% 50% / 50% 60% 40% 70%; }
-          66% { border-radius: 50% 60% 70% 40% / 70% 40% 50% 60%; }
-          100% { border-radius: 50% 70% 40% 60% / 60% 40% 70% 50%; }
-        }
-        @keyframes liquidOverlay {
-          0% { border-radius: 40% 60% 30% 70% / 60% 30% 70% 40%; opacity: 0.7; }
-          50% { border-radius: 60% 40% 70% 30% / 30% 70% 40% 60%; opacity: 0.8; }
-          100% { border-radius: 40% 60% 30% 70% / 60% 30% 70% 40%; opacity: 0.7; }
-        }
-        @keyframes liquidOverlay2 {
-          0% { border-radius: 70% 50% 60% 40% / 40% 60% 50% 70%; opacity: 0.7; }
-          50% { border-radius: 50% 70% 40% 60% / 60% 40% 70% 50%; opacity: 0.8; }
-          100% { border-radius: 70% 50% 60% 40% / 40% 60% 50% 70%; opacity: 0.7; }
-        }
-        @keyframes liquidDroplet {
-          0% { border-radius: 60% 70% 40% 50% / 50% 60% 40% 50%; transform: translate(120%, -50%) scale(1); }
-          50% { border-radius: 50% 60% 50% 40% / 40% 50% 60% 50%; transform: translate(130%, -50%) scale(1.05); }
-          100% { border-radius: 60% 70% 40% 50% / 50% 60% 40% 50%; transform: translate(120%, -50%) scale(1); }
-        }
-        @keyframes liquidDroplet2 {
-          0% { border-radius: 50% 60% 70% 40% / 40% 50% 60% 70%; transform: translate(-50%, 120%) scale(1); }
-          50% { border-radius: 40% 50% 60% 70% / 70% 40% 50% 60%; transform: translate(-50%, 130%) scale(1.05); }
-          100% { border-radius: 50% 60% 70% 40% / 40% 50% 60% 70%; transform: translate(-50%, 120%) scale(1); }
-        }
-        @keyframes liquidDroplet3 {
-          0% { border-radius: 50% 40% 60% 70% / 60% 50% 70% 40%; transform: translate(-120%, -50%) scale(1); }
-          50% { border-radius: 60% 50% 70% 40% / 70% 60% 40% 50%; transform: translate(-130%, -50%) scale(1.05); }
-          100% { border-radius: 50% 40% 60% 70% / 60% 50% 70% 40%; transform: translate(-120%, -50%) scale(1); }
-        }
-      `}</style>
     </div>
   );
 }
