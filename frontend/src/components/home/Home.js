@@ -1,13 +1,13 @@
 // file: ./frontend/src/components/Home.js
 import React, { useState, useEffect, useRef } from "react";
-import { useAuth } from "../AuthContext";
+import { useAuth } from "../../AuthContext";
 import { doc, onSnapshot } from "firebase/firestore";
-import { db } from "./firebaseConfig";
-import DnDBackground from "./backgrounds/DnDBackground";
-import Navbar from "./elements/navbar";
-import StatsBars from "./elements/StatsBars";
+import { db } from "../firebaseConfig";
+import DnDBackground from "../backgrounds/DnDBackground";
+import Navbar from "../common/navbar";
+import StatsBars from "../common/StatsBars";
 import { BaseStatsTable, CombatStatsTable } from "./elements/paramTables";
-import { API_BASE_URL } from "./firebaseConfig";
+import { API_BASE_URL } from "../firebaseConfig";
 
 function Home() {
   const { user } = useAuth();

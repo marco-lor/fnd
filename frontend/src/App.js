@@ -2,10 +2,10 @@
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import Login from "./components/Login";
-import Home from "./components/Home";
-import Bazaar from "./components/Bazaar";
-import DMDashboard from "./components/DMDashboard"; // New DM page
-import TecnicheSpell from "./components/TecnicheSpell"; // New import for TecnicheSpell
+import Home from "./components/home/Home";
+import Bazaar from "./components/bazaar/Bazaar";
+import DMDashboard from "./components/dmDashboard/DMDashboard"; // New DM page
+import TecnicheSpell from "./components/tecnicheSpell/TecnicheSpell"; // New import for TecnicheSpell
 import { AuthProvider, useAuth } from "./AuthContext";
 import "./App.css";
 

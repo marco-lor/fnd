@@ -2,8 +2,8 @@ import React, { useContext, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { deleteDoc, doc, onSnapshot } from "firebase/firestore";
 import { ref, deleteObject } from "firebase/storage"; // Added Firebase storage functions
-import { db, storage } from "../firebaseConfig"; // Imported storage alongside db
-import { AuthContext } from "../../AuthContext";
+import { db, storage } from "../../firebaseConfig"; // Imported storage alongside db
+import { AuthContext } from "../../../AuthContext";
 
 export default function ComparisonPanel({ item }) {
   const { user } = useContext(AuthContext);

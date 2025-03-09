@@ -1,10 +1,10 @@
 // file: ./frontend/src/components/TecnicheSpell.js  # do not remove this line
 import React, { useState, useEffect, useRef } from "react";
-import { useAuth } from "../AuthContext";
+import { useAuth } from "../../AuthContext";
 import { doc, onSnapshot, getDoc } from "firebase/firestore";
-import { db } from "./firebaseConfig";
-import DnDBackground from "./backgrounds/DnDBackground";
-import Navbar from "./elements/navbar";
+import { db } from "../firebaseConfig";
+import DnDBackground from "../backgrounds/DnDBackground";
+import Navbar from "../common/navbar";
 
 const TecnicaCard = ({ tecnicaName, tecnica }) => {
   const [isHovered, setIsHovered] = useState(false);

@@ -1,8 +1,8 @@
 // file: ./frontend/src/components/elements/paramTables.js
 import React, { useState, useEffect } from "react";
 import { doc, updateDoc, onSnapshot } from "firebase/firestore";
-import { db } from "../firebaseConfig";
-import { useAuth } from "../../AuthContext";
+import { db } from "../../firebaseConfig";
+import { useAuth } from "../../../AuthContext";
 
 // Component for the Base Stats Table
 export function BaseStatsTable() {

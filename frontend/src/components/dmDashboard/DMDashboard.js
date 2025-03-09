@@ -1,16 +1,16 @@
 // file: ./frontend/src/components/DMDashboard.js
 import React, { useState, useEffect } from "react";
-import Navbar from "./elements/navbar";
-import { db } from "./firebaseConfig";
+import Navbar from "../common/navbar";
+import { db } from "../firebaseConfig";
 import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
-import { useAuth } from "../AuthContext";
+import { useAuth } from "../../AuthContext";
 import { useNavigate } from "react-router-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faLock, faLockOpen, faEdit, faTrash } from "@fortawesome/free-solid-svg-icons";
 import { library } from "@fortawesome/fontawesome-svg-core";
-import { AddTecnicaPersonaleOverlay } from "./dmElements/addTecnicaPersonale";
-import { EditTecnicaPersonale } from "./dmElements/editTecnicaPersonale";
-import { DelTecnicaPersonale } from "./dmElements/delTecnicaPersonale";
+import { AddTecnicaPersonaleOverlay } from "../dmElements/addTecnicaPersonale";
+import { EditTecnicaPersonale } from "../dmElements/editTecnicaPersonale";
+import { DelTecnicaPersonale } from "../dmElements/delTecnicaPersonale";
 
 // Add icons to library
 library.add(faLock, faLockOpen, faEdit, faTrash);

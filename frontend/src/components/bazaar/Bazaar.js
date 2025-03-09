@@ -1,11 +1,11 @@
 // file: ./frontend/src/components/Bazaar.js
 import React, { useState, useContext, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import Navbar from './elements/navbar';
-import InteractiveBackground from './backgrounds/InteractiveBackground';
+import Navbar from '../common/navbar';
+import InteractiveBackground from '../backgrounds/InteractiveBackground';
 import { collection, doc, onSnapshot } from "firebase/firestore";
-import { db } from './firebaseConfig';
-import { AuthContext } from '../AuthContext';
+import { db } from '../firebaseConfig';
+import { AuthContext } from '../../AuthContext';
 import { AddWeaponOverlay } from './elements/addWeapon';
 import ComparisonPanel from './elements/comparisonComponent';
 

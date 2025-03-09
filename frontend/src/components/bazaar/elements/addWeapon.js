@@ -1,7 +1,7 @@
 // file: ./frontend/src/components/elements/addWeapon.js
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { db, storage } from '../firebaseConfig';
+import { db, storage } from '../../firebaseConfig';
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
