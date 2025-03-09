@@ -1,7 +1,7 @@
-// file: ./frontend/src/components/dmElements/delTecnicaPersonale.js
+// file: ./frontend/src/components/dmDashboard/elements/addTecnicaPersonale.js
 import React, { useState } from 'react';
 import ReactDOM from 'react-dom';
-import { db, storage } from '../firebaseConfig';
+import { db, storage } from '../../firebaseConfig';
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { ref, deleteObject } from "firebase/storage";
 

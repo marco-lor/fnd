@@ -1,4 +1,4 @@
-// file: ./frontend/src/components/Home.js
+// file: ./frontend/src/components/home/Home.js
 import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "../../AuthContext";
 import { doc, onSnapshot } from "firebase/firestore";

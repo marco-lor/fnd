@@ -1,4 +1,4 @@
-// file: ./frontend/src/components/Bazaar.js
+// file: ./frontend/src/components/bazaar/Bazaar.js
 import React, { useState, useContext, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from '../common/navbar';

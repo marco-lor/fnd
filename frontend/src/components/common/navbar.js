@@ -1,4 +1,4 @@
-// file: ./frontend/src/components/elements/navbar.js
+// file: ./frontend/src/components/common/navbar.js
 import React, { useEffect, useState, useRef, useContext } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { signOut } from 'firebase/auth';

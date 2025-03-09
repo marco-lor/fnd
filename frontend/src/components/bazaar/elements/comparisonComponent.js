@@ -1,3 +1,4 @@
+// file: ./frontend/src/components/bazaar/elements/comparisonComponent.js
 import React, { useContext, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { deleteDoc, doc, onSnapshot } from "firebase/firestore";

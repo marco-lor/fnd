@@ -1,4 +1,4 @@
-// file: ./frontend/src/components/TecnicheSpell.js  # do not remove this line
+// file: ./frontend/src/components/tecnicheSpell/TecnicheSpell.js
 import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "../../AuthContext";
 import { doc, onSnapshot, getDoc } from "firebase/firestore";

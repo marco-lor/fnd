@@ -1,4 +1,4 @@
-// file: ./frontend/src/components/elements/StatsBars.js
+// file: ./frontend/src/components/common/StatsBars.js
 import React, { useEffect, useState, useRef, useContext } from 'react';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';

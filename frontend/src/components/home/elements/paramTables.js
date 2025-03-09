@@ -1,4 +1,4 @@
-// file: ./frontend/src/components/elements/paramTables.js
+// file: ./frontend/src/components/home/elements/paramTables.js
 import React, { useState, useEffect } from "react";
 import { doc, updateDoc, onSnapshot } from "firebase/firestore";
 import { db } from "../../firebaseConfig";

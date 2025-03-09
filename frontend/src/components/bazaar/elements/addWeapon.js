@@ -1,4 +1,4 @@
-// file: ./frontend/src/components/elements/addWeapon.js
+// file: ./frontend/src/components/bazaar/elements/addWeapon.js
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { db, storage } from '../../firebaseConfig';
