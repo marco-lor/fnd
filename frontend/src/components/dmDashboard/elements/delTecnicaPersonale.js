@@ -1,4 +1,4 @@
-// file: ./frontend/src/components/dmDashboard/elements/addTecnicaPersonale.js
+// file: ./frontend/src/components/dmDashboard/elements/delTecnicaPersonale.js
 import React, { useState } from 'react';
 import ReactDOM from 'react-dom';
 import { db, storage } from '../../firebaseConfig';
@@ -42,6 +42,19 @@ export function DelTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose 
           console.log("Image deleted successfully from storage");
         } catch (imageError) {
           console.error("Error deleting image from storage:", imageError);
+        }
+      }
+
+      // Delete the video from storage if it exists
+      if (tecnicaData.video_url) {
+        try {
+          // Extract the file path from the URL
+          const videoUrlPath = decodeURIComponent(tecnicaData.video_url.split('/o/')[1].split('?')[0]);
+          const videoRef = ref(storage, videoUrlPath);
+          await deleteObject(videoRef);
+          console.log("Video deleted successfully from storage");
+        } catch (videoError) {
+          console.error("Error deleting video from storage:", videoError);
         }
       }
 

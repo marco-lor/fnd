@@ -12,7 +12,6 @@ function TecnicheSpell() {
   const [userData, setUserData] = useState(null);
   const [personalTecniche, setPersonalTecniche] = useState({});
   const [commonTecniche, setCommonTecniche] = useState({});
-  // New state for spells (to be populated later as needed)
   const [personalSpells, setPersonalSpells] = useState({});
   const [commonSpells, setCommonSpells] = useState({});
   const [loading, setLoading] = useState(true);
@@ -21,7 +20,6 @@ function TecnicheSpell() {
   useEffect(() => {
     async function fetchData() {
       if (user) {
-        // Fetch personal tecniche from user document
         const userRef = doc(db, "users", user.uid);
         unsubscribeRef.current = onSnapshot(
           userRef,
@@ -30,8 +28,6 @@ function TecnicheSpell() {
               const data = docSnap.data();
               setUserData(data);
               setPersonalTecniche(data.tecniche || {});
-              // Optionally, if spell data is stored with the user:
-              // setPersonalSpells(data.spells || {});
             }
           },
           (error) => {
@@ -39,7 +35,6 @@ function TecnicheSpell() {
           }
         );
 
-        // Fetch common tecniche from the utils/tecniche_common document
         try {
           const commonTecnicheRef = doc(db, "utils", "tecniche_common");
           const commonTecnicheSnap = await getDoc(commonTecnicheRef);
@@ -69,7 +64,7 @@ function TecnicheSpell() {
 
   if (loading) {
     return (
-      <div className="relative w-screen min-h-screen overflow-hidden">
+      <div className="relative w-full min-h-screen overflow-x-hidden">
         <DnDBackground />
         <div className="relative z-10 flex justify-center items-center h-screen">
           <p className="text-white text-xl">Loading...</p>
@@ -79,11 +74,11 @@ function TecnicheSpell() {
   }
 
   return (
-    <div className="relative w-screen min-h-screen overflow-hidden">
+    <div className="relative w-full min-h-screen overflow-x-hidden">
       <DnDBackground />
       <div className="relative z-10 flex flex-col">
         <Navbar userData={userData} />
-        <main className="flex flex-col items-center justify-center p-5">
+        <main className="flex flex-col items-center justify-center p-5 max-w-full">
           <div className="flex flex-col md:flex-row w-full max-w-[1600px] gap-6 justify-center">
             {/* Left Section - Tecniche */}
             <TecnicheSide

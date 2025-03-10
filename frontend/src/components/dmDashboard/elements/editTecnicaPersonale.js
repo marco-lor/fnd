@@ -1,4 +1,4 @@
-// file: frontend/src/components/dmDashboard/elements/addTecnicaPersonaleOverlay.js
+// file: frontend/src/components/dmDashboard/elements/editTecnicaPersonale.js
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { db, storage } from '../../firebaseConfig';
@@ -10,6 +10,8 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
   const [tecnicaFormData, setTecnicaFormData] = useState({});
   const [imageFile, setImageFile] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
+  const [videoFile, setVideoFile] = useState(null);
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
   const [userName, setUserName] = useState("");
   const [showConfirmation, setShowConfirmation] = useState(false);
 
@@ -35,6 +37,10 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
           // Set image preview if it exists
           if (tecnicaData.image_url) {
             setImagePreviewUrl(tecnicaData.image_url);
+          }
+          // Set video preview if it exists
+          if (tecnicaData.video_url) {
+            setVideoPreviewUrl(tecnicaData.video_url);
           }
         } else {
           console.error("Schema not found at /utils/schema_tecnica");
@@ -64,6 +70,14 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
     }
   };
 
+  const handleVideoChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setVideoFile(file);
+      setVideoPreviewUrl(URL.createObjectURL(file));
+    }
+  };
+
   const handleUpdateTecnica = async () => {
     try {
       const newTecnicaName = tecnicaFormData.Nome ? tecnicaFormData.Nome.trim() : "";
@@ -75,10 +89,10 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
       // Convert Costo to an integer before saving
       let updatedTecnicaData = {
         ...tecnicaFormData,
-        Costo: parseInt(tecnicaFormData.Costo) || 0  // Convert to integer
+        Costo: parseInt(tecnicaFormData.Costo) || 0
       };
 
-      // Upload image if present
+      // Upload image if a new image is selected
       if (imageFile) {
         const safeFileName = `tecnica_${userId}_${newTecnicaName.replace(/\s+/g, "_")}_${Date.now()}`;
         const imageRef = ref(storage, 'tecnicas/' + safeFileName);
@@ -88,6 +102,18 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
       } else if (tecnicaData.image_url) {
         // Keep the existing image URL if no new image selected
         updatedTecnicaData.image_url = tecnicaData.image_url;
+      }
+
+      // Upload video if a new video is selected
+      if (videoFile) {
+        const safeVideoFileName = `tecnica_${userId}_${newTecnicaName.replace(/\s+/g, "_")}_${Date.now()}_video`;
+        const videoRef = ref(storage, 'tecnicas/videos/' + safeVideoFileName);
+        await uploadBytes(videoRef, videoFile);
+        const videoDownloadURL = await getDownloadURL(videoRef);
+        updatedTecnicaData.video_url = videoDownloadURL;
+      } else if (tecnicaData.video_url) {
+        // Keep the existing video URL if no new video selected
+        updatedTecnicaData.video_url = tecnicaData.video_url;
       }
 
       // Update the user's tecniche field
@@ -197,16 +223,38 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
                 </div>
 
                 <div className="mb-4">
-                  <label className="block text-white mb-1">Immagine</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageChange}
-                    className="w-full text-white"
-                  />
-                  {imagePreviewUrl && (
-                    <img src={imagePreviewUrl} alt="Preview" className="mt-2 w-24 h-auto rounded" />
-                  )}
+                  <div>
+                    <label className="block text-white mb-1">Immagine</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageChange}
+                      className="w-full text-white"
+                    />
+                    {imagePreviewUrl && (
+                      <img src={imagePreviewUrl} alt="Preview" className="mt-2 w-24 h-auto rounded" />
+                    )}
+                  </div>
+
+                  <div className="mt-4">
+                    <label className="block text-white mb-1">Video</label>
+                    <input
+                      type="file"
+                      accept="video/*"
+                      onChange={handleVideoChange}
+                      className="w-full text-white"
+                    />
+                    {videoPreviewUrl && (
+                      <video
+                        src={videoPreviewUrl}
+                        controls
+                        className="mt-2 w-full max-h-48 rounded"
+                      />
+                    )}
+                    <p className="text-gray-400 text-sm mt-1">
+                      Consigliato: video breve (max 30s) di dimensioni ridotte
+                    </p>
+                  </div>
                 </div>
               </div>
             ) : (

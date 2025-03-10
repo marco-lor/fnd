@@ -156,7 +156,7 @@ const Navbar = ({ imageUrl: propImageUrl, userData: propUserData }) => {
       </div>
 
       {/* Right Column: Logout Button */}
-      <div className="flex items-center justify-end gap-3">
+      <div className="flex items-center justify-end gap-3 mr-4">
         <button
           className="bg-[#8B0000] text-white px-4 py-2 rounded-[5px] cursor-pointer transition-colors duration-300 hover:bg-[#B22222]"
           onClick={handleLogout}

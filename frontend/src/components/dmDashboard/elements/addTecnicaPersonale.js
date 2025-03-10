@@ -10,6 +10,8 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
   const [tecnicaFormData, setTecnicaFormData] = useState({});
   const [imageFile, setImageFile] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
+  const [videoFile, setVideoFile] = useState(null);
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
   const [userName, setUserName] = useState("");
 
   useEffect(() => {
@@ -26,7 +28,7 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
           // Initialize form with empty values
           let initialData = {
             Nome: "",
-            Costo: 0,  // Initialize as a number instead of empty string
+            Costo: 0,
             Azione: schemaData.Azione && Array.isArray(schemaData.Azione) ? schemaData.Azione[0] : "",
             Effetto: ""
           };
@@ -60,6 +62,14 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
     }
   };
 
+  const handleVideoChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setVideoFile(file);
+      setVideoPreviewUrl(URL.createObjectURL(file));
+    }
+  };
+
   const handleSaveTecnica = async () => {
     try {
       const tecnicaName = tecnicaFormData.Nome ? tecnicaFormData.Nome.trim() : "";
@@ -76,17 +86,28 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
         Effetto: tecnicaFormData.Effetto || ""
       };
 
-      // Upload image if present
+      // Upload media if present
+      const safeFileName = `tecnica_${userId}_${tecnicaName.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}`;
+
       if (imageFile) {
         try {
-          const safeFileName = `tecnica_${userId}_${tecnicaName.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}`;
-          const imageRef = ref(storage, 'tecnicas/' + safeFileName);
+          const imageRef = ref(storage, 'tecnicas/' + safeFileName + '_image');
           await uploadBytes(imageRef, imageFile);
           const downloadURL = await getDownloadURL(imageRef);
           tecnicaData.image_url = downloadURL;
         } catch (imageError) {
           console.error("Error uploading image:", imageError);
-          // Continue without the image
+        }
+      }
+
+      if (videoFile) {
+        try {
+          const videoRef = ref(storage, 'tecnicas/videos/' + safeFileName + '_video');
+          await uploadBytes(videoRef, videoFile);
+          const downloadURL = await getDownloadURL(videoRef);
+          tecnicaData.video_url = downloadURL;
+        } catch (videoError) {
+          console.error("Error uploading video:", videoError);
         }
       }
 
@@ -103,7 +124,7 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
 
         // Check document size (Firestore limit is 1MB)
         if (JSON.stringify(updatedTecniche).length > 900000) {
-          alert("Data too large. Try using a smaller image.");
+          alert("Data too large. Try using a smaller image or video.");
           return;
         }
 
@@ -181,11 +202,38 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
               </div>
 
               <div className="mb-4">
-                <label className="block text-white mb-1">Immagine</label>
-                <input type="file" accept="image/*" onChange={handleImageChange} className="w-full text-white" />
-                {imagePreviewUrl && (
-                  <img src={imagePreviewUrl} alt="Preview" className="mt-2 w-24 h-auto rounded" />
-                )}
+                <div>
+                  <label className="block text-white mb-1">Immagine</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageChange}
+                    className="w-full text-white"
+                  />
+                  {imagePreviewUrl && (
+                    <img src={imagePreviewUrl} alt="Preview" className="mt-2 w-24 h-auto rounded" />
+                  )}
+                </div>
+
+                <div className="mt-4">
+                  <label className="block text-white mb-1">Video</label>
+                  <input
+                    type="file"
+                    accept="video/*"
+                    onChange={handleVideoChange}
+                    className="w-full text-white"
+                  />
+                  {videoPreviewUrl && (
+                    <video
+                      src={videoPreviewUrl}
+                      controls
+                      className="mt-2 w-full max-h-48 rounded"
+                    />
+                  )}
+                  <p className="text-gray-400 text-sm mt-1">
+                    Consigliato: video breve (max 30s) di dimensioni ridotte
+                  </p>
+                </div>
               </div>
             </div>
           ) : (
