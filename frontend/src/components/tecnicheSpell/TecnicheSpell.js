@@ -64,9 +64,9 @@ function TecnicheSpell() {
 
   if (loading) {
     return (
-      <div className="relative w-full min-h-screen overflow-x-hidden">
+      <div className="w-full h-screen">
         <DnDBackground />
-        <div className="relative z-10 flex justify-center items-center h-screen">
+        <div className="absolute inset-0 z-10 flex justify-center items-center">
           <p className="text-white text-xl">Loading...</p>
         </div>
       </div>
@@ -74,27 +74,29 @@ function TecnicheSpell() {
   }
 
   return (
-    <div className="relative w-full min-h-screen overflow-x-hidden">
+    <div className="w-full min-h-screen overflow-hidden">
       <DnDBackground />
-      <div className="relative z-10 flex flex-col">
-        <Navbar userData={userData} />
-        <main className="flex flex-col items-center justify-center p-5 max-w-full">
-          <div className="flex flex-col md:flex-row w-full max-w-[1600px] gap-6 justify-center">
-            {/* Left Section - Tecniche */}
-            <TecnicheSide
-              personalTecniche={personalTecniche}
-              commonTecniche={commonTecniche}
-            />
+      <div className="absolute inset-0 overflow-y-auto overflow-x-hidden">
+        <div className="relative z-10 flex flex-col min-h-full">
+          <Navbar userData={userData} />
+          <main className="flex flex-col items-center justify-center p-5 w-full">
+            <div className="flex flex-col md:flex-row w-full max-w-[1600px] gap-6 justify-center">
+              {/* Left Section - Tecniche */}
+              <TecnicheSide
+                personalTecniche={personalTecniche}
+                commonTecniche={commonTecniche}
+              />
 
-            {/* Right Section - Spellbook */}
-            <SpellSide
-              personalSpells={personalSpells}
-              commonSpells={commonSpells}
-            />
-          </div>
-          {/* Empty container to fix visual bug */}
-          <div className="w-full h-20 mt-6"></div>
-        </main>
+              {/* Right Section - Spellbook */}
+              <SpellSide
+                personalSpells={personalSpells}
+                commonSpells={commonSpells}
+              />
+            </div>
+            {/* Spacer for overlays to extend into */}
+            <div className="w-full h-60 mt-6"></div>
+          </main>
+        </div>
       </div>
     </div>
   );
