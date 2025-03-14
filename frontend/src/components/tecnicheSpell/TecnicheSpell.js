@@ -31,7 +31,8 @@ function TecnicheSpell() {
           (docSnap) => {
             if (docSnap.exists()) {
               const data = docSnap.data();
-              setUserData(data);
+              // Include the uid in the userData object
+              setUserData({ ...data, uid: user.uid });
               setPersonalTecniche(data.tecniche || {});
               // Optionally, if personal spells are available in user data, set them here.
             }
@@ -191,6 +192,7 @@ function TecnicheSpell() {
               <TecnicheSide
                 personalTecniche={filterTecniche(personalTecniche)}
                 commonTecniche={filterTecniche(commonTecniche)}
+                userData={userData}
               />
 
               <SpellSide
