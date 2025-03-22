@@ -278,10 +278,20 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
                 <p className="text-gray-200">{tecnica.Azione}</p>
               </div>
             </div>
-            <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto">
+            <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto mb-4">
               <p className="text-purple-300 font-bold text-sm mb-1">Effetto</p>
               <p className="text-gray-200 text-sm">{tecnica.Effetto}</p>
             </div>
+            
+            {/* Add Use Tecnica button in expanded view */}
+            {isExpanded && (
+              <button
+                onClick={handleUseTecnica}
+                className="w-full py-3 bg-purple-700 hover:bg-purple-600 text-white rounded-md transition-colors flex items-center justify-center"
+              >
+                <GiCrossedSwords className="mr-2" /> Usa Tecnica
+              </button>
+            )}
           </div>
         </div>
       )}

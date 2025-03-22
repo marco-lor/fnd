@@ -261,7 +261,7 @@ const SpellCard = ({ spellName, spell, userData }) => {
                 <p className="text-gray-200">{spell["Tipo Base"]}</p>
               </div>
             </div>
-            <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto">
+            <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto mb-4">
               {spell["Effetti Positivi"] && (
                 <div className="mb-2">
                   <p className="text-green-300 font-bold text-sm mb-1">Effetti Positivi</p>
@@ -275,6 +275,16 @@ const SpellCard = ({ spellName, spell, userData }) => {
                 </div>
               )}
             </div>
+            
+            {/* Add Cast Spell button in expanded view */}
+            {isExpanded && (
+              <button
+                onClick={handleUseSpell}
+                className="w-full py-3 bg-indigo-700 hover:bg-indigo-600 text-white rounded-md transition-colors flex items-center justify-center"
+              >
+                <GiMagicSwirl className="mr-2" /> Lancia Incantesimo
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -367,4 +377,3 @@ const SpellSide = ({ personalSpells = {}, userData = {} }) => {
 };
 
 export default SpellSide;
-
