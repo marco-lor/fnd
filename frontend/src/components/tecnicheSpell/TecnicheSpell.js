@@ -13,13 +13,12 @@ function TecnicheSpell() {
   const [personalTecniche, setPersonalTecniche] = useState({});
   const [commonTecniche, setCommonTecniche] = useState({});
   const [personalSpells, setPersonalSpells] = useState({});
-  const [commonSpells, setCommonSpells] = useState({});
   const [loading, setLoading] = useState(true);
   const unsubscribeRef = useRef(null);
 
   // States for filtering
   const [searchTerm, setSearchTerm] = useState('');
-  const [maxCosto, setMaxCosto] = useState(''); // Changed to a single value instead of array
+  const [maxCosto, setMaxCosto] = useState('');
   const [selectedAzione, setSelectedAzione] = useState(['All']);
 
   useEffect(() => {
@@ -34,7 +33,8 @@ function TecnicheSpell() {
               // Include the uid in the userData object
               setUserData({ ...data, uid: user.uid });
               setPersonalTecniche(data.tecniche || {});
-              // Optionally, if personal spells are available in user data, set them here.
+              // Set personal spells from user data
+              setPersonalSpells(data.spells || {});
             }
           },
           (error) => {
@@ -119,7 +119,6 @@ function TecnicheSpell() {
         (tecnica.Nome && tecnica.Nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (tecnica.Effetto && tecnica.Effetto.toLowerCase().includes(searchTerm.toLowerCase()));
 
-      // New cost filter logic using max cost
       const tecnicaCosto = getCostoNumeric(tecnica.Costo);
       const matchesCosto = maxCosto === '' || tecnicaCosto <= parseInt(maxCosto, 10);
 
@@ -127,6 +126,24 @@ function TecnicheSpell() {
 
       if (matchesSearch && matchesCosto && matchesAzione) {
         filtered[key] = tecnica;
+      }
+      return filtered;
+    }, {});
+  };
+
+  // Function to filter spells based on search term and max cost
+  const filterSpells = (spellsObj) => {
+    return Object.entries(spellsObj).reduce((filtered, [key, spell]) => {
+      const matchesSearch = searchTerm === '' ||
+        (spell.Nome && spell.Nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (spell["Effetti Positivi"] && spell["Effetti Positivi"].toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (spell["Effetti Negativi"] && spell["Effetti Negativi"].toLowerCase().includes(searchTerm.toLowerCase()));
+
+      const spellCosto = getCostoNumeric(spell.Costo);
+      const matchesCosto = maxCosto === '' || spellCosto <= parseInt(maxCosto, 10);
+
+      if (matchesSearch && matchesCosto) {
+        filtered[key] = spell;
       }
       return filtered;
     }, {});
@@ -196,8 +213,8 @@ function TecnicheSpell() {
               />
 
               <SpellSide
-                personalSpells={personalSpells}
-                commonSpells={commonSpells}
+                personalSpells={filterSpells(personalSpells)}
+                userData={userData}
               />
             </div>
             {/* Spacer for overlays to extend into */}
