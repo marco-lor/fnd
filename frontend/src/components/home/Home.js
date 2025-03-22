@@ -5,7 +5,7 @@ import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 import DnDBackground from "../backgrounds/DnDBackground";
 import Navbar from "../common/navbar";
-import StatsBars from "../common/StatsBars";
+import StatsBars from "./elements/StatsBars";
 import { BaseStatsTable, CombatStatsTable } from "./elements/paramTables";
 import { API_BASE_URL } from "../firebaseConfig";
 

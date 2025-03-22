@@ -1,8 +1,8 @@
-// file: ./frontend/src/components/common/StatsBars.js
+// file: ./frontend/src/components/home/elements/StatsBars.js
 import React, { useEffect, useState, useRef, useContext } from 'react';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
-import { AuthContext } from '../../AuthContext';
+import { db } from '../../firebaseConfig';
+import { AuthContext } from '../../../AuthContext';
 import { FaRedo, FaPlus, FaMinus, FaPlusSquare, FaMinusSquare } from 'react-icons/fa';
 
 const StatsBars = () => {
