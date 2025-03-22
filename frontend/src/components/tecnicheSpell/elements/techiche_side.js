@@ -5,24 +5,26 @@ import { doc, updateDoc, getFirestore } from "firebase/firestore";
 const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
+  const [isPositioned, setIsPositioned] = useState(false);
+  const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [successMessage, setSuccessMessage] = useState(null);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [initialCardRect, setInitialCardRect] = useState(null);
   const cardRef = useRef(null);
   const overlayRef = useRef(null);
+  // New: ref to store the dismissal timeout ID
+  const dismissTimeoutRef = useRef(null);
   const hasImage = tecnica.image_url && tecnica.image_url.trim() !== "";
   const db = getFirestore();
 
   // --- Mana validation logic ---
-
-  // Extract mana cost from tecnica.Costo (assuming format like "5 PM")
   const extractManaCost = () => {
     const costStr = tecnica.Costo?.toString() || "0";
     const match = costStr.match(/(\d+)/);
     return match ? parseInt(match[1], 10) : 0;
   };
 
-  // Get current mana from userData (adjust path if necessary)
   const getCurrentMana = () => {
     return userData?.stats?.manaCurrent || 0;
   };
@@ -31,103 +33,94 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
   const currentMana = getCurrentMana();
   const hasSufficientMana = currentMana >= manaCost;
 
-  // Calculate overlay position
+  // Save initial card position for animation
   useEffect(() => {
-    if (isHovered && !isExpanded && cardRef.current && overlayRef.current) {
-      const cardRect = cardRef.current.getBoundingClientRect();
-      const overlayRect = overlayRef.current.getBoundingClientRect();
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
-
-      // Calculate the initial position of the overlay
-      let top, left;
-
-      // Try to position on the right
-      if (cardRect.right + overlayRect.width < viewportWidth) {
-        left = cardRect.right;
-        top = cardRect.top - (overlayRect.height - cardRect.height) / 2;
-      }
-      // Try to position on the left
-      else if (cardRect.left - overlayRect.width > 0) {
-        left = cardRect.left - overlayRect.width;
-        top = cardRect.top - (overlayRect.height - cardRect.height) / 2;
-      }
-      // Position below
-      else if (cardRect.bottom + overlayRect.height < viewportHeight) {
-        top = cardRect.bottom;
-        left = cardRect.left + (cardRect.width - overlayRect.width) / 2;
-      }
-      // Position above
-      else {
-        top = cardRect.top - overlayRect.height;
-        left = cardRect.left + (cardRect.width - overlayRect.width) / 2;
-      }
-
-      // Ensure overlay is within viewport bounds
-      top = Math.max(10, Math.min(viewportHeight - overlayRect.height - 10, top));
-      left = Math.max(10, Math.min(viewportWidth - overlayRect.width - 10, left));
-
-      setPosition({ top, left });
+    if (isHovered && !initialCardRect && cardRef.current) {
+      setInitialCardRect(cardRef.current.getBoundingClientRect());
     }
-  }, [isHovered, isExpanded]);
+  }, [isHovered, initialCardRect]);
 
-  // Handle outside clicks when overlay is expanded
+  // Calculate overlay position when hovered and not expanded.
+  useEffect(() => {
+    if (isHovered && !isExpanded && cardRef.current && !overlayDismissed) {
+      const cardRect = cardRef.current.getBoundingClientRect();
+      const top = cardRect.top - 75; // Adjust vertically to center
+      const left = cardRect.right + 10; // Gap between card and overlay
+      setPosition({ top, left });
+      setIsPositioned(true);
+    } else if ((!isHovered || overlayDismissed) && !isExpanded) {
+      setIsPositioned(false);
+    }
+  }, [isHovered, isExpanded, overlayDismissed]);
+
+  // Handle outside clicks when overlay is expanded.
   useEffect(() => {
     const handleOutsideClick = (e) => {
-      if (isExpanded && overlayRef.current && !overlayRef.current.contains(e.target)) {
+      if (
+        isExpanded &&
+        overlayRef.current &&
+        !overlayRef.current.contains(e.target)
+      ) {
         setIsExpanded(false);
+        setIsHovered(false); // Also hide the "Use Tecnica" button
+        // Schedule the overlay dismissal after the collapse transition.
+        dismissTimeoutRef.current = setTimeout(() => {
+          setOverlayDismissed(true);
+          dismissTimeoutRef.current = null;
+        }, 300);
       }
     };
 
     if (isExpanded) {
-      document.addEventListener('mousedown', handleOutsideClick);
+      document.addEventListener("mousedown", handleOutsideClick);
     }
-
     return () => {
-      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener("mousedown", handleOutsideClick);
     };
   }, [isExpanded]);
 
-  // Auto-hide success message
+  // When the card is clicked, clear any pending timeout and re-expand immediately.
+  const handleCardClick = (e) => {
+    if (dismissTimeoutRef.current) {
+      clearTimeout(dismissTimeoutRef.current);
+      dismissTimeoutRef.current = null;
+    }
+    if (!isExpanded && isHovered) {
+      e.stopPropagation();
+      // Reset overlayDismissed in case it was set by the timeout.
+      setOverlayDismissed(false);
+      setIsExpanded(true);
+    }
+  };
+
+  const handleUseTecnica = (e) => {
+    e.stopPropagation();
+    setIsExpanded(false);
+    setOverlayDismissed(true);
+    setIsHovered(false);
+    setShowConfirmation(true);
+  };
+
+  // Auto-hide success message.
   useEffect(() => {
     if (successMessage) {
       const timer = setTimeout(() => {
         setSuccessMessage(null);
       }, 3000);
-
       return () => clearTimeout(timer);
     }
   }, [successMessage]);
 
-  const handleUseTecnica = (e) => {
-    e.stopPropagation();
-    setShowConfirmation(true);
-  };
-
-  const handleCardClick = (e) => {
-    if (!isExpanded && isHovered) {
-      e.stopPropagation();
-      setIsExpanded(true);
-    }
-  };
-
-  // Confirm the use of tecnica with mana deduction
   const confirmUseTecnica = async () => {
     if (!hasSufficientMana) return;
-
     try {
-      // Update the database to subtract mana cost
       const userRef = doc(db, "users", userData.uid);
       const newManaValue = currentMana - manaCost;
-
-      await updateDoc(userRef, {
-        "stats.manaCurrent": newManaValue
-      });
-
-      // Show success message
-      setSuccessMessage(`Tecnica ${tecnica.Nome || tecnicaName} utilizzata! (-${manaCost} PM)`);
+      await updateDoc(userRef, { "stats.manaCurrent": newManaValue });
+      setSuccessMessage(
+        `Tecnica ${tecnica.Nome || tecnicaName} utilizzata! (-${manaCost} PM)`
+      );
       setShowConfirmation(false);
-      setIsHovered(false);
     } catch (error) {
       console.error("Error updating mana:", error);
       setSuccessMessage("Errore nell'utilizzo della tecnica. Riprova.");
@@ -137,37 +130,39 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
 
   const cancelUseTecnica = () => {
     setShowConfirmation(false);
-    setIsHovered(false);
   };
 
   const getOverlayClasses = () => {
     return `fixed rounded-lg shadow-xl overflow-hidden transition-all duration-300 ease-out z-50
-      ${!isHovered && !isExpanded ? "opacity-0 pointer-events-none" : "opacity-100"}
+      ${!isHovered && !isExpanded ? "opacity-0 pointer-events-none translate-x-[-20px]" : "opacity-100 translate-x-0"}
       ${isExpanded ? "z-[100]" : "z-50"}`;
   };
 
   const getOverlayStyle = () => {
     if (isExpanded) {
       return {
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
-        width: '420px',
-        height: '450px',
+        top: "50%",
+        left: "50%",
+        transform: "translate(-50%, -50%)",
+        width: "420px",
+        height: "450px",
         background: "rgba(10,10,20,0.97)",
         backdropFilter: "blur(4px)",
-        boxShadow: "0 10px 25px rgba(0,0,0,0.5)"
+        boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+        transformOrigin: "center center"
       };
     } else {
       return {
         top: `${position.top}px`,
         left: `${position.left}px`,
-        transform: 'translate(0, 0)',
+        transform: "translate(0, 0)",
         width: "320px",
         height: "350px",
         background: "rgba(10,10,20,0.97)",
         backdropFilter: "blur(4px)",
-        boxShadow: "0 10px 25px rgba(0,0,0,0.5)"
+        boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+        transformOrigin: "left center",
+        transition: "all 0.3s ease-out"
       };
     }
   };
@@ -176,8 +171,13 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
     <div
       className="relative rounded-md aspect-square transition-all duration-300"
       style={{ height: "200px" }}
-      onMouseEnter={() => !isExpanded && setIsHovered(true)}
-      onMouseLeave={() => !isExpanded && setIsHovered(false)}
+      onMouseEnter={() => {
+        if (!isExpanded && !overlayDismissed) setIsHovered(true);
+      }}
+      onMouseLeave={() => {
+        setIsHovered(false);
+        setOverlayDismissed(false); // Reset dismissed state on mouse leave.
+      }}
       onClick={handleCardClick}
       ref={cardRef}
     >
@@ -244,44 +244,47 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
         </div>
       </div>
 
-      {/* Expanded overlay on hover - positioned as fixed for smooth transitions */}
-      <div
-        ref={overlayRef}
-        className={getOverlayClasses()}
-        style={getOverlayStyle()}
-      >
-        {tecnica.video_url && (
-          <div className="absolute inset-0 z-0">
-            <video
-              src={tecnica.video_url}
-              autoPlay
-              muted
-              loop
-              className="w-full h-full object-cover opacity-50"
-            />
-            <div className="absolute inset-0 bg-black/40"></div>
-          </div>
-        )}
-        <div className="p-4 h-full flex flex-col relative z-10">
-          <h3 className="text-lg text-white font-bold mb-3 text-center border-b border-gray-600 pb-2">
-            {tecnica.Nome || tecnicaName}
-          </h3>
-          <div className="grid grid-cols-2 gap-2 mb-2">
-            <div className="bg-black/50 p-2 rounded">
-              <p className="text-purple-300 font-bold text-sm">Costo</p>
-              <p className="text-gray-200">{tecnica.Costo}</p>
+      {/* Render overlay only if either expanded or positioned and not dismissed */}
+      {((isExpanded || isPositioned) && !overlayDismissed) && (
+        <div
+          ref={overlayRef}
+          onClick={(e) => e.stopPropagation()}
+          className={getOverlayClasses()}
+          style={getOverlayStyle()}
+        >
+          {tecnica.video_url && (
+            <div className="absolute inset-0 z-0">
+              <video
+                src={tecnica.video_url}
+                autoPlay
+                muted
+                loop
+                className="w-full h-full object-cover opacity-50"
+              />
+              <div className="absolute inset-0 bg-black/40"></div>
             </div>
-            <div className="bg-black/50 p-2 rounded">
-              <p className="text-purple-300 font-bold text-sm">Azione</p>
-              <p className="text-gray-200">{tecnica.Azione}</p>
+          )}
+          <div className="p-4 h-full flex flex-col relative z-10">
+            <h3 className="text-lg text-white font-bold mb-3 text-center border-b border-gray-600 pb-2">
+              {tecnica.Nome || tecnicaName}
+            </h3>
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <div className="bg-black/50 p-2 rounded">
+                <p className="text-purple-300 font-bold text-sm">Costo</p>
+                <p className="text-gray-200">{tecnica.Costo}</p>
+              </div>
+              <div className="bg-black/50 p-2 rounded">
+                <p className="text-purple-300 font-bold text-sm">Azione</p>
+                <p className="text-gray-200">{tecnica.Azione}</p>
+              </div>
             </div>
-          </div>
-          <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto">
-            <p className="text-purple-300 font-bold text-sm mb-1">Effetto</p>
-            <p className="text-gray-200 text-sm">{tecnica.Effetto}</p>
+            <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto">
+              <p className="text-purple-300 font-bold text-sm mb-1">Effetto</p>
+              <p className="text-gray-200 text-sm">{tecnica.Effetto}</p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Backdrop when expanded */}
       {isExpanded && (
@@ -297,13 +300,9 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
               Stai per utilizzare la tecnica{" "}
               <span className="text-purple-500 font-bold">
                 {tecnica.Nome || tecnicaName}
-              </span>
-              , costa{" "}
-              <span className="text-purple-500 font-bold">{tecnica.Costo}</span>{" "}
-              mana
+              </span>, costa{" "}
+              <span className="text-purple-500 font-bold">{tecnica.Costo}</span> mana
             </p>
-
-            {/* Mana status information */}
             <div className="mb-6 p-2 rounded bg-black/30">
               <p className="text-gray-200">
                 Mana disponibile:{" "}
@@ -321,7 +320,6 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
                 </p>
               )}
             </div>
-
             <div className="flex justify-end gap-4">
               <button
                 onClick={cancelUseTecnica}
@@ -348,15 +346,10 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
   );
 };
 
-const TecnicheSide = ({
-  personalTecniche = {},
-  commonTecniche = {},
-  userData = {},
-}) => {
+const TecnicheSide = ({ personalTecniche = {}, commonTecniche = {}, userData = {} }) => {
   return (
     <div className="md:w-3/5 bg-[rgba(40,40,60,0.8)] p-5 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.4)]">
       <h1 className="text-2xl text-white font-bold mb-4">Tecniche</h1>
-
       {/* Tecniche Personali */}
       <div className="mb-8">
         <h2 className="text-xl text-white font-semibold mb-4 border-b border-gray-600 pb-2">
@@ -377,12 +370,9 @@ const TecnicheSide = ({
               ))}
           </div>
         ) : (
-          <p className="text-gray-400">
-            Nessuna tecnica personale disponibile.
-          </p>
+          <p className="text-gray-400">Nessuna tecnica personale disponibile.</p>
         )}
       </div>
-
       {/* Tecniche Comuni */}
       <div>
         <h2 className="text-xl text-white font-semibold mb-4 border-b border-gray-600 pb-2">
@@ -403,9 +393,7 @@ const TecnicheSide = ({
               ))}
           </div>
         ) : (
-          <p className="text-gray-400">
-            Nessuna tecnica comune disponibile.
-          </p>
+          <p className="text-gray-400">Nessuna tecnica comune disponibile.</p>
         )}
       </div>
     </div>
@@ -413,3 +401,4 @@ const TecnicheSide = ({
 };
 
 export default TecnicheSide;
+
