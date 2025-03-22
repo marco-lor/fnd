@@ -5,23 +5,26 @@ import { doc, updateDoc, getFirestore } from "firebase/firestore";
 const SpellCard = ({ spellName, spell, userData }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
+  const [isPositioned, setIsPositioned] = useState(false);
+  const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [successMessage, setSuccessMessage] = useState(null);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [initialCardRect, setInitialCardRect] = useState(null);
   const cardRef = useRef(null);
   const overlayRef = useRef(null);
+  // Ref to store the dismissal timeout ID
+  const dismissTimeoutRef = useRef(null);
   const hasImage = spell.image_url && spell.image_url.trim() !== "";
   const db = getFirestore();
 
   // --- Mana validation logic ---
-
-  // Extract mana cost from spell.Costo (assuming format like "5 PM")
   const extractManaCost = () => {
     const costStr = spell.Costo?.toString() || "0";
     const match = costStr.match(/(\d+)/);
     return match ? parseInt(match[1], 10) : 0;
   };
 
-  // Get current mana from userData
   const getCurrentMana = () => {
     return userData?.stats?.manaCurrent || 0;
   };
@@ -30,75 +33,94 @@ const SpellCard = ({ spellName, spell, userData }) => {
   const currentMana = getCurrentMana();
   const hasSufficientMana = currentMana >= manaCost;
 
+  // Save initial card position for animation
   useEffect(() => {
-    if (isHovered && cardRef.current && overlayRef.current) {
-      // Get dimensions and position of the card and overlay
-      const card = cardRef.current.getBoundingClientRect();
-      const overlay = overlayRef.current.getBoundingClientRect();
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
-
-      let newTop = 0;
-      let newLeft = 0;
-
-      // Position the overlay on the right side of the card
-      if (card.right + overlay.width < viewportWidth) {
-        newLeft = card.width + 10; // Place overlay completely to the right with a 10px gap
-        newTop = -(overlay.height - card.height) / 2;
-      }
-      // Otherwise, try the left side
-      else if (card.left - overlay.width > 0) {
-        newLeft = -overlay.width - 10;
-        newTop = -(overlay.height - card.height) / 2;
-      }
-      // Next, try positioning below the card
-      else if (card.bottom + overlay.height < viewportHeight) {
-        newTop = card.height + 10;
-        newLeft = -(overlay.width - card.width) / 2;
-      }
-      // Otherwise, default to positioning above the card
-      else {
-        newTop = -overlay.height - 10;
-        newLeft = -(overlay.width - card.width) / 2;
-      }
-
-      setPosition({ top: newTop, left: newLeft });
+    if (isHovered && !initialCardRect && cardRef.current) {
+      setInitialCardRect(cardRef.current.getBoundingClientRect());
     }
-  }, [isHovered]);
+  }, [isHovered, initialCardRect]);
 
-  // Auto-hide success message
+  // Calculate overlay position when hovered and not expanded.
+  useEffect(() => {
+    if (isHovered && !isExpanded && cardRef.current && !overlayDismissed) {
+      const cardRect = cardRef.current.getBoundingClientRect();
+      const top = cardRect.top - 75; // Adjust vertically to center
+      const left = cardRect.right + 10; // Gap between card and overlay
+      setPosition({ top, left });
+      setIsPositioned(true);
+    } else if ((!isHovered || overlayDismissed) && !isExpanded) {
+      setIsPositioned(false);
+    }
+  }, [isHovered, isExpanded, overlayDismissed]);
+
+  // Handle outside clicks when overlay is expanded.
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (
+        isExpanded &&
+        overlayRef.current &&
+        !overlayRef.current.contains(e.target)
+      ) {
+        setIsExpanded(false);
+        setIsHovered(false); // Also hide the "Use Spell" button
+        // Schedule the overlay dismissal after the collapse transition.
+        dismissTimeoutRef.current = setTimeout(() => {
+          setOverlayDismissed(true);
+          dismissTimeoutRef.current = null;
+        }, 300);
+      }
+    };
+
+    if (isExpanded) {
+      document.addEventListener("mousedown", handleOutsideClick);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+  }, [isExpanded]);
+
+  // When the card is clicked, clear any pending timeout and re-expand immediately.
+  const handleCardClick = (e) => {
+    if (dismissTimeoutRef.current) {
+      clearTimeout(dismissTimeoutRef.current);
+      dismissTimeoutRef.current = null;
+    }
+    if (!isExpanded && isHovered) {
+      e.stopPropagation();
+      // Reset overlayDismissed in case it was set by the timeout.
+      setOverlayDismissed(false);
+      setIsExpanded(true);
+    }
+  };
+
+  const handleUseSpell = (e) => {
+    e.stopPropagation();
+    setIsExpanded(false);
+    setOverlayDismissed(true);
+    setIsHovered(false);
+    setShowConfirmation(true);
+  };
+
+  // Auto-hide success message.
   useEffect(() => {
     if (successMessage) {
       const timer = setTimeout(() => {
         setSuccessMessage(null);
       }, 3000);
-
       return () => clearTimeout(timer);
     }
   }, [successMessage]);
 
-  const handleUseSpell = (e) => {
-    e.stopPropagation();
-    setShowConfirmation(true);
-  };
-
-  // Confirm the use of spell with mana deduction
   const confirmUseSpell = async () => {
     if (!hasSufficientMana) return;
-
     try {
-      // Update the database to subtract mana cost
       const userRef = doc(db, "users", userData.uid);
       const newManaValue = currentMana - manaCost;
-
-      await updateDoc(userRef, {
-        "stats.manaCurrent": newManaValue
-      });
-
-      // Show success message
-      setSuccessMessage(`Incantesimo ${spell.Nome || spellName} lanciato! (-${manaCost} PM)`);
+      await updateDoc(userRef, { "stats.manaCurrent": newManaValue });
+      setSuccessMessage(
+        `Incantesimo ${spell.Nome || spellName} lanciato! (-${manaCost} PM)`
+      );
       setShowConfirmation(false);
-      setIsHovered(false);
     } catch (error) {
       console.error("Error updating mana:", error);
       setSuccessMessage("Errore nel lancio dell'incantesimo. Riprova.");
@@ -108,15 +130,55 @@ const SpellCard = ({ spellName, spell, userData }) => {
 
   const cancelUseSpell = () => {
     setShowConfirmation(false);
-    setIsHovered(false);
+  };
+
+  const getOverlayClasses = () => {
+    return `fixed rounded-lg shadow-xl overflow-hidden transition-all duration-300 ease-out z-50
+      ${!isHovered && !isExpanded ? "opacity-0 pointer-events-none translate-x-[-20px]" : "opacity-100 translate-x-0"}
+      ${isExpanded ? "z-[100]" : "z-50"}`;
+  };
+
+  const getOverlayStyle = () => {
+    if (isExpanded) {
+      return {
+        top: "50%",
+        left: "50%",
+        transform: "translate(-50%, -50%)",
+        width: "420px",
+        height: "450px",
+        background: "rgba(10,10,20,0.97)",
+        backdropFilter: "blur(4px)",
+        boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+        transformOrigin: "center center"
+      };
+    } else {
+      return {
+        top: `${position.top}px`,
+        left: `${position.left}px`,
+        transform: "translate(0, 0)",
+        width: "320px",
+        height: "350px",
+        background: "rgba(10,10,20,0.97)",
+        backdropFilter: "blur(4px)",
+        boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+        transformOrigin: "left center",
+        transition: "all 0.3s ease-out"
+      };
+    }
   };
 
   return (
     <div
       className="relative rounded-md aspect-square transition-all duration-300"
       style={{ height: "200px" }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseEnter={() => {
+        if (!isExpanded && !overlayDismissed) setIsHovered(true);
+      }}
+      onMouseLeave={() => {
+        setIsHovered(false);
+        setOverlayDismissed(false); // Reset dismissed state on mouse leave.
+      }}
+      onClick={handleCardClick}
       ref={cardRef}
     >
       {/* Success message notification */}
@@ -165,64 +227,62 @@ const SpellCard = ({ spellName, spell, userData }) => {
         </div>
       </div>
 
-      {/* Expanded overlay on hover - positioned outside the card */}
-      <div
-        ref={overlayRef}
-        className={`absolute z-50 rounded-lg shadow-xl overflow-hidden transition-all duration-300 ease-out ${
-          isHovered ? "opacity-100" : "opacity-0 pointer-events-none"
-        }`}
-        style={{
-          top: `${position.top}px`,
-          left: `${position.left}px`,
-          width: "320px",
-          height: "350px",
-          background: "rgba(10,10,20,0.97)",
-          backdropFilter: "blur(4px)",
-          boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
-        }}
-      >
-        {spell.video_url && (
-          <div className="absolute inset-0 z-0">
-            <video
-              src={spell.video_url}
-              autoPlay
-              muted
-              loop
-              className="w-full h-full object-cover opacity-50"
-            />
-            <div className="absolute inset-0 bg-black/40"></div>
-          </div>
-        )}
-        <div className="p-4 h-full flex flex-col relative z-10">
-          <h3 className="text-lg text-white font-bold mb-3 text-center border-b border-gray-600 pb-2">
-            {spell.Nome || spellName}
-          </h3>
-          <div className="grid grid-cols-2 gap-2 mb-2">
-            <div className="bg-black/50 p-2 rounded">
-              <p className="text-indigo-300 font-bold text-sm">Costo</p>
-              <p className="text-gray-200">{spell.Costo}</p>
+      {/* Render overlay only if either expanded or positioned and not dismissed */}
+      {((isExpanded || isPositioned) && !overlayDismissed) && (
+        <div
+          ref={overlayRef}
+          onClick={(e) => e.stopPropagation()}
+          className={getOverlayClasses()}
+          style={getOverlayStyle()}
+        >
+          {spell.video_url && (
+            <div className="absolute inset-0 z-0">
+              <video
+                src={spell.video_url}
+                autoPlay
+                muted
+                loop
+                className="w-full h-full object-cover opacity-50"
+              />
+              <div className="absolute inset-0 bg-black/40"></div>
             </div>
-            <div className="bg-black/50 p-2 rounded">
-              <p className="text-indigo-300 font-bold text-sm">Tipo</p>
-              <p className="text-gray-200">{spell["Tipo Base"]}</p>
-            </div>
-          </div>
-          <div className="flex-grow overflow-y-auto">
-            {spell["Effetti Positivi"] && (
-              <div className="bg-black/50 p-2 rounded mb-2">
-                <p className="text-green-300 font-bold text-sm mb-1">Effetti Positivi</p>
-                <p className="text-gray-200 text-sm">{spell["Effetti Positivi"]}</p>
-              </div>
-            )}
-            {spell["Effetti Negativi"] && (
+          )}
+          <div className="p-4 h-full flex flex-col relative z-10">
+            <h3 className="text-lg text-white font-bold mb-3 text-center border-b border-gray-600 pb-2">
+              {spell.Nome || spellName}
+            </h3>
+            <div className="grid grid-cols-2 gap-2 mb-2">
               <div className="bg-black/50 p-2 rounded">
-                <p className="text-red-300 font-bold text-sm mb-1">Effetti Negativi</p>
-                <p className="text-gray-200 text-sm">{spell["Effetti Negativi"]}</p>
+                <p className="text-indigo-300 font-bold text-sm">Costo</p>
+                <p className="text-gray-200">{spell.Costo}</p>
               </div>
-            )}
+              <div className="bg-black/50 p-2 rounded">
+                <p className="text-indigo-300 font-bold text-sm">Tipo</p>
+                <p className="text-gray-200">{spell["Tipo Base"]}</p>
+              </div>
+            </div>
+            <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto">
+              {spell["Effetti Positivi"] && (
+                <div className="mb-2">
+                  <p className="text-green-300 font-bold text-sm mb-1">Effetti Positivi</p>
+                  <p className="text-gray-200 text-sm">{spell["Effetti Positivi"]}</p>
+                </div>
+              )}
+              {spell["Effetti Negativi"] && (
+                <div>
+                  <p className="text-red-300 font-bold text-sm mb-1">Effetti Negativi</p>
+                  <p className="text-gray-200 text-sm">{spell["Effetti Negativi"]}</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* Backdrop when expanded */}
+      {isExpanded && (
+        <div className="fixed inset-0 bg-black/50 z-[90] transition-opacity duration-300 ease-in-out"></div>
+      )}
 
       {/* Confirmation Overlay */}
       {showConfirmation && (
@@ -233,13 +293,9 @@ const SpellCard = ({ spellName, spell, userData }) => {
               Stai per lanciare l'incantesimo{" "}
               <span className="text-indigo-500 font-bold">
                 {spell.Nome || spellName}
-              </span>
-              , costa{" "}
-              <span className="text-indigo-500 font-bold">{spell.Costo}</span>{" "}
-              mana
+              </span>, costa{" "}
+              <span className="text-indigo-500 font-bold">{spell.Costo}</span> mana
             </p>
-
-            {/* Mana status information */}
             <div className="mb-6 p-2 rounded bg-black/30">
               <p className="text-gray-200">
                 Mana disponibile:{" "}
@@ -257,7 +313,6 @@ const SpellCard = ({ spellName, spell, userData }) => {
                 </p>
               )}
             </div>
-
             <div className="flex justify-end gap-4">
               <button
                 onClick={cancelUseSpell}
@@ -312,3 +367,4 @@ const SpellSide = ({ personalSpells = {}, userData = {} }) => {
 };
 
 export default SpellSide;
+
