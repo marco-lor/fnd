@@ -427,3 +427,4 @@ export function AddSpellOverlay({ userId, onClose }) {
 
   return ReactDOM.createPortal(overlayContent, document.body);
 }
+

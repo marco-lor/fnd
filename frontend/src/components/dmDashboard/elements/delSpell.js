@@ -132,3 +132,4 @@ export function DelSpellOverlay({ userId, spellName, spellData, onClose }) {
 
   return ReactDOM.createPortal(overlayContent, document.body);
 }
+

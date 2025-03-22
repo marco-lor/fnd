@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { db, storage } from '../../firebaseConfig';
 import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 
 export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
   const [schema, setSchema] = useState(null);
@@ -192,6 +192,19 @@ export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
 
       if (videoFile) {
         try {
+          // If there's an existing video, delete it first
+          if (spellData.video_url) {
+            try {
+              const videoUrlPath = decodeURIComponent(spellData.video_url.split('/o/')[1].split('?')[0]);
+              const oldVideoRef = ref(storage, videoUrlPath);
+              await deleteObject(oldVideoRef);
+              console.log("Previous video deleted successfully");
+            } catch (deleteError) {
+              console.error("Error deleting previous video:", deleteError);
+            }
+          }
+          
+          // Upload the new video to the videos subfolder
           const videoRef = ref(storage, 'spells/videos/' + safeFileName + '_video');
           await uploadBytes(videoRef, videoFile);
           const downloadURL = await getDownloadURL(videoRef);
@@ -464,3 +477,4 @@ export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
 
   return ReactDOM.createPortal(overlayContent, document.body);
 }
+
