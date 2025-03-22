@@ -7,6 +7,7 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [successMessage, setSuccessMessage] = useState(null);
+  const [isExpanded, setIsExpanded] = useState(false);
   const cardRef = useRef(null);
   const overlayRef = useRef(null);
   const hasImage = tecnica.image_url && tecnica.image_url.trim() !== "";
@@ -30,41 +31,62 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
   const currentMana = getCurrentMana();
   const hasSufficientMana = currentMana >= manaCost;
 
+  // Calculate overlay position
   useEffect(() => {
-    if (isHovered && cardRef.current && overlayRef.current) {
-      // Get dimensions and position of the card and overlay
-      const card = cardRef.current.getBoundingClientRect();
-      const overlay = overlayRef.current.getBoundingClientRect();
+    if (isHovered && !isExpanded && cardRef.current && overlayRef.current) {
+      const cardRect = cardRef.current.getBoundingClientRect();
+      const overlayRect = overlayRef.current.getBoundingClientRect();
       const viewportWidth = window.innerWidth;
       const viewportHeight = window.innerHeight;
 
-      let newTop = 0;
-      let newLeft = 0;
+      // Calculate the initial position of the overlay
+      let top, left;
 
-      // Position the overlay on the right side of the card
-      if (card.right + overlay.width < viewportWidth) {
-        newLeft = card.width + 10; // Place overlay completely to the right with a 10px gap
-        newTop = -(overlay.height - card.height) / 2;
+      // Try to position on the right
+      if (cardRect.right + overlayRect.width < viewportWidth) {
+        left = cardRect.right;
+        top = cardRect.top - (overlayRect.height - cardRect.height) / 2;
       }
-      // Otherwise, try the left side
-      else if (card.left - overlay.width > 0) {
-        newLeft = -overlay.width - 10;
-        newTop = -(overlay.height - card.height) / 2;
+      // Try to position on the left
+      else if (cardRect.left - overlayRect.width > 0) {
+        left = cardRect.left - overlayRect.width;
+        top = cardRect.top - (overlayRect.height - cardRect.height) / 2;
       }
-      // Next, try positioning below the card
-      else if (card.bottom + overlay.height < viewportHeight) {
-        newTop = card.height + 10;
-        newLeft = -(overlay.width - card.width) / 2;
+      // Position below
+      else if (cardRect.bottom + overlayRect.height < viewportHeight) {
+        top = cardRect.bottom;
+        left = cardRect.left + (cardRect.width - overlayRect.width) / 2;
       }
-      // Otherwise, default to positioning above the card
+      // Position above
       else {
-        newTop = -overlay.height - 10;
-        newLeft = -(overlay.width - card.width) / 2;
+        top = cardRect.top - overlayRect.height;
+        left = cardRect.left + (cardRect.width - overlayRect.width) / 2;
       }
 
-      setPosition({ top: newTop, left: newLeft });
+      // Ensure overlay is within viewport bounds
+      top = Math.max(10, Math.min(viewportHeight - overlayRect.height - 10, top));
+      left = Math.max(10, Math.min(viewportWidth - overlayRect.width - 10, left));
+
+      setPosition({ top, left });
     }
-  }, [isHovered]);
+  }, [isHovered, isExpanded]);
+
+  // Handle outside clicks when overlay is expanded
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (isExpanded && overlayRef.current && !overlayRef.current.contains(e.target)) {
+        setIsExpanded(false);
+      }
+    };
+
+    if (isExpanded) {
+      document.addEventListener('mousedown', handleOutsideClick);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, [isExpanded]);
 
   // Auto-hide success message
   useEffect(() => {
@@ -80,6 +102,13 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
   const handleUseTecnica = (e) => {
     e.stopPropagation();
     setShowConfirmation(true);
+  };
+
+  const handleCardClick = (e) => {
+    if (!isExpanded && isHovered) {
+      e.stopPropagation();
+      setIsExpanded(true);
+    }
   };
 
   // Confirm the use of tecnica with mana deduction
@@ -111,12 +140,45 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
     setIsHovered(false);
   };
 
+  const getOverlayClasses = () => {
+    return `fixed rounded-lg shadow-xl overflow-hidden transition-all duration-300 ease-out z-50
+      ${!isHovered && !isExpanded ? "opacity-0 pointer-events-none" : "opacity-100"}
+      ${isExpanded ? "z-[100]" : "z-50"}`;
+  };
+
+  const getOverlayStyle = () => {
+    if (isExpanded) {
+      return {
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        width: '420px',
+        height: '450px',
+        background: "rgba(10,10,20,0.97)",
+        backdropFilter: "blur(4px)",
+        boxShadow: "0 10px 25px rgba(0,0,0,0.5)"
+      };
+    } else {
+      return {
+        top: `${position.top}px`,
+        left: `${position.left}px`,
+        transform: 'translate(0, 0)',
+        width: "320px",
+        height: "350px",
+        background: "rgba(10,10,20,0.97)",
+        backdropFilter: "blur(4px)",
+        boxShadow: "0 10px 25px rgba(0,0,0,0.5)"
+      };
+    }
+  };
+
   return (
     <div
       className="relative rounded-md aspect-square transition-all duration-300"
       style={{ height: "200px" }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseEnter={() => !isExpanded && setIsHovered(true)}
+      onMouseLeave={() => !isExpanded && setIsHovered(false)}
+      onClick={handleCardClick}
       ref={cardRef}
     >
       {/* Success message notification */}
@@ -182,21 +244,11 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
         </div>
       </div>
 
-      {/* Expanded overlay on hover - positioned outside the card */}
+      {/* Expanded overlay on hover - positioned as fixed for smooth transitions */}
       <div
         ref={overlayRef}
-        className={`absolute z-50 rounded-lg shadow-xl overflow-hidden transition-all duration-300 ease-out ${
-          isHovered ? "opacity-100" : "opacity-0 pointer-events-none"
-        }`}
-        style={{
-          top: `${position.top}px`,
-          left: `${position.left}px`,
-          width: "320px",
-          height: "350px",
-          background: "rgba(10,10,20,0.97)",
-          backdropFilter: "blur(4px)",
-          boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
-        }}
+        className={getOverlayClasses()}
+        style={getOverlayStyle()}
       >
         {tecnica.video_url && (
           <div className="absolute inset-0 z-0">
@@ -224,12 +276,17 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
               <p className="text-gray-200">{tecnica.Azione}</p>
             </div>
           </div>
-          <div className="flex-grow bg-black/50 p-2 rounded">
+          <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto">
             <p className="text-purple-300 font-bold text-sm mb-1">Effetto</p>
             <p className="text-gray-200 text-sm">{tecnica.Effetto}</p>
           </div>
         </div>
       </div>
+
+      {/* Backdrop when expanded */}
+      {isExpanded && (
+        <div className="fixed inset-0 bg-black/50 z-[90] transition-opacity duration-300 ease-in-out"></div>
+      )}
 
       {/* Confirmation Overlay */}
       {showConfirmation && (
