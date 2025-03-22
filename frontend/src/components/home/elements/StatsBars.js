@@ -216,82 +216,87 @@ const StatsBars = () => {
     <div className="bg-[rgba(40,40,60,0.8)] p-4 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.4)]">
       <div className="mt-2 space-y-3 flex flex-col items-center">
         {/* HP Bar */}
-        <div className="flex items-center space-x-2 w-full justify-center">
-          <span className="text-base font-bold text-red-700 w-16">HP:</span>
-          <button onClick={handleResetHP} className="bg-green-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-green-600" title="Reset HP">
-            <FaRedo className="w-3 h-3" />
-          </button>
-          <button onMouseDown={handleDecrementHPStart} onMouseUp={handleDecrementHPEnd} onMouseLeave={handleDecrementHPEnd} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Decrease HP by 1">
-            <FaMinus className="w-3 h-3" />
-          </button>
-          <button onClick={handleCustomDecrementHP} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Decrease HP by custom value">
-            <FaMinusSquare className="w-3 h-3" />
-          </button>
-          <div className="w-80 md:w-96 lg:w-1/2 h-5 bg-red-200 rounded flex overflow-visible">
-            {userData?.stats?.hpTotal ? (() => {
-              const hpCurrent = userData.stats.hpCurrent;
-              const hpTotal = userData.stats.hpTotal;
-              if (hpCurrent <= hpTotal) {
-                return <div style={{ width: `${(hpCurrent / hpTotal) * 100}%` }} className="h-full bg-red-500 rounded"></div>;
-              } else {
-                const extraPercent = ((hpCurrent - hpTotal) / hpTotal) * 100;
-                return (
-                  <>
-                    <div style={{ width: '100%' }} className="h-full bg-red-500 rounded-l"></div>
-                    <div style={{ width: `${extraPercent}%` }} className="h-full bg-yellow-500 rounded-r"></div>
-                  </>
-                );
-              }
-            })() : null}
+        <div className="flex items-center w-full">
+          <span className="text-base font-bold text-red-700 w-16 text-right mr-2">HP:</span>
+          <div className="flex items-center space-x-2 flex-1">
+            <button onClick={handleResetHP} className="bg-green-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-green-600" title="Reset HP">
+              <FaRedo className="w-3 h-3" />
+            </button>
+            <button onMouseDown={handleDecrementHPStart} onMouseUp={handleDecrementHPEnd} onMouseLeave={handleDecrementHPEnd} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Decrease HP by 1">
+              <FaMinus className="w-3 h-3" />
+            </button>
+            <button onClick={handleCustomDecrementHP} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Decrease HP by custom value">
+              <FaMinusSquare className="w-3 h-3" />
+            </button>
+            <div className="flex-1 h-5 bg-red-200 rounded flex overflow-visible">
+              {userData?.stats?.hpTotal ? (() => {
+                const hpCurrent = userData.stats.hpCurrent;
+                const hpTotal = userData.stats.hpTotal;
+                if (hpCurrent <= hpTotal) {
+                  return <div style={{ width: `${(hpCurrent / hpTotal) * 100}%` }} className="h-full bg-red-500 rounded"></div>;
+                } else {
+                  const extraPercent = ((hpCurrent - hpTotal) / hpTotal) * 100;
+                  return (
+                    <>
+                      <div style={{ width: '100%' }} className="h-full bg-red-500 rounded-l"></div>
+                      <div style={{ width: `${extraPercent}%` }} className="h-full bg-yellow-500 rounded-r"></div>
+                    </>
+                  );
+                }
+              })() : null}
+            </div>
+            <button onClick={handleCustomIncrementHP} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Increase HP by custom value">
+              <FaPlusSquare className="w-3 h-3" />
+            </button>
+            <button onMouseDown={handleIncrementHPStart} onMouseUp={handleIncrementHPEnd} onMouseLeave={handleIncrementHPEnd} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Increase HP by 1">
+              <FaPlus className="w-3 h-3" />
+            </button>
+            <span className="text-base text-white w-16 text-right">
+              {userData?.stats?.hpCurrent}/{userData?.stats?.hpTotal}
+            </span>
           </div>
-          <button onClick={handleCustomIncrementHP} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Increase HP by custom value">
-            <FaPlusSquare className="w-3 h-3" />
-          </button>
-          <button onMouseDown={handleIncrementHPStart} onMouseUp={handleIncrementHPEnd} onMouseLeave={handleIncrementHPEnd} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Increase HP by 1">
-            <FaPlus className="w-3 h-3" />
-          </button>
-          <span className="text-base text-white">
-            {userData?.stats?.hpCurrent}/{userData?.stats?.hpTotal}
-          </span>
         </div>
+        
         {/* Mana Bar */}
-        <div className="flex items-center space-x-2 w-full justify-center">
-          <span className="text-base font-bold text-purple-700 w-16">Mana:</span>
-          <button onClick={handleResetMana} className="bg-green-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-green-600" title="Reset Mana">
-            <FaRedo className="w-3 h-3" />
-          </button>
-          <button onMouseDown={handleDecrementManaStart} onMouseUp={handleDecrementManaEnd} onMouseLeave={handleDecrementManaEnd} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Decrease Mana by 1">
-            <FaMinus className="w-3 h-3" />
-          </button>
-          <button onClick={handleCustomDecrementMana} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Decrease Mana by custom value">
-            <FaMinusSquare className="w-3 h-3" />
-          </button>
-          <div className="w-80 md:w-96 lg:w-1/2 h-5 bg-purple-200 rounded flex overflow-visible">
-            {userData?.stats?.manaTotal ? (() => {
-              const manaCurrent = userData.stats.manaCurrent;
-              const manaTotal = userData.stats.manaTotal;
-              if (manaCurrent <= manaTotal) {
-                return <div style={{ width: `${(manaCurrent / manaTotal) * 100}%` }} className="h-full bg-purple-600 rounded"></div>;
-              } else {
-                const extraPercent = ((manaCurrent - manaTotal) / manaTotal) * 100;
-                return (
-                  <>
-                    <div style={{ width: '100%' }} className="h-full bg-purple-600 rounded-l"></div>
-                    <div style={{ width: `${extraPercent}%` }} className="h-full bg-yellow-500 rounded-r"></div>
-                  </>
-                );
-              }
-            })() : null}
+        <div className="flex items-center w-full">
+          <span className="text-base font-bold text-purple-700 w-16 text-right mr-2">Mana:</span>
+          <div className="flex items-center space-x-2 flex-1">
+            <button onClick={handleResetMana} className="bg-green-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-green-600" title="Reset Mana">
+              <FaRedo className="w-3 h-3" />
+            </button>
+            <button onMouseDown={handleDecrementManaStart} onMouseUp={handleDecrementManaEnd} onMouseLeave={handleDecrementManaEnd} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Decrease Mana by 1">
+              <FaMinus className="w-3 h-3" />
+            </button>
+            <button onClick={handleCustomDecrementMana} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Decrease Mana by custom value">
+              <FaMinusSquare className="w-3 h-3" />
+            </button>
+            <div className="flex-1 h-5 bg-purple-200 rounded flex overflow-visible">
+              {userData?.stats?.manaTotal ? (() => {
+                const manaCurrent = userData.stats.manaCurrent;
+                const manaTotal = userData.stats.manaTotal;
+                if (manaCurrent <= manaTotal) {
+                  return <div style={{ width: `${(manaCurrent / manaTotal) * 100}%` }} className="h-full bg-purple-600 rounded"></div>;
+                } else {
+                  const extraPercent = ((manaCurrent - manaTotal) / manaTotal) * 100;
+                  return (
+                    <>
+                      <div style={{ width: '100%' }} className="h-full bg-purple-600 rounded-l"></div>
+                      <div style={{ width: `${extraPercent}%` }} className="h-full bg-yellow-500 rounded-r"></div>
+                    </>
+                  );
+                }
+              })() : null}
+            </div>
+            <button onClick={handleCustomIncrementMana} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Increase Mana by custom value">
+              <FaPlusSquare className="w-3 h-3" />
+            </button>
+            <button onMouseDown={handleIncrementManaStart} onMouseUp={handleIncrementManaEnd} onMouseLeave={handleIncrementManaEnd} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Increase Mana by 1">
+              <FaPlus className="w-3 h-3" />
+            </button>
+            <span className="text-base text-white w-16 text-right">
+              {userData?.stats?.manaCurrent}/{userData?.stats?.manaTotal}
+            </span>
           </div>
-          <button onClick={handleCustomIncrementMana} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Increase Mana by custom value">
-            <FaPlusSquare className="w-3 h-3" />
-          </button>
-          <button onMouseDown={handleIncrementManaStart} onMouseUp={handleIncrementManaEnd} onMouseLeave={handleIncrementManaEnd} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Increase Mana by 1">
-            <FaPlus className="w-3 h-3" />
-          </button>
-          <span className="text-base text-white">
-            {userData?.stats?.manaCurrent}/{userData?.stats?.manaTotal}
-          </span>
         </div>
       </div>
     </div>
