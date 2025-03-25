@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { GiSpellBook, GiMagicSwirl } from "react-icons/gi";
-import { doc, updateDoc, getFirestore } from "firebase/firestore";
+import { doc, updateDoc, getFirestore, getDoc } from "firebase/firestore";
 
 const SpellCard = ({ spellName, spell, userData }) => {
   const [isHovered, setIsHovered] = useState(false);
@@ -11,12 +11,29 @@ const SpellCard = ({ spellName, spell, userData }) => {
   const [successMessage, setSuccessMessage] = useState(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [initialCardRect, setInitialCardRect] = useState(null);
+  const [dadiAnima, setDadiAnima] = useState(null);
   const cardRef = useRef(null);
   const overlayRef = useRef(null);
   // Ref to store the dismissal timeout ID
   const dismissTimeoutRef = useRef(null);
   const hasImage = spell.image_url && spell.image_url.trim() !== "";
   const db = getFirestore();
+
+  // Fetch dadiAnimaByLevel data when component mounts
+  useEffect(() => {
+    const fetchDadiAnima = async () => {
+      try {
+        const dadiRef = doc(db, "utils", "varie");
+        const dadiDoc = await getDoc(dadiRef);
+        if (dadiDoc.exists()) {
+          setDadiAnima(dadiDoc.data().dadiAnimaByLevel || []);
+        }
+      } catch (error) {
+        console.error("Error fetching dadi anima data:", error);
+      }
+    };
+    fetchDadiAnima();
+  }, [db]);
 
   // --- Mana validation logic ---
   const extractManaCost = () => {
@@ -167,6 +184,69 @@ const SpellCard = ({ spellName, spell, userData }) => {
     }
   };
 
+  // Format and calculate TPC values
+  const formatTPC = (tpcData) => {
+    if (!tpcData) return "---";
+    
+    const param1 = tpcData.Param1 || "---";
+    const param2 = tpcData.Param2 || "---";
+    const paramTarget = tpcData.ParamTarget || "---";
+    
+    // If all parameters are "---", return "---"
+    if (param1 === "---" && param2 === "---" && paramTarget === "---") {
+      return "---";
+    }
+    
+    // Get player level and corresponding dadi value
+    const playerLevel = userData?.stats?.level || 1;
+    const dadiValue = dadiAnima && dadiAnima[playerLevel] ? dadiAnima[playerLevel] : "d10";
+    
+    // Get parameter values from user data - fixed to look in the correct location
+    const getParamValue = (param) => {
+      if (param === "---") return null;
+      
+      // Check in Parametri.Base (for stats like Forza, Costituzione, etc.)
+      if (userData?.Parametri?.Base?.[param]) {
+        return {name: param, value: userData.Parametri.Base[param].Tot};
+      }
+      // Check in Parametri.Combattimento (for stats like Attacco, Difesa, etc.)
+      if (userData?.Parametri?.Combattimento?.[param]) {
+        return {name: param, value: userData.Parametri.Combattimento[param].Tot};
+      }
+      return {name: param, value: "?"};
+    };
+    
+    const param1Value = getParamValue(param1);
+    const param2Value = getParamValue(param2);
+    
+    // If only one parameter is defined
+    if ((param1 !== "---" && param2 === "---") || (param1 === "---" && param2 !== "---")) {
+      const activeParam = param1 !== "---" ? param1Value : param2Value;
+      if (!activeParam) return "---";
+      
+      // Format: "Parameter (value) + Anima (dX) VS ParamTarget + Anima"
+      let result = `${activeParam.name} (${activeParam.value}) + Anima (${dadiValue})`;
+      if (paramTarget !== "---") {
+        result += ` VS ${paramTarget} + Anima`;
+      }
+      return result;
+    }
+    
+    // If both parameters are defined, use the higher value
+    if (param1 !== "---" && param2 !== "---" && param1Value && param2Value) {
+      const highParam = param1Value.value > param2Value.value ? param1Value : param2Value;
+      
+      // Format with max value
+      let result = `MAX(${param1Value.name}, ${param2Value.name}) → ${highParam.name} (${highParam.value}) + Anima (${dadiValue})`;
+      if (paramTarget !== "---") {
+        result += ` VS ${paramTarget} + Anima`;
+      }
+      return result;
+    }
+    
+    return "---";
+  };
+
   return (
     <div
       className="relative rounded-md aspect-square transition-all duration-300"
@@ -248,20 +328,24 @@ const SpellCard = ({ spellName, spell, userData }) => {
             </div>
           )}
           <div className="p-4 h-full flex flex-col relative z-10">
-            <h3 className="text-lg text-white font-bold mb-3 text-center border-b border-gray-600 pb-2">
+            <h3 className="text-lg text-white font-bold mb-3 text-center border-b border-gray-600 pb-2 relative">
               {spell.Nome || spellName}
+              {/* Small Tipo Base at center top */}
+              <span className="absolute left-0 right-0 -top-3 text-xs text-gray-300 text-center">
+                {spell["Tipo Base"]}
+              </span>
             </h3>
-            <div className="grid grid-cols-2 gap-2 mb-2">
+            <div className="grid grid-cols-3 gap-2 mb-2">
               <div className="bg-black/50 p-2 rounded">
                 <p className="text-indigo-300 font-bold text-sm">Costo</p>
                 <p className="text-gray-200">{spell.Costo}</p>
               </div>
-              <div className="bg-black/50 p-2 rounded">
-                <p className="text-indigo-300 font-bold text-sm">Tipo</p>
-                <p className="text-gray-200">{spell["Tipo Base"]}</p>
+              <div className="bg-black/50 p-2 rounded col-span-2">
+                <p className="text-indigo-300 font-bold text-sm">Esperienza</p>
+                <p className="text-gray-200">{spell.Esperienza || "---"}</p>
               </div>
             </div>
-            <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto mb-4">
+            <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto mb-2">
               {spell["Effetti Positivi"] && (
                 <div className="mb-2">
                   <p className="text-green-300 font-bold text-sm mb-1">Effetti Positivi</p>
@@ -269,11 +353,61 @@ const SpellCard = ({ spellName, spell, userData }) => {
                 </div>
               )}
               {spell["Effetti Negativi"] && (
-                <div>
+                <div className="mb-2">
                   <p className="text-red-300 font-bold text-sm mb-1">Effetti Negativi</p>
                   <p className="text-gray-200 text-sm">{spell["Effetti Negativi"]}</p>
                 </div>
               )}
+              
+              {/* Mod Params section - only show non-zero values */}
+              {spell["Mod Params"] && (
+                <div className="mt-2">
+                  <p className="text-indigo-300 font-bold text-sm mb-1">Modificatori</p>
+                  <div className="grid grid-cols-2 gap-1 text-xs">
+                    {/* Base parameters */}
+                    {spell["Mod Params"]?.Base && Object.entries(spell["Mod Params"].Base)
+                      .filter(([_, value]) => value !== 0)
+                      .map(([param, value]) => (
+                        <div key={`base-${param}`} className="flex justify-between bg-black/30 p-1 rounded">
+                          <span className="text-gray-300">{param}</span>
+                          <span className={value > 0 ? "text-green-400" : "text-red-400"}>
+                            {value > 0 ? `+${value}` : value}
+                          </span>
+                        </div>
+                      ))}
+                    
+                    {/* Combat parameters */}
+                    {spell["Mod Params"]?.Combattimento && Object.entries(spell["Mod Params"].Combattimento)
+                      .filter(([_, value]) => value !== 0)
+                      .map(([param, value]) => (
+                        <div key={`combat-${param}`} className="flex justify-between bg-black/30 p-1 rounded">
+                          <span className="text-gray-300">{param}</span>
+                          <span className={value > 0 ? "text-green-400" : "text-red-400"}>
+                            {value > 0 ? `+${value}` : value}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* TPC sections */}
+              <div className="mt-3">
+                <div className="mb-1">
+                  <p className="text-yellow-300 font-bold text-sm">TPC</p>
+                  <p className="text-gray-200 text-xs">{formatTPC(spell.TPC)}</p>
+                </div>
+                
+                <div className="mb-1">
+                  <p className="text-yellow-300 font-bold text-sm">TPC Fisico</p>
+                  <p className="text-gray-200 text-xs">{formatTPC(spell["TPC Fisico"])}</p>
+                </div>
+                
+                <div>
+                  <p className="text-yellow-300 font-bold text-sm">TPC Mentale</p>
+                  <p className="text-gray-200 text-xs">{formatTPC(spell["TPC Mentale"])}</p>
+                </div>
+              </div>
             </div>
             
             {/* Add Cast Spell button in expanded view */}
@@ -377,3 +511,4 @@ const SpellSide = ({ personalSpells = {}, userData = {} }) => {
 };
 
 export default SpellSide;
+
