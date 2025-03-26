@@ -132,6 +132,16 @@ const Navbar = ({ imageUrl: propImageUrl, userData: propUserData }) => {
           Bazaar
         </button>
         <button
+          onClick={() => navigate("/combat")}
+          className={`px-4 py-2 rounded-md transition-colors ${
+            isActive("/combat")
+              ? "bg-[#FFA500] text-white"
+              : "bg-transparent text-white hover:bg-[#e69500]"
+          }`}
+        >
+          Combat
+        </button>
+        <button
           onClick={() => navigate("/tecniche-spell")}
           className={`px-4 py-2 rounded-md transition-colors ${
             isActive("/tecniche-spell")
@@ -139,7 +149,7 @@ const Navbar = ({ imageUrl: propImageUrl, userData: propUserData }) => {
               : "bg-transparent text-white hover:bg-[#e69500]"
           }`}
         >
-          Tecniche/Spell
+          Tecniche | Spell
         </button>
         {userData?.role === "dm" && (
           <button

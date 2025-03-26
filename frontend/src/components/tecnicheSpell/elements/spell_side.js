@@ -236,12 +236,11 @@ const SpellCard = ({ spellName, spell, userData }) => {
     if (param1 !== "---" && param2 !== "---" && param1Value && param2Value) {
       const highParam = param1Value.value > param2Value.value ? param1Value : param2Value;
       
-      // Format with max value
-      let result = `MAX(${param1Value.name}, ${param2Value.name}) → ${highParam.name} (${highParam.value}) + Anima (${dadiValue})`;
-      if (paramTarget !== "---") {
-        result += ` VS ${paramTarget} + Anima`;
-      }
-      return result;
+      // Format with max value split in two lines
+      return {
+        line1: `MAX(${param1Value.name}, ${param2Value.name})`,
+        line2: `${highParam.name} (${highParam.value}) + Anima (${dadiValue})${paramTarget !== "---" ? ` VS ${paramTarget} + Anima` : ''}`
+      };
     }
     
     return "---";
@@ -395,17 +394,38 @@ const SpellCard = ({ spellName, spell, userData }) => {
               <div className="mt-3">
                 <div className="mb-1">
                   <p className={`text-yellow-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'}`}>TPC</p>
-                  <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell.TPC)}</p>
+                  {typeof formatTPC(spell.TPC) === 'object' ? (
+                    <>
+                      <p className={`text-gray-400 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell.TPC).line1}</p>
+                      <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell.TPC).line2}</p>
+                    </>
+                  ) : (
+                    <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell.TPC)}</p>
+                  )}
                 </div>
                 
                 <div className="mb-1">
                   <p className={`text-yellow-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'}`}>TPC Fisico</p>
-                  <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell["TPC Fisico"])}</p>
+                  {typeof formatTPC(spell["TPC Fisico"]) === 'object' ? (
+                    <>
+                      <p className={`text-gray-400 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell["TPC Fisico"]).line1}</p>
+                      <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell["TPC Fisico"]).line2}</p>
+                    </>
+                  ) : (
+                    <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell["TPC Fisico"])}</p>
+                  )}
                 </div>
                 
                 <div>
                   <p className={`text-yellow-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'}`}>TPC Mentale</p>
-                  <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell["TPC Mentale"])}</p>
+                  {typeof formatTPC(spell["TPC Mentale"]) === 'object' ? (
+                    <>
+                      <p className={`text-gray-400 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell["TPC Mentale"]).line1}</p>
+                      <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell["TPC Mentale"]).line2}</p>
+                    </>
+                  ) : (
+                    <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell["TPC Mentale"])}</p>
+                  )}
                 </div>
               </div>
             </div>
@@ -511,3 +531,4 @@ const SpellSide = ({ personalSpells = {}, userData = {} }) => {
 };
 
 export default SpellSide;
+
