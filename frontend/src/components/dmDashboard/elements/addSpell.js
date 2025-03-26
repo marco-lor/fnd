@@ -28,6 +28,7 @@ export function AddSpellOverlay({ userId, onClose }) {
           let initialData = {
             Nome: "",
             Costo: 0,
+            Turni: 0,
             "Effetti Positivi": "",
             "Effetti Negativi": "",
             Esperienza: schemaData.Esperienza && Array.isArray(schemaData.Esperienza) ? schemaData.Esperienza[0] : "",
@@ -126,6 +127,7 @@ export function AddSpellOverlay({ userId, onClose }) {
       let spellData = {
         Nome: spellFormData.Nome || "",
         Costo: parseInt(spellFormData.Costo) || 0,
+        Turni: parseInt(spellFormData.Turni) || 0,
         "Effetti Positivi": spellFormData["Effetti Positivi"] || "",
         "Effetti Negativi": spellFormData["Effetti Negativi"] || "",
         Esperienza: spellFormData.Esperienza || "",
@@ -241,7 +243,7 @@ export function AddSpellOverlay({ userId, onClose }) {
         <form onSubmit={(e) => { e.preventDefault(); handleSaveSpell(); }}>
           {schema ? (
             <div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                 <div>
                   <label className="block text-white mb-1">Nome</label>
                   <input
@@ -261,6 +263,17 @@ export function AddSpellOverlay({ userId, onClose }) {
                     onChange={(e) => setSpellFormData({ ...spellFormData, Costo: e.target.value })}
                     className="w-full p-2 rounded bg-gray-700 text-white"
                     placeholder="Inserisci costo"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-white mb-1">Turni</label>
+                  <input
+                    type="number"
+                    value={spellFormData.Turni || ''}
+                    onChange={(e) => setSpellFormData({ ...spellFormData, Turni: e.target.value })}
+                    className="w-full p-2 rounded bg-gray-700 text-white"
+                    placeholder="Inserisci numero di turni"
                   />
                 </div>
               </div>

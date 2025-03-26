@@ -29,6 +29,7 @@ export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
           setSpellFormData({
             Nome: spellName,
             Costo: parseInt(spellData.Costo) || 0,
+            Turni: parseInt(spellData.Turni) || 0,
             "Effetti Positivi": spellData["Effetti Positivi"] || "",
             "Effetti Negativi": spellData["Effetti Negativi"] || "",
             Esperienza: spellData.Esperienza || "",
@@ -134,6 +135,7 @@ export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
       let updatedSpellData = {
         Nome: spellFormData.Nome || "",
         Costo: parseInt(spellFormData.Costo) || 0,
+        Turni: parseInt(spellFormData.Turni) || 0,
         "Effetti Positivi": spellFormData["Effetti Positivi"] || "",
         "Effetti Negativi": spellFormData["Effetti Negativi"] || "",
         Esperienza: spellFormData.Esperienza || "",
@@ -290,7 +292,7 @@ export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
           <form onSubmit={(e) => { e.preventDefault(); setShowConfirmation(true); }}>
             {schema ? (
               <div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                   <div>
                     <label className="block text-white mb-1">Nome</label>
                     <input
@@ -310,6 +312,17 @@ export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
                       onChange={(e) => setSpellFormData({ ...spellFormData, Costo: e.target.value })}
                       className="w-full p-2 rounded bg-gray-700 text-white"
                       placeholder="Inserisci costo"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-white mb-1">Turni</label>
+                    <input
+                      type="number"
+                      value={spellFormData.Turni || ''}
+                      onChange={(e) => setSpellFormData({ ...spellFormData, Turni: e.target.value })}
+                      className="w-full p-2 rounded bg-gray-700 text-white"
+                      placeholder="Inserisci numero di turni"
                     />
                   </div>
                 </div>
