@@ -161,8 +161,8 @@ const SpellCard = ({ spellName, spell, userData }) => {
         top: "50%",
         left: "50%",
         transform: "translate(-50%, -50%)",
-        width: "420px",
-        height: "450px",
+        width: "520px",  // Increased from 420px
+        height: "560px", // Increased from 450px
         background: "rgba(10,10,20,0.97)",
         backdropFilter: "blur(4px)",
         boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
@@ -328,49 +328,49 @@ const SpellCard = ({ spellName, spell, userData }) => {
             </div>
           )}
           <div className="p-4 h-full flex flex-col relative z-10">
-            <h3 className="text-lg text-white font-bold mb-3 text-center border-b border-gray-600 pb-2 relative">
+            <h3 className={`${isExpanded ? 'text-2xl' : 'text-lg'} text-white font-bold mb-3 text-center border-b border-gray-600 pb-2 relative`}>
               {spell.Nome || spellName}
               {/* Small Tipo Base at center top */}
-              <span className="absolute left-0 right-0 -top-3 text-xs text-gray-300 text-center">
+              <span className={`absolute left-0 right-0 -top-3 ${isExpanded ? 'text-sm' : 'text-xs'} text-gray-300 text-center`}>
                 {spell["Tipo Base"]}
               </span>
             </h3>
             <div className="grid grid-cols-3 gap-2 mb-2">
               <div className="bg-black/50 p-2 rounded">
-                <p className="text-indigo-300 font-bold text-sm">Costo</p>
-                <p className="text-gray-200">{spell.Costo}</p>
+                <p className={`text-indigo-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'}`}>Costo</p>
+                <p className={`text-gray-200 ${isExpanded ? 'text-base' : 'text-sm'}`}>{spell.Costo}</p>
               </div>
               <div className="bg-black/50 p-2 rounded col-span-2">
-                <p className="text-indigo-300 font-bold text-sm">Esperienza</p>
-                <p className="text-gray-200">{spell.Esperienza || "---"}</p>
+                <p className={`text-indigo-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'}`}>Esperienza</p>
+                <p className={`text-gray-200 ${isExpanded ? 'text-base' : 'text-sm'}`}>{spell.Esperienza || "---"}</p>
               </div>
             </div>
             <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto mb-2">
               {spell["Effetti Positivi"] && (
                 <div className="mb-2">
-                  <p className="text-green-300 font-bold text-sm mb-1">Effetti Positivi</p>
-                  <p className="text-gray-200 text-sm">{spell["Effetti Positivi"]}</p>
+                  <p className={`text-green-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'} mb-1`}>Effetti Positivi</p>
+                  <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{spell["Effetti Positivi"]}</p>
                 </div>
               )}
               {spell["Effetti Negativi"] && (
                 <div className="mb-2">
-                  <p className="text-red-300 font-bold text-sm mb-1">Effetti Negativi</p>
-                  <p className="text-gray-200 text-sm">{spell["Effetti Negativi"]}</p>
+                  <p className={`text-red-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'} mb-1`}>Effetti Negativi</p>
+                  <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{spell["Effetti Negativi"]}</p>
                 </div>
               )}
               
               {/* Mod Params section - only show non-zero values */}
               {spell["Mod Params"] && (
                 <div className="mt-2">
-                  <p className="text-indigo-300 font-bold text-sm mb-1">Modificatori</p>
-                  <div className="grid grid-cols-2 gap-1 text-xs">
+                  <p className={`text-indigo-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'} mb-1`}>Modificatori</p>
+                  <div className="grid grid-cols-2 gap-1">
                     {/* Base parameters */}
                     {spell["Mod Params"]?.Base && Object.entries(spell["Mod Params"].Base)
                       .filter(([_, value]) => value !== 0)
                       .map(([param, value]) => (
                         <div key={`base-${param}`} className="flex justify-between bg-black/30 p-1 rounded">
-                          <span className="text-gray-300">{param}</span>
-                          <span className={value > 0 ? "text-green-400" : "text-red-400"}>
+                          <span className={`text-gray-300 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{param}</span>
+                          <span className={`${value > 0 ? "text-green-400" : "text-red-400"} ${isExpanded ? 'text-sm' : 'text-xs'}`}>
                             {value > 0 ? `+${value}` : value}
                           </span>
                         </div>
@@ -381,8 +381,8 @@ const SpellCard = ({ spellName, spell, userData }) => {
                       .filter(([_, value]) => value !== 0)
                       .map(([param, value]) => (
                         <div key={`combat-${param}`} className="flex justify-between bg-black/30 p-1 rounded">
-                          <span className="text-gray-300">{param}</span>
-                          <span className={value > 0 ? "text-green-400" : "text-red-400"}>
+                          <span className={`text-gray-300 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{param}</span>
+                          <span className={`${value > 0 ? "text-green-400" : "text-red-400"} ${isExpanded ? 'text-sm' : 'text-xs'}`}>
                             {value > 0 ? `+${value}` : value}
                           </span>
                         </div>
@@ -394,18 +394,18 @@ const SpellCard = ({ spellName, spell, userData }) => {
               {/* TPC sections */}
               <div className="mt-3">
                 <div className="mb-1">
-                  <p className="text-yellow-300 font-bold text-sm">TPC</p>
-                  <p className="text-gray-200 text-xs">{formatTPC(spell.TPC)}</p>
+                  <p className={`text-yellow-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'}`}>TPC</p>
+                  <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell.TPC)}</p>
                 </div>
                 
                 <div className="mb-1">
-                  <p className="text-yellow-300 font-bold text-sm">TPC Fisico</p>
-                  <p className="text-gray-200 text-xs">{formatTPC(spell["TPC Fisico"])}</p>
+                  <p className={`text-yellow-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'}`}>TPC Fisico</p>
+                  <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell["TPC Fisico"])}</p>
                 </div>
                 
                 <div>
-                  <p className="text-yellow-300 font-bold text-sm">TPC Mentale</p>
-                  <p className="text-gray-200 text-xs">{formatTPC(spell["TPC Mentale"])}</p>
+                  <p className={`text-yellow-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'}`}>TPC Mentale</p>
+                  <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell["TPC Mentale"])}</p>
                 </div>
               </div>
             </div>
@@ -414,7 +414,7 @@ const SpellCard = ({ spellName, spell, userData }) => {
             {isExpanded && (
               <button
                 onClick={handleUseSpell}
-                className="w-full py-3 bg-indigo-700 hover:bg-indigo-600 text-white rounded-md transition-colors flex items-center justify-center"
+                className="w-full py-3 bg-indigo-700 hover:bg-indigo-600 text-white rounded-md transition-colors flex items-center justify-center text-lg"
               >
                 <GiMagicSwirl className="mr-2" /> Lancia Incantesimo
               </button>
@@ -511,4 +511,3 @@ const SpellSide = ({ personalSpells = {}, userData = {} }) => {
 };
 
 export default SpellSide;
-
