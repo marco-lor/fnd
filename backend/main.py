@@ -1,7 +1,18 @@
 # file: ./backend/main.py
+# C:\ProgramData\miniconda3\envs\fatins\Scripts\uvicorn.exe main:app --reload --host 127.0.0.1 --port 8000
 from firebase_conn import db
 from fast_api import app
 import uvicorn
+import json
+from google.cloud.firestore_v1.types.document import Document
+from google.api_core.datetime_helpers import DatetimeWithNanoseconds
+
+# Classe personalizzata per la serializzazione JSON degli oggetti Firebase
+class FirestoreEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, DatetimeWithNanoseconds):
+            return obj.isoformat()  # Converte il timestamp in una stringa ISO
+        return super().default(obj)
 
 @app.get("/")
 def read_root():
@@ -28,51 +39,91 @@ def add_character(character: dict):
     return {"status": "success", "id": doc_ref.id}
 
 # Optional: Interactive Firebase Testing
-def crea_params():
-    # selected_document = db.collection('users').document('DOwwzU7WDwSk84LA4gzOu4YskNI3').get()
-    # if selected_document.exists:
-    #     print("Document data:", selected_document.to_dict())
-    #     doc_data = selected_document.to_dict()
-    # else:
-    #     print("No such document!")
+def run_call(path: str = 'users/TQAmmVfIpOeNiRflXKSeL1NX2ak2'):
+    """
+    Retrieve and print the structure of a document at the specified Firestore path.
+    
+    Args:
+        path (str): The path to the Firestore document (e.g., 'users/OgVlbkriGFdtUu1WEkP8OCaXyKL2')
+    """
+    try:
+        # Get the specific document
+        doc_ref = db.document(path)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            print(f"Document at {path} not found")
+            return None
+        
+        # Get the document data
+        doc_data = doc.to_dict()
+        
+        # Print the document structure in a formatted way
+        print(f"\nStructure of document at {path}:")
+        print("-----------------------------------")
+        formatted_json = json.dumps(doc_data, indent=2, cls=FirestoreEncoder)  # Utilizzo dell'encoder personalizzato
+        print(formatted_json)
+        print("-----------------------------------")
+        
+        return doc_data
+    except Exception as e:
+        print(f"Error retrieving document: {str(e)}")
+        return None
 
-    # Read all document IDs
-    selected_collection = db.collection('users').stream()
-    uids = {doc.id for doc in selected_collection}
-
-    print("Characters in Database:", uids)
-
-    # Add "Parametri Base" field to each user
-    for uid in uids:
-        user_ref = db.collection('users').document(uid)
-        user_ref.update({
-            "Parametri": {
-                "Base": {
-                    "Forza": {'Base': 0, 'Anima': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
-                    "Destrezza": {'Base': 0, 'Anima': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
-                    "Costituzione": {'Base': 0, 'Anima': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
-                    "Saggezza": {'Base': 0, 'Anima': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
-                    "Intelligenza": {'Base': 0, 'Anima': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
-                    "Fortuna": {'Base': 0, 'Anima': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
-                    },
-                "Combattimento": {
-                    "Salute": {'Base': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
-                    "Mira": {'Base': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
-                    "Attacco": {'Base': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
-                    "Critico": {'Base': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
-                    "Difesa": {'Base': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
-                    "RiduzioneDanni": {'Base': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
-                    "Disciplina": {'Base': 0, 'Equip': 0, 'Mod': 0, 'Tot': 0},
-                    },
-                }
-        })
-        print(f"Updated user {uid} with Parametri Base")
-
+def everything_to_json():
+    """
+    Retrieve all collections and all documents from Firestore and return them as a JSON structure.
+    
+    Returns:
+        dict: A dictionary containing all Firestore data organized by collections
+    """
+    try:
+        result = {}
+        
+        # Get all collections
+        collections = db.collections()
+        
+        print("\nRetrieving all Firestore data:")
+        print("-----------------------------------")
+        
+        # For each collection
+        for collection in collections:
+            collection_name = collection.id
+            result[collection_name] = {}
+            
+            # Get all documents in this collection
+            docs = collection.stream()
+            
+            for doc in docs:
+                doc_id = doc.id
+                doc_data = doc.to_dict()
+                result[collection_name][doc_id] = doc_data
+                
+        # Format and print the full database structure
+        formatted_json = json.dumps(result, indent=2, cls=FirestoreEncoder)  # Utilizzo dell'encoder personalizzato
+        print(formatted_json)
+        print("-----------------------------------")
+        
+        return result
+    except Exception as e:
+        print(f"Error retrieving Firestore data: {str(e)}")
+        return {"error": str(e)}
 
 @app.get("/test-endpoint")
-def test_endpoint():
-    crea_params()
-    return {"message": "API Call Successful! Pippo"}
+def test_endpoint(path: str = None):
+    if path:
+        result = run_call(path)
+    else:
+        result = run_call()
+    return {"message": "API Call Successful!", "data": result}
+
+@app.get("/all-data")
+def get_all_data():
+    """
+    Endpoint to retrieve all data from all collections in Firestore.
+    """
+    result = everything_to_json()
+    return {"message": "All Firestore data retrieved", "data": result}
 
 # Run Uvicorn server only if the script is executed directly
 if __name__ == "__main__":
@@ -80,3 +131,4 @@ if __name__ == "__main__":
     test_endpoint()  # Test the Firebase connection
     print("Firebase Connection Successful!")
     uvicorn.run(app, host="127.0.0.1", port=8000, reload=True)
+

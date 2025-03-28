@@ -48,6 +48,17 @@ function Home() {
     }
   };
 
+  // List Everything API Call handler
+  const handleListEverythingClick = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/all-data`);
+      const data = await response.json();
+      console.log("All Data Response:", data);
+    } catch (error) {
+      console.error("API request failed:", error);
+    }
+  };
+
   if (!user) {
     return <p>Loading...</p>;
   }
@@ -60,16 +71,21 @@ function Home() {
         <main className="flex flex-col items-center justify-center p-5">
           {/* Render Test API button only if user role is webmaster */}
           {userData?.role === "webmaster" && (
-            <div className="mb-5">
+            <div className="mb-5 flex gap-3">
               <button
                 className="bg-[#007BFF] text-white text-lg py-2 px-4 rounded-[8px] cursor-pointer transition-colors duration-300 hover:bg-[#0056b3]"
                 onClick={handleTestButtonClick}
               >
                 Test API Call
               </button>
+              <button
+                className="bg-[#28a745] text-white text-lg py-2 px-4 rounded-[8px] cursor-pointer transition-colors duration-300 hover:bg-[#218838]"
+                onClick={handleListEverythingClick}
+              >
+                List Everything
+              </button>
             </div>
           )}
-          {/* Insert the StatsBars component here */}
           <div className="mb-5 w-full max-w-[1200px]">
             <StatsBars />
           </div>
