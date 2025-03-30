@@ -72,7 +72,8 @@ def run_call(path: str = 'users/TQAmmVfIpOeNiRflXKSeL1NX2ak2'):
 
 def everything_to_json():
     """
-    Retrieve all collections and all documents from Firestore and return them as a JSON structure.
+    Retrieve all collections and all documents from Firestore, but for the 'users' collection
+    only include the document with ID 'TQAmmVfIpOeNiRflXKSeL1NX2ak2'.
     
     Returns:
         dict: A dictionary containing all Firestore data organized by collections
@@ -91,16 +92,23 @@ def everything_to_json():
             collection_name = collection.id
             result[collection_name] = {}
             
-            # Get all documents in this collection
-            docs = collection.stream()
-            
-            for doc in docs:
-                doc_id = doc.id
-                doc_data = doc.to_dict()
-                result[collection_name][doc_id] = doc_data
+            if collection_name == "users":
+                # For the users collection, only get the specific user
+                specific_doc_id = "TQAmmVfIpOeNiRflXKSeL1NX2ak2"
+                doc = collection.document(specific_doc_id).get()
+                if doc.exists:
+                    doc_data = doc.to_dict()
+                    result[collection_name][specific_doc_id] = doc_data
+            else:
+                # For all other collections, get all documents
+                docs = collection.stream()
+                for doc in docs:
+                    doc_id = doc.id
+                    doc_data = doc.to_dict()
+                    result[collection_name][doc_id] = doc_data
                 
         # Format and print the full database structure
-        formatted_json = json.dumps(result, indent=2, cls=FirestoreEncoder)  # Utilizzo dell'encoder personalizzato
+        formatted_json = json.dumps(result, indent=2, cls=FirestoreEncoder)
         print(formatted_json)
         print("-----------------------------------")
         
@@ -131,4 +139,3 @@ if __name__ == "__main__":
     test_endpoint()  # Test the Firebase connection
     print("Firebase Connection Successful!")
     uvicorn.run(app, host="127.0.0.1", port=8000, reload=True)
-
