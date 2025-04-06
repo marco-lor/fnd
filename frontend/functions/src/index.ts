@@ -12,8 +12,16 @@ import * as admin from "firebase-admin";
 import {updateHpTotal} from "./updateHpTotal";
 import {updateManaTotal} from "./updateManaTotal";
 import {updateTotParameters} from "./updateTotParameters";
+// Import the new function
+import {spendCharacterPoint} from "./spendCharacterPoint";
 
 admin.initializeApp();
 
 // Ri-esporta le funzioni affinché Firebase le distribuisca tutte.
-export {updateHpTotal, updateManaTotal, updateTotParameters};
+export {
+  updateHpTotal,
+  updateManaTotal,
+  updateTotParameters,
+  // Export the new function
+  spendCharacterPoint,
+};
