@@ -63,7 +63,7 @@ export const updateManaTotal = onDocumentUpdated(
       const manaMultiplier = manaMultByLevel[levelKey] || 7;
 
       // Calculate manaTotal using the correct multiplier
-      const manaTotal = manaMultiplier * currentDisciplinaTot + 12;
+      const manaTotal = manaMultiplier * currentDisciplinaTot + 5;
 
       // Update the user's document with the new manaTotal
       return admin.firestore().doc(`users/${userId}`).update({

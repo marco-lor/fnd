@@ -61,7 +61,7 @@ export const updateHpTotal = onDocumentUpdated(
       const hpMultiplier = hpMultByLevel[levelKey] || 5;
 
       // Calculate hpTotal using the correct multiplier
-      const hpTotal = hpMultiplier * currentSaluteTot + 12;
+      const hpTotal = hpMultiplier * currentSaluteTot + 8;
 
       // Update the user's document with the new hpTotal
       return admin.firestore().doc(`users/${userId}`).update({
