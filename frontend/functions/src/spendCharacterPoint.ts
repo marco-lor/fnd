@@ -1,24 +1,19 @@
-// Import v2 specific modules for HTTPS callable functions and errors
+// file: ./functions/src/spendCharacterPoint.ts
+
 import {
   onCall,
   HttpsError,
   CallableRequest,
 } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
-// If you plan to use structured logging, uncomment the next line
 // import * as logger from "firebase-functions/logger";
 
-// Do NOT initialize Firebase Admin here because it's already initialized
-// in index.ts.
-
-// Define the expected input data structure for type safety
 interface SpendPointData {
   statName: string;
-  statType: "Base" | "Combat";
+  statType: "Base" | "Combat"; // Input type remains the same
   change: 1 | -1;
 }
 
-// Define the structure of the combat stat costs in utils
 interface CombatStatCosts {
   [key: string]: number;
   Salute: number;
@@ -30,31 +25,30 @@ interface CombatStatCosts {
   Disciplina: number;
 }
 
-// Define the minimum allowed base value for a stat (adjust if needed)
 const MINIMUM_STAT_BASE_VALUE = 0;
 
-// Define the function using the v2 'onCall' syntax
 export const spendCharacterPoint = onCall(
   {
-    region: "europe-west8", // Specify region in the options object
-    // Add other options like memory, timeoutSeconds if needed
-    // memory: "256MiB",
-    // timeoutSeconds: 60,
+    region: "us-central1", // Or "europe-west8" if you changed it back
   },
   async (request: CallableRequest<SpendPointData>) => {
-    // 1. Authentication Check (uses request.auth in v2)
     if (!request.auth) {
-      // Use HttpsError directly (imported from v2/https)
       throw new HttpsError(
         "unauthenticated",
         "The function must be called while authenticated."
       );
     }
     const uid = request.auth.uid;
+    const {statName, statType, change} = request.data;
 
-    // 2. Input Validation (uses request.data in v2)
-    const {statName, statType, change} = request.data; // Destructure
-    const isValidStatType = statType === "Base" || statType === "Combat";
+    // Determine the correct Firestore key based on input statType
+    // *** THIS IS THE KEY CHANGE ***
+    // eslint-disable-next-line max-len
+    const firestoreStatTypeKey = statType === "Combat" ? "Combattimento" : "Base";
+    // *** END KEY CHANGE ***
+
+    // eslint-disable-next-line max-len
+    const isValidStatType = statType === "Base" || statType === "Combat"; // Keep input validation as is
     const isValidChange = change === 1 || change === -1;
 
     // eslint-disable-next-line max-len
@@ -66,13 +60,11 @@ export const spendCharacterPoint = onCall(
       );
     }
 
-    // 3. Firestore References
     const db = admin.firestore();
     const userDocRef = db.collection("users").doc(uid);
     const utilsDocRef = db.collection("utils").doc("varie");
 
     try {
-      // 4. Fetch Utils Data (Costs)
       const utilsDocSnap = await utilsDocRef.get();
       if (!utilsDocSnap.exists) {
         throw new HttpsError(
@@ -81,7 +73,6 @@ export const spendCharacterPoint = onCall(
         );
       }
       const utilsData = utilsDocSnap.data();
-      // Use optional chaining and nullish coalescing for safer access
       const combatStatCosts = utilsData?.cost_params_combat as
         | CombatStatCosts
         | undefined;
@@ -94,7 +85,6 @@ export const spendCharacterPoint = onCall(
         );
       }
 
-      // 5. Run Transaction
       await db.runTransaction(async (transaction) => {
         const userDocSnap = await transaction.get(userDocRef);
         if (!userDocSnap.exists) {
@@ -105,37 +95,62 @@ export const spendCharacterPoint = onCall(
           throw new HttpsError("internal", "User data is missing.");
         }
 
-        // 6. Get Current Values
+        // --- Revised Step 6: Use the correct Firestore key ---
         const currentStats = userData.stats;
         const currentParams = userData.Parametri;
-        const currentParamBase = currentParams?.[statType]?.[statName]?.Base;
 
-        // More robust check for nested properties
-        if (!currentStats || currentParamBase === undefined) {
+        if (!currentStats) {
+          throw new HttpsError("internal", "User 'stats' object is missing.");
+        }
+        if (!currentParams) {
+          // eslint-disable-next-line max-len
+          throw new HttpsError("internal", "User 'Parametri' object is missing.");
+        }
+        // Use the determined Firestore key here
+        const statTypeObject = currentParams[firestoreStatTypeKey];
+        if (!statTypeObject) {
           throw new HttpsError(
             "internal",
-            `Stat data for Parametri.${statType}.${statName}.Base ` +
-              "is missing or not structured correctly."
+            // Use the correct key in the error message too
+            `User 'Parametri.${firestoreStatTypeKey}' object is missing.`
           );
         }
+        const specificStatObject = statTypeObject[statName];
+        if (!specificStatObject) {
+          throw new HttpsError(
+            "internal",
+            // Use the correct key in the error message too
+            // eslint-disable-next-line max-len
+            `User 'Parametri.${firestoreStatTypeKey}.${statName}' object is missing.`
+          );
+        }
+        const currentParamBase = specificStatObject.Base;
+        if (currentParamBase === undefined || currentParamBase === null) {
+          throw new HttpsError(
+            "internal",
+            // Use the correct key in the error message too
+            // eslint-disable-next-line max-len
+            `Value for Parametri.${firestoreStatTypeKey}.${statName}.Base is missing (undefined or null).`
+          );
+        }
+        // --- End Revised Step 6 ---
 
-        const currentBaseValue = Number(currentParamBase) || 0;
+        const currentBaseValue = Number(currentParamBase);
         let availablePoints: number;
         let cost: number;
         let availablePointsField: string;
         let spentPointsField: string;
 
-        // 7. Determine Point Type and Cost
+        // eslint-disable-next-line max-len
+        // 7. Determine Point Type and Cost (No change needed here, uses input statType)
         if (statType === "Base") {
-          cost = 1; // Base stats cost 1 point
+          cost = 1;
           availablePoints = Number(currentStats.basePointsAvailable) || 0;
           availablePointsField = "stats.basePointsAvailable";
           spentPointsField = "stats.basePointsSpent";
-        } else {
-          // Combat stats
+        } else { // statType === "Combat"
           cost = combatStatCosts[statName];
           if (cost === undefined) {
-            // Check if the key exists in the fetched costs
             throw new HttpsError(
               "invalid-argument",
               `Invalid or unconfigured combat stat name: ${statName}. ` +
@@ -147,71 +162,58 @@ export const spendCharacterPoint = onCall(
           spentPointsField = "stats.combatTokensSpent";
         }
 
-        // 8. Validate Change
+        // 8. Validate Change (Same as before)
         if (change === 1) {
-          // Increasing stat
           if (availablePoints < cost) {
             const pointsNoun = statType === "Base" ? "points" : "tokens";
             throw new HttpsError(
               "resource-exhausted",
-              `Insufficient ${pointsNoun}. ` +
-                `Need ${cost}, have ${availablePoints}.`
+              // eslint-disable-next-line max-len
+              `Insufficient ${pointsNoun}. Need ${cost}, have ${availablePoints}.`
             );
           }
         } else {
-          // Decreasing stat (change === -1)
           if (currentBaseValue <= MINIMUM_STAT_BASE_VALUE) {
             throw new HttpsError(
               "failed-precondition",
-              `Cannot decrease ${statName} below ${MINIMUM_STAT_BASE_VALUE}. ` +
-                `Current base value is ${currentBaseValue}.`
+              // eslint-disable-next-line max-len
+              `Cannot decrease ${statName} below ${MINIMUM_STAT_BASE_VALUE}. Current base value is ${currentBaseValue}.`
             );
           }
-          // Cost is effectively the amount refunded when decreasing
         }
 
-        // 9. Prepare Updates
+        // 9. Prepare Updates (Use the correct Firestore key in path)
         const newBaseValue = currentBaseValue + change;
-        // Cost deducted if +1, refunded if -1
         const pointsChange = cost * change;
-
         const updateData: { [key: string]: any } = {};
-        const statPath = `Parametri.${statType}.${statName}.Base`;
-        // Use FieldValue for atomic increments/decrements
+        // Use the determined Firestore key here
+        const statPath = `Parametri.${firestoreStatTypeKey}.${statName}.Base`;
         updateData[statPath] = newBaseValue;
-        updateData[availablePointsField] =
-          admin.firestore.FieldValue.increment(-pointsChange);
-        updateData[spentPointsField] =
-          admin.firestore.FieldValue.increment(pointsChange);
+        // eslint-disable-next-line max-len
+        updateData[availablePointsField] = admin.firestore.FieldValue.increment(-pointsChange);
+        // eslint-disable-next-line max-len
+        updateData[spentPointsField] = admin.firestore.FieldValue.increment(pointsChange);
 
-        // 10. Apply Updates within Transaction
+        // 10. Apply Updates within Transaction (Same as before)
         transaction.update(userDocRef, updateData);
       }); // End Transaction
 
-      // 11. Return Success
-      // logger.info(
-      //   `Success: ${statType}.${statName} user ${uid} change ${change}.`
-      // );
+      // 11. Return Success (Same as before)
       return {
         success: true,
         message: `Successfully updated ${statType}.${statName}.`,
       };
     } catch (error: any) {
-      // Log the error for debugging
-      // logger.error(`Error updating stat for user ${uid}:`, error);
-
-      // Re-throw HttpsError or wrap other errors
+      // eslint-disable-next-line max-len
+      console.error("Error in spendCharacterPoint transaction:", error); // Log the actual error server-side
       if (error instanceof HttpsError) {
         throw error;
       } else {
-        // Log original error for server-side debugging
-        console.error("Unexpected error in spendCharacterPoint:", error);
+        // eslint-disable-next-line max-len
+        console.error("Unexpected error details:", error.message, error.stack); // More detailed logging
         throw new HttpsError(
           "internal",
           "An unexpected error occurred while updating the stat.",
-          // Optionally include original error details for debugging,
-          // but be careful about exposing sensitive info.
-          // error.message
         );
       }
     }
