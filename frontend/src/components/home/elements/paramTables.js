@@ -17,8 +17,8 @@ export function BaseStatsTable() {
       if (userData.Parametri && userData.Parametri.Base) {
         setBaseStats(userData.Parametri.Base);
       }
-      if (userData.stats && userData.stats.ability_points !== undefined) {
-        setAbilityPoints(userData.stats.ability_points);
+      if (userData.stats && userData.stats.basePointsAvailable !== undefined) {
+        setAbilityPoints(userData.stats.basePointsAvailable);
       }
       if (userData.settings) {
         setLockParamBase(userData.settings.lock_param_base || false);
@@ -26,7 +26,7 @@ export function BaseStatsTable() {
     }
   }, [userData]);
 
-  // Enhanced real-time listener for base stats, settings and ability points changes
+  // Enhanced real-time listener for base stats, settings and base points changes
   useEffect(() => {
     if (!user) return;
 
@@ -36,8 +36,8 @@ export function BaseStatsTable() {
       (docSnapshot) => {
         if (docSnapshot.exists()) {
           const data = docSnapshot.data();
-          if (data.stats && data.stats.ability_points !== undefined) {
-            setAbilityPoints(data.stats.ability_points);
+          if (data.stats && data.stats.basePointsAvailable !== undefined) {
+            setAbilityPoints(data.stats.basePointsAvailable);
           }
           if (data.settings) {
             setLockParamBase(data.settings.lock_param_base || false);
@@ -56,7 +56,6 @@ export function BaseStatsTable() {
     return () => unsubscribe();
   }, [user]);
 
-  // Rest of the BaseStatsTable component code remains unchanged
   const triggerCooldown = () => {
     setCooldown(true);
     setTimeout(() => setCooldown(false), 500);
@@ -73,7 +72,6 @@ export function BaseStatsTable() {
       await updateDoc(userRef, {
         [`Parametri.Base.${statName}.Base`]: newValue,
       });
-      // No need to manually update state since onSnapshot will handle it
     } catch (error) {
       console.error("Error updating stat", error);
     }
@@ -128,7 +126,6 @@ export function BaseStatsTable() {
   };
 
   const renderTable = () => {
-    // Table rendering code remains unchanged
     if (!baseStats) return null;
     const columns = ["Base", "Anima", "Equip", "Mod", "Tot"];
     const orderedStats = Object.keys(baseStats).sort();
@@ -262,8 +259,8 @@ export function CombatStatsTable() {
       if (userData.Parametri && userData.Parametri.Combattimento) {
         setCombStats(userData.Parametri.Combattimento);
       }
-      if (userData.stats && userData.stats.token !== undefined) {
-        setTokenValue(userData.stats.token);
+      if (userData.stats && userData.stats.combatTokensAvailable !== undefined) {
+        setTokenValue(userData.stats.combatTokensAvailable);
       }
       if (userData.settings) {
         setLockParamCombat(userData.settings.lock_param_combat || false);
@@ -281,8 +278,8 @@ export function CombatStatsTable() {
       (docSnapshot) => {
         if (docSnapshot.exists()) {
           const data = docSnapshot.data();
-          if (data.stats && data.stats.token !== undefined) {
-            setTokenValue(data.stats.token);
+          if (data.stats && data.stats.combatTokensAvailable !== undefined) {
+            setTokenValue(data.stats.combatTokensAvailable);
           }
           if (data.settings) {
             setLockParamCombat(data.settings.lock_param_combat || false);
@@ -317,7 +314,6 @@ export function CombatStatsTable() {
       await updateDoc(userRef, {
         [`Parametri.Combattimento.${statName}.Base`]: newValue,
       });
-      // No need to manually update state since onSnapshot will handle it
     } catch (error) {
       console.error("Error updating combat stat", error);
     }
@@ -372,7 +368,6 @@ export function CombatStatsTable() {
   };
 
   const renderTable = () => {
-    // Table rendering code remains unchanged
     if (!combStats) return null;
     const columns = ["Base", "Equip", "Mod", "Tot"];
     const orderedStats = Object.keys(combStats).sort();
