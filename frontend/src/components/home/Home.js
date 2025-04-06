@@ -59,6 +59,17 @@ function Home() {
     }
   };
 
+  // Update All Users API Call handler
+  const handleUpdateAllUsersClick = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/update-all-users`);
+      const data = await response.json();
+      console.log("Update All Users Response:", data);
+    } catch (error) {
+      console.error("API request failed:", error);
+    }
+  };
+
   if (!user) {
     return <p>Loading...</p>;
   }
@@ -72,6 +83,12 @@ function Home() {
           {/* Render Test API button only if user role is webmaster */}
           {userData?.role === "webmaster" && (
             <div className="mb-5 flex gap-3">
+              <button
+                className="bg-[#6610f2] text-white text-lg py-2 px-4 rounded-[8px] cursor-pointer transition-colors duration-300 hover:bg-[#520dc2]"
+                onClick={handleUpdateAllUsersClick}
+              >
+                Update All Users
+              </button>
               <button
                 className="bg-[#007BFF] text-white text-lg py-2 px-4 rounded-[8px] cursor-pointer transition-colors duration-300 hover:bg-[#0056b3]"
                 onClick={handleTestButtonClick}
@@ -104,3 +121,4 @@ function Home() {
 }
 
 export default Home;
+
