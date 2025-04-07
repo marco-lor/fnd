@@ -1,14 +1,32 @@
 import React, { useState, useEffect } from "react";
-import { doc, updateDoc, onSnapshot } from "firebase/firestore";
+// Import necessary Firestore functions
+import { doc, updateDoc, onSnapshot, getDoc } from "firebase/firestore";
 // Import Firebase Functions modules
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { db } from "../../firebaseConfig";
-import { useAuth } from "../../../AuthContext";
+import { db } from "../../firebaseConfig"; // Ensure this path is correct
+import { useAuth } from "../../../AuthContext"; // Ensure this path is correct
 
 // Initialize Firebase Functions
 const functions = getFunctions();
 // Get a reference to the callable function
 const spendCharacterPoint = httpsCallable(functions, 'spendCharacterPoint');
+
+// --- Reusable Button Component (Optional but Recommended) ---
+const StatButton = ({ onClick, disabled, children, className = "" }) => (
+  <button
+    onClick={onClick}
+    disabled={disabled}
+    className={`
+      px-2 py-0.5 rounded text-sm font-medium transition-colors duration-150 ease-in-out
+      bg-gray-600 hover:bg-gray-500 text-white
+      disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-600
+      focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-blue-500
+      ${className}
+    `}
+  >
+    {children}
+  </button>
+);
 
 
 // --- CombatStatsTable Component ---
@@ -16,25 +34,48 @@ export function CombatStatsTable() {
   const { user, userData } = useAuth();
   const [combStats, setCombStats] = useState(null);
   const [cooldown, setCooldown] = useState(false);
-  // State for available tokens
   const [combatTokensAvailable, setCombatTokensAvailable] = useState(0);
-  // State for spent tokens
   const [combatTokensSpent, setCombatTokensSpent] = useState(0);
   const [lockParamCombat, setLockParamCombat] = useState(false);
+  const [combatStatCosts, setCombatStatCosts] = useState(null); // State for costs
 
-  // useEffect hooks remain the same as they already fetch both values
+  // Fetch combat stat costs on component mount
+  useEffect(() => {
+    const fetchCosts = async () => {
+      try {
+        const costsDocRef = doc(db, "utils", "varie"); // Path to the cost data
+        const docSnap = await getDoc(costsDocRef);
+
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.cost_params_combat) {
+            setCombatStatCosts(data.cost_params_combat);
+          } else {
+            console.warn("cost_params_combat not found in utils/varie");
+            setCombatStatCosts({}); // Set to empty if not found
+          }
+        } else {
+          console.error("utils/varie document does not exist!");
+          setCombatStatCosts({}); // Set to empty if doc doesn't exist
+        }
+      } catch (error) {
+        console.error("Error fetching combat stat costs:", error);
+        setCombatStatCosts({}); // Set to empty on error
+      }
+    };
+
+    fetchCosts();
+  }, []); // Empty dependency array ensures this runs only once on mount
+
+  // Effect to set initial data from userData
   useEffect(() => {
     if (userData) {
       if (userData.Parametri && userData.Parametri.Combattimento) {
         setCombStats(userData.Parametri.Combattimento);
       }
       if (userData.stats) {
-        if (userData.stats.combatTokensAvailable !== undefined) {
-          setCombatTokensAvailable(userData.stats.combatTokensAvailable);
-        }
-        if (userData.stats.combatTokensSpent !== undefined) {
-          setCombatTokensSpent(userData.stats.combatTokensSpent);
-        }
+        setCombatTokensAvailable(userData.stats.combatTokensAvailable ?? 0);
+        setCombatTokensSpent(userData.stats.combatTokensSpent ?? 0);
       }
       if (userData.settings) {
         setLockParamCombat(userData.settings.lock_param_combat || false);
@@ -42,6 +83,7 @@ export function CombatStatsTable() {
     }
   }, [userData]);
 
+  // Effect to listen for real-time updates on user data
   useEffect(() => {
     if (!user) return;
     const userDocRef = doc(db, "users", user.uid);
@@ -50,14 +92,10 @@ export function CombatStatsTable() {
       (docSnapshot) => {
         if (docSnapshot.exists()) {
           const data = docSnapshot.data();
-           if (data.stats) {
-            if (data.stats.combatTokensAvailable !== undefined) {
-              setCombatTokensAvailable(data.stats.combatTokensAvailable);
-            }
-            if (data.stats.combatTokensSpent !== undefined) {
-               setCombatTokensSpent(data.stats.combatTokensSpent);
-            }
-           }
+          if (data.stats) {
+            setCombatTokensAvailable(data.stats.combatTokensAvailable ?? 0);
+            setCombatTokensSpent(data.stats.combatTokensSpent ?? 0);
+          }
           if (data.settings) {
             setLockParamCombat(data.settings.lock_param_combat || false);
           }
@@ -75,19 +113,24 @@ export function CombatStatsTable() {
 
   const triggerCooldown = () => {
     setCooldown(true);
-    setTimeout(() => setCooldown(false), 500);
+    setTimeout(() => setCooldown(false), 500); // 500ms cooldown
   };
 
-  // Increase/Decrease/Mod handlers remain unchanged
+  // Increase/Decrease/Mod handlers remain functionally the same
   const handleCombIncrease = async (statName) => {
-    if (cooldown || lockParamCombat || !user || !combStats) return;
+    if (cooldown || lockParamCombat || !user || !combStats || combatTokensAvailable <= 0 || !combatStatCosts) return;
+
+    // Optional: Check if cost is affordable (though cloud function should handle this)
+    const cost = Number(combatStatCosts[statName]);
+    if (isNaN(cost) || combatTokensAvailable < cost) {
+        console.warn(`Not enough tokens to increase ${statName}. Cost: ${cost}, Available: ${combatTokensAvailable}`);
+        // Maybe show a user-friendly message here
+        return;
+    }
+
     triggerCooldown();
     try {
-      await spendCharacterPoint({
-        statName: statName,
-        statType: 'Combat',
-        change: 1
-      });
+      await spendCharacterPoint({ statName, statType: 'Combat', change: 1 });
     } catch (error) {
       console.error("Error spending combat token:", error);
       alert(`Failed to increase ${statName}: ${error.message}`);
@@ -97,18 +140,15 @@ export function CombatStatsTable() {
   const handleCombDecrease = async (statName) => {
     if (cooldown || lockParamCombat || !user || !combStats) return;
     const currentValue = Number(combStats[statName]?.Base) || 0;
+    // Using 0 as the general minimum base for combat stats, adjust if needed
     const MINIMUM_STAT_BASE_VALUE = 0;
-    if (currentValue <= MINIMUM_STAT_BASE_VALUE) {
-       console.log(`Cannot decrease ${statName} below ${MINIMUM_STAT_BASE_VALUE}`);
-       return;
+    if (currentValue <= MINIMUM_STAT_BASE_VALUE || combatTokensSpent <= 0) {
+      console.log(`Cannot decrease ${statName} below minimum (${MINIMUM_STAT_BASE_VALUE}) or no spent tokens.`);
+      return;
     }
     triggerCooldown();
     try {
-      await spendCharacterPoint({
-        statName: statName,
-        statType: 'Combat',
-        change: -1
-       });
+      await spendCharacterPoint({ statName, statType: 'Combat', change: -1 });
     } catch (error) {
       console.error("Error refunding combat token:", error);
       alert(`Failed to decrease ${statName}: ${error.message}`);
@@ -116,179 +156,194 @@ export function CombatStatsTable() {
   };
 
   const handleCombModIncrease = async (statName) => {
-    if (cooldown || !user || !combStats) return;
-    triggerCooldown();
-    const currentValue = Number(combStats[statName].Mod) || 0;
-    const newValue = currentValue + 1;
-    try {
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, {
-        [`Parametri.Combattimento.${statName}.Mod`]: newValue,
-      });
-    } catch (error) {
-      console.error("Error updating combat stat mod", error);
-    }
+     if (cooldown || !user || !combStats) return;
+     triggerCooldown();
+     const currentValue = Number(combStats[statName]?.Mod) || 0;
+     try {
+       const userRef = doc(db, "users", user.uid);
+       await updateDoc(userRef, { [`Parametri.Combattimento.${statName}.Mod`]: currentValue + 1 });
+     } catch (error) {
+       console.error("Error updating combat stat mod", error);
+     }
   };
 
   const handleCombModDecrease = async (statName) => {
-    if (cooldown || !user || !combStats) return;
-    triggerCooldown();
-    const currentValue = Number(combStats[statName].Mod) || 0;
-    const newValue = currentValue - 1;
-    try {
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, {
-        [`Parametri.Combattimento.${statName}.Mod`]: newValue,
-      });
-    } catch (error) {
-      console.error("Error updating combat stat mod", error);
-    }
+     if (cooldown || !user || !combStats) return;
+     triggerCooldown();
+     const currentValue = Number(combStats[statName]?.Mod) || 0;
+     try {
+       const userRef = doc(db, "users", user.uid);
+       await updateDoc(userRef, { [`Parametri.Combattimento.${statName}.Mod`]: currentValue - 1 });
+     } catch (error) {
+       console.error("Error updating combat stat mod", error);
+     }
   };
 
-  // --- renderTable function ---
+  // --- renderTable function with tooltips ---
   const renderTable = () => {
-    if (!combStats) return null;
+    if (!combStats || combatStatCosts === null) { // Also check if costs have loaded
+        return <div className="text-center text-gray-400">Loading stats...</div>;
+    }
+
     const columns = ["Base", "Equip", "Mod", "Tot"];
     const orderedStats = Object.keys(combStats).sort();
 
     return (
-      <div className="flex-grow flex flex-col">
-         {/* *** MODIFIED: Display both available and spent tokens on one line *** */}
-        <div className="p-2 text-right text-white bg-[rgba(25,50,128,0.4)] border border-[rgba(255,255,255,0.3)]">
-          Token Disponibili: {combatTokensAvailable} | Token Spesi: {combatTokensSpent}
+      <div className="bg-gray-800 shadow-lg rounded-lg overflow-hidden border border-gray-700">
+        {/* Points Display Bar */}
+        <div className="px-4 py-2 bg-gray-700 text-right text-sm text-gray-300 border-b border-gray-600">
+          <span>Token Disponibili: <span className="font-semibold text-white">{combatTokensAvailable}</span></span>
+          <span className="mx-2">|</span>
+          <span>Token Spesi: <span className="font-semibold text-white">{combatTokensSpent}</span></span>
         </div>
-         {/* Rest of the table rendering logic remains the same */}
-         <table className="w-full flex-grow border-collapse text-white rounded-[8px] overflow-hidden">
-          <thead>
-            <tr>
-              <th className="border border-[rgba(255,255,255,0.3)] p-2 text-left pl-[10px]">
-                Stat
-              </th>
-              {columns.map((col) => {
-                let thClasses = "border border-[rgba(255,255,255,0.3)] p-2 text-center";
-                if (col === "Tot") {
-                  thClasses += " bg-[rgba(25,50,128,0.4)] font-bold";
-                }
-                return (
-                  <th key={col} className={thClasses}>
+
+        {/* Table Itself */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left text-gray-300">
+            <thead className="text-xs text-gray-400 uppercase bg-gray-700">
+              <tr>
+                <th scope="col" className="px-4 py-3">
+                  Stat
+                </th>
+                {columns.map((col) => (
+                  <th key={col} scope="col" className={`px-4 py-3 text-center ${col === "Tot" ? "bg-blue-900/50 text-white font-semibold" : ""}`}>
                     {col}
                   </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {orderedStats.map((statName) => {
-              const statValues = combStats[statName];
-              return (
-                <tr key={statName} className="even:bg-[rgba(60,60,80,0.4)]">
-                  <td className="border border-[rgba(255,255,255,0.3)] p-2 text-left pl-[10px]">
-                    {statName}
-                  </td>
-                  {columns.map((col) => {
-                    if (col === "Base") {
-                      return (
-                        <td key={col} className="border border-[rgba(255,255,255,0.3)] p-2 text-center">
-                          {!lockParamCombat ? (
-                            <div className="flex flex-row items-center justify-center">
-                              <button
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {orderedStats.map((statName, index) => {
+                const statValues = combStats[statName];
+                const isEven = index % 2 === 0;
+                // Get the cost for the current stat, provide fallback
+                const cost = combatStatCosts[statName] ?? 'N/A';
+                const tooltipText = `Costo: ${cost} Token`;
+
+                return (
+                  <tr key={statName} className={`${isEven ? 'bg-gray-800' : 'bg-gray-900/50'} border-b border-gray-700 last:border-b-0`}>
+                    {/* Stat Name Cell with Tooltip */}
+                    <td
+                      className="px-4 py-2 font-medium text-white whitespace-nowrap"
+                      title={tooltipText} // <<< TOOLTIP ADDED HERE
+                    >
+                      {statName}
+                    </td>
+
+                    {/* Data Cells */}
+                    {columns.map((col) => {
+                      let cellClasses = `px-4 py-2 text-center align-middle`;
+                      if (col === "Tot") {
+                        cellClasses += " bg-blue-900/50 text-white font-semibold";
+                      }
+
+                      // --- Base Column (Interactive) ---
+                      if (col === "Base") {
+                        const baseValue = Number(statValues.Base) || 0;
+                        const MINIMUM_STAT_BASE_VALUE = 0; // Adjust if needed
+                        const costValue = Number(combatStatCosts[statName]); // Get cost for disabling '+' button
+                        const canAffordIncrease = !isNaN(costValue) && combatTokensAvailable >= costValue;
+
+                        return (
+                          <td key={col} className={cellClasses}>
+                            {!lockParamCombat ? (
+                              <div className="flex items-center justify-center space-x-2">
+                                <StatButton
+                                  onClick={() => handleCombDecrease(statName)}
+                                  disabled={cooldown || baseValue <= MINIMUM_STAT_BASE_VALUE || combatTokensSpent <= 0}
+                                >
+                                  -
+                                </StatButton>
+                                <span className="font-mono min-w-[2ch] text-center text-white">
+                                  {statValues[col]}
+                                </span>
+                                <StatButton
+                                  onClick={() => handleCombIncrease(statName)}
+                                  disabled={cooldown || combatTokensAvailable <= 0 || !canAffordIncrease} // Disable if cannot afford
+                                  title={!canAffordIncrease && combatTokensAvailable > 0 ? `Costo: ${costValue} Token` : undefined} // Show cost tooltip on '+' if disabled due to cost
+                                >
+                                  +
+                                </StatButton>
+                              </div>
+                            ) : (
+                              <span className="font-mono text-white">{statValues[col]}</span>
+                            )}
+                          </td>
+                        );
+                      }
+                      // --- Mod Column (Interactive) ---
+                      else if (col === "Mod") {
+                         return (
+                          <td key={col} className={cellClasses}>
+                            <div className="flex items-center justify-center space-x-2">
+                              <StatButton
+                                onClick={() => handleCombModDecrease(statName)}
                                 disabled={cooldown}
-                                className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
-                                onClick={() => handleCombDecrease(statName)}
                               >
-                                ◀
-                              </button>
-                              <span className="mx-[5px] min-w-[20px] text-center">
+                                -
+                              </StatButton>
+                              <span className="font-mono min-w-[2ch] text-center">
                                 {statValues[col]}
                               </span>
-                              <button
+                              <StatButton
+                                onClick={() => handleCombModIncrease(statName)}
                                 disabled={cooldown}
-                                className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
-                                onClick={() => handleCombIncrease(statName)}
                               >
-                                ▶
-                              </button>
+                                +
+                              </StatButton>
                             </div>
-                          ) : (
-                            <span className="mx-[5px] min-w-[20px] text-center">
-                              {statValues[col]}
-                            </span>
-                          )}
-                        </td>
-                      );
-                    } else if (col === "Mod") {
-                     return (
-                        <td key={col} className="border border-[rgba(255,255,255,0.3)] p-2 text-center">
-                          <div className="flex flex-row items-center justify-center">
-                            <button
-                              disabled={cooldown}
-                              className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
-                              onClick={() => handleCombModDecrease(statName)}
-                            >
-                              ◀
-                            </button>
-                            <span className="mx-[5px] min-w-[20px] text-center">
-                              {statValues[col]}
-                            </span>
-                            <button
-                              disabled={cooldown}
-                              className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
-                              onClick={() => handleCombModIncrease(statName)}
-                            >
-                              ▶
-                            </button>
-                          </div>
-                        </td>
-                      );
-                    } else {
-                      let tdClasses = "border border-[rgba(255,255,255,0.3)] p-2 text-center";
-                      if (col === "Tot") {
-                        tdClasses += " bg-[rgba(25,50,128,0.4)] font-bold";
+                          </td>
+                        );
                       }
-                      return (
-                        <td key={col} className={tdClasses}>
-                          {statValues[col]}
-                        </td>
-                      );
-                    }
-                  })}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                      // --- Other Columns (Display Only) ---
+                      else {
+                        return (
+                          <td key={col} className={cellClasses}>
+                            {statValues[col]}
+                          </td>
+                        );
+                      }
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   };
 
   return (
-    <div>
-      <h2 className="mb-3 text-white text-xl">Combat Stats</h2>
+    <div className="bg-gray-900 p-4 rounded-xl shadow-md">
+      <h2 className="mb-4 text-xl font-semibold text-white">Combat Stats</h2>
       {renderTable()}
     </div>
   );
 }
 
-// --- BaseStatsTable Component (Unchanged) ---
-// (Included for completeness of the file structure)
+// --- BaseStatsTable Component (Remains Unchanged) ---
 export function BaseStatsTable() {
   const { user, userData } = useAuth();
   const [baseStats, setBaseStats] = useState(null);
   const [cooldown, setCooldown] = useState(false);
   const [basePointsAvailable, setBasePointsAvailable] = useState(0);
+  const [basePointsSpent, setBasePointsSpent] = useState(0);
   const [lockParamBase, setLockParamBase] = useState(false);
 
+  // useEffect hooks adapted for Base stats and points
   useEffect(() => {
     if (userData) {
       if (userData.Parametri && userData.Parametri.Base) {
         setBaseStats(userData.Parametri.Base);
       }
-      if (userData.stats && userData.stats.basePointsAvailable !== undefined) {
-        setBasePointsAvailable(userData.stats.basePointsAvailable);
+      if (userData.stats) {
+        setBasePointsAvailable(userData.stats.basePointsAvailable ?? 0);
+        setBasePointsSpent(userData.stats.basePointsSpent ?? 0);
       }
-      if (userData.settings) {
-        setLockParamBase(userData.settings.lock_param_base || false);
-      }
+       if (userData.settings) {
+         setLockParamBase(userData.settings.lock_param_base || false);
+       }
     }
   }, [userData]);
 
@@ -300,12 +355,13 @@ export function BaseStatsTable() {
       (docSnapshot) => {
         if (docSnapshot.exists()) {
           const data = docSnapshot.data();
-          if (data.stats && data.stats.basePointsAvailable !== undefined) {
-            setBasePointsAvailable(data.stats.basePointsAvailable);
+          if (data.stats) {
+            setBasePointsAvailable(data.stats.basePointsAvailable ?? 0);
+            setBasePointsSpent(data.stats.basePointsSpent ?? 0);
           }
-          if (data.settings) {
-            setLockParamBase(data.settings.lock_param_base || false);
-          }
+           if (data.settings) {
+             setLockParamBase(data.settings.lock_param_base || false);
+           }
           if (data.Parametri && data.Parametri.Base) {
             setBaseStats(data.Parametri.Base);
           }
@@ -318,20 +374,18 @@ export function BaseStatsTable() {
     return () => unsubscribe();
   }, [user]);
 
+
   const triggerCooldown = () => {
     setCooldown(true);
-    setTimeout(() => setCooldown(false), 500);
+    setTimeout(() => setCooldown(false), 500); // 500ms cooldown
   };
 
+  // Increase/Decrease/Mod handlers remain functionally the same, adapted for 'Base'
   const handleIncrease = async (statName) => {
-    if (cooldown || lockParamBase || !user || !baseStats) return;
+    if (cooldown || lockParamBase || !user || !baseStats || basePointsAvailable <= 0) return;
     triggerCooldown();
     try {
-      await spendCharacterPoint({
-        statName: statName,
-        statType: 'Base',
-        change: 1
-      });
+      await spendCharacterPoint({ statName, statType: 'Base', change: 1 });
     } catch (error) {
       console.error("Error spending base point:", error);
       alert(`Failed to increase ${statName}: ${error.message}`);
@@ -341,18 +395,14 @@ export function BaseStatsTable() {
   const handleDecrease = async (statName) => {
     if (cooldown || lockParamBase || !user || !baseStats) return;
     const currentValue = Number(baseStats[statName]?.Base) || 0;
-    const MINIMUM_STAT_BASE_VALUE = 0;
-    if (currentValue <= MINIMUM_STAT_BASE_VALUE) {
-       console.log(`Cannot decrease ${statName} below ${MINIMUM_STAT_BASE_VALUE}`);
+    const MINIMUM_STAT_BASE_VALUE = 0; // Base stats usually start at 0
+    if (currentValue <= MINIMUM_STAT_BASE_VALUE || basePointsSpent <= 0) {
+       console.log(`Cannot decrease ${statName} below minimum or no points spent.`);
        return;
     }
     triggerCooldown();
     try {
-      await spendCharacterPoint({
-        statName: statName,
-        statType: 'Base',
-        change: -1
-       });
+      await spendCharacterPoint({ statName, statType: 'Base', change: -1 });
     } catch (error) {
       console.error("Error refunding base point:", error);
        alert(`Failed to decrease ${statName}: ${error.message}`);
@@ -362,149 +412,152 @@ export function BaseStatsTable() {
   const handleModIncrease = async (statName) => {
     if (cooldown || !user || !baseStats) return;
     triggerCooldown();
-    const currentValue = Number(baseStats[statName].Mod) || 0;
-    const newValue = currentValue + 1;
+    const currentValue = Number(baseStats[statName]?.Mod) || 0;
     try {
       const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, {
-        [`Parametri.Base.${statName}.Mod`]: newValue,
-      });
+      await updateDoc(userRef, { [`Parametri.Base.${statName}.Mod`]: currentValue + 1 });
     } catch (error) {
-      console.error("Error updating stat mod", error);
+      console.error("Error updating base stat mod", error);
     }
   };
 
   const handleModDecrease = async (statName) => {
     if (cooldown || !user || !baseStats) return;
     triggerCooldown();
-    const currentValue = Number(baseStats[statName].Mod) || 0;
-    const newValue = currentValue - 1;
+    const currentValue = Number(baseStats[statName]?.Mod) || 0;
     try {
       const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, {
-        [`Parametri.Base.${statName}.Mod`]: newValue,
-      });
+      await updateDoc(userRef, { [`Parametri.Base.${statName}.Mod`]: currentValue - 1 });
     } catch (error) {
-      console.error("Error updating stat mod", error);
+      console.error("Error updating base stat mod", error);
     }
   };
 
+  // --- renderTable function with improved styling for Base Stats ---
   const renderTable = () => {
-    if (!baseStats) return null;
+    if (!baseStats) return <div className="text-center text-gray-400">Loading stats...</div>;
+
     const columns = ["Base", "Anima", "Equip", "Mod", "Tot"];
     const orderedStats = Object.keys(baseStats).sort();
 
     return (
-      <div className="flex-grow flex flex-col">
-        <div className="p-2 text-right text-white bg-[rgba(25,50,128,0.4)] border border-[rgba(255,255,255,0.3)]">
-          Punti Base: {basePointsAvailable}
-        </div>
-         <table className="w-full flex-grow border-collapse text-white rounded-[8px] overflow-hidden">
-          <thead>
-            <tr>
-              <th className="border border-[rgba(255,255,255,0.3)] p-2 text-left pl-[10px]">
-                Stat
-              </th>
-              {columns.map((col) => {
-                let thClasses = "border border-[rgba(255,255,255,0.3)] p-2 text-center";
-                if (col === "Tot") {
-                  thClasses += " bg-[rgba(25,50,128,0.4)] font-bold";
-                }
-                return (
-                  <th key={col} className={thClasses}>
+      <div className="bg-gray-800 shadow-lg rounded-lg overflow-hidden border border-gray-700">
+         {/* Points Display Bar */}
+        <div className="px-4 py-2 bg-gray-700 text-right text-sm text-gray-300 border-b border-gray-600">
+           <span>Punti Disponibili: <span className="font-semibold text-white">{basePointsAvailable}</span></span>
+           <span className="mx-2">|</span>
+           <span>Punti Spesi: <span className="font-semibold text-white">{basePointsSpent}</span></span>
+         </div>
+
+        {/* Table Itself */}
+         <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left text-gray-300">
+            <thead className="text-xs text-gray-400 uppercase bg-gray-700">
+              <tr>
+                <th scope="col" className="px-4 py-3">
+                  Stat
+                </th>
+                {columns.map((col) => (
+                  <th key={col} scope="col" className={`px-4 py-3 text-center ${col === "Tot" ? "bg-green-900/50 text-white font-semibold" : ""}`}>
                     {col}
                   </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {orderedStats.map((statName) => {
-              const statValues = baseStats[statName];
-              return (
-                <tr key={statName} className="even:bg-[rgba(60,60,80,0.4)]">
-                  <td className="border border-[rgba(255,255,255,0.3)] p-2 text-left pl-[10px]">
-                    {statName}
-                  </td>
-                  {columns.map((col) => {
-                    if (col === "Base") {
-                      return (
-                        <td key={col} className="border border-[rgba(255,255,255,0.3)] p-2 text-center">
-                          {!lockParamBase ? (
-                            <div className="flex flex-row items-center justify-center">
-                              <button
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {orderedStats.map((statName, index) => {
+                const statValues = baseStats[statName];
+                const isEven = index % 2 === 0;
+                return (
+                  <tr key={statName} className={`${isEven ? 'bg-gray-800' : 'bg-gray-900/50'} border-b border-gray-700 last:border-b-0`}>
+                    {/* Stat Name Cell */}
+                    <td className="px-4 py-2 font-medium text-white whitespace-nowrap">
+                      {statName}
+                    </td>
+
+                    {/* Data Cells */}
+                    {columns.map((col) => {
+                      let cellClasses = `px-4 py-2 text-center align-middle`;
+                      if (col === "Tot") {
+                        cellClasses += " bg-green-900/50 text-white font-semibold";
+                      }
+
+                      // --- Base Column (Interactive) ---
+                      if (col === "Base") {
+                        const baseValue = Number(statValues.Base) || 0;
+                        const MINIMUM_STAT_BASE_VALUE_FOR_BUTTON = 0;
+                        return (
+                          <td key={col} className={cellClasses}>
+                            {!lockParamBase ? (
+                              <div className="flex items-center justify-center space-x-2">
+                                <StatButton
+                                  onClick={() => handleDecrease(statName)}
+                                  disabled={cooldown || baseValue <= MINIMUM_STAT_BASE_VALUE_FOR_BUTTON || basePointsSpent <= 0}
+                                >
+                                  -
+                                </StatButton>
+                                <span className="font-mono min-w-[2ch] text-center text-white">
+                                  {statValues[col]}
+                                </span>
+                                <StatButton
+                                  onClick={() => handleIncrease(statName)}
+                                  disabled={cooldown || basePointsAvailable <= 0}
+                                >
+                                  +
+                                </StatButton>
+                              </div>
+                            ) : (
+                              <span className="font-mono text-white">{statValues[col]}</span>
+                            )}
+                          </td>
+                        );
+                      }
+                       // --- Mod Column (Interactive) ---
+                      else if (col === "Mod") {
+                         return (
+                          <td key={col} className={cellClasses}>
+                             <div className="flex items-center justify-center space-x-2">
+                              <StatButton
+                                onClick={() => handleModDecrease(statName)}
                                 disabled={cooldown}
-                                className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
-                                onClick={() => handleDecrease(statName)}
-                              >
-                                ◀
-                              </button>
-                              <span className="mx-[5px] min-w-[20px] text-center">
+                               >
+                                -
+                              </StatButton>
+                              <span className="font-mono min-w-[2ch] text-center">
                                 {statValues[col]}
                               </span>
-                              <button
+                              <StatButton
+                                onClick={() => handleModIncrease(statName)}
                                 disabled={cooldown}
-                                className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
-                                onClick={() => handleIncrease(statName)}
-                              >
-                                ▶
-                              </button>
+                               >
+                                +
+                              </StatButton>
                             </div>
-                          ) : (
-                            <span className="mx-[5px] min-w-[20px] text-center">
-                              {statValues[col]}
-                            </span>
-                          )}
-                        </td>
-                      );
-                    } else if (col === "Mod") {
-                      return (
-                        <td key={col} className="border border-[rgba(255,255,255,0.3)] p-2 text-center">
-                          <div className="flex flex-row items-center justify-center">
-                            <button
-                              disabled={cooldown}
-                              className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
-                              onClick={() => handleModDecrease(statName)}
-                            >
-                              ◀
-                            </button>
-                            <span className="mx-[5px] min-w-[20px] text-center">
-                              {statValues[col]}
-                            </span>
-                            <button
-                              disabled={cooldown}
-                              className="bg-transparent border-0 text-white cursor-pointer text-base px-[5px] transition-colors hover:text-[#ffd700]"
-                              onClick={() => handleModIncrease(statName)}
-                            >
-                              ▶
-                            </button>
-                          </div>
-                        </td>
-                      );
-                    } else {
-                      let tdClasses = "border border-[rgba(255,255,255,0.3)] p-2 text-center";
-                      if (col === "Tot") {
-                        tdClasses += " bg-[rgba(25,50,128,0.4)] font-bold";
+                          </td>
+                        );
                       }
-                      return (
-                        <td key={col} className={tdClasses}>
-                          {statValues[col]}
-                        </td>
-                      );
-                    }
-                  })}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                       // --- Other Columns (Display Only - Anima, Equip, Tot) ---
+                      else {
+                        return (
+                          <td key={col} className={cellClasses}>
+                            {statValues[col]}
+                          </td>
+                        );
+                      }
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   };
 
   return (
-    <div>
-      <h2 className="mb-3 text-white text-xl">Base Stats</h2>
+     <div className="bg-gray-900 p-4 rounded-xl shadow-md mt-6">
+      <h2 className="mb-4 text-xl font-semibold text-white">Base Stats</h2>
       {renderTable()}
     </div>
   );
