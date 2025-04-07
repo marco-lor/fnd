@@ -39,27 +39,61 @@ def add_character(character: dict):
     return {"status": "success", "id": doc_ref.id}
 
 # Optional: Interactive Firebase Testing
-def run_call(path: str = 'users/TQAmmVfIpOeNiRflXKSeL1NX2ak2'):
+def run_call(user_id: str = None, path: str = None):
     """
-    Retrieve and print the structure of a document at the specified Firestore path.
+    Retrieve, modify and update a document at the specified Firestore path.
     
     Args:
-        path (str): The path to the Firestore document (e.g., 'users/OgVlbkriGFdtUu1WEkP8OCaXyKL2')
+        user_id (str, optional): The user ID to process. Takes precedence over path.
+        path (str, optional): The path to the Firestore document.
     """
     try:
+        # Determine the document path
+        if user_id:
+            doc_path = f'users/{user_id}'
+        elif path:
+            doc_path = path
+        else:
+            doc_path = 'users/TQAmmVfIpOeNiRflXKSeL1NX2ak2'  # Default user as fallback
+        
         # Get the specific document
-        doc_ref = db.document(path)
+        doc_ref = db.document(doc_path)
         doc = doc_ref.get()
         
         if not doc.exists:
-            print(f"Document at {path} not found")
+            print(f"Document at {doc_path} not found")
             return None
         
         # Get the document data
         doc_data = doc.to_dict()
         
+        # Trasforma la struttura del campo "stats" se presente
+        if "stats" in doc_data:
+            old_stats = doc_data["stats"]
+            new_stats = {
+                # Mantieni i campi esistenti che non devono cambiare
+                "level": old_stats.get("level", 1),
+                "hpTotal": old_stats.get("hpTotal", 0),
+                "hpCurrent": old_stats.get("hpCurrent", 0),
+                "manaTotal": old_stats.get("manaTotal", 0),
+                "manaCurrent": old_stats.get("manaCurrent", 0),
+                
+                # Nuovi campi di basePoints che sostituiscono ability_points
+                "basePointsAvailable": 4,
+                "basePointsSpent": 0,
+                
+                # Nuovi campi di combatTokens che sostituiscono token
+                "combatTokensAvailable": 50,
+                "combatTokensSpent": 0,
+            }
+            doc_data["stats"] = new_stats
+            
+            # Salva il documento modificato in Firestore
+            doc_ref.set(doc_data)
+            print(f"Document updated in Firestore: {doc_path}")
+        
         # Print the document structure in a formatted way
-        print(f"\nStructure of document at {path}:")
+        print(f"\nStructure of document at {doc_path}:")
         print("-----------------------------------")
         formatted_json = json.dumps(doc_data, indent=2, cls=FirestoreEncoder)  # Utilizzo dell'encoder personalizzato
         print(formatted_json)
@@ -67,8 +101,47 @@ def run_call(path: str = 'users/TQAmmVfIpOeNiRflXKSeL1NX2ak2'):
         
         return doc_data
     except Exception as e:
-        print(f"Error retrieving document: {str(e)}")
+        print(f"Error retrieving or updating document: {str(e)}")
         return None
+
+def run_call_on_everyone():
+    """
+    Retrieve all users from the 'users' collection and apply the run_call function to each of them.
+    
+    Returns:
+        dict: A dictionary with user IDs as keys and their updated data as values
+    """
+    try:
+        # Get all user documents from the users collection
+        users_ref = db.collection('users').stream()
+        
+        results = {}
+        user_count = 0
+        
+        print("\nProcessing all users in the 'users' collection:")
+        print("-----------------------------------")
+        
+        # Apply run_call to each user
+        for user_doc in users_ref:
+            user_id = user_doc.id
+            print(f"Processing user: {user_id}")
+            
+            # Call run_call for this specific user
+            user_data = run_call(user_id=user_id)
+            
+            # Store the result
+            if user_data:
+                results[user_id] = user_data
+                user_count += 1
+        
+        print(f"-----------------------------------")
+        print(f"Total users processed: {user_count}")
+        print(f"-----------------------------------")
+        
+        return results
+    except Exception as e:
+        print(f"Error processing users: {str(e)}")
+        return {"error": str(e)}
 
 def everything_to_json():
     """
@@ -118,12 +191,25 @@ def everything_to_json():
         return {"error": str(e)}
 
 @app.get("/test-endpoint")
-def test_endpoint(path: str = None):
-    if path:
-        result = run_call(path)
+def test_endpoint(path: str = None, user_id: str = None):
+    if user_id:
+        result = run_call(user_id=user_id)
+        return {"message": f"API Call Successful! Document for user {user_id} retrieved, modified and updated in Firestore.", "data": result}
+    elif path:
+        result = run_call(path=path)
+        return {"message": "API Call Successful! Document retrieved, modified and updated in Firestore.", "data": result}
     else:
         result = run_call()
-    return {"message": "API Call Successful!", "data": result}
+        return {"message": "API Call Successful! Default document retrieved, modified and updated in Firestore.", "data": result}
+
+@app.get("/update-all-users")
+def update_all_users():
+    """
+    Endpoint to update all users in the database.
+    """
+    result = run_call_on_everyone()
+    user_count = len(result) if isinstance(result, dict) and "error" not in result else 0
+    return {"message": f"Updated {user_count} users in the database", "data": result}
 
 @app.get("/all-data")
 def get_all_data():
@@ -136,6 +222,9 @@ def get_all_data():
 # Run Uvicorn server only if the script is executed directly
 if __name__ == "__main__":
     print("Starting FastAPI server...")
-    test_endpoint()  # Test the Firebase connection
+    # Ora è possibile scegliere se testare un singolo utente o tutti gli utenti
+    # test_endpoint()  # Test con utente predefinito
+    run_call_on_everyone()  # Test su tutti gli utenti
     print("Firebase Connection Successful!")
     uvicorn.run(app, host="127.0.0.1", port=8000, reload=True)
+
