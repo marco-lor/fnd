@@ -1,24 +1,33 @@
-// file: ./frontend/src/components/home/elements/paramTables.js
 import React, { useState, useEffect } from "react";
 import { doc, updateDoc, onSnapshot } from "firebase/firestore";
+// Import Firebase Functions modules
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../../firebaseConfig";
 import { useAuth } from "../../../AuthContext";
 
-// Component for the Base Stats Table
+// Initialize Firebase Functions
+const functions = getFunctions();
+// Get a reference to the callable function
+const spendCharacterPoint = httpsCallable(functions, 'spendCharacterPoint');
+
+// --- BaseStatsTable Component ---
 export function BaseStatsTable() {
   const { user, userData } = useAuth();
   const [baseStats, setBaseStats] = useState(null);
   const [cooldown, setCooldown] = useState(false);
-  const [abilityPoints, setAbilityPoints] = useState(0);
+  // Use the new state variable name from the updated structure
+  const [basePointsAvailable, setBasePointsAvailable] = useState(0);
   const [lockParamBase, setLockParamBase] = useState(false);
 
+  // Update useEffect to use the new field name 'basePointsAvailable'
   useEffect(() => {
     if (userData) {
       if (userData.Parametri && userData.Parametri.Base) {
         setBaseStats(userData.Parametri.Base);
       }
+      // Use the new field name
       if (userData.stats && userData.stats.basePointsAvailable !== undefined) {
-        setAbilityPoints(userData.stats.basePointsAvailable);
+        setBasePointsAvailable(userData.stats.basePointsAvailable);
       }
       if (userData.settings) {
         setLockParamBase(userData.settings.lock_param_base || false);
@@ -26,7 +35,7 @@ export function BaseStatsTable() {
     }
   }, [userData]);
 
-  // Enhanced real-time listener for base stats, settings and base points changes
+  // Update real-time listener to use the new field name 'basePointsAvailable'
   useEffect(() => {
     if (!user) return;
 
@@ -36,13 +45,13 @@ export function BaseStatsTable() {
       (docSnapshot) => {
         if (docSnapshot.exists()) {
           const data = docSnapshot.data();
+          // Use the new field name
           if (data.stats && data.stats.basePointsAvailable !== undefined) {
-            setAbilityPoints(data.stats.basePointsAvailable);
+            setBasePointsAvailable(data.stats.basePointsAvailable);
           }
           if (data.settings) {
             setLockParamBase(data.settings.lock_param_base || false);
           }
-          // Listen for changes in Base parameters
           if (data.Parametri && data.Parametri.Base) {
             setBaseStats(data.Parametri.Base);
           }
@@ -61,42 +70,66 @@ export function BaseStatsTable() {
     setTimeout(() => setCooldown(false), 500);
   };
 
-  const handleIncrease = async (statName) => {
-    if (cooldown) return;
+  // --- Modified handleIncrease ---
+  const handleIncrease = async (statName) => { // Removed type annotation
+    // Keep existing checks
+    if (cooldown || lockParamBase || !user || !baseStats) return;
     triggerCooldown();
-    if (!user || !baseStats) return;
-    const currentValue = Number(baseStats[statName].Base) || 0;
-    const newValue = currentValue + 1;
+
     try {
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, {
-        [`Parametri.Base.${statName}.Base`]: newValue,
+      // Call the Cloud Function instead of updating Firestore directly
+      await spendCharacterPoint({
+        statName: statName,
+        statType: 'Base',
+        change: 1
       });
-    } catch (error) {
-      console.error("Error updating stat", error);
+      // Success feedback (optional)
+      // console.log(`Increased ${statName}`);
+      // No manual state update needed; onSnapshot will reflect the change.
+    } catch (error) { // Corrected catch block syntax
+      console.error("Error spending base point:", error);
+      // Provide user feedback based on the error type (optional)
+      alert(`Failed to increase ${statName}: ${error.message}`);
     }
   };
 
-  const handleDecrease = async (statName) => {
-    if (cooldown) return;
+  // --- Modified handleDecrease ---
+  const handleDecrease = async (statName) => { // Removed type annotation
+    // Keep existing checks
+    if (cooldown || lockParamBase || !user || !baseStats) return;
+
+    // Optional: Add client-side check for minimum, but backend enforces it
+    const currentValue = Number(baseStats[statName]?.Base) || 0;
+    const MINIMUM_STAT_BASE_VALUE = 0; // Match the minimum defined in your CF
+    if (currentValue <= MINIMUM_STAT_BASE_VALUE) {
+       console.log(`Cannot decrease ${statName} below ${MINIMUM_STAT_BASE_VALUE}`);
+       // Optionally disable the button or show a message
+       return;
+    }
+
     triggerCooldown();
-    if (!user || !baseStats) return;
-    const currentValue = Number(baseStats[statName].Base) || 0;
-    const newValue = currentValue - 1;
+
     try {
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, {
-        [`Parametri.Base.${statName}.Base`]: newValue,
-      });
-    } catch (error) {
-      console.error("Error updating stat", error);
+      // Call the Cloud Function instead of updating Firestore directly
+      await spendCharacterPoint({
+        statName: statName,
+        statType: 'Base',
+        change: -1
+       });
+      // Success feedback (optional)
+      // console.log(`Decreased ${statName}`);
+      // No manual state update needed; onSnapshot will reflect the change.
+    } catch (error) { // Corrected catch block syntax
+      console.error("Error refunding base point:", error);
+      // Provide user feedback based on the error type (optional)
+       alert(`Failed to decrease ${statName}: ${error.message}`);
     }
   };
 
-  const handleModIncrease = async (statName) => {
-    if (cooldown) return;
+  // Keep handleModIncrease and handleModDecrease as they modify the 'Mod' field directly
+  const handleModIncrease = async (statName) => { // Removed type annotation
+    if (cooldown || !user || !baseStats) return;
     triggerCooldown();
-    if (!user || !baseStats) return;
     const currentValue = Number(baseStats[statName].Mod) || 0;
     const newValue = currentValue + 1;
     try {
@@ -104,26 +137,27 @@ export function BaseStatsTable() {
       await updateDoc(userRef, {
         [`Parametri.Base.${statName}.Mod`]: newValue,
       });
-    } catch (error) {
+    } catch (error) { // Corrected catch block syntax
       console.error("Error updating stat mod", error);
     }
   };
 
-  const handleModDecrease = async (statName) => {
-    if (cooldown) return;
+  const handleModDecrease = async (statName) => { // Removed type annotation
+    if (cooldown || !user || !baseStats) return;
     triggerCooldown();
-    if (!user || !baseStats) return;
     const currentValue = Number(baseStats[statName].Mod) || 0;
     const newValue = currentValue - 1;
+    // Add check if you don't want negative Mods, e.g., if (newValue < 0) return;
     try {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
         [`Parametri.Base.${statName}.Mod`]: newValue,
       });
-    } catch (error) {
+    } catch (error) { // Corrected catch block syntax
       console.error("Error updating stat mod", error);
     }
   };
+
 
   const renderTable = () => {
     if (!baseStats) return null;
@@ -132,10 +166,12 @@ export function BaseStatsTable() {
 
     return (
       <div className="flex-grow flex flex-col">
+        {/* Update displayed text and variable */}
         <div className="p-2 text-right text-white bg-[rgba(25,50,128,0.4)] border border-[rgba(255,255,255,0.3)]">
-          Punti Base: {abilityPoints}
+          Punti Base: {basePointsAvailable} {/* Use new state variable */}
         </div>
-        <table className="w-full flex-grow border-collapse text-white rounded-[8px] overflow-hidden">
+        {/* Rest of the table rendering logic remains the same */}
+         <table className="w-full flex-grow border-collapse text-white rounded-[8px] overflow-hidden">
           <thead>
             <tr>
               <th className="border border-[rgba(255,255,255,0.3)] p-2 text-left pl-[10px]">
@@ -164,6 +200,7 @@ export function BaseStatsTable() {
                   </td>
                   {columns.map((col) => {
                     if (col === "Base") {
+                      // Buttons now call modified handlers
                       return (
                         <td key={col} className="border border-[rgba(255,255,255,0.3)] p-2 text-center">
                           {!lockParamBase ? (
@@ -194,6 +231,7 @@ export function BaseStatsTable() {
                         </td>
                       );
                     } else if (col === "Mod") {
+                      // Mod handlers remain unchanged
                       return (
                         <td key={col} className="border border-[rgba(255,255,255,0.3)] p-2 text-center">
                           <div className="flex flex-row items-center justify-center">
@@ -246,21 +284,24 @@ export function BaseStatsTable() {
   );
 }
 
-// Component for the Combat Stats Table
+// --- CombatStatsTable Component ---
 export function CombatStatsTable() {
   const { user, userData } = useAuth();
   const [combStats, setCombStats] = useState(null);
   const [cooldown, setCooldown] = useState(false);
-  const [tokenValue, setTokenValue] = useState(0);
+  // Use the new state variable name
+  const [combatTokensAvailable, setCombatTokensAvailable] = useState(0);
   const [lockParamCombat, setLockParamCombat] = useState(false);
 
+  // Update useEffect to use the new field name 'combatTokensAvailable'
   useEffect(() => {
     if (userData) {
       if (userData.Parametri && userData.Parametri.Combattimento) {
         setCombStats(userData.Parametri.Combattimento);
       }
+      // Use the new field name
       if (userData.stats && userData.stats.combatTokensAvailable !== undefined) {
-        setTokenValue(userData.stats.combatTokensAvailable);
+        setCombatTokensAvailable(userData.stats.combatTokensAvailable);
       }
       if (userData.settings) {
         setLockParamCombat(userData.settings.lock_param_combat || false);
@@ -268,7 +309,7 @@ export function CombatStatsTable() {
     }
   }, [userData]);
 
-  // Enhanced real-time listener for combat stats, settings and token value changes
+  // Update real-time listener to use the new field name 'combatTokensAvailable'
   useEffect(() => {
     if (!user) return;
 
@@ -278,13 +319,13 @@ export function CombatStatsTable() {
       (docSnapshot) => {
         if (docSnapshot.exists()) {
           const data = docSnapshot.data();
+           // Use the new field name
           if (data.stats && data.stats.combatTokensAvailable !== undefined) {
-            setTokenValue(data.stats.combatTokensAvailable);
+            setCombatTokensAvailable(data.stats.combatTokensAvailable);
           }
           if (data.settings) {
             setLockParamCombat(data.settings.lock_param_combat || false);
           }
-          // Listen for changes in Combat parameters
           if (data.Parametri && data.Parametri.Combattimento) {
             setCombStats(data.Parametri.Combattimento);
           }
@@ -303,42 +344,59 @@ export function CombatStatsTable() {
     setTimeout(() => setCooldown(false), 500);
   };
 
-  const handleCombIncrease = async (statName) => {
-    if (cooldown) return;
+  // --- Modified handleCombIncrease ---
+  const handleCombIncrease = async (statName) => { // Removed type annotation
+    // Keep existing checks
+    if (cooldown || lockParamCombat || !user || !combStats) return;
     triggerCooldown();
-    if (!user || !combStats) return;
-    const currentValue = Number(combStats[statName].Base) || 0;
-    const newValue = currentValue + 1;
+
     try {
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, {
-        [`Parametri.Combattimento.${statName}.Base`]: newValue,
+      // Call the Cloud Function
+      await spendCharacterPoint({
+        statName: statName,
+        statType: 'Combat',
+        change: 1
       });
-    } catch (error) {
-      console.error("Error updating combat stat", error);
+      // console.log(`Increased ${statName}`);
+    } catch (error) { // Corrected catch block syntax
+      console.error("Error spending combat token:", error);
+      alert(`Failed to increase ${statName}: ${error.message}`);
     }
   };
 
-  const handleCombDecrease = async (statName) => {
-    if (cooldown) return;
+  // --- Modified handleCombDecrease ---
+  const handleCombDecrease = async (statName) => { // Removed type annotation
+    // Keep existing checks
+    if (cooldown || lockParamCombat || !user || !combStats) return;
+
+     // Optional: Client-side minimum check
+    const currentValue = Number(combStats[statName]?.Base) || 0;
+    const MINIMUM_STAT_BASE_VALUE = 0; // Match the minimum defined in your CF
+    if (currentValue <= MINIMUM_STAT_BASE_VALUE) {
+       console.log(`Cannot decrease ${statName} below ${MINIMUM_STAT_BASE_VALUE}`);
+       return;
+    }
+
     triggerCooldown();
-    if (!user || !combStats) return;
-    const currentValue = Number(combStats[statName].Base) || 0;
-    const newValue = currentValue - 1;
+
     try {
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, {
-        [`Parametri.Combattimento.${statName}.Base`]: newValue,
-      });
-    } catch (error) {
-      console.error("Error updating combat stat", error);
+       // Call the Cloud Function
+      await spendCharacterPoint({
+        statName: statName,
+        statType: 'Combat',
+        change: -1
+       });
+       // console.log(`Decreased ${statName}`);
+    } catch (error) { // Corrected catch block syntax
+      console.error("Error refunding combat token:", error);
+      alert(`Failed to decrease ${statName}: ${error.message}`);
     }
   };
 
-  const handleCombModIncrease = async (statName) => {
-    if (cooldown) return;
+  // Keep handleCombModIncrease and handleCombModDecrease as they modify 'Mod'
+  const handleCombModIncrease = async (statName) => { // Removed type annotation
+    if (cooldown || !user || !combStats) return;
     triggerCooldown();
-    if (!user || !combStats) return;
     const currentValue = Number(combStats[statName].Mod) || 0;
     const newValue = currentValue + 1;
     try {
@@ -346,23 +404,23 @@ export function CombatStatsTable() {
       await updateDoc(userRef, {
         [`Parametri.Combattimento.${statName}.Mod`]: newValue,
       });
-    } catch (error) {
+    } catch (error) { // Corrected catch block syntax
       console.error("Error updating combat stat mod", error);
     }
   };
 
-  const handleCombModDecrease = async (statName) => {
-    if (cooldown) return;
+  const handleCombModDecrease = async (statName) => { // Removed type annotation
+    if (cooldown || !user || !combStats) return;
     triggerCooldown();
-    if (!user || !combStats) return;
     const currentValue = Number(combStats[statName].Mod) || 0;
     const newValue = currentValue - 1;
+    // Add check if you don't want negative Mods, e.g., if (newValue < 0) return;
     try {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
         [`Parametri.Combattimento.${statName}.Mod`]: newValue,
       });
-    } catch (error) {
+    } catch (error) { // Corrected catch block syntax
       console.error("Error updating combat stat mod", error);
     }
   };
@@ -374,10 +432,12 @@ export function CombatStatsTable() {
 
     return (
       <div className="flex-grow flex flex-col">
+         {/* Update displayed text and variable */}
         <div className="p-2 text-right text-white bg-[rgba(25,50,128,0.4)] border border-[rgba(255,255,255,0.3)]">
-          Token: {tokenValue}
+          Token: {combatTokensAvailable} {/* Use new state variable */}
         </div>
-        <table className="w-full flex-grow border-collapse text-white rounded-[8px] overflow-hidden">
+         {/* Rest of the table rendering logic remains the same */}
+         <table className="w-full flex-grow border-collapse text-white rounded-[8px] overflow-hidden">
           <thead>
             <tr>
               <th className="border border-[rgba(255,255,255,0.3)] p-2 text-left pl-[10px]">
@@ -406,6 +466,7 @@ export function CombatStatsTable() {
                   </td>
                   {columns.map((col) => {
                     if (col === "Base") {
+                      // Buttons now call modified handlers
                       return (
                         <td key={col} className="border border-[rgba(255,255,255,0.3)] p-2 text-center">
                           {!lockParamCombat ? (
@@ -436,7 +497,8 @@ export function CombatStatsTable() {
                         </td>
                       );
                     } else if (col === "Mod") {
-                      return (
+                     // Mod handlers remain unchanged
+                     return (
                         <td key={col} className="border border-[rgba(255,255,255,0.3)] p-2 text-center">
                           <div className="flex flex-row items-center justify-center">
                             <button
