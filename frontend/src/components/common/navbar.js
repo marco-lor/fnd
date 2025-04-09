@@ -163,6 +163,18 @@ const Navbar = ({ imageUrl: propImageUrl, userData: propUserData }) => {
             DM Dashboard
           </button>
         )}
+        {userData?.role === "webmaster" && (
+          <button
+            onClick={() => navigate("/admin")}
+            className={`px-4 py-2 rounded-md transition-colors ${
+              isActive("/admin")
+                ? "bg-[#FFA500] text-white"
+                : "bg-transparent text-white hover:bg-[#e69500]"
+            }`}
+          >
+            Admin
+          </button>
+        )}
       </div>
 
       {/* Right Column: Logout Button */}

@@ -7,6 +7,7 @@ import Bazaar from "./components/bazaar/Bazaar";
 import DMDashboard from "./components/dmDashboard/DMDashboard"; // New DM page
 import TecnicheSpell from "./components/tecnicheSpell/TecnicheSpell"; // New import for TecnicheSpell
 import CombatPage from "./components/combatTool/combatPage"; // Nuovo import
+import AdminPage from "./components/admin/adminPage"; // Import for AdminPage
 import { AuthProvider, useAuth } from "./AuthContext";
 import "./App.css";
 
@@ -14,6 +15,15 @@ import "./App.css";
 const ProtectedDMRoute = ({ children }) => {
   const { user, userData } = useAuth();
   if (!user || userData?.role !== "dm") {
+    return <Navigate to="/home" />;
+  }
+  return children;
+};
+
+// Protected route component for webmaster-only access
+const ProtectedWebmasterRoute = ({ children }) => {
+  const { user, userData } = useAuth();
+  if (!user || userData?.role !== "webmaster") {
     return <Navigate to="/home" />;
   }
   return children;
@@ -33,6 +43,14 @@ function AppRoutes() {
           <ProtectedDMRoute>
             <DMDashboard />
           </ProtectedDMRoute>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <ProtectedWebmasterRoute>
+            <AdminPage />
+          </ProtectedWebmasterRoute>
         }
       />
     </Routes>
