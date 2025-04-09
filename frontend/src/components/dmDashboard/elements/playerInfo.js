@@ -15,72 +15,54 @@ import { DelSpellOverlay } from "./delSpell";
 library.add(faEdit, faTrash);
 
 const PlayerInfo = ({ users, loading, error, setUsers }) => {
-  // State variables for the technique overlays
+  // State variables (remain the same)
   const [showTecnicaOverlay, setShowTecnicaOverlay] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [showEditTecnicaOverlay, setShowEditTecnicaOverlay] = useState(false);
   const [selectedTecnica, setSelectedTecnica] = useState(null);
   const [showDeleteTecnicaOverlay, setShowDeleteTecnicaOverlay] = useState(false);
-  
-  // State variables for the spell overlays
+
   const [showSpellOverlay, setShowSpellOverlay] = useState(false);
   const [showEditSpellOverlay, setShowEditSpellOverlay] = useState(false);
   const [showDeleteSpellOverlay, setShowDeleteSpellOverlay] = useState(false);
   const [selectedSpell, setSelectedSpell] = useState(null);
 
-  // Handler function for opening the Tecnica overlay
+  // Handlers (remain the same)
   const handleAddTecnicaClick = (userId) => {
     setSelectedUserId(userId);
     setShowTecnicaOverlay(true);
   };
 
-  // Handler function for opening the Edit Tecnica overlay
   const handleEditTecnicaClick = (userId, tecnicaName, tecnicaData) => {
     setSelectedUserId(userId);
-    setSelectedTecnica({
-      name: tecnicaName,
-      data: tecnicaData
-    });
+    setSelectedTecnica({ name: tecnicaName, data: tecnicaData });
     setShowEditTecnicaOverlay(true);
   };
 
-  // Handler function for opening the Delete Tecnica overlay
   const handleDeleteTecnicaClick = (userId, tecnicaName, tecnicaData) => {
     setSelectedUserId(userId);
-    setSelectedTecnica({
-      name: tecnicaName,
-      data: tecnicaData
-    });
+    setSelectedTecnica({ name: tecnicaName, data: tecnicaData });
     setShowDeleteTecnicaOverlay(true);
   };
-  
-  // Handler function for opening the Spell overlay
+
   const handleAddSpellClick = (userId) => {
     setSelectedUserId(userId);
     setShowSpellOverlay(true);
   };
-  
-  // Handler function for opening the Edit Spell overlay
+
   const handleEditSpellClick = (userId, spellName, spellData) => {
     setSelectedUserId(userId);
-    setSelectedSpell({
-      name: spellName,
-      data: spellData
-    });
+    setSelectedSpell({ name: spellName, data: spellData });
     setShowEditSpellOverlay(true);
   };
-  
-  // Handler function for opening the Delete Spell overlay
+
   const handleDeleteSpellClick = (userId, spellName, spellData) => {
     setSelectedUserId(userId);
-    setSelectedSpell({
-      name: spellName,
-      data: spellData
-    });
+    setSelectedSpell({ name: spellName, data: spellData });
     setShowDeleteSpellOverlay(true);
   };
 
-  // Function to refresh user data after changes
+  // refreshUserData (remains the same)
   const refreshUserData = async () => {
     try {
       const usersRef = collection(db, "users");
@@ -92,41 +74,51 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
     }
   };
 
+  // Loading/Error/No users checks (remain the same)
   if (loading) {
     return <div className="text-white mt-4">Loading user data...</div>;
   }
-
   if (error) {
     return <div className="text-red-500 mt-4">{error}</div>;
   }
-
   if (users.length === 0) {
     return <div className="text-white mt-4">No users found.</div>;
   }
 
+  // --- MODIFICATION: Updated Button Styles ---
+  // Style for the icon-only edit button
+  const iconEditButtonStyle = "text-blue-400 hover:text-blue-300 transition-colors duration-200 transform hover:scale-110 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded";
+  // Style for the icon-only delete button
+  const iconDeleteButtonStyle = "text-red-500 hover:text-red-400 transition-colors duration-200 transform hover:scale-110 focus:outline-none focus:ring-1 focus:ring-red-600 rounded";
+  // --- END MODIFICATION ---
+
   return (
     <div className="mt-8">
       <h2 className="mb-3 text-white text-xl">Player Info</h2>
-      <div className="overflow-x-auto">
-        <table className="min-w-full border-collapse text-white">
-          <thead>
+      {/* --- MODIFICATION: Removed overflow-x-auto --- */}
+      <div className="rounded-lg shadow-lg">
+      {/* --- END MODIFICATION --- */}
+        <table className="min-w-full border-collapse text-white bg-gray-800">
+          <thead className="bg-gray-700">
             <tr>
-              <th className="border px-4 py-2">Tecniche</th>
+              <th className="border border-gray-600 px-4 py-2 text-left">Category</th>
               {users.map((user) => (
-                <th key={user.id} className="border px-4 py-2">
+                <th key={user.id} className="border border-gray-600 px-4 py-2 text-center">
                   {user.characterId || user.email || "Unknown User"}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td className="border px-4 py-2">Actions</td>
+            {/* Actions Row */}
+            <tr className="bg-gray-800 hover:bg-gray-700 transition-colors duration-150">
+              <td className="border border-gray-600 px-4 py-2 font-medium">Actions</td>
               {users.map((user) => (
-                <td key={`${user.id}-action`} className="border px-4 py-2 text-center">
-                  <div className="flex flex-col items-center">
+                <td key={`${user.id}-action`} className="border border-gray-600 px-4 py-2 text-center">
+                  <div className="flex flex-col items-center space-y-2">
+                    {/* Aggiungi Tecnica Button */}
                     <button
-                      className="w-48 px-3 py-1.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-medium rounded-md shadow-md transition-all duration-200 transform hover:scale-105 flex items-center justify-center space-x-1"
+                      className="w-48 px-3 py-1.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-medium rounded-md shadow-md transition-all duration-200 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-opacity-75"
                       onClick={() => handleAddTecnicaClick(user.id)}
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -134,9 +126,10 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                       </svg>
                       <span>Aggiungi Tecnica</span>
                     </button>
-                    
+
+                    {/* Aggiungi Spell Button */}
                     <button
-                      className="w-48 mt-2 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white font-medium rounded-md shadow-md transition-all duration-200 transform hover:scale-105 flex items-center justify-center space-x-1"
+                      className="w-48 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white font-medium rounded-md shadow-md transition-all duration-200 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-opacity-75"
                       onClick={() => handleAddSpellClick(user.id)}
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -148,70 +141,124 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                 </td>
               ))}
             </tr>
-            <tr>
-              <td className="border px-4 py-2">Tecniche</td>
+
+            {/* Tecniche Row */}
+            <tr className="bg-gray-800 hover:bg-gray-700 transition-colors duration-150">
+              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Tecniche</td>
               {users.map((user) => (
-                <td key={`${user.id}-tecniche`} className="border px-4 py-2">
-                  {user.tecniche ? (
-                    <ul className="list-disc list-inside">
+                <td key={`${user.id}-tecniche`} className="border border-gray-600 px-4 py-2 align-top">
+                  {user.tecniche && Object.keys(user.tecniche).length > 0 ? (
+                    <ul className="space-y-1">
                       {Object.keys(user.tecniche).map((tecnicaName) => (
-                        <li key={tecnicaName} className="text-sm flex items-center justify-between">
-                          <span>{tecnicaName}</span>
-                          <div className="ml-2 space-x-1">
+                        <li key={tecnicaName} className="text-sm flex items-center justify-between group">
+                          <span className="truncate mr-2">{tecnicaName}</span>
+                          <div className="flex-shrink-0 ml-2 space-x-1.5 opacity-50 group-hover:opacity-100 transition-opacity duration-200"> {/* Increased space */}
+                            {/* --- MODIFICATION: Apply new button style --- */}
                             <button
-                              className="px-1.5 py-1 bg-yellow-600 hover:bg-yellow-700 rounded-full text-xs transition-transform hover:scale-110"
+                              className={iconEditButtonStyle} // Use new style
                               title="Modify Tecnica"
                               onClick={() => handleEditTecnicaClick(user.id, tecnicaName, user.tecniche[tecnicaName])}
                             >
-                              <FontAwesomeIcon icon="edit" />
+                              <FontAwesomeIcon icon="edit" className="w-3.5 h-3.5"/> {/* Slightly larger icon */}
                             </button>
                             <button
-                              className="px-1.5 py-1 bg-red-600 hover:bg-red-700 rounded-full text-xs transition-transform hover:scale-110"
+                              className={iconDeleteButtonStyle} // Use new style
                               title="Delete Tecnica"
                               onClick={() => handleDeleteTecnicaClick(user.id, tecnicaName, user.tecniche[tecnicaName])}
                             >
-                              <FontAwesomeIcon icon="trash" />
+                              <FontAwesomeIcon icon="trash" className="w-3.5 h-3.5"/> {/* Slightly larger icon */}
                             </button>
+                            {/* --- END MODIFICATION --- */}
                           </div>
                         </li>
                       ))}
                     </ul>
                   ) : (
-                    <span className="text-gray-400 text-sm">No tecniche found</span>
+                    <span className="text-gray-400 text-sm italic">No tecniche</span>
                   )}
                 </td>
               ))}
             </tr>
-            <tr>
-              <td className="border px-4 py-2">Spells</td>
+
+            {/* Spells Row */}
+            <tr className="bg-gray-800 hover:bg-gray-700 transition-colors duration-150">
+              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Spells</td>
               {users.map((user) => (
-                <td key={`${user.id}-spells`} className="border px-4 py-2">
-                  {user.spells ? (
-                    <ul className="list-disc list-inside">
+                <td key={`${user.id}-spells`} className="border border-gray-600 px-4 py-2 align-top">
+                  {user.spells && Object.keys(user.spells).length > 0 ? (
+                     <ul className="space-y-1">
                       {Object.keys(user.spells).map((spellName) => (
-                        <li key={spellName} className="text-sm flex items-center justify-between">
-                          <span>{spellName}</span>
-                          <div className="ml-2 space-x-1">
+                        <li key={spellName} className="text-sm flex items-center justify-between group">
+                          <span className="truncate mr-2">{spellName}</span>
+                           <div className="flex-shrink-0 ml-2 space-x-1.5 opacity-50 group-hover:opacity-100 transition-opacity duration-200"> {/* Increased space */}
+                             {/* --- MODIFICATION: Apply new button style --- */}
                             <button
-                              className="px-1.5 py-1 bg-yellow-600 hover:bg-yellow-700 rounded-full text-xs transition-transform hover:scale-110"
+                              className={iconEditButtonStyle} // Use new style
                               title="Modify Spell"
                               onClick={() => handleEditSpellClick(user.id, spellName, user.spells[spellName])}
                             >
-                              <FontAwesomeIcon icon="edit" />
+                              <FontAwesomeIcon icon="edit" className="w-3.5 h-3.5"/> {/* Slightly larger icon */}
                             </button>
                             <button
-                              className="px-1.5 py-1 bg-red-600 hover:bg-red-700 rounded-full text-xs transition-transform hover:scale-110"
+                              className={iconDeleteButtonStyle} // Use new style
                               title="Delete Spell"
                               onClick={() => handleDeleteSpellClick(user.id, spellName, user.spells[spellName])}
                             >
-                              <FontAwesomeIcon icon="trash" />
+                              <FontAwesomeIcon icon="trash" className="w-3.5 h-3.5"/> {/* Slightly larger icon */}
                             </button>
+                             {/* --- END MODIFICATION --- */}
                           </div>
                         </li>
                       ))}
                     </ul>
                   ) : (
-                    <span className="text-gray-400 text-sm">No spells found</span>
+                    <span className="text-gray-400 text-sm italic">No spells</span>
+                  )}
+                </td>
+              ))}
+            </tr>
+
+            {/* Conoscenze Row */}
+            <tr className="bg-gray-800 hover:bg-gray-700 transition-colors duration-150">
+              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Conoscenze</td>
+              {users.map((user) => (
+                <td key={`${user.id}-conoscenze`} className="border border-gray-600 px-4 py-2 align-top">
+                  {user.conoscenze && Object.keys(user.conoscenze).length > 0 ? (
+                    <ul className="space-y-1">
+                      {Object.keys(user.conoscenze).map((conoscenzaName) => (
+                        <li key={conoscenzaName} className="text-sm group flex items-center justify-between">
+                          <span className="truncate mr-2">{conoscenzaName}</span>
+                           <div className="flex-shrink-0 ml-2 space-x-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                              {/* Placeholder for potential future buttons */}
+                           </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <span className="text-gray-400 text-sm italic">No conoscenze</span>
+                  )}
+                </td>
+              ))}
+            </tr>
+
+            {/* Professioni Row */}
+            <tr className="bg-gray-800 hover:bg-gray-700 transition-colors duration-150">
+              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Professioni</td>
+              {users.map((user) => (
+                <td key={`${user.id}-professioni`} className="border border-gray-600 px-4 py-2 align-top">
+                  {user.professioni && Object.keys(user.professioni).length > 0 ? (
+                    <ul className="space-y-1">
+                      {Object.keys(user.professioni).map((professioneName) => (
+                         <li key={professioneName} className="text-sm group flex items-center justify-between">
+                          <span className="truncate mr-2">{professioneName}</span>
+                           <div className="flex-shrink-0 ml-2 space-x-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                               {/* Placeholder for potential future buttons */}
+                           </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <span className="text-gray-400 text-sm italic">No professioni</span>
                   )}
                 </td>
               ))}
@@ -220,6 +267,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
         </table>
       </div>
 
+      {/* Overlays (remain the same) */}
       {showTecnicaOverlay && selectedUserId && (
         <AddTecnicaPersonaleOverlay
           userId={selectedUserId}
@@ -232,7 +280,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
           }}
         />
       )}
-      
+
       {showEditTecnicaOverlay && selectedUserId && selectedTecnica && (
         <EditTecnicaPersonale
           userId={selectedUserId}
@@ -248,7 +296,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
           }}
         />
       )}
-      
+
       {showDeleteTecnicaOverlay && selectedUserId && selectedTecnica && (
         <DelTecnicaPersonale
           userId={selectedUserId}
@@ -264,7 +312,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
           }}
         />
       )}
-      
+
       {showSpellOverlay && selectedUserId && (
         <AddSpellOverlay
           userId={selectedUserId}
@@ -277,7 +325,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
           }}
         />
       )}
-      
+
       {showEditSpellOverlay && selectedUserId && selectedSpell && (
         <EditSpellOverlay
           userId={selectedUserId}
@@ -293,7 +341,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
           }}
         />
       )}
-      
+
       {showDeleteSpellOverlay && selectedUserId && selectedSpell && (
         <DelSpellOverlay
           userId={selectedUserId}
