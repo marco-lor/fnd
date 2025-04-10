@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faEdit, faTrash } from "@fortawesome/free-solid-svg-icons";
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { collection, getDocs } from "firebase/firestore";
-import { db } from "../../firebaseConfig";
+import { db } from "../../firebaseConfig"; // Assuming firebaseConfig is correctly set up
 import { AddTecnicaPersonaleOverlay } from "./buttons/addTecnicaPersonale";
 import { EditTecnicaPersonale } from "./buttons/editTecnicaPersonale";
 import { DelTecnicaPersonale } from "./buttons/delTecnicaPersonale";
@@ -11,11 +11,17 @@ import { AddSpellOverlay } from "./buttons/addSpell";
 import { EditSpellOverlay } from "./buttons/editSpell";
 import { DelSpellOverlay } from "./buttons/delSpell";
 
+// --- Import the new Button Components ---
+import AddLinguaPersonale from "./buttons/addLinguaPersonale";
+import AddConoscenzaPersonale from "./buttons/addConoscenzaPersonale";
+import AddProfessionePersonale from "./buttons/addProfessionePersonale";
+// --- End Import ---
+
 // Add icons to library
 library.add(faEdit, faTrash);
 
 const PlayerInfo = ({ users, loading, error, setUsers }) => {
-  // State variables (remain the same)
+  // State variables
   const [showTecnicaOverlay, setShowTecnicaOverlay] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [showEditTecnicaOverlay, setShowEditTecnicaOverlay] = useState(false);
@@ -27,7 +33,30 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
   const [showDeleteSpellOverlay, setShowDeleteSpellOverlay] = useState(false);
   const [selectedSpell, setSelectedSpell] = useState(null);
 
-  // Handlers (remain the same)
+  // --- Placeholder State/Handlers for new buttons (optional for now) ---
+  // You would add state like this later if needed for overlays:
+  // const [showLinguaOverlay, setShowLinguaOverlay] = useState(false);
+  // const [showConoscenzaOverlay, setShowConoscenzaOverlay] = useState(false);
+  // const [showProfessioneOverlay, setShowProfessioneOverlay] = useState(false);
+
+  const handleAddLinguaClick = (userId) => {
+    console.log(`Placeholder: Add Lingua for user ${userId}`);
+    // Later: setSelectedUserId(userId); setShowLinguaOverlay(true);
+  };
+
+  const handleAddConoscenzaClick = (userId) => {
+    console.log(`Placeholder: Add Conoscenza for user ${userId}`);
+    // Later: setSelectedUserId(userId); setShowConoscenzaOverlay(true);
+  };
+
+  const handleAddProfessioneClick = (userId) => {
+    console.log(`Placeholder: Add Professione for user ${userId}`);
+    // Later: setSelectedUserId(userId); setShowProfessioneOverlay(true);
+  };
+  // --- End Placeholder Handlers ---
+
+
+  // Handlers for existing buttons
   const handleAddTecnicaClick = (userId) => {
     setSelectedUserId(userId);
     setShowTecnicaOverlay(true);
@@ -62,7 +91,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
     setShowDeleteSpellOverlay(true);
   };
 
-  // refreshUserData (remains the same)
+  // refreshUserData
   const refreshUserData = async () => {
     try {
       const usersRef = collection(db, "users");
@@ -71,10 +100,11 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
       setUsers(usersData);
     } catch (err) {
       console.error("Error refreshing users:", err);
+      // Optionally set an error state here to display to the user
     }
   };
 
-  // Loading/Error/No users checks (remain the same)
+  // Loading/Error/No users checks
   if (loading) {
     return <div className="text-white mt-4">Loading user data...</div>;
   }
@@ -85,19 +115,18 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
     return <div className="text-white mt-4">No users found.</div>;
   }
 
-  // --- MODIFICATION: Updated Button Styles ---
-  // Style for the icon-only edit button
+  // Button Styles
   const iconEditButtonStyle = "text-blue-400 hover:text-blue-300 transition-colors duration-200 transform hover:scale-110 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded";
-  // Style for the icon-only delete button
   const iconDeleteButtonStyle = "text-red-500 hover:text-red-400 transition-colors duration-200 transform hover:scale-110 focus:outline-none focus:ring-1 focus:ring-red-600 rounded";
-  // --- END MODIFICATION ---
+
+  // --- START REFACTOR: New Button Style ---
+  const sleekButtonStyle = "w-36 px-2 py-1 bg-gradient-to-r from-blue-800 to-indigo-900 hover:from-blue-700 hover:to-indigo-800 text-white text-xs font-medium rounded-md transition-all duration-150 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 shadow-sm";
+  // --- END REFACTOR: New Button Style ---
 
   return (
     <div className="mt-8">
       <h2 className="mb-3 text-white text-xl">Player Info</h2>
-      {/* --- MODIFICATION: Removed overflow-x-auto --- */}
       <div className="rounded-lg shadow-lg">
-      {/* --- END MODIFICATION --- */}
         <table className="min-w-full border-collapse text-white bg-gray-800">
           <thead className="bg-gray-700">
             <tr>
@@ -112,31 +141,49 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
           <tbody>
             {/* Actions Row */}
             <tr className="bg-gray-800 hover:bg-gray-700 transition-colors duration-150">
-              <td className="border border-gray-600 px-4 py-2 font-medium">Actions</td>
+              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Actions</td> {/* Added align-top */}
               {users.map((user) => (
-                <td key={`${user.id}-action`} className="border border-gray-600 px-4 py-2 text-center">
-                  <div className="flex flex-col items-center space-y-2">
-                    {/* Aggiungi Tecnica Button */}
+                <td key={`${user.id}-action`} className="border border-gray-600 px-4 py-2 text-center align-top"> {/* Added align-top */}
+                  {/* --- Updated flex container --- */}
+                  <div className="flex flex-col items-center space-y-1"> {/* Reduced space-y */}
+                    {/* Aggiungi Tecnica Button - REFACTORED STYLE */}
                     <button
-                      className="w-48 px-3 py-1.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-medium rounded-md shadow-md transition-all duration-200 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-opacity-75"
+                      className={sleekButtonStyle} // Applied new style
                       onClick={() => handleAddTecnicaClick(user.id)}
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"> {/* Slightly smaller icon */}
                         <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
                       </svg>
-                      <span>Aggiungi Tecnica</span>
+                      <span>Add Tecnica</span>
                     </button>
 
-                    {/* Aggiungi Spell Button */}
+                    {/* Aggiungi Spell Button - REFACTORED STYLE */}
                     <button
-                      className="w-48 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white font-medium rounded-md shadow-md transition-all duration-200 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-opacity-75"
+                      className={sleekButtonStyle} // Applied new style
                       onClick={() => handleAddSpellClick(user.id)}
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"> {/* Slightly smaller icon */}
                         <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
                       </svg>
-                      <span>Aggiungi Spell</span>
+                      <span>Add Spell</span>
                     </button>
+
+                    {/* --- Add the New Buttons with REFACTORED STYLE --- */}
+                    {/* Assuming these components accept className prop */}
+                    <AddLinguaPersonale
+                        className={sleekButtonStyle} // Applied new style
+                        onClick={() => handleAddLinguaClick(user.id)}
+                     />
+                    <AddConoscenzaPersonale
+                        className={sleekButtonStyle} // Applied new style
+                        onClick={() => handleAddConoscenzaClick(user.id)}
+                    />
+                    <AddProfessionePersonale
+                        className={sleekButtonStyle} // Applied new style
+                        onClick={() => handleAddProfessioneClick(user.id)}
+                    />
+                    {/* --- End New Buttons --- */}
+
                   </div>
                 </td>
               ))}
@@ -152,23 +199,21 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                       {Object.keys(user.tecniche).map((tecnicaName) => (
                         <li key={tecnicaName} className="text-sm flex items-center justify-between group">
                           <span className="truncate mr-2">{tecnicaName}</span>
-                          <div className="flex-shrink-0 ml-2 space-x-1.5 opacity-50 group-hover:opacity-100 transition-opacity duration-200"> {/* Increased space */}
-                            {/* --- MODIFICATION: Apply new button style --- */}
+                          <div className="flex-shrink-0 ml-2 space-x-1.5 opacity-50 group-hover:opacity-100 transition-opacity duration-200">
                             <button
-                              className={iconEditButtonStyle} // Use new style
+                              className={iconEditButtonStyle}
                               title="Modify Tecnica"
                               onClick={() => handleEditTecnicaClick(user.id, tecnicaName, user.tecniche[tecnicaName])}
                             >
-                              <FontAwesomeIcon icon="edit" className="w-3.5 h-3.5"/> {/* Slightly larger icon */}
+                              <FontAwesomeIcon icon="edit" className="w-3.5 h-3.5"/>
                             </button>
                             <button
-                              className={iconDeleteButtonStyle} // Use new style
+                              className={iconDeleteButtonStyle}
                               title="Delete Tecnica"
                               onClick={() => handleDeleteTecnicaClick(user.id, tecnicaName, user.tecniche[tecnicaName])}
                             >
-                              <FontAwesomeIcon icon="trash" className="w-3.5 h-3.5"/> {/* Slightly larger icon */}
+                              <FontAwesomeIcon icon="trash" className="w-3.5 h-3.5"/>
                             </button>
-                            {/* --- END MODIFICATION --- */}
                           </div>
                         </li>
                       ))}
@@ -190,23 +235,21 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                       {Object.keys(user.spells).map((spellName) => (
                         <li key={spellName} className="text-sm flex items-center justify-between group">
                           <span className="truncate mr-2">{spellName}</span>
-                           <div className="flex-shrink-0 ml-2 space-x-1.5 opacity-50 group-hover:opacity-100 transition-opacity duration-200"> {/* Increased space */}
-                             {/* --- MODIFICATION: Apply new button style --- */}
+                           <div className="flex-shrink-0 ml-2 space-x-1.5 opacity-50 group-hover:opacity-100 transition-opacity duration-200">
                             <button
-                              className={iconEditButtonStyle} // Use new style
+                              className={iconEditButtonStyle}
                               title="Modify Spell"
                               onClick={() => handleEditSpellClick(user.id, spellName, user.spells[spellName])}
                             >
-                              <FontAwesomeIcon icon="edit" className="w-3.5 h-3.5"/> {/* Slightly larger icon */}
+                              <FontAwesomeIcon icon="edit" className="w-3.5 h-3.5"/>
                             </button>
                             <button
-                              className={iconDeleteButtonStyle} // Use new style
+                              className={iconDeleteButtonStyle}
                               title="Delete Spell"
                               onClick={() => handleDeleteSpellClick(user.id, spellName, user.spells[spellName])}
                             >
-                              <FontAwesomeIcon icon="trash" className="w-3.5 h-3.5"/> {/* Slightly larger icon */}
+                              <FontAwesomeIcon icon="trash" className="w-3.5 h-3.5"/>
                             </button>
-                             {/* --- END MODIFICATION --- */}
                           </div>
                         </li>
                       ))}
@@ -263,11 +306,35 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                 </td>
               ))}
             </tr>
+
+            {/* Lingue Row */}
+            <tr className="bg-gray-800 hover:bg-gray-700 transition-colors duration-150">
+              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Lingue</td>
+              {users.map((user) => (
+                <td key={`${user.id}-lingue`} className="border border-gray-600 px-4 py-2 align-top">
+                  {user.lingue && Object.keys(user.lingue).length > 0 ? (
+                    <ul className="space-y-1">
+                      {Object.keys(user.lingue).map((linguaName) => (
+                         <li key={linguaName} className="text-sm group flex items-center justify-between">
+                          <span className="truncate mr-2">{linguaName}</span>
+                           <div className="flex-shrink-0 ml-2 space-x-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                               {/* Placeholder for potential future buttons */}
+                           </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <span className="text-gray-400 text-sm italic">No lingue</span>
+                  )}
+                </td>
+              ))}
+            </tr>
+
           </tbody>
         </table>
       </div>
 
-      {/* Overlays (remain the same) */}
+      {/* Overlays (Existing ones) */}
       {showTecnicaOverlay && selectedUserId && (
         <AddTecnicaPersonaleOverlay
           userId={selectedUserId}
@@ -357,6 +424,21 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
           }}
         />
       )}
+
+      {/* --- Placeholder for New Overlays (Add later) --- */}
+      {/*
+      {showLinguaOverlay && selectedUserId && (
+        <AddLinguaOverlay userId={selectedUserId} onClose={(success) => { ... }} />
+      )}
+      {showConoscenzaOverlay && selectedUserId && (
+        <AddConoscenzaOverlay userId={selectedUserId} onClose={(success) => { ... }} />
+      )}
+      {showProfessioneOverlay && selectedUserId && (
+        <AddProfessioneOverlay userId={selectedUserId} onClose={(success) => { ... }} />
+      )}
+      */}
+       {/* --- End Placeholder --- */}
+
     </div>
   );
 };

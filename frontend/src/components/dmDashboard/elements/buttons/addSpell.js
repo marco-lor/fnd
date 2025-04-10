@@ -238,7 +238,7 @@ export function AddSpellOverlay({ userId, onClose }) {
   const overlayContent = (
     <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-[9999]">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-4/5 max-w-3xl max-h-[90vh] overflow-y-auto">
-        <h2 className="text-xl text-white mb-1">Aggiungi Spell</h2>
+        <h2 className="text-xl text-white mb-1">Add Spell</h2>
         <p className="text-gray-300 mb-4">Per il giocatore: {userName}</p>
         <form onSubmit={(e) => { e.preventDefault(); handleSaveSpell(); }}>
           {schema ? (
