@@ -1,11 +1,10 @@
-// file: ./frontend/src/components/dmDashboard/elements/delTecnicaPersonale.js
 import React, { useState } from 'react';
 import ReactDOM from 'react-dom';
-import { db, storage } from '../../firebaseConfig';
+import { db, storage } from '../../../firebaseConfig';
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { ref, deleteObject } from "firebase/storage";
 
-export function DelTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose }) {
+export function DelSpellOverlay({ userId, spellName, spellData, onClose }) {
   const [userName, setUserName] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -28,15 +27,15 @@ export function DelTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose 
     fetchUserName();
   }, [userId]);
 
-  const handleDeleteTecnica = async () => {
+  const handleDeleteSpell = async () => {
     try {
       setIsDeleting(true);
 
       // Delete the image from storage if it exists
-      if (tecnicaData.image_url) {
+      if (spellData.image_url) {
         try {
           // Extract the file path from the URL
-          const urlPath = decodeURIComponent(tecnicaData.image_url.split('/o/')[1].split('?')[0]);
+          const urlPath = decodeURIComponent(spellData.image_url.split('/o/')[1].split('?')[0]);
           const imageRef = ref(storage, urlPath);
           await deleteObject(imageRef);
           console.log("Image deleted successfully from storage");
@@ -46,10 +45,10 @@ export function DelTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose 
       }
 
       // Delete the video from storage if it exists
-      if (tecnicaData.video_url) {
+      if (spellData.video_url) {
         try {
           // Extract the file path from the URL
-          const videoUrlPath = decodeURIComponent(tecnicaData.video_url.split('/o/')[1].split('?')[0]);
+          const videoUrlPath = decodeURIComponent(spellData.video_url.split('/o/')[1].split('?')[0]);
           const videoRef = ref(storage, videoUrlPath);
           await deleteObject(videoRef);
           console.log("Video deleted successfully from storage");
@@ -58,20 +57,20 @@ export function DelTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose 
         }
       }
 
-      // Remove the tecnica from the user's profile
+      // Remove the spell from the user's profile
       const userRef = doc(db, "users", userId);
       const userDoc = await getDoc(userRef);
 
       if (userDoc.exists()) {
         const userData = userDoc.data();
-        const updatedTecniche = { ...(userData.tecniche || {}) };
+        const updatedSpells = { ...(userData.spells || {}) };
 
-        // Delete the tecnica from the object
-        delete updatedTecniche[tecnicaName];
+        // Delete the spell from the object
+        delete updatedSpells[spellName];
 
         // Update the document
-        await updateDoc(userRef, { tecniche: updatedTecniche });
-        console.log(`Tecnica "${tecnicaName}" deleted successfully`);
+        await updateDoc(userRef, { spells: updatedSpells });
+        console.log(`Spell "${spellName}" deleted successfully`);
 
         // Close the dialog and notify parent component
         onClose(true);
@@ -79,8 +78,8 @@ export function DelTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose 
         alert("User not found");
       }
     } catch (error) {
-      console.error("Error deleting tecnica:", error);
-      alert("Error deleting tecnica");
+      console.error("Error deleting spell:", error);
+      alert("Error deleting spell");
     } finally {
       setIsDeleting(false);
     }
@@ -89,12 +88,12 @@ export function DelTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose 
   const overlayContent = (
     <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-[9999]">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-4/5 max-w-md">
-        <h2 className="text-xl text-white mb-2">Elimina Tecnica Personale</h2>
+        <h2 className="text-xl text-white mb-2">Elimina Spell</h2>
         <p className="text-gray-300 mb-2">Giocatore: {userName}</p>
 
         <div className="bg-red-900 bg-opacity-25 border border-red-700 rounded p-4 mb-4">
           <p className="text-white mb-2">
-            Stai per eliminare la tecnica <span className="font-semibold">{tecnicaName}</span>.
+            Stai per eliminare lo spell <span className="font-semibold">{spellName}</span>.
           </p>
           <p className="text-red-300">
             Questa azione è permanente e non può essere annullata.
@@ -112,7 +111,7 @@ export function DelTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose 
           </button>
           <button
             type="button"
-            onClick={handleDeleteTecnica}
+            onClick={handleDeleteSpell}
             disabled={isDeleting}
             className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center"
           >
@@ -133,3 +132,4 @@ export function DelTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose 
 
   return ReactDOM.createPortal(overlayContent, document.body);
 }
+

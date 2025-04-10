@@ -4,12 +4,12 @@ import { faEdit, faTrash } from "@fortawesome/free-solid-svg-icons";
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../firebaseConfig";
-import { AddTecnicaPersonaleOverlay } from "./addTecnicaPersonale";
-import { EditTecnicaPersonale } from "./editTecnicaPersonale";
-import { DelTecnicaPersonale } from "./delTecnicaPersonale";
-import { AddSpellOverlay } from "./addSpell";
-import { EditSpellOverlay } from "./editSpell";
-import { DelSpellOverlay } from "./delSpell";
+import { AddTecnicaPersonaleOverlay } from "./buttons/addTecnicaPersonale";
+import { EditTecnicaPersonale } from "./buttons/editTecnicaPersonale";
+import { DelTecnicaPersonale } from "./buttons/delTecnicaPersonale";
+import { AddSpellOverlay } from "./buttons/addSpell";
+import { EditSpellOverlay } from "./buttons/editSpell";
+import { DelSpellOverlay } from "./buttons/delSpell";
 
 // Add icons to library
 library.add(faEdit, faTrash);
