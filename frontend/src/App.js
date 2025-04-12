@@ -4,10 +4,12 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import Login from "./components/Login";
 import Home from "./components/home/Home";
 import Bazaar from "./components/bazaar/Bazaar";
-import DMDashboard from "./components/dmDashboard/DMDashboard"; // New DM page
-import TecnicheSpell from "./components/tecnicheSpell/TecnicheSpell"; // New import for TecnicheSpell
-import CombatPage from "./components/combatTool/combatPage"; // Nuovo import
-import AdminPage from "./components/admin/adminPage"; // Import for AdminPage
+import DMDashboard from "./components/dmDashboard/DMDashboard"; // DM page
+import TecnicheSpell from "./components/tecnicheSpell/TecnicheSpell"; // TecnicheSpell page
+import CombatPage from "./components/combatTool/combatPage"; // Combat page
+import AdminPage from "./components/admin/adminPage"; // AdminPage
+import Codex from "./components/codex/Codex"; // Codex page
+import EchiDiViaggio from "./components/echiDiViaggio/EchiDiViaggio"; // Import for Echi di Viaggio page
 import { AuthProvider, useAuth } from "./AuthContext";
 import "./App.css";
 
@@ -35,8 +37,10 @@ function AppRoutes() {
       <Route path="/" element={<Login />} />
       <Route path="/home" element={<Home />} />
       <Route path="/bazaar" element={<Bazaar />} />
-      <Route path="/combat" element={<CombatPage />} /> {/* Nuova rotta */}
-      <Route path="/tecniche-spell" element={<TecnicheSpell />} /> {/* New route */}
+      <Route path="/combat" element={<CombatPage />} />
+      <Route path="/tecniche-spell" element={<TecnicheSpell />} />
+      <Route path="/codex" element={<Codex />} />
+      <Route path="/echi-di-viaggio" element={<EchiDiViaggio />} /> {/* New route for Echi di Viaggio */}
       <Route
         path="/dm-dashboard"
         element={
@@ -53,6 +57,8 @@ function AppRoutes() {
           </ProtectedWebmasterRoute>
         }
       />
+       {/* Redirect any unknown paths to home, or handle 404 */}
+       <Route path="*" element={<Navigate to="/home" />} />
     </Routes>
   );
 }

@@ -137,11 +137,12 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
             </tr>
           </thead>
           <tbody>
+            {/* --- FIX APPLIED: Removed potential whitespace between <td> and map, and between rows --- */}
             {/* Actions Row */}
             <tr className="bg-gray-800 hover:bg-gray-700 transition-colors duration-150">
-              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Actions</td> {/* Added align-top */}
-              {users.map((user) => (
-                <td key={`${user.id}-action`} className="border border-gray-600 px-4 py-2 text-center align-top"> {/* Added align-top */}
+              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Actions</td>{
+              users.map((user) => (
+                <td key={`${user.id}-action`} className="border border-gray-600 px-4 py-2 text-center align-top">
                   {/* --- Updated flex container --- */}
                   <div className="flex flex-col items-center space-y-1"> {/* Reduced space-y */}
 
@@ -171,11 +172,10 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                 </td>
               ))}
             </tr>
-
             {/* Tecniche Row */}
             <tr className="bg-gray-800 hover:bg-gray-700 transition-colors duration-150">
-              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Tecniche</td>
-              {users.map((user) => (
+              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Tecniche</td>{
+              users.map((user) => (
                 <td key={`${user.id}-tecniche`} className="border border-gray-600 px-4 py-2 align-top">
                   {user.tecniche && Object.keys(user.tecniche).length > 0 ? (
                     <ul className="space-y-1">
@@ -207,11 +207,10 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                 </td>
               ))}
             </tr>
-
             {/* Spells Row */}
             <tr className="bg-gray-800 hover:bg-gray-700 transition-colors duration-150">
-              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Spells</td>
-              {users.map((user) => (
+              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Spells</td>{
+              users.map((user) => (
                 <td key={`${user.id}-spells`} className="border border-gray-600 px-4 py-2 align-top">
                   {user.spells && Object.keys(user.spells).length > 0 ? (
                      <ul className="space-y-1">
@@ -243,11 +242,10 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                 </td>
               ))}
             </tr>
-
             {/* Conoscenze Row */}
             <tr className="bg-gray-800 hover:bg-gray-700 transition-colors duration-150">
-              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Conoscenze</td>
-              {users.map((user) => (
+              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Conoscenze</td>{
+              users.map((user) => (
                 <td key={`${user.id}-conoscenze`} className="border border-gray-600 px-4 py-2 align-top">
                   {user.conoscenze && Object.keys(user.conoscenze).length > 0 ? (
                     <ul className="space-y-1">
@@ -266,11 +264,10 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                 </td>
               ))}
             </tr>
-
             {/* Professioni Row */}
             <tr className="bg-gray-800 hover:bg-gray-700 transition-colors duration-150">
-              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Professioni</td>
-              {users.map((user) => (
+              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Professioni</td>{
+              users.map((user) => (
                 <td key={`${user.id}-professioni`} className="border border-gray-600 px-4 py-2 align-top">
                   {user.professioni && Object.keys(user.professioni).length > 0 ? (
                     <ul className="space-y-1">
@@ -289,11 +286,10 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                 </td>
               ))}
             </tr>
-
             {/* Lingue Row */}
             <tr className="bg-gray-800 hover:bg-gray-700 transition-colors duration-150">
-              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Lingue</td>
-              {users.map((user) => (
+              <td className="border border-gray-600 px-4 py-2 font-medium align-top">Lingue</td>{
+              users.map((user) => (
                 <td key={`${user.id}-lingue`} className="border border-gray-600 px-4 py-2 align-top">
                   {user.lingue && Object.keys(user.lingue).length > 0 ? (
                     <ul className="space-y-1">
@@ -312,7 +308,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                 </td>
               ))}
             </tr>
-
+            {/* --- End FIX --- */}
           </tbody>
         </table>
       </div>
