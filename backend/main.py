@@ -190,7 +190,7 @@ def everything_to_json():
         print(f"Error retrieving Firestore data: {str(e)}")
         return {"error": str(e)}
 
-@app.get("/test-endpoint")
+# @app.get("/test-endpoint")
 def test_endpoint(path: str = None, user_id: str = None):
     if user_id:
         result = run_call(user_id=user_id)
@@ -219,6 +219,62 @@ def get_all_data():
     result = everything_to_json()
     return {"message": "All Firestore data retrieved", "data": result}
 
+def copy_fields_to_codex():
+    """
+    Copia i campi 'lingue', 'professioni', 'conoscenze' dal documento 'utils/possible_lists'
+    al documento 'utils/codex' nel database Firestore.
+    
+    Returns:
+        dict: Un dizionario che indica il successo o il fallimento dell'operazione
+    """
+    try:
+        # Riferimento al documento sorgente
+        possible_lists_ref = db.document('utils/possible_lists')
+        source_doc = possible_lists_ref.get()
+        
+        if not source_doc.exists:
+            return {"status": "error", "message": "Documento sorgente 'utils/possible_lists' non trovato"}
+        
+        # Ottiene i dati sorgente
+        source_data = source_doc.to_dict()
+        
+        # Estrae i campi richiesti
+        fields_to_copy = {}
+        for field in ['lingue', 'professioni', 'conoscenze']:
+            if field in source_data:
+                fields_to_copy[field] = source_data[field]
+            else:
+                print(f"Attenzione: Campo '{field}' non trovato nel documento sorgente")
+        
+        # Riferimento al documento di destinazione
+        codex_ref = db.document('utils/codex')
+        target_doc = codex_ref.get()
+        
+        if target_doc.exists:
+            # Aggiorna il documento esistente
+            codex_ref.update(fields_to_copy)
+        else:
+            # Crea un nuovo documento
+            codex_ref.set(fields_to_copy)
+        
+        return {
+            "status": "success", 
+            "message": "Campi copiati con successo in 'utils/codex'",
+            "copied_fields": list(fields_to_copy.keys())
+        }
+    except Exception as e:
+        print(f"Errore durante la copia dei campi nel codex: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+@app.get("/test-endpoint")
+def copy_to_codex_endpoint():
+    """
+    Endpoint per copiare i campi 'lingue', 'professioni', 'conoscenze'
+    da 'utils/possible_lists' a 'utils/codex'.
+    """
+    result = copy_fields_to_codex()
+    return result
+
 # Run Uvicorn server only if the script is executed directly
 if __name__ == "__main__":
     print("Starting FastAPI server...")
@@ -227,4 +283,3 @@ if __name__ == "__main__":
     run_call_on_everyone()  # Test su tutti gli utenti
     print("Firebase Connection Successful!")
     uvicorn.run(app, host="127.0.0.1", port=8000, reload=True)
-
