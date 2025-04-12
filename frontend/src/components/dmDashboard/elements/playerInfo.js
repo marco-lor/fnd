@@ -4,14 +4,16 @@ import { faEdit, faTrash } from "@fortawesome/free-solid-svg-icons";
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../firebaseConfig"; // Assuming firebaseConfig is correctly set up
-import { AddTecnicaPersonaleOverlay } from "./buttons/addTecnicaPersonale";
+// --- Import the Overlay AND the new Button Component ---
+import { AddTecnicaPersonaleOverlay, AddTecnicaButton } from "./buttons/addTecnicaPersonale";
 import { EditTecnicaPersonale } from "./buttons/editTecnicaPersonale";
 import { DelTecnicaPersonale } from "./buttons/delTecnicaPersonale";
-import { AddSpellOverlay } from "./buttons/addSpell";
+// --- Import the Overlay AND the new Button Component ---
+import { AddSpellOverlay, AddSpellButton } from "./buttons/addSpell";
 import { EditSpellOverlay } from "./buttons/editSpell";
 import { DelSpellOverlay } from "./buttons/delSpell";
 
-// --- Import the new Button Components ---
+// --- Import the other Button Components ---
 import AddLinguaPersonale from "./buttons/addLinguaPersonale";
 import AddConoscenzaPersonale from "./buttons/addConoscenzaPersonale";
 import AddProfessionePersonale from "./buttons/addProfessionePersonale";
@@ -33,12 +35,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
   const [showDeleteSpellOverlay, setShowDeleteSpellOverlay] = useState(false);
   const [selectedSpell, setSelectedSpell] = useState(null);
 
-  // --- Placeholder State/Handlers for new buttons (optional for now) ---
-  // You would add state like this later if needed for overlays:
-  // const [showLinguaOverlay, setShowLinguaOverlay] = useState(false);
-  // const [showConoscenzaOverlay, setShowConoscenzaOverlay] = useState(false);
-  // const [showProfessioneOverlay, setShowProfessioneOverlay] = useState(false);
-
+  // --- Placeholder State/Handlers for Lingua/Conoscenza/Professione (optional for now) ---
   const handleAddLinguaClick = (userId) => {
     console.log(`Placeholder: Add Lingua for user ${userId}`);
     // Later: setSelectedUserId(userId); setShowLinguaOverlay(true);
@@ -115,13 +112,14 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
     return <div className="text-white mt-4">No users found.</div>;
   }
 
-  // Button Styles
+  // Button Styles for Edit/Delete Icons
   const iconEditButtonStyle = "text-blue-400 hover:text-blue-300 transition-colors duration-200 transform hover:scale-110 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded";
   const iconDeleteButtonStyle = "text-red-500 hover:text-red-400 transition-colors duration-200 transform hover:scale-110 focus:outline-none focus:ring-1 focus:ring-red-600 rounded";
 
-  // --- START REFACTOR: New Button Style ---
+  // --- Style for the OTHER action buttons (Lingua, Conoscenza, Professione) ---
+  // This remains here as these buttons were not part of the refactoring request.
   const sleekButtonStyle = "w-36 px-2 py-1 bg-gradient-to-r from-blue-800 to-indigo-900 hover:from-blue-700 hover:to-indigo-800 text-white text-xs font-medium rounded-md transition-all duration-150 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 shadow-sm";
-  // --- END REFACTOR: New Button Style ---
+  // ---
 
   return (
     <div className="mt-8">
@@ -146,43 +144,28 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                 <td key={`${user.id}-action`} className="border border-gray-600 px-4 py-2 text-center align-top"> {/* Added align-top */}
                   {/* --- Updated flex container --- */}
                   <div className="flex flex-col items-center space-y-1"> {/* Reduced space-y */}
-                    {/* Aggiungi Tecnica Button - REFACTORED STYLE */}
-                    <button
-                      className={sleekButtonStyle} // Applied new style
-                      onClick={() => handleAddTecnicaClick(user.id)}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"> {/* Slightly smaller icon */}
-                        <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
-                      </svg>
-                      <span>Add Tecnica</span>
-                    </button>
 
-                    {/* Aggiungi Spell Button - REFACTORED STYLE */}
-                    <button
-                      className={sleekButtonStyle} // Applied new style
-                      onClick={() => handleAddSpellClick(user.id)}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"> {/* Slightly smaller icon */}
-                        <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
-                      </svg>
-                      <span>Add Spell</span>
-                    </button>
+                    {/* --- Use the Imported Button Components --- */}
+                    <AddTecnicaButton onClick={() => handleAddTecnicaClick(user.id)} />
+                    <AddSpellButton onClick={() => handleAddSpellClick(user.id)} />
+                    {/* --- End Imported Button Components --- */}
 
-                    {/* --- Add the New Buttons with REFACTORED STYLE --- */}
+
+                    {/* --- Other Buttons (using style defined in this file) --- */}
                     {/* Assuming these components accept className prop */}
                     <AddLinguaPersonale
-                        className={sleekButtonStyle} // Applied new style
+                        className={sleekButtonStyle} // Applied style defined locally
                         onClick={() => handleAddLinguaClick(user.id)}
                      />
                     <AddConoscenzaPersonale
-                        className={sleekButtonStyle} // Applied new style
+                        className={sleekButtonStyle} // Applied style defined locally
                         onClick={() => handleAddConoscenzaClick(user.id)}
                     />
                     <AddProfessionePersonale
-                        className={sleekButtonStyle} // Applied new style
+                        className={sleekButtonStyle} // Applied style defined locally
                         onClick={() => handleAddProfessioneClick(user.id)}
                     />
-                    {/* --- End New Buttons --- */}
+                    {/* --- End Other Buttons --- */}
 
                   </div>
                 </td>
@@ -425,18 +408,8 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
         />
       )}
 
-      {/* --- Placeholder for New Overlays (Add later) --- */}
-      {/*
-      {showLinguaOverlay && selectedUserId && (
-        <AddLinguaOverlay userId={selectedUserId} onClose={(success) => { ... }} />
-      )}
-      {showConoscenzaOverlay && selectedUserId && (
-        <AddConoscenzaOverlay userId={selectedUserId} onClose={(success) => { ... }} />
-      )}
-      {showProfessioneOverlay && selectedUserId && (
-        <AddProfessioneOverlay userId={selectedUserId} onClose={(success) => { ... }} />
-      )}
-      */}
+       {/* --- Placeholder for New Overlays (Add later) --- */}
+       {/* ... (Overlays for Lingua, Conoscenza, Professione would go here) ... */}
        {/* --- End Placeholder --- */}
 
     </div>

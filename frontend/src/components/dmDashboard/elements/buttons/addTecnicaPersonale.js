@@ -1,10 +1,31 @@
-// file: ./frontend/src/components/dmDashboard/elements/addTecnicaPersonale.js
+// file: ./frontend/src/components/dmDashboard/elements/buttons/addTecnicaPersonale.js
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { db, storage } from '../../../firebaseConfig';
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
+// --- Style definition moved here ---
+const sleekButtonStyle = "w-36 px-2 py-1 bg-gradient-to-r from-blue-800 to-indigo-900 hover:from-blue-700 hover:to-indigo-800 text-white text-xs font-medium rounded-md transition-all duration-150 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 shadow-sm";
+
+// --- New Exported Button Component ---
+export function AddTecnicaButton({ onClick }) {
+  return (
+    <button
+      className={sleekButtonStyle}
+      onClick={onClick}
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+        <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
+      </svg>
+      <span>Add Tecnica</span>
+    </button>
+  );
+}
+// --- End New Button Component ---
+
+
+// --- Existing Overlay Component (unchanged logic) ---
 export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
   const [schema, setSchema] = useState(null);
   const [tecnicaFormData, setTecnicaFormData] = useState({});
@@ -262,3 +283,4 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
 
   return ReactDOM.createPortal(overlayContent, document.body);
 }
+// --- End Existing Overlay Component ---

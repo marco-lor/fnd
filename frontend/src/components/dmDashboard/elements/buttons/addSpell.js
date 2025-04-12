@@ -1,9 +1,31 @@
+// file: ./frontend/src/components/dmDashboard/elements/buttons/addSpell.js
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { db, storage } from '../../../firebaseConfig';
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
+// --- Style definition moved here ---
+const sleekButtonStyle = "w-36 px-2 py-1 bg-gradient-to-r from-blue-800 to-indigo-900 hover:from-blue-700 hover:to-indigo-800 text-white text-xs font-medium rounded-md transition-all duration-150 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 shadow-sm";
+
+// --- New Exported Button Component ---
+export function AddSpellButton({ onClick }) {
+  return (
+    <button
+      className={sleekButtonStyle}
+      onClick={onClick}
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+        <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
+      </svg>
+      <span>Add Spell</span>
+    </button>
+  );
+}
+// --- End New Button Component ---
+
+
+// --- Existing Overlay Component (unchanged logic) ---
 export function AddSpellOverlay({ userId, onClose }) {
   const [schema, setSchema] = useState(null);
   const [spellFormData, setSpellFormData] = useState({});
@@ -225,7 +247,7 @@ export function AddSpellOverlay({ userId, onClose }) {
 
   const renderDropdown = (options, value, onChange) => {
     if (!Array.isArray(options) || options.length === 0) return <input type="text" value={value || ''} onChange={onChange} className="w-full p-2 rounded bg-gray-700 text-white" />;
-    
+
     return (
       <select value={value || ''} onChange={onChange} className="w-full p-2 rounded bg-gray-700 text-white">
         {options.map(option => (
@@ -265,7 +287,7 @@ export function AddSpellOverlay({ userId, onClose }) {
                     placeholder="Inserisci costo"
                   />
                 </div>
-                
+
                 <div>
                   <label className="block text-white mb-1">Turni</label>
                   <input
@@ -318,7 +340,7 @@ export function AddSpellOverlay({ userId, onClose }) {
 
               <div className="mb-4">
                 <h3 className="text-white text-lg mb-2">Mod Params</h3>
-                
+
                 <div className="bg-gray-700 p-3 rounded mb-3">
                   <h4 className="text-white font-medium mb-2">Base</h4>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -335,7 +357,7 @@ export function AddSpellOverlay({ userId, onClose }) {
                     ))}
                   </div>
                 </div>
-                
+
                 <div className="bg-gray-700 p-3 rounded">
                   <h4 className="text-white font-medium mb-2">Combattimento</h4>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -440,4 +462,4 @@ export function AddSpellOverlay({ userId, onClose }) {
 
   return ReactDOM.createPortal(overlayContent, document.body);
 }
-
+// --- End Existing Overlay Component ---
