@@ -1,6 +1,5 @@
 // file: ./frontend/src/components/codex/Codex.js
 import React, { useState, useEffect, useRef } from 'react';
-import Navbar from '../common/navbar';
 import { useAuth } from '../../AuthContext';
 import { db } from '../firebaseConfig'; // Assuming db is correctly exported from firebaseConfig
 import { doc, onSnapshot } from 'firebase/firestore'; // Keep these imports
@@ -35,14 +34,12 @@ const deriveSingularName = (key) => {
 };
 
 function Codex() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, userData, loading: authLoading } = useAuth();
   const [codexData, setCodexData] = useState({});
   const [activeSection, setActiveSection] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const isInitialLoad = useRef(true);
-  const [userRole, setUserRole] = useState(null); // <-- Step 1: Add state for user role
-  const [isRoleLoading, setIsRoleLoading] = useState(true); // <-- State to track role loading
 
   // --- Effect for fetching Codex data ---
   useEffect(() => {
@@ -104,53 +101,18 @@ function Codex() {
     };
   }, [user, authLoading]); // Keep original dependencies
 
-  // --- Step 2: Add useEffect for fetching User Role ---
-  useEffect(() => {
-    let unsubscribeUser = () => {};
-    if (user && !authLoading) {
-      setIsRoleLoading(true); // Start loading role
-      const userDocRef = doc(db, 'users', user.uid); // Assuming 'users' collection and user.uid is correct
-      console.log(`Setting up listener for user role: users/${user.uid}`);
-
-      unsubscribeUser = onSnapshot(userDocRef, (docSnap) => {
-        if (docSnap.exists()) {
-          const fetchedRole = docSnap.data()?.role;
-          setUserRole(fetchedRole);
-          console.log("User role fetched:", fetchedRole);
-        } else {
-          setUserRole(null); // User document doesn't exist
-          console.log("User document not found for role fetching.");
-        }
-        setIsRoleLoading(false); // Finish loading role
-      }, (error) => {
-        console.error("Error fetching user role:", error);
-        setUserRole(null); // Set role to null on error
-        setIsRoleLoading(false); // Finish loading role even on error
-      });
-    } else {
-      setUserRole(null); // Reset role if user logs out or isn't available
-      setIsRoleLoading(false); // Not loading if no user
-    }
-
-    // Cleanup function for the user role listener
-    return () => {
-      console.log("Unsubscribing from User role listener");
-      unsubscribeUser();
-    };
-  }, [user, authLoading]); // Dependencies: run when user or authLoading changes
-
   // --- Loading and Auth States ---
-  if (authLoading || (user && isRoleLoading)) { // Check auth loading OR role loading if user exists
+  if (authLoading) {
     return (
         <div className="flex justify-center items-center min-h-screen bg-gray-900 text-white">
             <div>Loading User Data...</div>
         </div>
     );
   }
-  if (!authLoading && !user) {
+  
+  if (!user) {
     return (
         <div className="codex-page-container bg-gray-900 min-h-screen text-white">
-            <Navbar />
             <main className="p-4 md:p-8 text-center">
                 <h1 className="text-3xl font-bold mb-6">Codex</h1>
                 <p className="text-lg">Please log in to view the Codex.</p>
@@ -182,7 +144,7 @@ function Codex() {
     const activeSectionSingularName = activeSection ? deriveSingularName(activeSection) : '';
 
     // Determine if the current user is a DM
-    const isDM = userRole === 'dm'; // <-- Check the fetched role
+    const isDM = userData?.role === 'dm' || userData?.role === 'webmaster';
 
     return (
       <div className="flex flex-col md:flex-row gap-6 md:gap-8">
@@ -213,7 +175,7 @@ function Codex() {
         <section className="w-full md:w-3/4 lg:w-4/5 bg-gray-800 p-4 rounded-lg shadow-lg flex flex-col">
           {activeSection ? (
             <>
-              {/* --- Step 3: Conditionally Render Add Button --- */}
+              {/* --- Conditionally Render Add Button --- */}
               {isDM && (
                   <div className="mb-4 pb-4 border-b border-gray-700">
                       <AggiungiButton
@@ -249,7 +211,7 @@ function Codex() {
                                 </pre>
                              )}
                          </div>
-                         {/* --- Step 3: Conditionally Render Action Buttons --- */}
+                         {/* --- Conditionally Render Action Buttons --- */}
                          {isDM && (
                              <div className="flex-shrink-0 flex items-center space-x-2 pt-1">
                                  <EditItemButton
@@ -288,7 +250,6 @@ function Codex() {
   // Main component return
   return (
     <div className="codex-page-container bg-gray-900 min-h-screen text-white">
-      <Navbar />
       <main className="p-4 md:p-8">
         <h1 className="text-3xl font-bold text-center mb-8">Codex</h1>
         {renderCodexContent()}

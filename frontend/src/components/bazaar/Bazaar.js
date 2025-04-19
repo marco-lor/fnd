@@ -1,11 +1,10 @@
 // file: ./frontend/src/components/bazaar/Bazaar.js
-import React, { useState, useContext, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import Navbar from '../common/navbar';
 import InteractiveBackground from '../backgrounds/InteractiveBackground';
-import { collection, doc, onSnapshot } from "firebase/firestore";
+import { collection, onSnapshot } from "firebase/firestore";
 import { db } from '../firebaseConfig';
-import { AuthContext } from '../../AuthContext';
+import { useAuth } from '../../AuthContext';
 import { AddWeaponOverlay } from './elements/addWeapon';
 import ComparisonPanel from './elements/comparisonComponent';
 
@@ -64,27 +63,7 @@ export default function Bazaar() {
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [confirmationMessage, setConfirmationMessage] = useState("");
 
-  const { user } = useContext(AuthContext);
-  const [userData, setUserData] = useState(null);
-
-  // Fetch user data from Firestore based on AuthContext user
-  useEffect(() => {
-    if (user) {
-      const userRef = doc(db, "users", user.uid);
-      const unsubscribe = onSnapshot(
-        userRef,
-        (docSnap) => {
-          if (docSnap.exists()) {
-            setUserData(docSnap.data());
-          }
-        },
-        (error) => {
-          console.error("Error fetching user data:", error);
-        }
-      );
-      return () => unsubscribe();
-    }
-  }, [user]);
+  const { user, userData } = useAuth();
 
   useEffect(() => {
     const itemsRef = collection(db, "items");
@@ -190,10 +169,6 @@ export default function Bazaar() {
 
   return (
     <div className="min-h-screen relative" style={{ backgroundColor: 'transparent' }}>
-      <div className="fixed top-0 left-0 w-full z-50">
-        <Navbar />
-      </div>
-
       <InteractiveBackground />
 
       <div className="fixed left-0 p-4 overflow-y-auto z-40" style={{ top: '10rem', width: '15vw', height: 'calc(100% - 4rem)' }}>

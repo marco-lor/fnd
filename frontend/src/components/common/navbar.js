@@ -1,105 +1,41 @@
 // file: ./frontend/src/components/common/navbar.js
-import React, { useEffect, useState, useRef, useContext } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { auth, db } from '../firebaseConfig'; // Adjusted path assuming firebaseConfig is two levels up
-import { AuthContext } from '../../AuthContext';
+import { auth } from '../firebaseConfig';
+import { useAuth } from '../../AuthContext';
 
-const Navbar = ({ imageUrl: propImageUrl, userData: propUserData }) => {
+const Navbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useContext(AuthContext);
-
-  // Use state with localStorage for persistence between navigations
-  const [userData, setUserData] = useState(() => {
-    const cached = localStorage.getItem('userData');
-    return propUserData || (cached ? JSON.parse(cached) : null);
-  });
-
-  const [imageUrl, setImageUrl] = useState(() => {
-    return propImageUrl || localStorage.getItem('userImageUrl') || '';
-  });
-
-  // Add a loading state that is true if userData isn't already loaded
-  const [isLoading, setIsLoading] = useState(!userData);
-  const unsubscribeSnapshotRef = useRef(null);
-
-  useEffect(() => {
-    if (user) {
-      setIsLoading(true); // Set loading true when fetching starts
-      const userRef = doc(db, "users", user.uid);
-      unsubscribeSnapshotRef.current = onSnapshot(
-        userRef,
-        (docSnap) => {
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            setUserData(data);
-            localStorage.setItem('userData', JSON.stringify(data)); // Cache user data
-
-            if (data.imageUrl) {
-              setImageUrl(data.imageUrl);
-              localStorage.setItem('userImageUrl', data.imageUrl); // Cache image URL
-            } else {
-              // If no imageUrl in DB, clear cached one if necessary
-              setImageUrl(''); // Set to empty string or a default placeholder
-              localStorage.removeItem('userImageUrl');
-            }
-          } else {
-            console.log("No such document!"); // Handle case where user doc doesn't exist
-            setUserData(null); // Clear local state
-            setImageUrl('');
-            localStorage.removeItem('userData'); // Clear cache
-            localStorage.removeItem('userImageUrl');
-          }
-          setIsLoading(false); // Set loading false after fetch attempt
-        },
-        (error) => {
-          console.error("Error in snapshot listener:", error);
-          setIsLoading(false); // Ensure loading is false on error
-        }
-      );
-    } else {
-      // If no user, navigate to login page
-      navigate("/");
-    }
-
-    // Cleanup function to unsubscribe from snapshot listener
-    return () => {
-      if (unsubscribeSnapshotRef.current) {
-        // console.log("Unsubscribing from Firestore snapshot listener.");
-        unsubscribeSnapshotRef.current();
-        unsubscribeSnapshotRef.current = null; // Prevent memory leaks
-      }
-    };
-  }, [user, navigate]); // Re-run effect if user or navigate changes
+  const { user, userData } = useAuth();
+  
+  // Loading state for logout operations
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const isActive = (path) => location.pathname === path;
 
   const handleLogout = async () => {
     try {
-      if (unsubscribeSnapshotRef.current) {
-        unsubscribeSnapshotRef.current(); // Unsubscribe before logging out
-        unsubscribeSnapshotRef.current = null;
-      }
+      setIsLoggingOut(true);
       await signOut(auth);
-      localStorage.removeItem('userData'); // Clear cached data on logout
-      localStorage.removeItem('userImageUrl');
-      navigate("/"); // Redirect to login page
+      // AuthContext will handle clearing localStorage and state
+      navigate("/");
     } catch (error) {
       console.error("Logout failed:", error);
+    } finally {
+      setIsLoggingOut(false);
     }
   };
 
-  // Conditional rendering based on loading state
+  // Rendering profile info based on userData from AuthContext
   const renderProfileInfo = () => {
-    if (isLoading) {
+    if (!userData) {
       return (
         <>
           <div className="w-20 h-20 rounded-full bg-gray-600 animate-pulse mr-3"></div>
           <div className="flex flex-col">
             <div className="h-6 w-32 bg-gray-600 animate-pulse rounded mb-1"></div>
-            {/* Optionally add a placeholder for level if needed */}
           </div>
         </>
       );
@@ -107,10 +43,10 @@ const Navbar = ({ imageUrl: propImageUrl, userData: propUserData }) => {
 
     return (
       <>
-        {imageUrl ? (
+        {userData.imageUrl ? (
           <div className="relative mr-3">
             <img
-              src={imageUrl}
+              src={userData.imageUrl}
               alt="Character Avatar"
               className="w-20 h-20 rounded-full object-cover border-2 border-white"
             />
@@ -195,7 +131,6 @@ const Navbar = ({ imageUrl: propImageUrl, userData: propUserData }) => {
         >
           Codex
         </button>
-        {/* New Echi di Viaggio Button */}
         <button
           onClick={() => navigate("/echi-di-viaggio")}
           className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
@@ -206,7 +141,6 @@ const Navbar = ({ imageUrl: propImageUrl, userData: propUserData }) => {
         >
           Echi di Viaggio
         </button>
-        {/* End New Echi di Viaggio Button */}
         {userData?.role === "dm" && (
           <button
             onClick={() => navigate("/dm-dashboard")}
@@ -236,10 +170,11 @@ const Navbar = ({ imageUrl: propImageUrl, userData: propUserData }) => {
       {/* Right Column: Logout Button */}
       <div className="flex items-center justify-center md:justify-end gap-3 mt-4 md:mt-0 md:mr-4">
         <button
-          className="bg-[#8B0000] text-white px-3 py-1 md:px-4 md:py-2 rounded-[5px] cursor-pointer transition-colors duration-300 hover:bg-[#B22222] text-sm md:text-base font-medium"
+          className="bg-[#8B0000] text-white px-3 py-1 md:px-4 md:py-2 rounded-[5px] cursor-pointer transition-colors duration-300 hover:bg-[#B22222] text-sm md:text-base font-medium disabled:opacity-75"
           onClick={handleLogout}
+          disabled={isLoggingOut}
         >
-          Logout
+          {isLoggingOut ? 'Logging out...' : 'Logout'}
         </button>
       </div>
     </header>

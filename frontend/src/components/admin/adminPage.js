@@ -1,12 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import Navbar from '../common/navbar';
 import { useAuth } from '../../AuthContext'; // Assuming this provides logged-in user info
 import { db } from '../firebaseConfig'; // *** IMPORT YOUR FIRESTORE DB INSTANCE ***
-// *** Import Firestore functions ***
 import { collection, doc, getDocs, getDoc, updateDoc } from 'firebase/firestore';
 
 const AdminPage = () => {
-  const { userData } = useAuth(); // Get logged-in user data if needed
   const [users, setUsers] = useState({}); // Store users as an object { userId: userData, ... }
   const [roles, setRoles] = useState([]); // Store possible roles
   const [loading, setLoading] = useState(true);
@@ -18,24 +15,17 @@ const AdminPage = () => {
       setLoading(true);
       setError(null);
       try {
-        // Firestore references
         const usersCollectionRef = collection(db, 'users');
-        // Reference to the specific document holding the roles array
-        // Adjust 'possible_lists' if your document ID is different (e.g., 'roles_list')
         const rolesDocRef = doc(db, 'utils', 'possible_lists');
 
-        // Fetch data using Firestore functions
         const [usersSnapshot, rolesSnapshot] = await Promise.all([
-          getDocs(usersCollectionRef), // Get all documents in the 'users' collection
-          getDoc(rolesDocRef)        // Get the single document holding roles
+          getDocs(usersCollectionRef),
+          getDoc(rolesDocRef)
         ]);
 
-        // Process users data
         if (!usersSnapshot.empty) {
           const usersData = {};
           usersSnapshot.forEach((doc) => {
-            // Use doc.id as the key (which is the userId)
-            // and doc.data() as the value (the user object)
             usersData[doc.id] = doc.data();
           });
           setUsers(usersData);
@@ -44,15 +34,13 @@ const AdminPage = () => {
           setUsers({});
         }
 
-        // Process roles data
         if (rolesSnapshot.exists()) {
-          // Access the 'ruoli' field within the document's data
           const rolesData = rolesSnapshot.data();
           if (rolesData && rolesData.ruoli && Array.isArray(rolesData.ruoli)) {
-             setRoles(rolesData.ruoli);
+            setRoles(rolesData.ruoli);
           } else {
-             console.error("Firestore document 'utils/possible_lists' exists but does not contain a valid 'ruoli' array field!");
-             setRoles([]);
+            console.error("Firestore document 'utils/possible_lists' exists but does not contain a valid 'ruoli' array field!");
+            setRoles([]);
           }
         } else {
           console.error("Firestore document 'utils/possible_lists' does not exist!");
@@ -71,17 +59,13 @@ const AdminPage = () => {
 
     fetchData();
 
-  }, []); // Empty dependency array ensures this runs only once on mount
+  }, []);
 
-  // Function to handle role change using Firestore
   const handleRoleChange = async (userId, newRole) => {
-    // Create a reference to the specific user document in Firestore
     const userDocRef = doc(db, 'users', userId);
     try {
-      // Update only the 'role' field in the user's document
       await updateDoc(userDocRef, { role: newRole });
 
-      // Optimistically update local state for immediate UI feedback
       setUsers(prevUsers => ({
         ...prevUsers,
         [userId]: {
@@ -93,16 +77,12 @@ const AdminPage = () => {
     } catch (err) {
       console.error(`Failed to update role for user ${userId} in Firestore:`, err);
       setError(`Failed to update role for ${users[userId]?.username || userId}.`);
-      // Optionally revert optimistic update here if needed
     }
   };
-
-  // --- Render Logic (Mostly unchanged) ---
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-900 text-white">
-        <Navbar />
         <div className="container mx-auto px-4 py-8 text-center">Loading user data...</div>
       </div>
     );
@@ -111,7 +91,6 @@ const AdminPage = () => {
   if (error) {
     return (
       <div className="min-h-screen bg-gray-900 text-white">
-        <Navbar />
         <div className="container mx-auto px-4 py-8 text-center text-red-500">{error}</div>
       </div>
     );
@@ -119,11 +98,9 @@ const AdminPage = () => {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
-      <Navbar />
       <div className="container mx-auto px-4 py-8">
         <h1 className="text-3xl font-bold mb-6">Pannello di Amministrazione</h1>
 
-        {/* User Management Section */}
         <div className="bg-gray-800 rounded-lg p-6 shadow-lg mb-8">
           <h2 className="text-2xl font-semibold mb-4">Gestione Utenti</h2>
           {Object.keys(users).length === 0 ? (
@@ -154,7 +131,7 @@ const AdminPage = () => {
                           className="bg-gray-600 border border-gray-500 rounded px-2 py-1 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                           disabled={roles.length === 0}
                         >
-                           <option value="" disabled hidden>{user.role ? 'Seleziona...' : 'Nessun ruolo'}</option>
+                          <option value="" disabled hidden>{user.role ? 'Seleziona...' : 'Nessun ruolo'}</option>
                           {roles.map(roleOption => (
                             <option key={roleOption} value={roleOption}>
                               {roleOption}
@@ -170,22 +147,20 @@ const AdminPage = () => {
           )}
         </div>
 
-        {/* Other Admin Sections (Optional - Kept from original) */}
         <div className="bg-gray-800 rounded-lg p-6 shadow-lg">
-           <h2 className="text-2xl font-semibold mb-4">Altre Sezioni</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
-                <div className="bg-gray-700 p-4 rounded-lg opacity-50 cursor-not-allowed">
-                <h3 className="text-xl font-semibold mb-2">Impostazioni Sistema</h3>
-                <p>Configura le impostazioni globali (non implementato)</p>
-                </div>
-
-                <div className="bg-gray-700 p-4 rounded-lg opacity-50 cursor-not-allowed">
-                <h3 className="text-xl font-semibold mb-2">Logs di Sistema</h3>
-                <p>Controlla i log (non implementato)</p>
-                </div>
+          <h2 className="text-2xl font-semibold mb-4">Altre Sezioni</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
+            <div className="bg-gray-700 p-4 rounded-lg opacity-50 cursor-not-allowed">
+              <h3 className="text-xl font-semibold mb-2">Impostazioni Sistema</h3>
+              <p>Configura le impostazioni globali (non implementato)</p>
             </div>
-        </div>
 
+            <div className="bg-gray-700 p-4 rounded-lg opacity-50 cursor-not-allowed">
+              <h3 className="text-xl font-semibold mb-2">Logs di Sistema</h3>
+              <p>Controlla i log (non implementato)</p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

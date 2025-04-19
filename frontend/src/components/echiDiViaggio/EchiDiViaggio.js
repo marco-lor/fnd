@@ -1,10 +1,9 @@
 // file: ./frontend/src/components/echiDiViaggio/EchiDiViaggio.js
 import React from 'react';
-import Navbar from '../common/navbar'; // Import the Navbar
 import { useAuth } from '../../AuthContext'; // Import useAuth
 
 function EchiDiViaggio() {
-  const { user, userData, loading } = useAuth(); // Use auth context
+  const { user, loading } = useAuth(); // Use auth context
 
   // Optional: Show loading state or handle case where user is not logged in
   if (loading) {
@@ -18,7 +17,6 @@ function EchiDiViaggio() {
 
   return (
     <div className="echi-di-viaggio-page-container bg-gray-900 min-h-screen text-white">
-      <Navbar /> {/* Render the Navbar */}
       <main className="p-4 md:p-8">
         <h1 className="text-3xl font-bold text-center mb-6 text-[#FFA500]">Echi di Viaggio</h1>
         <div className="bg-gray-800 p-6 rounded-lg shadow-lg max-w-4xl mx-auto">

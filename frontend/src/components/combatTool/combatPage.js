@@ -1,13 +1,11 @@
 import Roll20Map from './elements/roll20map'; // Adjusted path  (or wherever your file is)
 import React, { useState, useEffect, useCallback } from 'react';
-import Navbar from '../common/navbar'; // Adjust path as needed
 import { useAuth } from '../../AuthContext'; // Assuming you need auth context
 import { db } from '../firebaseConfig'; // Adjust path as needed
-import { doc, getDoc, updateDoc, collection, onSnapshot } from 'firebase/firestore'; // Import Firestore functions
+import { doc, updateDoc, collection, onSnapshot } from 'firebase/firestore'; // Removed getDoc as it's unused
 
 const CombatPage = () => {
-  const { user } = useAuth(); // Get user if needed for permissions or data fetching
-  const [combatId, setCombatId] = useState('YOUR_DEFAULT_COMBAT_ID'); // TODO: Set this dynamically (e.g., from URL param, user selection)
+  const [combatId] = useState('YOUR_DEFAULT_COMBAT_ID'); // Removed setCombatId as it's unused
   const [mapUrl, setMapUrl] = useState(''); // State for the map image URL
   const [tokens, setTokens] = useState([]); // State for token data fetched from Firestore
   const [loading, setLoading] = useState(true);
@@ -102,7 +100,6 @@ const CombatPage = () => {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col">
-      <Navbar /> {/* Pass userData if Navbar needs it */}
       <div className="flex-grow container mx-auto p-4 flex flex-col">
         <h1 className="text-3xl font-bold mb-6 text-center">Combat: {combatId}</h1>
         {/* Combat tool content */}

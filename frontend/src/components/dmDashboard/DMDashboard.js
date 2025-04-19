@@ -1,6 +1,5 @@
 // file: ./frontend/src/components/dmDashboard/DMDashboard.js
 import React, { useState, useEffect } from "react";
-import Navbar from "../common/navbar";
 import { db } from "../firebaseConfig";
 import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
 import { useAuth } from "../../AuthContext";
@@ -157,7 +156,6 @@ const DMDashboard = () => {
   if (!userData) {
     return (
       <div className="min-h-screen bg-gray-900 text-white">
-        <Navbar />
         <div className="container mx-auto p-4">
           <div className="bg-gray-800 rounded-lg p-6">
             <p>Loading...</p>
@@ -170,7 +168,6 @@ const DMDashboard = () => {
   if (userData.role !== "dm") {
     return (
       <div className="min-h-screen bg-gray-900 text-white">
-        <Navbar />
         <div className="container mx-auto p-4">
           <div className="bg-gray-800 rounded-lg p-6 text-red-500">
             <p>Access denied. This area is only accessible to DMs.</p>
@@ -182,7 +179,6 @@ const DMDashboard = () => {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
-      <Navbar />
       <div className="container mx-auto p-4">
         <h1 className="text-3xl font-bold mb-6">DM Dashboard</h1>
         <div className="bg-gray-800 rounded-lg p-6">

@@ -1,41 +1,13 @@
 // file: ./frontend/src/components/home/Home.js
-import React, { useState, useEffect, useRef } from "react";
+import React from "react";
 import { useAuth } from "../../AuthContext";
-import { doc, onSnapshot } from "firebase/firestore";
-import { db } from "../firebaseConfig";
 import DnDBackground from "../backgrounds/DnDBackground";
-import Navbar from "../common/navbar";
 import StatsBars from "./elements/StatsBars";
 import { BaseStatsTable, CombatStatsTable } from "./elements/paramTables";
 import { API_BASE_URL } from "../firebaseConfig";
 
 function Home() {
-  const { user } = useAuth();
-  const [userData, setUserData] = useState(null);
-  const unsubscribeRef = useRef(null);
-
-  useEffect(() => {
-    if (user) {
-      const userRef = doc(db, "users", user.uid);
-      unsubscribeRef.current = onSnapshot(
-        userRef,
-        (docSnap) => {
-          if (docSnap.exists()) {
-            setUserData(docSnap.data());
-          }
-        },
-        (error) => {
-          console.error("Error fetching user data:", error);
-        }
-      );
-    }
-
-    return () => {
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-      }
-    };
-  }, [user]);
+  const { user, userData } = useAuth();
 
   // Test API Call handler
   const handleTestButtonClick = async () => {
@@ -78,7 +50,6 @@ function Home() {
     <div className="relative w-screen min-h-screen overflow-hidden">
       <DnDBackground />
       <div className="relative z-10 flex flex-col">
-        <Navbar userData={userData} />
         <main className="flex flex-col items-center justify-center p-5">
           {/* Render Test API button only if user role is webmaster */}
           {userData?.role === "webmaster" && (

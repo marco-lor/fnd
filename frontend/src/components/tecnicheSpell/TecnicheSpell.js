@@ -3,12 +3,11 @@ import { useAuth } from "../../AuthContext";
 import { doc, onSnapshot, getDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 import DnDBackground from "../backgrounds/DnDBackground";
-import Navbar from "../common/navbar";
 import TecnicheSide from "./elements/techiche_side";
 import SpellSide from "./elements/spell_side";
 
 function TecnicheSpell() {
-  const { user } = useAuth();
+  const { user, userData: authUserData } = useAuth();
   const [userData, setUserData] = useState(null);
   const [personalTecniche, setPersonalTecniche] = useState({});
   const [commonTecniche, setCommonTecniche] = useState({});
@@ -24,16 +23,22 @@ function TecnicheSpell() {
   useEffect(() => {
     async function fetchData() {
       if (user) {
+        // Initialize with data from AuthContext if available
+        if (authUserData) {
+          setUserData({ ...authUserData, uid: user.uid });
+          setPersonalTecniche(authUserData.tecniche || {});
+          setPersonalSpells(authUserData.spells || {});
+        }
+        
+        // Still set up the listener for real-time updates to specific data
         const userRef = doc(db, "users", user.uid);
         unsubscribeRef.current = onSnapshot(
           userRef,
           (docSnap) => {
             if (docSnap.exists()) {
               const data = docSnap.data();
-              // Include the uid in the userData object
               setUserData({ ...data, uid: user.uid });
               setPersonalTecniche(data.tecniche || {});
-              // Set personal spells from user data
               setPersonalSpells(data.spells || {});
             }
           },
@@ -67,7 +72,7 @@ function TecnicheSpell() {
         unsubscribeRef.current();
       }
     };
-  }, [user]);
+  }, [user, authUserData]);
 
   if (loading) {
     return (
@@ -154,8 +159,6 @@ function TecnicheSpell() {
       <DnDBackground />
       <div className="absolute inset-0 overflow-y-auto overflow-x-hidden">
         <div className="relative z-10 flex flex-col min-h-full">
-          <Navbar userData={userData} />
-
           {/* Filter Section */}
           <div className="px-5 pt-4">
             <div className="max-w-[1600px] mx-auto">
