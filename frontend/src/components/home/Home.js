@@ -47,7 +47,7 @@ function Home() {
   }
 
   return (
-    <div className="relative w-screen min-h-screen overflow-hidden">
+    <div className="relative w-full min-h-screen overflow-x-hidden">
       <DnDBackground />
       <div className="relative z-10 flex flex-col">
         <main className="flex flex-col items-center justify-center p-5">

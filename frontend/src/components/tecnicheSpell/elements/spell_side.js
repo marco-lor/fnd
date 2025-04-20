@@ -1,6 +1,14 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { GiSpellBook, GiMagicSwirl } from "react-icons/gi";
 import { doc, updateDoc, getFirestore, getDoc } from "firebase/firestore";
+
+// Cache for dadi anima data to prevent repeated fetches
+const dadiAnimaCache = {
+  data: null,
+  lastFetchTimestamp: 0,
+  // Cache expiration time in milliseconds (30 minutes)
+  expirationTime: 30 * 60 * 1000
+};
 
 const SpellCard = ({ spellName, spell, userData }) => {
   const [isHovered, setIsHovered] = useState(false);
@@ -14,19 +22,30 @@ const SpellCard = ({ spellName, spell, userData }) => {
   const [dadiAnima, setDadiAnima] = useState(null);
   const cardRef = useRef(null);
   const overlayRef = useRef(null);
-  // Ref to store the dismissal timeout ID
   const dismissTimeoutRef = useRef(null);
   const hasImage = spell.image_url && spell.image_url.trim() !== "";
   const db = getFirestore();
 
-  // Fetch dadiAnimaByLevel data when component mounts
+  // Fetch dadiAnimaByLevel data when component mounts - enhanced with caching
   useEffect(() => {
     const fetchDadiAnima = async () => {
       try {
+        const now = Date.now();
+        // Use cached data if available and not expired
+        if (dadiAnimaCache.data && now - dadiAnimaCache.lastFetchTimestamp < dadiAnimaCache.expirationTime) {
+          setDadiAnima(dadiAnimaCache.data);
+          return;
+        }
+
+        // Fetch from database if cache is invalid
         const dadiRef = doc(db, "utils", "varie");
         const dadiDoc = await getDoc(dadiRef);
         if (dadiDoc.exists()) {
-          setDadiAnima(dadiDoc.data().dadiAnimaByLevel || []);
+          const dadiData = dadiDoc.data().dadiAnimaByLevel || [];
+          // Update cache
+          dadiAnimaCache.data = dadiData;
+          dadiAnimaCache.lastFetchTimestamp = now;
+          setDadiAnima(dadiData);
         }
       } catch (error) {
         console.error("Error fetching dadi anima data:", error);
@@ -184,67 +203,75 @@ const SpellCard = ({ spellName, spell, userData }) => {
     }
   };
 
-  // Format and calculate TPC values
-  const formatTPC = (tpcData) => {
-    if (!tpcData) return "---";
-    
-    const param1 = tpcData.Param1 || "---";
-    const param2 = tpcData.Param2 || "---";
-    const paramTarget = tpcData.ParamTarget || "---";
-    
-    // If all parameters are "---", return "---"
-    if (param1 === "---" && param2 === "---" && paramTarget === "---") {
-      return "---";
-    }
-    
-    // Get player level and corresponding dadi value
-    const playerLevel = userData?.stats?.level || 1;
-    const dadiValue = dadiAnima && dadiAnima[playerLevel] ? dadiAnima[playerLevel] : "d10";
-    
-    // Get parameter values from user data - fixed to look in the correct location
-    const getParamValue = (param) => {
-      if (param === "---") return null;
+  // Format and calculate TPC values - memoized for performance
+  const formatTPC = useMemo(() => {
+    const calculateTPC = (tpcData) => {
+      if (!tpcData) return "---";
       
-      // Check in Parametri.Base (for stats like Forza, Costituzione, etc.)
-      if (userData?.Parametri?.Base?.[param]) {
-        return {name: param, value: userData.Parametri.Base[param].Tot};
+      const param1 = tpcData.Param1 || "---";
+      const param2 = tpcData.Param2 || "---";
+      const paramTarget = tpcData.ParamTarget || "---";
+      
+      // If all parameters are "---", return "---"
+      if (param1 === "---" && param2 === "---" && paramTarget === "---") {
+        return "---";
       }
-      // Check in Parametri.Combattimento (for stats like Attacco, Difesa, etc.)
-      if (userData?.Parametri?.Combattimento?.[param]) {
-        return {name: param, value: userData.Parametri.Combattimento[param].Tot};
+      
+      // Get player level and corresponding dadi value
+      const playerLevel = userData?.stats?.level || 1;
+      const dadiValue = dadiAnima && dadiAnima[playerLevel] ? dadiAnima[playerLevel] : "d10";
+      
+      // Get parameter values from user data - fixed to look in the correct location
+      const getParamValue = (param) => {
+        if (param === "---") return null;
+        
+        // Check in Parametri.Base (for stats like Forza, Costituzione, etc.)
+        if (userData?.Parametri?.Base?.[param]) {
+          return {name: param, value: userData.Parametri.Base[param].Tot};
+        }
+        // Check in Parametri.Combattimento (for stats like Attacco, Difesa, etc.)
+        if (userData?.Parametri?.Combattimento?.[param]) {
+          return {name: param, value: userData.Parametri.Combattimento[param].Tot};
+        }
+        return {name: param, value: "?"};
+      };
+      
+      const param1Value = getParamValue(param1);
+      const param2Value = getParamValue(param2);
+      
+      // If only one parameter is defined
+      if ((param1 !== "---" && param2 === "---") || (param1 === "---" && param2 !== "---")) {
+        const activeParam = param1 !== "---" ? param1Value : param2Value;
+        if (!activeParam) return "---";
+        
+        // Format: "Parameter (value) + Anima (dX) VS ParamTarget + Anima"
+        let result = `${activeParam.name} (${activeParam.value}) + Anima (${dadiValue})`;
+        if (paramTarget !== "---") {
+          result += ` VS ${paramTarget} + Anima`;
+        }
+        return result;
       }
-      return {name: param, value: "?"};
+      
+      // If both parameters are defined, use the higher value
+      if (param1 !== "---" && param2 !== "---" && param1Value && param2Value) {
+        const highParam = param1Value.value > param2Value.value ? param1Value : param2Value;
+        
+        // Format with max value split in two lines
+        return {
+          line1: `MAX(${param1Value.name}, ${param2Value.name})`,
+          line2: `${highParam.name} (${highParam.value}) + Anima (${dadiValue})${paramTarget !== "---" ? ` VS ${paramTarget} + Anima` : ''}`
+        };
+      }
+      
+      return "---";
     };
     
-    const param1Value = getParamValue(param1);
-    const param2Value = getParamValue(param2);
-    
-    // If only one parameter is defined
-    if ((param1 !== "---" && param2 === "---") || (param1 === "---" && param2 !== "---")) {
-      const activeParam = param1 !== "---" ? param1Value : param2Value;
-      if (!activeParam) return "---";
-      
-      // Format: "Parameter (value) + Anima (dX) VS ParamTarget + Anima"
-      let result = `${activeParam.name} (${activeParam.value}) + Anima (${dadiValue})`;
-      if (paramTarget !== "---") {
-        result += ` VS ${paramTarget} + Anima`;
-      }
-      return result;
-    }
-    
-    // If both parameters are defined, use the higher value
-    if (param1 !== "---" && param2 !== "---" && param1Value && param2Value) {
-      const highParam = param1Value.value > param2Value.value ? param1Value : param2Value;
-      
-      // Format with max value split in two lines
-      return {
-        line1: `MAX(${param1Value.name}, ${param2Value.name})`,
-        line2: `${highParam.name} (${highParam.value}) + Anima (${dadiValue})${paramTarget !== "---" ? ` VS ${paramTarget} + Anima` : ''}`
-      };
-    }
-    
-    return "---";
-  };
+    return {
+      main: calculateTPC(spell.TPC),
+      fisico: calculateTPC(spell["TPC Fisico"]),
+      mentale: calculateTPC(spell["TPC Mentale"])
+    };
+  }, [spell, userData, dadiAnima]);
 
   return (
     <div
@@ -395,41 +422,41 @@ const SpellCard = ({ spellName, spell, userData }) => {
                 </div>
               )}
               
-              {/* TPC sections */}
+              {/* TPC sections - using memoized formatted values */}
               <div className="mt-3">
                 <div className="mb-1">
                   <p className={`text-yellow-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'}`}>TPC</p>
-                  {typeof formatTPC(spell.TPC) === 'object' ? (
+                  {typeof formatTPC.main === 'object' ? (
                     <>
-                      <p className={`text-gray-400 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell.TPC).line1}</p>
-                      <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell.TPC).line2}</p>
+                      <p className={`text-gray-400 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC.main.line1}</p>
+                      <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC.main.line2}</p>
                     </>
                   ) : (
-                    <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell.TPC)}</p>
+                    <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC.main}</p>
                   )}
                 </div>
                 
                 <div className="mb-1">
                   <p className={`text-yellow-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'}`}>TPC Fisico</p>
-                  {typeof formatTPC(spell["TPC Fisico"]) === 'object' ? (
+                  {typeof formatTPC.fisico === 'object' ? (
                     <>
-                      <p className={`text-gray-400 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell["TPC Fisico"]).line1}</p>
-                      <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell["TPC Fisico"]).line2}</p>
+                      <p className={`text-gray-400 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC.fisico.line1}</p>
+                      <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC.fisico.line2}</p>
                     </>
                   ) : (
-                    <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell["TPC Fisico"])}</p>
+                    <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC.fisico}</p>
                   )}
                 </div>
                 
                 <div>
                   <p className={`text-yellow-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'}`}>TPC Mentale</p>
-                  {typeof formatTPC(spell["TPC Mentale"]) === 'object' ? (
+                  {typeof formatTPC.mentale === 'object' ? (
                     <>
-                      <p className={`text-gray-400 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell["TPC Mentale"]).line1}</p>
-                      <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell["TPC Mentale"]).line2}</p>
+                      <p className={`text-gray-400 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC.mentale.line1}</p>
+                      <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC.mentale.line2}</p>
                     </>
                   ) : (
-                    <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC(spell["TPC Mentale"])}</p>
+                    <p className={`text-gray-200 ${isExpanded ? 'text-sm' : 'text-xs'}`}>{formatTPC.mentale}</p>
                   )}
                 </div>
               </div>

@@ -1,6 +1,9 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { GiCrossedSwords, GiMinotaur } from "react-icons/gi";
 import { doc, updateDoc, getFirestore } from "firebase/firestore";
+
+// Cache dismissal timeouts to prevent flickering
+const timeoutCache = new Map();
 
 const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
   const [isHovered, setIsHovered] = useState(false);
@@ -13,25 +16,31 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
   const [initialCardRect, setInitialCardRect] = useState(null);
   const cardRef = useRef(null);
   const overlayRef = useRef(null);
-  // New: ref to store the dismissal timeout ID
   const dismissTimeoutRef = useRef(null);
   const hasImage = tecnica.image_url && tecnica.image_url.trim() !== "";
   const db = getFirestore();
 
-  // --- Mana validation logic ---
-  const extractManaCost = () => {
-    const costStr = tecnica.Costo?.toString() || "0";
-    const match = costStr.match(/(\d+)/);
-    return match ? parseInt(match[1], 10) : 0;
-  };
-
-  const getCurrentMana = () => {
-    return userData?.stats?.manaCurrent || 0;
-  };
-
-  const manaCost = extractManaCost();
-  const currentMana = getCurrentMana();
-  const hasSufficientMana = currentMana >= manaCost;
+  // --- Mana validation logic - now memoized for performance ---
+  const { manaCost, currentMana, hasSufficientMana } = useMemo(() => {
+    const extractManaCost = () => {
+      const costStr = tecnica.Costo?.toString() || "0";
+      const match = costStr.match(/(\d+)/);
+      return match ? parseInt(match[1], 10) : 0;
+    };
+  
+    const getCurrentMana = () => {
+      return userData?.stats?.manaCurrent || 0;
+    };
+  
+    const cost = extractManaCost();
+    const mana = getCurrentMana();
+    
+    return {
+      manaCost: cost,
+      currentMana: mana,
+      hasSufficientMana: mana >= cost
+    };
+  }, [tecnica.Costo, userData?.stats?.manaCurrent]);
 
   // Save initial card position for animation
   useEffect(() => {
@@ -78,6 +87,21 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
       document.removeEventListener("mousedown", handleOutsideClick);
     };
   }, [isExpanded]);
+
+  // Clean up timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (dismissTimeoutRef.current) {
+        clearTimeout(dismissTimeoutRef.current);
+      }
+      
+      // Also clean from the global cache
+      if (timeoutCache.has(tecnicaName)) {
+        clearTimeout(timeoutCache.get(tecnicaName));
+        timeoutCache.delete(tecnicaName);
+      }
+    };
+  }, [tecnicaName]);
 
   // When the card is clicked, clear any pending timeout and re-expand immediately.
   const handleCardClick = (e) => {
@@ -132,13 +156,15 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
     setShowConfirmation(false);
   };
 
-  const getOverlayClasses = () => {
+  // Memoize overlay classes to avoid unnecessary rerenders
+  const overlayClasses = useMemo(() => {
     return `fixed rounded-lg shadow-xl overflow-hidden transition-all duration-300 ease-out z-50
       ${!isHovered && !isExpanded ? "opacity-0 pointer-events-none translate-x-[-20px]" : "opacity-100 translate-x-0"}
       ${isExpanded ? "z-[100]" : "z-50"}`;
-  };
+  }, [isHovered, isExpanded]);
 
-  const getOverlayStyle = () => {
+  // Memoize overlay style to avoid unnecessary rerenders
+  const overlayStyle = useMemo(() => {
     if (isExpanded) {
       return {
         top: "50%",
@@ -165,7 +191,7 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
         transition: "all 0.3s ease-out"
       };
     }
-  };
+  }, [isExpanded, position.top, position.left]);
 
   return (
     <div
@@ -195,6 +221,7 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
             src={tecnica.image_url}
             alt={tecnica.Nome || tecnicaName}
             className="w-full h-full object-cover"
+            loading="lazy"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gray-800">
@@ -249,8 +276,8 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
         <div
           ref={overlayRef}
           onClick={(e) => e.stopPropagation()}
-          className={getOverlayClasses()}
-          style={getOverlayStyle()}
+          className={overlayClasses}
+          style={overlayStyle}
         >
           {tecnica.video_url && (
             <div className="absolute inset-0 z-0">
@@ -356,6 +383,9 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
   );
 };
 
+// Memoized TecnicaCard for better performance
+const MemoizedTecnicaCard = React.memo(TecnicaCard);
+
 const TecnicheSide = ({ personalTecniche = {}, commonTecniche = {}, userData = {} }) => {
   return (
     <div className="md:w-3/5 bg-[rgba(40,40,60,0.8)] p-5 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.4)]">
@@ -370,7 +400,7 @@ const TecnicheSide = ({ personalTecniche = {}, commonTecniche = {}, userData = {
             {Object.entries(personalTecniche)
               .sort((a, b) => a[0].localeCompare(b[0]))
               .map(([tecnicaName, tecnica]) => (
-                <TecnicaCard
+                <MemoizedTecnicaCard
                   key={tecnicaName}
                   tecnicaName={tecnicaName}
                   tecnica={tecnica}
@@ -393,7 +423,7 @@ const TecnicheSide = ({ personalTecniche = {}, commonTecniche = {}, userData = {
             {Object.entries(commonTecniche)
               .sort((a, b) => a[0].localeCompare(b[0]))
               .map(([tecnicaName, tecnica]) => (
-                <TecnicaCard
+                <MemoizedTecnicaCard
                   key={tecnicaName}
                   tecnicaName={tecnicaName}
                   tecnica={tecnica}
@@ -410,5 +440,6 @@ const TecnicheSide = ({ personalTecniche = {}, commonTecniche = {}, userData = {
   );
 };
 
-export default TecnicheSide;
+// Memoize the entire TecnicheSide component to prevent unnecessary rerenders
+export default React.memo(TecnicheSide);
 
