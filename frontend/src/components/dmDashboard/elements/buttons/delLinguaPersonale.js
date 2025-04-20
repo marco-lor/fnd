@@ -1,11 +1,10 @@
-// frontend/src/components/dmDashboard/elements/buttons/delSpell.js
+// frontend/src/components/dmDashboard/elements/buttons/delLinguaPersonale.js
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { db, storage } from '../../../firebaseConfig';
+import { db } from '../../../firebaseConfig';
 import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { ref, deleteObject } from "firebase/storage";
 
-export function DelSpellOverlay({ userId, spellName, spellData, onClose }) {
+export function DelLinguaPersonaleOverlay({ userId, linguaName, onClose }) {
   const [userName, setUserName] = useState("");
   const [confirmInput, setConfirmInput] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
@@ -13,35 +12,18 @@ export function DelSpellOverlay({ userId, spellName, spellData, onClose }) {
   useEffect(() => {
     (async () => {
       const snap = await getDoc(doc(db, "users", userId));
-      if (snap.exists()) {
-        const d = snap.data();
-        setUserName(d.characterId || d.email);
-      }
+      if (snap.exists()) setUserName(snap.data().characterId || snap.data().email);
     })();
   }, [userId]);
 
   const handleDelete = async () => {
     setIsDeleting(true);
-    // remove media
-    if (spellData.image_url) {
-      try {
-        const path = decodeURIComponent(spellData.image_url.split('/o/')[1].split('?')[0]);
-        await deleteObject(ref(storage, path));
-      } catch {}
-    }
-    if (spellData.video_url) {
-      try {
-        const path = decodeURIComponent(spellData.video_url.split('/o/')[1].split('?')[0]);
-        await deleteObject(ref(storage, path));
-      } catch {}
-    }
-    // remove from Firestore
     const userRef = doc(db, "users", userId);
     const snap = await getDoc(userRef);
     if (snap.exists()) {
-      const data = { ...(snap.data().spells || {}) };
-      delete data[spellName];
-      await updateDoc(userRef, { spells: data });
+      const data = { ...(snap.data().lingue || {}) };
+      delete data[linguaName];
+      await updateDoc(userRef, { lingue: data });
       onClose(true);
     } else {
       alert("Utente non trovato");
@@ -52,10 +34,10 @@ export function DelSpellOverlay({ userId, spellName, spellData, onClose }) {
   const overlay = (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-md">
-        <h2 className="text-xl text-white mb-2">Elimina Spell</h2>
+        <h2 className="text-xl text-white mb-2">Elimina Lingua</h2>
         <p className="text-gray-300 mb-4">Giocatore: <span className="font-semibold">{userName}</span></p>
         <div className="bg-red-900 bg-opacity-25 border border-red-700 rounded p-4 mb-4">
-          <p className="text-white">Per eliminare <span className="font-semibold">{spellName}</span>, digita il nome esatto qui sotto:</p>
+          <p className="text-white">Per eliminare <span className="font-semibold">{linguaName}</span>, digita il nome esatto qui sotto:</p>
         </div>
         <input
           type="text"
@@ -74,13 +56,9 @@ export function DelSpellOverlay({ userId, spellName, spellData, onClose }) {
           </button>
           <button
             onClick={handleDelete}
-            disabled={isDeleting || confirmInput !== spellName}
-            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 flex items-center"
+            disabled={isDeleting || confirmInput !== linguaName}
+            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
           >
-            {isDeleting
-              ? <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.37 0 0 5.37 0 12h4z"/></svg>
-              : null
-            }
             Elimina
           </button>
         </div>

@@ -36,6 +36,7 @@ const Navbar = () => {
           <div className="w-20 h-20 rounded-full bg-gray-600 animate-pulse mr-3"></div>
           <div className="flex flex-col">
             <div className="h-6 w-32 bg-gray-600 animate-pulse rounded mb-1"></div>
+            <div className="h-4 w-24 bg-gray-600 animate-pulse rounded"></div>
           </div>
         </>
       );
@@ -65,8 +66,9 @@ const Navbar = () => {
           <h1 className="text-xl md:text-2xl font-bold text-white">
             {userData?.characterId || (user && user.email) || "User"}
           </h1>
-          {/* Optional: Display other info like class */}
-          {/* <p className="text-sm text-gray-300">{userData?.class || 'No Class'}</p> */}
+          <p className="text-sm text-gray-300">
+            {userData?.race || 'No Race'}
+          </p>
         </div>
       </>
     );
