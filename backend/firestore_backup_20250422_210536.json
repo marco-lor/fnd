@@ -1,0 +1,2041 @@
+{
+  "items": {
+    "Armatura_di_Cuoio": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "2",
+            "7": "3",
+            "10": "4",
+            "1": "1"
+          },
+          "Salute": {
+            "4": "6",
+            "7": "9",
+            "10": "12",
+            "1": "3"
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "6",
+            "7": "9",
+            "10": "12",
+            "1": "3"
+          }
+        }
+      },
+      "ridCostoTec": {
+        "4": "2",
+        "7": "2",
+        "10": "2",
+        "1": "2"
+      },
+      "Bonus Danno": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Effetto": "",
+      "Hands": "-",
+      "requisiti": "",
+      "Penetrazione": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "ridCostoSpell": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Tipo": "-",
+      "Danno Critico": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Nome": "Armatura di Cuoio",
+      "Slot": "Corpo",
+      "Danno": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "image_url": "",
+      "Bonus Danno Critico": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      }
+    },
+    "Pugnale": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "4",
+            "7": "6",
+            "10": "8",
+            "1": "2"
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        }
+      },
+      "ridCostoTec": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Bonus Danno": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Effetto": "",
+      "Hands": 1,
+      "requisiti": "",
+      "Penetrazione": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "ridCostoSpell": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Tipo": "Mischia",
+      "Danno Critico": {
+        "4": "2d10",
+        "7": "3d10",
+        "10": "4d10",
+        "1": "1d10"
+      },
+      "Nome": "Pugnale",
+      "Slot": "Mano Principale",
+      "Danno": {
+        "4": "2d4",
+        "7": "3d4",
+        "10": "4d4",
+        "1": "1d4"
+      },
+      "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2FPugnale_pugnale.webp?alt=media&token=e86e079b-759e-4792-9159-4608aa2ccec0",
+      "Bonus Danno Critico": {
+        "4": "6",
+        "7": "9",
+        "10": "12",
+        "1": "3"
+      }
+    },
+    "Scudo": {
+      "Nome": "Scudo",
+      "Slot": "-",
+      "Bonus Danno": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Effetto": "difende male",
+      "Danno": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Hands": 1,
+      "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2FScudo_shield.jpg?alt=media&token=6ded2e99-83f2-4ca3-be8c-a2270bf28812",
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "2",
+            "7": "3",
+            "10": "4",
+            "1": "1"
+          },
+          "Difesa": {
+            "4": "4",
+            "7": "6",
+            "10": "8",
+            "1": "2"
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "-2",
+            "7": "-3",
+            "10": "-4",
+            "1": "-1"
+          },
+          "Salute": {
+            "4": "4",
+            "7": "6",
+            "10": "8",
+            "1": "2"
+          }
+        }
+      },
+      "Penetrazione": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Bonus Danno Critico": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Tipo": "Mischia",
+      "Danno Critico": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      }
+    },
+    "Stivali_di_cuoio": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "1",
+            "7": "1",
+            "10": "1",
+            "1": "1"
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        }
+      },
+      "ridCostoTec": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Bonus Danno": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Effetto": "Comodi",
+      "Hands": "-",
+      "requisiti": "",
+      "Penetrazione": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "ridCostoSpell": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Tipo": "-",
+      "Danno Critico": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Nome": "Stivali di cuoio",
+      "Slot": "Stivali",
+      "Danno": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "prezzo": "150",
+      "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2FStivali_di_cuoio_stivali.webp?alt=media&token=d2eedf84-e3ed-4152-a3d9-3003b4afc7b0",
+      "Bonus Danno Critico": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      }
+    }
+  },
+  "users": {
+    "TQAmmVfIpOeNiRflXKSeL1NX2ak2": {
+      "AltriParametri": {
+        "AnimaFields": [
+          "Spirito",
+          "Potenza",
+          "Astuzia"
+        ],
+        "Anima_4": "---",
+        "Anima_1": "---",
+        "Anima_7": "---"
+      },
+      "characterId": "Nyx",
+      "conoscenze": {},
+      "imageUrl": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/characters%2Ftoken_2.png?alt=media&token=4d67afc5-c32e-4dda-97cb-c102a547d7dd",
+      "inventory": [],
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Intelligenza": {
+            "Base": 3,
+            "Anima": 0,
+            "Tot": 3,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Saggezza": {
+            "Base": 2,
+            "Anima": 0,
+            "Tot": 2,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Destrezza": {
+            "Base": -1,
+            "Anima": 0,
+            "Tot": -1,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Forza": {
+            "Base": -1,
+            "Anima": 0,
+            "Tot": -1,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Costituzione": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "Base": 9,
+            "Equip": 0,
+            "Tot": 9,
+            "Mod": 0
+          },
+          "Critico": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Mod": 0
+          },
+          "RiduzioneDanni": {
+            "Base": 1,
+            "Equip": 0,
+            "Tot": 1,
+            "Mod": 0
+          },
+          "Difesa": {
+            "Base": 1,
+            "Equip": 0,
+            "Tot": 1,
+            "Mod": 0
+          },
+          "Salute": {
+            "Base": 1,
+            "Equip": 0,
+            "Tot": 1,
+            "Mod": 0
+          },
+          "Mira": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Mod": 0
+          },
+          "Attacco": {
+            "Base": 3,
+            "Equip": 0,
+            "Tot": 3,
+            "Mod": 0
+          }
+        }
+      },
+      "tecniche": {
+        "Trasformazione": {
+          "Azione": "Consumabile",
+          "Nome": "Trasformazione",
+          "Costo": 2,
+          "Effetto": "La fata pu\u00f2 assumere l\u2019altra forma, spendendo 2 MANA. In forma di Fata il personaggio pu\u00f2 VOLARE in altezza, velocit\u00e0 e distanza equivalenti alle capacit\u00e0 di corsa; tutto l\u2019equipaggiamento (set armi 1, set armi2 .testa, corpo, cintura, fodero, stivali, accessori) viene magicamente ridotto in dimensioni e peso e rimane equipaggiato. Anche l\u2019inventario si rimpicciolisce, ma al contrario dell\u2019equipaggiamento IL PESO RIMANE INALTERATO. Gli oggetti estratti dall\u2019inventario fatato tornano immediatamente alla dimensione originale, tuttavia non \u00e8 vero il viceversa, ovvero OGGETTI NORMALI NON RIMPICCIOLISCONO se ottenuti da una fata IN FORMA DI FATA.\nIn forma di fata tutti i DANNI subiti sono RADDOPPIATI ma ottiene un bonus alla DIFESA pari al LIVELLO. \n",
+          "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/tecnicas%2Ftecnica_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Trasformazione_1742685743124_image?alt=media&token=e8f9d5e4-22d6-4546-b948-458ff3096f62"
+        }
+      },
+      "race": "Fata",
+      "settings": {
+        "lock_param_combat": false,
+        "notifications": true,
+        "theme": "dark",
+        "lock_param_base": false
+      },
+      "stats": {
+        "combatTokensAvailable": 0,
+        "basePointsSpent": 4,
+        "combatTokensSpent": 50,
+        "level": 1,
+        "manaTotal": 59,
+        "manaCurrent": 59,
+        "hpTotal": 13,
+        "hpCurrent": 13,
+        "basePointsAvailable": 0
+      },
+      "lingue": {},
+      "spells": {
+        "Barriera Cosmica (benefica)": {
+          "Turni": 3,
+          "video_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fvideos%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__benefica__1742682281306_video?alt=media&token=84db6620-cdcd-49a7-8469-f41bf1c4a048",
+          "Costo": 19,
+          "Effetti Positivi": " 3d10 barriera , i tuoi sensi vengono amplificati e proiettati in una zona di  10 Metri di raggio intorno a te, + 2 difesa per i tuoi prossimi tre turni, chi ti attacca in mischia subisce 1d10 danno e se ha una massa inferiore a 300 kg viene respinto 6 metri indietro, castabile su te stesso o bersaglio alleato",
+          "TPC Mentale": {
+            "Param1": "---",
+            "Param2": "---",
+            "ParamTarget": "---"
+          },
+          "TPC": {
+            "Param1": "---",
+            "Param2": "---",
+            "ParamTarget": "---"
+          },
+          "Tipo Base": "Incantamento",
+          "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__benefica__1742671660253_image?alt=media&token=1d4b399b-6fdc-4981-9e05-6635d384fd9f",
+          "Nome": "Barriera Cosmica (benefica)",
+          "Mod Params": {
+            "Base": {
+              "Fortuna": 0,
+              "Intelligenza": 0,
+              "Saggezza": 0,
+              "Forza": 0,
+              "Destrezza": 0,
+              "Costituzione": 0
+            },
+            "Combattimento": {
+              "Difesa": 2,
+              "Disciplina": 0,
+              "RiduzioneDanni": 0,
+              "Salute": 0,
+              "Attacco": 0,
+              "Critico": 0
+            }
+          },
+          "Esperienza": "Principiante",
+          "TPC Fisico": {
+            "Param1": "Intelligenza",
+            "Param2": "Saggezza",
+            "ParamTarget": "Costituzione"
+          },
+          "Effetti Negativi": "Sei cieco e sordo al di l\u00e0 dei dieci metri per tutta la durata dell'incantesimo; l'incantesimo pu\u00f2 essere interrotto spendendo un' azione consumabile; utilizzare questo incantesimo se Barriera Cosmica Offensiva \u00e8 attiva causa il termine immediato di Barriera Cosmica Offensiva"
+        },
+        "Barriera Cosmica (offensiva)": {
+          "Turni": 3,
+          "video_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fvideos%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__offensiva__1742685004831_video?alt=media&token=36a3a79e-ac7c-4155-8dfc-2107d179261b",
+          "Costo": 19,
+          "Effetti Positivi": "3d10 danno, nel prossimo turno il bersaglio non pu\u00f2 utilizzare l'azione di movimento, Gittata dieci metri, -2 DIFESA per tre turni contro attacchi in mischia",
+          "TPC Mentale": {
+            "Param1": "Costituzione",
+            "Param2": "Costituzione",
+            "ParamTarget": "Costituzione"
+          },
+          "TPC": {
+            "Param1": "Intelligenza",
+            "Param2": "Saggezza",
+            "ParamTarget": "''"
+          },
+          "Tipo Base": "Congiurazione",
+          "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__offensiva__1742685004831_image?alt=media&token=f942ca87-b3b1-4a52-85e0-b1a2e127df4d",
+          "Nome": "Barriera Cosmica (offensiva)",
+          "Mod Params": {
+            "Base": {
+              "Fortuna": 0,
+              "Intelligenza": 0,
+              "Saggezza": 0,
+              "Forza": 0,
+              "Destrezza": 0,
+              "Costituzione": 0
+            },
+            "Combattimento": {
+              "Difesa": 0,
+              "Disciplina": 0,
+              "RiduzioneDanni": 0,
+              "Salute": 0,
+              "Attacco": 0,
+              "Critico": 0
+            }
+          },
+          "Esperienza": "Principiante",
+          "TPC Fisico": {
+            "Param1": "Intelligenza",
+            "Param2": "Saggezza",
+            "ParamTarget": "Costituzione"
+          },
+          "Effetti Negativi": "il bersaglio ottiene +2 DIFESA  contro attacchi a distanza o (+2/int o sag) incantesimi lanciati da almeno 15 feet di distanza utilizzare questo incantesimo se Barriera Cosmica Difensiva \u00e8 attiva causa il termine immediato di Barriera Cosmica Difensiva"
+        }
+      },
+      "role": "webmaster",
+      "email": "marcolorenzo92@gmail.com",
+      "professioni": {},
+      "username": "marcolorenzo92"
+    }
+  },
+  "utils": {
+    "codex": {
+      "conoscenze": {},
+      "professioni": {
+        "Medico": "Anatomia, malattie, cure e farmaci.  Velocizza la rigenerazione dei Punti Ferita durante il riposo (vedi Sezione \u201cRiposo\u201d). Avanzato: effetti rigenerativi ulteriormente potenziati.",
+        "Cacciatore": "Progettare e piazzare trappole, disinnescarle, seguire tracce, catturare o addestrare animali. Avanzato: migliora efficacia delle trappole e interazione avanzata con creature.",
+        "Artigiano": "Valutazione, modifica e manutenzione di oggetti in legno, cuoio o materiali organici. Avanzato: produzione di armi e armature organiche.",
+        "Musicista": "Suonare strumenti, comporre musica, intonazione, riparazione e costruzione di strumenti musicali. ",
+        "Ingegnere": "Progettare, costruire, riconoscere e riparare meccanismi e trappole complesse. Include interazione con ascensori, ponti levatoi, serrature. Avanzato: capacit\u00e0 di scasso e costruzioni ingegneristiche avanzate.",
+        "Gioielliere": "Riconoscere qualit\u00e0, valore e incantamenti di gioielli, accessori e pietre preziose. Gestire e modificare tali oggetti. Avanzato: produzione di nuovi gioielli incantati o speciali.",
+        "Arcanista": "Teoria della magia, conoscenza dell\u2019Anima e dell\u2019Etere.  Capacit\u00e0 di comprendere e decifrare incantesimi. Avanzato: possibilit\u00e0 di scrivere nuovi incantesimi (richiede \u201cl\u2019ispirazione giusta\u201d).",
+        "Agricoltore": "Gestione della vita rurale: coltivazione, allevamento, cura degli animali da fattoria.",
+        "Marinaio": "Conoscenze nautiche e aeronautiche, gestione della vita da equipaggio in viaggi marittimi o aerei.",
+        "Coglione": "un coglione",
+        "Fabbro": "Riconoscere qualit\u00e0 e valore di armi/armature metalliche, identificare incantamenti o maledizioni. Maneggiare, trasportare, riparare e modificare l\u2019equipaggiamento. Avanzato: forgiatura di nuovi oggetti metallici.",
+        "Alchimista": "Identificare ingredienti, estrarne i principi attivi, conoscerne effetti e applicazioni. Preparare pozioni, veleni, unguenti, acidi, bombe. Avanzato: crea nuove formulazioni complesse.",
+        "Militare": "Conoscenze di sopravvivenza in guerra, strategia, catene di comando, terreni militari."
+      },
+      "lingue": {
+        "Comune": "Il personaggio comprende e si esprime perfettamente nella lingua pi\u00f9 diffusa di Etherium."
+      }
+    },
+    "possible_lists": {
+      "slots": [
+        "Mano Principale",
+        "Mano Secondaria",
+        "Testa",
+        "Corpo",
+        "Cintura",
+        "Fodero",
+        "Stivali",
+        "Accessorio",
+        "Consumabile",
+        ""
+      ],
+      "tipo": [
+        "Mischia",
+        "Distanza"
+      ],
+      "ruoli": [
+        "player",
+        "webmaster",
+        "dm"
+      ],
+      "hands": [
+        1,
+        2
+      ],
+      "anima": [
+        "Spirito",
+        "Potenza",
+        "Astuzia"
+      ]
+    },
+    "render_ping": {
+      "last_ping": "2025-02-19T18:30:19.832000+00:00"
+    },
+    "schema_accessorio": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Intelligenza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Saggezza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Forza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Destrezza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Costituzione": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Critico": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "RiduzioneDanni": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Difesa": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Salute": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Mira": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Attacco": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          }
+        }
+      },
+      "ridCostoTec": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "Bonus Danno": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "Effetto": "Descrizione dell'effetto.",
+      "Hands": [
+        1,
+        2,
+        "-"
+      ],
+      "requisiti": "",
+      "Penetrazione": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "ridCostoSpell": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "Tipo": [
+        "Mischia",
+        "Distanza",
+        "-"
+      ],
+      "Danno Critico": {
+        "4": "1d6",
+        "10": "1d6",
+        "7": "1d6",
+        "1": "1d6"
+      },
+      "Nome": "Nome Arma",
+      "Slot": [
+        "Mano Principale",
+        "Mano Secondaria",
+        "Testa",
+        "Corpo",
+        "Cintura",
+        "Fodero",
+        "Stivali",
+        "Accessorio",
+        "Consumabile",
+        "Consumabile Grande",
+        "-"
+      ],
+      "Danno": {
+        "4": "1d4",
+        "10": "1d4",
+        "7": "1d4",
+        "1": "1d4"
+      },
+      "prezzo": 0,
+      "image_url": "",
+      "Bonus Danno Critico": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "slotCintura": 0
+    },
+    "schema_ammo": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Intelligenza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Saggezza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Forza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Destrezza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Costituzione": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Critico": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "RiduzioneDanni": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Difesa": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Salute": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Mira": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Attacco": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          }
+        }
+      },
+      "ridCostoTec": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "Bonus Danno": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "Effetto": "Descrizione dell'effetto.",
+      "Hands": [
+        1,
+        2,
+        "-"
+      ],
+      "requisiti": "",
+      "Penetrazione": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "ridCostoSpell": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "Tipo": [
+        "Mischia",
+        "Distanza",
+        "-"
+      ],
+      "Danno Critico": {
+        "4": "1d6",
+        "10": "1d6",
+        "7": "1d6",
+        "1": "1d6"
+      },
+      "Nome": "Nome Arma",
+      "Slot": [
+        "Mano Principale",
+        "Mano Secondaria",
+        "Testa",
+        "Corpo",
+        "Cintura",
+        "Fodero",
+        "Stivali",
+        "Accessorio",
+        "Consumabile",
+        "Consumabile Grande",
+        "-"
+      ],
+      "Danno": {
+        "4": "1d4",
+        "10": "1d4",
+        "7": "1d4",
+        "1": "1d4"
+      },
+      "prezzo": 0,
+      "image_url": "",
+      "Bonus Danno Critico": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "slotCintura": 0
+    },
+    "schema_arma": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Intelligenza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Saggezza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Forza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Destrezza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Costituzione": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Critico": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "RiduzioneDanni": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Difesa": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Salute": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Mira": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Attacco": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          }
+        }
+      },
+      "ridCostoTec": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "Bonus Danno": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "Effetto": "Descrizione dell'effetto.",
+      "Hands": [
+        1,
+        2
+      ],
+      "requisiti": "",
+      "Penetrazione": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "ridCostoSpell": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "Tipo": [
+        "Mischia",
+        "Distanza"
+      ],
+      "Danno Critico": {
+        "4": "1d6",
+        "10": "1d6",
+        "7": "1d6",
+        "1": "1d6"
+      },
+      "Nome": "Nome Arma",
+      "Slot": [
+        "Mano Principale",
+        "Mano Secondaria"
+      ],
+      "Danno": {
+        "4": "1d4",
+        "10": "1d4",
+        "7": "1d4",
+        "1": "1d4"
+      },
+      "prezzo": 0,
+      "image_url": "",
+      "Bonus Danno Critico": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      }
+    },
+    "schema_armatura": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Intelligenza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Saggezza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Forza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Destrezza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Costituzione": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Critico": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "RiduzioneDanni": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Difesa": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Salute": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Mira": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Attacco": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          }
+        }
+      },
+      "ridCostoTec": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "Bonus Danno": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "Effetto": "Descrizione dell'effetto.",
+      "Hands": [
+        1,
+        2,
+        "-"
+      ],
+      "requisiti": "",
+      "Penetrazione": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "ridCostoSpell": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "Tipo": [
+        "Mischia",
+        "Distanza",
+        "-"
+      ],
+      "Danno Critico": {
+        "4": "1d6",
+        "10": "1d6",
+        "7": "1d6",
+        "1": "1d6"
+      },
+      "Nome": "Nome Arma",
+      "Slot": [
+        "Mano Principale",
+        "Mano Secondaria",
+        "Testa",
+        "Corpo",
+        "Cintura",
+        "Fodero",
+        "Stivali",
+        "Accessorio",
+        "Consumabile",
+        "Consumabile Grande",
+        "-"
+      ],
+      "Danno": {
+        "4": "1d4",
+        "10": "1d4",
+        "7": "1d4",
+        "1": "1d4"
+      },
+      "prezzo": 0,
+      "image_url": "",
+      "Bonus Danno Critico": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "slotCintura": 0
+    },
+    "schema_consumabili": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Intelligenza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Saggezza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Forza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Destrezza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Costituzione": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Critico": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "RiduzioneDanni": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Difesa": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Salute": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Mira": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Attacco": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          }
+        }
+      },
+      "ridCostoTec": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "Bonus Danno": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "Effetto": "Descrizione dell'effetto.",
+      "Hands": [
+        1,
+        2,
+        "-"
+      ],
+      "requisiti": "",
+      "Penetrazione": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "ridCostoSpell": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "Tipo": [
+        "Mischia",
+        "Distanza",
+        "-"
+      ],
+      "Danno Critico": {
+        "4": "1d6",
+        "10": "1d6",
+        "7": "1d6",
+        "1": "1d6"
+      },
+      "Nome": "Nome Arma",
+      "Slot": [
+        "Mano Principale",
+        "Mano Secondaria",
+        "Testa",
+        "Corpo",
+        "Cintura",
+        "Fodero",
+        "Stivali",
+        "Accessorio",
+        "Consumabile",
+        "Consumabile Grande",
+        "-"
+      ],
+      "Danno": {
+        "4": "1d4",
+        "10": "1d4",
+        "7": "1d4",
+        "1": "1d4"
+      },
+      "prezzo": 0,
+      "image_url": "",
+      "Bonus Danno Critico": {
+        "4": 0,
+        "10": 0,
+        "7": 0,
+        "1": 0
+      },
+      "slotCintura": 0
+    },
+    "schema_npc": {},
+    "schema_pg": {
+      "AltriParametri": {
+        "AnimaFields": [
+          "Spirito",
+          "Potenza",
+          "Astuzia"
+        ],
+        "Anima_4": "---",
+        "Anima_1": "---",
+        "Anima_7": "---"
+      },
+      "imageUrl": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/characters%2Ftoken_2.png?alt=media&token=4d67afc5-c32e-4dda-97cb-c102a547d7dd",
+      "conoscenze": {},
+      "characterId": "Inserire il nome del personaggio",
+      "inventory": [],
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Intelligenza": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Saggezza": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Destrezza": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Forza": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Costituzione": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Mod": 0
+          },
+          "RiduzioneDanni": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Mod": 0
+          },
+          "Critico": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Mod": 0
+          },
+          "Difesa": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Mod": 0
+          },
+          "Attacco": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Mod": 0
+          },
+          "Mira": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Mod": 0
+          },
+          "Salute": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Mod": 0
+          }
+        }
+      },
+      "tecniche": {},
+      "race": [
+        "Goblin",
+        "Beastfolk",
+        "Fata"
+      ],
+      "settings": {
+        "lock_param_combat": false,
+        "lock_param_base": false,
+        "notifications": true,
+        "theme": "dark"
+      },
+      "stats": {
+        "combatTokensAvailable": 0,
+        "basePointSpent": 0,
+        "combatTokensSpent": 0,
+        "level": 1,
+        "manaCurrent": 61,
+        "manaTotal": 61,
+        "hpTotal": 28,
+        "hpCurrent": 28,
+        "basePointsAvailable": 0
+      },
+      "lingue": {},
+      "spells": {},
+      "role": "player",
+      "email": "tuamail@gmail.com",
+      "professioni": {},
+      "username": "username"
+    },
+    "schema_spell": {
+      "Tipo Base": [
+        "Incantamento",
+        "Evocazione",
+        "Congiurazione",
+        "Maledizione",
+        "Utility Minore",
+        "Utility Maggiore"
+      ],
+      "Nome": "Inserisci nome spell",
+      "Costo": 0,
+      "Effetti Positivi": "",
+      "video_url": "",
+      "TPC": {
+        "Param1": [
+          "Costituzione",
+          "Destrezza",
+          "Fortuna",
+          "Forza",
+          "Intelligenza",
+          "Saggezza",
+          "---"
+        ],
+        "Param2": [
+          "Costituzione",
+          "Destrezza",
+          "Fortuna",
+          "Forza",
+          "Intelligenza",
+          "Saggezza",
+          "---"
+        ],
+        "ParamTarget": [
+          "Costituzione",
+          "Destrezza",
+          "Fortuna",
+          "Intelligenza",
+          "Saggezza",
+          "---"
+        ]
+      },
+      "TPC Fisico": {
+        "Param1": [
+          "Costituzione",
+          "Destrezza",
+          "Fortuna",
+          "Forza",
+          "Intelligenza",
+          "Saggezza",
+          "---"
+        ],
+        "Param2": [
+          "Costituzione",
+          "Destrezza",
+          "Fortuna",
+          "Forza",
+          "Intelligenza",
+          "Saggezza",
+          "---"
+        ],
+        "ParamTarget": [
+          "Costituzione",
+          "Destrezza",
+          "Fortuna",
+          "Forza",
+          "Intelligenza",
+          "Saggezza",
+          "---"
+        ]
+      },
+      "image_url": "",
+      "TPC Mentale": {
+        "Param1": [
+          "Costituzione",
+          "Destrezza",
+          "Fortuna",
+          "Forza",
+          "Intelligenza",
+          "Saggezza",
+          "---"
+        ],
+        "Param2": [
+          "Costituzione",
+          "Destrezza",
+          "Fortuna",
+          "Forza",
+          "Intelligenza",
+          "Saggezza",
+          "---"
+        ],
+        "ParamTarget": [
+          "Costituzione",
+          "Destrezza",
+          "Fortuna",
+          "Forza",
+          "Intelligenza",
+          "Saggezza",
+          "---"
+        ]
+      },
+      "Mod Params": {
+        "Base": {
+          "Fortuna": 0,
+          "Intelligenza": 0,
+          "Saggezza": 0,
+          "Destrezza": 0,
+          "Forza": 0,
+          "Costituzione": 0
+        },
+        "Combattimento": {
+          "Difesa": 0,
+          "Disciplina": 0,
+          "Critico": 0,
+          "Attacco": 0,
+          "RiduzioneDanni": 0,
+          "Salute": 0
+        }
+      },
+      "Esperienza": [
+        "Principiante",
+        "Esperto",
+        "Maestro"
+      ],
+      "Turni": 0,
+      "Effetti Negativi": ""
+    },
+    "schema_tecnica": {
+      "Azione": [
+        "Tattica",
+        "Movimento",
+        "Comunicazione",
+        "Consumabile"
+      ],
+      "Nome": "Nome della tecnica",
+      "Costo": 0,
+      "video_url": "Placeholder URL del video",
+      "Effetto": "Placeholder per effetto della tecnica.",
+      "image_url": "Placeholder URL dell'immagine"
+    },
+    "spells_common": {},
+    "tecniche_common": {
+      "Ostruzione": {
+        "Azione": "Movimento",
+        "Nome": "Ostruzione",
+        "Costo": 4,
+        "Effetto": "Forza + Dado Anima vs Forza + Dado Anima annulla l'azione di movimento del bersaglio; questa azione pu\u00f2 essere effettuata anticipando la propria azione del turno successivo durante l'azione di movimento del bersaglio ingaggiato in mischia.",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/tecniche%2Fostruzione.webp?alt=media&token=28b8f0dc-67bd-4155-823d-dbfdcef6664f"
+      },
+      "Impedimento": {
+        "Azione": "Tattica",
+        "Nome": "Impedimento",
+        "Costo": 12,
+        "Effetto": "Forza + Dado Anima vs Forza + Dado Anima. Fino alla fine del prossimo turno il bersaglio ha danno fisico dimezzato oppure non pu\u00f2 usare azione di movimento oppure mira dimezzata.",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/tecniche%2Fimpedimento.webp?alt=media&token=e5fb5da3-29e9-4755-ab5a-501692bd042a"
+      },
+      "AttaccoOpportunit\u00e0": {
+        "Azione": "Movimento",
+        "Nome": "Attacco d'Opportunit\u00e0",
+        "Costo": 4,
+        "Effetto": "Attacco fisico in mischia su bersaglio che cerca di allontanarsi. Richiede arma da mischia.",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/tecniche%2Fattacco_opportunita.webp?alt=media&token=887c2e75-1498-4468-9500-cb30c0e7dd34"
+      },
+      "CambioSetArmi": {
+        "Azione": "Consumabile",
+        "Nome": "Cambio Set Armi",
+        "Costo": 0,
+        "Effetto": "Sostituisce il set di armi equipaggiato con il set non equipaggiato con relativo fodero.",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/tecniche%2Fcambio_set_armi.webp?alt=media&token=3d702e8a-364c-45e9-849f-520b1b88eab6"
+      },
+      "UsoConsumabileCintura": {
+        "Azione": "Consumabile",
+        "Nome": "Uso Consumabile in Cintura",
+        "Costo": 0,
+        "Effetto": "Utilizza un oggetto consumabile se equipaggiato nello slot cintura su se stesso o su un personaggio vicino. Far ingerire una pozione ad un alleato \u00e8 possibile solo se l'alleato \u00e8 in mischia. Passare una pozione ad un alleato lontano richiede un successo su destrezza.",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/tecniche%2Fuso_consumabile.webp?alt=media&token=16044cd4-3326-4c15-93c5-dcca6210c0e4"
+      },
+      "Movimento": {
+        "Azione": "Movimento",
+        "Nome": "Movimento",
+        "Costo": 0,
+        "Effetto": "Il bersaglio si muove al massimo della rapidit\u00e0 fino a un massimo di 9 metri, a seconda delle condizioni del terreno e della situazione.",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/tecniche%2Fmovimento.webp?alt=media&token=a926acce-02df-42ec-b769-7295da9f5566"
+      },
+      "Frapposizione": {
+        "Azione": "Comunicazione",
+        "Nome": "Frapposizione",
+        "Costo": 6,
+        "Effetto": "Fino al prossimo turno il personaggio si fa proteggere da un alleato distante fino a 4m, frapponendosi fra lui ed i nemici e intercettando gli attacchi. L'alleato subisce i danni altrimenti diretti al personaggio, senza possibilit\u00e0 di poter schivare ma applicando le eventuali riduzioni del danno.",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/tecniche%2Ffrapposizione.webp?alt=media&token=0ac594d1-fedf-4031-a208-3178bc187b9f"
+      },
+      "Attacco": {
+        "Azione": "Tattica",
+        "Nome": "Attacco",
+        "Costo": 0,
+        "Effetto": "Il personaggio effettua un attacco fisico in mischia o a distanza, a seconda dell'arma equipaggiata.",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/tecniche%2Fattacco.webp?alt=media&token=622cae5d-ef2c-42df-9a21-08b3842b3177"
+      },
+      "Copertura": {
+        "Azione": "Movimento",
+        "Nome": "Copertura",
+        "Costo": 4,
+        "video_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/tecniche%2Fvideo%2Fcopertura_vid.mp4?alt=media&token=6f7f11dd-a2c0-497e-9f85-21a7d4eac7b0",
+        "Effetto": "Se il personaggio non \u00e8 ingaggiato in mischia pu\u00f2 attaccare con arma a distanza da una copertura: +2 Difesa contro attacchi a distanza e +2 al dado anima contro incantesimi fino alla prossima azione di movimento.",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/tecniche%2Fcopertura.webp?alt=media&token=8acd603c-62a7-4d13-9fd3-d7859832862e"
+      },
+      "Protezione": {
+        "Azione": "Comunicazione",
+        "Nome": "Protezione",
+        "Costo": 4,
+        "Effetto": "Fino al prossimo turno il personaggio protegge un alleato distante fino a 4m, frapponendosi fra lui ed i nemici e intercettando gli attacchi. Il personaggio subisce i danni altrimenti diretti all'alleato, senza possibilit\u00e0 di poter schivare ma applicando le eventuali riduzioni del danno.",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/tecniche%2Fprotezione.webp?alt=media&token=49dad044-c487-4a73-a359-5bb1b57fb8a1"
+      },
+      "Carica": {
+        "Azione": "Movimento",
+        "Nome": "Carica",
+        "Costo": 4,
+        "Effetto": "Se il personaggio non \u00e8 ingaggiato in mischia pu\u00f2 correre addosso ad un bersaglio aggiungendo Forza danni all'azione tattica di questo turno.",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/tecniche%2Fcarica.webp?alt=media&token=69f7dd74-4712-489b-bf71-de265119cc03"
+      },
+      "Parata": {
+        "Azione": "Movimento",
+        "Nome": "Parata",
+        "Costo": 4,
+        "Effetto": "Fino alla prossima azione tattica il personaggio ottiene +1 Difesa, +1 al dado anima contro incantesimo, +2 riduzione danni. I bonus sono raddoppiati se il personaggio ha equipaggiato uno scudo.",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/tecniche%2Fparata.webp?alt=media&token=e79e8d40-9fe3-4717-9a9d-b10098533c81"
+      },
+      "AttaccoFurtivo": {
+        "Azione": "Movimento",
+        "Nome": "Attacco Furtivo",
+        "Costo": 12,
+        "Effetto": "Il personaggio raggiunge il bersaglio con circospezione per attaccarlo; se l'azione tattica infligge danni al bersaglio, il bersaglio non pu\u00f2 attaccare il personaggio con la sua prossima azione tattica a bersaglio singolo.",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/tecniche%2Fattacco_furtivo.webp?alt=media&token=68652f62-a147-4445-a085-ab8a46912c4e"
+      },
+      "Coordinazione": {
+        "Azione": "Comunicazione",
+        "Nome": "Coordinazione",
+        "Costo": 3,
+        "Effetto": "Avverte un alleato ingaggiato in mischia dell'imminente attacco a distanza di s\u00e9 stesso o alleato, dandogli la possibilit\u00e0 di non essere ferito dal fuoco amico.",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/tecniche%2Fcoordinazione.webp?alt=media&token=784f52c6-7cbc-4c39-9d5b-c0aef8ffa543"
+      }
+    },
+    "varie": {
+      "cost_params_combat": {
+        "Disciplina": 3,
+        "Critico": 4,
+        "RiduzioneDanni": 6,
+        "Difesa": 5,
+        "Attacco": 3,
+        "Mira": 4,
+        "Salute": 3
+      },
+      "dadiAnimaByLevel": [
+        "d10",
+        "d10",
+        "d10",
+        "d10",
+        "d12",
+        "d12",
+        "d12",
+        "d12",
+        "d20",
+        "d20",
+        "d20"
+      ],
+      "modAnima": {
+        "Potenza": {
+          "Forza": 1,
+          "Costituzione": 1
+        },
+        "Spirito": {
+          "Intelligenza": 1,
+          "Saggezza": 1
+        },
+        "Astuzia": {
+          "Fortuna": 1,
+          "Destrezza": 1
+        }
+      },
+      "levelUpAnimaBonus": {
+        "Potenza": {
+          "Salute": 1
+        },
+        "Spirito": {
+          "Disciplina": 1
+        },
+        "Astuzia": {
+          "Attacco": 1
+        }
+      },
+      "hpMultByLevel": {
+        "4": 7,
+        "7": 9,
+        "1": 5
+      },
+      "tokensPerLevel": {
+        "7": 6,
+        "9": 8,
+        "1": 50,
+        "5": 6,
+        "2": 4,
+        "6": 6,
+        "8": 8,
+        "3": 4,
+        "4": 4,
+        "10": 8
+      },
+      "manaMultByLevel": {
+        "4": 9,
+        "7": 12,
+        "1": 6
+      }
+    }
+  }
+}

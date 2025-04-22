@@ -147,6 +147,7 @@ def everything_to_json():
     """
     Retrieve all collections and all documents from Firestore, but for the 'users' collection
     only include the document with ID 'TQAmmVfIpOeNiRflXKSeL1NX2ak2'.
+    Also saves the data to a JSON file in the backend directory.
     
     Returns:
         dict: A dictionary containing all Firestore data organized by collections
@@ -179,10 +180,24 @@ def everything_to_json():
                     doc_id = doc.id
                     doc_data = doc.to_dict()
                     result[collection_name][doc_id] = doc_data
-                
+        
         # Format and print the full database structure
         formatted_json = json.dumps(result, indent=2, cls=FirestoreEncoder)
         print(formatted_json)
+        print("-----------------------------------")
+        
+        # Save the data to a JSON file with timestamp
+        from datetime import datetime
+        import os
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"firestore_backup_{timestamp}.json"
+        filepath = os.path.join(os.path.dirname(__file__), filename)
+        
+        with open(filepath, 'w', encoding='utf-8') as json_file:
+            json_file.write(formatted_json)
+        
+        print(f"Data saved to file: {filepath}")
         print("-----------------------------------")
         
         return result
