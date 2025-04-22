@@ -1,10 +1,9 @@
 // file: ./frontend/src/components/Login.js
-// Import the CSS file at the top of Login.js
-import React, { useState } from "react";
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
+import React, { useState, useEffect } from "react";
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, fetchSignInMethodsForEmail } from "firebase/auth";
 import { auth, db } from "./firebaseConfig";
 import { useNavigate } from "react-router-dom";
-import { setDoc, doc } from "firebase/firestore";
+import { setDoc, doc, getDoc } from "firebase/firestore";
 import DnDBackground from "./backgrounds/DnDBackground";
 import "./LoginAnimations.css"; // Added import
 
@@ -12,8 +11,10 @@ function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
   const [isHovered, setIsHovered] = useState(false);
-  const [isSignupHovered, setIsSignupHovered] = useState(false);
+  const [isCreateHovered, setIsCreateHovered] = useState(false);
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
@@ -33,25 +34,100 @@ function Login() {
     }
   };
 
-  const handleSignup = async (e) => {
+  const handleCreate = async (e) => {
     e.preventDefault();
     setError("");
+    setSuccessMessage("");
+    
+    if (!email.includes("@") || password.length < 6) {
+      setError("Invalid email or password too short (min 6 characters).");
+      return;
+    }
 
     try {
+      // First check if the user already exists
+      const methods = await fetchSignInMethodsForEmail(auth, email);
+      
+      if (methods && methods.length > 0) {
+        // User already exists
+        setError("This email is already registered. Please login instead.");
+        return;
+      }
+
+      setIsCreatingAccount(true);
+      
+      // Create the user if they don't exist
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      await setDoc(doc(db, "users", user.uid), {
+      // Get the character creation schema from Firestore
+      const schemaDocRef = doc(db, "utils", "schema_pg");
+      const schemaDocSnap = await getDoc(schemaDocRef);
+      
+      let characterInitialData = {
         email: user.email,
         characterId: email.split("@")[0],
-        imageUrl: "https://example.com/default-avatar.png",
-        stats: { level: 1, hp: 100, xp: 0 },
-        inventory: [{ name: "Basic Sword", type: "Weapon" }],
-      });
+        role: "player", // Default role
+        stats: {
+          level: 1,
+          hpTotal: 10,
+          hpCurrent: 10,
+          manaTotal: 10,
+          manaCurrent: 10,
+          basePointsAvailable: 4,
+          basePointsSpent: 0,
+          combatTokensAvailable: 50,
+          combatTokensSpent: 0
+        },
+        created_at: new Date().toISOString()
+      };
 
-      navigate("/home");
+      // Add schema-based structure if available
+      if (schemaDocSnap.exists()) {
+        const schemaData = schemaDocSnap.data();
+        
+        // Initialize character data based on schema
+        if (schemaData.Parametri) {
+          characterInitialData.Parametri = {
+            Base: {},
+            Combattimento: {}
+          };
+          
+          // Initialize base parameters
+          if (schemaData.Parametri.Base) {
+            Object.keys(schemaData.Parametri.Base).forEach(param => {
+              characterInitialData.Parametri.Base[param] = { 
+                Base: 0,
+                Bonus: 0
+              };
+            });
+          }
+          
+          // Initialize combat parameters
+          if (schemaData.Parametri.Combattimento) {
+            Object.keys(schemaData.Parametri.Combattimento).forEach(param => {
+              characterInitialData.Parametri.Combattimento[param] = { 
+                Base: 0,
+                Bonus: 0
+              };
+            });
+          }
+        }
+      }
+
+      // Save the initial user data to Firestore
+      await setDoc(doc(db, "users", user.uid), characterInitialData);
+      
+      setSuccessMessage("Account created successfully! Redirecting to character setup...");
+      
+      // Navigate to home or character creation page after a short delay
+      setTimeout(() => {
+        navigate("/home");
+      }, 1500);
+      
     } catch (err) {
       setError(err.message);
+      setIsCreatingAccount(false);
     }
   };
 
@@ -103,18 +179,6 @@ function Login() {
                     animation: "liquidBubble 8s ease-in-out infinite alternate",
                     transition: "all 0.4s ease-in-out",
                     transform: isHovered ? "scale(0.8)" : "scale(1)",
-                  }}
-                ></div>
-
-                {/* Liquid overlay effect */}
-                <div
-                  className="absolute inset-0"
-                  style={{
-                    borderRadius: "40% 60% 30% 70% / 60% 30% 70% 40%",
-                    background: "linear-gradient(135deg, rgba(255,255,255,0.4) 0%, transparent 50%, rgba(80,180,255,0.3) 100%)",
-                    opacity: 0.7,
-                    animation: "liquidOverlay 6s ease-in-out infinite alternate",
-                    filter: isHovered ? "blur(2px)" : "blur(1px)",
                   }}
                 ></div>
 
@@ -243,14 +307,15 @@ function Login() {
             </div>
           </form>
 
-          {/* Animated Liquid Neon Metal Signup Button */}
+          {/* Animated Liquid Neon Metal Create Button */}
           <div className="relative my-6 flex justify-center items-center">
             <button
               type="button"
-              onClick={handleSignup}
-              className="relative w-16 h-16 rounded-full overflow-visible cursor-pointer focus:outline-none"
-              onMouseEnter={() => setIsSignupHovered(true)}
-              onMouseLeave={() => setIsSignupHovered(false)}
+              onClick={handleCreate}
+              disabled={isCreatingAccount}
+              className="relative w-16 h-16 rounded-full overflow-visible cursor-pointer focus:outline-none disabled:opacity-70"
+              onMouseEnter={() => setIsCreateHovered(true)}
+              onMouseLeave={() => setIsCreateHovered(false)}
             >
               {/* Base liquid metal cloud */}
               <div
@@ -262,19 +327,7 @@ function Login() {
                   filter: "blur(0.5px)",
                   animation: "liquidBubble2 7s ease-in-out infinite alternate",
                   transition: "all 0.4s ease-in-out",
-                  transform: isSignupHovered ? "scale(0.8)" : "scale(1)",
-                }}
-              ></div>
-
-              {/* Liquid overlay effect */}
-              <div
-                className="absolute inset-0"
-                style={{
-                  borderRadius: "70% 50% 60% 40% / 40% 60% 50% 70%",
-                  background: "linear-gradient(135deg, rgba(255,255,255,0.4) 0%, transparent 50%, rgba(80,180,255,0.3) 100%)",
-                  opacity: 0.7,
-                  animation: "liquidOverlay2 5s ease-in-out infinite alternate",
-                  filter: isSignupHovered ? "blur(2px)" : "blur(1px)",
+                  transform: isCreateHovered ? "scale(0.8)" : "scale(1)",
                 }}
               ></div>
 
@@ -282,17 +335,17 @@ function Login() {
               <div
                 className="absolute rounded-full"
                 style={{
-                  width: isSignupHovered ? "18px" : "0px",
-                  height: isSignupHovered ? "18px" : "0px",
+                  width: isCreateHovered ? "18px" : "0px",
+                  height: isCreateHovered ? "18px" : "0px",
                   top: "50%",
                   right: "0%",
-                  transform: isSignupHovered ? "translate(120%, -50%)" : "translate(0%, -50%)",
+                  transform: isCreateHovered ? "translate(120%, -50%)" : "translate(0%, -50%)",
                   background: "radial-gradient(circle at 30% 30%, rgba(255,255,255,0.8), rgba(255,80,120,0.8) 60%)",
                   boxShadow: "0 0 15px rgba(255,80,120,0.9)",
-                  opacity: isSignupHovered ? 1 : 0,
+                  opacity: isCreateHovered ? 1 : 0,
                   transition: "all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
                   borderRadius: "55% 65% 35% 45% / 55% 65% 35% 45%",
-                  animation: isSignupHovered ? "liquidDroplet 3.5s ease-in-out infinite alternate" : "none",
+                  animation: isCreateHovered ? "liquidDroplet 3.5s ease-in-out infinite alternate" : "none",
                   filter: "blur(0.5px)",
                 }}
               ></div>
@@ -301,17 +354,17 @@ function Login() {
               <div
                 className="absolute"
                 style={{
-                  width: isSignupHovered ? "18px" : "0px",
-                  height: isSignupHovered ? "18px" : "0px",
+                  width: isCreateHovered ? "18px" : "0px",
+                  height: isCreateHovered ? "18px" : "0px",
                   bottom: "0%",
                   left: "50%",
-                  transform: isSignupHovered ? "translate(-50%, 120%)" : "translate(-50%, 0%)",
+                  transform: isCreateHovered ? "translate(-50%, 120%)" : "translate(-50%, 0%)",
                   background: "radial-gradient(circle at 30% 30%, rgba(255,255,255,0.8), rgba(80,255,180,0.8) 60%)",
                   boxShadow: "0 0 15px rgba(80,255,180,0.9)",
-                  opacity: isSignupHovered ? 1 : 0,
+                  opacity: isCreateHovered ? 1 : 0,
                   transition: "all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
                   borderRadius: "45% 55% 65% 35% / 35% 45% 55% 65%",
-                  animation: isSignupHovered ? "liquidDroplet2 3.5s ease-in-out infinite alternate" : "none",
+                  animation: isCreateHovered ? "liquidDroplet2 3.5s ease-in-out infinite alternate" : "none",
                   filter: "blur(0.5px)",
                 }}
               ></div>
@@ -320,23 +373,23 @@ function Login() {
               <div
                 className="absolute"
                 style={{
-                  width: isSignupHovered ? "18px" : "0px",
-                  height: isSignupHovered ? "18px" : "0px",
+                  width: isCreateHovered ? "18px" : "0px",
+                  height: isCreateHovered ? "18px" : "0px",
                   top: "50%",
                   left: "0%",
-                  transform: isSignupHovered ? "translate(-120%, -50%)" : "translate(0%, -50%)",
+                  transform: isCreateHovered ? "translate(-120%, -50%)" : "translate(0%, -50%)",
                   background: "radial-gradient(circle at 30% 30%, rgba(255,255,255,0.8), rgba(80,180,255,0.8) 60%)",
                   boxShadow: "0 0 15px rgba(80,180,255,0.9)",
-                  opacity: isSignupHovered ? 1 : 0,
+                  opacity: isCreateHovered ? 1 : 0,
                   transition: "all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
                   borderRadius: "45% 35% 55% 65% / 55% 45% 65% 35%",
-                  animation: isSignupHovered ? "liquidDroplet3 3.5s ease-in-out infinite alternate" : "none",
+                  animation: isCreateHovered ? "liquidDroplet3 3.5s ease-in-out infinite alternate" : "none",
                   filter: "blur(0.5px)",
                 }}
               ></div>
 
               {/* Liquid connections (appears on hover) */}
-              {isSignupHovered && (
+              {isCreateHovered && (
                 <>
                   <div
                     className="absolute"
@@ -386,21 +439,22 @@ function Login() {
                 </>
               )}
 
-              {/* Text */}
+              {/* Text - Changed to "Create" */}
               <div
                 className="absolute inset-0 flex items-center justify-center text-white font-bold text-base"
                 style={{
-                  opacity: isSignupHovered ? 1 : 0,
-                  transform: isSignupHovered ? "scale(1)" : "scale(0.8)",
+                  opacity: isCreateHovered ? 1 : 0,
+                  transform: isCreateHovered ? "scale(1)" : "scale(0.8)",
                   transition: "all 0.3s ease-in-out",
                   textShadow: "0 0 8px rgba(150,200,255,0.9), 0 0 15px rgba(100,150,255,0.7)",
                   zIndex: 10,
                 }}
               >
-                SignUp
+                Create
               </div>
             </button>
           </div>
+          {successMessage && <p className="text-green-400 mt-[10px] font-bold">{successMessage}</p>}
           {error && <p className="text-[#FF4C4C] mt-[10px] font-bold">{error}</p>}
         </div>
       </div>

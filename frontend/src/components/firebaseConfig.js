@@ -33,4 +33,4 @@ const db = getFirestore(app);
 const storage = getStorage(app); // Initialize Storage
 
 // Export Firebase services and API base URL
-export { auth, db, storage, API_BASE_URL };
+export { auth, db, storage, API_BASE_URL, app };

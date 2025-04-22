@@ -1,13 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../AuthContext'; // Assuming this provides logged-in user info
-import { db } from '../firebaseConfig'; // *** IMPORT YOUR FIRESTORE DB INSTANCE ***
+import { db, app } from '../firebaseConfig'; // *** IMPORT YOUR FIRESTORE DB INSTANCE ***
 import { collection, doc, getDocs, getDoc, updateDoc } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 
 const AdminPage = () => {
   const [users, setUsers] = useState({}); // Store users as an object { userId: userData, ... }
   const [roles, setRoles] = useState([]); // Store possible roles
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [userToDelete, setUserToDelete] = useState(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const { userData } = useAuth(); // Get current user data to check if they're a webmaster
+  
+  // Initialize Firebase Functions
+  const functions = getFunctions(app, "europe-west8");
+  const deleteUserFunction = httpsCallable(functions, 'deleteUser');
 
   // Fetch users and possible roles from Firestore on component mount
   useEffect(() => {
@@ -80,6 +90,54 @@ const AdminPage = () => {
     }
   };
 
+  // Function to open the delete modal
+  const openDeleteModal = (userId) => {
+    setUserToDelete(userId);
+    setDeleteConfirmation("");
+    setShowDeleteModal(true);
+  };
+
+  // Function to close the delete modal
+  const closeDeleteModal = () => {
+    setShowDeleteModal(false);
+    setUserToDelete(null);
+    setDeleteConfirmation("");
+  };
+
+  // Function to handle user deletion
+  const handleDeleteUser = async () => {
+    if (!userToDelete) return;
+    
+    setIsDeleting(true);
+    
+    try {
+      // Call the Cloud Function to delete both the Authentication account and Firestore document
+      const result = await deleteUserFunction({ userId: userToDelete });
+      
+      // Update the local state by removing the deleted user
+      setUsers(prevUsers => {
+        const updatedUsers = {...prevUsers};
+        delete updatedUsers[userToDelete];
+        return updatedUsers;
+      });
+      
+      // Close the modal
+      closeDeleteModal();
+      
+      // Show success message
+      alert(`Utente ${users[userToDelete]?.characterId || users[userToDelete]?.email || 'sconosciuto'} eliminato con successo`);
+    } catch (err) {
+      console.error(`Failed to delete user ${userToDelete}:`, err);
+      setError(`Impossibile eliminare l'utente. ${err.message || 'Errore sconosciuto'}`);
+      closeDeleteModal();
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Check if current user is a webmaster
+  const isWebmaster = userData?.role === 'webmaster';
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-900 text-white">
@@ -115,6 +173,7 @@ const AdminPage = () => {
                     <th className="border border-gray-600 px-4 py-2 text-left">Email</th>
                     <th className="border border-gray-600 px-4 py-2 text-left">Ruolo Attuale</th>
                     <th className="border border-gray-600 px-4 py-2 text-left">Cambia Ruolo</th>
+                    {isWebmaster && <th className="border border-gray-600 px-4 py-2 text-left">Azioni</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -139,6 +198,16 @@ const AdminPage = () => {
                           ))}
                         </select>
                       </td>
+                      {isWebmaster && (
+                        <td className="border border-gray-600 px-4 py-2">
+                          <button 
+                            onClick={() => openDeleteModal(userId)}
+                            className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 transition-colors"
+                          >
+                            Elimina
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -146,6 +215,48 @@ const AdminPage = () => {
             </div>
           )}
         </div>
+
+        {/* Delete User Confirmation Modal */}
+        {showDeleteModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
+            <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-md">
+              <h2 className="text-xl text-white mb-2">Elimina Utente</h2>
+              <div className="bg-red-900 bg-opacity-25 border border-red-700 rounded p-4 mb-4">
+                <p className="text-white">
+                  Sei sicuro di voler eliminare l'utente <span className="font-semibold">
+                    {users[userToDelete]?.characterId || users[userToDelete]?.email || 'sconosciuto'}
+                  </span>? Questa azione è irreversibile.
+                </p>
+              </div>
+              <div className="mb-4">
+                <label className="block text-white mb-2">
+                  Per confermare, digita "ELIMINA":
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmation}
+                  onChange={e => setDeleteConfirmation(e.target.value)}
+                  className="w-full px-3 py-2 rounded bg-gray-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex justify-end space-x-2">
+                <button
+                  onClick={closeDeleteModal}
+                  className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
+                >
+                  Annulla
+                </button>
+                <button
+                  onClick={handleDeleteUser}
+                  disabled={deleteConfirmation !== "ELIMINA" || isDeleting}
+                  className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Elimina Utente
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="bg-gray-800 rounded-lg p-6 shadow-lg">
           <h2 className="text-2xl font-semibold mb-4">Altre Sezioni</h2>

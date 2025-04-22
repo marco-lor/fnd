@@ -12,8 +12,9 @@ import * as admin from "firebase-admin";
 import {updateHpTotal} from "./updateHpTotal";
 import {updateManaTotal} from "./updateManaTotal";
 import {updateTotParameters} from "./updateTotParameters";
-// Import the new function
 import {spendCharacterPoint} from "./spendCharacterPoint";
+// Import the delete user function
+import {deleteUser} from "./deleteUser";
 
 admin.initializeApp();
 
@@ -22,6 +23,7 @@ export {
   updateHpTotal,
   updateManaTotal,
   updateTotParameters,
-  // Export the new function
   spendCharacterPoint,
+  // Export the delete user function
+  deleteUser,
 };
