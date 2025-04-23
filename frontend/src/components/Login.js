@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, fetchSignInMethodsForEmail } from "firebase/auth";
 import { auth, db } from "./firebaseConfig";
 import { useNavigate } from "react-router-dom";
-import { setDoc, doc, getDoc } from "firebase/firestore";
+import { setDoc, doc } from "firebase/firestore";
 import DnDBackground from "./backgrounds/DnDBackground";
 import "./LoginAnimations.css"; // Added import
 
@@ -60,69 +60,24 @@ function Login() {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Get the character creation schema from Firestore
-      const schemaDocRef = doc(db, "utils", "schema_pg");
-      const schemaDocSnap = await getDoc(schemaDocRef);
-      
-      let characterInitialData = {
+      // Set a basic user document in Firestore
+      // Note: More detailed character setup will happen in CharacterCreation component
+      const basicUserData = {
         email: user.email,
-        characterId: email.split("@")[0],
-        role: "player", // Default role
-        stats: {
-          level: 1,
-          hpTotal: 10,
-          hpCurrent: 10,
-          manaTotal: 10,
-          manaCurrent: 10,
-          basePointsAvailable: 4,
-          basePointsSpent: 0,
-          combatTokensAvailable: 50,
-          combatTokensSpent: 0
-        },
+        role: "player",
         created_at: new Date().toISOString()
       };
-
-      // Add schema-based structure if available
-      if (schemaDocSnap.exists()) {
-        const schemaData = schemaDocSnap.data();
-        
-        // Initialize character data based on schema
-        if (schemaData.Parametri) {
-          characterInitialData.Parametri = {
-            Base: {},
-            Combattimento: {}
-          };
-          
-          // Initialize base parameters
-          if (schemaData.Parametri.Base) {
-            Object.keys(schemaData.Parametri.Base).forEach(param => {
-              characterInitialData.Parametri.Base[param] = { 
-                Base: 0,
-                Bonus: 0
-              };
-            });
-          }
-          
-          // Initialize combat parameters
-          if (schemaData.Parametri.Combattimento) {
-            Object.keys(schemaData.Parametri.Combattimento).forEach(param => {
-              characterInitialData.Parametri.Combattimento[param] = { 
-                Base: 0,
-                Bonus: 0
-              };
-            });
-          }
-        }
-      }
-
-      // Save the initial user data to Firestore
-      await setDoc(doc(db, "users", user.uid), characterInitialData);
+      
+      // Save the initial basic user data to Firestore
+      await setDoc(doc(db, "users", user.uid), basicUserData);
       
       setSuccessMessage("Account created successfully! Redirecting to character setup...");
       
-      // Navigate to home or character creation page after a short delay
+      // Navigate to character creation page after a short delay
       setTimeout(() => {
-        navigate("/home");
+        navigate("/character-creation", { 
+          state: { email: user.email } 
+        });
       }, 1500);
       
     } catch (err) {

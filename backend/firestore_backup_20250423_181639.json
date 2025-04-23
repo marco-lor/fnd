@@ -568,14 +568,14 @@
             "Equip": 0,
             "Mod": 0
           },
-          "Destrezza": {
+          "Forza": {
             "Base": -1,
             "Anima": 0,
             "Tot": -1,
             "Equip": 0,
             "Mod": 0
           },
-          "Forza": {
+          "Destrezza": {
             "Base": -1,
             "Anima": 0,
             "Tot": -1,
@@ -656,11 +656,12 @@
         "basePointsSpent": 4,
         "combatTokensSpent": 50,
         "level": 1,
-        "manaTotal": 59,
+        "negativeBaseStatCount": 2,
         "manaCurrent": 59,
         "hpTotal": 13,
+        "manaTotal": 59,
         "hpCurrent": 13,
-        "basePointsAvailable": 0
+        "basePointsAvailable": 1
       },
       "lingue": {},
       "spells": {
@@ -753,6 +754,9 @@
           "Effetti Negativi": "il bersaglio ottiene +2 DIFESA  contro attacchi a distanza o (+2/int o sag) incantesimi lanciati da almeno 15 feet di distanza utilizzare questo incantesimo se Barriera Cosmica Difensiva \u00e8 attiva causa il termine immediato di Barriera Cosmica Difensiva"
         }
       },
+      "flags": {
+        "characterCreationDone": true
+      },
       "role": "webmaster",
       "email": "marcolorenzo92@gmail.com",
       "professioni": {},
@@ -761,7 +765,9 @@
   },
   "utils": {
     "codex": {
-      "conoscenze": {},
+      "conoscenze": {
+        "Persuasione": "Capacit\u00e0 di persuadere (descrizione da reworkare)"
+      },
       "professioni": {
         "Medico": "Anatomia, malattie, cure e farmaci.  Velocizza la rigenerazione dei Punti Ferita durante il riposo (vedi Sezione \u201cRiposo\u201d). Avanzato: effetti rigenerativi ulteriormente potenziati.",
         "Cacciatore": "Progettare e piazzare trappole, disinnescarle, seguire tracce, catturare o addestrare animali. Avanzato: migliora efficacia delle trappole e interazione avanzata con creature.",
@@ -779,6 +785,11 @@
       },
       "lingue": {
         "Comune": "Il personaggio comprende e si esprime perfettamente nella lingua pi\u00f9 diffusa di Etherium."
+      },
+      "Razze": {
+        "Beastfolk": "Gli Uomini Bestia sono umanoidi con tratti animali variabili e costituiscono la razza pi\u00f9 diffusa in Etherium. Ogni individuo ha un habitat ideale in base alla propria fisiologia (es. pelliccia, scaglie, nudit\u00e0). Spesso coinvolti in guerre ideologiche fra clan, sono ritenuti meno razionali delle altre razze e raramente ricoprono ruoli di potere, nonostante la loro adattabilit\u00e0.\n\nBonus alla Creazione:\n\n\u2022\tAdattabile\nL'Uomo Bestia acquisisce una caratteristica legata all\u2019animale da cui \u00e8 ispirato.\n\u27a4 Tale caratteristica migliora con l\u2019avanzare del livello.\n\n\u2022\tVersatile\nRiceve +1 punto nei Parametri Base e 3 Token extra da usare nei Parametri di Combattimento.",
+        "Fata": "Le Fate sono note per la loro bellezza soprannaturale, discendenza divina e affinit\u00e0 con la magia. Diffuse in tutto Etherium ma concentrate soprattutto nell\u2019Impero Fatato, vivono in tutte le classi sociali e sono spesso capaci di cambiare forma. Le famiglie custodiscono segreti magici tramandati da generazioni.\n\nBonus alla Creazione:\n\u2022\tForma Umana / Forma di Fata\nUna Fata pu\u00f2 cambiare forma spendendo 2 MANA.\n\u27a4 In Forma di Fata:\no\tPu\u00f2 volare con capacit\u00e0 pari alla corsa, non si possono trasportare alleati o pesi equivalenti o superiori a quelli di una persona adulta.\no\tL'equipaggiamento si rimpicciolisce magicamente ma rimane indossato.\no\tAnche l\u2019inventario si riduce, ma il peso rimane invariato.\no\tOggetti nuovi ottenuti non si rimpiccioliscono in questa forma.\no\tTutti i danni subiti sono raddoppiati\n\n\u2022\tAffinit\u00e0 Magica\nRiceve un incantesimo legato al background.\n\u27a4 L\u2019incantesimo pu\u00f2 essere di qualsiasi tipo, ma potrebbe non essere subito utilizzabile se troppo complesso.",
+        "Goblin": "I Goblin sono gli umanoidi pi\u00f9 bassi di Etherium (circa 1.60 m), con pelle verde rugosa, naso arcuato e orecchie corte e appuntite. Tradizionalmente discriminati, hanno sviluppato una forte coesione interna che ha favorito l\u2019accesso privilegiato a educazione e capitali. Oggi costituiscono una potente elite economica con reti commerciali globali e influenza politica indiretta. Scelgono di rimanere separati dalle altre razze per orgoglio, evitando matrimoni interspecie e ritenendosi superiori sul piano morale e spirituale.\n\nBonus alla Creazione:\n\u2022\tRigida Educazione\nIl Goblin inizia con una professione a scelta di livello Avanzato.\nEccezione: Se il personaggio ha INTELLIGENZA = -1, inizia con una professione di livello Base.\n\n\u2022\tPersuasione\nIl Goblin \u00e8 particolarmente abile nel negoziare scambi economici, ottenendo:\n\u27a4 riduzione della difficolt\u00e0 oppure effetti migliorati nelle prove ambientali o contrapposte relative.\nPossiede la Persuasione a livello Base e pu\u00f2 svilupparla in Avanzato investendo 1 punto in INTELLIGENZA.\nNota: Solo i Goblin possono ottenere Persuasione Avanzata.\n\n\u2022\tEredit\u00e0\nIl Goblin riceve un oggetto legato al suo background.\n\u27a4 L\u2019oggetto pu\u00f2 essere di qualsiasi tipo, ma potrebbe non essere subito utilizzabile se troppo complesso o potente."
       }
     },
     "possible_lists": {
@@ -1712,14 +1723,18 @@
         "basePointSpent": 0,
         "combatTokensSpent": 0,
         "level": 1,
-        "manaCurrent": 61,
+        "negativeBaseStatCount": 0,
         "manaTotal": 61,
         "hpTotal": 28,
+        "manaCurrent": 61,
         "hpCurrent": 28,
         "basePointsAvailable": 0
       },
       "lingue": {},
       "spells": {},
+      "flags": {
+        "characterCreationDone": false
+      },
       "role": "player",
       "email": "tuamail@gmail.com",
       "professioni": {},
@@ -2030,6 +2045,20 @@
         "3": 4,
         "4": 4,
         "10": 8
+      },
+      "races_extra": {
+        "Beastfolk": {
+          "extraTokenCreation": 3,
+          "extraAbilityCreation": 1
+        },
+        "Fata": {
+          "extraTokenCreation": 0,
+          "extraAbilityCreation": 0
+        },
+        "Goblin": {
+          "extraTokenCreation": 0,
+          "extraAbilityCreation": 0
+        }
       },
       "manaMultByLevel": {
         "4": 9,

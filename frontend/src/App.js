@@ -2,6 +2,7 @@
 import React from "react";
 import { Routes, Route, Navigate, Outlet } from "react-router-dom";
 import Login from "./components/Login";
+import CharacterCreation from "./components/characterCreation/CharacterCreation"; // Import CharacterCreation component
 import Home from "./components/home/Home";
 import Bazaar from "./components/bazaar/Bazaar";
 import DMDashboard from "./components/dmDashboard/DMDashboard"; // DM page
@@ -50,8 +51,9 @@ const ProtectedWebmasterRoute = ({ children }) => {
 function AppRoutes() {
   return (
     <Routes>
-      {/* Public route */}
+      {/* Public routes */}
       <Route path="/" element={<Login />} />
+      <Route path="/character-creation" element={<CharacterCreation />} />
       
       {/* Authenticated routes with shared Layout */}
       <Route element={<AuthenticatedRoute />}>
