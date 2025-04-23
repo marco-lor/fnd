@@ -161,7 +161,16 @@ function Codex() {
     return (
       <div className="flex flex-col md:flex-row gap-6 md:gap-8">
         {/* Left Menu (Sidebar) */}
-        <aside className="w-full md:w-1/4 lg:w-1/5 bg-gray-800 p-4 rounded-lg shadow-lg self-start">
+        <aside
+          className="
+            w-full md:w-1/4 lg:w-1/5
+            bg-gray-800 p-4 rounded-lg shadow-lg
+            self-start
+            md:sticky md:top-32              /*  keeps the column fixed after the page header  */
+            md:max-h-[calc(100vh-7rem)]      /*  allow menu to scroll if it grows taller than viewport  */
+            md:overflow-y-auto
+          "
+        >
           <h2 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">
             Categorie
           </h2>
