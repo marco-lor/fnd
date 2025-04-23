@@ -1,221 +1,146 @@
-// file: ./functions/src/spendCharacterPoint.ts
-
-import {
-  onCall,
-  HttpsError,
-  CallableRequest,
-} from "firebase-functions/v2/https";
+import {onCall, HttpsError, CallableRequest} from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
-// import * as logger from "firebase-functions/logger";
 
 interface SpendPointData {
   statName: string;
-  statType: "Base" | "Combat"; // Input type remains the same
+  statType: "Base" | "Combat";
   change: 1 | -1;
 }
 
 interface CombatStatCosts {
-  [key: string]: number;
-  Salute: number;
-  Mira: number;
-  Attacco: number;
-  Critico: number;
-  Difesa: number;
-  RiduzioneDanni: number;
-  Disciplina: number;
+  [k: string]: number;
 }
 
-const MINIMUM_STAT_BASE_VALUE = 0;
+const MIN_BASE = -1; // new minimum for Base parameters
+const MAX_NEG = 4; // max parameters allowed at –1
 
 export const spendCharacterPoint = onCall(
-  {
-    region: "us-central1", // Or "europe-west8" if you changed it back
-  },
-  async (request: CallableRequest<SpendPointData>) => {
-    if (!request.auth) {
-      throw new HttpsError(
-        "unauthenticated",
-        "The function must be called while authenticated."
-      );
-    }
-    const uid = request.auth.uid;
-    const {statName, statType, change} = request.data;
+  {region: "us-central1"},
+  async (req: CallableRequest<SpendPointData>) => {
+    if (!req.auth) throw new HttpsError("unauthenticated", "Auth required.");
 
-    // Determine the correct Firestore key based on input statType
-    // *** THIS IS THE KEY CHANGE ***
-    // eslint-disable-next-line max-len
-    const firestoreStatTypeKey = statType === "Combat" ? "Combattimento" : "Base";
-    // *** END KEY CHANGE ***
-
-    // eslint-disable-next-line max-len
-    const isValidStatType = statType === "Base" || statType === "Combat"; // Keep input validation as is
-    const isValidChange = change === 1 || change === -1;
-
-    // eslint-disable-next-line max-len
-    if (!statName || !statType || !isValidStatType || !change || !isValidChange) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Invalid data. Required: statName (string), " +
-          "statType ('Base'|'Combat'), change (1|-1)."
-      );
+    const {statName, statType, change} = req.data;
+    if (!statName || !statType || ![1, -1].includes(change)) {
+      throw new HttpsError("invalid-argument", "Bad request.");
     }
 
+    const uid = req.auth.uid;
     const db = admin.firestore();
-    const userDocRef = db.collection("users").doc(uid);
-    const utilsDocRef = db.collection("utils").doc("varie");
+    const user = db.doc(`users/${uid}`);
+    const util = db.doc("utils/varie");
 
-    try {
-      const utilsDocSnap = await utilsDocRef.get();
-      if (!utilsDocSnap.exists) {
-        throw new HttpsError(
-          "not-found",
-          "Utility configuration document (utils/varie) not found."
-        );
-      }
-      const utilsData = utilsDocSnap.data();
-      const combatStatCosts = utilsData?.cost_params_combat as
-        | CombatStatCosts
-        | undefined;
-
-      if (!combatStatCosts) {
-        throw new HttpsError(
-          "internal",
-          "Combat stat costs configuration (cost_params_combat) " +
-            "is missing in utils/varie."
-        );
-      }
-
-      await db.runTransaction(async (transaction) => {
-        const userDocSnap = await transaction.get(userDocRef);
-        if (!userDocSnap.exists) {
-          throw new HttpsError("not-found", "User document not found.");
-        }
-        const userData = userDocSnap.data();
-        if (!userData) {
-          throw new HttpsError("internal", "User data is missing.");
-        }
-
-        // --- Revised Step 6: Use the correct Firestore key ---
-        const currentStats = userData.stats;
-        const currentParams = userData.Parametri;
-
-        if (!currentStats) {
-          throw new HttpsError("internal", "User 'stats' object is missing.");
-        }
-        if (!currentParams) {
-          // eslint-disable-next-line max-len
-          throw new HttpsError("internal", "User 'Parametri' object is missing.");
-        }
-        // Use the determined Firestore key here
-        const statTypeObject = currentParams[firestoreStatTypeKey];
-        if (!statTypeObject) {
-          throw new HttpsError(
-            "internal",
-            // Use the correct key in the error message too
-            `User 'Parametri.${firestoreStatTypeKey}' object is missing.`
-          );
-        }
-        const specificStatObject = statTypeObject[statName];
-        if (!specificStatObject) {
-          throw new HttpsError(
-            "internal",
-            // Use the correct key in the error message too
-            // eslint-disable-next-line max-len
-            `User 'Parametri.${firestoreStatTypeKey}.${statName}' object is missing.`
-          );
-        }
-        const currentParamBase = specificStatObject.Base;
-        if (currentParamBase === undefined || currentParamBase === null) {
-          throw new HttpsError(
-            "internal",
-            // Use the correct key in the error message too
-            // eslint-disable-next-line max-len
-            `Value for Parametri.${firestoreStatTypeKey}.${statName}.Base is missing (undefined or null).`
-          );
-        }
-        // --- End Revised Step 6 ---
-
-        const currentBaseValue = Number(currentParamBase);
-        let availablePoints: number;
-        let cost: number;
-        let availablePointsField: string;
-        let spentPointsField: string;
-
-        // eslint-disable-next-line max-len
-        // 7. Determine Point Type and Cost (No change needed here, uses input statType)
-        if (statType === "Base") {
-          cost = 1;
-          availablePoints = Number(currentStats.basePointsAvailable) || 0;
-          availablePointsField = "stats.basePointsAvailable";
-          spentPointsField = "stats.basePointsSpent";
-        } else { // statType === "Combat"
-          cost = combatStatCosts[statName];
-          if (cost === undefined) {
-            throw new HttpsError(
-              "invalid-argument",
-              `Invalid or unconfigured combat stat name: ${statName}. ` +
-                "Check 'cost_params_combat' in utils/varie."
-            );
-          }
-          availablePoints = Number(currentStats.combatTokensAvailable) || 0;
-          availablePointsField = "stats.combatTokensAvailable";
-          spentPointsField = "stats.combatTokensSpent";
-        }
-
-        // 8. Validate Change (Same as before)
-        if (change === 1) {
-          if (availablePoints < cost) {
-            const pointsNoun = statType === "Base" ? "points" : "tokens";
-            throw new HttpsError(
-              "resource-exhausted",
-              // eslint-disable-next-line max-len
-              `Insufficient ${pointsNoun}. Need ${cost}, have ${availablePoints}.`
-            );
-          }
-        } else {
-          if (currentBaseValue <= MINIMUM_STAT_BASE_VALUE) {
-            throw new HttpsError(
-              "failed-precondition",
-              // eslint-disable-next-line max-len
-              `Cannot decrease ${statName} below ${MINIMUM_STAT_BASE_VALUE}. Current base value is ${currentBaseValue}.`
-            );
-          }
-        }
-
-        // 9. Prepare Updates (Use the correct Firestore key in path)
-        const newBaseValue = currentBaseValue + change;
-        const pointsChange = cost * change;
-        const updateData: { [key: string]: any } = {};
-        // Use the determined Firestore key here
-        const statPath = `Parametri.${firestoreStatTypeKey}.${statName}.Base`;
-        updateData[statPath] = newBaseValue;
-        // eslint-disable-next-line max-len
-        updateData[availablePointsField] = admin.firestore.FieldValue.increment(-pointsChange);
-        // eslint-disable-next-line max-len
-        updateData[spentPointsField] = admin.firestore.FieldValue.increment(pointsChange);
-
-        // 10. Apply Updates within Transaction (Same as before)
-        transaction.update(userDocRef, updateData);
-      }); // End Transaction
-
-      // 11. Return Success (Same as before)
-      return {
-        success: true,
-        message: `Successfully updated ${statType}.${statName}.`,
-      };
-    } catch (error: any) {
-      // eslint-disable-next-line max-len
-      console.error("Error in spendCharacterPoint transaction:", error); // Log the actual error server-side
-      if (error instanceof HttpsError) {
-        throw error;
-      } else {
-        // eslint-disable-next-line max-len
-        console.error("Unexpected error details:", error.message, error.stack); // More detailed logging
-        throw new HttpsError(
-          "internal",
-          "An unexpected error occurred while updating the stat.",
-        );
+    // -----------------------------------------------------------------------
+    //  Pre-load cost table (only needed for Combat)
+    // -----------------------------------------------------------------------
+    let combatCosts: CombatStatCosts = {};
+    if (statType === "Combat") {
+      const utilSnap = await util.get();
+      combatCosts = utilSnap.get("cost_params_combat") ?? {};
+      if (combatCosts[statName] === undefined) {
+        throw new HttpsError("invalid-argument", "Unknown combat stat.");
       }
     }
+
+    // -----------------------------------------------------------------------
+    //  Run transaction
+    // -----------------------------------------------------------------------
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(user);
+      if (!snap.exists) throw new HttpsError("not-found", "User missing.");
+
+      const data = snap.data()!;
+      const stats = data.stats ?? {};
+      const params = data.Parametri ?? {};
+      const keyFireStore = statType === "Combat" ? "Combattimento" : "Base";
+      const statObj = params[keyFireStore]?.[statName];
+
+      if (!statObj) throw new HttpsError("internal", "Stat missing.");
+
+      // Current values
+      const curBase = Number(statObj.Base) || 0;
+      const newBase = curBase + change;
+      const negCount = Number(stats.negativeBaseStatCount) || 0;
+      const newNegCount =
+        statType === "Base" ?
+          negCount + (curBase === 0 && change === -1 ? 1 : 0) +
+            (curBase === -1 && change === 1 ? -1 : 0) :
+          negCount;
+
+      // ---------------------------------------------------------------------
+      //  VALIDATION
+      // ---------------------------------------------------------------------
+      if (statType === "Base") {
+        if (newBase < MIN_BASE) {
+          throw new HttpsError("failed-precondition", "Cannot go below -1.");
+        }
+        if (newNegCount > MAX_NEG) {
+          // eslint-disable-next-line max-len
+          throw new HttpsError("failed-precondition", "Max 4 parameters at -1.");
+        }
+      } else if (newBase < 0) {
+        throw new HttpsError("failed-precondition", "Combat stats >= 0.");
+      }
+
+      // ---------------------------------------------------------------------
+      //  How many points/tokens are consumed / refunded
+      // ---------------------------------------------------------------------
+      let availField: string;
+      let spentField: string;
+      let availDelta = 0; // + => gain, - => spend
+      let spentDelta = 0;
+
+      if (statType === "Base") {
+        availField = "stats.basePointsAvailable";
+        spentField = "stats.basePointsSpent";
+
+        const oldCredit = Math.floor(negCount / 2);
+        const newCredit = Math.floor(newNegCount / 2);
+        // eslint-disable-next-line max-len
+        const creditDelta = newCredit - oldCredit; // +1 when hitting 2 / 4, -1 when leaving
+
+        // Normal + / – between non-negative values
+        if (curBase > -1 && newBase > -1) {
+          if (change === 1) {
+            availDelta -= 1;
+            spentDelta += 1;
+          } else {
+            availDelta += 1;
+            spentDelta -= 1;
+          }
+        }
+
+        // Transition involving -1 (0 ↔ -1)
+        availDelta += creditDelta; // handles free / consumed credit
+      } else {
+        availField = "stats.combatTokensAvailable";
+        spentField = "stats.combatTokensSpent";
+
+        const cost = combatCosts[statName];
+        const need = change === 1 ? cost : -cost;
+        availDelta -= need;
+        spentDelta += need * (change === 1 ? 1 : -1);
+
+        if (change === 1 && (stats.combatTokensAvailable ?? 0) < cost) {
+          throw new HttpsError("resource-exhausted", "Not enough tokens.");
+        }
+      }
+
+      // ---------------------------------------------------------------------
+      //  Build atomic update
+      // ---------------------------------------------------------------------
+      const upd: Record<string, any> = {
+        [`Parametri.${keyFireStore}.${statName}.Base`]: newBase,
+        [availField]: admin.firestore.FieldValue.increment(availDelta),
+        [spentField]: admin.firestore.FieldValue.increment(spentDelta),
+      };
+
+      if (statType === "Base") {
+        upd["stats.negativeBaseStatCount"] = newNegCount;
+      }
+
+      tx.update(user, upd);
+    });
+
+    return {success: true};
   }
 );
