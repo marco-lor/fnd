@@ -1,8 +1,8 @@
 // file: ./frontend/src/components/codex/Codex.js
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../AuthContext';
-import { db } from '../firebaseConfig'; // Assuming db is correctly exported from firebaseConfig
-import { doc, onSnapshot } from 'firebase/firestore'; // Keep these imports
+import { db } from '../firebaseConfig';
+import { doc, onSnapshot } from 'firebase/firestore';
 
 // Import the button components
 import AggiungiButton from './buttons/AggiungiButton';
@@ -17,20 +17,20 @@ const capitalize = (s) => {
 
 // Helper function to derive a user-friendly singular name
 const deriveSingularName = (key) => {
-    if (typeof key !== 'string' || !key) return 'Elemento';
-    const singularMap = {
-        lingue: 'Lingua',
-        conoscenze: 'Conoscenza',
-        professioni: 'Professione',
-        abilita: 'Abilità',
-        incantesimi: 'Incantesimo',
-    };
-    if (singularMap[key]) return singularMap[key];
-    if (key.endsWith('ioni')) return capitalize(key.slice(0, -4) + 'one');
-    if (key.endsWith('enze')) return capitalize(key.slice(0, -3) + 'a');
-    if (key.endsWith('gue')) return capitalize(key.slice(0, -2) + 'a');
-    if (key.endsWith('i')) return capitalize(key.slice(0, -1) + 'o');
-    return capitalize(key);
+  if (typeof key !== 'string' || !key) return 'Elemento';
+  const singularMap = {
+    lingue: 'Lingua',
+    conoscenze: 'Conoscenza',
+    professioni: 'Professione',
+    abilita: 'Abilità',
+    incantesimi: 'Incantesimo',
+  };
+  if (singularMap[key]) return singularMap[key];
+  if (key.endsWith('ioni')) return capitalize(key.slice(0, -4) + 'one');
+  if (key.endsWith('enze')) return capitalize(key.slice(0, -3) + 'a');
+  if (key.endsWith('gue')) return capitalize(key.slice(0, -2) + 'a');
+  if (key.endsWith('i')) return capitalize(key.slice(0, -1) + 'o');
+  return capitalize(key);
 };
 
 function Codex() {
@@ -52,17 +52,20 @@ function Codex() {
 
       const docRef = doc(db, 'utils', 'codex');
 
-      unsubscribeCodex = onSnapshot(docRef,
+      unsubscribeCodex = onSnapshot(
+        docRef,
         (docSnap) => {
-          console.log("Received Codex update from Firestore");
+          console.log('Received Codex update from Firestore');
           if (docSnap.exists()) {
             const data = docSnap.data();
             const validData = data || {};
             setCodexData(validData);
             const sections = Object.keys(validData);
-            const sortedSections = [...sections].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+            const sortedSections = [...sections].sort((a, b) =>
+              a.toLowerCase().localeCompare(b.toLowerCase())
+            );
 
-            setActiveSection(prevActiveSection => {
+            setActiveSection((prevActiveSection) => {
               if (prevActiveSection && sections.includes(prevActiveSection)) {
                 return prevActiveSection;
               } else if (sortedSections.length > 0) {
@@ -71,19 +74,19 @@ function Codex() {
               return null;
             });
           } else {
-            console.log("Codex document does not exist!");
+            console.log('Codex document does not exist!');
             setCodexData({});
             setActiveSection(null);
           }
           setError(null);
           if (isInitialLoad.current) {
-              setIsLoading(false);
-              isInitialLoad.current = false;
+            setIsLoading(false);
+            isInitialLoad.current = false;
           }
         },
         (err) => {
-          console.error("Error listening to codex data:", err);
-          setError("Failed to listen for codex updates. Data might be stale.");
+          console.error('Error listening to codex data:', err);
+          setError('Failed to listen for codex updates. Data might be stale.');
           setIsLoading(false);
           isInitialLoad.current = false;
         }
@@ -96,34 +99,34 @@ function Codex() {
     }
 
     return () => {
-      console.log("Unsubscribing from Codex listener");
+      console.log('Unsubscribing from Codex listener');
       unsubscribeCodex();
     };
-  }, [user, authLoading]); // Keep original dependencies
+  }, [user, authLoading]);
 
   // --- Loading and Auth States ---
   if (authLoading) {
     return (
-        <div className="flex justify-center items-center min-h-screen bg-gray-900 text-white">
-            <div>Loading User Data...</div>
-        </div>
+      <div className="flex justify-center items-center min-h-screen bg-gray-900 text-white">
+        <div>Loading User Data...</div>
+      </div>
     );
   }
-  
+
   if (!user) {
     return (
-        <div className="codex-page-container bg-gray-900 min-h-screen text-white">
-            <main className="p-4 md:p-8 text-center">
-                <h1 className="text-3xl font-bold mb-6">Codex</h1>
-                <p className="text-lg">Please log in to view the Codex.</p>
-            </main>
-        </div>
+      <div className="codex-page-container bg-gray-900 min-h-screen text-white">
+        <main className="p-4 md:p-8 text-center">
+          <h1 className="text-3xl font-bold mb-6">Codex</h1>
+          <p className="text-lg">Please log in to view the Codex.</p>
+        </main>
+      </div>
     );
   }
 
   // --- Main Content Rendering (Menu + Details) ---
   const renderCodexContent = () => {
-    if (isLoading) { // Still loading codex data itself
+    if (isLoading) {
       return <div className="text-center mt-8">Loading Codex Data...</div>;
     }
     if (error && Object.keys(codexData).length === 0 && !isLoading) {
@@ -131,17 +134,26 @@ function Codex() {
     }
 
     const sections = Object.keys(codexData);
-    const sortedSectionKeys = [...sections].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+    const sortedSectionKeys = [...sections].sort((a, b) =>
+      a.toLowerCase().localeCompare(b.toLowerCase())
+    );
 
     if (sortedSectionKeys.length === 0 && !isLoading) {
-        return <div className="text-center mt-8 text-gray-400">No Codex categories found or data is empty.</div>;
+      return (
+        <div className="text-center mt-8 text-gray-400">
+          No Codex categories found or data is empty.
+        </div>
+      );
     }
 
     const activeSectionData = activeSection ? codexData[activeSection] : null;
-    const sectionEntries = typeof activeSectionData === 'object' && activeSectionData !== null
-                           ? Object.entries(activeSectionData)
-                           : [];
-    const activeSectionSingularName = activeSection ? deriveSingularName(activeSection) : '';
+    const sectionEntries =
+      typeof activeSectionData === 'object' && activeSectionData !== null
+        ? Object.entries(activeSectionData)
+        : [];
+    const activeSectionSingularName = activeSection
+      ? deriveSingularName(activeSection)
+      : '';
 
     // Determine if the current user is a DM
     const isDM = userData?.role === 'dm' || userData?.role === 'webmaster';
@@ -150,7 +162,9 @@ function Codex() {
       <div className="flex flex-col md:flex-row gap-6 md:gap-8">
         {/* Left Menu (Sidebar) */}
         <aside className="w-full md:w-1/4 lg:w-1/5 bg-gray-800 p-4 rounded-lg shadow-lg self-start">
-          <h2 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">Categorie</h2>
+          <h2 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">
+            Categorie
+          </h2>
           <nav>
             <ul className="space-y-2">
               {sortedSectionKeys.map((sectionKey) => (
@@ -177,70 +191,102 @@ function Codex() {
             <>
               {/* --- Conditionally Render Add Button --- */}
               {isDM && (
-                  <div className="mb-4 pb-4 border-b border-gray-700">
-                      <AggiungiButton
-                          categoryKey={activeSection}
-                          categoryData={codexData[activeSection] || {}}
-                          categoryDisplayNameSingular={activeSectionSingularName}
-                      />
-                  </div>
+                <div className="mb-4 pb-4 border-b border-gray-700">
+                  <AggiungiButton
+                    categoryKey={activeSection}
+                    categoryData={codexData[activeSection] || {}}
+                    categoryDisplayNameSingular={activeSectionSingularName}
+                  />
+                </div>
               )}
 
               {/* Display listener error if present */}
-              {error && <div className="mb-4 text-sm text-yellow-400 text-center">{error}</div>}
+              {error && (
+                <div className="mb-4 text-sm text-yellow-400 text-center">
+                  {error}
+                </div>
+              )}
 
               {/* Scrollable list area */}
               <div className="flex-grow overflow-y-auto pr-2 -mr-2 custom-scrollbar">
                 {sectionEntries.length > 0 ? (
                   <ul className="space-y-4">
                     {sectionEntries
-                        .sort((a, b) => a[0].toLowerCase().localeCompare(b[0].toLowerCase()))
-                        .map(([nome, descrizione]) => (
-                      <li key={nome}
+                      .sort((a, b) =>
+                        a[0].toLowerCase().localeCompare(b[0].toLowerCase())
+                      )
+                      .map(([nome, descrizione]) => (
+                        <li
+                          key={nome}
                           className="p-4 rounded-md bg-gray-700 hover:bg-gray-600/80 transition-all duration-200 flex justify-between items-start gap-4 shadow-sm border border-transparent hover:border-gray-500"
-                      >
-                         {/* Item Content */}
-                         <div className="flex-grow min-w-0">
-                            <h3 className="font-semibold text-lg text-blue-300 break-words">{nome}</h3>
-                            {typeof descrizione === 'string' && descrizione.trim() !== '' && (
-                               <p className="text-sm text-gray-300 mt-1 break-words">{descrizione}</p>
-                            )}
-                             {typeof descrizione !== 'string' && descrizione !== null && (
+                        >
+                          {/* Item Content */}
+                          <div className="flex-grow min-w-0">
+                            <h3 className="font-semibold text-lg text-blue-300 break-words">
+                              {nome}
+                            </h3>
+
+                            {typeof descrizione === 'string' &&
+                              descrizione.trim() !== '' && (
+                                <p
+                                  className="
+                                    text-sm text-gray-300 mt-1
+                                    break-words
+                                    whitespace-pre-line
+                                  "
+                                >
+                                  {descrizione}
+                                </p>
+                              )}
+
+                            {typeof descrizione !== 'string' &&
+                              descrizione !== null && (
                                 <pre className="text-xs text-gray-400 mt-2 bg-gray-800/50 p-2 rounded overflow-x-auto custom-scrollbar-xs">
-                                    {JSON.stringify(descrizione, null, 2)}
+                                  {JSON.stringify(descrizione, null, 2)}
                                 </pre>
-                             )}
-                         </div>
-                         {/* --- Conditionally Render Action Buttons --- */}
-                         {isDM && (
-                             <div className="flex-shrink-0 flex items-center space-x-2 pt-1">
-                                 <EditItemButton
-                                     categoryKey={activeSection}
-                                     itemKey={nome}
-                                     currentValue={descrizione}
-                                 />
-                                 <DeleteItemButton
-                                     categoryKey={activeSection}
-                                     itemKey={nome}
-                                 />
-                             </div>
-                         )}
-                      </li>
-                    ))}
+                              )}
+                          </div>
+
+                          {/* --- Conditionally Render Action Buttons --- */}
+                          {isDM && (
+                            <div className="flex-shrink-0 flex items-center space-x-2 pt-1">
+                              <EditItemButton
+                                categoryKey={activeSection}
+                                itemKey={nome}
+                                currentValue={descrizione}
+                              />
+                              <DeleteItemButton
+                                categoryKey={activeSection}
+                                itemKey={nome}
+                              />
+                            </div>
+                          )}
+                        </li>
+                      ))}
                   </ul>
                 ) : (
                   <p className="text-gray-400 text-center mt-4">
-                    Nessun{activeSectionSingularName.toLowerCase().endsWith('a') ? 'a' : 'o'} {activeSectionSingularName.toLowerCase()} disponibile in {capitalize(activeSection)}.
+                    Nessun
+                    {activeSectionSingularName
+                      .toLowerCase()
+                      .endsWith('a')
+                      ? 'a'
+                      : 'o'}{' '}
+                    {activeSectionSingularName.toLowerCase()} disponibile in{' '}
+                    {capitalize(activeSection)}.
                   </p>
                 )}
               </div>
             </>
           ) : (
-             !isLoading && sortedSectionKeys.length > 0 && (
-                 <div className="flex justify-center items-center h-full">
-                    <p className="text-gray-400">Seleziona una categoria dal menu.</p>
-                 </div>
-             )
+            !isLoading &&
+            sortedSectionKeys.length > 0 && (
+              <div className="flex justify-center items-center h-full">
+                <p className="text-gray-400">
+                  Seleziona una categoria dal menu.
+                </p>
+              </div>
+            )
           )}
         </section>
       </div>
