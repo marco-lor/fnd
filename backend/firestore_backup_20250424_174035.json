@@ -538,7 +538,7 @@
           "Astuzia"
         ],
         "Anima_4": "---",
-        "Anima_1": "---",
+        "Anima_1": "Spirito",
         "Anima_7": "---"
       },
       "characterId": "Nyx",
@@ -595,42 +595,49 @@
             "Base": 9,
             "Equip": 0,
             "Tot": 9,
+            "Anima": 0,
             "Mod": 0
           },
           "Critico": {
             "Base": 0,
             "Equip": 0,
             "Tot": 0,
+            "Anima": 0,
             "Mod": 0
           },
           "RiduzioneDanni": {
             "Base": 1,
             "Equip": 0,
             "Tot": 1,
+            "Anima": 0,
             "Mod": 0
           },
           "Difesa": {
             "Base": 1,
             "Equip": 0,
             "Tot": 1,
+            "Anima": 0,
             "Mod": 0
           },
           "Salute": {
             "Base": 1,
             "Equip": 0,
             "Tot": 1,
+            "Anima": 0,
             "Mod": 0
           },
           "Mira": {
             "Base": 0,
             "Equip": 0,
             "Tot": 0,
+            "Anima": 0,
             "Mod": 0
           },
           "Attacco": {
             "Base": 3,
             "Equip": 0,
             "Tot": 3,
+            "Anima": 0,
             "Mod": 0
           }
         }
@@ -652,6 +659,7 @@
         "lock_param_base": false
       },
       "stats": {
+        "manaTotal": 59,
         "combatTokensAvailable": 0,
         "basePointsSpent": 4,
         "combatTokensSpent": 50,
@@ -659,7 +667,7 @@
         "negativeBaseStatCount": 2,
         "manaCurrent": 59,
         "hpTotal": 13,
-        "manaTotal": 59,
+        "lastAnimaShard": "Spirito",
         "hpCurrent": 13,
         "basePointsAvailable": 1
       },
@@ -778,7 +786,6 @@
         "Arcanista": "Teoria della magia, conoscenza dell\u2019Anima e dell\u2019Etere.  Capacit\u00e0 di comprendere e decifrare incantesimi. Avanzato: possibilit\u00e0 di scrivere nuovi incantesimi (richiede \u201cl\u2019ispirazione giusta\u201d).",
         "Agricoltore": "Gestione della vita rurale: coltivazione, allevamento, cura degli animali da fattoria.",
         "Marinaio": "Conoscenze nautiche e aeronautiche, gestione della vita da equipaggio in viaggi marittimi o aerei.",
-        "Coglione": "un coglione",
         "Fabbro": "Riconoscere qualit\u00e0 e valore di armi/armature metalliche, identificare incantamenti o maledizioni. Maneggiare, trasportare, riparare e modificare l\u2019equipaggiamento. Avanzato: forgiatura di nuovi oggetti metallici.",
         "Alchimista": "Identificare ingredienti, estrarne i principi attivi, conoscerne effetti e applicazioni. Preparare pozioni, veleni, unguenti, acidi, bombe. Avanzato: crea nuove formulazioni complesse.",
         "Militare": "Conoscenze di sopravvivenza in guerra, strategia, catene di comando, terreni militari."
@@ -1666,42 +1673,49 @@
             "Base": 0,
             "Equip": 0,
             "Tot": 0,
-            "Mod": 0
-          },
-          "RiduzioneDanni": {
-            "Base": 0,
-            "Equip": 0,
-            "Tot": 0,
+            "Anima": 0,
             "Mod": 0
           },
           "Critico": {
             "Base": 0,
             "Equip": 0,
             "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "RiduzioneDanni": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
             "Mod": 0
           },
           "Difesa": {
             "Base": 0,
             "Equip": 0,
             "Tot": 0,
+            "Anima": 0,
             "Mod": 0
           },
           "Attacco": {
             "Base": 0,
             "Equip": 0,
             "Tot": 0,
+            "Anima": 0,
             "Mod": 0
           },
           "Mira": {
             "Base": 0,
             "Equip": 0,
             "Tot": 0,
+            "Anima": 0,
             "Mod": 0
           },
           "Salute": {
             "Base": 0,
             "Equip": 0,
             "Tot": 0,
+            "Anima": 0,
             "Mod": 0
           }
         }
@@ -1719,6 +1733,7 @@
         "theme": "dark"
       },
       "stats": {
+        "lastAnimaShard": "",
         "combatTokensAvailable": 0,
         "basePointSpent": 0,
         "combatTokensSpent": 0,

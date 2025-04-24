@@ -15,6 +15,7 @@ import {updateTotParameters} from "./updateTotParameters";
 import {spendCharacterPoint} from "./spendCharacterPoint";
 // Import the delete user function
 import {deleteUser} from "./deleteUser";
+import {updateAnimaModifier} from "./updateAnimaModifier";
 
 admin.initializeApp();
 
@@ -24,6 +25,6 @@ export {
   updateManaTotal,
   updateTotParameters,
   spendCharacterPoint,
-  // Export the delete user function
   deleteUser,
+  updateAnimaModifier,
 };
