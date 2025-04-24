@@ -1,5 +1,5 @@
 // file: ./frontend/src/components/characterCreation/CharacterCreation.js
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { auth, db, storage } from "../firebaseConfig"; 
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
@@ -32,12 +32,37 @@ function CharacterCreation() {
   // Total number of steps in the character creation process
   const totalSteps = 3; // Now we have 3 steps: Race, Anima, Details
 
+  // Check if character creation is already completed
+  const checkCharacterCreationStatus = useCallback(async () => {
+    if (user) {
+      try {
+        const userDocRef = doc(db, "users", user.uid);
+        const userDocSnap = await getDoc(userDocRef);
+        
+        if (userDocSnap.exists()) {
+          const userData = userDocSnap.data();
+          // If character creation is already done, redirect to home
+          if (userData.flags && userData.flags.characterCreationDone === true) {
+            console.log("Character creation already completed, redirecting to home");
+            navigate("/home");
+            return;
+          }
+        }
+      } catch (error) {
+        console.error("Error checking character creation status:", error);
+      }
+    }
+  }, [user, navigate]);
+
   // If no user is logged in, navigate to login page
   useEffect(() => {
     if (!user && !initializing) {
       navigate("/");
+    } else if (user && !initializing) {
+      // Check if the user has already completed character creation
+      checkCharacterCreationStatus();
     }
-  }, [user, navigate, initializing]);
+  }, [user, navigate, initializing, checkCharacterCreationStatus]);
 
   // Initialize state based on passed data from login or user email
   useEffect(() => {
@@ -154,8 +179,8 @@ function CharacterCreation() {
         await uploadBytes(imageRef, imageFile);
         const imageUrl = await getDownloadURL(imageRef);
         characterUpdateData.imageUrl = imageUrl;
-      } else if (!userDocSnap.exists() || !userDocSnap.data()?.imageUrl) {
-         characterUpdateData.imageUrl = userDocSnap.data()?.imageUrl || ""; // Keep existing or set empty
+      } else if (userDocSnap.exists() && userDocSnap.data()?.imageUrl) {
+         characterUpdateData.imageUrl = userDocSnap.data()?.imageUrl; // Keep existing
       }
 
       // Check if user document exists to decide between set (create) or update
@@ -211,11 +236,26 @@ function CharacterCreation() {
       } else {
         // For existing user, update the character data and apply anima bonuses
         const userData = userDocSnap.data();
-        const updateData = { ...characterUpdateData };
+        
+        // Ensure we have a flags object
+        if (!userData.flags) {
+          userData.flags = {};
+        }
+        
+        // Update data structure
+        const updateData = { 
+          ...characterUpdateData,
+          // Explicitly set the flags.characterCreationDone field
+          flags: {
+            ...userData.flags,
+            characterCreationDone: true
+          }
+        };
         
         // Apply anima shard bonuses if the user document exists
         if (selectedAnima && selectedAnima.bonuses) {
           // Ensure Parametri structure exists
+          updateData['Parametri'] = userData.Parametri || { Base: {}, Combattimento: {} };
           updateData['Parametri.Base'] = userData.Parametri?.Base || {};
           
           // Update each parameter with anima bonuses

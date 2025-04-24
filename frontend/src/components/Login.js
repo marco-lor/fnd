@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, fetchSignInMethodsForEmail } from "firebase/auth";
 import { auth, db } from "./firebaseConfig";
 import { useNavigate } from "react-router-dom";
-import { setDoc, doc } from "firebase/firestore";
+import { setDoc, doc, getDoc } from "firebase/firestore";
 import DnDBackground from "./backgrounds/DnDBackground";
 import "./LoginAnimations.css"; // Added import
 
@@ -15,22 +15,55 @@ function Login() {
   const [isHovered, setIsHovered] = useState(false);
   const [isCreateHovered, setIsCreateHovered] = useState(false);
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setError("");
+    setIsLoggingIn(true);
 
     if (!email.includes("@") || password.length < 6) {
       setError("Invalid email or password too short (min 6 characters).");
+      setIsLoggingIn(false);
       return;
     }
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      navigate("/home");
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+      
+      // Check if user has completed character creation
+      const userDocRef = doc(db, "users", user.uid);
+      const userDocSnap = await getDoc(userDocRef);
+      
+      if (userDocSnap.exists()) {
+        const userData = userDocSnap.data();
+        // Check if flags.characterCreationDone is false or doesn't exist
+        if (!userData.flags?.characterCreationDone) {
+          // Redirect to character creation
+          navigate("/character-creation");
+        } else {
+          // Normal login flow
+          navigate("/home");
+        }
+      } else {
+        // This is unlikely but handle the case where user exists in auth but not in Firestore
+        const basicUserData = {
+          email: user.email,
+          role: "player",
+          created_at: new Date().toISOString(),
+          flags: {
+            characterCreationDone: false
+          }
+        };
+        await setDoc(doc(db, "users", user.uid), basicUserData);
+        navigate("/character-creation");
+      }
     } catch (err) {
+      console.error("Login error:", err);
       setError("Login failed. Check credentials and try again.");
+      setIsLoggingIn(false);
     }
   };
 
@@ -60,12 +93,14 @@ function Login() {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Set a basic user document in Firestore
-      // Note: More detailed character setup will happen in CharacterCreation component
+      // Set a basic user document in Firestore with flags.characterCreationDone = false
       const basicUserData = {
         email: user.email,
         role: "player",
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        flags: {
+          characterCreationDone: false
+        }
       };
       
       // Save the initial basic user data to Firestore
@@ -119,9 +154,10 @@ function Login() {
             <div className="relative my-6 flex justify-center items-center h-40">
               <button
                 type="submit"
-                className="relative w-20 h-20 rounded-full overflow-visible cursor-pointer focus:outline-none"
+                className="relative w-20 h-20 rounded-full overflow-visible cursor-pointer focus:outline-none disabled:opacity-70"
                 onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
+                disabled={isLoggingIn}
               >
                 {/* Base liquid metal cloud */}
                 <div
@@ -256,7 +292,9 @@ function Login() {
                     zIndex: 10,
                   }}
                 >
-                  Enter
+                  {isLoggingIn ? (
+                    <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></div>
+                  ) : "Enter"}
                 </div>
               </button>
             </div>
@@ -405,7 +443,9 @@ function Login() {
                   zIndex: 10,
                 }}
               >
-                Create
+                {isCreatingAccount ? (
+                  <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
+                ) : "Create"}
               </div>
             </button>
           </div>
