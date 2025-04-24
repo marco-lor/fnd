@@ -150,7 +150,7 @@ export function CombatStatsTable() {
     if (!combStats || combatStatCosts === null)
       return <div className="text-center text-gray-400">Loading…</div>;
 
-    const columns = ["Base", "Equip", "Mod", "Tot"];
+    const columns = ["Base", "Anima", "Equip", "Mod", "Tot"];
     const ordered = Object.keys(combStats).sort();
 
     return (
@@ -273,7 +273,7 @@ export function CombatStatsTable() {
                         );
                       }
 
-                      return <td key={col} className={cellCls}>{stat[col]}</td>;
+                      return <td key={col} className={cellCls}>{stat[col] || 0}</td>;
                     })}
                   </tr>
                 );
