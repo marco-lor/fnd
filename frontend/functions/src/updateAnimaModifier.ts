@@ -22,20 +22,18 @@ export const updateAnimaModifier = onDocumentUpdated(
     region: "europe-west8",
   },
   async (event) => {
-    const userId = event.params?.userId;
+    // Prevent loops: only proceed if relevant fields changed
     const beforeData = event.data?.before?.data();
     const afterData = event.data?.after?.data();
+    const userId = event.params?.userId;
     if (!userId || !beforeData || !afterData) return;
-
-    // Only proceed if one of the Anima shard selections has changed
-    // eslint-disable-next-line max-len
-    const beforeAltri = beforeData.AltriParametri as Record<string, string> || {};
-    const afterAltri = afterData.AltriParametri as Record<string, string> || {};
-    const keys = ["Anima_1", "Anima_4", "Anima_7"];
-    const changed = keys.some((k) => beforeAltri[k] !== afterAltri[k]);
-    if (!changed) {
+    const oldAltri = JSON.stringify(beforeData.AltriParametri || {});
+    const newAltri = JSON.stringify(afterData.AltriParametri || {});
+    const oldLevel = beforeData.stats?.level;
+    const newLevel = afterData.stats?.level;
+    if (oldAltri === newAltri && oldLevel === newLevel) {
       // eslint-disable-next-line max-len
-      console.log("No Anima shard change detected, skipping updateAnimaModifier");
+      console.log("No change in AltriParametri or stats.level, skipping animaModifier update.");
       return;
     }
 
