@@ -113,7 +113,7 @@ function CharacterCreation() {
   };
 
   // Step navigation functions
-  const nextStep = () => {
+  const nextStep = async () => {
     // Validation for current step before proceeding
     if (currentStep === 1 && !selectedRace) {
       setError("Please select a race before proceeding.");
@@ -123,6 +123,27 @@ function CharacterCreation() {
     if (currentStep === 2 && !selectedAnima) {
       setError("Please select an Anima Shard before proceeding.");
       return;
+    }
+
+    // Persist race selection on first step
+    if (currentStep === 1) {
+      try {
+        const userDocRef = doc(db, "users", user.uid);
+        await updateDoc(userDocRef, { race: selectedRace.id });
+      } catch (err) {
+        setError("Failed to save race selection: " + err.message);
+        return;
+      }
+    }
+    // Persist Anima shard inside AltriParametri on second step
+    if (currentStep === 2) {
+      try {
+        const userDocRef = doc(db, "users", user.uid);
+        await updateDoc(userDocRef, { 'AltriParametri.Anima_1': selectedAnima.name });
+      } catch (err) {
+        setError("Failed to save Anima Shard selection: " + err.message);
+        return;
+      }
     }
 
     if (currentStep < totalSteps) {
@@ -166,9 +187,9 @@ function CharacterCreation() {
       // Base data for update/set operation
       const characterUpdateData = {
           characterId: characterName.trim(),
-          race: selectedRace.id, // Store the race name
-          anima: selectedAnima.name, // Store the anima shard name
-          animaLevelUpBonus: selectedAnima.levelUpBonus, // Store the level up bonus for future level-ups
+          // race: selectedRace.id, // Store the race name
+          // anima: selectedAnima.name, // Store the anima shard name
+          // animaLevelUpBonus: selectedAnima.levelUpBonus, // Store the level up bonus for future level-ups
           'flags.characterCreationDone': true
       };
 
@@ -203,17 +224,6 @@ function CharacterCreation() {
             };
         }
 
-        // Apply anima shard bonuses to parameters
-        if (selectedAnima && selectedAnima.bonuses) {
-          characterInitialData.Parametri = characterInitialData.Parametri || { Base: {} };
-          characterInitialData.Parametri.Base = characterInitialData.Parametri.Base || {};
-          
-          // Add anima bonuses to base parameters
-          Object.entries(selectedAnima.bonuses).forEach(([param, value]) => {
-            characterInitialData.Parametri.Base[param] = (characterInitialData.Parametri.Base[param] || 0) + value;
-          });
-        }
-
         // Merge schema/fallback with specific character info
         characterInitialData = {
             ...characterInitialData,
@@ -231,41 +241,28 @@ function CharacterCreation() {
         characterInitialData.flags.characterCreationDone = true;
 
         await setDoc(userDocRef, characterInitialData);
-        console.log("New user document created with Anima bonuses.");
+        console.log("New user document created.");
 
       } else {
-        // For existing user, update the character data and apply anima bonuses
+        // For existing user, update the character data
         const userData = userDocSnap.data();
-        
+
         // Ensure we have a flags object
         if (!userData.flags) {
           userData.flags = {};
         }
-        
+
         // Update data structure
         const updateData = { 
           ...characterUpdateData,
-          // Explicitly set the flags.characterCreationDone field
           flags: {
             ...userData.flags,
             characterCreationDone: true
           }
         };
-        
-        // Apply anima shard bonuses if the user document exists
-        if (selectedAnima && selectedAnima.bonuses) {
-          // Ensure Parametri structure exists
-          updateData['Parametri'] = userData.Parametri || { Base: {}, Combattimento: {} };
-          updateData['Parametri.Base'] = userData.Parametri?.Base || {};
-          
-          // Update each parameter with anima bonuses
-          Object.entries(selectedAnima.bonuses).forEach(([param, value]) => {
-            updateData[`Parametri.Base.${param}`] = (userData.Parametri?.Base?.[param] || 0) + value;
-          });
-        }
 
         await updateDoc(userDocRef, updateData);
-        console.log("User document updated with Anima bonuses.");
+        console.log("User document updated.");
       }
 
       navigate("/home"); // Navigate on success

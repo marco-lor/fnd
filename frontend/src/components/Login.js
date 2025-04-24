@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { setDoc, doc, getDoc } from "firebase/firestore";
 import DnDBackground from "./backgrounds/DnDBackground";
 import "./LoginAnimations.css"; // Added import
+import LoginCreateButton from "./LoginCreateButton";
 
 function Login() {
   const [email, setEmail] = useState("");
@@ -93,17 +94,43 @@ function Login() {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Set a basic user document in Firestore with flags.characterCreationDone = false
+      // Fetch initial schema for character defaults
+      const schemaDocRef = doc(db, "utils", "schema_pg");
+      const schemaSnap = await getDoc(schemaDocRef);
+      let initialSchemaData = {};
+      if (schemaSnap.exists()) {
+        const schemaData = schemaSnap.data();
+        const fieldsToPick = [
+          "AltriParametri",
+          "Parametri",
+          "characterId",
+          "conoscenze",
+          "inventory",
+          "lingue",
+          "professioni",
+          "settings",
+          "spells",
+          "stats",
+          "tecniche",
+          "imageUrl"
+        ];
+        fieldsToPick.forEach(field => {
+          if (schemaData[field] !== undefined) {
+            initialSchemaData[field] = JSON.parse(JSON.stringify(schemaData[field]));
+          }
+        });
+      }
+
+      // Prepare basic user data including schema defaults
       const basicUserData = {
         email: user.email,
         role: "player",
         created_at: new Date().toISOString(),
-        flags: {
-          characterCreationDone: false
-        }
+        flags: { characterCreationDone: false },
+        ...initialSchemaData
       };
-      
-      // Save the initial basic user data to Firestore
+
+      // Save the initial user data to Firestore
       await setDoc(doc(db, "users", user.uid), basicUserData);
       
       setSuccessMessage("Account created successfully! Redirecting to character setup...");
@@ -224,7 +251,7 @@ function Login() {
                     boxShadow: "0 0 15px rgba(80,180,255,0.9)",
                     opacity: isHovered ? 1 : 0,
                     transition: "all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
-                    borderRadius: "50% 40% 60% 70% / 60% 50% 70% 40%",
+                    borderRadius: "50% 40% 60% 70% / 60% 40% 60% 40%",
                     animation: isHovered ? "liquidDroplet3 3s ease-in-out infinite alternate" : "none",
                     filter: "blur(0.5px)",
                   }}
@@ -301,154 +328,13 @@ function Login() {
           </form>
 
           {/* Animated Liquid Neon Metal Create Button */}
-          <div className="relative my-6 flex justify-center items-center">
-            <button
-              type="button"
-              onClick={handleCreate}
-              disabled={isCreatingAccount}
-              className="relative w-16 h-16 rounded-full overflow-visible cursor-pointer focus:outline-none disabled:opacity-70"
-              onMouseEnter={() => setIsCreateHovered(true)}
-              onMouseLeave={() => setIsCreateHovered(false)}
-            >
-              {/* Base liquid metal cloud */}
-              <div
-                className="absolute inset-0"
-                style={{
-                  borderRadius: "50% 70% 40% 60% / 60% 40% 70% 50%",
-                  background: "linear-gradient(45deg, rgba(255,80,120,0.6), rgba(80,180,255,0.6), rgba(80,255,180,0.6))",
-                  boxShadow: "0 0 15px rgba(150,200,255,0.7), inset 0 0 8px rgba(255,255,255,0.5)",
-                  filter: "blur(0.5px)",
-                  animation: "liquidBubble2 7s ease-in-out infinite alternate",
-                  transition: "all 0.4s ease-in-out",
-                  transform: isCreateHovered ? "scale(0.8)" : "scale(1)",
-                }}
-              ></div>
+          <LoginCreateButton 
+            handleCreate={handleCreate} 
+            isCreatingAccount={isCreatingAccount} 
+            isCreateHovered={isCreateHovered} 
+            setIsCreateHovered={setIsCreateHovered} 
+          />
 
-              {/* Red liquid droplet (appears on hover) */}
-              <div
-                className="absolute rounded-full"
-                style={{
-                  width: isCreateHovered ? "18px" : "0px",
-                  height: isCreateHovered ? "18px" : "0px",
-                  top: "50%",
-                  right: "0%",
-                  transform: isCreateHovered ? "translate(120%, -50%)" : "translate(0%, -50%)",
-                  background: "radial-gradient(circle at 30% 30%, rgba(255,255,255,0.8), rgba(255,80,120,0.8) 60%)",
-                  boxShadow: "0 0 15px rgba(255,80,120,0.9)",
-                  opacity: isCreateHovered ? 1 : 0,
-                  transition: "all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
-                  borderRadius: "55% 65% 35% 45% / 55% 65% 35% 45%",
-                  animation: isCreateHovered ? "liquidDroplet 3.5s ease-in-out infinite alternate" : "none",
-                  filter: "blur(0.5px)",
-                }}
-              ></div>
-
-              {/* Green liquid droplet (appears on hover) */}
-              <div
-                className="absolute"
-                style={{
-                  width: isCreateHovered ? "18px" : "0px",
-                  height: isCreateHovered ? "18px" : "0px",
-                  bottom: "0%",
-                  left: "50%",
-                  transform: isCreateHovered ? "translate(-50%, 120%)" : "translate(-50%, 0%)",
-                  background: "radial-gradient(circle at 30% 30%, rgba(255,255,255,0.8), rgba(80,255,180,0.8) 60%)",
-                  boxShadow: "0 0 15px rgba(80,255,180,0.9)",
-                  opacity: isCreateHovered ? 1 : 0,
-                  transition: "all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
-                  borderRadius: "45% 55% 65% 35% / 35% 45% 55% 65%",
-                  animation: isCreateHovered ? "liquidDroplet2 3.5s ease-in-out infinite alternate" : "none",
-                  filter: "blur(0.5px)",
-                }}
-              ></div>
-
-              {/* Blue liquid droplet (appears on hover) */}
-              <div
-                className="absolute"
-                style={{
-                  width: isCreateHovered ? "18px" : "0px",
-                  height: isCreateHovered ? "18px" : "0px",
-                  top: "50%",
-                  left: "0%",
-                  transform: isCreateHovered ? "translate(-120%, -50%)" : "translate(0%, -50%)",
-                  background: "radial-gradient(circle at 30% 30%, rgba(255,255,255,0.8), rgba(80,180,255,0.8) 60%)",
-                  boxShadow: "0 0 15px rgba(80,180,255,0.9)",
-                  opacity: isCreateHovered ? 1 : 0,
-                  transition: "all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
-                  borderRadius: "45% 35% 55% 65% / 55% 45% 65% 35%",
-                  animation: isCreateHovered ? "liquidDroplet3 3.5s ease-in-out infinite alternate" : "none",
-                  filter: "blur(0.5px)",
-                }}
-              ></div>
-
-              {/* Liquid connections (appears on hover) */}
-              {isCreateHovered && (
-                <>
-                  <div
-                    className="absolute"
-                    style={{
-                      width: "30px",
-                      height: "3px",
-                      top: "50%",
-                      right: "5%",
-                      transform: "translateY(-50%)",
-                      background: "linear-gradient(to right, rgba(255,100,150,0.6), rgba(255,80,120,0))",
-                      filter: "blur(2px)",
-                      opacity: 0.8,
-                      boxShadow: "0 0 8px rgba(255,100,150,0.6)",
-                      borderRadius: "30% 70% 70% 30% / 30% 70% 30% 70%",
-                    }}
-                  ></div>
-                  <div
-                    className="absolute"
-                    style={{
-                      width: "3px",
-                      height: "30px",
-                      bottom: "5%",
-                      left: "50%",
-                      transform: "translateX(-50%)",
-                      background: "linear-gradient(to bottom, rgba(100,255,180,0.6), rgba(80,255,180,0))",
-                      filter: "blur(2px)",
-                      opacity: 0.8,
-                      boxShadow: "0 0 8px rgba(100,255,180,0.6)",
-                      borderRadius: "70% 30% 70% 30% / 30% 70% 30% 70%",
-                    }}
-                  ></div>
-                  <div
-                    className="absolute"
-                    style={{
-                      width: "30px",
-                      height: "3px",
-                      top: "50%",
-                      left: "5%",
-                      transform: "translateY(-50%)",
-                      background: "linear-gradient(to left, rgba(100,180,255,0.6), rgba(80,180,255,0))",
-                      filter: "blur(2px)",
-                      opacity: 0.8,
-                      boxShadow: "0 0 8px rgba(100,180,255,0.6)",
-                      borderRadius: "70% 30% 70% 30% / 70% 30% 70% 30%",
-                    }}
-                  ></div>
-                </>
-              )}
-
-              {/* Text - Changed to "Create" */}
-              <div
-                className="absolute inset-0 flex items-center justify-center text-white font-bold text-base"
-                style={{
-                  opacity: isCreateHovered ? 1 : 0,
-                  transform: isCreateHovered ? "scale(1)" : "scale(0.8)",
-                  transition: "all 0.3s ease-in-out",
-                  textShadow: "0 0 8px rgba(150,200,255,0.9), 0 0 15px rgba(100,150,255,0.7)",
-                  zIndex: 10,
-                }}
-              >
-                {isCreatingAccount ? (
-                  <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
-                ) : "Create"}
-              </div>
-            </button>
-          </div>
           {successMessage && <p className="text-green-400 mt-[10px] font-bold">{successMessage}</p>}
           {error && <p className="text-[#FF4C4C] mt-[10px] font-bold">{error}</p>}
         </div>
