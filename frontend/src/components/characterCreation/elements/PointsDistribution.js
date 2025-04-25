@@ -84,50 +84,58 @@ export default function PointsDistribution() {
     if (!stats) return null;
     const ordered = Object.keys(stats).sort();
     return (
-      <table className="w-full text-sm text-left text-gray-300 mb-6">
-        <thead className="text-xs text-gray-400 uppercase bg-gray-700">
-          <tr>
-            <th className="px-4 py-2">Stat</th>
-            {['Base','Anima','Tot'].map(c => (
-              <th
-                key={c}
-                className={`px-4 py-2 text-center ${c === 'Tot' ? 'text-yellow-300' : ''}`}
-              >
-                {c}
-              </th>
-            ))}
-            {type === 'Combat' && (
-              <th className="px-4 py-2 text-center">Cost</th>
-            )}
-          </tr>
-        </thead>
-        <tbody>
-          {ordered.map(name => {
-            const stat = stats[name];
-            const base = Number(stat.Base) || 0;
-            const anima = Number(stat.Anima) || 0;
-            const tot = stat.Tot || base + anima;
-            const cost = Number(costs[name] || 0);
-            const canPlus = available >= (type === 'Combat' ? cost : 1) || (type === 'Base' && base === -1 && negativeCredits > 0);
-            const canMinus = type === 'Base' ? base > -1 : base > 0;
-            return (
-              <tr key={name} className="border-b border-gray-700">
-                <td className="px-4 py-2 font-medium text-white">{name}</td>
-                <td className="px-4 py-2 text-center">
-                  <button onClick={() => handleChange(name, -1, type)} disabled={!canMinus} className="px-1">-</button>
-                  <span className="mx-2 font-mono">{base}</span>
-                  <button onClick={() => handleChange(name, +1, type)} disabled={!canPlus} className="px-1">+</button>
-                </td>
-                <td className="px-4 py-2 text-center">{anima}</td>
-                <td className="px-4 py-2 text-center font-semibold text-yellow-300">{tot}</td>
-                {type === 'Combat' && (
-                  <td className="px-4 py-2 text-center">{cost}</td>
-                )}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <div className="bg-[rgba(40,40,60,0.95)] rounded-lg overflow-hidden border border-[rgba(100,100,150,0.3)]">
+        <table className="w-full text-sm text-left text-gray-300">
+          <thead className="text-xs text-gray-400 uppercase bg-[rgba(60,60,80,0.95)]">
+            <tr>
+              <th className="px-4 py-3">Stat</th>
+              {['Base','Anima','Tot'].map(c => (
+                <th
+                  key={c}
+                  className={`px-4 py-3 text-center ${c === 'Tot' ? 'text-yellow-300' : ''}`}
+                >
+                  {c}
+                </th>
+              ))}
+              {type === 'Combat' && (
+                <th className="px-4 py-3 text-center">Cost</th>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {ordered.map(name => {
+              const stat = stats[name];
+              const base = Number(stat.Base) || 0;
+              const anima = Number(stat.Anima) || 0;
+              const tot = stat.Tot || base + anima;
+              const cost = Number(costs[name] || 0);
+              const canPlus = available >= (type === 'Combat' ? cost : 1) || (type === 'Base' && base === -1 && negativeCredits > 0);
+              const canMinus = type === 'Base' ? base > -1 : base > 0;
+              return (
+                <tr key={name} className="border-b border-gray-700 hover:bg-[rgba(60,60,90,0.4)]">
+                  <td className="px-4 py-3 font-medium text-white">{name}</td>
+                  <td className="px-4 py-3 text-center">
+                    <div className="flex items-center justify-center space-x-2">
+                      <button onClick={() => handleChange(name, -1, type)} disabled={!canMinus} className={`text-gray-300 hover:text-white disabled:opacity-50 ${!canMinus ? 'cursor-not-allowed' : ''}`}>
+                        -
+                      </button>
+                      <span className="mx-2 font-mono w-6 text-center">{base}</span>
+                      <button onClick={() => handleChange(name, +1, type)} disabled={!canPlus} className={`text-gray-300 hover:text-white disabled:opacity-50 ${!canPlus ? 'cursor-not-allowed' : ''}`}>
+                        +
+                      </button>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-center">{anima}</td>
+                  <td className="px-4 py-3 text-center font-semibold text-yellow-300">{tot}</td>
+                  {type === 'Combat' && (
+                    <td className="px-4 py-3 text-center">{cost}</td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     );
   };
 
@@ -139,11 +147,37 @@ export default function PointsDistribution() {
 
   return (
     <div>
-      <h2 className="mb-2 text-lg font-semibold text-white">Points Distribution</h2>
-      <div className="text-white mb-4">Base Points Available: {basePointsAvailable} | Spent: {basePointsSpent}</div>
-      {renderTable(baseStats, {}, basePointsAvailable, basePointsSpent, 'Base')}
-      <div className="text-white mb-4">Combat Tokens Available: {combatTokensAvailable} | Spent: {combatTokensSpent}</div>
-      {renderTable(combStats, combatStatCosts||{}, combatTokensAvailable, combatTokensSpent, 'Combat')}
+      <h2 className="text-xl font-semibold text-[#D4AF37] mb-4" style={{ textShadow: "0 0 8px rgba(255,215,0,0.4)" }}>Points Distribution</h2>
+      
+      <div className="flex flex-col md:flex-row md:gap-6">
+        <div className="flex-1 mb-6 md:mb-0">
+          <div className="bg-[rgba(40,40,60,0.8)] p-3 rounded-lg mb-3 text-center">
+            <div className="text-white text-lg">
+              <span className="text-[#D4AF37] font-semibold">Base Points</span>
+              <div className="flex justify-center mt-1 text-sm space-x-4">
+                <span>Available: <span className="font-bold">{basePointsAvailable}</span></span> 
+                <span>|</span> 
+                <span>Spent: <span className="font-bold">{basePointsSpent}</span></span>
+              </div>
+            </div>
+          </div>
+          {renderTable(baseStats, {}, basePointsAvailable, basePointsSpent, 'Base')}
+        </div>
+        
+        <div className="flex-1">
+          <div className="bg-[rgba(40,40,60,0.8)] p-3 rounded-lg mb-3 text-center">
+            <div className="text-white text-lg">
+              <span className="text-[#D4AF37] font-semibold">Combat Tokens</span>
+              <div className="flex justify-center mt-1 text-sm space-x-4">
+                <span>Available: <span className="font-bold">{combatTokensAvailable}</span></span> 
+                <span>|</span> 
+                <span>Spent: <span className="font-bold">{combatTokensSpent}</span></span>
+              </div>
+            </div>
+          </div>
+          {renderTable(combStats, combatStatCosts||{}, combatTokensAvailable, combatTokensSpent, 'Combat')}
+        </div>
+      </div>
     </div>
   );
 }
