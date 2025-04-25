@@ -9,6 +9,7 @@ import DnDBackground from "../backgrounds/DnDBackground";
 // Import the components for each step
 import RaceSelection from "./elements/RaceSelection";
 import AnimaShardSelection from "./elements/AnimaShardSelection";
+import PointsDistribution from "./elements/PointsDistribution";
 import CharacterDetails from "./elements/CharacterDetails";
 
 function CharacterCreation() {
@@ -30,7 +31,7 @@ function CharacterCreation() {
   const { user } = useAuth();
 
   // Total number of steps in the character creation process
-  const totalSteps = 3; // Now we have 3 steps: Race, Anima, Details
+  const totalSteps = 4; // Now we have 4 steps: Race, Anima, Points Distribution, Details
 
   // Check if character creation is already completed
   const checkCharacterCreationStatus = useCallback(async () => {
@@ -139,9 +140,28 @@ function CharacterCreation() {
     if (currentStep === 2) {
       try {
         const userDocRef = doc(db, "users", user.uid);
-        await updateDoc(userDocRef, { 'AltriParametri.Anima_1': selectedAnima.name });
+        // Fetch starting values and race extra bonuses
+        const varieDocRef = doc(db, "utils", "varie");
+        const varieSnap = await getDoc(varieDocRef);
+        if (!varieSnap.exists()) {
+          throw new Error("Configuration for starting values and extras not found");
+        }
+        const { starting_values: startingValues = {}, races_extra: racesExtra = {} } = varieSnap.data();
+        const abilityStart = startingValues.abilityPoints || 0;
+        const tokenStart = startingValues.tokenPoints || 0;
+        const raceExtra = racesExtra[selectedRace.id] || {};
+        const extraAbility = raceExtra.extraAbilityCreation || 0;
+        const extraTokens = raceExtra.extraTokenCreation || 0;
+        const basePointsAvailable = abilityStart + extraAbility;
+        const combatTokensAvailable = tokenStart + extraTokens;
+        // Update anima selection and starting stats in user document
+        await updateDoc(userDocRef, {
+          'AltriParametri.Anima_1': selectedAnima.name,
+          'stats.basePointsAvailable': basePointsAvailable,
+          'stats.combatTokensAvailable': combatTokensAvailable
+        });
       } catch (err) {
-        setError("Failed to save Anima Shard selection: " + err.message);
+        setError("Failed to save Anima Shard selection and starting points: " + err.message);
         return;
       }
     }
@@ -315,6 +335,7 @@ function CharacterCreation() {
       <div className="flex justify-between mt-1 text-xs text-gray-400">
         <div>Race Selection</div>
         <div>Anima Shard</div>
+        <div>Points Distribution</div>
         <div>Character Details</div>
       </div>
     </div>
@@ -355,9 +376,14 @@ function CharacterCreation() {
       />
     </div>
   );
-
-  // Step 3: Character Details content - now using the CharacterDetails component
+  // Step 3: Points Distribution content
   const renderStep3 = () => (
+    <div className="mb-6">
+      <PointsDistribution />
+    </div>
+  );
+  // Step 4: Character Details content - now using the CharacterDetails component
+  const renderStep4 = () => (
     <div className="mb-6">
       <CharacterDetails 
         characterName={characterName}
@@ -435,6 +461,8 @@ function CharacterCreation() {
         return renderStep2();
       case 3:
         return renderStep3();
+      case 4:
+        return renderStep4();
       default:
         return <div>Unknown step</div>;
     }
@@ -457,6 +485,8 @@ function CharacterCreation() {
               ? "Welcome to Etherium! Choose a race to begin your adventure."
               : currentStep === 2
               ? "Select an Anima Shard to empower your character with special bonuses."
+              : currentStep === 3
+              ? "Distribute your points to define your character's abilities."
               : "Fill in your character details to bring them to life."}
           </p>
 

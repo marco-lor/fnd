@@ -556,15 +556,15 @@
           },
           "Intelligenza": {
             "Base": 3,
-            "Anima": 0,
-            "Tot": 3,
+            "Anima": 1,
+            "Tot": 4,
             "Equip": 0,
             "Mod": 0
           },
           "Saggezza": {
             "Base": 2,
-            "Anima": 0,
-            "Tot": 2,
+            "Anima": 1,
+            "Tot": 3,
             "Equip": 0,
             "Mod": 0
           },
@@ -576,9 +576,9 @@
             "Mod": 0
           },
           "Destrezza": {
-            "Base": -1,
+            "Base": 0,
             "Anima": 0,
-            "Tot": -1,
+            "Tot": 0,
             "Equip": 0,
             "Mod": 0
           },
@@ -594,8 +594,8 @@
           "Disciplina": {
             "Base": 9,
             "Equip": 0,
-            "Tot": 9,
-            "Anima": 0,
+            "Tot": 10,
+            "Anima": 1,
             "Mod": 0
           },
           "Critico": {
@@ -619,10 +619,10 @@
             "Anima": 0,
             "Mod": 0
           },
-          "Salute": {
-            "Base": 1,
+          "Attacco": {
+            "Base": 3,
             "Equip": 0,
-            "Tot": 1,
+            "Tot": 3,
             "Anima": 0,
             "Mod": 0
           },
@@ -633,10 +633,10 @@
             "Anima": 0,
             "Mod": 0
           },
-          "Attacco": {
-            "Base": 3,
+          "Salute": {
+            "Base": 1,
             "Equip": 0,
-            "Tot": 3,
+            "Tot": 1,
             "Anima": 0,
             "Mod": 0
           }
@@ -659,17 +659,17 @@
         "lock_param_base": false
       },
       "stats": {
-        "manaTotal": 59,
+        "basePointsAvailable": 0,
         "combatTokensAvailable": 0,
-        "basePointsSpent": 4,
-        "combatTokensSpent": 50,
-        "level": 1,
+        "basePointsSpent": 5,
+        "combatTokensSpent": 68,
+        "manaCurrent": 75,
         "negativeBaseStatCount": 2,
-        "manaCurrent": 59,
-        "hpTotal": 13,
+        "level": 2,
         "lastAnimaShard": "Spirito",
+        "hpTotal": 13,
         "hpCurrent": 13,
-        "basePointsAvailable": 1
+        "manaTotal": 75
       },
       "lingue": {},
       "spells": {
@@ -1619,10 +1619,8 @@
         "Anima_1": "---",
         "Anima_7": "---"
       },
-      "imageUrl": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/characters%2Ftoken_2.png?alt=media&token=4d67afc5-c32e-4dda-97cb-c102a547d7dd",
-      "conoscenze": {},
       "characterId": "Inserire il nome del personaggio",
-      "inventory": [],
+      "conoscenze": {},
       "Parametri": {
         "Base": {
           "Fortuna": {
@@ -1720,6 +1718,8 @@
           }
         }
       },
+      "inventory": [],
+      "imageUrl": "",
       "tecniche": {},
       "race": [
         "Goblin",
@@ -2033,16 +2033,9 @@
           "Destrezza": 1
         }
       },
-      "levelUpAnimaBonus": {
-        "Potenza": {
-          "Salute": 1
-        },
-        "Spirito": {
-          "Disciplina": 1
-        },
-        "Astuzia": {
-          "Attacco": 1
-        }
+      "starting_values": {
+        "tokenPoints": 50,
+        "abilityPoints": 4
       },
       "hpMultByLevel": {
         "4": 7,
@@ -2079,6 +2072,17 @@
         "4": 9,
         "7": 12,
         "1": 6
+      },
+      "levelUpAnimaBonus": {
+        "Potenza": {
+          "Salute": 1
+        },
+        "Spirito": {
+          "Disciplina": 1
+        },
+        "Astuzia": {
+          "Attacco": 1
+        }
       }
     }
   }
