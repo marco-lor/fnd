@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../AuthContext'; // Assuming this provides logged-in user info
-import { db, app } from '../firebaseConfig'; // *** IMPORT YOUR FIRESTORE DB INSTANCE ***
+import { db, app, storage } from '../firebaseConfig';
 import { collection, doc, getDocs, getDoc, updateDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { ref, deleteObject } from 'firebase/storage';
 
 const AdminPage = () => {
   const [users, setUsers] = useState({}); // Store users as an object { userId: userData, ... }
@@ -109,7 +110,18 @@ const AdminPage = () => {
     if (!userToDelete) return;
     
     setIsDeleting(true);
-    
+    // Delete user profile image from Firebase Storage if it exists
+    const imageUrl = users[userToDelete]?.imageUrl;
+    if (imageUrl) {
+      try {
+        const imgRef = ref(storage, imageUrl);
+        await deleteObject(imgRef);
+        console.log(`Deleted profile image for user ${userToDelete}`);
+      } catch (storageError) {
+        console.error(`Failed to delete image for user ${userToDelete}:`, storageError);
+      }
+    }
+
     try {
       // Call the Cloud Function to delete both the Authentication account and Firestore document
       const result = await deleteUserFunction({ userId: userToDelete });
