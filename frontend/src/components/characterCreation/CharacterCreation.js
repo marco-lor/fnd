@@ -161,6 +161,10 @@ function CharacterCreation() {
           'stats.combatTokensSpent': 0,
           'stats.negativeBaseStatCount': 0
         });
+        // Initialize AltriParametri.Anima_1 to default before Anima Shard selection
+        await updateDoc(userDocRef, {
+          'AltriParametri.Anima_1': '---'
+        });
       } catch (err) {
         setError("Failed to save race selection and reset parameters: " + err.message);
         return;

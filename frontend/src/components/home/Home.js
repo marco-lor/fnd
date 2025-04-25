@@ -1,13 +1,30 @@
 // file: ./frontend/src/components/home/Home.js
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { useAuth } from "../../AuthContext";
 import DnDBackground from "../backgrounds/DnDBackground";
 import StatsBars from "./elements/StatsBars";
 import { BaseStatsTable, CombatStatsTable } from "./elements/paramTables";
 import { API_BASE_URL } from "../firebaseConfig";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../firebaseConfig";
 
 function Home() {
   const { user, userData } = useAuth();
+  const [dadiAnimaByLevel, setDadiAnimaByLevel] = useState([]);
+
+  useEffect(() => {
+    const fetchDadiAnima = async () => {
+      try {
+        const snap = await getDoc(doc(db, "utils", "varie"));
+        if (snap.exists()) {
+          setDadiAnimaByLevel(snap.data().dadiAnimaByLevel || []);
+        }
+      } catch (e) {
+        console.error("Error fetching dadiAnimaByLevel:", e);
+      }
+    };
+    fetchDadiAnima();
+  }, []);
 
   // Test API Call handler
   const handleTestButtonClick = async () => {
@@ -72,6 +89,11 @@ function Home() {
               >
                 List Everything
               </button>
+            </div>
+          )}
+          {dadiAnimaByLevel.length > 0 && userData?.stats?.level && (
+            <div className="mb-5 text-white text-lg">
+              Dado Anima: {dadiAnimaByLevel[userData.stats.level - 1]}
             </div>
           )}
           <div className="mb-5 w-full max-w-[1200px]">

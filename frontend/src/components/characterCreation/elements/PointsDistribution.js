@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react'; // added useCallback
 import { doc, onSnapshot, getDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from "../../firebaseConfig";
@@ -21,6 +21,7 @@ export default function PointsDistribution() {
   const [combatTokensAvailable, setCombatTokensAvailable] = useState(0);
   const [combatTokensSpent, setCombatTokensSpent] = useState(0);
   const [combatStatCosts, setCombatStatCosts] = useState(null);
+  const [cooldown, setCooldown] = useState(false); // cooldown state for button clicks
 
   // Load combat cost table
   useEffect(() => {
@@ -60,21 +61,17 @@ export default function PointsDistribution() {
     });
   }, [user]);
 
-  const triggerCooldown = () => {
-    // noop here if needed
-  };
-
-  // Base handlers
-  const handleBaseChange = async (stat, delta) => {
+  // Base handlers with stable references
+  const handleBaseChange = useCallback(async (stat, delta) => {
     if (!user || !baseStats) return;
     await spendCharacterPoint({ statName: stat, statType: 'Base', change: delta });
-  };
+  }, [user, baseStats]);
 
-  // Combat handlers
-  const handleCombChange = async (stat, delta) => {
+  // Combat handlers with stable references
+  const handleCombChange = useCallback(async (stat, delta) => {
     if (!user || !combStats) return;
     await spendCharacterPoint({ statName: stat, statType: 'Combat', change: delta });
-  };
+  }, [user, combStats]);
 
   // Helper free credits
   const negativeCredits = Math.floor(negativeBaseStatCount / 2);
@@ -116,11 +113,11 @@ export default function PointsDistribution() {
                   <td className="px-4 py-3 font-medium text-white">{name}</td>
                   <td className="px-4 py-3 text-center">
                     <div className="flex items-center justify-center space-x-2">
-                      <button onClick={() => handleChange(name, -1, type)} disabled={!canMinus} className={`text-gray-300 hover:text-white disabled:opacity-50 ${!canMinus ? 'cursor-not-allowed' : ''}`}>
+                      <button onClick={() => handleChange(name, -1, type)} disabled={!canMinus || cooldown} className={`text-gray-300 hover:text-white disabled:opacity-50 ${!canMinus || cooldown ? 'cursor-not-allowed' : ''}`}>
                         -
                       </button>
                       <span className="mx-2 font-mono w-6 text-center">{base}</span>
-                      <button onClick={() => handleChange(name, +1, type)} disabled={!canPlus} className={`text-gray-300 hover:text-white disabled:opacity-50 ${!canPlus ? 'cursor-not-allowed' : ''}`}>
+                      <button onClick={() => handleChange(name, +1, type)} disabled={!canPlus || cooldown} className={`text-gray-300 hover:text-white disabled:opacity-50 ${!canPlus || cooldown ? 'cursor-not-allowed' : ''}`}>
                         +
                       </button>
                     </div>
@@ -140,10 +137,15 @@ export default function PointsDistribution() {
   };
 
   // generic change router
-  const handleChange = (stat, delta, type) => {
-    if (type==='Base') return handleBaseChange(stat, delta);
-    return handleCombChange(stat, delta);
-  };
+  const handleChange = useCallback((stat, delta, type) => {
+    if (cooldown) return; // prevent clicks during cooldown
+    setCooldown(true);
+    const action = type === 'Base'
+      ? handleBaseChange(stat, delta)
+      : handleCombChange(stat, delta);
+    action.catch(err => console.error('Error changing stat:', err))
+          .finally(() => setTimeout(() => setCooldown(false), 500));
+  }, [cooldown, handleBaseChange, handleCombChange]);
 
   return (
     <div>
