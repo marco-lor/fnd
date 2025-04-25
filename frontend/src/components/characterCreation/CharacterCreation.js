@@ -131,21 +131,18 @@ function CharacterCreation() {
       try {
         const userDocRef = doc(db, "users", user.uid);
         await updateDoc(userDocRef, { race: selectedRace.id });
-      } catch (err) {
-        setError("Failed to save race selection: " + err.message);
-        return;
-      }
-    }
-    // Persist Anima shard inside AltriParametri on second step
-    if (currentStep === 2) {
-      try {
-        const userDocRef = doc(db, "users", user.uid);
-        // Fetch starting values and race extra bonuses
-        const varieDocRef = doc(db, "utils", "varie");
+        // Reset parameters using schema from utils/schema_pg
+        const schemaRef = doc(db, 'utils', 'schema_pg');
+        const schemaSnap = await getDoc(schemaRef);
+        const schemaParams = schemaSnap.exists() ? schemaSnap.data().Parametri : { Base: {}, Combattimento: {} };
+        await updateDoc(userDocRef, {
+          'Parametri.Base': schemaParams.Base,
+          'Parametri.Combattimento': schemaParams.Combattimento
+        });
+        // Fetch starting values and apply race bonuses for initial points
+        const varieDocRef = doc(db, 'utils', 'varie');
         const varieSnap = await getDoc(varieDocRef);
-        if (!varieSnap.exists()) {
-          throw new Error("Configuration for starting values and extras not found");
-        }
+        if (!varieSnap.exists()) throw new Error('Configuration for starting values not found');
         const { starting_values: startingValues = {}, races_extra: racesExtra = {} } = varieSnap.data();
         const abilityStart = startingValues.abilityPoints || 0;
         const tokenStart = startingValues.tokenPoints || 0;
@@ -154,14 +151,31 @@ function CharacterCreation() {
         const extraTokens = raceExtra.extraTokenCreation || 0;
         const basePointsAvailable = abilityStart + extraAbility;
         const combatTokensAvailable = tokenStart + extraTokens;
-        // Update anima selection and starting stats in user document
         await updateDoc(userDocRef, {
-          'AltriParametri.Anima_1': selectedAnima.name,
           'stats.basePointsAvailable': basePointsAvailable,
           'stats.combatTokensAvailable': combatTokensAvailable
         });
+        // Reset spent counters and negative count on race selection
+        await updateDoc(userDocRef, {
+          'stats.basePointsSpent': 0,
+          'stats.combatTokensSpent': 0,
+          'stats.negativeBaseStatCount': 0
+        });
       } catch (err) {
-        setError("Failed to save Anima Shard selection and starting points: " + err.message);
+        setError("Failed to save race selection and reset parameters: " + err.message);
+        return;
+      }
+    }
+    // Persist Anima shard inside AltriParametri on second step
+    if (currentStep === 2) {
+      try {
+        const userDocRef = doc(db, "users", user.uid);
+        // Update anima selection and reset spent counters in user document
+        await updateDoc(userDocRef, {
+          'AltriParametri.Anima_1': selectedAnima.name
+        });
+      } catch (err) {
+        setError("Failed to save Anima Shard selection and reset parameters: " + err.message);
         return;
       }
     }
@@ -210,7 +224,9 @@ function CharacterCreation() {
           // race: selectedRace.id, // Store the race name
           // anima: selectedAnima.name, // Store the anima shard name
           // animaLevelUpBonus: selectedAnima.levelUpBonus, // Store the level up bonus for future level-ups
-          'flags.characterCreationDone': true
+          'flags.characterCreationDone': true,
+          'settings.lock_param_base': true,
+          'settings.lock_param_combat': true
       };
 
       // Handle image upload if a file is present

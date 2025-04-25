@@ -412,23 +412,16 @@ export function BaseStatsTable() {
       <div className="bg-gray-800 shadow-lg rounded-lg overflow-hidden border border-gray-700">
         <div className="px-4 py-2 bg-gray-700 text-right text-sm text-gray-300 border-b border-gray-600">
           <span>
-            Punti Disponibili:{" "}
+            Punti Disponibili: {" "}
             <span className="font-semibold text-white">
               {basePointsAvailable}
             </span>
           </span>
           <span className="mx-2">|</span>
           <span>
-            Punti Spesi:{" "}
+            Punti Spesi: {" "}
             <span className="font-semibold text-white">
               {basePointsSpent}
-            </span>
-          </span>
-          <span className="mx-2">|</span>
-          <span>
-            Parametri a –1:{" "}
-            <span className="font-semibold text-white">
-              {negativeBaseStatCount}/4
             </span>
           </span>
         </div>

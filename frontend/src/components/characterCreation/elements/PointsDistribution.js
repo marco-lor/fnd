@@ -86,10 +86,19 @@ export default function PointsDistribution() {
     return (
       <table className="w-full text-sm text-left text-gray-300 mb-6">
         <thead className="text-xs text-gray-400 uppercase bg-gray-700">
-          <tr><th className="px-4 py-2">Stat</th>
+          <tr>
+            <th className="px-4 py-2">Stat</th>
             {['Base','Anima','Tot'].map(c => (
-              <th key={c} className="px-4 py-2 text-center">{c}</th>
+              <th
+                key={c}
+                className={`px-4 py-2 text-center ${c === 'Tot' ? 'text-yellow-300' : ''}`}
+              >
+                {c}
+              </th>
             ))}
+            {type === 'Combat' && (
+              <th className="px-4 py-2 text-center">Cost</th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -98,9 +107,9 @@ export default function PointsDistribution() {
             const base = Number(stat.Base) || 0;
             const anima = Number(stat.Anima) || 0;
             const tot = stat.Tot || base + anima;
-            const cost = type === 'Combat' ? Number(costs[name]||0) : 1;
-            const canPlus = available >= cost || (type==='Base' && base===-1 && negativeCredits>0);
-            const canMinus = type==='Base' ? base> -1 : base>0;
+            const cost = Number(costs[name] || 0);
+            const canPlus = available >= (type === 'Combat' ? cost : 1) || (type === 'Base' && base === -1 && negativeCredits > 0);
+            const canMinus = type === 'Base' ? base > -1 : base > 0;
             return (
               <tr key={name} className="border-b border-gray-700">
                 <td className="px-4 py-2 font-medium text-white">{name}</td>
@@ -110,7 +119,10 @@ export default function PointsDistribution() {
                   <button onClick={() => handleChange(name, +1, type)} disabled={!canPlus} className="px-1">+</button>
                 </td>
                 <td className="px-4 py-2 text-center">{anima}</td>
-                <td className="px-4 py-2 text-center font-semibold">{tot}</td>
+                <td className="px-4 py-2 text-center font-semibold text-yellow-300">{tot}</td>
+                {type === 'Combat' && (
+                  <td className="px-4 py-2 text-center">{cost}</td>
+                )}
               </tr>
             );
           })}
