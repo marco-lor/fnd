@@ -28,6 +28,7 @@ export function AddProfessionePersonaleOverlay({ userId, onClose }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedProfessione, setSelectedProfessione] = useState(null);
+  const [livello, setLivello] = useState("Base");
   const [userName, setUserName] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -75,8 +76,9 @@ export function AddProfessionePersonaleOverlay({ userId, onClose }) {
     }
 
     try {
-      // Get the professione details from codex
-      const professioneData = codexProfessioni[selectedProfessione];
+      // Get the professione description and include livello
+      const descrizione = codexProfessioni[selectedProfessione];
+      const professionePayload = { descrizione, livello };
       
       // Update the user's professioni field
       const userRef = doc(db, "users", userId);
@@ -86,8 +88,8 @@ export function AddProfessionePersonaleOverlay({ userId, onClose }) {
         const userData = userDoc.data();
         const updatedProfessioni = { ...(userData.professioni || {}) };
 
-        // Add or update the selected professione
-        updatedProfessioni[selectedProfessione] = professioneData;
+        // Add or update the selected professione with payload
+        updatedProfessioni[selectedProfessione] = professionePayload;
 
         await updateDoc(userRef, { professioni: updatedProfessioni });
         onClose(true);
@@ -161,7 +163,18 @@ export function AddProfessionePersonaleOverlay({ userId, onClose }) {
                 </div>
               )}
             </div>
-            
+            {/* Livello selector */}
+            <div className="mb-4">
+              <label className="block text-white mb-1">Livello</label>
+              <select
+                value={livello}
+                onChange={(e) => setLivello(e.target.value)}
+                className="w-full p-2 rounded bg-gray-700 text-white"
+              >
+                <option value="Base">Base</option>
+                <option value="Avanzato">Avanzato</option>
+              </select>
+            </div>
             <div className="flex justify-end gap-2 mt-2 pt-3 border-t border-gray-700">
               <button
                 type="button"

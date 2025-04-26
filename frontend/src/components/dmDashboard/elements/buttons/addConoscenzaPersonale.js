@@ -28,6 +28,7 @@ export function AddConoscenzaPersonaleOverlay({ userId, onClose }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedConoscenza, setSelectedConoscenza] = useState(null);
+  const [livello, setLivello] = useState("Base");
   const [userName, setUserName] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -75,8 +76,9 @@ export function AddConoscenzaPersonaleOverlay({ userId, onClose }) {
     }
 
     try {
-      // Get the conoscenza details from codex
-      const conoscenzaData = codexConoscenze[selectedConoscenza];
+      // Get the conoscenza description and include livello
+      const descrizione = codexConoscenze[selectedConoscenza];
+      const conoscenzaPayload = { descrizione, livello };
       
       // Update the user's conoscenze field
       const userRef = doc(db, "users", userId);
@@ -86,8 +88,8 @@ export function AddConoscenzaPersonaleOverlay({ userId, onClose }) {
         const userData = userDoc.data();
         const updatedConoscenze = { ...(userData.conoscenze || {}) };
 
-        // Add or update the selected conoscenza
-        updatedConoscenze[selectedConoscenza] = conoscenzaData;
+        // Add or update the selected conoscenza with payload
+        updatedConoscenze[selectedConoscenza] = conoscenzaPayload;
 
         await updateDoc(userRef, { conoscenze: updatedConoscenze });
         onClose(true);
@@ -162,6 +164,19 @@ export function AddConoscenzaPersonaleOverlay({ userId, onClose }) {
               )}
             </div>
             
+            {/* Livello selector */}
+            <div className="mb-4">
+              <label className="block text-white mb-1">Livello</label>
+              <select
+                value={livello}
+                onChange={(e) => setLivello(e.target.value)}
+                className="w-full p-2 rounded bg-gray-700 text-white"
+              >
+                <option value="Base">Base</option>
+                <option value="Avanzato">Avanzato</option>
+              </select>
+            </div>
+
             <div className="flex justify-end gap-2 mt-2 pt-3 border-t border-gray-700">
               <button
                 type="button"

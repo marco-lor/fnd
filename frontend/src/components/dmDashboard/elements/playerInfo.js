@@ -20,9 +20,11 @@ import { DelLinguaPersonaleOverlay } from "./buttons/delLinguaPersonale";
 
 import AddConoscenzaPersonale, { AddConoscenzaPersonaleOverlay } from "./buttons/addConoscenzaPersonale";
 import { DelConoscenzaPersonaleOverlay } from "./buttons/delConoscenzaPersonale";
+import { EditConoscenzaPersonaleOverlay } from "./buttons/editConoscenzaPersonale";
 
 import AddProfessionePersonale, { AddProfessionePersonaleOverlay } from "./buttons/addProfessionePersonale";
 import { DelProfessionePersonaleOverlay } from "./buttons/delProfessionePersonale";
+import { EditProfessionePersonaleOverlay } from "./buttons/editProfessionePersonale";
 // --- End Imports ---
 
 library.add(faEdit, faTrash);
@@ -30,33 +32,42 @@ library.add(faEdit, faTrash);
 const PlayerInfo = ({ users, loading, error, setUsers }) => {
   // common state
   const [selectedUserId, setSelectedUserId] = useState(null);
-
+  const [showEditConoscenzaOverlay, setShowEditConoscenzaOverlay] = useState(false);
+  const [showEditProfessioneOverlay, setShowEditProfessioneOverlay] = useState(false);
+  
+  // Conoscenza
+  const [showConoscenzaOverlay, setShowConoscenzaOverlay] = useState(false);
+  const [showDeleteConoscenzaOverlay, setShowDeleteConoscenzaOverlay] = useState(false);
+  const [selectedConoscenza, setSelectedConoscenza] = useState(null);
+  // Professione
+  const [showProfessioneOverlay, setShowProfessioneOverlay] = useState(false);
+  const [showDeleteProfessioneOverlay, setShowDeleteProfessioneOverlay] = useState(false);
+  const [selectedProfessione, setSelectedProfessione] = useState(null);
   // Tecnica
   const [showTecnicaOverlay, setShowTecnicaOverlay] = useState(false);
   const [showEditTecnicaOverlay, setShowEditTecnicaOverlay] = useState(false);
   const [showDeleteTecnicaOverlay, setShowDeleteTecnicaOverlay] = useState(false);
   const [selectedTecnica, setSelectedTecnica] = useState(null);
-
   // Spell
   const [showSpellOverlay, setShowSpellOverlay] = useState(false);
   const [showEditSpellOverlay, setShowEditSpellOverlay] = useState(false);
   const [showDeleteSpellOverlay, setShowDeleteSpellOverlay] = useState(false);
   const [selectedSpell, setSelectedSpell] = useState(null);
-
   // Lingua
   const [showLinguaOverlay, setShowLinguaOverlay] = useState(false);
   const [showDeleteLinguaOverlay, setShowDeleteLinguaOverlay] = useState(false);
   const [selectedLingua, setSelectedLingua] = useState(null);
-
-  // Conoscenza
-  const [showConoscenzaOverlay, setShowConoscenzaOverlay] = useState(false);
-  const [showDeleteConoscenzaOverlay, setShowDeleteConoscenzaOverlay] = useState(false);
-  const [selectedConoscenza, setSelectedConoscenza] = useState(null);
-
-  // Professione
-  const [showProfessioneOverlay, setShowProfessioneOverlay] = useState(false);
-  const [showDeleteProfessioneOverlay, setShowDeleteProfessioneOverlay] = useState(false);
-  const [selectedProfessione, setSelectedProfessione] = useState(null);
+  // new edit handlers
+  const handleEditConoscenzaClick = (userId, name) => {
+    setSelectedUserId(userId);
+    setSelectedConoscenza(name);
+    setShowEditConoscenzaOverlay(true);
+  };
+  const handleEditProfessioneClick = (userId, name) => {
+    setSelectedUserId(userId);
+    setSelectedProfessione(name);
+    setShowEditProfessioneOverlay(true);
+  };
 
   const refreshUserData = async () => {
     try {
@@ -253,14 +264,22 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                   {u.conoscenze && Object.keys(u.conoscenze).length
                     ? <ul className="space-y-1">
                         {Object.keys(u.conoscenze).map(name => (
-                          <li key={name} className="flex justify-between group">
-                            <span className="truncate mr-2">{name}</span>
-                            <button
-                              className={iconDel}
-                              onClick={() => handleDeleteConoscenzaClick(u.id, name)}
-                            >
-                              <FontAwesomeIcon icon="trash" className="w-3.5 h-3.5"/>
-                            </button>
+                          <li key={name} className="flex justify-between items-center group">
+                            <span className="truncate mr-2">{name} ({u.conoscenze[name].livello})</span>
+                            <div className="opacity-50 group-hover:opacity-100 space-x-1 flex">
+                              <button
+                                className={iconEdit}
+                                onClick={() => handleEditConoscenzaClick(u.id, name)}
+                              >
+                                <FontAwesomeIcon icon="edit" className="w-3.5 h-3.5"/>
+                              </button>
+                              <button
+                                className={iconDel}
+                                onClick={() => handleDeleteConoscenzaClick(u.id, name)}
+                              >
+                                <FontAwesomeIcon icon="trash" className="w-3.5 h-3.5"/>
+                              </button>
+                            </div>
                           </li>
                         ))}
                       </ul>
@@ -278,14 +297,22 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                   {u.professioni && Object.keys(u.professioni).length
                     ? <ul className="space-y-1">
                         {Object.keys(u.professioni).map(name => (
-                          <li key={name} className="flex justify-between group">
-                            <span className="truncate mr-2">{name}</span>
-                            <button
-                              className={iconDel}
-                              onClick={() => handleDeleteProfessioneClick(u.id, name)}
-                            >
-                              <FontAwesomeIcon icon="trash" className="w-3.5 h-3.5"/>
-                            </button>
+                          <li key={name} className="flex justify-between items-center group">
+                            <span className="truncate mr-2">{name} ({u.professioni[name].livello})</span>
+                            <div className="opacity-50 group-hover:opacity-100 space-x-1 flex">
+                              <button
+                                className={iconEdit}
+                                onClick={() => handleEditProfessioneClick(u.id, name)}
+                              >
+                                <FontAwesomeIcon icon="edit" className="w-3.5 h-3.5"/>
+                              </button>
+                              <button
+                                className={iconDel}
+                                onClick={() => handleDeleteProfessioneClick(u.id, name)}
+                              >
+                                <FontAwesomeIcon icon="trash" className="w-3.5 h-3.5"/>
+                              </button>
+                            </div>
                           </li>
                         ))}
                       </ul>
@@ -443,7 +470,18 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
           }}
         />
       )}
-
+      {showEditConoscenzaOverlay && selectedUserId && selectedConoscenza && (
+        <EditConoscenzaPersonaleOverlay
+          userId={selectedUserId}
+          conoscenzaName={selectedConoscenza}
+          onClose={(ok) => {
+            setShowEditConoscenzaOverlay(false);
+            setSelectedConoscenza(null);
+            setSelectedUserId(null);
+            if (ok) refreshUserData();
+          }}
+        />
+      )}
       {showProfessioneOverlay && selectedUserId && (
         <AddProfessionePersonaleOverlay
           userId={selectedUserId}
@@ -460,6 +498,18 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
           professioneName={selectedProfessione}
           onClose={(ok) => {
             setShowDeleteProfessioneOverlay(false);
+            setSelectedProfessione(null);
+            setSelectedUserId(null);
+            if (ok) refreshUserData();
+          }}
+        />
+      )}
+      {showEditProfessioneOverlay && selectedUserId && selectedProfessione && (
+        <EditProfessionePersonaleOverlay
+          userId={selectedUserId}
+          professioneName={selectedProfessione}
+          onClose={(ok) => {
+            setShowEditProfessioneOverlay(false);
             setSelectedProfessione(null);
             setSelectedUserId(null);
             if (ok) refreshUserData();

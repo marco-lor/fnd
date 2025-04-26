@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom';
 import { db } from '../../../firebaseConfig';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 
-export function EditConoscenzaPersonaleOverlay({ userId, conoscenzaName, onClose }) {
+export function EditProfessionePersonaleOverlay({ userId, professioneName, onClose }) {
   const [livello, setLivello] = useState('Base');
   const [userName, setUserName] = useState('');
 
@@ -15,24 +15,24 @@ export function EditConoscenzaPersonaleOverlay({ userId, conoscenzaName, onClose
       if (snap.exists()) {
         const data = snap.data();
         setUserName(data.characterId || data.email || '');
-        const current = data.conoscenze?.[conoscenzaName]?.livello;
+        const current = data.professioni?.[professioneName]?.livello;
         if (current) setLivello(current);
       }
     };
     fetchData();
-  }, [userId, conoscenzaName]);
+  }, [userId, professioneName]);
 
   const handleSave = async () => {
     const userRef = doc(db, 'users', userId);
     const snap = await getDoc(userRef);
     if (snap.exists()) {
       const data = snap.data();
-      const updated = { ...(data.conoscenze || {}) };
-      if (updated[conoscenzaName]) {
+      const updated = { ...(data.professioni || {}) };
+      if (updated[professioneName]) {
         // update only livello
-        updated[conoscenzaName] = { ...updated[conoscenzaName], livello };
+        updated[professioneName] = { ...updated[professioneName], livello };
       }
-      await updateDoc(userRef, { conoscenze: updated });
+      await updateDoc(userRef, { professioni: updated });
       onClose(true);
     } else {
       alert('User not found');
@@ -43,9 +43,9 @@ export function EditConoscenzaPersonaleOverlay({ userId, conoscenzaName, onClose
   const overlay = (
     <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-[9999]">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-sm">
-        <h2 className="text-xl text-white mb-2">Modifica Livello Conoscenza</h2>
+        <h2 className="text-xl text-white mb-2">Modifica Livello Professione</h2>
         <p className="text-gray-300 mb-4">Giocatore: <span className="font-semibold">{userName}</span></p>
-        <p className="text-white mb-2">Conoscenza: <span className="font-semibold">{conoscenzaName}</span></p>
+        <p className="text-white mb-2">Professione: <span className="font-semibold">{professioneName}</span></p>
         <div className="mb-4">
           <label className="block text-white mb-1">Livello</label>
           <select
