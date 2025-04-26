@@ -542,9 +542,9 @@
         "Anima_7": "---"
       },
       "characterId": "Nyx",
-      "conoscenze": {},
-      "imageUrl": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/characters%2Ftoken_2.png?alt=media&token=4d67afc5-c32e-4dda-97cb-c102a547d7dd",
-      "inventory": [],
+      "conoscenze": {
+        "Persuasione": "Capacit\u00e0 di persuadere (descrizione da reworkare)"
+      },
       "Parametri": {
         "Base": {
           "Fortuna": {
@@ -594,8 +594,8 @@
           "Disciplina": {
             "Base": 5,
             "Equip": 0,
-            "Tot": 6,
-            "Anima": 1,
+            "Tot": 8,
+            "Anima": 3,
             "Mod": 0
           },
           "RiduzioneDanni": {
@@ -642,6 +642,8 @@
           }
         }
       },
+      "inventory": [],
+      "imageUrl": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/characters%2Ftoken_2.png?alt=media&token=4d67afc5-c32e-4dda-97cb-c102a547d7dd",
       "tecniche": {
         "Trasformazione": {
           "Azione": "Consumabile",
@@ -659,15 +661,15 @@
         "lock_param_base": false
       },
       "stats": {
-        "manaCurrent": 47,
+        "manaTotal": 61,
         "combatTokensAvailable": 0,
         "basePointsSpent": 5,
         "combatTokensSpent": 68,
-        "level": 2,
+        "manaCurrent": 47,
         "negativeBaseStatCount": 2,
-        "manaTotal": 47,
-        "lastAnimaShard": "Spirito",
+        "level": 8,
         "hpTotal": 13,
+        "lastAnimaShard": "Spirito",
         "hpCurrent": 13,
         "basePointsAvailable": 0
       },
@@ -767,7 +769,10 @@
       },
       "role": "webmaster",
       "email": "marcolorenzo92@gmail.com",
-      "professioni": {},
+      "professioni": {
+        "Artigiano": "Valutazione, modifica e manutenzione di oggetti in legno, cuoio o materiali organici. Avanzato: produzione di armi e armature organiche.",
+        "Arcanista": "Teoria della magia, conoscenza dell\u2019Anima e dell\u2019Etere.  Capacit\u00e0 di comprendere e decifrare incantesimi. Avanzato: possibilit\u00e0 di scrivere nuovi incantesimi (richiede \u201cl\u2019ispirazione giusta\u201d)."
+      },
       "username": "marcolorenzo92"
     }
   },
