@@ -191,7 +191,19 @@ export function MergedStatsTable() {
                     {columns.map(col => {
                       // Highlight Tot column
                       const cellCls = `px-3 py-2 text-center ${col === 'Tot' ? 'bg-blue-900/50 font-semibold text-white' : ''}`;
-                      if (col === 'Base') return <td key={col} className={cellCls}><div className="flex justify-center space-x-1"><StatButton onClick={()=>handlePointChange(name,'Base',-1)} disabled={val<=-1}>–</StatButton><span>{stat.Base}</span><StatButton onClick={()=>handlePointChange(name,'Base',1)} disabled={val>=0&&basePointsAvailable<=0}>+</StatButton></div></td>;
+                      if (col === 'Base') return (
+                        <td key={col} className={cellCls}>
+                          {!lockBase ? (
+                            <div className="flex justify-center space-x-1">
+                              <StatButton onClick={() => handlePointChange(name, 'Base', -1)} disabled={val <= -1}>–</StatButton>
+                              <span>{stat.Base}</span>
+                              <StatButton onClick={() => handlePointChange(name, 'Base', 1)} disabled={val >= 0 && basePointsAvailable <= 0}>+</StatButton>
+                            </div>
+                          ) : (
+                            <span>{stat.Base}</span>
+                          )}
+                        </td>
+                      );
                       if (col === 'Mod') return <td key={col} className={cellCls}><div className="flex justify-center space-x-1"><StatButton onClick={()=>handleModChange(name,'Base',-1)}>-</StatButton><span>{stat.Mod}</span><StatButton onClick={()=>handleModChange(name,'Base',1)}>+</StatButton></div></td>;
                       return <td key={col} className={cellCls}>{stat[col]||0}</td>;
                     })}
