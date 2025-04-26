@@ -3,10 +3,11 @@ import React, { useState, useEffect } from "react";
 import { useAuth } from "../../AuthContext";
 import DnDBackground from "../backgrounds/DnDBackground";
 import StatsBars from "./elements/StatsBars";
-import { BaseStatsTable, CombatStatsTable } from "./elements/paramTables";
+import { MergedStatsTable } from "./elements/paramTables";
 import { API_BASE_URL } from "../firebaseConfig";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
+import { FaDice } from "react-icons/fa";
 
 function Home() {
   const { user, userData } = useAuth();
@@ -59,6 +60,18 @@ function Home() {
     }
   };
 
+  // Roll Dado Anima handler
+  const handleRollDice = () => {
+    const level = userData?.stats?.level;
+    if (!level) return;
+    const diceTypeStr = dadiAnimaByLevel[level - 1];
+    if (!diceTypeStr) return;
+    const faces = parseInt(diceTypeStr.replace(/^d/, ''), 10);
+    if (isNaN(faces) || faces <= 0) return;
+    const roll = Math.floor(Math.random() * faces) + 1;
+    alert(`Rolled ${diceTypeStr}: ${roll}`);
+  };
+
   if (!user) {
     return <p>Loading...</p>;
   }
@@ -67,7 +80,7 @@ function Home() {
     <div className="relative w-full min-h-screen overflow-x-hidden">
       <DnDBackground />
       <div className="relative z-10 flex flex-col">
-        <main className="flex flex-col items-center justify-center p-5">
+        <main className="flex flex-col items-start justify-start p-5 w-full">
           {/* Render Test API button only if user role is webmaster */}
           {userData?.role === "webmaster" && (
             <div className="mb-5 flex gap-3">
@@ -92,19 +105,20 @@ function Home() {
             </div>
           )}
           {dadiAnimaByLevel.length > 0 && userData?.stats?.level && (
-            <div className="mb-5 text-white text-lg">
-              Dado Anima: {dadiAnimaByLevel[userData.stats.level - 1]}
+            <div className="mb-5 text-white text-lg flex items-center">
+              <span>Dado Anima: {dadiAnimaByLevel[userData.stats.level - 1]}</span>
+              <button onClick={handleRollDice} className="ml-2 text-white hover:text-gray-300" title="Roll Dado Anima">
+                <FaDice className="inline-block" />
+              </button>
             </div>
           )}
-          <div className="mb-5 w-full max-w-[1200px]">
-            <StatsBars />
-          </div>
-          <div className="flex flex-row gap-5 w-full max-w-[1200px] h-full">
-            <div className="bg-[rgba(40,40,60,0.8)] p-4 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.4)] flex flex-col flex-1 min-h-0">
-              <BaseStatsTable />
+          {/* Main content: tables on left, stats bars on right */}
+          <div className="mb-5 w-full flex flex-row">
+            <div className="flex flex-col gap-5 w-auto">
+              <MergedStatsTable />
             </div>
-            <div className="bg-[rgba(40,40,60,0.8)] p-4 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.4)] flex flex-col flex-1 min-h-0">
-              <CombatStatsTable />
+            <div className="ml-5 flex-1">
+              <StatsBars />
             </div>
           </div>
         </main>
