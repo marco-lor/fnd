@@ -7,11 +7,16 @@ import { MergedStatsTable } from "./elements/paramTables";
 import { API_BASE_URL } from "../firebaseConfig";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
-import { FaDice } from "react-icons/fa";
+import { FaDiceD20 } from "react-icons/fa";
+import DiceRoller from "../common/DiceRoller";
 
 function Home() {
   const { user, userData } = useAuth();
   const [dadiAnimaByLevel, setDadiAnimaByLevel] = useState([]);
+  // at start of Home, add rolling state
+  const [rolling, setRolling] = useState(false);
+  const [rollingFaces, setRollingFaces] = useState(0);
+  const [rollingDescription, setRollingDescription] = useState("");
 
   useEffect(() => {
     const fetchDadiAnima = async () => {
@@ -68,8 +73,10 @@ function Home() {
     if (!diceTypeStr) return;
     const faces = parseInt(diceTypeStr.replace(/^d/, ''), 10);
     if (isNaN(faces) || faces <= 0) return;
-    const roll = Math.floor(Math.random() * faces) + 1;
-    alert(`Rolled ${diceTypeStr}: ${roll}`);
+    // trigger animated overlay with description
+    setRollingFaces(faces);
+    setRollingDescription(`Dado Anima (${diceTypeStr})`);
+    setRolling(true);
   };
 
   if (!user) {
@@ -108,7 +115,7 @@ function Home() {
             <div className="mb-5 text-white text-lg flex items-center">
               <span>Dado Anima: {dadiAnimaByLevel[userData.stats.level - 1]}</span>
               <button onClick={handleRollDice} className="ml-2 text-white hover:text-gray-300" title="Roll Dado Anima">
-                <FaDice className="inline-block" />
+                <FaDiceD20 className="inline-block" />
               </button>
             </div>
           )}
@@ -123,6 +130,18 @@ function Home() {
           </div>
         </main>
       </div>
+      {rolling && (
+        <DiceRoller
+          faces={rollingFaces}
+          count={1}
+          modifier={0}
+          description={rollingDescription}
+          onComplete={(total) => {
+            console.log(`${rollingDescription}: ${total}`);
+            setRolling(false);
+          }}
+        />
+      )}
     </div>
   );
 }

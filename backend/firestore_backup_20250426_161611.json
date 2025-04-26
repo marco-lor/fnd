@@ -592,17 +592,10 @@
         },
         "Combattimento": {
           "Disciplina": {
-            "Base": 9,
+            "Base": 5,
             "Equip": 0,
-            "Tot": 10,
+            "Tot": 6,
             "Anima": 1,
-            "Mod": 0
-          },
-          "Critico": {
-            "Base": 0,
-            "Equip": 0,
-            "Tot": 0,
-            "Anima": 0,
             "Mod": 0
           },
           "RiduzioneDanni": {
@@ -612,17 +605,24 @@
             "Anima": 0,
             "Mod": 0
           },
-          "Difesa": {
+          "Critico": {
             "Base": 1,
             "Equip": 0,
             "Tot": 1,
             "Anima": 0,
             "Mod": 0
           },
-          "Attacco": {
-            "Base": 3,
+          "Difesa": {
+            "Base": 2,
             "Equip": 0,
-            "Tot": 3,
+            "Tot": 2,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Salute": {
+            "Base": 1,
+            "Equip": 0,
+            "Tot": 1,
             "Anima": 0,
             "Mod": 0
           },
@@ -633,10 +633,10 @@
             "Anima": 0,
             "Mod": 0
           },
-          "Salute": {
-            "Base": 1,
+          "Attacco": {
+            "Base": 4,
             "Equip": 0,
-            "Tot": 1,
+            "Tot": 4,
             "Anima": 0,
             "Mod": 0
           }
@@ -659,17 +659,17 @@
         "lock_param_base": false
       },
       "stats": {
-        "basePointsAvailable": 0,
+        "manaCurrent": 47,
         "combatTokensAvailable": 0,
         "basePointsSpent": 5,
         "combatTokensSpent": 68,
-        "manaCurrent": 75,
-        "negativeBaseStatCount": 2,
         "level": 2,
+        "negativeBaseStatCount": 2,
+        "manaTotal": 47,
         "lastAnimaShard": "Spirito",
         "hpTotal": 13,
         "hpCurrent": 13,
-        "manaTotal": 75
+        "basePointsAvailable": 0
       },
       "lingue": {},
       "spells": {
@@ -1735,7 +1735,7 @@
       "stats": {
         "lastAnimaShard": "",
         "combatTokensAvailable": 0,
-        "basePointSpent": 0,
+        "basePointsSpent": 0,
         "combatTokensSpent": 0,
         "level": 1,
         "negativeBaseStatCount": 0,

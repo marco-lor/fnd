@@ -4,6 +4,8 @@ import { doc, updateDoc, onSnapshot, getDoc } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../../firebaseConfig";
 import { useAuth } from "../../../AuthContext";
+import { FaDiceD20 } from 'react-icons/fa';
+import DiceRoller from '../../common/DiceRoller';
 
 const functions = getFunctions();
 const spendCharacterPoint = httpsCallable(functions, "spendCharacterPoint");
@@ -30,6 +32,10 @@ const StatButton = ({ onClick, disabled, children, className = "" }) => (
 // --------------------------------------------------
 export function MergedStatsTable() {
   const { user, userData } = useAuth();
+  // Anima dice faces by character level
+  const [dadiAnimaByLevel, setDadiAnimaByLevel] = useState([]);
+  // Roller state
+  const [roller, setRoller] = useState({ visible: false, faces: 0, count: 1, modifier: 0, description: '' });
   const [baseStats, setBaseStats] = useState(null);
   const [combStats, setCombStats] = useState(null);
   const [cooldown, setCooldown] = useState(false);
@@ -61,6 +67,16 @@ export function MergedStatsTable() {
       setLockCombat(settings.lock_param_combat || false);
     }
   }, [userData]);
+
+  // fetch anima dice config
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'utils', 'varie'));
+        if (snap.exists()) setDadiAnimaByLevel(snap.data().dadiAnimaByLevel || []);
+      } catch {}
+    })();
+  }, []);
 
   // load combat cost table
   useEffect(() => {
@@ -121,6 +137,17 @@ export function MergedStatsTable() {
     await updateDoc(doc(db, "users", user.uid), { [`${key}.${stat}.Mod`]: cur + delta });
   };
 
+  // Handle parameter dice roll: roll anima dice + modifier equal to param total
+  const handleRollParam = (statName, total) => {
+    const level = userData?.stats?.level;
+    if (!level) return;
+    const diceTypeStr = dadiAnimaByLevel[level - 1];
+    if (!diceTypeStr) return;
+    const faces = parseInt(diceTypeStr.replace(/^d/, ''), 10);
+    if (isNaN(faces)) return;
+    setRoller({ visible: true, faces, count: 1, modifier: total, description: `${statName} Roll` });
+  };
+
   const renderTable = () => {
     if (!baseStats || !combStats || combatCosts === null) return <div className="text-center text-gray-400">Loading…</div>;
     const columns = ['Base','Anima','Equip','Mod','Tot'];
@@ -155,7 +182,12 @@ export function MergedStatsTable() {
                 const val = Number(stat.Base)||0;
                 return (
                   <tr key={name} className={even?"bg-gray-800":"bg-gray-900/50"}>
-                    <td className="px-3 py-2 font-medium text-white">{name}</td>
+                    <td className="px-3 py-2 font-medium text-white">
+                      <div className="flex items-center space-x-1">
+                        <FaDiceD20 className="cursor-pointer text-gray-400 hover:text-white" title={`Roll ${name}`} onClick={() => handleRollParam(name, Number(stat.Tot)||0)} />
+                        <span>{name}</span>
+                      </div>
+                    </td>
                     {columns.map(col => {
                       // Highlight Tot column
                       const cellCls = `px-3 py-2 text-center ${col === 'Tot' ? 'bg-blue-900/50 font-semibold text-white' : ''}`;
@@ -172,7 +204,12 @@ export function MergedStatsTable() {
                 const cost = combatCosts[name]||0; const afford=combatTokensAvailable>=cost;
                 return (
                   <tr key={name} className={even?"bg-gray-800":"bg-gray-900/50"}>
-                    <td className="px-3 py-2 font-medium text-white" title={`Cost: ${cost}`}>{name}</td>
+                    <td className="px-3 py-2 font-medium text-white" title={`Cost: ${cost}`}>
+                      <div className="flex items-center space-x-1">
+                        <FaDiceD20 className="cursor-pointer text-gray-400 hover:text-white" title={`Roll ${name}`} onClick={() => handleRollParam(name, Number(stat.Tot)||0)} />
+                        <span>{name}</span>
+                      </div>
+                    </td>
                     {columns.map(col=>{
                       // Highlight Tot column
                       const cellCls = `px-3 py-2 text-center ${col === 'Tot' ? 'bg-blue-900/50 font-semibold text-white' : ''}`;
@@ -191,12 +228,27 @@ export function MergedStatsTable() {
   };
 
   return (
-  <div className="p-4 bg-gray-900 rounded-xl shadow-md w-auto inline-block">
-    <h2 className="mb-3 text-lg font-semibold text-white">Stats Overview</h2>
-    {errorMsg && <div className="mb-2 text-red-400 text-sm">{errorMsg}</div>}
-    <div className="w-auto inline-block">
-      {renderTable()}
-    </div>
-  </div>
+    <>   
+      <div className="p-4 bg-gray-900 rounded-xl shadow-md w-auto inline-block">
+        <h2 className="mb-3 text-lg font-semibold text-white">Stats Overview</h2>
+        {errorMsg && <div className="mb-2 text-red-400 text-sm">{errorMsg}</div>}
+        <div className="w-auto inline-block">
+          {renderTable()}
+        </div>
+      </div>
+      {/* Dice Roller Overlay */}
+      {roller.visible && (
+        <DiceRoller
+          faces={roller.faces}
+          count={roller.count}
+          modifier={roller.modifier}
+          description={roller.description}
+          onComplete={(total) => {
+            console.log(`${roller.description}: ${total}`);
+            setRoller({ ...roller, visible: false });
+          }}
+        />
+      )}
+    </>
   );
 }
