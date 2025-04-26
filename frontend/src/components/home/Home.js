@@ -9,6 +9,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 import { FaDiceD20 } from "react-icons/fa";
 import DiceRoller from "../common/DiceRoller";
+import Extra from './elements/Extra';
 
 function Home() {
   const { user, userData } = useAuth();
@@ -69,7 +70,7 @@ function Home() {
   const handleRollDice = () => {
     const level = userData?.stats?.level;
     if (!level) return;
-    const diceTypeStr = dadiAnimaByLevel[level - 1];
+    const diceTypeStr = dadiAnimaByLevel[level];
     if (!diceTypeStr) return;
     const faces = parseInt(diceTypeStr.replace(/^d/, ''), 10);
     if (isNaN(faces) || faces <= 0) return;
@@ -111,9 +112,9 @@ function Home() {
               </button>
             </div>
           )}
-          {dadiAnimaByLevel.length > 0 && userData?.stats?.level && (
+          {dadiAnimaByLevel.length > 1 && userData?.stats?.level && (
             <div className="mb-5 text-white text-lg flex items-center">
-              <span>Dado Anima: {dadiAnimaByLevel[userData.stats.level - 1]}</span>
+              <span>Dado Anima: {dadiAnimaByLevel[userData.stats.level]}</span>
               <button onClick={handleRollDice} className="ml-2 text-white hover:text-gray-300" title="Roll Dado Anima">
                 <FaDiceD20 className="inline-block" />
               </button>
@@ -128,53 +129,7 @@ function Home() {
               <StatsBars />
             </div>
           </div>  {/* end stats row */}
-          {/* Conoscenze, Lingue, Professioni Container */}
-          <div className="bg-[rgba(40,40,60,0.8)] p-4 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.4)] w-1/4 mb-5">
-            <div className="grid grid-cols-1 divide-y divide-gray-700">
-              {/* Lingue */}
-              <div className="py-4">
-                <h3 className="text-lg font-semibold text-white mb-1">Lingue</h3>
-                {userData?.lingue ? (
-                  <ul className="list-disc list-inside text-gray-300">
-                    {Object.entries(userData.lingue).map(([name, descrizione]) => (
-                      <li key={name} className="mb-2">
-                        <span className="font-semibold">{name}</span>
-                        <p className="ml-4">{descrizione}</p>
-                      </li>
-                    ))}
-                  </ul>
-                ) : <p className="text-gray-400">Nessuna lingua.</p>}
-              </div>
-              {/* Conoscenze */}
-              <div className="py-4">
-                <h3 className="text-lg font-semibold text-white mb-1">Conoscenze</h3>
-                {userData?.conoscenze ? (
-                  <ul className="list-disc list-inside text-gray-300">
-                    {Object.entries(userData.conoscenze).map(([name, { livello, descrizione }]) => (
-                      <li key={name} className="mb-2">
-                        <span className="font-semibold">{name} | {livello}</span>
-                        <p className="ml-4">{descrizione}</p>
-                      </li>
-                    ))}
-                  </ul>
-                ) : <p className="text-gray-400">Nessuna conoscenza.</p>}
-              </div>
-              {/* Professioni */}
-              <div className="py-4">
-                <h3 className="text-lg font-semibold text-white mb-1">Professioni</h3>
-                {userData?.professioni ? (
-                  <ul className="list-disc list-inside text-gray-300">
-                    {Object.entries(userData.professioni).map(([name, { livello, descrizione }]) => (
-                      <li key={name} className="mb-2">
-                        <span className="font-semibold">{name} | {livello}</span>
-                        <p className="ml-4">{descrizione}</p>
-                      </li>
-                    ))}
-                  </ul>
-                ) : <p className="text-gray-400">Nessuna professione.</p>}
-              </div>
-            </div>
-          </div>
+          <Extra userData={userData} />
         </main>
       </div>
       {rolling && (
