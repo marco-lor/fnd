@@ -543,7 +543,10 @@
       },
       "characterId": "Nyx",
       "conoscenze": {
-        "Persuasione": "Capacit\u00e0 di persuadere (descrizione da reworkare)"
+        "Persuasione": {
+          "livello": "Avanzato",
+          "descrizione": "Capacit\u00e0 di persuadere (descrizione da reworkare)"
+        }
       },
       "Parametri": {
         "Base": {
@@ -661,19 +664,21 @@
         "lock_param_base": false
       },
       "stats": {
-        "manaTotal": 61,
+        "manaCurrent": 61,
         "combatTokensAvailable": 0,
         "basePointsSpent": 5,
         "combatTokensSpent": 68,
-        "manaCurrent": 47,
-        "negativeBaseStatCount": 2,
         "level": 8,
+        "negativeBaseStatCount": 2,
+        "manaTotal": 61,
         "hpTotal": 13,
         "lastAnimaShard": "Spirito",
         "hpCurrent": 13,
         "basePointsAvailable": 0
       },
-      "lingue": {},
+      "lingue": {
+        "Comune": "Il personaggio comprende e si esprime perfettamente nella lingua pi\u00f9 diffusa di Etherium."
+      },
       "spells": {
         "Barriera Cosmica (benefica)": {
           "Turni": 3,
@@ -770,8 +775,14 @@
       "role": "webmaster",
       "email": "marcolorenzo92@gmail.com",
       "professioni": {
-        "Artigiano": "Valutazione, modifica e manutenzione di oggetti in legno, cuoio o materiali organici. Avanzato: produzione di armi e armature organiche.",
-        "Arcanista": "Teoria della magia, conoscenza dell\u2019Anima e dell\u2019Etere.  Capacit\u00e0 di comprendere e decifrare incantesimi. Avanzato: possibilit\u00e0 di scrivere nuovi incantesimi (richiede \u201cl\u2019ispirazione giusta\u201d)."
+        "Agricoltore": {
+          "livello": "Avanzato",
+          "descrizione": "Gestione della vita rurale: coltivazione, allevamento, cura degli animali da fattoria."
+        },
+        "Arcanista": {
+          "livello": "Base",
+          "descrizione": "Teoria della magia, conoscenza dell\u2019Anima e dell\u2019Etere.  Capacit\u00e0 di comprendere e decifrare incantesimi. Avanzato: possibilit\u00e0 di scrivere nuovi incantesimi (richiede \u201cl\u2019ispirazione giusta\u201d)."
+        }
       },
       "username": "marcolorenzo92"
     }
