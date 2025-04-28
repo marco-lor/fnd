@@ -91,7 +91,7 @@ function RaceSelection({ user, onRaceSelect, selectedRace }) {
         // Apply conditional styling based on selection state
         className={`p-4 rounded-lg cursor-pointer transition-all duration-300 text-left h-full flex flex-col ${
           selectedRace?.id === race.id
-            ? 'bg-blue-700/70 border-2 border-blue-400 shadow-[0_0_10px_rgba(100,150,255,0.7)] scale-105'
+            ? 'bg-blue-700/70 border-2 border-blue-400 shadow-[0_0_10px_rgba(100,150,255,0.7)] scale-95'
             : 'bg-[rgba(40,40,60,0.7)] border border-[rgba(150,150,255,0.2)] hover:bg-[rgba(60,60,80,0.7)] hover:scale-102'
         }`}
         onClick={() => handleRaceSelect(race)}
