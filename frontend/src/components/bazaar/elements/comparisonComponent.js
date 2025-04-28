@@ -139,7 +139,7 @@ export default function ComparisonPanel({ item }) {
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: 300, opacity: 0 }}
       transition={{ duration: 0.3 }}
-      className="fixed right-0 p-0 overflow-y-auto z-50"
+      className="fixed right-0 p-0 overflow-y-auto z-50 rounded-l-lg overflow-hidden"
       style={{
         top: '14rem',
         width: '25vw',

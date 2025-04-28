@@ -110,7 +110,7 @@ const EquipmentBackground = () => {
 
   return (
     // Changed to fixed positioning to cover the entire viewport
-    <div className="fixed inset-0 z-0 overflow-hidden">
+    <div className="absolute inset-0 z-0 overflow-hidden">
       <div className="absolute inset-0 bg-gradient-to-br from-purple-900 via-gray-800 to-black"></div>
       {icons.map(({ id, x, y, size, IconComponent }) => (
         <IconComponent

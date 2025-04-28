@@ -168,117 +168,118 @@ export default function Bazaar() {
   const panelItem = lockedItem || hoveredItem;
 
   return (
-    <div className="min-h-screen relative" style={{ backgroundColor: 'transparent' }}>
+    <div className="relative w-full min-h-screen overflow-x-hidden">
       <InteractiveBackground />
 
-      <div className="fixed left-0 p-4 overflow-y-auto z-40" style={{ top: '10rem', width: '15vw', height: 'calc(100% - 4rem)' }}>
-        <div className="mb-6">
-          <p className="text-white font-bold mb-2">Filter by Slot:</p>
-          <div className="flex flex-wrap gap-2">
-            {slots.map((slot) => (
-              <button
-                key={slot}
-                onClick={() => handleToggleSlot(slot)}
-                className={`px-4 py-2 rounded-lg border transition-colors ${selectedSlot.includes(slot) ? 'bg-[rgba(25,50,128,0.4)] text-white' : 'bg-white text-[rgba(25,50,128,0.4)]'}`}
-              >
-                {slot || 'None'}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="mb-6">
-          <p className="text-white font-bold mb-2">Filter by Hands:</p>
-          <div className="flex flex-wrap gap-2">
-            {hands.map((hand) => (
-              <button
-                key={hand}
-                onClick={() => handleToggleHands(hand)}
-                className={`px-4 py-2 rounded-lg border transition-colors ${selectedHands.includes(hand) ? 'bg-[rgba(25,50,128,0.4)] text-white' : 'bg-white text-[rgba(25,50,128,0.4)]'}`}
-              >
-                {hand}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div>
-          <p className="text-white font-bold mb-2">Filter by Tipo:</p>
-          <div className="flex flex-wrap gap-2">
-            {tipos.map((tipo) => (
-              <button
-                key={tipo}
-                onClick={() => handleToggleTipo(tipo)}
-                className={`px-4 py-2 rounded-lg border transition-colors ${selectedTipo.includes(tipo) ? 'bg-[rgba(25,50,128,0.4)] text-white' : 'bg-white text-[rgba(25,50,128,0.4)]'}`}
-              >
-                {tipo}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="relative p-6" style={{ marginLeft: '15vw', marginRight: '25vw', marginTop: '9rem' }}>
-        {(userData?.role === 'webmaster' || userData?.role === 'dm') && (
-          <div className="mb-4">
-            <div className="flex space-x-2">
-              <button
-                onClick={handleAddWeaponClick}
-                className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
-              >
-                Aggiungi Arma
-              </button>
-              <button
-                onClick={() => displayConfirmation("Funzionalità Armatura in arrivo!")}
-                className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
-              >
-                Aggiungi Armatura
-              </button>
-              <button
-                onClick={() => displayConfirmation("Funzionalità Accessorio in arrivo!")}
-                className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
-              >
-                Aggiungi Accessorio
-              </button>
-              <button
-                onClick={() => displayConfirmation("Funzionalità Consumabile in arrivo!")}
-                className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
-              >
-                Aggiungi Consumabile
-              </button>
-              <button
-                onClick={() => displayConfirmation("Funzionalità Munizione in arrivo!")}
-                className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
-              >
-                Aggiungi Munizione
-              </button>
+      <div className="relative z-10 flex">
+        <div className="sticky top-0 p-4 overflow-y-auto w-[15vw] h-screen">
+          <div className="mb-6">
+            <p className="text-white font-bold mb-2">Filter by Slot:</p>
+            <div className="flex flex-wrap gap-2">
+              {slots.map((slot) => (
+                <button
+                  key={slot}
+                  onClick={() => handleToggleSlot(slot)}
+                  className={`px-4 py-2 rounded-lg border transition-colors ${selectedSlot.includes(slot) ? 'bg-[rgba(25,50,128,0.4)] text-white' : 'bg-white text-[rgba(25,50,128,0.4)]'}`}
+                >
+                  {slot || 'None'}
+                </button>
+              ))}
             </div>
           </div>
-        )}
-        <div className="flex flex-col gap-4 mb-4">
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={handleSearchChange}
-            placeholder="Search Arcane Wares..."
-            className="border border-white rounded-lg px-4 py-2 focus:outline-none focus:border-gray-300 flex-1 bg-gray-800 text-white"
-          />
+          <div className="mb-6">
+            <p className="text-white font-bold mb-2">Filter by Hands:</p>
+            <div className="flex flex-wrap gap-2">
+              {hands.map((hand) => (
+                <button
+                  key={hand}
+                  onClick={() => handleToggleHands(hand)}
+                  className={`px-4 py-2 rounded-lg border transition-colors ${selectedHands.includes(hand) ? 'bg-[rgba(25,50,128,0.4)] text-white' : 'bg-white text-[rgba(25,50,128,0.4)]'}`}
+                >
+                  {hand}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-white font-bold mb-2">Filter by Tipo:</p>
+            <div className="flex flex-wrap gap-2">
+              {tipos.map((tipo) => (
+                <button
+                  key={tipo}
+                  onClick={() => handleToggleTipo(tipo)}
+                  className={`px-4 py-2 rounded-lg border transition-colors ${selectedTipo.includes(tipo) ? 'bg-[rgba(25,50,128,0.4)] text-white' : 'bg-white text-[rgba(25,50,128,0.4)]'}`}
+                >
+                  {tipo}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
-        <div className="flex flex-col gap-2">
-          {filteredItems.map((item) => (
-            <ItemCard
-              key={item.id}
-              item={item}
-              onPurchase={handlePurchase}
-              onHoverItem={handleHoverItem}
-              onLockToggle={() => {
-                if (lockedItem && lockedItem.id === item.id) {
-                  setLockedItem(null);
-                } else {
-                  setLockedItem(item);
-                }
-              }}
-              isLocked={lockedItem && lockedItem.id === item.id}
+        <div className="w-7/12 p-6">
+          {(userData?.role === 'webmaster' || userData?.role === 'dm') && (
+            <div className="mb-4">
+              <div className="flex space-x-2">
+                <button
+                  onClick={handleAddWeaponClick}
+                  className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+                >
+                  Aggiungi Arma
+                </button>
+                <button
+                  onClick={() => displayConfirmation("Funzionalità Armatura in arrivo!")}
+                  className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+                >
+                  Aggiungi Armatura
+                </button>
+                <button
+                  onClick={() => displayConfirmation("Funzionalità Accessorio in arrivo!")}
+                  className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+                >
+                  Aggiungi Accessorio
+                </button>
+                <button
+                  onClick={() => displayConfirmation("Funzionalità Consumabile in arrivo!")}
+                  className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+                >
+                  Aggiungi Consumabile
+                </button>
+                <button
+                  onClick={() => displayConfirmation("Funzionalità Munizione in arrivo!")}
+                  className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+                >
+                  Aggiungi Munizione
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="flex flex-col gap-4 mb-4">
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={handleSearchChange}
+              placeholder="Search Arcane Wares..."
+              className="border border-white rounded-lg px-4 py-2 focus:outline-none focus:border-gray-300 flex-1 bg-gray-800 text-white"
             />
-          ))}
+          </div>
+          <div className="flex flex-col gap-2">
+            {filteredItems.map((item) => (
+              <ItemCard
+                key={item.id}
+                item={item}
+                onPurchase={handlePurchase}
+                onHoverItem={handleHoverItem}
+                onLockToggle={() => {
+                  if (lockedItem && lockedItem.id === item.id) {
+                    setLockedItem(null);
+                  } else {
+                    setLockedItem(item);
+                  }
+                }}
+                isLocked={lockedItem && lockedItem.id === item.id}
+              />
+            ))}
+          </div>
         </div>
       </div>
 
