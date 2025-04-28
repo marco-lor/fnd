@@ -235,11 +235,14 @@ function CharacterCreation() {
 
       // Handle image upload if a file is present
       if (imageFile) {
-        const safeFileName = `${characterName.trim().replace(/\s+/g, '_')}_${user.uid}_${Date.now()}`; // Add timestamp for uniqueness
-        const imageRef = ref(storage, `characters/${safeFileName}`);
+        // Generate and store both URL and storage path
+        const safeFileName = `${characterName.trim().replace(/\s+/g, '_')}_${user.uid}_${Date.now()}`;
+        const imagePath = `characters/${safeFileName}`;
+        const imageRef = ref(storage, imagePath);
         await uploadBytes(imageRef, imageFile);
         const imageUrl = await getDownloadURL(imageRef);
         characterUpdateData.imageUrl = imageUrl;
+        characterUpdateData.imagePath = imagePath;
       } else if (userDocSnap.exists() && userDocSnap.data()?.imageUrl) {
          characterUpdateData.imageUrl = userDocSnap.data()?.imageUrl; // Keep existing
       }
