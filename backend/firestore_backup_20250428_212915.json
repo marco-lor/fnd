@@ -674,847 +674,6 @@
     "armature": {},
     "consumabili": {},
     "munizioni": {},
-    "test": {
-      "Parametri": {
-        "Base": {
-          "Fortuna": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Intelligenza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Saggezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Forza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Destrezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Costituzione": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        },
-        "Combattimento": {
-          "Disciplina": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "RiduzioneDanni": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Difesa": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Attacco": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Mira": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Salute": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        }
-      },
-      "ridCostoTec": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Bonus Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Effetto": "fa malissimo",
-      "Hands": "2",
-      "requisiti": "nessuno",
-      "Penetrazione": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "ridCostoSpell": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Tipo": "Mischia",
-      "Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Nome": "test",
-      "Slot": "Mano Principale",
-      "Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "prezzo": "150",
-      "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Ftest_gio.png?alt=media&token=f71a3be4-58eb-43f5-8437-763a9128dc07",
-      "Bonus Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      }
-    },
-    "test_nyx": {
-      "Hands": 1,
-      "ridCostoSpellSingola": {
-        "Barriera Cosmica (benefica)": 1
-      },
-      "Bonus Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Effetto": "",
-      "Parametri": {
-        "Base": {
-          "Fortuna": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Intelligenza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Saggezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Forza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Destrezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Costituzione": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        },
-        "Combattimento": {
-          "Disciplina": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "RiduzioneDanni": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Difesa": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Attacco": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Mira": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Salute": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        }
-      },
-      "requisiti": "",
-      "ridCostoTecSingola": {
-        "Trasformazione": 1
-      },
-      "ridCostoTec": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Penetrazione": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "ridCostoSpell": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Tipo": "Mischia",
-      "Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Nome": "test_nyx",
-      "Slot": "Mano Principale",
-      "Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "image_url": "",
-      "Bonus Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      }
-    },
-    "test_param": {
-      "Parametri": {
-        "Base": {
-          "Fortuna": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Intelligenza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Saggezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Forza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Destrezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Costituzione": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        },
-        "Combattimento": {
-          "Disciplina": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "RiduzioneDanni": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Difesa": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Attacco": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": "Difesa*2"
-          },
-          "Mira": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Salute": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        }
-      },
-      "ridCostoSpellSingola": {
-        "nome_spell": ""
-      },
-      "Bonus Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Effetto": "",
-      "ridCostoTec": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "requisiti": "",
-      "ridCostoTecSingola": {
-        "nomeTecnica": ""
-      },
-      "Hands": 1,
-      "Penetrazione": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "ridCostoSpell": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Tipo": "Mischia",
-      "Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Nome": "test_param",
-      "Slot": "Mano Principale",
-      "Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "image_url": "",
-      "Bonus Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      }
-    },
-    "test_pu": {
-      "Parametri": {
-        "Base": {
-          "Fortuna": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Intelligenza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Saggezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Forza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Destrezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Costituzione": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        },
-        "Combattimento": {
-          "Disciplina": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "RiduzioneDanni": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Difesa": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Attacco": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": "-3+Destrezza"
-          },
-          "Mira": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": "-3+Forza"
-          },
-          "Salute": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        }
-      },
-      "ridCostoSpellSingola": {
-        "nome_spell": ""
-      },
-      "Bonus Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Effetto": "",
-      "ridCostoTec": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "requisiti": "",
-      "ridCostoTecSingola": {
-        "nomeTecnica": ""
-      },
-      "Hands": 1,
-      "Penetrazione": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "ridCostoSpell": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Tipo": "Mischia",
-      "Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Nome": "test_pu",
-      "Slot": "Mano Principale",
-      "Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "image_url": "",
-      "Bonus Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      }
-    },
-    "test_pu_2": {
-      "Parametri": {
-        "Base": {
-          "Fortuna": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Intelligenza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Saggezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Forza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Destrezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Costituzione": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        },
-        "Combattimento": {
-          "Disciplina": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "RiduzioneDanni": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Difesa": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Attacco": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": "MAX(-3+Destrezza;0)"
-          },
-          "Mira": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": "MAX(-3+Forza;0)"
-          },
-          "Salute": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        }
-      },
-      "ridCostoSpellSingola": {
-        "nome_spell": ""
-      },
-      "Bonus Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Effetto": "",
-      "ridCostoTec": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "requisiti": "",
-      "ridCostoTecSingola": {
-        "nomeTecnica": ""
-      },
-      "Hands": 1,
-      "Penetrazione": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "ridCostoSpell": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Tipo": "Mischia",
-      "Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Nome": "test_pu_2",
-      "Slot": "Mano Principale",
-      "Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "image_url": "",
-      "Bonus Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      }
-    },
-    "testtest": {
-      "Parametri": {
-        "Base": {
-          "Fortuna": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Intelligenza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Saggezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Forza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Destrezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Costituzione": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        },
-        "Combattimento": {
-          "Disciplina": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "RiduzioneDanni": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Difesa": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Attacco": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": "MAX(-3+MIN(Destrezza;3);0)"
-          },
-          "Mira": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Salute": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        }
-      },
-      "ridCostoSpellSingola": {
-        "nome_spell": ""
-      },
-      "Bonus Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Effetto": "",
-      "ridCostoTec": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "requisiti": "",
-      "ridCostoTecSingola": {
-        "nomeTecnica": ""
-      },
-      "Hands": 1,
-      "Penetrazione": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "ridCostoSpell": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Tipo": "Mischia",
-      "Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Nome": "testtest",
-      "Slot": "Mano Principale",
-      "Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "image_url": "",
-      "Bonus Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      }
-    },
     "weapons": {}
   },
   "users": {
@@ -1654,15 +813,16 @@
       "stats": {
         "hpCurrent": 13,
         "combatTokensAvailable": 5,
+        "gold": 0,
         "basePointsSpent": 5,
         "combatTokensSpent": 63,
         "level": 8,
         "negativeBaseStatCount": 2,
         "manaTotal": 68,
         "lastAnimaShard": "Spirito",
-        "manaCurrent": 68,
+        "hpTotal": 13,
         "basePointsAvailable": 0,
-        "hpTotal": 13
+        "manaCurrent": 68
       },
       "lingue": {
         "Comune": "Il personaggio comprende e si esprime perfettamente nella lingua pi\u00f9 diffusa di Etherium."
@@ -1670,8 +830,8 @@
       "imagePath": "characters/Nyx_TQAmmVfIpOeNiRflXKSeL1NX2ak2_1745838390356",
       "spells": {
         "Barriera Cosmica (benefica)": {
-          "Turni": 3,
-          "video_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fvideos%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__benefica__1742682281306_video?alt=media&token=84db6620-cdcd-49a7-8469-f41bf1c4a048",
+          "Tipo Base": "Incantamento",
+          "Nome": "Barriera Cosmica (benefica)",
           "Costo": 19,
           "Effetti Positivi": " 3d10 barriera , i tuoi sensi vengono amplificati e proiettati in una zona di  10 Metri di raggio intorno a te, + 2 difesa per i tuoi prossimi tre turni, chi ti attacca in mischia subisce 1d10 danno e se ha una massa inferiore a 300 kg viene respinto 6 metri indietro, castabile su te stesso o bersaglio alleato",
           "TPC Mentale": {
@@ -1684,43 +844,47 @@
             "Param2": "---",
             "ParamTarget": "---"
           },
-          "Tipo Base": "Incantamento",
+          "Turni": 3,
           "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__benefica__1742671660253_image?alt=media&token=1d4b399b-6fdc-4981-9e05-6635d384fd9f",
-          "Nome": "Barriera Cosmica (benefica)",
+          "video_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fvideos%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__benefica__1742682281306_video?alt=media&token=84db6620-cdcd-49a7-8469-f41bf1c4a048",
           "Mod Params": {
             "Base": {
               "Fortuna": 0,
               "Intelligenza": 0,
               "Saggezza": 0,
-              "Forza": 0,
               "Destrezza": 0,
+              "Forza": 0,
               "Costituzione": 0
             },
             "Combattimento": {
               "Difesa": 2,
               "Disciplina": 0,
-              "RiduzioneDanni": 0,
+              "Critico": 0,
               "Salute": 0,
               "Attacco": 0,
-              "Critico": 0
+              "RiduzioneDanni": 0
             }
           },
           "Esperienza": "Principiante",
           "TPC Fisico": {
-            "Param1": "Intelligenza",
             "Param2": "Saggezza",
+            "Param1": "Intelligenza",
             "ParamTarget": "Costituzione"
           },
           "Effetti Negativi": "Sei cieco e sordo al di l\u00e0 dei dieci metri per tutta la durata dell'incantesimo; l'incantesimo pu\u00f2 essere interrotto spendendo un' azione consumabile; utilizzare questo incantesimo se Barriera Cosmica Offensiva \u00e8 attiva causa il termine immediato di Barriera Cosmica Offensiva"
         },
         "Barriera Cosmica (offensiva)": {
-          "Turni": 3,
-          "video_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fvideos%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__offensiva__1742685004831_video?alt=media&token=36a3a79e-ac7c-4155-8dfc-2107d179261b",
-          "Costo": 19,
-          "Effetti Positivi": "3d10 danno, nel prossimo turno il bersaglio non pu\u00f2 utilizzare l'azione di movimento, Gittata dieci metri, -2 DIFESA per tre turni contro attacchi in mischia",
           "TPC Mentale": {
             "Param1": "Costituzione",
             "Param2": "Costituzione",
+            "ParamTarget": "Costituzione"
+          },
+          "Nome": "Barriera Cosmica (offensiva)",
+          "Costo": 19,
+          "Effetti Positivi": "3d10 danno, nel prossimo turno il bersaglio non pu\u00f2 utilizzare l'azione di movimento, Gittata dieci metri, -2 DIFESA per tre turni contro attacchi in mischia",
+          "TPC Fisico": {
+            "Param1": "Intelligenza",
+            "Param2": "Saggezza",
             "ParamTarget": "Costituzione"
           },
           "TPC": {
@@ -1728,16 +892,16 @@
             "Param2": "Saggezza",
             "ParamTarget": "''"
           },
-          "Tipo Base": "Congiurazione",
+          "Turni": 3,
           "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__offensiva__1742685004831_image?alt=media&token=f942ca87-b3b1-4a52-85e0-b1a2e127df4d",
-          "Nome": "Barriera Cosmica (offensiva)",
+          "Tipo Base": "Congiurazione",
           "Mod Params": {
             "Base": {
               "Fortuna": 0,
               "Intelligenza": 0,
               "Saggezza": 0,
-              "Forza": 0,
               "Destrezza": 0,
+              "Forza": 0,
               "Costituzione": 0
             },
             "Combattimento": {
@@ -1749,12 +913,8 @@
               "Critico": 0
             }
           },
+          "video_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fvideos%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__offensiva__1742685004831_video?alt=media&token=36a3a79e-ac7c-4155-8dfc-2107d179261b",
           "Esperienza": "Principiante",
-          "TPC Fisico": {
-            "Param1": "Intelligenza",
-            "Param2": "Saggezza",
-            "ParamTarget": "Costituzione"
-          },
           "Effetti Negativi": "il bersaglio ottiene +2 DIFESA  contro attacchi a distanza o (+2/int o sag) incantesimi lanciati da almeno 15 feet di distanza utilizzare questo incantesimo se Barriera Cosmica Difensiva \u00e8 attiva causa il termine immediato di Barriera Cosmica Difensiva"
         }
       },
@@ -2289,6 +1449,7 @@
         "Mano Principale",
         "Mano Secondaria"
       ],
+      "spells": {},
       "Danno": {
         "4": "1d4",
         "10": "1d4",
@@ -2746,6 +1907,7 @@
       "stats": {
         "lastAnimaShard": "",
         "combatTokensAvailable": 0,
+        "gold": 0,
         "basePointsSpent": 0,
         "combatTokensSpent": 0,
         "level": 1,

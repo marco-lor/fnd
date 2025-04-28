@@ -12,6 +12,7 @@ const sleekButtonStyle = "w-36 px-2 py-1 bg-gradient-to-r from-blue-800 to-indig
 export function AddSpellButton({ onClick }) {
   return (
     <button
+      type="button"
       className={sleekButtonStyle}
       onClick={onClick}
     >

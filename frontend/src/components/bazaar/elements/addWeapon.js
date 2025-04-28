@@ -6,6 +6,7 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { AuthContext } from '../../../AuthContext';
 import { computeValue } from '../../common/computeFormula';
+import { AddSpellButton, AddSpellOverlay } from '../../dmDashboard/elements/buttons/addSpell';
 
 export function AddWeaponOverlay({ onClose }) {
   const [schema, setSchema] = useState(null);
@@ -19,11 +20,15 @@ export function AddWeaponOverlay({ onClose }) {
   const [ridTecnicheList, setRidTecnicheList] = useState([]);
   const [spellsList, setSpellsList] = useState([]);
   const [ridSpellList, setRidSpellList] = useState([]);
+  const [weaponSpellsList, setWeaponSpellsList] = useState([]);
+  const [showSpellOverlay, setShowSpellOverlay] = useState(false);
   // handers to add/remove tecnica reductions
   const addTecnica = () => setRidTecnicheList(prev => [...prev, { selectedTec: '', ridValue: '' }]);
   const removeTecnica = index => setRidTecnicheList(prev => prev.filter((_, i) => i !== index));
   const addSpell = () => setRidSpellList(prev => [...prev, { selectedSpell: '', ridValue: '' }]);
   const removeSpell = index => setRidSpellList(prev => prev.filter((_, i) => i !== index));
+  const addWeaponSpell = () => setWeaponSpellsList(prev => [...prev, '']);
+  const removeWeaponSpell = index => setWeaponSpellsList(prev => prev.filter((_, i) => i !== index));
 
   useEffect(() => {
     const fetchSchema = async () => {
@@ -93,7 +98,7 @@ export function AddWeaponOverlay({ onClose }) {
     if (user) fetchTecniche();
   }, [user]);
   useEffect(() => {
-    const fetchSpells = async () => {
+    const fetchSpellsList = async () => {
       try {
         const doc1 = await getDoc(doc(db, 'utils', 'spells_common'));
         const commonData = doc1.exists() ? doc1.data() : {};
@@ -104,7 +109,7 @@ export function AddWeaponOverlay({ onClose }) {
         console.error('Error fetching spells', error);
       }
     };
-    if (user) fetchSpells();
+    if (user) fetchSpellsList();
   }, [user]);
   useEffect(() => {
     if (user) {
@@ -162,6 +167,12 @@ export function AddWeaponOverlay({ onClose }) {
       if (ridSpellList.length > 0) {
         updatedFormData.ridCostoSpellSingola = ridSpellList.reduce((acc, { selectedSpell, ridValue }) => {
           if (selectedSpell) acc[selectedSpell] = Number(ridValue);
+          return acc;
+        }, {});
+      }
+      if (weaponSpellsList.length > 0) {
+        updatedFormData.spells = weaponSpellsList.reduce((acc, spell) => {
+          if (spell) acc[spell] = true;
           return acc;
         }, {});
       }
@@ -466,61 +477,87 @@ export function AddWeaponOverlay({ onClose }) {
         <form onSubmit={(e) => { e.preventDefault(); handleSaveWeapon(); }}>
           {renderBasicFields()}
           {renderTablesSection()}
+          {/* Single technique reductions */}
           <div className="mt-4">
-            <label className="block text-white mb-1">Riduzione Costo Tecnica</label>
-            <button
-              type="button"
-              onClick={addTecnica}
-              className="mb-2 text-blue-500 underline hover:text-blue-600"
-            >
-              Aggiungi Tecnica
-            </button>
+            <label className="block text-white mb-1">Riduzioni Tecniche Singole</label>
+            <button type="button" onClick={addTecnica} className="text-blue-500 underline hover:text-blue-600 mb-2">Aggiungi Tecnica</button>
             {ridTecnicheList.map((item, idx) => (
               <div key={idx} className="grid grid-cols-3 gap-4 items-center mb-2">
                 <select
                   value={item.selectedTec}
                   onChange={e => {
-                    const newList = [...ridTecnicheList]; newList[idx].selectedTec = e.target.value; setRidTecnicheList(newList);
+                    const newList = [...ridTecnicheList];
+                    newList[idx].selectedTec = e.target.value;
+                    setRidTecnicheList(newList);
                   }}
                   className="w-full p-2 rounded bg-gray-700 text-white"
                 >
                   <option value="" disabled>Seleziona tecnica</option>
-                  {tecnicheList.map(name => (
-                    <option key={name} value={name}>{name}</option>
-                  ))}
+                  {tecnicheList.map(name => <option key={name} value={name}>{name}</option>)}
                 </select>
                 <input
                   type="number"
                   value={item.ridValue}
                   onChange={e => {
-                    const newList = [...ridTecnicheList]; newList[idx].ridValue = e.target.value; setRidTecnicheList(newList);
+                    const newList = [...ridTecnicheList];
+                    newList[idx].ridValue = e.target.value;
+                    setRidTecnicheList(newList);
                   }}
-                  className="w-full p-2 rounded bg-gray-700 text-white"
                   placeholder="Riduzione"
+                  className="w-full p-2 rounded bg-gray-700 text-white"
                 />
-                <button
-                  type="button"
-                  onClick={() => removeTecnica(idx)}
-                  className="text-red-500"
-                >Rimuovi</button>
+                <button type="button" onClick={() => removeTecnica(idx)} className="text-red-500">Rimuovi</button>
               </div>
             ))}
           </div>
+          {/* Single spell reductions */}
           <div className="mt-4">
-            <label className="block text-white mb-1">Riduzione Costo Spell</label>
-            <button
-              type="button"
-              onClick={addSpell}
-              className="mb-2 text-blue-500 underline hover:text-blue-600"
-            >
-              Aggiungi Spell
-            </button>
+            <label className="block text-white mb-1">Riduzioni Spell Singole</label>
+            <button type="button" onClick={addSpell} className="text-blue-500 underline hover:text-blue-600 mb-2">Aggiungi Riduzione Spell</button>
             {ridSpellList.map((item, idx) => (
               <div key={idx} className="grid grid-cols-3 gap-4 items-center mb-2">
                 <select
                   value={item.selectedSpell}
                   onChange={e => {
-                    const newList = [...ridSpellList]; newList[idx].selectedSpell = e.target.value; setRidSpellList(newList);
+                    const newList = [...ridSpellList];
+                    newList[idx].selectedSpell = e.target.value;
+                    setRidSpellList(newList);
+                  }}
+                  className="w-full p-2 rounded bg-gray-700 text-white"
+                >
+                  <option value="" disabled>Seleziona spell</option>
+                  {spellsList.map(name => <option key={name} value={name}>{name}</option>)}
+                </select>
+                <input
+                  type="number"
+                  value={item.ridValue}
+                  onChange={e => {
+                    const newList = [...ridSpellList];
+                    newList[idx].ridValue = e.target.value;
+                    setRidSpellList(newList);
+                  }}
+                  placeholder="Riduzione"
+                  className="w-full p-2 rounded bg-gray-700 text-white"
+                />
+                <button type="button" onClick={() => removeSpell(idx)} className="text-red-500">Rimuovi</button>
+              </div>
+            ))}
+          </div>
+          {/* New weapon spells */}
+          <div className="mt-4">
+            <label className="block text-white mb-1">Spells</label>
+            <div className="mb-2">
+              <AddSpellButton onClick={() => setShowSpellOverlay(true)} />
+            </div>
+            {showSpellOverlay && (
+              <AddSpellOverlay userId={user.uid} onClose={(saved) => { if (saved) { /* refresh spells list */ /* fetchSpellsList is inside effect */ } setShowSpellOverlay(false); }} />
+            )}
+            {weaponSpellsList.map((spell, idx) => (
+              <div key={idx} className="grid grid-cols-2 gap-4 items-center mb-2">
+                <select
+                  value={spell}
+                  onChange={e => {
+                    const newList = [...weaponSpellsList]; newList[idx] = e.target.value; setWeaponSpellsList(newList);
                   }}
                   className="w-full p-2 rounded bg-gray-700 text-white"
                 >
@@ -529,20 +566,7 @@ export function AddWeaponOverlay({ onClose }) {
                     <option key={name} value={name}>{name}</option>
                   ))}
                 </select>
-                <input
-                  type="number"
-                  value={item.ridValue}
-                  onChange={e => {
-                    const newList = [...ridSpellList]; newList[idx].ridValue = e.target.value; setRidSpellList(newList);
-                  }}
-                  className="w-full p-2 rounded bg-gray-700 text-white"
-                  placeholder="Riduzione"
-                />
-                <button
-                  type="button"
-                  onClick={() => removeSpell(idx)}
-                  className="text-red-500"
-                >Rimuovi</button>
+                <button type="button" onClick={() => removeWeaponSpell(idx)} className="text-red-500">Rimuovi</button>
               </div>
             ))}
           </div>
