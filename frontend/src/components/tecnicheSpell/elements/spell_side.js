@@ -363,7 +363,7 @@ const SpellCard = ({ spellName, spell, userData }) => {
             </h3>
             {/* Nuovo campo Turni posizionato sotto il nome dell'incantesimo e la linea */}
             <div className={`text-center -mt-3 mb-2 ${isExpanded ? 'text-xs' : 'text-[10px]'} text-gray-400`}>
-              Turni: {spell.Turni || "---"}
+              Turni: {spell.Turni || "---"} | Gittata: {spell.Gittata || "---"}
             </div>
             
             <div className="grid grid-cols-3 gap-2 mb-2">

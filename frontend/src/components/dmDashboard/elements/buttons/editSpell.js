@@ -30,6 +30,7 @@ export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
             Nome: spellName,
             Costo: parseInt(spellData.Costo) || 0,
             Turni: parseInt(spellData.Turni) || 0,
+            Gittata: parseInt(spellData.Gittata) || 0,
             "Effetti Positivi": spellData["Effetti Positivi"] || "",
             "Effetti Negativi": spellData["Effetti Negativi"] || "",
             Esperienza: spellData.Esperienza || "",
@@ -136,6 +137,7 @@ export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
         Nome: spellFormData.Nome || "",
         Costo: parseInt(spellFormData.Costo) || 0,
         Turni: parseInt(spellFormData.Turni) || 0,
+        Gittata: parseInt(spellFormData.Gittata) || 0,
         "Effetti Positivi": spellFormData["Effetti Positivi"] || "",
         "Effetti Negativi": spellFormData["Effetti Negativi"] || "",
         Esperienza: spellFormData.Esperienza || "",
@@ -323,6 +325,16 @@ export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
                       onChange={(e) => setSpellFormData({ ...spellFormData, Turni: e.target.value })}
                       className="w-full p-2 rounded bg-gray-700 text-white"
                       placeholder="Inserisci numero di turni"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-white mb-1">Gittata</label>
+                    <input
+                      type="number"
+                      value={spellFormData.Gittata || ''}
+                      onChange={(e) => setSpellFormData({ ...spellFormData, Gittata: e.target.value })}
+                      className="w-full p-2 rounded bg-gray-700 text-white"
+                      placeholder="Inserisci gittata"
                     />
                   </div>
                 </div>
