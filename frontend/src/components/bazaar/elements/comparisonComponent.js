@@ -1,14 +1,16 @@
 // file: ./frontend/src/components/bazaar/elements/comparisonComponent.js
 import React, { useContext, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { deleteDoc, doc, onSnapshot } from "firebase/firestore";
-import { ref, deleteObject } from "firebase/storage"; // Added Firebase storage functions
-import { db, storage } from "../../firebaseConfig"; // Imported storage alongside db
+import { deleteDoc, doc, onSnapshot, getDoc } from "firebase/firestore";
+import { ref, deleteObject } from "firebase/storage"; // Firebase storage functions
+import { db, storage } from "../../firebaseConfig";
+import { computeValue } from '../../common/computeFormula';
 import { AuthContext } from "../../../AuthContext";
 
 export default function ComparisonPanel({ item }) {
   const { user } = useContext(AuthContext);
   const [userData, setUserData] = useState(null);
+  const [userParams, setUserParams] = useState({ Base: {}, Combattimento: {} });
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [imageError, setImageError] = useState(false);
 
@@ -26,6 +28,19 @@ export default function ComparisonPanel({ item }) {
           console.error("Error fetching user data:", error);
         }
       );
+      // fetch user parameters
+      const fetchParams = async () => {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (userDoc.exists()) {
+            setUserParams(userDoc.data().Parametri || {});
+          }
+        } catch (error) {
+          console.error('Error fetching user parameters', error);
+        }
+      };
+      fetchParams();
+
       return () => unsubscribe();
     }
   }, [user]);
@@ -81,7 +96,13 @@ export default function ComparisonPanel({ item }) {
   const renderRow = (data) => {
     return ["1", "4", "7", "10"].map(col => (
       <td key={col} className="border px-2 py-1 text-center">
-        {data && data[col] ? data[col] : '-'}
+        {data && data[col] ? (
+          <>
+            {data[col]}
+            <span className="ml-1 text-gray-400">({computeValue(data[col], userParams)})</span>
+          </>
+        ) : '-'
+        }
       </td>
     ));
   };
