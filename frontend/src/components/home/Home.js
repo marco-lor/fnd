@@ -13,6 +13,18 @@ import Extra from './elements/Extra';
 
 function Home() {
   const { user, userData } = useAuth();
+  // helper to show anima field value or empty
+  const getAnimaField = (key) => {
+    const val = userData?.AltriParametri?.[key];
+    return (typeof val === 'string' && /[A-Za-z]+/.test(val)) ? val : '';
+  };
+  // helper for anima color classes
+  const getAnimaColorClass = (value) => {
+    if (value === 'Spirito') return 'text-blue-300';
+    if (value === 'Astuzia') return 'text-green-300';
+    if (value === 'Potenza') return 'text-red-300';
+    return 'text-gray-300';
+  };
   const [dadiAnimaByLevel, setDadiAnimaByLevel] = useState([]);
   // at start of Home, add rolling state
   const [rolling, setRolling] = useState(false);
@@ -113,11 +125,29 @@ function Home() {
             </div>
           )}
           {dadiAnimaByLevel.length > 1 && userData?.stats?.level && (
-            <div className="mb-5 text-white text-lg flex items-center">
-              <span>Dado Anima: {dadiAnimaByLevel[userData.stats.level]}</span>
-              <button onClick={handleRollDice} className="ml-2 text-white hover:text-gray-300" title="Roll Dado Anima">
-                <FaDiceD20 className="inline-block" />
-              </button>
+            <div className="mb-5 text-white text-lg flex items-center w-full justify-between">
+              {/* Left: Dado Anima and roll button */}
+              <div className="flex items-center space-x-4">
+                <span>Dado Anima: {dadiAnimaByLevel[userData.stats.level]}</span>
+                <button onClick={handleRollDice} className="text-white hover:text-gray-300" title="Roll Dado Anima">
+                  <FaDiceD20 className="inline-block" />
+                </button>
+              </div>
+              {/* Right: Anima Livello fields */}
+              <div className="bg-[rgba(40,40,60,0.8)] p-4 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.4)] flex space-x-4">
+                <div>
+                  <span className="font-semibold">Anima Livello 1:</span>
+                  <span className={`ml-1 font-semibold ${getAnimaColorClass(getAnimaField('Anima_1'))}`}>{getAnimaField('Anima_1')}</span>
+                </div>
+                <div>
+                  <span className="font-semibold">Anima Livello 4:</span>
+                  <span className={`ml-1 font-semibold ${getAnimaColorClass(getAnimaField('Anima_4'))}`}>{getAnimaField('Anima_4')}</span>
+                </div>
+                <div>
+                  <span className="font-semibold">Anima Livello 7:</span>
+                  <span className={`ml-1 font-semibold ${getAnimaColorClass(getAnimaField('Anima_7'))}`}>{getAnimaField('Anima_7')}</span>
+                </div>
+              </div>
             </div>
           )}
           {/* Main content: tables on left, stats bars on right */}

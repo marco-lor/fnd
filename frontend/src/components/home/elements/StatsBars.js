@@ -3,7 +3,8 @@ import React, { useEffect, useState, useRef, useContext } from 'react';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 import { AuthContext } from '../../../AuthContext';
-import { FaRedo, FaPlus, FaMinus, FaPlusSquare, FaMinusSquare } from 'react-icons/fa';
+import { FaAngleRight, FaAngleLeft, FaAnglesRight, FaAnglesLeft } from 'react-icons/fa6';
+import { FaRedo } from 'react-icons/fa';
 
 const StatsBars = () => {
   const { user } = useContext(AuthContext);
@@ -223,10 +224,10 @@ const StatsBars = () => {
               <FaRedo className="w-3 h-3" />
             </button>
             <button onMouseDown={handleDecrementHPStart} onMouseUp={handleDecrementHPEnd} onMouseLeave={handleDecrementHPEnd} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Decrease HP by 1">
-              <FaMinus className="w-3 h-3" />
+              <FaAngleLeft className="w-3 h-3" />
             </button>
             <button onClick={handleCustomDecrementHP} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Decrease HP by custom value">
-              <FaMinusSquare className="w-3 h-3" />
+              <FaAnglesLeft className="w-3 h-3" />
             </button>
             <div className="flex-1 h-5 bg-red-200 rounded flex overflow-visible">
               {userData?.stats?.hpTotal ? (() => {
@@ -246,10 +247,10 @@ const StatsBars = () => {
               })() : null}
             </div>
             <button onClick={handleCustomIncrementHP} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Increase HP by custom value">
-              <FaPlusSquare className="w-3 h-3" />
+              <FaAnglesRight className="w-3 h-3" />
             </button>
             <button onMouseDown={handleIncrementHPStart} onMouseUp={handleIncrementHPEnd} onMouseLeave={handleIncrementHPEnd} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Increase HP by 1">
-              <FaPlus className="w-3 h-3" />
+              <FaAngleRight className="w-3 h-3" />
             </button>
             <span className="text-base text-white w-16 text-right">
               {userData?.stats?.hpCurrent}/{userData?.stats?.hpTotal}
@@ -265,10 +266,10 @@ const StatsBars = () => {
               <FaRedo className="w-3 h-3" />
             </button>
             <button onMouseDown={handleDecrementManaStart} onMouseUp={handleDecrementManaEnd} onMouseLeave={handleDecrementManaEnd} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Decrease Mana by 1">
-              <FaMinus className="w-3 h-3" />
+              <FaAngleLeft className="w-3 h-3" />
             </button>
             <button onClick={handleCustomDecrementMana} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Decrease Mana by custom value">
-              <FaMinusSquare className="w-3 h-3" />
+              <FaAnglesLeft className="w-3 h-3" />
             </button>
             <div className="flex-1 h-5 bg-purple-200 rounded flex overflow-visible">
               {userData?.stats?.manaTotal ? (() => {
@@ -288,10 +289,10 @@ const StatsBars = () => {
               })() : null}
             </div>
             <button onClick={handleCustomIncrementMana} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Increase Mana by custom value">
-              <FaPlusSquare className="w-3 h-3" />
+              <FaAnglesRight className="w-3 h-3" />
             </button>
             <button onMouseDown={handleIncrementManaStart} onMouseUp={handleIncrementManaEnd} onMouseLeave={handleIncrementManaEnd} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Increase Mana by 1">
-              <FaPlus className="w-3 h-3" />
+              <FaAngleRight className="w-3 h-3" />
             </button>
             <span className="text-base text-white w-16 text-right">
               {userData?.stats?.manaCurrent}/{userData?.stats?.manaTotal}

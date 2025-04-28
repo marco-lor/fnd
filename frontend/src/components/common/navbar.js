@@ -122,20 +122,25 @@ const Navbar = () => {
     if (!selectedFile || !user) return;
     setIsUploading(true);
     // delete old image
-    if (userData?.imageUrl) {
+    if (userData?.imagePath) {
       try {
-        await deleteObject(storageRef(storage, userData.imageUrl));
+        await deleteObject(storageRef(storage, userData.imagePath));
       } catch (err) {
         console.error('Old image deletion failed:', err);
       }
     }
     // upload new image
     try {
-      const path = `profileImages/${user.uid}/${Date.now()}_${selectedFile.name}`;
-      const fileRef = storageRef(storage, path);
+      // construct filename same as CharacterCreation: characterId_uid_timestamp
+      const characterId = userData?.characterId || (user && user.email.split('@')[0]);
+      const safeName = characterId.replace(/\s+/g, '_');
+      const safeFileName = `${safeName}_${user.uid}_${Date.now()}`;
+      const imagePath = `characters/${safeFileName}`;
+      const fileRef = storageRef(storage, imagePath);
       await uploadBytes(fileRef, selectedFile);
       const url = await getDownloadURL(fileRef);
-      await updateDoc(doc(db, 'users', user.uid), { imageUrl: url });
+      // update both URL and storage path
+      await updateDoc(doc(db, 'users', user.uid), { imageUrl: url, imagePath });
       setIsUploadOpen(false);
       setSelectedFile(null);
     } catch (err) {
