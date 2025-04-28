@@ -5,6 +5,7 @@ import { db, storage } from '../../firebaseConfig';
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { AuthContext } from '../../../AuthContext';
+import { computeValue } from '../../common/computeFormula';
 
 export function AddWeaponOverlay({ onClose }) {
   const [schema, setSchema] = useState(null);
@@ -13,11 +14,16 @@ export function AddWeaponOverlay({ onClose }) {
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
 
   const { user } = useContext(AuthContext);
+  const [userParams, setUserParams] = useState({ Base: {}, Combattimento: {} });
   const [tecnicheList, setTecnicheList] = useState([]);
   const [ridTecnicheList, setRidTecnicheList] = useState([]);
+  const [spellsList, setSpellsList] = useState([]);
+  const [ridSpellList, setRidSpellList] = useState([]);
   // handers to add/remove tecnica reductions
   const addTecnica = () => setRidTecnicheList(prev => [...prev, { selectedTec: '', ridValue: '' }]);
   const removeTecnica = index => setRidTecnicheList(prev => prev.filter((_, i) => i !== index));
+  const addSpell = () => setRidSpellList(prev => [...prev, { selectedSpell: '', ridValue: '' }]);
+  const removeSpell = index => setRidSpellList(prev => prev.filter((_, i) => i !== index));
 
   useEffect(() => {
     const fetchSchema = async () => {
@@ -86,6 +92,36 @@ export function AddWeaponOverlay({ onClose }) {
     };
     if (user) fetchTecniche();
   }, [user]);
+  useEffect(() => {
+    const fetchSpells = async () => {
+      try {
+        const doc1 = await getDoc(doc(db, 'utils', 'spells_common'));
+        const commonData = doc1.exists() ? doc1.data() : {};
+        const personalDoc = await getDoc(doc(db, 'users', user.uid));
+        const personalData = personalDoc.exists() ? personalDoc.data().spells || {} : {};
+        setSpellsList([...Object.keys(commonData), ...Object.keys(personalData)]);
+      } catch (error) {
+        console.error('Error fetching spells', error);
+      }
+    };
+    if (user) fetchSpells();
+  }, [user]);
+  useEffect(() => {
+    if (user) {
+      const fetchParams = async () => {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (userDoc.exists()) {
+            const paramsData = userDoc.data().Parametri || {};
+            setUserParams(paramsData);
+          }
+        } catch (error) {
+          console.error('Error fetching user parameters', error);
+        }
+      };
+      fetchParams();
+    }
+  }, [user]);
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
@@ -120,6 +156,12 @@ export function AddWeaponOverlay({ onClose }) {
       if (ridTecnicheList.length > 0) {
         updatedFormData.ridCostoTecSingola = ridTecnicheList.reduce((acc, { selectedTec, ridValue }) => {
           if (selectedTec) acc[selectedTec] = Number(ridValue);
+          return acc;
+        }, {});
+      }
+      if (ridSpellList.length > 0) {
+        updatedFormData.ridCostoSpellSingola = ridSpellList.reduce((acc, { selectedSpell, ridValue }) => {
+          if (selectedSpell) acc[selectedSpell] = Number(ridValue);
           return acc;
         }, {});
       }
@@ -335,28 +377,27 @@ export function AddWeaponOverlay({ onClose }) {
                     <td className={`bg-gray-700/30 px-3 py-2 ${isLast ? 'rounded-bl-lg' : ''} text-left`}>{subField}</td>
                     {["1", "4", "7", "10"].map((col, j) => (
                       <td key={col} className={`bg-gray-700/30 px-3 py-2 ${isLast && j === 3 ? 'rounded-br-lg' : ''}`}>
-                        <input
-                          type="text"
-                          value={
-                            (weaponFormData.Parametri &&
-                              weaponFormData.Parametri["Base"] &&
-                              weaponFormData.Parametri["Base"][subField] &&
-                              weaponFormData.Parametri["Base"][subField][col]
-                            ) || ''
-                          }
-                          onChange={(e) => {
-                            const newData = { ...weaponFormData };
-                            if (!newData.Parametri) newData.Parametri = {};
-                            if (!newData.Parametri["Base"]) newData.Parametri["Base"] = {};
-                            if (!newData.Parametri["Base"][subField]) {
-                              newData.Parametri["Base"][subField] = { "1": "", "4": "", "7": "", "10": "" };
-                            }
-                            newData.Parametri["Base"][subField][col] = e.target.value;
-                            setWeaponFormData(newData);
-                          }}
-                          className="w-full p-1 rounded-md bg-gray-600/70 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                          placeholder={`-`}
-                        />
+                        <div className="flex items-center">
+                          <input
+                            type="text"
+                            value={weaponFormData.Parametri?.[category]?.[subField]?.[col] || ''}
+                            onChange={(e) => {
+                              const newData = { ...weaponFormData };
+                              if (!newData.Parametri) newData.Parametri = {};
+                              if (!newData.Parametri[category]) newData.Parametri[category] = {};
+                              if (!newData.Parametri[category][subField]) {
+                                newData.Parametri[category][subField] = { "1": "", "4": "", "7": "", "10": "" };
+                              }
+                              newData.Parametri[category][subField][col] = e.target.value;
+                              setWeaponFormData(newData);
+                            }}
+                            className="w-full p-1 rounded-md bg-gray-600/70 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                            placeholder="-"
+                          />
+                          {weaponFormData.Parametri?.[category]?.[subField]?.[col] && (
+                            <span className="ml-2 text-gray-400">({computeValue(weaponFormData.Parametri[category][subField][col], userParams)})</span>
+                          )}
+                        </div>
                       </td>
                     ))}
                   </tr>
@@ -371,28 +412,33 @@ export function AddWeaponOverlay({ onClose }) {
                     <td className={`bg-gray-700/30 px-3 py-2 ${isLast ? 'rounded-bl-lg' : ''} text-left`}>{subField}</td>
                     {["1", "4", "7", "10"].map((col, j) => (
                       <td key={col} className={`bg-gray-700/30 px-3 py-2 ${isLast && j === 3 ? 'rounded-br-lg' : ''}`}>
-                        <input
-                          type="text"
-                          value={
-                            (weaponFormData.Parametri &&
-                              weaponFormData.Parametri["Combattimento"] &&
-                              weaponFormData.Parametri["Combattimento"][subField] &&
-                              weaponFormData.Parametri["Combattimento"][subField][col]
-                            ) || ''
-                          }
-                          onChange={(e) => {
-                            const newData = { ...weaponFormData };
-                            if (!newData.Parametri) newData.Parametri = {};
-                            if (!newData.Parametri["Combattimento"]) newData.Parametri["Combattimento"] = {};
-                            if (!newData.Parametri["Combattimento"][subField]) {
-                              newData.Parametri["Combattimento"][subField] = { "1": "", "4": "", "7": "", "10": "" };
+                        <div className="flex items-center">
+                          <input
+                            type="text"
+                            value={
+                              (weaponFormData.Parametri &&
+                                weaponFormData.Parametri["Combattimento"] &&
+                                weaponFormData.Parametri["Combattimento"][subField] &&
+                                weaponFormData.Parametri["Combattimento"][subField][col]
+                              ) || ''
                             }
-                            newData.Parametri["Combattimento"][subField][col] = e.target.value;
-                            setWeaponFormData(newData);
-                          }}
-                          className="w-full p-1 rounded-md bg-gray-600/70 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                          placeholder={`-`}
-                        />
+                            onChange={(e) => {
+                              const newData = { ...weaponFormData };
+                              if (!newData.Parametri) newData.Parametri = {};
+                              if (!newData.Parametri["Combattimento"]) newData.Parametri["Combattimento"] = {};
+                              if (!newData.Parametri["Combattimento"][subField]) {
+                                newData.Parametri["Combattimento"][subField] = { "1": "", "4": "", "7": "", "10": "" };
+                              }
+                              newData.Parametri["Combattimento"][subField][col] = e.target.value;
+                              setWeaponFormData(newData);
+                            }}
+                            className="w-full p-1 rounded-md bg-gray-600/70 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                            placeholder="-"
+                          />
+                          {weaponFormData.Parametri?.[category]?.[subField]?.[col] && (
+                            <span className="ml-2 text-gray-400">({computeValue(weaponFormData.Parametri[category][subField][col], userParams)})</span>
+                          )}
+                        </div>
                       </td>
                     ))}
                   </tr>
@@ -455,6 +501,46 @@ export function AddWeaponOverlay({ onClose }) {
                 <button
                   type="button"
                   onClick={() => removeTecnica(idx)}
+                  className="text-red-500"
+                >Rimuovi</button>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4">
+            <label className="block text-white mb-1">Riduzione Costo Spell</label>
+            <button
+              type="button"
+              onClick={addSpell}
+              className="mb-2 text-blue-500 underline hover:text-blue-600"
+            >
+              Aggiungi Spell
+            </button>
+            {ridSpellList.map((item, idx) => (
+              <div key={idx} className="grid grid-cols-3 gap-4 items-center mb-2">
+                <select
+                  value={item.selectedSpell}
+                  onChange={e => {
+                    const newList = [...ridSpellList]; newList[idx].selectedSpell = e.target.value; setRidSpellList(newList);
+                  }}
+                  className="w-full p-2 rounded bg-gray-700 text-white"
+                >
+                  <option value="" disabled>Seleziona spell</option>
+                  {spellsList.map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  value={item.ridValue}
+                  onChange={e => {
+                    const newList = [...ridSpellList]; newList[idx].ridValue = e.target.value; setRidSpellList(newList);
+                  }}
+                  className="w-full p-2 rounded bg-gray-700 text-white"
+                  placeholder="Riduzione"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeSpell(idx)}
                   className="text-red-500"
                 >Rimuovi</button>
               </div>

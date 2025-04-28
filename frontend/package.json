@@ -11,6 +11,7 @@
     "axios": "^1.7.9",
     "cannon": "^0.6.2",
     "cra-template": "1.2.0",
+    "expr-eval": "^2.0.2",
     "firebase": "^11.2.0",
     "firebase-admin": "^13.0.2",
     "firebase-functions": "^6.3.2",
