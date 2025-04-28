@@ -1,15 +1,23 @@
 // file: ./frontend/src/components/bazaar/elements/addWeapon.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import ReactDOM from 'react-dom';
 import { db, storage } from '../../firebaseConfig';
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { AuthContext } from '../../../AuthContext';
 
 export function AddWeaponOverlay({ onClose }) {
   const [schema, setSchema] = useState(null);
   const [weaponFormData, setWeaponFormData] = useState({});
   const [imageFile, setImageFile] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
+
+  const { user } = useContext(AuthContext);
+  const [tecnicheList, setTecnicheList] = useState([]);
+  const [ridTecnicheList, setRidTecnicheList] = useState([]);
+  // handers to add/remove tecnica reductions
+  const addTecnica = () => setRidTecnicheList(prev => [...prev, { selectedTec: '', ridValue: '' }]);
+  const removeTecnica = index => setRidTecnicheList(prev => prev.filter((_, i) => i !== index));
 
   useEffect(() => {
     const fetchSchema = async () => {
@@ -57,6 +65,28 @@ export function AddWeaponOverlay({ onClose }) {
     fetchSchema();
   }, []);
 
+  useEffect(() => {
+    const fetchTecniche = async () => {
+      try {
+        // fetch common tecniche; try utils/utils.tecniche_common first, then utils/tecniche_common
+        let commonData = {};
+        const doc1 = await getDoc(doc(db, 'utils', 'utils'));
+        if (doc1.exists() && doc1.data().tecniche_common) {
+          commonData = doc1.data().tecniche_common;
+        } else {
+          const doc2 = await getDoc(doc(db, 'utils', 'tecniche_common'));
+          commonData = doc2.exists() ? doc2.data() : {};
+        }
+        const personalDoc = await getDoc(doc(db, 'users', user.uid));
+        const personalData = personalDoc.exists() ? personalDoc.data().tecniche || {} : {};
+        setTecnicheList([...Object.keys(commonData), ...Object.keys(personalData)]);
+      } catch (error) {
+        console.error('Error fetching tecniche', error);
+      }
+    };
+    if (user) fetchTecniche();
+  }, [user]);
+
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -86,6 +116,12 @@ export function AddWeaponOverlay({ onClose }) {
         await uploadBytes(imageRef, imageFile);
         const downloadURL = await getDownloadURL(imageRef);
         updatedFormData.image_url = downloadURL;
+      }
+      if (ridTecnicheList.length > 0) {
+        updatedFormData.ridCostoTecSingola = ridTecnicheList.reduce((acc, { selectedTec, ridValue }) => {
+          if (selectedTec) acc[selectedTec] = Number(ridValue);
+          return acc;
+        }, {});
       }
       await setDoc(weaponDocRef, updatedFormData);
       onClose(true);
@@ -384,6 +420,46 @@ export function AddWeaponOverlay({ onClose }) {
         <form onSubmit={(e) => { e.preventDefault(); handleSaveWeapon(); }}>
           {renderBasicFields()}
           {renderTablesSection()}
+          <div className="mt-4">
+            <label className="block text-white mb-1">Riduzione Costo Tecnica</label>
+            <button
+              type="button"
+              onClick={addTecnica}
+              className="mb-2 text-blue-500 underline hover:text-blue-600"
+            >
+              Aggiungi Tecnica
+            </button>
+            {ridTecnicheList.map((item, idx) => (
+              <div key={idx} className="grid grid-cols-3 gap-4 items-center mb-2">
+                <select
+                  value={item.selectedTec}
+                  onChange={e => {
+                    const newList = [...ridTecnicheList]; newList[idx].selectedTec = e.target.value; setRidTecnicheList(newList);
+                  }}
+                  className="w-full p-2 rounded bg-gray-700 text-white"
+                >
+                  <option value="" disabled>Seleziona tecnica</option>
+                  {tecnicheList.map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  value={item.ridValue}
+                  onChange={e => {
+                    const newList = [...ridTecnicheList]; newList[idx].ridValue = e.target.value; setRidTecnicheList(newList);
+                  }}
+                  className="w-full p-2 rounded bg-gray-700 text-white"
+                  placeholder="Riduzione"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeTecnica(idx)}
+                  className="text-red-500"
+                >Rimuovi</button>
+              </div>
+            ))}
+          </div>
           <div className="flex justify-end gap-2 mt-4">
             <button
               type="button"

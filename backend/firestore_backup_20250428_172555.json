@@ -527,7 +527,148 @@
         "10": "",
         "1": ""
       }
-    }
+    },
+    "accessori": {},
+    "armature": {},
+    "consumabili": {},
+    "munizioni": {},
+    "test": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        }
+      },
+      "ridCostoTec": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Bonus Danno": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Effetto": "fa malissimo",
+      "Hands": "2",
+      "requisiti": "nessuno",
+      "Penetrazione": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "ridCostoSpell": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Tipo": "Mischia",
+      "Danno Critico": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "Nome": "test",
+      "Slot": "Mano Principale",
+      "Danno": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      },
+      "prezzo": "150",
+      "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Ftest_gio.png?alt=media&token=f71a3be4-58eb-43f5-8437-763a9128dc07",
+      "Bonus Danno Critico": {
+        "4": "",
+        "7": "",
+        "10": "",
+        "1": ""
+      }
+    },
+    "weapons": {}
   },
   "users": {
     "TQAmmVfIpOeNiRflXKSeL1NX2ak2": {
@@ -548,6 +689,8 @@
           "descrizione": "Capacit\u00e0 di persuadere (descrizione da reworkare)"
         }
       },
+      "imageUrl": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/characters%2FNyx_TQAmmVfIpOeNiRflXKSeL1NX2ak2_1745838390356?alt=media&token=bff25470-cc2b-4c7b-90ac-4295e329e5db",
+      "inventory": [],
       "Parametri": {
         "Base": {
           "Fortuna": {
@@ -595,9 +738,9 @@
         },
         "Combattimento": {
           "Disciplina": {
-            "Base": 5,
+            "Base": 6,
             "Equip": 0,
-            "Tot": 8,
+            "Tot": 9,
             "Anima": 3,
             "Mod": 0
           },
@@ -616,9 +759,9 @@
             "Mod": 0
           },
           "Difesa": {
-            "Base": 2,
+            "Base": 1,
             "Equip": 0,
-            "Tot": 2,
+            "Tot": 1,
             "Anima": 0,
             "Mod": 0
           },
@@ -637,16 +780,14 @@
             "Mod": 0
           },
           "Attacco": {
-            "Base": 4,
+            "Base": 3,
             "Equip": 0,
-            "Tot": 4,
+            "Tot": 3,
             "Anima": 0,
             "Mod": 0
           }
         }
       },
-      "inventory": [],
-      "imageUrl": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/characters%2Ftoken_2.png?alt=media&token=4d67afc5-c32e-4dda-97cb-c102a547d7dd",
       "tecniche": {
         "Trasformazione": {
           "Azione": "Consumabile",
@@ -658,27 +799,28 @@
       },
       "race": "Fata",
       "settings": {
-        "lock_param_combat": false,
+        "lock_param_combat": true,
         "notifications": true,
         "theme": "dark",
-        "lock_param_base": false
+        "lock_param_base": true
       },
       "stats": {
-        "manaCurrent": 61,
-        "combatTokensAvailable": 0,
+        "hpCurrent": 13,
+        "combatTokensAvailable": 5,
         "basePointsSpent": 5,
-        "combatTokensSpent": 68,
+        "combatTokensSpent": 63,
         "level": 8,
         "negativeBaseStatCount": 2,
-        "manaTotal": 61,
-        "hpTotal": 13,
+        "manaTotal": 68,
         "lastAnimaShard": "Spirito",
-        "hpCurrent": 13,
-        "basePointsAvailable": 0
+        "manaCurrent": 68,
+        "basePointsAvailable": 0,
+        "hpTotal": 13
       },
       "lingue": {
         "Comune": "Il personaggio comprende e si esprime perfettamente nella lingua pi\u00f9 diffusa di Etherium."
       },
+      "imagePath": "characters/Nyx_TQAmmVfIpOeNiRflXKSeL1NX2ak2_1745838390356",
       "spells": {
         "Barriera Cosmica (benefica)": {
           "Turni": 3,
@@ -1267,6 +1409,12 @@
         2
       ],
       "requisiti": "",
+      "ridCostoTecSingola": {
+        "nomeTecnica": 0
+      },
+      "ridCostoSpellSingola": {
+        "nome_spell": 0
+      },
       "Penetrazione": {
         "4": 0,
         "10": 0,
