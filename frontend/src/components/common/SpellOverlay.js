@@ -1,4 +1,4 @@
-// file: ./frontend/src/components/dmDashboard/elements/overlays/SpellOverlay.js
+// file: ./frontend/src/components/common/SpellOverlay.js
 import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom";
 
