@@ -1,484 +1,119 @@
 // file: ./frontend/src/components/dmDashboard/elements/buttons/addSpell.js
-import React, { useState, useEffect } from 'react';
-import ReactDOM from 'react-dom';
-import { db, storage } from '../../../firebaseConfig';
-import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import React, { useEffect, useState } from "react";
+import { SpellOverlay } from "../overlays/SpellOverlay";
+import { db, storage } from "../../../firebaseConfig";
+import {
+  doc, getDoc, updateDoc,
+} from "firebase/firestore";
+import {
+  ref, uploadBytes, getDownloadURL,
+} from "firebase/storage";
 
-// --- Style definition moved here ---
-const sleekButtonStyle = "w-36 px-2 py-1 bg-gradient-to-r from-blue-800 to-indigo-900 hover:from-blue-700 hover:to-indigo-800 text-white text-xs font-medium rounded-md transition-all duration-150 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 shadow-sm";
+/* ------------------------------------------------------------------ */
+/*  A. Pure button – API unchanged                                    */
+/* ------------------------------------------------------------------ */
+const sleek =
+  "w-36 px-2 py-1 bg-gradient-to-r from-blue-800 to-indigo-900 hover:from-blue-700 hover:to-indigo-800 text-white text-xs font-medium rounded-md transition-all duration-150 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 shadow-sm";
 
-// --- New Exported Button Component ---
 export function AddSpellButton({ onClick }) {
   return (
-    <button
-      type="button"
-      className={sleekButtonStyle}
-      onClick={onClick}
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-        <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
+    <button type="button" className={sleek} onClick={onClick}>
+      <svg xmlns="http://www.w3.org/2000/svg"
+           className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+        <path fillRule="evenodd"
+              d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z"
+              clipRule="evenodd"/>
       </svg>
       <span>Add Spell</span>
     </button>
   );
 }
-// --- End New Button Component ---
 
-
-// --- Existing Overlay Component (updated logic) ---
-export function AddSpellOverlay({ userId, onClose, savePath }) {
-  const [schema, setSchema] = useState(null);
-  const [spellFormData, setSpellFormData] = useState({});
-  const [imageFile, setImageFile] = useState(null);
-  const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
-  const [videoFile, setVideoFile] = useState(null);
-  const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
+/* ------------------------------------------------------------------ */
+/*  B. Overlay wrapper (decoupled saving logic)                       */
+/* ------------------------------------------------------------------ */
+export function AddSpellOverlay({ userId, onClose, savePath = null }) {
+  const [schema,   setSchema]   = useState(null);
   const [userName, setUserName] = useState("");
 
+  /* fetch schema + user only once */
   useEffect(() => {
-    const fetchData = async () => {
+    (async () => {
       try {
-        // Fetch schema
-        const schemaDocRef = doc(db, "utils", "schema_spell");
-        const schemaDocSnap = await getDoc(schemaDocRef);
-
-        if (schemaDocSnap.exists()) {
-          const schemaData = schemaDocSnap.data();
-          setSchema(schemaData);
-
-          // Initialize form with empty values
-          let initialData = {
-            Nome: "",
-            Costo: 0,
-            Turni: 0,
-            Gittata: schemaData.Gittata || 0,
-            "Effetti Positivi": "",
-            "Effetti Negativi": "",
-            Esperienza: schemaData.Esperienza && Array.isArray(schemaData.Esperienza) ? schemaData.Esperienza[0] : "",
-            "Mod Params": {
-              Base: {
-                Costituzione: 0,
-                Destrezza: 0,
-                Fortuna: 0,
-                Forza: 0,
-                Intelligenza: 0,
-                Saggezza: 0
-              },
-              Combattimento: {
-                Attacco: 0,
-                Critico: 0,
-                Difesa: 0,
-                Disciplina: 0,
-                RiduzioneDanni: 0,
-                Salute: 0
-              }
-            },
-            TPC: {
-              Param1: schemaData.TPC?.Param1 && Array.isArray(schemaData.TPC.Param1) ? schemaData.TPC.Param1[0] : "",
-              Param2: schemaData.TPC?.Param2 && Array.isArray(schemaData.TPC.Param2) ? schemaData.TPC.Param2[0] : "",
-              ParamTarget: schemaData.TPC?.ParamTarget && Array.isArray(schemaData.TPC.ParamTarget) ? schemaData.TPC.ParamTarget[0] : ""
-            },
-            "TPC Fisico": {
-              Param1: schemaData["TPC Fisico"]?.Param1 && Array.isArray(schemaData["TPC Fisico"].Param1) ? schemaData["TPC Fisico"].Param1[0] : "",
-              Param2: schemaData["TPC Fisico"]?.Param2 && Array.isArray(schemaData["TPC Fisico"].Param2) ? schemaData["TPC Fisico"].Param2[0] : "",
-              ParamTarget: schemaData["TPC Fisico"]?.ParamTarget && Array.isArray(schemaData["TPC Fisico"].ParamTarget) ? schemaData["TPC Fisico"].ParamTarget[0] : ""
-            },
-            "TPC Mentale": {
-              Param1: schemaData["TPC Mentale"]?.Param1 && Array.isArray(schemaData["TPC Mentale"].Param1) ? schemaData["TPC Mentale"].Param1[0] : "",
-              Param2: schemaData["TPC Mentale"]?.Param2 && Array.isArray(schemaData["TPC Mentale"].Param2) ? schemaData["TPC Mentale"].Param2[0] : "",
-              ParamTarget: schemaData["TPC Mentale"]?.ParamTarget && Array.isArray(schemaData["TPC Mentale"].ParamTarget) ? schemaData["TPC Mentale"].ParamTarget[0] : ""
-            },
-            "Tipo Base": schemaData["Tipo Base"] && Array.isArray(schemaData["Tipo Base"]) ? schemaData["Tipo Base"][0] : ""
-          };
-
-          setSpellFormData(initialData);
-        } else {
-          console.error("Schema not found at /utils/schema_spell");
-        }
-
-        // Fetch user data to display the name
-        const userDocRef = doc(db, "users", userId);
-        const userDocSnap = await getDoc(userDocRef);
-
-        if (userDocSnap.exists()) {
-          const userData = userDocSnap.data();
-          setUserName(userData.characterId || userData.email || "Unknown User");
-        }
-      } catch (error) {
-        console.error("Error fetching data:", error);
-      }
-    };
-
-    fetchData();
+        const schemaSnap = await getDoc(doc(db, "utils", "schema_spell"));
+        if (schemaSnap.exists()) setSchema(schemaSnap.data());
+        const userSnap   = await getDoc(doc(db, "users", userId));
+        if (userSnap.exists())
+          setUserName(userSnap.data().characterId || userSnap.data().email || "Unknown User");
+      } catch (err) { console.error("Fetch error:", err); }
+    })();
   }, [userId]);
 
-  const handleImageChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setImageFile(file);
-      setImagePreviewUrl(URL.createObjectURL(file));
-    }
-  };
+  /* callback from SpellOverlay */
+  const handleOverlayClose = async (result) => {
+    if (!result) { onClose(false); return; }       // cancelled
 
-  const handleVideoChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setVideoFile(file);
-      setVideoPreviewUrl(URL.createObjectURL(file));
-    }
-  };
-
-  const handleNestedChange = (category, subcategory, field, value) => {
-    setSpellFormData(prevData => {
-      const newData = { ...prevData };
-      if (!newData[category]) newData[category] = {};
-      if (!newData[category][subcategory]) newData[category][subcategory] = {};
-      newData[category][subcategory][field] = value;
-      return newData;
-    });
-  };
-
-  const handleSaveSpell = async () => {
     try {
-      const spellName = spellFormData.Nome ? spellFormData.Nome.trim() : "";
-      if (!spellName) {
-        alert("Nome is required");
-        return;
-      }
+      const { spellData, imageFile, videoFile } = result;
+      const spellName = spellData.Nome.trim();
+      const safeBase  = `spell_${(savePath?.id || userId)}_${spellName.replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}`;
 
-      // Create a clean spell data object
-      let spellData = {
-        Nome: spellFormData.Nome || "",
-        Costo: parseInt(spellFormData.Costo) || 0,
-        Turni: parseInt(spellFormData.Turni) || 0,
-        Gittata: parseInt(spellFormData.Gittata) || 0,
-        "Effetti Positivi": spellFormData["Effetti Positivi"] || "",
-        "Effetti Negativi": spellFormData["Effetti Negativi"] || "",
-        Esperienza: spellFormData.Esperienza || "",
-        "Mod Params": spellFormData["Mod Params"] || {
-          Base: {
-            Costituzione: parseInt(spellFormData["Mod Params"]?.Base?.Costituzione) || 0,
-            Destrezza: parseInt(spellFormData["Mod Params"]?.Base?.Destrezza) || 0,
-            Fortuna: parseInt(spellFormData["Mod Params"]?.Base?.Fortuna) || 0,
-            Forza: parseInt(spellFormData["Mod Params"]?.Base?.Forza) || 0,
-            Intelligenza: parseInt(spellFormData["Mod Params"]?.Base?.Intelligenza) || 0,
-            Saggezza: parseInt(spellFormData["Mod Params"]?.Base?.Saggezza) || 0
-          },
-          Combattimento: {
-            Attacco: parseInt(spellFormData["Mod Params"]?.Combattimento?.Attacco) || 0,
-            Critico: parseInt(spellFormData["Mod Params"]?.Combattimento?.Critico) || 0,
-            Difesa: parseInt(spellFormData["Mod Params"]?.Combattimento?.Difesa) || 0,
-            Disciplina: parseInt(spellFormData["Mod Params"]?.Combattimento?.Disciplina) || 0,
-            RiduzioneDanni: parseInt(spellFormData["Mod Params"]?.Combattimento?.RiduzioneDanni) || 0,
-            Salute: parseInt(spellFormData["Mod Params"]?.Combattimento?.Salute) || 0
-          }
-        },
-        TPC: spellFormData.TPC || {
-          Param1: spellFormData.TPC?.Param1 || "",
-          Param2: spellFormData.TPC?.Param2 || "",
-          ParamTarget: spellFormData.TPC?.ParamTarget || ""
-        },
-        "TPC Fisico": spellFormData["TPC Fisico"] || {
-          Param1: spellFormData["TPC Fisico"]?.Param1 || "",
-          Param2: spellFormData["TPC Fisico"]?.Param2 || "",
-          ParamTarget: spellFormData["TPC Fisico"]?.ParamTarget || ""
-        },
-        "TPC Mentale": spellFormData["TPC Mentale"] || {
-          Param1: spellFormData["TPC Mentale"]?.Param1 || "",
-          Param2: spellFormData["TPC Mentale"]?.Param2 || "",
-          ParamTarget: spellFormData["TPC Mentale"]?.ParamTarget || ""
-        },
-        "Tipo Base": spellFormData["Tipo Base"] || ""
-      };
-
-      // Upload media if present
-      const safeFileName = `spell_${(savePath?.id || userId)}_${spellName.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}`;
-
+      /* ---------------------------------------------------- */
+      /* 1. optional media upload                            */
+      /* ---------------------------------------------------- */
       if (imageFile) {
-        try {
-          const imageRef = ref(storage, 'spells/' + safeFileName + '_image');
-          await uploadBytes(imageRef, imageFile);
-          const downloadURL = await getDownloadURL(imageRef);
-          spellData.image_url = downloadURL;
-        } catch (imageError) {
-          console.error("Error uploading image:", imageError);
-        }
+        const imgRef  = ref(storage, `spells/${safeBase}_image`);
+        await uploadBytes(imgRef, imageFile);
+        spellData.image_url = await getDownloadURL(imgRef);
       }
-
       if (videoFile) {
-        try {
-          const videoRef = ref(storage, 'spells/videos/' + safeFileName + '_video');
-          await uploadBytes(videoRef, videoFile);
-          const downloadURL = await getDownloadURL(videoRef);
-          spellData.video_url = downloadURL;
-        } catch (videoError) {
-          console.error("Error uploading video:", videoError);
-        }
+        const vidRef  = ref(storage, `spells/videos/${safeBase}_video`);
+        await uploadBytes(vidRef, videoFile);
+        spellData.video_url = await getDownloadURL(vidRef);
       }
 
-      // Determine Firestore path
-      let docRef, docSnap, spellsField = "spells";
-      if (savePath && savePath.type === "item") {
-        docRef = doc(db, "items", savePath.id);
-        docSnap = await getDoc(docRef);
-      } else {
-        docRef = doc(db, "users", userId);
-        docSnap = await getDoc(docRef);
+      /* ---------------------------------------------------- */
+      /* 2. write (or merge) into Firestore                  */
+      /* ---------------------------------------------------- */
+      const [collection, docId] =
+        savePath && savePath.type === "item"
+          ? ["items", savePath.id]
+          : ["users", userId];
+
+      const docRef = doc(db, collection, docId);
+      const snap   = await getDoc(docRef);
+      if (!snap.exists()) {
+        alert(collection === "items" ? "Item not found" : "User not found");
+        onClose(false); return;
       }
 
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        const updatedSpells = { ...(data[spellsField] || {}) };
+      const prev   = snap.data().spells || {};
+      const next   = { ...prev, [spellName]: spellData };
 
-        // Add or replace the spell
-        updatedSpells[spellName] = spellData;
-
-        // Check document size (Firestore limit is 1MB)
-        if (JSON.stringify(updatedSpells).length > 900000) {
-          alert("Data too large. Try using a smaller image or video.");
-          return;
-        }
-
-        await updateDoc(docRef, { [spellsField]: updatedSpells });
-        onClose(true);
-      } else {
-        alert(savePath && savePath.type === "item" ? "Item not found" : "User not found");
+      if (JSON.stringify(next).length > 900_000) {
+        alert("Data too large – usa un’immagine o video più piccoli.");
+        onClose(false); return;
       }
-    } catch (error) {
-      console.error("Error saving spell:", error);
-      if (error.code) {
-        console.error("Firebase error code:", error.code);
-      }
-      alert("Error saving spell. Check console for details.");
+
+      await updateDoc(docRef, { spells: next });
+      onClose(true);
+
+    } catch (err) {
+      console.error("Error saving spell:", err);
+      alert("Errore durante il salvataggio – vedi console.");
+      onClose(false);
     }
   };
 
-  const renderDropdown = (options, value, onChange) => {
-    if (!Array.isArray(options) || options.length === 0) return <input type="text" value={value || ''} onChange={onChange} className="w-full p-2 rounded bg-gray-700 text-white" />;
-
-    return (
-      <select value={value || ''} onChange={onChange} className="w-full p-2 rounded bg-gray-700 text-white">
-        {options.map(option => (
-          <option key={option} value={option}>{option}</option>
-        ))}
-      </select>
-    );
-  };
-
-  const overlayContent = (
-    <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-[9999]">
-      <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-4/5 max-w-3xl max-h-[90vh] overflow-y-auto">
-        <h2 className="text-xl text-white mb-1">Add Spell</h2>
-        <p className="text-gray-300 mb-4">Per il giocatore: {userName}</p>
-        <form onSubmit={(e) => { e.preventDefault(); handleSaveSpell(); }}>
-          {schema ? (
-            <div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                <div>
-                  <label className="block text-white mb-1">Nome</label>
-                  <input
-                    type="text"
-                    value={spellFormData.Nome || ''}
-                    onChange={(e) => setSpellFormData({ ...spellFormData, Nome: e.target.value })}
-                    className="w-full p-2 rounded bg-gray-700 text-white"
-                    placeholder="Inserisci nome dello spell"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-white mb-1">Costo</label>
-                  <input
-                    type="number"
-                    value={spellFormData.Costo || ''}
-                    onChange={(e) => setSpellFormData({ ...spellFormData, Costo: e.target.value })}
-                    className="w-full p-2 rounded bg-gray-700 text-white"
-                    placeholder="Inserisci costo"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-white mb-1">Turni</label>
-                  <input
-                    type="number"
-                    value={spellFormData.Turni || ''}
-                    onChange={(e) => setSpellFormData({ ...spellFormData, Turni: e.target.value })}
-                    className="w-full p-2 rounded bg-gray-700 text-white"
-                    placeholder="Inserisci numero di turni"
-                  />
-                </div>
-                <div>
-                  <label className="block text-white mb-1">Gittata</label>
-                  <input
-                    type="number"
-                    value={spellFormData.Gittata || ''}
-                    onChange={(e) => setSpellFormData({ ...spellFormData, Gittata: e.target.value })}
-                    className="w-full p-2 rounded bg-gray-700 text-white"
-                    placeholder="Inserisci gittata"
-                  />
-                </div>
-              </div>
-
-              <div className="mb-4">
-                <label className="block text-white mb-1">Effetti Positivi</label>
-                <textarea
-                  value={spellFormData["Effetti Positivi"] || ''}
-                  onChange={(e) => setSpellFormData({ ...spellFormData, "Effetti Positivi": e.target.value })}
-                  className="w-full p-2 rounded bg-gray-700 text-white h-20"
-                  placeholder="Descrivi gli effetti positivi dello spell"
-                />
-              </div>
-
-              <div className="mb-4">
-                <label className="block text-white mb-1">Effetti Negativi</label>
-                <textarea
-                  value={spellFormData["Effetti Negativi"] || ''}
-                  onChange={(e) => setSpellFormData({ ...spellFormData, "Effetti Negativi": e.target.value })}
-                  className="w-full p-2 rounded bg-gray-700 text-white h-20"
-                  placeholder="Descrivi gli effetti negativi dello spell"
-                />
-              </div>
-
-              <div className="mb-4">
-                <label className="block text-white mb-1">Esperienza</label>
-                {renderDropdown(
-                  schema.Esperienza,
-                  spellFormData.Esperienza,
-                  (e) => setSpellFormData({ ...spellFormData, Esperienza: e.target.value })
-                )}
-              </div>
-
-              <div className="mb-4">
-                <label className="block text-white mb-1">Tipo Base</label>
-                {renderDropdown(
-                  schema["Tipo Base"],
-                  spellFormData["Tipo Base"],
-                  (e) => setSpellFormData({ ...spellFormData, "Tipo Base": e.target.value })
-                )}
-              </div>
-
-              <div className="mb-4">
-                <h3 className="text-white text-lg mb-2">Mod Params</h3>
-
-                <div className="bg-gray-700 p-3 rounded mb-3">
-                  <h4 className="text-white font-medium mb-2">Base</h4>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {["Costituzione", "Destrezza", "Fortuna", "Forza", "Intelligenza", "Saggezza"].map(param => (
-                      <div key={param}>
-                        <label className="block text-white text-sm mb-1">{param}</label>
-                        <input
-                          type="number"
-                          value={spellFormData["Mod Params"]?.Base?.[param] || 0}
-                          onChange={(e) => handleNestedChange("Mod Params", "Base", param, parseInt(e.target.value) || 0)}
-                          className="w-full p-2 rounded bg-gray-600 text-white"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="bg-gray-700 p-3 rounded">
-                  <h4 className="text-white font-medium mb-2">Combattimento</h4>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {["Attacco", "Critico", "Difesa", "Disciplina", "RiduzioneDanni", "Salute"].map(param => (
-                      <div key={param}>
-                        <label className="block text-white text-sm mb-1">{param}</label>
-                        <input
-                          type="number"
-                          value={spellFormData["Mod Params"]?.Combattimento?.[param] || 0}
-                          onChange={(e) => handleNestedChange("Mod Params", "Combattimento", param, parseInt(e.target.value) || 0)}
-                          className="w-full p-2 rounded bg-gray-600 text-white"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {["TPC", "TPC Fisico", "TPC Mentale"].map(tpcType => (
-                <div key={tpcType} className="mb-4">
-                  <h3 className="text-white text-lg mb-2">{tpcType}</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {["Param1", "Param2", "ParamTarget"].map(param => (
-                      <div key={`${tpcType}-${param}`}>
-                        <label className="block text-white text-sm mb-1">{param}</label>
-                        {renderDropdown(
-                          schema[tpcType]?.[param],
-                          spellFormData[tpcType]?.[param],
-                          (e) => {
-                            setSpellFormData(prev => {
-                              const updated = { ...prev };
-                              if (!updated[tpcType]) updated[tpcType] = {};
-                              updated[tpcType][param] = e.target.value;
-                              return updated;
-                            });
-                          }
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-
-              <div className="mb-4">
-                <div>
-                  <label className="block text-white mb-1">Immagine</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageChange}
-                    className="w-full text-white"
-                  />
-                  {imagePreviewUrl && (
-                    <img src={imagePreviewUrl} alt="Preview" className="mt-2 w-24 h-auto rounded" />
-                  )}
-                </div>
-
-                <div className="mt-4">
-                  <label className="block text-white mb-1">Video</label>
-                  <input
-                    type="file"
-                    accept="video/*"
-                    onChange={handleVideoChange}
-                    className="w-full text-white"
-                  />
-                  {videoPreviewUrl && (
-                    <video
-                      src={videoPreviewUrl}
-                      controls
-                      className="mt-2 w-full max-h-48 rounded"
-                    />
-                  )}
-                  <p className="text-gray-400 text-sm mt-1">
-                    Consigliato: video breve (max 30s) di dimensioni ridotte
-                  </p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="text-white">Loading schema...</div>
-          )}
-
-          <div className="flex justify-end gap-2 mt-4">
-            <button
-              type="button"
-              onClick={() => onClose(false)}
-              className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-md shadow-md transition-all duration-200"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white rounded-md shadow-md transition-all duration-200"
-            >
-              Save Spell
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+  /* render the generic overlay once everything is loaded */
+  return (
+    schema && (
+      <SpellOverlay
+        mode="add"
+        schema={schema}
+        userName={userName}
+        onClose={handleOverlayClose}
+      />
+    )
   );
-
-  return ReactDOM.createPortal(overlayContent, document.body);
 }
-// --- End Existing Overlay Component ---
