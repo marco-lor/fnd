@@ -26,8 +26,8 @@ export function AddSpellButton({ onClick }) {
 // --- End New Button Component ---
 
 
-// --- Existing Overlay Component (unchanged logic) ---
-export function AddSpellOverlay({ userId, onClose }) {
+// --- Existing Overlay Component (updated logic) ---
+export function AddSpellOverlay({ userId, onClose, savePath }) {
   const [schema, setSchema] = useState(null);
   const [spellFormData, setSpellFormData] = useState({});
   const [imageFile, setImageFile] = useState(null);
@@ -193,7 +193,7 @@ export function AddSpellOverlay({ userId, onClose }) {
       };
 
       // Upload media if present
-      const safeFileName = `spell_${userId}_${spellName.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}`;
+      const safeFileName = `spell_${(savePath?.id || userId)}_${spellName.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}`;
 
       if (imageFile) {
         try {
@@ -217,13 +217,19 @@ export function AddSpellOverlay({ userId, onClose }) {
         }
       }
 
-      // Update the user's spells field
-      const userRef = doc(db, "users", userId);
-      const userDoc = await getDoc(userRef);
+      // Determine Firestore path
+      let docRef, docSnap, spellsField = "spells";
+      if (savePath && savePath.type === "item") {
+        docRef = doc(db, "items", savePath.id);
+        docSnap = await getDoc(docRef);
+      } else {
+        docRef = doc(db, "users", userId);
+        docSnap = await getDoc(docRef);
+      }
 
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        const updatedSpells = { ...(userData.spells || {}) };
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const updatedSpells = { ...(data[spellsField] || {}) };
 
         // Add or replace the spell
         updatedSpells[spellName] = spellData;
@@ -234,10 +240,10 @@ export function AddSpellOverlay({ userId, onClose }) {
           return;
         }
 
-        await updateDoc(userRef, { spells: updatedSpells });
+        await updateDoc(docRef, { [spellsField]: updatedSpells });
         onClose(true);
       } else {
-        alert("User not found");
+        alert(savePath && savePath.type === "item" ? "Item not found" : "User not found");
       }
     } catch (error) {
       console.error("Error saving spell:", error);
@@ -465,7 +471,7 @@ export function AddSpellOverlay({ userId, onClose }) {
               type="submit"
               className="px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white rounded-md shadow-md transition-all duration-200"
             >
-              Save
+              Save Spell
             </button>
           </div>
         </form>

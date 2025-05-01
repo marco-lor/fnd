@@ -124,7 +124,7 @@ export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
     });
   };
 
-  const handleUpdateSpell = async () => {
+  const handleSaveSpell = async () => {
     try {
       const newSpellName = spellFormData.Nome ? spellFormData.Nome.trim() : "";
       if (!newSpellName) {
@@ -283,7 +283,7 @@ export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
                 Annulla
               </button>
               <button
-                onClick={handleUpdateSpell}
+                onClick={handleSaveSpell}
                 className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
               >
                 Conferma
@@ -491,7 +491,7 @@ export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
                 type="submit"
                 className="px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white rounded-md shadow-md transition-all duration-200"
               >
-                Save
+                Save Spell
               </button>
             </div>
           </form>
