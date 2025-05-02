@@ -196,6 +196,8 @@ export function AddWeaponOverlay({ onClose, showMessage }) {
       }
 
       let finalWeaponData = { ...weaponFormData };
+      // Add this line to set the item_type field
+      finalWeaponData.item_type = "weapon";
       // Remove ownerId from upload (do not add)
       delete finalWeaponData.ownerId;
 
