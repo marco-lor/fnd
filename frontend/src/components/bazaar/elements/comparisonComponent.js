@@ -127,7 +127,34 @@ export default function ComparisonPanel({ item }) {
 
   const handleConfirmDelete = async () => {
     try {
-      // First, delete the Firestore document
+      // First, delete spell images and videos if present
+      if (item.spells && typeof item.spells === "object") {
+        for (const spellName in item.spells) {
+          const spell = item.spells[spellName];
+          // If the spell is just a boolean (linked spell), skip
+          if (!spell || typeof spell !== "object") continue;
+          // Delete spell image
+          if (spell.image_url) {
+            try {
+              const path = decodeURIComponent(spell.image_url.split('/o/')[1].split('?')[0]);
+              await deleteObject(ref(storage, path));
+            } catch (e) {
+              console.warn(`Failed to delete spell image for "${spellName}":`, e);
+            }
+          }
+          // Delete spell video
+          if (spell.video_url) {
+            try {
+              const path = decodeURIComponent(spell.video_url.split('/o/')[1].split('?')[0]);
+              await deleteObject(ref(storage, path));
+            } catch (e) {
+              console.warn(`Failed to delete spell video for "${spellName}":`, e);
+            }
+          }
+        }
+      }
+
+      // Then, delete the Firestore document
       await deleteDoc(doc(db, "items", item.id));
       console.log("Document deleted successfully");
 
