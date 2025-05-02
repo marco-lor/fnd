@@ -343,7 +343,7 @@ export function SpellOverlay({
              <div className="mt-2 relative w-24 h-24">
                 <img src={imagePreviewUrl} alt="Preview" className="w-full h-full object-cover rounded border border-gray-600" />
                  {/* Add a clear button */}
-                  <button type="button" onClick={() => { if (imagePreviewUrl?.startsWith('blob:')) URL.revokeObjectURL(imagePreviewUrl); setImageFile(null); setImagePreviewUrl(initialData?.image_url || null); e.target.value = null; }} className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center -mt-1 -mr-1">&times;</button>
+                  <button type="button" onClick={() => { if (imagePreviewUrl?.startsWith('blob:')) URL.revokeObjectURL(imagePreviewUrl); setImageFile(null); setImagePreviewUrl(initialData?.image_url || null); }} className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center -mt-1 -mr-1">&times;</button>
               </div>
            )}
            {!imagePreviewUrl && <div className="mt-2 w-24 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">No Image</div>}
@@ -358,7 +358,7 @@ export function SpellOverlay({
              <div className="mt-2 relative max-w-xs">
                 <video src={videoPreviewUrl} controls className="w-full max-h-48 rounded border border-gray-600" />
                 {/* Add a clear button */}
-                <button type="button" onClick={() => { if (videoPreviewUrl?.startsWith('blob:')) URL.revokeObjectURL(videoPreviewUrl); setVideoFile(null); setVideoPreviewUrl(initialData?.video_url || null); e.target.value = null;}} className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center -mt-1 -mr-1">&times;</button>
+                <button type="button" onClick={() => { if (videoPreviewUrl?.startsWith('blob:')) URL.revokeObjectURL(videoPreviewUrl); setVideoFile(null); setVideoPreviewUrl(initialData?.video_url || null); }} className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center -mt-1 -mr-1">&times;</button>
               </div>
             )}
             {!videoPreviewUrl && <div className="mt-2 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">No Video</div>}
