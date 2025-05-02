@@ -59,6 +59,7 @@ export function SpellOverlay({
    }), []); // Empty dependency array assuming schema structure doesn't change based on props/state here
 
   /* initialise on mount / when schema/initialData changes */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!schema) return;
     // Deep copy initialData if provided to avoid modifying the original object
@@ -77,7 +78,7 @@ export function SpellOverlay({
        if (videoPreviewUrl && videoPreviewUrl.startsWith('blob:')) URL.revokeObjectURL(videoPreviewUrl);
      };
 
-  }, [schema, initialData, buildEmptySpell, imagePreviewUrl, videoPreviewUrl]); // buildEmptySpell is memoized
+  }, [schema, initialData, buildEmptySpell]); // buildEmptySpell is memoized
 
   /* generic nested-field setter */
  const handleNestedChange = useCallback((cat, sub, key, val) =>
@@ -195,6 +196,12 @@ export function SpellOverlay({
    // Use useCallback for dispatchSave
    const dispatchSave = useCallback(() => {
      setShowConfirmation(false); // Hide confirmation if it was shown
+     // Debug: log what is being sent
+     console.log('SpellOverlay result:', {
+       spellData: cleanSpell(),
+       imageFile,
+       videoFile,
+     });
      onClose({
        spellData: cleanSpell(),
        imageFile, // Pass the File object, not the preview URL
