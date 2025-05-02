@@ -8,7 +8,7 @@ import { AuthContext } from '../../../AuthContext';
 import { computeValue } from '../../common/computeFormula';
 import { AddSpellButton } from '../../dmDashboard/elements/buttons/addSpell'; // Keep button
 import { SpellOverlay } from '../../common/SpellOverlay'; // Import SpellOverlay directly
-import { FaTrash } from "react-icons/fa";
+import { FaTrash, FaEdit } from "react-icons/fa";
 
 export function AddWeaponOverlay({ onClose, showMessage }) {
   const [schema, setSchema] = useState(null);
@@ -30,6 +30,7 @@ export function AddWeaponOverlay({ onClose, showMessage }) {
   // State for the spells being created within AddWeaponOverlay
   const [showSpellOverlay, setShowSpellOverlay] = useState(false);
   const [customSpells, setCustomSpells] = useState([]); // Array of { spellData, imageFile, videoFile }
+  const [editingSpellIndex, setEditingSpellIndex] = useState(null); // Track which spell is being edited
 
   // handlers to add/remove tecnica reductions
   const addTecnica = () => setRidTecnicheList(prev => [...prev, { selectedTec: '', ridValue: '' }]);
@@ -147,15 +148,26 @@ export function AddWeaponOverlay({ onClose, showMessage }) {
   // Handler for SpellOverlay close
   const handleSpellCreate = (result) => {
     if (result) {
-      setCustomSpells(prev => {
-        // Prevent duplicate spell names
-        if (prev.some(s => s.spellData.Nome.trim() === result.spellData.Nome.trim())) return prev;
-        return [...prev, result];
-      });
-      setSpellsList(prev => [...new Set([...prev, result.spellData.Nome.trim()])]);
-      if (showMessage) showMessage(`Spell "${result.spellData.Nome.trim()}" creato localmente. Salva l'arma per caricarlo.`);
+      if (editingSpellIndex !== null) {
+        // Edit mode: update the spell at the given index
+        setCustomSpells(prev => {
+          const updated = [...prev];
+          updated[editingSpellIndex] = result;
+          return updated;
+        });
+        if (showMessage) showMessage(`Spell "${result.spellData.Nome.trim()}" modificato.`);
+      } else {
+        // Add mode: add new spell if not duplicate
+        setCustomSpells(prev => {
+          if (prev.some(s => s.spellData.Nome.trim() === result.spellData.Nome.trim())) return prev;
+          return [...prev, result];
+        });
+        setSpellsList(prev => [...new Set([...prev, result.spellData.Nome.trim()])]);
+        if (showMessage) showMessage(`Spell "${result.spellData.Nome.trim()}" creato localmente. Salva l'arma per caricarlo.`);
+      }
     }
     setShowSpellOverlay(false);
+    setEditingSpellIndex(null);
   };
 
   const handleImageChange = (e) => {
@@ -201,6 +213,8 @@ export function AddWeaponOverlay({ onClose, showMessage }) {
       if (customSpells.length > 0) {
         if (!finalWeaponData.spells) finalWeaponData.spells = {};
         for (const spellObj of customSpells) {
+          // Debug: Log spellObj to verify file presence
+          console.log('Uploading spell:', spellObj);
           const createdSpellData = { ...spellObj.spellData };
           const spellName = createdSpellData.Nome.trim();
           const safeBase = `spell_${docId}_${spellName.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}`;
@@ -208,11 +222,17 @@ export function AddWeaponOverlay({ onClose, showMessage }) {
             const spellImgRef = ref(storage, `spells/${safeBase}_image`);
             await uploadBytes(spellImgRef, spellObj.imageFile);
             createdSpellData.image_url = await getDownloadURL(spellImgRef);
+          } else {
+            // Debug: No image file present
+            console.log(`No image file for spell: ${spellName}`);
           }
           if (spellObj.videoFile) {
             const spellVidRef = ref(storage, `spells/videos/${safeBase}_video`);
             await uploadBytes(spellVidRef, spellObj.videoFile);
             createdSpellData.video_url = await getDownloadURL(spellVidRef);
+          } else {
+            // Debug: No video file present
+            console.log(`No video file for spell: ${spellName}`);
           }
           finalWeaponData.spells[spellName] = createdSpellData;
         }
@@ -635,6 +655,18 @@ export function AddWeaponOverlay({ onClose, showMessage }) {
                       >
                         <FaTrash />
                       </button>
+                      <button
+                        type="button"
+                        className="text-blue-400 hover:text-blue-600 flex items-center justify-center"
+                        onClick={() => {
+                          setEditingSpellIndex(idx);
+                          setShowSpellOverlay(true);
+                        }}
+                        aria-label="Edit spell"
+                        style={{ padding: 0, background: 'none', border: 'none' }}
+                      >
+                        <FaEdit />
+                      </button>
                       <span>{s.spellData.Nome}</span>
                     </li>
                   ))}
@@ -716,11 +748,18 @@ export function AddWeaponOverlay({ onClose, showMessage }) {
       {/* Spell Creation Overlay - Rendered conditionally on top */}
       {showSpellOverlay && spellSchema && userName && (
         <SpellOverlay
-          mode="add"
+          mode={editingSpellIndex !== null ? "edit" : "add"}
           schema={spellSchema}
           userName={userName}
           onClose={handleSpellCreate}
-          saveButtonText="Create Spell"
+          saveButtonText={editingSpellIndex !== null ? "Salva Modifiche" : "Create Spell"}
+          initialData={editingSpellIndex !== null ? {
+            ...customSpells[editingSpellIndex].spellData,
+            image_url: customSpells[editingSpellIndex].imageFile ? undefined : customSpells[editingSpellIndex].spellData.image_url,
+            video_url: customSpells[editingSpellIndex].videoFile ? undefined : customSpells[editingSpellIndex].spellData.video_url,
+          } : undefined}
+          imageFile={editingSpellIndex !== null ? customSpells[editingSpellIndex].imageFile : undefined}
+          videoFile={editingSpellIndex !== null ? customSpells[editingSpellIndex].videoFile : undefined}
         />
       )}
       {showSpellOverlay && (!spellSchema || !userName) && (

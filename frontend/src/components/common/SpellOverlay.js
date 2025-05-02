@@ -59,7 +59,7 @@ export function SpellOverlay({
    }), []); // Empty dependency array assuming schema structure doesn't change based on props/state here
 
   /* initialise on mount / when schema/initialData changes */
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line
   useEffect(() => {
     if (!schema) return;
     // Deep copy initialData if provided to avoid modifying the original object
@@ -209,7 +209,6 @@ export function SpellOverlay({
      });
    }, [onClose, cleanSpell, imageFile, videoFile]); // Dependencies for dispatchSave
 
-
   /* ---------- tiny helpers ---------- */
     const selectOrText = useCallback((opts, val, changeFn, placeholder = "") => {
         const commonClasses = "w-full p-2 rounded bg-gray-700 text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500/50";
@@ -229,7 +228,6 @@ export function SpellOverlay({
                 />
             );
     }, []); // No external dependencies
-
 
   /* ---------- rendered form ---------- */
   const formEl = (
@@ -272,7 +270,6 @@ export function SpellOverlay({
         ))}
       </div>
 
-
        {/* Dropdowns/Text: Esperienza, Tipo Base */}
        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
          {[
@@ -286,7 +283,6 @@ export function SpellOverlay({
            </div>
          ))}
        </div>
-
 
       {/* Mod Params Section */}
        <div className="mb-4 p-4 bg-gray-700/50 rounded-lg">
