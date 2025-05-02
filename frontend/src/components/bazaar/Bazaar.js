@@ -288,12 +288,15 @@ export default function Bazaar() {
       </AnimatePresence>
 
       {showOverlay && (
-        <AddWeaponOverlay onClose={(success) => {
-          setShowOverlay(false);
-          if (success) {
-            displayConfirmation("Oggetto Creato!");
-          }
-        }} />
+        <AddWeaponOverlay 
+          onClose={(success) => {
+            setShowOverlay(false);
+            if (success) {
+              displayConfirmation("Oggetto Creato!");
+            }
+          }}
+          showMessage={displayConfirmation}
+        />
       )}
 
       <AnimatePresence>
@@ -303,7 +306,7 @@ export default function Bazaar() {
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.8 }}
             transition={{ duration: 0.3 }}
-            className="fixed inset-0 flex items-center justify-center z-50"
+            className="fixed inset-0 flex items-center justify-center z-[10000]"
           >
             <div className="bg-gradient-to-r from-green-400 to-green-600 text-white px-8 py-4 rounded-lg shadow-xl">
               {confirmationMessage}

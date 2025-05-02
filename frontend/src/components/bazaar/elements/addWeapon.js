@@ -9,7 +9,7 @@ import { computeValue } from '../../common/computeFormula';
 import { AddSpellButton } from '../../dmDashboard/elements/buttons/addSpell'; // Keep button
 import { SpellOverlay } from '../../common/SpellOverlay'; // Import SpellOverlay directly
 
-export function AddWeaponOverlay({ onClose }) {
+export function AddWeaponOverlay({ onClose, showMessage }) {
   const [schema, setSchema] = useState(null);
   const [weaponFormData, setWeaponFormData] = useState({});
   const [imageFile, setImageFile] = useState(null);
@@ -35,7 +35,6 @@ export function AddWeaponOverlay({ onClose }) {
   const removeTecnica = index => setRidTecnicheList(prev => prev.filter((_, i) => i !== index));
   const addSpell = () => setRidSpellList(prev => [...prev, { selectedSpell: '', ridValue: '' }]);
   const removeSpell = index => setRidSpellList(prev => prev.filter((_, i) => i !== index));
-  // const addWeaponSpell = () => setWeaponSpellsList(prev => [...prev, '']); // Keep this if you want to link existing spells by name
   const removeWeaponSpell = index => setWeaponSpellsList(prev => prev.filter((_, i) => i !== index));
 
   // Fetch weapon schema
@@ -49,7 +48,7 @@ export function AddWeaponOverlay({ onClose }) {
           setSchema(schemaData);
           // Initialize weapon form data based on schema
           let initialData = {};
-           Object.keys(schemaData).forEach(field => {
+          Object.keys(schemaData).forEach(field => {
             if (["Slot", "Hands", "Tipo"].includes(field) && Array.isArray(schemaData[field])) {
               initialData[field] = schemaData[field][0] || "";
             } else if (typeof schemaData[field] === "string") {
@@ -68,13 +67,13 @@ export function AddWeaponOverlay({ onClose }) {
             ) {
               initialData[field] = { "1": "", "4": "", "7": "", "10": "" };
             } else if (typeof schemaData[field] === "object" && !Array.isArray(schemaData[field])) {
-               // Handle simple objects like ridCostoSpellSingola etc. if defined in schema, otherwise they are handled manually
-               if (!["ridCostoSpellSingola", "ridCostoTecSingola", "spells"].includes(field)) {
-                 initialData[field] = {};
-                 Object.keys(schemaData[field]).forEach(subKey => {
-                   initialData[field][subKey] = "";
-                 });
-               }
+              // Handle simple objects like ridCostoSpellSingola etc. if defined in schema, otherwise they are handled manually
+              if (!["ridCostoSpellSingola", "ridCostoTecSingola", "spells"].includes(field)) {
+                initialData[field] = {};
+                Object.keys(schemaData[field]).forEach(subKey => {
+                  initialData[field][subKey] = "";
+                });
+              }
             }
           });
           // Ensure nested structures exist even if not fully defined in schema yet
@@ -101,18 +100,18 @@ export function AddWeaponOverlay({ onClose }) {
         const userDocRef = doc(db, 'users', user.uid);
         const userSnap = await getDoc(userDocRef);
         if (userSnap.exists()) {
-            const userData = userSnap.data();
-            setUserParams(userData.Parametri || { Base: {}, Combattimento: {} });
-            setUserName(userData.characterId || userData.email || "Unknown User"); // For SpellOverlay
+          const userData = userSnap.data();
+          setUserParams(userData.Parametri || { Base: {}, Combattimento: {} });
+          setUserName(userData.characterId || userData.email || "Unknown User"); // For SpellOverlay
         }
 
         // Fetch spell schema
         const spellSchemaRef = doc(db, "utils", "schema_spell");
         const spellSchemaSnap = await getDoc(spellSchemaRef);
         if (spellSchemaSnap.exists()) {
-            setSpellSchema(spellSchemaSnap.data());
+          setSpellSchema(spellSchemaSnap.data());
         } else {
-             console.error("Spell schema not found at /utils/schema_spell");
+          console.error("Spell schema not found at /utils/schema_spell");
         }
 
         // Fetch existing spell names (common + personal) for dropdowns
@@ -144,19 +143,14 @@ export function AddWeaponOverlay({ onClose }) {
     fetchData();
   }, [user]);
 
-
   // Handler for SpellOverlay close
   const handleSpellCreate = (result) => {
     if (result) {
-      // User clicked "Create Spell"
       setTempSpellData(result); // Store { spellData, imageFile, videoFile }
       // Add the new spell name to the dropdown list immediately for selection
       setSpellsList(prev => [...new Set([...prev, result.spellData.Nome.trim()])]);
-      // Optionally automatically add it to the weapon's spell list (or let user select it)
-      // setWeaponSpellsList(prev => [...prev, result.spellData.Nome.trim()]);
-       alert(`Spell "${result.spellData.Nome.trim()}" created locally. Save the weapon to upload it.`);
+      if (showMessage) showMessage(`Spell "${result.spellData.Nome.trim()}" created locally. Save the weapon to upload it.`);
     } else {
-      // User clicked Cancel in SpellOverlay
       setTempSpellData(null); // Clear any potential previous temp data
     }
     setShowSpellOverlay(false); // Close the SpellOverlay
@@ -174,7 +168,7 @@ export function AddWeaponOverlay({ onClose }) {
     try {
       const weaponName = weaponFormData.Nome ? weaponFormData.Nome.trim() : "";
       if (!weaponName) {
-        alert("Weapon Name is required");
+        if (showMessage) showMessage("Weapon Name is required");
         return;
       }
       const docId = weaponName.replace(/\s+/g, "_"); // Use name for ID
@@ -183,12 +177,13 @@ export function AddWeaponOverlay({ onClose }) {
       // Check if weapon already exists *before* uploading anything
       const existingDocSnap = await getDoc(weaponDocRef);
       if (existingDocSnap.exists()) {
-        alert(`Weapon with name "${weaponName}" (ID: ${docId}) already exists. Please choose a different name.`);
+        if (showMessage) showMessage(`Weapon with name "${weaponName}" (ID: ${docId}) already exists. Please choose a different name.`);
         return;
       }
 
       let finalWeaponData = { ...weaponFormData };
-      finalWeaponData.ownerId = user.uid; // Add owner ID
+      // Remove ownerId from upload (do not add)
+      delete finalWeaponData.ownerId;
 
       // --- Start Uploads ---
 
@@ -196,45 +191,30 @@ export function AddWeaponOverlay({ onClose }) {
       if (imageFile) {
         const weaponImgFileName = `weapon_${docId}_${Date.now()}_${imageFile.name}`;
         const weaponImgRef = ref(storage, 'items/' + weaponImgFileName);
-        console.log("Uploading weapon image to:", weaponImgRef.fullPath);
         await uploadBytes(weaponImgRef, imageFile);
         finalWeaponData.image_url = await getDownloadURL(weaponImgRef);
-        console.log("Weapon image URL:", finalWeaponData.image_url);
       }
 
       // 2. Handle the Temporarily Created Spell (if any)
       let createdSpellData = null;
       if (tempSpellData) {
-        console.log("Processing temporary spell:", tempSpellData.spellData.Nome);
-        createdSpellData = { ...tempSpellData.spellData }; // Copy base spell data
-
+        createdSpellData = { ...tempSpellData.spellData };
         const spellName = createdSpellData.Nome.trim();
         const safeBase = `spell_${docId}_${spellName.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}`;
-
-        // Upload spell image (if provided)
         if (tempSpellData.imageFile) {
           const spellImgRef = ref(storage, `spells/${safeBase}_image`);
-          console.log("Uploading spell image to:", spellImgRef.fullPath);
           await uploadBytes(spellImgRef, tempSpellData.imageFile);
           createdSpellData.image_url = await getDownloadURL(spellImgRef);
-          console.log("Spell image URL:", createdSpellData.image_url);
         }
-        // Upload spell video (if provided)
         if (tempSpellData.videoFile) {
           const spellVidRef = ref(storage, `spells/videos/${safeBase}_video`);
-           console.log("Uploading spell video to:", spellVidRef.fullPath);
           await uploadBytes(spellVidRef, tempSpellData.videoFile);
           createdSpellData.video_url = await getDownloadURL(spellVidRef);
-          console.log("Spell video URL:", createdSpellData.video_url);
         }
-
-        // Add the processed spell data to the weapon's spells map
-        // We store the *full spell definition* within the weapon document itself
-         if (!finalWeaponData.spells) {
-             finalWeaponData.spells = {};
-         }
+        if (!finalWeaponData.spells) {
+          finalWeaponData.spells = {};
+        }
         finalWeaponData.spells[spellName] = createdSpellData;
-        console.log(`Added created spell "${spellName}" to weapon data.`);
       }
 
       // --- Prepare Final Data Structure ---
@@ -245,11 +225,10 @@ export function AddWeaponOverlay({ onClose }) {
           if (selectedTec && ridValue.trim() !== '') acc[selectedTec] = Number(ridValue);
           return acc;
         }, {});
-         console.log("Added Technique Reductions:", finalWeaponData.ridCostoTecSingola);
       } else {
-         delete finalWeaponData.ridCostoTecSingola; // Clean up if empty
+        // Always upload as empty object if not filled
+        finalWeaponData.ridCostoTecSingola = {};
       }
-
 
       // Consolidate spell cost reductions (for existing spells)
       if (ridSpellList.length > 0) {
@@ -257,50 +236,50 @@ export function AddWeaponOverlay({ onClose }) {
           if (selectedSpell && ridValue.trim() !== '') acc[selectedSpell] = Number(ridValue);
           return acc;
         }, {});
-         console.log("Added Spell Reductions:", finalWeaponData.ridCostoSpellSingola);
       } else {
-          delete finalWeaponData.ridCostoSpellSingola; // Clean up if empty
+        // Always upload as empty object if not filled
+        finalWeaponData.ridCostoSpellSingola = {};
       }
 
-
-     // Consolidate linked *existing* spells (names only, value is just true)
-      // Note: The newly created spell is already *fully embedded* above
-      // This section is for linking other, pre-existing spells by name.
-       const linkedSpells = weaponSpellsList.reduce((acc, spellName) => {
-         if (spellName && spellName !== (createdSpellData?.Nome || '')) { // Ensure name is valid and not the one just created
-           acc[spellName] = true; // Mark linked existing spells
-         }
-         return acc;
-       }, {});
+      // Consolidate linked *existing* spells (names only, value is just true)
+      const linkedSpells = weaponSpellsList.reduce((acc, spellName) => {
+        if (spellName && spellName !== (createdSpellData?.Nome || '')) {
+          acc[spellName] = true;
+        }
+        return acc;
+      }, {});
 
       // Merge linked existing spells with the potentially created spell
       finalWeaponData.spells = { ...(finalWeaponData.spells || {}), ...linkedSpells };
-      if (Object.keys(finalWeaponData.spells).length === 0) {
-          delete finalWeaponData.spells; // Clean up if no spells linked or created
-      } else {
-          console.log("Final Weapon Spells Map:", finalWeaponData.spells);
+      // Always upload as empty object if not filled
+      if (!finalWeaponData.spells || Object.keys(finalWeaponData.spells).length === 0) {
+        finalWeaponData.spells = {};
       }
 
+      // prezzo: always upload as int, default 0
+      let prezzoValue = 0;
+      if (typeof finalWeaponData.prezzo === 'string' && finalWeaponData.prezzo.trim() !== '') {
+        const parsed = parseInt(finalWeaponData.prezzo, 10);
+        prezzoValue = isNaN(parsed) ? 0 : parsed;
+      }
+      finalWeaponData.prezzo = prezzoValue;
 
       // Remove temporary state holders if they exist at the top level
       delete finalWeaponData.tempSpellData;
       delete finalWeaponData.showSpellOverlay;
 
       // --- Save to Firestore ---
-      console.log("Final weapon data being saved:", finalWeaponData);
       await setDoc(weaponDocRef, finalWeaponData); // Use setDoc for creation
 
-      alert(`Weapon "${weaponName}" saved successfully!`);
+      if (showMessage) showMessage(`Weapon "${weaponName}" saved successfully!`);
       onClose(true); // Signal success to parent
 
     } catch (error) {
       console.error("Error saving weapon:", error);
-      alert(`Error saving weapon: ${error.message}`);
-      // Consider more granular error handling (e.g., if upload fails vs. Firestore write fails)
+      if (showMessage) showMessage(`Error saving weapon: ${error.message}`);
       onClose(false); // Signal failure
     }
   };
-
 
   // --- Rendering Functions ---
 
@@ -313,18 +292,18 @@ export function AddWeaponOverlay({ onClose }) {
           {/* Name */}
           <div className="md:col-span-1">
             {schema.Nome !== undefined && (
-                <label className="block text-white mb-1">Nome <span className="text-red-500">*</span></label>
+              <label className="block text-white mb-1">Nome <span className="text-red-500">*</span></label>
             )}
-             {schema.Nome !== undefined && (
-                <input
-                    type="text"
-                    value={weaponFormData.Nome || ''}
-                    onChange={(e) => setWeaponFormData({ ...weaponFormData, Nome: e.target.value })}
-                    className="w-full p-2 rounded bg-gray-700 text-white"
-                    placeholder="Weapon Name (Required)"
-                    required // HTML5 validation
-                />
-             )}
+            {schema.Nome !== undefined && (
+              <input
+                type="text"
+                value={weaponFormData.Nome || ''}
+                onChange={(e) => setWeaponFormData({ ...weaponFormData, Nome: e.target.value })}
+                className="w-full p-2 rounded bg-gray-700 text-white"
+                placeholder="Weapon Name (Required)"
+                required // HTML5 validation
+              />
+            )}
           </div>
 
           {/* Slot */}
@@ -352,83 +331,83 @@ export function AddWeaponOverlay({ onClose }) {
             {imagePreviewUrl && (
               <img src={imagePreviewUrl} alt="Preview" className="mt-2 w-24 h-auto rounded border border-gray-600" />
             )}
-             {!imagePreviewUrl && <div className="mt-2 w-24 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-sm">No Image</div>}
+            {!imagePreviewUrl && <div className="mt-2 w-24 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-sm">No Image</div>}
           </div>
 
           {/* Row 2: Tipo, Hands */}
-           <div className="md:col-span-1">
-             {schema.Tipo !== undefined && Array.isArray(schema.Tipo) && (
-               <>
-                 <label className="block text-white mb-1">Tipo</label>
-                 <select
-                   value={weaponFormData.Tipo || (schema.Tipo.length > 0 ? schema.Tipo[0] : '')}
-                   onChange={(e) => setWeaponFormData({ ...weaponFormData, Tipo: e.target.value })}
-                   className="w-full p-2 rounded bg-gray-700 text-white"
-                 >
-                   {schema.Tipo.map(option => (
-                     <option key={option} value={option}>{option}</option>
-                   ))}
-                 </select>
-               </>
-             )}
-           </div>
+          <div className="md:col-span-1">
+            {schema.Tipo !== undefined && Array.isArray(schema.Tipo) && (
+              <>
+                <label className="block text-white mb-1">Tipo</label>
+                <select
+                  value={weaponFormData.Tipo || (schema.Tipo.length > 0 ? schema.Tipo[0] : '')}
+                  onChange={(e) => setWeaponFormData({ ...weaponFormData, Tipo: e.target.value })}
+                  className="w-full p-2 rounded bg-gray-700 text-white"
+                >
+                  {schema.Tipo.map(option => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </>
+            )}
+          </div>
 
-           <div className="md:col-span-1">
-             {schema.Hands !== undefined && Array.isArray(schema.Hands) && (
-               <>
-                 <label className="block text-white mb-1">Hands</label>
-                 <select
-                   value={weaponFormData.Hands || (schema.Hands.length > 0 ? schema.Hands[0] : '')}
-                   onChange={(e) => setWeaponFormData({ ...weaponFormData, Hands: e.target.value })}
-                   className="w-full p-2 rounded bg-gray-700 text-white"
-                 >
-                   {schema.Hands.map(option => (
-                     <option key={option} value={option}>{option}</option>
-                   ))}
-                 </select>
-               </>
-             )}
-           </div>
+          <div className="md:col-span-1">
+            {schema.Hands !== undefined && Array.isArray(schema.Hands) && (
+              <>
+                <label className="block text-white mb-1">Hands</label>
+                <select
+                  value={weaponFormData.Hands || (schema.Hands.length > 0 ? schema.Hands[0] : '')}
+                  onChange={(e) => setWeaponFormData({ ...weaponFormData, Hands: e.target.value })}
+                  className="w-full p-2 rounded bg-gray-700 text-white"
+                >
+                  {schema.Hands.map(option => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Row 3: Effect */}
         <div className="mb-4">
           {schema.Effetto !== undefined && typeof schema.Effetto === "string" && (
-              <>
-                <label className="block text-white mb-1">Effetto</label>
-                <textarea // Use textarea for potentially longer text
-                  value={weaponFormData.Effetto || ''}
-                  onChange={(e) => setWeaponFormData({ ...weaponFormData, Effetto: e.target.value })}
-                  className="w-full p-2 rounded bg-gray-700 text-white h-20" // Adjust height as needed
-                  placeholder="Describe the weapon's effect"
-                />
-              </>
+            <>
+              <label className="block text-white mb-1">Effetto</label>
+              <textarea // Use textarea for potentially longer text
+                value={weaponFormData.Effetto || ''}
+                onChange={(e) => setWeaponFormData({ ...weaponFormData, Effetto: e.target.value })}
+                className="w-full p-2 rounded bg-gray-700 text-white h-20" // Adjust height as needed
+                placeholder="Describe the weapon's effect"
+              />
+            </>
           )}
         </div>
 
-         {/* Row 4: Requirements, Price */}
+        {/* Row 4: Requirements, Price */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-             <div>
-               <label className="block text-white mb-1">Requisiti</label>
-               <input
-                 type="text"
-                 value={weaponFormData.requisiti || ''}
-                 onChange={(e) => setWeaponFormData({ ...weaponFormData, requisiti: e.target.value })}
-                 className="w-full p-2 rounded bg-gray-700 text-white"
-                 placeholder="e.g., STR 10, DEX 8"
-               />
-             </div>
-             <div>
-               <label className="block text-white mb-1">Prezzo</label>
-               <input
-                 type="text" // Keep as text to allow "N/A" or currency symbols
-                 value={weaponFormData.prezzo || ''}
-                 onChange={(e) => setWeaponFormData({ ...weaponFormData, prezzo: e.target.value })}
-                 className="w-full p-2 rounded bg-gray-700 text-white"
-                 placeholder="e.g., 100 Gold"
-               />
-             </div>
-           </div>
+          <div>
+            <label className="block text-white mb-1">Requisiti</label>
+            <input
+              type="text"
+              value={weaponFormData.requisiti || ''}
+              onChange={(e) => setWeaponFormData({ ...weaponFormData, requisiti: e.target.value })}
+              className="w-full p-2 rounded bg-gray-700 text-white"
+              placeholder="e.g., STR 10, DEX 8"
+            />
+          </div>
+          <div>
+            <label className="block text-white mb-1">Prezzo</label>
+            <input
+              type="text" // Keep as text to allow "N/A" or currency symbols
+              value={weaponFormData.prezzo || ''}
+              onChange={(e) => setWeaponFormData({ ...weaponFormData, prezzo: e.target.value })}
+              className="w-full p-2 rounded bg-gray-700 text-white"
+              placeholder="e.g., 100 Gold"
+            />
+          </div>
+        </div>
       </div>
     );
   };
@@ -445,298 +424,293 @@ export function AddWeaponOverlay({ onClose }) {
 
     // Helper to render a single table
     const renderTable = (title, fields, category = null) => {
-        // Check if *any* field in this table actually exists in the schema
-        const schemaHasFields = fields.some(field =>
-            category ? schema.Parametri?.[category]?.[field] !== undefined : schema[field] !== undefined
-        );
-        if (!schemaHasFields) return null; // Don't render table if no relevant fields exist in schema
+      // Check if *any* field in this table actually exists in the schema
+      const schemaHasFields = fields.some(field =>
+        category ? schema.Parametri?.[category]?.[field] !== undefined : schema[field] !== undefined
+      );
+      if (!schemaHasFields) return null; // Don't render table if no relevant fields exist in schema
 
-        return (
-            <div className="w-full bg-gray-800/70 p-4 rounded-xl shadow-lg backdrop-blur-sm">
-                <h3 className="text-white mb-3 font-medium">{title}</h3>
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[300px] text-white text-sm">
-                    <thead>
-                        <tr>
-                            <th className="bg-gray-700/50 px-2 py-2 rounded-tl-lg text-left font-semibold">Param</th>
-                            {levels.map((lvl, i) => (
-                                <th key={lvl} className={`bg-gray-700/50 px-2 py-2 ${i === levels.length - 1 ? 'rounded-tr-lg' : ''} text-center font-semibold`}>
-                                    Lvl {lvl}
-                                </th>
-                            ))}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {fields.map((field, i) => {
-                            // Check if this specific field exists in the schema before rendering row
-                             const fieldExistsInSchema = category
-                                ? schema.Parametri?.[category]?.[field] !== undefined
-                                : schema[field] !== undefined;
+      return (
+        <div className="w-full bg-gray-800/70 p-4 rounded-xl shadow-lg backdrop-blur-sm">
+          <h3 className="text-white mb-3 font-medium">{title}</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[300px] text-white text-sm">
+              <thead>
+                <tr>
+                  <th className="bg-gray-700/50 px-2 py-2 rounded-tl-lg text-left font-semibold">Param</th>
+                  {levels.map((lvl, i) => (
+                    <th key={lvl} className={`bg-gray-700/50 px-2 py-2 ${i === levels.length - 1 ? 'rounded-tr-lg' : ''} text-center font-semibold`}>
+                      Lvl {lvl}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {fields.map((field, i) => {
+                  // Check if this specific field exists in the schema before rendering row
+                  const fieldExistsInSchema = category
+                    ? schema.Parametri?.[category]?.[field] !== undefined
+                    : schema[field] !== undefined;
 
-                             if (!fieldExistsInSchema) return null; // Skip row if field not in schema
+                  if (!fieldExistsInSchema) return null; // Skip row if field not in schema
 
-                            const isLastRow = i === fields.filter(f => category ? schema.Parametri?.[category]?.[f] !== undefined : schema[f] !== undefined).length - 1;
-                            const rowData = category
-                                ? weaponFormData.Parametri?.[category]?.[field]
-                                : weaponFormData[field];
+                  const isLastRow = i === fields.filter(f => category ? schema.Parametri?.[category]?.[f] !== undefined : schema[f] !== undefined).length - 1;
+                  const rowData = category
+                    ? weaponFormData.Parametri?.[category]?.[field]
+                    : weaponFormData[field];
 
-                            return (
-                                <tr key={field}>
-                                    <td className={`bg-gray-700/30 px-2 py-1.5 ${isLastRow ? 'rounded-bl-lg' : ''} text-left`}>
-                                        {field}
-                                    </td>
-                                    {levels.map((lvl, j) => {
-                                      const value = (rowData && rowData[lvl]) || '';
-                                      const computed = category && value ? computeValue(value, userParams) : null;
+                  return (
+                    <tr key={field}>
+                      <td className={`bg-gray-700/30 px-2 py-1.5 ${isLastRow ? 'rounded-bl-lg' : ''} text-left`}>
+                        {field}
+                      </td>
+                      {levels.map((lvl, j) => {
+                        const value = (rowData && rowData[lvl]) || '';
+                        const computed = category && value ? computeValue(value, userParams) : null;
 
-                                      return (
-                                        <td key={lvl} className={`bg-gray-700/30 px-1 py-1 ${isLastRow && j === levels.length - 1 ? 'rounded-br-lg' : ''}`}>
-                                            <div className="flex items-center justify-center">
-                                                <input
-                                                    type="text" // Use text to allow formulas like "FOR/2"
-                                                    value={value}
-                                                    onChange={(e) => {
-                                                        const newValue = e.target.value;
-                                                        setWeaponFormData(prev => {
-                                                            const newData = { ...prev };
-                                                            if (category) {
-                                                                if (!newData.Parametri) newData.Parametri = { Base: {}, Combattimento: {} };
-                                                                if (!newData.Parametri[category]) newData.Parametri[category] = {};
-                                                                if (!newData.Parametri[category][field]) newData.Parametri[category][field] = {};
-                                                                newData.Parametri[category][field][lvl] = newValue;
-                                                            } else {
-                                                                if (!newData[field]) newData[field] = {};
-                                                                newData[field][lvl] = newValue;
-                                                            }
-                                                            return newData;
-                                                        });
-                                                    }}
-                                                    className="w-16 p-1 rounded-md bg-gray-600/70 text-white text-center focus:outline-none focus:ring-1 focus:ring-blue-500/50"
-                                                    placeholder="-"
-                                                />
-                                                 {/* Show computed value only for Base/Combat params */}
-                                                {computed !== null && (
-                                                    <span className="ml-1 text-gray-400 text-xs">({computed})</span>
-                                                )}
-                                            </div>
-                                        </td>
-                                      )
-                                    })}
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                  </table>
-                </div>
-            </div>
-        );
+                        return (
+                          <td key={lvl} className={`bg-gray-700/30 px-1 py-1 ${isLastRow && j === levels.length - 1 ? 'rounded-br-lg' : ''}`}>
+                            <div className="flex items-center justify-center">
+                              <input
+                                type="text" // Use text to allow formulas like "FOR/2"
+                                value={value}
+                                onChange={(e) => {
+                                  const newValue = e.target.value;
+                                  setWeaponFormData(prev => {
+                                    const newData = { ...prev };
+                                    if (category) {
+                                      if (!newData.Parametri) newData.Parametri = { Base: {}, Combattimento: {} };
+                                      if (!newData.Parametri[category]) newData.Parametri[category] = {};
+                                      if (!newData.Parametri[category][field]) newData.Parametri[category][field] = {};
+                                      newData.Parametri[category][field][lvl] = newValue;
+                                    } else {
+                                      if (!newData[field]) newData[field] = {};
+                                      newData[field][lvl] = newValue;
+                                    }
+                                    return newData;
+                                  });
+                                }}
+                                className="w-16 p-1 rounded-md bg-gray-600/70 text-white text-center focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+                                placeholder="-"
+                              />
+                              {/* Show computed value only for Base/Combat params */}
+                              {computed !== null && (
+                                <span className="ml-1 text-gray-400 text-xs">({computed})</span>
+                              )}
+                            </div>
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
     };
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6"> {/* Responsive grid for tables */}
-            {renderTable("Parametri Speciali", specialFields)}
-            {renderTable("Parametri Base", baseParamFields, "Base")}
-            {renderTable("Parametri Combattimento", combatParamFields, "Combattimento")}
-        </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6"> {/* Responsive grid for tables */}
+        {renderTable("Parametri Speciali", specialFields)}
+        {renderTable("Parametri Base", baseParamFields, "Base")}
+        {renderTable("Parametri Combattimento", combatParamFields, "Combattimento")}
+      </div>
     );
-};
+  };
 
-
-const renderReductionsAndSpells = () => {
+  const renderReductionsAndSpells = () => {
     return (
-        <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Column 1: Reductions */}
-            <div className="space-y-4">
-                {/* --- Single Technique Reductions --- */}
-                 <div>
-                     <label className="block text-white mb-2 font-medium">Riduzioni Costo Tecniche Singole</label>
-                     {ridTecnicheList.map((item, idx) => (
-                         <div key={idx} className="flex items-center gap-2 mb-2 p-2 bg-gray-700/50 rounded">
-                             <select
-                                 value={item.selectedTec}
-                                 onChange={e => {
-                                     const newList = [...ridTecnicheList];
-                                     newList[idx].selectedTec = e.target.value;
-                                     setRidTecnicheList(newList);
-                                 }}
-                                 className="flex-grow p-2 rounded bg-gray-600 text-white text-sm"
-                             >
-                                 <option value="" disabled>Seleziona tecnica...</option>
-                                 {tecnicheList.sort().map(name => <option key={name} value={name}>{name}</option>)}
-                             </select>
-                             <input
-                                 type="number"
-                                 value={item.ridValue}
-                                 onChange={e => {
-                                     const newList = [...ridTecnicheList];
-                                     newList[idx].ridValue = e.target.value;
-                                     setRidTecnicheList(newList);
-                                 }}
-                                 placeholder="Valore Rid."
-                                 className="w-24 p-2 rounded bg-gray-600 text-white text-sm"
-                             />
-                             <button type="button" onClick={() => removeTecnica(idx)} className="text-red-500 hover:text-red-400 p-1">✕</button>
-                         </div>
-                     ))}
-                     <button
-                       type="button"
-                       onClick={addTecnica}
-                       className="mt-1 text-sm text-blue-400 hover:text-blue-300"
-                       disabled={tecnicheList.length === 0}
-                      >
-                        + Aggiungi Riduzione Tecnica
-                     </button>
-                     {tecnicheList.length === 0 && <p className="text-xs text-gray-400 mt-1">Caricamento tecniche...</p>}
-                 </div>
+      <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Column 1: Reductions */}
+        <div className="space-y-4">
+          {/* --- Single Technique Reductions --- */}
+          <div>
+            <label className="block text-white mb-2 font-medium">Riduzioni Costo Tecniche Singole</label>
+            {ridTecnicheList.map((item, idx) => (
+              <div key={idx} className="flex items-center gap-2 mb-2 p-2 bg-gray-700/50 rounded">
+                <select
+                  value={item.selectedTec}
+                  onChange={e => {
+                    const newList = [...ridTecnicheList];
+                    newList[idx].selectedTec = e.target.value;
+                    setRidTecnicheList(newList);
+                  }}
+                  className="flex-grow p-2 rounded bg-gray-600 text-white text-sm"
+                >
+                  <option value="" disabled>Seleziona tecnica...</option>
+                  {tecnicheList.sort().map(name => <option key={name} value={name}>{name}</option>)}
+                </select>
+                <input
+                  type="number"
+                  value={item.ridValue}
+                  onChange={e => {
+                    const newList = [...ridTecnicheList];
+                    newList[idx].ridValue = e.target.value;
+                    setRidTecnicheList(newList);
+                  }}
+                  placeholder="Valore Rid."
+                  className="w-24 p-2 rounded bg-gray-600 text-white text-sm"
+                />
+                <button type="button" onClick={() => removeTecnica(idx)} className="text-red-500 hover:text-red-400 p-1">✕</button>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={addTecnica}
+              className="mt-1 text-sm text-blue-400 hover:text-blue-300"
+              disabled={tecnicheList.length === 0}
+            >
+              + Aggiungi Riduzione Tecnica
+            </button>
+            {tecnicheList.length === 0 && <p className="text-xs text-gray-400 mt-1">Caricamento tecniche...</p>}
+          </div>
 
-                {/* --- Single Spell Reductions --- */}
-                <div>
-                    <label className="block text-white mb-2 font-medium">Riduzioni Costo Spell Singole</label>
-                     {ridSpellList.map((item, idx) => (
-                         <div key={idx} className="flex items-center gap-2 mb-2 p-2 bg-gray-700/50 rounded">
-                             <select
-                                 value={item.selectedSpell}
-                                 onChange={e => {
-                                     const newList = [...ridSpellList];
-                                     newList[idx].selectedSpell = e.target.value;
-                                     setRidSpellList(newList);
-                                 }}
-                                  className="flex-grow p-2 rounded bg-gray-600 text-white text-sm"
-                             >
-                                 <option value="" disabled>Seleziona spell...</option>
-                                 {spellsList.sort().map(name => <option key={name} value={name}>{name}</option>)}
-                             </select>
-                             <input
-                                 type="number"
-                                 value={item.ridValue}
-                                 onChange={e => {
-                                     const newList = [...ridSpellList];
-                                     newList[idx].ridValue = e.target.value;
-                                     setRidSpellList(newList);
-                                 }}
-                                 placeholder="Valore Rid."
-                                 className="w-24 p-2 rounded bg-gray-600 text-white text-sm"
-                             />
-                             <button type="button" onClick={() => removeSpell(idx)} className="text-red-500 hover:text-red-400 p-1">✕</button>
-                         </div>
-                     ))}
-                    <button
-                       type="button"
-                       onClick={addSpell}
-                       className="mt-1 text-sm text-blue-400 hover:text-blue-300"
-                       disabled={spellsList.length === 0}
-                    >
-                       + Aggiungi Riduzione Spell
-                    </button>
-                     {spellsList.length === 0 && <p className="text-xs text-gray-400 mt-1">Caricamento spells...</p>}
-                </div>
-            </div>
-
-            {/* Column 2: Weapon Spells */}
-            <div>
-                 <label className="block text-white mb-2 font-medium">Spells Conferiti dall'Arma</label>
-                 <p className="text-xs text-gray-400 mb-2">Aggiungi spells esistenti o creane uno nuovo specifico per quest'arma.</p>
-
-                {/* Button to open Spell Creation Overlay */}
-                 <div className="mb-3">
-                     <AddSpellButton onClick={() => setShowSpellOverlay(true)} />
-                      {tempSpellData && (
-                         <p className="text-xs text-green-400 mt-1 italic">
-                             Spell "{tempSpellData.spellData.Nome}" pronto per essere salvato con l'arma.
-                         </p>
-                      )}
-                 </div>
-
-
-                 {/* List to select *EXISTING* spells to link */}
-                  <label className="block text-white text-sm mb-1">Collega Spells Esistenti:</label>
-                 {weaponSpellsList.map((spellName, idx) => (
-                   <div key={idx} className="flex items-center gap-2 mb-2 p-2 bg-gray-700/50 rounded">
-                     <select
-                       value={spellName}
-                       onChange={e => {
-                         const newList = [...weaponSpellsList];
-                         newList[idx] = e.target.value;
-                         setWeaponSpellsList(newList);
-                       }}
-                       className="flex-grow p-2 rounded bg-gray-600 text-white text-sm"
-                     >
-                       <option value="" disabled>Seleziona spell esistente...</option>
-                       {/* Filter out the temp spell name if it exists */}
-                       {spellsList
-                          .filter(name => !tempSpellData || name !== tempSpellData.spellData.Nome)
-                          .sort()
-                          .map(name => (
-                            <option key={name} value={name}>{name}</option>
-                       ))}
-                     </select>
-                     <button type="button" onClick={() => removeWeaponSpell(idx)} className="text-red-500 hover:text-red-400 p-1">✕</button>
-                   </div>
-                 ))}
-                 <button
-                   type="button"
-                   // onClick={addWeaponSpell} // Renable this if you want multiple dropdowns for existing spells
-                   onClick={() => setWeaponSpellsList(prev => [...prev, ''])} // Add an empty entry to show a new dropdown
-                   className="mt-1 text-sm text-blue-400 hover:text-blue-300"
-                   disabled={spellsList.length === 0}
-                 >
-                   + Collega Spell Esistente
-                 </button>
-                  {spellsList.length === 0 && <p className="text-xs text-gray-400 mt-1">Caricamento spells...</p>}
-            </div>
+          {/* --- Single Spell Reductions --- */}
+          <div>
+            <label className="block text-white mb-2 font-medium">Riduzioni Costo Spell Singole</label>
+            {ridSpellList.map((item, idx) => (
+              <div key={idx} className="flex items-center gap-2 mb-2 p-2 bg-gray-700/50 rounded">
+                <select
+                  value={item.selectedSpell}
+                  onChange={e => {
+                    const newList = [...ridSpellList];
+                    newList[idx].selectedSpell = e.target.value;
+                    setRidSpellList(newList);
+                  }}
+                  className="flex-grow p-2 rounded bg-gray-600 text-white text-sm"
+                >
+                  <option value="" disabled>Seleziona spell...</option>
+                  {spellsList.sort().map(name => <option key={name} value={name}>{name}</option>)}
+                </select>
+                <input
+                  type="number"
+                  value={item.ridValue}
+                  onChange={e => {
+                    const newList = [...ridSpellList];
+                    newList[idx].ridValue = e.target.value;
+                    setRidSpellList(newList);
+                  }}
+                  placeholder="Valore Rid."
+                  className="w-24 p-2 rounded bg-gray-600 text-white text-sm"
+                />
+                <button type="button" onClick={() => removeSpell(idx)} className="text-red-500 hover:text-red-400 p-1">✕</button>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={addSpell}
+              className="mt-1 text-sm text-blue-400 hover:text-blue-300"
+              disabled={spellsList.length === 0}
+            >
+              + Aggiungi Riduzione Spell
+            </button>
+            {spellsList.length === 0 && <p className="text-xs text-gray-400 mt-1">Caricamento spells...</p>}
+          </div>
         </div>
-    );
-};
 
+        {/* Column 2: Weapon Spells */}
+        <div>
+          <label className="block text-white mb-2 font-medium">Spells Conferiti dall'Arma</label>
+          <p className="text-xs text-gray-400 mb-2">Aggiungi spells esistenti o creane uno nuovo specifico per quest'arma.</p>
+
+          {/* Button to open Spell Creation Overlay */}
+          <div className="mb-3">
+            <AddSpellButton onClick={() => setShowSpellOverlay(true)} />
+            {tempSpellData && (
+              <p className="text-xs text-green-400 mt-1 italic">
+                Spell "{tempSpellData.spellData.Nome}" pronto per essere salvato con l'arma.
+              </p>
+            )}
+          </div>
+
+          {/* List to select *EXISTING* spells to link */}
+          <label className="block text-white text-sm mb-1">Collega Spells Esistenti:</label>
+          {weaponSpellsList.map((spellName, idx) => (
+            <div key={idx} className="flex items-center gap-2 mb-2 p-2 bg-gray-700/50 rounded">
+              <select
+                value={spellName}
+                onChange={e => {
+                  const newList = [...weaponSpellsList];
+                  newList[idx] = e.target.value;
+                  setWeaponSpellsList(newList);
+                }}
+                className="flex-grow p-2 rounded bg-gray-600 text-white text-sm"
+              >
+                <option value="" disabled>Seleziona spell esistente...</option>
+                {/* Filter out the temp spell name if it exists */}
+                {spellsList
+                  .filter(name => !tempSpellData || name !== tempSpellData.spellData.Nome)
+                  .sort()
+                  .map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+              </select>
+              <button type="button" onClick={() => removeWeaponSpell(idx)} className="text-red-500 hover:text-red-400 p-1">✕</button>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => setWeaponSpellsList(prev => [...prev, ''])} // Add an empty entry to show a new dropdown
+            className="mt-1 text-sm text-blue-400 hover:text-blue-300"
+            disabled={spellsList.length === 0}
+          >
+            + Collega Spell Esistente
+          </button>
+          {spellsList.length === 0 && <p className="text-xs text-gray-400 mt-1">Caricamento spells...</p>}
+        </div>
+      </div>
+    );
+  };
 
   // --- Main Overlay JSX ---
   const overlayContent = (
     <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-70 z-[9990] p-4"> {/* Use slightly lower z-index than spell overlay */}
-       <div className="bg-gray-800 p-5 rounded-lg shadow-xl w-[80vw] h-[80vh] max-w-none max-h-none overflow-y-auto border border-gray-700">
-         <h2 className="text-2xl text-white mb-4 font-semibold border-b border-gray-700 pb-2">Add New Weapon</h2>
+      <div className="bg-gray-800 p-5 rounded-lg shadow-xl w-[80vw] h-[80vh] max-w-none max-h-none overflow-y-auto border border-gray-700">
+        <h2 className="text-2xl text-white mb-4 font-semibold border-b border-gray-700 pb-2">Add New Weapon</h2>
 
-         {/* Prevent form submission via Enter key press */}
-         <form onSubmit={(e) => { e.preventDefault(); handleSaveWeapon(); }} onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}>
-           {renderBasicFields()}
-           {renderTablesSection()}
-           {renderReductionsAndSpells()}
+        {/* Prevent form submission via Enter key press */}
+        <form onSubmit={(e) => { e.preventDefault(); handleSaveWeapon(); }} onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}>
+          {renderBasicFields()}
+          {renderTablesSection()}
+          {renderReductionsAndSpells()}
 
-           {/* Action Buttons */}
-           <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-700">
-             <button
-               type="button"
-               onClick={() => onClose(false)} // Use the original onClose for canceling the weapon creation
-               className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md shadow-md transition-colors duration-150"
-             >
-               Cancel
-             </button>
-             <button
-               type="submit" // This button triggers the handleSaveWeapon
-               className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md shadow-md transition-colors duration-150"
-               disabled={!weaponFormData.Nome} // Disable save if name is empty
-             >
-               Save Weapon
-             </button>
-           </div>
-         </form>
-       </div>
+          {/* Action Buttons */}
+          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-700">
+            <button
+              type="button"
+              onClick={() => onClose(false)} // Use the original onClose for canceling the weapon creation
+              className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md shadow-md transition-colors duration-150"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit" // This button triggers the handleSaveWeapon
+              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md shadow-md transition-colors duration-150"
+            >
+              Save Weapon
+            </button>
+          </div>
+        </form>
+      </div>
 
-        {/* Spell Creation Overlay - Rendered conditionally on top */}
-        {showSpellOverlay && spellSchema && userName && (
-             <SpellOverlay
-                 mode="add"
-                 schema={spellSchema}
-                 userName={userName}
-                 onClose={handleSpellCreate} // Use the dedicated handler
-                 saveButtonText="Create Spell" // Pass the specific button text
-             />
-        )}
-         {showSpellOverlay && (!spellSchema || !userName) && (
-            // Show loading/error state if spell overlay is toggled but dependencies aren't ready
-             <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-[9999]">
-                 <div className="bg-gray-800 p-6 rounded-lg shadow-lg text-white">Loading spell creation dependencies...</div>
-             </div>
-         )}
+      {/* Spell Creation Overlay - Rendered conditionally on top */}
+      {showSpellOverlay && spellSchema && userName && (
+        <SpellOverlay
+          mode="add"
+          schema={spellSchema}
+          userName={userName}
+          onClose={handleSpellCreate} // Use the dedicated handler
+          saveButtonText="Create Spell" // Pass the specific button text
+        />
+      )}
+      {showSpellOverlay && (!spellSchema || !userName) && (
+        // Show loading/error state if spell overlay is toggled but dependencies aren't ready
+        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-[9999]">
+          <div className="bg-gray-800 p-6 rounded-lg shadow-lg text-white">Loading spell creation dependencies...</div>
+        </div>
+      )}
     </div>
   );
 
