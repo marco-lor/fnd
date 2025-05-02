@@ -8,6 +8,7 @@ import { AuthContext } from '../../../AuthContext';
 import { computeValue } from '../../common/computeFormula';
 import { AddSpellButton } from '../../dmDashboard/elements/buttons/addSpell'; // Keep button
 import { SpellOverlay } from '../../common/SpellOverlay'; // Import SpellOverlay directly
+import { FaTrash } from "react-icons/fa";
 
 export function AddWeaponOverlay({ onClose, showMessage }) {
   const [schema, setSchema] = useState(null);
@@ -26,9 +27,9 @@ export function AddWeaponOverlay({ onClose, showMessage }) {
   const [ridSpellList, setRidSpellList] = useState([]);
   const [weaponSpellsList, setWeaponSpellsList] = useState([]); // Existing spells to link
 
-  // State for the spell being created within AddWeaponOverlay
+  // State for the spells being created within AddWeaponOverlay
   const [showSpellOverlay, setShowSpellOverlay] = useState(false);
-  const [tempSpellData, setTempSpellData] = useState(null); // { spellData, imageFile, videoFile }
+  const [customSpells, setCustomSpells] = useState([]); // Array of { spellData, imageFile, videoFile }
 
   // handlers to add/remove tecnica reductions
   const addTecnica = () => setRidTecnicheList(prev => [...prev, { selectedTec: '', ridValue: '' }]);
@@ -146,14 +147,15 @@ export function AddWeaponOverlay({ onClose, showMessage }) {
   // Handler for SpellOverlay close
   const handleSpellCreate = (result) => {
     if (result) {
-      setTempSpellData(result); // Store { spellData, imageFile, videoFile }
-      // Add the new spell name to the dropdown list immediately for selection
+      setCustomSpells(prev => {
+        // Prevent duplicate spell names
+        if (prev.some(s => s.spellData.Nome.trim() === result.spellData.Nome.trim())) return prev;
+        return [...prev, result];
+      });
       setSpellsList(prev => [...new Set([...prev, result.spellData.Nome.trim()])]);
-      if (showMessage) showMessage(`Spell "${result.spellData.Nome.trim()}" created locally. Save the weapon to upload it.`);
-    } else {
-      setTempSpellData(null); // Clear any potential previous temp data
+      if (showMessage) showMessage(`Spell "${result.spellData.Nome.trim()}" creato localmente. Salva l'arma per caricarlo.`);
     }
-    setShowSpellOverlay(false); // Close the SpellOverlay
+    setShowSpellOverlay(false);
   };
 
   const handleImageChange = (e) => {
@@ -195,26 +197,25 @@ export function AddWeaponOverlay({ onClose, showMessage }) {
         finalWeaponData.image_url = await getDownloadURL(weaponImgRef);
       }
 
-      // 2. Handle the Temporarily Created Spell (if any)
-      let createdSpellData = null;
-      if (tempSpellData) {
-        createdSpellData = { ...tempSpellData.spellData };
-        const spellName = createdSpellData.Nome.trim();
-        const safeBase = `spell_${docId}_${spellName.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}`;
-        if (tempSpellData.imageFile) {
-          const spellImgRef = ref(storage, `spells/${safeBase}_image`);
-          await uploadBytes(spellImgRef, tempSpellData.imageFile);
-          createdSpellData.image_url = await getDownloadURL(spellImgRef);
+      // 2. Handle the Temporarily Created Spells (if any)
+      if (customSpells.length > 0) {
+        if (!finalWeaponData.spells) finalWeaponData.spells = {};
+        for (const spellObj of customSpells) {
+          const createdSpellData = { ...spellObj.spellData };
+          const spellName = createdSpellData.Nome.trim();
+          const safeBase = `spell_${docId}_${spellName.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}`;
+          if (spellObj.imageFile) {
+            const spellImgRef = ref(storage, `spells/${safeBase}_image`);
+            await uploadBytes(spellImgRef, spellObj.imageFile);
+            createdSpellData.image_url = await getDownloadURL(spellImgRef);
+          }
+          if (spellObj.videoFile) {
+            const spellVidRef = ref(storage, `spells/videos/${safeBase}_video`);
+            await uploadBytes(spellVidRef, spellObj.videoFile);
+            createdSpellData.video_url = await getDownloadURL(spellVidRef);
+          }
+          finalWeaponData.spells[spellName] = createdSpellData;
         }
-        if (tempSpellData.videoFile) {
-          const spellVidRef = ref(storage, `spells/videos/${safeBase}_video`);
-          await uploadBytes(spellVidRef, tempSpellData.videoFile);
-          createdSpellData.video_url = await getDownloadURL(spellVidRef);
-        }
-        if (!finalWeaponData.spells) {
-          finalWeaponData.spells = {};
-        }
-        finalWeaponData.spells[spellName] = createdSpellData;
       }
 
       // --- Prepare Final Data Structure ---
@@ -243,13 +244,14 @@ export function AddWeaponOverlay({ onClose, showMessage }) {
 
       // Consolidate linked *existing* spells (names only, value is just true)
       const linkedSpells = weaponSpellsList.reduce((acc, spellName) => {
-        if (spellName && spellName !== (createdSpellData?.Nome || '')) {
+        // Prevent overwriting custom spells
+        if (spellName && !customSpells.some(s => s.spellData.Nome.trim() === spellName)) {
           acc[spellName] = true;
         }
         return acc;
       }, {});
 
-      // Merge linked existing spells with the potentially created spell
+      // Merge linked existing spells with the custom spells
       finalWeaponData.spells = { ...(finalWeaponData.spells || {}), ...linkedSpells };
       // Always upload as empty object if not filled
       if (!finalWeaponData.spells || Object.keys(finalWeaponData.spells).length === 0) {
@@ -618,10 +620,26 @@ export function AddWeaponOverlay({ onClose, showMessage }) {
           {/* Button to open Spell Creation Overlay */}
           <div className="mb-3">
             <AddSpellButton onClick={() => setShowSpellOverlay(true)} />
-            {tempSpellData && (
-              <p className="text-xs text-green-400 mt-1 italic">
-                Spell "{tempSpellData.spellData.Nome}" pronto per essere salvato con l'arma.
-              </p>
+            {customSpells.length > 0 && (
+              <div className="mt-2">
+                <p className="text-xs text-green-400 italic mb-1">Spells creati localmente:</p>
+                <ul className="text-xs text-white list-disc ml-4">
+                  {customSpells.map((s, idx) => (
+                    <li key={idx} className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="text-red-400 hover:text-red-600 flex items-center justify-center"
+                        onClick={() => setCustomSpells(prev => prev.filter((_, i) => i !== idx))}
+                        aria-label="Remove spell"
+                        style={{ padding: 0, background: 'none', border: 'none' }}
+                      >
+                        <FaTrash />
+                      </button>
+                      <span>{s.spellData.Nome}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </div>
 
@@ -641,7 +659,7 @@ export function AddWeaponOverlay({ onClose, showMessage }) {
                 <option value="" disabled>Seleziona spell esistente...</option>
                 {/* Filter out the temp spell name if it exists */}
                 {spellsList
-                  .filter(name => !tempSpellData || name !== tempSpellData.spellData.Nome)
+                  .filter(name => !customSpells.some(s => s.spellData.Nome.trim() === name))
                   .sort()
                   .map(name => (
                     <option key={name} value={name}>{name}</option>
@@ -701,8 +719,8 @@ export function AddWeaponOverlay({ onClose, showMessage }) {
           mode="add"
           schema={spellSchema}
           userName={userName}
-          onClose={handleSpellCreate} // Use the dedicated handler
-          saveButtonText="Create Spell" // Pass the specific button text
+          onClose={handleSpellCreate}
+          saveButtonText="Create Spell"
         />
       )}
       {showSpellOverlay && (!spellSchema || !userName) && (

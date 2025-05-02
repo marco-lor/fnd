@@ -77,7 +77,7 @@ export function SpellOverlay({
        if (videoPreviewUrl && videoPreviewUrl.startsWith('blob:')) URL.revokeObjectURL(videoPreviewUrl);
      };
 
-  }, [schema, initialData, buildEmptySpell]); // buildEmptySpell is memoized
+  }, [schema, initialData, buildEmptySpell, imagePreviewUrl, videoPreviewUrl]); // buildEmptySpell is memoized
 
   /* generic nested-field setter */
  const handleNestedChange = useCallback((cat, sub, key, val) =>
