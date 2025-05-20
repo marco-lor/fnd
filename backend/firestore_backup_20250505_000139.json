@@ -100,6 +100,7 @@
       "Effetto": "",
       "Hands": "-",
       "requisiti": "",
+      "item_type": "armor",
       "Penetrazione": {
         "4": "",
         "7": "",
@@ -241,6 +242,7 @@
         "10": "",
         "1": ""
       },
+      "item_type": "weapon",
       "Penetrazione": {
         "4": "",
         "7": "",
@@ -377,6 +379,7 @@
       "Effetto": "",
       "Hands": 1,
       "requisiti": "",
+      "item_type": "weapon",
       "Penetrazione": {
         "4": "",
         "7": "",
@@ -514,6 +517,7 @@
           }
         }
       },
+      "item_type": "weapon",
       "Penetrazione": {
         "4": "",
         "7": "",
@@ -634,6 +638,7 @@
       "Effetto": "Comodi",
       "Hands": "-",
       "requisiti": "",
+      "item_type": "armor",
       "Penetrazione": {
         "4": "",
         "7": "",
@@ -669,12 +674,7 @@
         "10": "",
         "1": ""
       }
-    },
-    "accessori": {},
-    "armature": {},
-    "consumabili": {},
-    "munizioni": {},
-    "weapons": {}
+    }
   },
   "users": {
     "TQAmmVfIpOeNiRflXKSeL1NX2ak2": {
@@ -831,12 +831,12 @@
       "spells": {
         "Barriera Cosmica (benefica)": {
           "Tipo Base": "Incantamento",
-          "Nome": "Barriera Cosmica (benefica)",
+          "video_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fvideos%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__benefica__1742682281306_video?alt=media&token=84db6620-cdcd-49a7-8469-f41bf1c4a048",
           "Costo": 19,
           "Effetti Positivi": " 3d10 barriera , i tuoi sensi vengono amplificati e proiettati in una zona di  10 Metri di raggio intorno a te, + 2 difesa per i tuoi prossimi tre turni, chi ti attacca in mischia subisce 1d10 danno e se ha una massa inferiore a 300 kg viene respinto 6 metri indietro, castabile su te stesso o bersaglio alleato",
           "TPC Mentale": {
-            "Param1": "---",
             "Param2": "---",
+            "Param1": "---",
             "ParamTarget": "---"
           },
           "TPC": {
@@ -846,7 +846,12 @@
           },
           "Turni": 3,
           "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__benefica__1742671660253_image?alt=media&token=1d4b399b-6fdc-4981-9e05-6635d384fd9f",
-          "video_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fvideos%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__benefica__1742682281306_video?alt=media&token=84db6620-cdcd-49a7-8469-f41bf1c4a048",
+          "TPC Fisico": {
+            "Param2": "Saggezza",
+            "Param1": "Intelligenza",
+            "ParamTarget": "Costituzione"
+          },
+          "Esperienza": "Principiante",
           "Mod Params": {
             "Base": {
               "Fortuna": 0,
@@ -860,31 +865,22 @@
               "Difesa": 2,
               "Disciplina": 0,
               "Critico": 0,
-              "Salute": 0,
               "Attacco": 0,
+              "Salute": 0,
               "RiduzioneDanni": 0
             }
           },
-          "Esperienza": "Principiante",
-          "TPC Fisico": {
-            "Param2": "Saggezza",
-            "Param1": "Intelligenza",
-            "ParamTarget": "Costituzione"
-          },
+          "Nome": "Barriera Cosmica (benefica)",
           "Effetti Negativi": "Sei cieco e sordo al di l\u00e0 dei dieci metri per tutta la durata dell'incantesimo; l'incantesimo pu\u00f2 essere interrotto spendendo un' azione consumabile; utilizzare questo incantesimo se Barriera Cosmica Offensiva \u00e8 attiva causa il termine immediato di Barriera Cosmica Offensiva"
         },
         "Barriera Cosmica (offensiva)": {
-          "TPC Mentale": {
-            "Param1": "Costituzione",
-            "Param2": "Costituzione",
-            "ParamTarget": "Costituzione"
-          },
+          "Turni": 3,
           "Nome": "Barriera Cosmica (offensiva)",
           "Costo": 19,
           "Effetti Positivi": "3d10 danno, nel prossimo turno il bersaglio non pu\u00f2 utilizzare l'azione di movimento, Gittata dieci metri, -2 DIFESA per tre turni contro attacchi in mischia",
-          "TPC Fisico": {
-            "Param1": "Intelligenza",
-            "Param2": "Saggezza",
+          "TPC Mentale": {
+            "Param2": "Costituzione",
+            "Param1": "Costituzione",
             "ParamTarget": "Costituzione"
           },
           "TPC": {
@@ -892,29 +888,33 @@
             "Param2": "Saggezza",
             "ParamTarget": "''"
           },
-          "Turni": 3,
-          "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__offensiva__1742685004831_image?alt=media&token=f942ca87-b3b1-4a52-85e0-b1a2e127df4d",
           "Tipo Base": "Congiurazione",
+          "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__offensiva__1742685004831_image?alt=media&token=f942ca87-b3b1-4a52-85e0-b1a2e127df4d",
+          "TPC Fisico": {
+            "Param2": "Saggezza",
+            "Param1": "Intelligenza",
+            "ParamTarget": "Costituzione"
+          },
           "Mod Params": {
             "Base": {
               "Fortuna": 0,
               "Intelligenza": 0,
               "Saggezza": 0,
-              "Destrezza": 0,
               "Forza": 0,
+              "Destrezza": 0,
               "Costituzione": 0
             },
             "Combattimento": {
               "Difesa": 0,
               "Disciplina": 0,
-              "RiduzioneDanni": 0,
-              "Salute": 0,
+              "Critico": 0,
               "Attacco": 0,
-              "Critico": 0
+              "Salute": 0,
+              "RiduzioneDanni": 0
             }
           },
-          "video_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fvideos%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__offensiva__1742685004831_video?alt=media&token=36a3a79e-ac7c-4155-8dfc-2107d179261b",
           "Esperienza": "Principiante",
+          "video_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fvideos%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__offensiva__1742685004831_video?alt=media&token=36a3a79e-ac7c-4155-8dfc-2107d179261b",
           "Effetti Negativi": "il bersaglio ottiene +2 DIFESA  contro attacchi a distanza o (+2/int o sag) incantesimi lanciati da almeno 15 feet di distanza utilizzare questo incantesimo se Barriera Cosmica Difensiva \u00e8 attiva causa il termine immediato di Barriera Cosmica Difensiva"
         }
       },
@@ -1505,6 +1505,68 @@
             "1": 0
           }
         },
+        "Special": {
+          "ridCostoSpell": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "ridCostoTec": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Bonus Danno": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Danno": {
+            "4": "1d4",
+            "10": "1d4",
+            "7": "1d4",
+            "1": "1d4"
+          },
+          "Penetrazione": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Mira 1H": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Mira 2H": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Danno Critico": {
+            "4": "1d6",
+            "10": "1d6",
+            "7": "1d6",
+            "1": "1d6"
+          },
+          "Bonus Danno Critico": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          }
+        },
         "Combattimento": {
           "Disciplina": {
             "4": 0,
@@ -1550,77 +1612,42 @@
           }
         }
       },
-      "ridCostoTec": {
-        "4": 0,
-        "10": 0,
-        "7": 0,
-        "1": 0
+      "Specific": {
+        "Hands": [
+          1,
+          2,
+          "-"
+        ],
+        "Tipo": [
+          "Mischia",
+          "Distanza",
+          "-"
+        ],
+        "slotCintura": 0
       },
-      "Bonus Danno": {
-        "4": 0,
-        "10": 0,
-        "7": 0,
-        "1": 0
-      },
-      "Effetto": "Descrizione dell'effetto.",
-      "Hands": [
-        1,
-        2,
-        "-"
-      ],
-      "requisiti": "",
-      "Penetrazione": {
-        "4": 0,
-        "10": 0,
-        "7": 0,
-        "1": 0
-      },
-      "ridCostoSpell": {
-        "4": 0,
-        "10": 0,
-        "7": 0,
-        "1": 0
-      },
-      "Tipo": [
-        "Mischia",
-        "Distanza",
-        "-"
-      ],
-      "Danno Critico": {
-        "4": "1d6",
-        "10": "1d6",
-        "7": "1d6",
-        "1": "1d6"
-      },
-      "Nome": "Nome Arma",
-      "Slot": [
-        "Mano Principale",
-        "Mano Secondaria",
-        "Testa",
-        "Corpo",
-        "Cintura",
-        "Fodero",
-        "Stivali",
-        "Accessorio",
-        "Consumabile",
-        "Consumabile Grande",
-        "-"
-      ],
-      "Danno": {
-        "4": "1d4",
-        "10": "1d4",
-        "7": "1d4",
-        "1": "1d4"
-      },
-      "prezzo": 0,
-      "image_url": "",
-      "Bonus Danno Critico": {
-        "4": 0,
-        "10": 0,
-        "7": 0,
-        "1": 0
-      },
-      "slotCintura": 0
+      "General": {
+        "Nome": "Nome Arma",
+        "Slot": [
+          "Mano Principale",
+          "Mano Secondaria",
+          "Testa",
+          "Corpo",
+          "Cintura",
+          "Fodero",
+          "Stivali",
+          "Accessorio",
+          "Consumabile",
+          "Consumabile Grande",
+          "-"
+        ],
+        "ridCostoSpellSingola": 0,
+        "Effetto": "Descrizione dell'effetto.",
+        "prezzo": 0,
+        "requisiti": "",
+        "image_url": "",
+        "ridCostoTecSingola": 0,
+        "spells": ""
+      }
     },
     "schema_consumabili": {
       "Parametri": {
@@ -2068,6 +2095,7 @@
       "Effetto": "Placeholder per effetto della tecnica.",
       "image_url": "Placeholder URL dell'immagine"
     },
+    "schema_weapon": {},
     "spells_common": {},
     "tecniche_common": {
       "Ostruzione": {
