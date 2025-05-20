@@ -10,10 +10,13 @@ import { SpellOverlay } from '../../common/SpellOverlay';
 import { WeaponOverlay } from '../../common/WeaponOverlay';
 import { FaTrash, FaEdit } from "react-icons/fa";
 
-// Accept initialData and editMode props
 export function AddWeaponOverlay({ onClose, showMessage, initialData = null, editMode = false }) {
     const [schema, setSchema] = useState(null);
-    const [weaponFormData, setWeaponFormData] = useState({});
+    const [weaponFormData, setWeaponFormData] = useState({
+        General: {},
+        Specific: {},
+        Parametri: { Base: {}, Combattimento: {}, Special: {} }
+    });
     const [imageFile, setImageFile] = useState(null);
     const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -24,22 +27,21 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
     const [userName, setUserName] = useState("");
     const [spellSchema, setSpellSchema] = useState(null);
 
-    // State for dynamic lists
     const [tecnicheList, setTecnicheList] = useState([]);
     const [ridTecnicheList, setRidTecnicheList] = useState([]);
-    const [spellsList, setSpellsList] = useState([]); // Available spells for dropdowns
+    const [spellsList, setSpellsList] = useState([]);
     const [ridSpellList, setRidSpellList] = useState([]);
-    const [weaponSpellsList, setWeaponSpellsList] = useState([]); // Linked existing spell names
+    const [weaponSpellsList, setWeaponSpellsList] = useState([]);
 
-    // State for custom spells
     const [showSpellOverlay, setShowSpellOverlay] = useState(false);
-    const [customSpells, setCustomSpells] = useState([]); // Stores { spellData, imageFile?, videoFile? }
+    const [customSpells, setCustomSpells] = useState([]);
     const [editingSpellIndex, setEditingSpellIndex] = useState(null);
 
-    // Ref to track if initialization has run
-    const didInitialize = useRef(false);
+    // Refs to manage initialization logic
+    const prevInitialDataIdRef = useRef(null);
+    const formInitializedForCurrentItem = useRef(false);
 
-    // --- Dynamic List Handlers ---
+
     const addTecnica = useCallback(() => setRidTecnicheList(prev => [...prev, { selectedTec: '', ridValue: '' }]), []);
     const removeTecnica = useCallback(index => setRidTecnicheList(prev => prev.filter((_, i) => i !== index)), []);
     const addSpell = useCallback(() => setRidSpellList(prev => [...prev, { selectedSpell: '', ridValue: '' }]), []);
@@ -47,98 +49,95 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
     const addWeaponSpellLink = useCallback(() => setWeaponSpellsList(prev => [...prev, '']), []);
     const removeWeaponSpellLink = useCallback(index => setWeaponSpellsList(prev => prev.filter((_, i) => i !== index)), []);
 
-    // --- Initialize Form Data ---
-    const initializeFormData = useCallback((schemaData, initialItemData) => {
-        console.log("Attempting to initialize FormData. Edit Mode:", editMode, "Initial Data:", initialItemData);
-        let initialFormState = {};
-
-        const getValue = (field, category = null, subField = null) => {
-            if (initialItemData) {
-                if (subField && category) return initialItemData.Parametri?.[category]?.[subField]?.[field] ?? '';
-                if (category) return initialItemData.Parametri?.[category]?.[field] ?? '';
-                return initialItemData[field] ?? '';
-            }
-            if (field === "Parametri") {
-                 const params = {};
-                Object.keys(schemaData[field] || {}).forEach(cat => {
-                    params[cat] = {};
-                    Object.keys(schemaData[field][cat] || {}).forEach(subF => {
-                        params[cat][subF] = { "1": "", "4": "", "7": "", "10": "" };
-                    });
-                });
-                return params;
-            }
-            if (["Penetrazione", "Danno", "Danno Critico", "Bonus Danno Critico", "Bonus Danno", "ridCostoSpell", "ridCostoTec"].includes(field)) {
-                return { "1": "", "4": "", "7": "", "10": "" };
-            }
-             if (["Slot", "Hands", "Tipo"].includes(field) && Array.isArray(schemaData[field])) {
-                return schemaData[field][0] || "";
-            }
-            if (typeof schemaData[field] === 'object' && !Array.isArray(schemaData[field]) && schemaData[field] !== null) {
-                 return '';
-             }
-            return '';
+    const initializeFormData = useCallback((schemaData, currentItemData) => {
+        console.log("Attempting to initialize FormData. Edit Mode:", editMode, "Current Item Data:", currentItemData);
+        let initialFormState = {
+            General: {},
+            Specific: {},
+            Parametri: { Base: {}, Combattimento: {}, Special: {} }
         };
 
-        Object.keys(schemaData || {}).forEach(field => {
-            if (field === "Parametri") {
-                initialFormState[field] = {};
-                 Object.keys(schemaData[field] || {}).forEach(category => {
-                    initialFormState[field][category] = {};
-                    Object.keys(schemaData[field][category] || {}).forEach(subField => {
-                        initialFormState[field][category][subField] = {
-                            "1": initialItemData?.Parametri?.[category]?.[subField]?.["1"] ?? '',
-                            "4": initialItemData?.Parametri?.[category]?.[subField]?.["4"] ?? '',
-                            "7": initialItemData?.Parametri?.[category]?.[subField]?.["7"] ?? '',
-                            "10": initialItemData?.Parametri?.[category]?.[subField]?.["10"] ?? '',
-                        };
-                    });
-                });
-            } else if (["Penetrazione", "Danno", "Danno Critico", "Bonus Danno Critico", "Bonus Danno", "ridCostoSpell", "ridCostoTec"].includes(field)) {
-                initialFormState[field] = {
-                    "1": initialItemData?.[field]?.["1"] ?? '',
-                    "4": initialItemData?.[field]?.["4"] ?? '',
-                    "7": initialItemData?.[field]?.["7"] ?? '',
-                    "10": initialItemData?.[field]?.["10"] ?? '',
-                };
-            } else {
-                initialFormState[field] = initialItemData?.[field] ?? getValue(field);
-                if (field === 'prezzo' && typeof initialFormState[field] === 'number') {
-                    initialFormState[field] = String(initialFormState[field]);
+        const getValue = (category, field, defaultValue = '') => {
+            return currentItemData?.[category]?.[field] ?? defaultValue;
+        };
+
+        const getParamValue = (paramCategory, paramField, level, defaultValue = '') => {
+            return currentItemData?.Parametri?.[paramCategory]?.[paramField]?.[level] ?? defaultValue;
+        };
+
+        for (const field of Object.keys(schemaData.General || {})) {
+            let defaultValue = schemaData.General[field];
+            if (field === "Slot" && Array.isArray(defaultValue)) defaultValue = defaultValue[0] || '';
+            else if (typeof defaultValue === 'object' && !Array.isArray(defaultValue) && defaultValue !== null) defaultValue = {};
+            else if (field === "prezzo") defaultValue = '0';
+            else if (typeof defaultValue !== 'string') defaultValue = '';
+            initialFormState.General[field] = getValue("General", field, defaultValue);
+            if (field === 'prezzo' && typeof initialFormState.General[field] === 'number') {
+                initialFormState.General[field] = String(initialFormState.General[field]);
+            }
+        }
+
+        for (const field of Object.keys(schemaData.Specific || {})) {
+            let defaultValue = schemaData.Specific[field];
+            if (Array.isArray(defaultValue)) defaultValue = defaultValue[0] ?? '';
+            else defaultValue = '';
+            initialFormState.Specific[field] = getValue("Specific", field, defaultValue);
+            if (field === 'Hands' && initialFormState.Specific[field] !== undefined) {
+                initialFormState.Specific[field] = String(initialFormState.Specific[field]);
+            }
+        }
+
+        const levels = ["1", "4", "7", "10"];
+        for (const paramCategory of Object.keys(schemaData.Parametri || {})) {
+            initialFormState.Parametri[paramCategory] = {};
+            for (const paramField of Object.keys(schemaData.Parametri[paramCategory] || {})) {
+                initialFormState.Parametri[paramCategory][paramField] = {};
+                for (const level of levels) {
+                    const defaultValue = schemaData.Parametri[paramCategory][paramField]?.[level] ?? '';
+                    initialFormState.Parametri[paramCategory][paramField][level] = getParamValue(paramCategory, paramField, level, defaultValue);
                 }
             }
-        });
+        }
 
-        if (initialItemData) {
-            setRidTecnicheList(initialItemData.ridCostoTecSingola ?
-                Object.entries(initialItemData.ridCostoTecSingola).map(([tec, val]) => ({ selectedTec: tec, ridValue: String(val) })) : []
+        setWeaponFormData(initialFormState); // Set the main form data
+
+        // Populate dynamic lists and image based on currentItemData
+        if (currentItemData) {
+            setRidTecnicheList(currentItemData.General?.ridCostoTecSingola ?
+                Object.entries(currentItemData.General.ridCostoTecSingola).map(([tec, val]) => ({ selectedTec: tec, ridValue: String(val) })) : []
             );
-            setRidSpellList(initialItemData.ridCostoSpellSingola ?
-                Object.entries(initialItemData.ridCostoSpellSingola).map(([spell, val]) => ({ selectedSpell: spell, ridValue: String(val) })) : []
+            setRidSpellList(currentItemData.General?.ridCostoSpellSingola ?
+                Object.entries(currentItemData.General.ridCostoSpellSingola).map(([spell, val]) => ({ selectedSpell: spell, ridValue: String(val) })) : []
             );
 
+            // *** MODIFIED SPELL INITIALIZATION LOGIC ***
+            // Only set customSpells and weaponSpellsList from currentItemData if the item ID has changed
+            // or if formInitializedForCurrentItem.current was false (meaning it's the first init for this item).
+            // This check is now primarily handled by the calling useEffect.
+            // Here, we assume if currentItemData is provided, we are setting based on it,
+            // but the calling useEffect prevents this from overwriting local changes.
             const initialLinkedSpells = [];
-            const initialCustomSpells = [];
-            if (initialItemData.spells && typeof initialItemData.spells === 'object') {
-                Object.entries(initialItemData.spells).forEach(([name, data]) => {
+            const initialCustomSpellsFromData = [];
+            if (currentItemData.General?.spells && typeof currentItemData.General.spells === 'object') {
+                Object.entries(currentItemData.General.spells).forEach(([name, data]) => {
                     if (data === true) {
                         initialLinkedSpells.push(name);
                     } else if (typeof data === 'object') {
-                        initialCustomSpells.push({ spellData: data, imageFile: null, videoFile: null });
+                        initialCustomSpellsFromData.push({ spellData: data, imageFile: null, videoFile: null });
                     }
                 });
             }
             setWeaponSpellsList(initialLinkedSpells);
-            setCustomSpells(initialCustomSpells);
+            setCustomSpells(initialCustomSpellsFromData);
 
-            if (initialItemData.image_url) {
-                setImagePreviewUrl(initialItemData.image_url);
+
+            if (currentItemData.General?.image_url) {
+                setImagePreviewUrl(currentItemData.General.image_url);
             } else {
-                 setImagePreviewUrl(null);
+                setImagePreviewUrl(null);
             }
             setImageFile(null);
-
-        } else {
+        } else { // New item
             setRidTecnicheList([]);
             setRidSpellList([]);
             setWeaponSpellsList([]);
@@ -147,26 +146,25 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
             setImageFile(null);
         }
 
-        initialFormState.Parametri = initialFormState.Parametri || { Base: {}, Combattimento: {} };
-        initialFormState.spells = initialFormState.spells || {};
+        initialFormState.General = initialFormState.General || {};
+        initialFormState.Specific = initialFormState.Specific || {};
+        initialFormState.Parametri = initialFormState.Parametri || { Base: {}, Combattimento: {}, Special: {} };
+        initialFormState.General.spells = initialFormState.General.spells || {};
 
         console.log("Initialized FormData:", initialFormState);
-        setWeaponFormData(initialFormState);
-        didInitialize.current = true;
 
-    }, [editMode]);
+    }, [editMode]); // Removed customSpells.length, parent useEffect controls re-init
 
-    // Fetch weapon schema
     useEffect(() => {
         setIsSchemaLoading(true);
         const fetchWeaponSchema = async () => {
             try {
-                const schemaDocRef = doc(db, "utils", "schema_arma");
+                const schemaDocRef = doc(db, "utils", "schema_weapon");
                 const docSnap = await getDoc(schemaDocRef);
                 if (docSnap.exists()) {
                     setSchema(docSnap.data());
                 } else {
-                    console.error("Weapon schema not found!");
+                    console.error("Weapon schema (schema_weapon) not found!");
                     if (showMessage) showMessage("Errore: Schema arma non trovato.", "error");
                 }
             } catch (error) {
@@ -179,18 +177,38 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
         fetchWeaponSchema();
     }, [showMessage]);
 
-    // Initialize form data based on schema and initialData
+    // *** REVISED useEffect FOR INITIALIZATION ***
     useEffect(() => {
-        if (schema && (editMode || !didInitialize.current)) {
-             initializeFormData(schema, initialData);
+        if (schema) {
+            if (editMode && initialData) {
+                // If the item ID changes, or if form hasn't been initialized for the current item ID
+                if (initialData.id !== prevInitialDataIdRef.current || !formInitializedForCurrentItem.current) {
+                    console.log("Initializing FormData for item (edit mode):", initialData.General?.Nome, "ID:", initialData.id);
+                    initializeFormData(schema, initialData);
+                    prevInitialDataIdRef.current = initialData.id;
+                    formInitializedForCurrentItem.current = true;
+                } else {
+                    console.log("Skipping re-initialization for already loaded item:", initialData.General?.Nome);
+                }
+            } else if (!editMode) { // Creating a new item
+                if (!formInitializedForCurrentItem.current) {
+                    console.log("Initializing FormData for NEW weapon.");
+                    initializeFormData(schema, null); // Pass null for new item
+                    prevInitialDataIdRef.current = null; // No ID for new item yet
+                    formInitializedForCurrentItem.current = true;
+                }
+            }
         }
-         if (schema && editMode && initialData) {
-             console.log("Re-initializing due to initialData change in edit mode.");
-             initializeFormData(schema, initialData);
-         }
     }, [schema, initialData, editMode, initializeFormData]);
 
-    // Fetch user data, spell schema, existing spells, and techniques
+    // Reset initialization flag if component instance changes (e.g. overlay is closed and reopened)
+    // This effect runs on mount and when editMode changes.
+    useEffect(() => {
+        formInitializedForCurrentItem.current = false;
+        // When the overlay is shown (component mounts) or mode changes,
+        // we want to allow initialization.
+    }, [editMode]); // Also implicitly runs on mount
+
     useEffect(() => {
         if (!user) return;
         const fetchData = async () => {
@@ -205,19 +223,17 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
 
                 const spellSchemaRef = doc(db, "utils", "schema_spell");
                 const spellSchemaSnap = await getDoc(spellSchemaRef);
-                if (spellSchemaSnap.exists()) {
-                    setSpellSchema(spellSchemaSnap.data());
-                } else {
-                    console.error("Spell schema not found!");
-                }
+                if (spellSchemaSnap.exists()) setSpellSchema(spellSchemaSnap.data());
+                else console.error("Spell schema not found!");
 
                 const commonSpellsRef = doc(db, 'utils', 'spells_common');
                 const commonSpellsSnap = await getDoc(commonSpellsRef);
                 const commonSpells = commonSpellsSnap.exists() ? commonSpellsSnap.data() : {};
                 const userSpells = userSnap.exists() ? userSnap.data().spells || {} : {};
-                const initialSpellNames = initialData?.spells ? Object.keys(initialData.spells) : [];
+
+                const initialSpellNamesFromData = initialData?.General?.spells ? Object.keys(initialData.General.spells) : [];
                 const currentCustomSpellNames = customSpells.map(cs => cs.spellData.Nome.trim());
-                setSpellsList([...new Set([...Object.keys(commonSpells), ...Object.keys(userSpells), ...initialSpellNames, ...currentCustomSpellNames])].sort());
+                setSpellsList([...new Set([...Object.keys(commonSpells), ...Object.keys(userSpells), ...initialSpellNamesFromData, ...currentCustomSpellNames])].sort());
 
                 let commonTecniche = {};
                 const utilsDocRef = doc(db, 'utils', 'utils');
@@ -230,17 +246,16 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                     commonTecniche = commonTecnicheSnap.exists() ? commonTecnicheSnap.data() : {};
                 }
                 const userTecniche = userSnap.exists() ? userSnap.data().tecniche || {} : {};
-                const initialTecNames = initialData?.ridCostoTecSingola ? Object.keys(initialData.ridCostoTecSingola) : [];
-                setTecnicheList([...new Set([...Object.keys(commonTecniche), ...Object.keys(userTecniche), ...initialTecNames])].sort());
+                const initialTecNamesFromData = initialData?.General?.ridCostoTecSingola ? Object.keys(initialData.General.ridCostoTecSingola) : [];
+                setTecnicheList([...new Set([...Object.keys(commonTecniche), ...Object.keys(userTecniche), ...initialTecNamesFromData])].sort());
 
             } catch (error) {
-                console.error('Error fetching initial data:', error);
+                console.error('Error fetching initial data for overlay:', error);
             }
         };
         fetchData();
-    }, [user, initialData, customSpells]);
+    }, [user, initialData?.id, customSpells, showMessage]); // Use initialData.id for stability
 
-    // Handler for SpellOverlay close
     const handleSpellCreate = useCallback((result) => {
         console.log("Spell Create/Edit Result:", result);
         if (result?.spellData?.Nome) {
@@ -261,14 +276,14 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
             } else {
                 console.log("Adding new custom spell:", spellName);
                 if (customSpells.some(s => s.spellData.Nome.trim() === spellName)) {
-                     if (showMessage) showMessage(`Uno spell custom con nome "${spellName}" esiste già.`, "warning");
+                    if (showMessage) showMessage(`Uno spell custom con nome "${spellName}" esiste già.`, "warning");
                 } else {
                     setCustomSpells(prev => [...prev, result]);
                     if (showMessage) showMessage(`Spell "${spellName}" creato localmente. Salva l'arma per caricarlo.`, "info");
                 }
             }
         } else {
-             console.log("Spell creation/edit cancelled or no result.");
+            console.log("Spell creation/edit cancelled or no result.");
         }
         setShowSpellOverlay(false);
         setEditingSpellIndex(null);
@@ -278,31 +293,54 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
         const file = e.target.files[0];
         if (file) {
             setImageFile(file);
-            setImagePreviewUrl(URL.createObjectURL(file));
+            const previewURL = URL.createObjectURL(file);
+            setImagePreviewUrl(previewURL);
+            setWeaponFormData(prev => ({ ...prev, General: { ...prev.General, image_url: previewURL } }));
         }
     };
 
-    // --- Spell Button Handlers (defined at top level) ---
     const handleAddSpellClick = useCallback(() => {
         setEditingSpellIndex(null);
         setShowSpellOverlay(true);
-    }, []); // No dependencies needed
+    }, []);
 
     const handleEditSpellClick = useCallback((index) => {
         console.log("Editing custom spell index:", index, "Data:", customSpells[index]);
         setEditingSpellIndex(index);
         setShowSpellOverlay(true);
-    }, [customSpells]); // Depends on customSpells to get the correct data
+    }, [customSpells]);
 
     const handleRemoveCustomSpell = useCallback((index) => {
         setCustomSpells(prev => prev.filter((_, i) => i !== index));
-    }, []); // No dependencies needed
+    }, []);
 
-    // --- Main Save Handler ---
+    const handleNestedChange = (path, value) => {
+        setWeaponFormData(prev => {
+            const keys = path.split('.');
+            let current = prev;
+            for (let i = 0; i < keys.length - 1; i++) {
+                if (!current[keys[i]]) current[keys[i]] = {}; // Ensure path exists
+                current = current[keys[i]];
+            }
+            current[keys[keys.length - 1]] = value;
+            return { ...prev };
+        });
+    };
+
+    const handleParamChange = (paramCategory, paramField, level, value) => {
+        setWeaponFormData(prev => {
+            const newState = JSON.parse(JSON.stringify(prev));
+            if (!newState.Parametri) newState.Parametri = { Base: {}, Combattimento: {}, Special: {} };
+            if (!newState.Parametri[paramCategory]) newState.Parametri[paramCategory] = {};
+            if (!newState.Parametri[paramCategory][paramField]) newState.Parametri[paramCategory][paramField] = {};
+            newState.Parametri[paramCategory][paramField][level] = value;
+            return newState;
+        });
+    };
+
     const handleSaveWeapon = async () => {
-        // ... (keep existing save logic)
         setIsLoading(true);
-        const weaponName = weaponFormData.Nome ? weaponFormData.Nome.trim() : "";
+        const weaponName = weaponFormData.General?.Nome ? weaponFormData.General.Nome.trim() : "";
         if (!weaponName) {
             if (showMessage) showMessage("Il Nome dell'arma è obbligatorio.", "error");
             setIsLoading(false);
@@ -311,9 +349,9 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
 
         const docId = editMode && initialData?.id ? initialData.id : weaponName.replace(/\s+/g, "_");
         if (!docId) {
-             if (showMessage) showMessage("Errore: Impossibile determinare l'ID del documento.", "error");
-             setIsLoading(false);
-             return;
+            if (showMessage) showMessage("Errore: Impossibile determinare l'ID del documento.", "error");
+            setIsLoading(false);
+            return;
         }
         const weaponDocRef = doc(db, "items", docId);
 
@@ -327,107 +365,115 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                 }
             }
 
-            let finalWeaponData = { ...weaponFormData };
-            finalWeaponData.item_type = "weapon";
-            delete finalWeaponData.ownerId;
+            let finalWeaponData = {
+                item_type: "weapon",
+                General: { ...(weaponFormData.General || {}) },
+                Specific: { ...(weaponFormData.Specific || {}) },
+                Parametri: JSON.parse(JSON.stringify(weaponFormData.Parametri || { Base: {}, Combattimento: {}, Special: {} }))
+            };
 
-            // Image Handling
-            let newImageUrl = editMode ? (initialData?.image_url ?? null) : null;
+            let newImageUrl = editMode ? (initialData?.General?.image_url ?? null) : null;
             if (imageFile) {
                 const weaponImgFileName = `weapon_${docId}_${Date.now()}_${imageFile.name}`;
                 const weaponImgRef = ref(storage, 'items/' + weaponImgFileName);
                 await uploadBytes(weaponImgRef, imageFile);
                 newImageUrl = await getDownloadURL(weaponImgRef);
-
-                if (editMode && initialData?.image_url && initialData.image_url !== newImageUrl) {
+                if (editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
                     try {
-                        const oldPath = decodeURIComponent(initialData.image_url.split('/o/')[1].split('?')[0]);
+                        const oldPath = decodeURIComponent(initialData.General.image_url.split('/o/')[1].split('?')[0]);
                         await deleteObject(ref(storage, oldPath));
                     } catch (e) { console.warn("Failed to delete old image:", e.code === 'storage/object-not-found' ? 'Old file not found.' : e.message); }
                 }
-            } else if (editMode && !weaponFormData.image_url && initialData?.image_url) {
-                 // Handle case where image was removed during edit
-                 newImageUrl = null;
-                 try {
-                     const oldPath = decodeURIComponent(initialData.image_url.split('/o/')[1].split('?')[0]);
-                     await deleteObject(ref(storage, oldPath));
-                     console.log("Deleted image that was removed during edit.");
-                 } catch (e) { console.warn("Failed to delete removed image:", e.code === 'storage/object-not-found' ? 'File not found.' : e.message); }
+            } else if (editMode && !imagePreviewUrl && initialData?.General?.image_url) {
+                newImageUrl = null;
+                try {
+                    const oldPath = decodeURIComponent(initialData.General.image_url.split('/o/')[1].split('?')[0]);
+                    await deleteObject(ref(storage, oldPath));
+                } catch (e) { console.warn("Failed to delete removed image:", e.code === 'storage/object-not-found' ? 'File not found.' : e.message); }
             }
-            finalWeaponData.image_url = newImageUrl;
+            finalWeaponData.General.image_url = newImageUrl;
 
-            // Spell Handling
             const finalSpells = {};
             for (const spellObj of customSpells) {
                 const createdSpellData = { ...spellObj.spellData };
-                const spellName = createdSpellData.Nome.trim();
-                const initialSpell = (editMode && initialData?.spells?.[spellName] && typeof initialData.spells[spellName] === 'object') ? initialData.spells[spellName] : {};
-                const safeBase = `spell_${docId}_${spellName.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}`;
+                const spellNameKey = createdSpellData.Nome.trim();
+                const initialSpellFromData = (editMode && initialData?.General?.spells?.[spellNameKey] && typeof initialData.General.spells[spellNameKey] === 'object')
+                    ? initialData.General.spells[spellNameKey]
+                    : {};
+                const safeBase = `spell_${docId}_${spellNameKey.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}`;
 
-                let spellImageUrl = spellObj.spellData.image_url || initialSpell.image_url || null;
-                let spellVideoUrl = spellObj.spellData.video_url || initialSpell.video_url || null;
+                let spellImageUrlToSave = createdSpellData.image_url || initialSpellFromData.image_url || null;
+                let spellVideoUrlToSave = createdSpellData.video_url || initialSpellFromData.video_url || null;
 
                 if (spellObj.imageFile) {
                     const spellImgRef = ref(storage, `spells/${safeBase}_image`);
                     await uploadBytes(spellImgRef, spellObj.imageFile);
-                    spellImageUrl = await getDownloadURL(spellImgRef);
-                    if (initialSpell.image_url && initialSpell.image_url !== spellImageUrl) {
-                         try { await deleteObject(ref(storage, decodeURIComponent(initialSpell.image_url.split('/o/')[1].split('?')[0]))); } catch(e) { console.warn("Failed to delete old spell image"); }
+                    spellImageUrlToSave = await getDownloadURL(spellImgRef);
+                    if (initialSpellFromData.image_url && initialSpellFromData.image_url !== spellImageUrlToSave) {
+                        try { await deleteObject(ref(storage, decodeURIComponent(initialSpellFromData.image_url.split('/o/')[1].split('?')[0]))); } catch (e) { console.warn("Failed to delete old spell image for", spellNameKey, e); }
                     }
                 }
                 if (spellObj.videoFile) {
                     const spellVidRef = ref(storage, `spells/videos/${safeBase}_video`);
                     await uploadBytes(spellVidRef, spellObj.videoFile);
-                    spellVideoUrl = await getDownloadURL(spellVidRef);
-                    if (initialSpell.video_url && initialSpell.video_url !== spellVideoUrl) {
-                         try { await deleteObject(ref(storage, decodeURIComponent(initialSpell.video_url.split('/o/')[1].split('?')[0]))); } catch(e) { console.warn("Failed to delete old spell video"); }
+                    spellVideoUrlToSave = await getDownloadURL(spellVidRef);
+                    if (initialSpellFromData.video_url && initialSpellFromData.video_url !== spellVideoUrlToSave) {
+                        try { await deleteObject(ref(storage, decodeURIComponent(initialSpellFromData.video_url.split('/o/')[1].split('?')[0]))); } catch (e) { console.warn("Failed to delete old spell video for", spellNameKey, e); }
                     }
                 }
-                createdSpellData.image_url = spellImageUrl;
-                createdSpellData.video_url = spellVideoUrl;
-                finalSpells[spellName] = createdSpellData;
+                createdSpellData.image_url = spellImageUrlToSave;
+                createdSpellData.video_url = spellVideoUrlToSave;
+                finalSpells[spellNameKey] = createdSpellData;
             }
 
-            weaponSpellsList.forEach(spellName => {
-                if (spellName && !finalSpells[spellName]) {
-                    finalSpells[spellName] = true;
+            weaponSpellsList.forEach(spellNameKey => {
+                if (spellNameKey && !finalSpells[spellNameKey]) {
+                    finalSpells[spellNameKey] = true;
                 }
             });
 
-            if (editMode && initialData?.spells) {
-                for (const initialSpellName in initialData.spells) {
+            if (editMode && initialData?.General?.spells) {
+                for (const initialSpellName in initialData.General.spells) {
                     if (!finalSpells[initialSpellName]) {
-                        const initialSpellData = initialData.spells[initialSpellName];
-                        if (typeof initialSpellData === 'object') {
-                            if (initialSpellData.image_url) try { await deleteObject(ref(storage, decodeURIComponent(initialSpellData.image_url.split('/o/')[1].split('?')[0]))); } catch(e) { console.warn("Failed to delete removed spell image"); }
-                            if (initialSpellData.video_url) try { await deleteObject(ref(storage, decodeURIComponent(initialSpellData.video_url.split('/o/')[1].split('?')[0]))); } catch(e) { console.warn("Failed to delete removed spell video"); }
+                        const initialSpellDetails = initialData.General.spells[initialSpellName];
+                        if (typeof initialSpellDetails === 'object') {
+                            if (initialSpellDetails.image_url) try { await deleteObject(ref(storage, decodeURIComponent(initialSpellDetails.image_url.split('/o/')[1].split('?')[0]))); } catch (e) { console.warn("Failed to delete removed spell image for", initialSpellName, e); }
+                            if (initialSpellDetails.video_url) try { await deleteObject(ref(storage, decodeURIComponent(initialSpellDetails.video_url.split('/o/')[1].split('?')[0]))); } catch (e) { console.warn("Failed to delete removed spell video for", initialSpellName, e); }
                         }
                     }
                 }
             }
-            finalWeaponData.spells = finalSpells;
+            finalWeaponData.General.spells = finalSpells;
 
-            // Reductions Handling
-            finalWeaponData.ridCostoTecSingola = ridTecnicheList.reduce((acc, { selectedTec, ridValue }) => {
+            finalWeaponData.General.ridCostoTecSingola = ridTecnicheList.reduce((acc, { selectedTec, ridValue }) => {
                 if (selectedTec && ridValue.trim() !== '') acc[selectedTec] = Number(ridValue);
                 return acc;
             }, {});
-            finalWeaponData.ridCostoSpellSingola = ridSpellList.reduce((acc, { selectedSpell, ridValue }) => {
+            finalWeaponData.General.ridCostoSpellSingola = ridSpellList.reduce((acc, { selectedSpell, ridValue }) => {
                 if (selectedSpell && ridValue.trim() !== '') acc[selectedSpell] = Number(ridValue);
                 return acc;
             }, {});
 
-            // Finalize Data
             let prezzoValue = 0;
-            if (typeof finalWeaponData.prezzo === 'string' && finalWeaponData.prezzo.trim() !== '') {
-                const parsed = parseInt(finalWeaponData.prezzo.trim(), 10);
+            if (typeof finalWeaponData.General.prezzo === 'string' && finalWeaponData.General.prezzo.trim() !== '') {
+                const parsed = parseInt(finalWeaponData.General.prezzo.trim(), 10);
                 prezzoValue = isNaN(parsed) ? 0 : parsed;
+            } else if (typeof finalWeaponData.General.prezzo === 'number') {
+                prezzoValue = finalWeaponData.General.prezzo;
             }
-            finalWeaponData.prezzo = prezzoValue;
-            delete finalWeaponData.tempSpellData;
-            delete finalWeaponData.showSpellOverlay;
+            finalWeaponData.General.prezzo = prezzoValue;
 
-            // Save to Firestore
+            if (finalWeaponData.Specific?.Hands !== undefined) {
+                finalWeaponData.Specific.Hands = Number(finalWeaponData.Specific.Hands);
+            }
+
+            // Clean up temporary/old schema fields from root
+            ['tempSpellData', 'showSpellOverlay', 'Nome', 'Slot', 'Effetto', 'requisiti', 'prezzo', 'image_url', 'Hands', 'Tipo', 'ridCostoTecSingola', 'ridCostoSpellSingola', 'spells'].forEach(key => delete finalWeaponData[key]);
+            if (finalWeaponData.Parametri && !finalWeaponData.Parametri.Base) { // Ensure root Parametri is not the one from old schema
+                 delete finalWeaponData.Parametri;
+            }
+
+
             if (editMode) {
                 console.log("Updating document:", docId, finalWeaponData);
                 await updateDoc(weaponDocRef, finalWeaponData);
@@ -447,44 +493,39 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
         }
     };
 
-    // --- Rendering Functions ---
-
     const renderBasicFields = () => {
-        // ... (keep existing basic fields rendering logic)
         if (isSchemaLoading) return <div className="text-white p-4 text-center">Caricamento schema...</div>;
         if (!schema) return <div className="text-white p-4 text-center text-red-500">Errore: Schema non caricato.</div>;
+        if (!schema.General || !schema.Specific) return <div className="text-white p-4 text-center text-red-500">Errore: Struttura schema non valida.</div>;
 
         return (
             <div>
-                {/* Row 1: Name, Slot, Image Placeholder */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                    {/* Name */}
                     <div className="md:col-span-1">
                         <label className="block text-white mb-1">Nome <span className="text-red-500">*</span></label>
                         <input
                             type="text"
-                            value={weaponFormData.Nome || ''}
-                            onChange={(e) => setWeaponFormData({ ...weaponFormData, Nome: e.target.value })}
+                            value={weaponFormData.General?.Nome || ''}
+                            onChange={(e) => handleNestedChange('General.Nome', e.target.value)}
                             className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                             placeholder="Nome Arma (Obbligatorio)"
                             required
                             disabled={editMode}
                             title={editMode ? "Il nome non può essere modificato." : ""}
                         />
-                         {editMode && <p className="text-xs text-gray-400 mt-1">Il nome non è modificabile.</p>}
+                        {editMode && <p className="text-xs text-gray-400 mt-1">Il nome non è modificabile.</p>}
                     </div>
 
-                    {/* Slot */}
                     <div className="md:col-span-1">
-                        {schema.Slot !== undefined && Array.isArray(schema.Slot) && (
+                        {schema.General.Slot !== undefined && Array.isArray(schema.General.Slot) && (
                             <>
                                 <label className="block text-white mb-1">Slot</label>
                                 <select
-                                    value={weaponFormData.Slot || (schema.Slot[0] || '')}
-                                    onChange={(e) => setWeaponFormData({ ...weaponFormData, Slot: e.target.value })}
+                                    value={weaponFormData.General?.Slot || (schema.General.Slot[0] || '')}
+                                    onChange={(e) => handleNestedChange('General.Slot', e.target.value)}
                                     className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                                 >
-                                    {schema.Slot.map(option => (
+                                    {schema.General.Slot.map(option => (
                                         <option key={option} value={option}>{option}</option>
                                     ))}
                                 </select>
@@ -492,7 +533,6 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                         )}
                     </div>
 
-                    {/* Image Upload */}
                     <div className="md:col-span-1 md:row-span-2">
                         <label className="block text-white mb-1">Immagine</label>
                         <input
@@ -501,15 +541,13 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                             onChange={handleImageChange}
                             className="w-full text-sm text-gray-400 file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 cursor-pointer mb-2"
                         />
-                         {/* Button to remove image */}
-                         {(imagePreviewUrl || (editMode && weaponFormData.image_url)) && (
+                        {(imagePreviewUrl) && (
                             <button
                                 type="button"
                                 onClick={() => {
                                     setImagePreviewUrl(null);
                                     setImageFile(null);
-                                    // Signal removal for save logic
-                                    setWeaponFormData({...weaponFormData, image_url: null });
+                                    handleNestedChange('General.image_url', null);
                                 }}
                                 className="text-xs text-red-400 hover:text-red-300 mb-1"
                             >
@@ -517,25 +555,24 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                             </button>
                         )}
                         <div className="w-24 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center bg-gray-700/50 overflow-hidden">
-                             {(imagePreviewUrl || weaponFormData.image_url) ? (
-                                <img src={imagePreviewUrl || weaponFormData.image_url} alt="Preview" className="w-full h-full object-cover" />
+                            {(imagePreviewUrl) ? (
+                                <img src={imagePreviewUrl} alt="Preview" className="w-full h-full object-cover" />
                             ) : (
                                 <span className="text-gray-500 text-xs text-center">Nessuna Immagine</span>
                             )}
                         </div>
                     </div>
 
-                    {/* Row 2: Tipo, Hands */}
                     <div className="md:col-span-1">
-                        {schema.Tipo !== undefined && Array.isArray(schema.Tipo) && (
+                        {schema.Specific.Tipo !== undefined && Array.isArray(schema.Specific.Tipo) && (
                             <>
                                 <label className="block text-white mb-1">Tipo</label>
                                 <select
-                                    value={weaponFormData.Tipo || (schema.Tipo[0] || '')}
-                                    onChange={(e) => setWeaponFormData({ ...weaponFormData, Tipo: e.target.value })}
-                                     className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                    value={weaponFormData.Specific?.Tipo || (schema.Specific.Tipo[0] || '')}
+                                    onChange={(e) => handleNestedChange('Specific.Tipo', e.target.value)}
+                                    className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                                 >
-                                    {schema.Tipo.map(option => (
+                                    {schema.Specific.Tipo.map(option => (
                                         <option key={option} value={option}>{option}</option>
                                     ))}
                                 </select>
@@ -544,16 +581,16 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                     </div>
 
                     <div className="md:col-span-1">
-                        {schema.Hands !== undefined && Array.isArray(schema.Hands) && (
+                        {schema.Specific.Hands !== undefined && Array.isArray(schema.Specific.Hands) && (
                             <>
                                 <label className="block text-white mb-1">Hands</label>
                                 <select
-                                     value={weaponFormData.Hands !== undefined ? String(weaponFormData.Hands) : (schema.Hands[0] !== undefined ? String(schema.Hands[0]) : '')}
-                                     onChange={(e) => setWeaponFormData({ ...weaponFormData, Hands: e.target.value })}
-                                     className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                    value={weaponFormData.Specific?.Hands !== undefined ? String(weaponFormData.Specific.Hands) : (schema.Specific.Hands[0] !== undefined ? String(schema.Specific.Hands[0]) : '')}
+                                    onChange={(e) => handleNestedChange('Specific.Hands', e.target.value)}
+                                    className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                                 >
-                                    {schema.Hands.map(option => (
-                                         <option key={option} value={String(option)}>{option}</option>
+                                    {schema.Specific.Hands.map(option => (
+                                        <option key={option} value={String(option)}>{option}</option>
                                     ))}
                                 </select>
                             </>
@@ -561,26 +598,24 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                     </div>
                 </div>
 
-                {/* Row 3: Effect */}
                 <div className="mb-4">
-                     <label className="block text-white mb-1">Effetto</label>
-                     <textarea
-                        value={weaponFormData.Effetto || ''}
-                        onChange={(e) => setWeaponFormData({ ...weaponFormData, Effetto: e.target.value })}
-                         className="w-full p-2 rounded bg-gray-700 text-white h-20 border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    <label className="block text-white mb-1">Effetto</label>
+                    <textarea
+                        value={weaponFormData.General?.Effetto || ''}
+                        onChange={(e) => handleNestedChange('General.Effetto', e.target.value)}
+                        className="w-full p-2 rounded bg-gray-700 text-white h-20 border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                         placeholder="Descrizione effetto..."
                     />
                 </div>
 
-                {/* Row 4: Requirements, Price */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     <div>
                         <label className="block text-white mb-1">Requisiti</label>
                         <input
                             type="text"
-                            value={weaponFormData.requisiti || ''}
-                            onChange={(e) => setWeaponFormData({ ...weaponFormData, requisiti: e.target.value })}
-                             className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                            value={weaponFormData.General?.requisiti || ''}
+                            onChange={(e) => handleNestedChange('General.requisiti', e.target.value)}
+                            className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                             placeholder="Es: STR 10"
                         />
                     </div>
@@ -588,14 +623,14 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                         <label className="block text-white mb-1">Prezzo</label>
                         <input
                             type="text"
-                            value={weaponFormData.prezzo || ''}
-                             onChange={(e) => {
+                            value={weaponFormData.General?.prezzo || ''}
+                            onChange={(e) => {
                                 const value = e.target.value;
                                 if (/^\d*$/.test(value)) {
-                                     setWeaponFormData({ ...weaponFormData, prezzo: value });
+                                    handleNestedChange('General.prezzo', value);
                                 }
-                             }}
-                             className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                            }}
+                            className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                             placeholder="Es: 100"
                         />
                     </div>
@@ -605,24 +640,20 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
     };
 
     const renderTablesSection = () => {
-        // ... (keep existing tables rendering logic)
-        if (isSchemaLoading || !schema || !schema.Parametri) return null;
+        if (isSchemaLoading) return null;
+        if (!schema || !schema.Parametri || !schema.Parametri.Base || !schema.Parametri.Combattimento || !schema.Parametri.Special) {
+            console.warn("Parametri structure missing or incomplete in schema:", schema?.Parametri);
+            return <div className="text-orange-400 p-4 text-center">Struttura parametri nello schema incompleta.</div>;
+        }
 
         const levels = ["1", "4", "7", "10"];
-        const specialFields = schema.Penetrazione !== undefined ? ["Penetrazione", "Danno", "Bonus Danno", "Danno Critico", "Bonus Danno Critico", "ridCostoSpell", "ridCostoTec"] : [];
-        const baseParamFields = schema.Parametri.Base ? Object.keys(schema.Parametri.Base) : [];
-        const combatParamFields = schema.Parametri.Combattimento ? Object.keys(schema.Parametri.Combattimento) : [];
+        const specialFields = Object.keys(schema.Parametri.Special || {});
+        const baseParamFields = Object.keys(schema.Parametri.Base || {});
+        const combatParamFields = Object.keys(schema.Parametri.Combattimento || {});
 
-        const renderTable = (title, fields, category = null) => {
-            const schemaHasFields = fields.some(field =>
-                category
-                    ? schema.Parametri?.[category]?.[field] !== undefined
-                    : schema[field] !== undefined
-            );
-            if (!schemaHasFields) return null;
-
-            const relevantFields = fields.filter(f => category ? schema.Parametri?.[category]?.[f] !== undefined : schema[f] !== undefined);
-            if (relevantFields.length === 0) return null;
+        const renderTable = (title, fields, paramCategory) => {
+            const schemaCategory = schema.Parametri?.[paramCategory];
+            if (!schemaCategory || fields.length === 0) return null;
 
             return (
                 <div className="w-full bg-gray-800/70 p-4 rounded-xl shadow-lg backdrop-blur-sm border border-gray-700/50">
@@ -640,44 +671,23 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                                 </tr>
                             </thead>
                             <tbody>
-                                {relevantFields.map((field, i) => {
-                                    const isLastRow = i === relevantFields.length - 1;
-                                    const rowData = category
-                                        ? weaponFormData.Parametri?.[category]?.[field]
-                                        : weaponFormData[field];
-
+                                {fields.map((field, i) => {
+                                    const isLastRow = i === fields.length - 1;
+                                    const rowData = weaponFormData.Parametri?.[paramCategory]?.[field];
                                     return (
-                                        <tr key={field}>
-                                            <td className={`bg-gray-700/30 px-2 py-1.5 ${isLastRow ? 'rounded-bl-lg' : ''} text-left`}>
-                                                {field}
-                                            </td>
+                                        <tr key={`${paramCategory}-${field}`}>
+                                            <td className={`bg-gray-700/30 px-2 py-1.5 ${isLastRow ? 'rounded-bl-lg' : ''} text-left`}>{field}</td>
                                             {levels.map((lvl, j) => {
-                                                const value = (rowData && rowData[lvl]) || '';
-                                                const isParamCategory = category === 'Base' || category === 'Combattimento';
-                                                const computed = isParamCategory && value && userParams ? computeValue(value, userParams) : null;
-
+                                                const value = (rowData && rowData[lvl] !== undefined) ? rowData[lvl] : '';
+                                                const isComputableParam = (paramCategory === 'Base' || paramCategory === 'Combattimento');
+                                                const computed = isComputableParam && value && userParams ? computeValue(value, userParams) : null;
                                                 return (
                                                     <td key={lvl} className={`bg-gray-700/30 px-1 py-1 ${isLastRow && j === levels.length - 1 ? 'rounded-br-lg' : ''}`}>
                                                         <div className="flex items-center justify-center">
                                                             <input
                                                                 type="text"
                                                                 value={value}
-                                                                onChange={(e) => {
-                                                                    const newValue = e.target.value;
-                                                                    setWeaponFormData(prev => {
-                                                                        const newData = JSON.parse(JSON.stringify(prev));
-                                                                        if (category) {
-                                                                            if (!newData.Parametri) newData.Parametri = { Base: {}, Combattimento: {} };
-                                                                            if (!newData.Parametri[category]) newData.Parametri[category] = {};
-                                                                            if (!newData.Parametri[category][field]) newData.Parametri[category][field] = {};
-                                                                            newData.Parametri[category][field][lvl] = newValue;
-                                                                        } else {
-                                                                            if (!newData[field]) newData[field] = {};
-                                                                            newData[field][lvl] = newValue;
-                                                                        }
-                                                                        return newData;
-                                                                    });
-                                                                }}
+                                                                onChange={(e) => handleParamChange(paramCategory, field, lvl, e.target.value)}
                                                                 className="w-16 p-1 rounded-md bg-gray-600/70 text-white text-center focus:outline-none focus:ring-1 focus:ring-blue-500/50 border border-gray-500/50"
                                                                 placeholder="-"
                                                             />
@@ -700,31 +710,27 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
 
         return (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
-                 {renderTable("Parametri Speciali", specialFields)}
-                 {renderTable("Parametri Base", baseParamFields, "Base")}
-                 {renderTable("Parametri Combattimento", combatParamFields, "Combattimento")}
+                {renderTable("Parametri Speciali", specialFields, "Special")}
+                {renderTable("Parametri Base", baseParamFields, "Base")}
+                {renderTable("Parametri Combattimento", combatParamFields, "Combattimento")}
             </div>
         );
     };
 
     const renderReductionsAndSpells = () => {
-         if (isSchemaLoading) return null;
+        if (isSchemaLoading) return null;
 
         return (
             <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Column 1: Reductions */}
                 <div className="space-y-4 bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
-                    {/* --- Single Technique Reductions --- */}
                     <div>
                         <label className="block text-white mb-2 font-medium">Riduzioni Costo Tecniche Singole</label>
                         {ridTecnicheList.map((item, idx) => (
-                            <div key={idx} className="flex items-center gap-2 mb-2 p-2 bg-gray-700/50 rounded">
+                            <div key={`tec-red-${idx}`} className="flex items-center gap-2 mb-2 p-2 bg-gray-700/50 rounded">
                                 <select
                                     value={item.selectedTec}
                                     onChange={e => {
-                                        const newList = [...ridTecnicheList];
-                                        newList[idx].selectedTec = e.target.value;
-                                        setRidTecnicheList(newList);
+                                        const newList = [...ridTecnicheList]; newList[idx].selectedTec = e.target.value; setRidTecnicheList(newList);
                                     }}
                                     className="flex-grow p-2 rounded bg-gray-600 text-white text-sm border border-gray-500/50"
                                 >
@@ -732,43 +738,30 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                                     {tecnicheList.map(name => <option key={name} value={name}>{name}</option>)}
                                 </select>
                                 <input
-                                    type="number"
-                                    value={item.ridValue}
+                                    type="number" value={item.ridValue}
                                     onChange={e => {
-                                        const newList = [...ridTecnicheList];
-                                        newList[idx].ridValue = e.target.value;
-                                        setRidTecnicheList(newList);
+                                        const newList = [...ridTecnicheList]; newList[idx].ridValue = e.target.value; setRidTecnicheList(newList);
                                     }}
                                     placeholder="Valore"
                                     className="w-24 p-2 rounded bg-gray-600 text-white text-sm border border-gray-500/50"
                                 />
-                                {/* Use stable removeTecnica handler */}
                                 <button type="button" onClick={() => removeTecnica(idx)} className="text-red-500 hover:text-red-400 p-1"><FaTrash /></button>
                             </div>
                         ))}
-                        {/* Use stable addTecnica handler */}
-                        <button
-                            type="button"
-                            onClick={addTecnica}
-                            className="mt-1 text-sm text-blue-400 hover:text-blue-300 disabled:text-gray-500 disabled:cursor-not-allowed"
-                            disabled={tecnicheList.length === 0}
-                        >
+                        <button type="button" onClick={addTecnica} className="mt-1 text-sm text-blue-400 hover:text-blue-300 disabled:text-gray-500 disabled:cursor-not-allowed" disabled={tecnicheList.length === 0}>
                             + Aggiungi Riduzione Tecnica
                         </button>
                         {tecnicheList.length === 0 && <p className="text-xs text-gray-400 mt-1">Nessuna tecnica disponibile.</p>}
                     </div>
 
-                    {/* --- Single Spell Reductions --- */}
                     <div className="mt-4 pt-4 border-t border-gray-700/50">
                         <label className="block text-white mb-2 font-medium">Riduzioni Costo Spell Singole</label>
                         {ridSpellList.map((item, idx) => (
-                            <div key={idx} className="flex items-center gap-2 mb-2 p-2 bg-gray-700/50 rounded">
+                            <div key={`spell-red-${idx}`} className="flex items-center gap-2 mb-2 p-2 bg-gray-700/50 rounded">
                                 <select
                                     value={item.selectedSpell}
                                     onChange={e => {
-                                        const newList = [...ridSpellList];
-                                        newList[idx].selectedSpell = e.target.value;
-                                        setRidSpellList(newList);
+                                        const newList = [...ridSpellList]; newList[idx].selectedSpell = e.target.value; setRidSpellList(newList);
                                     }}
                                     className="flex-grow p-2 rounded bg-gray-600 text-white text-sm border border-gray-500/50"
                                 >
@@ -776,145 +769,102 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                                     {spellsList.map(name => <option key={name} value={name}>{name}</option>)}
                                 </select>
                                 <input
-                                    type="number"
-                                    value={item.ridValue}
+                                    type="number" value={item.ridValue}
                                     onChange={e => {
-                                        const newList = [...ridSpellList];
-                                        newList[idx].ridValue = e.target.value;
-                                        setRidSpellList(newList);
+                                        const newList = [...ridSpellList]; newList[idx].ridValue = e.target.value; setRidSpellList(newList);
                                     }}
                                     placeholder="Valore"
                                     className="w-24 p-2 rounded bg-gray-600 text-white text-sm border border-gray-500/50"
                                 />
-                                {/* Use stable removeSpell handler */}
                                 <button type="button" onClick={() => removeSpell(idx)} className="text-red-500 hover:text-red-400 p-1"><FaTrash /></button>
                             </div>
                         ))}
-                        {/* Use stable addSpell handler */}
-                        <button
-                            type="button"
-                            onClick={addSpell}
-                            className="mt-1 text-sm text-blue-400 hover:text-blue-300 disabled:text-gray-500 disabled:cursor-not-allowed"
-                            disabled={spellsList.length === 0}
-                        >
+                        <button type="button" onClick={addSpell} className="mt-1 text-sm text-blue-400 hover:text-blue-300 disabled:text-gray-500 disabled:cursor-not-allowed" disabled={spellsList.length === 0}>
                             + Aggiungi Riduzione Spell
                         </button>
-                         {spellsList.length === 0 && <p className="text-xs text-gray-400 mt-1">Nessuno spell disponibile.</p>}
+                        {spellsList.length === 0 && <p className="text-xs text-gray-400 mt-1">Nessuno spell disponibile.</p>}
                     </div>
                 </div>
 
-                {/* Column 2: Weapon Spells */}
-                 <div className="space-y-4 bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
+                <div className="space-y-4 bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
                     <label className="block text-white mb-2 font-medium">Spells Conferiti dall'Arma</label>
                     <p className="text-xs text-gray-400 mb-2">Crea/Modifica spells specifici per l'arma o collega spells esistenti.</p>
-
-                    {/* Button to open Spell Creation Overlay */}
                     <div className="mb-3">
-                         {/* Use stable handleAddSpellClick handler */}
                         <AddSpellButton onClick={handleAddSpellClick} />
-
-                        {/* Display Custom Spells */}
                         {Array.isArray(customSpells) && customSpells.length > 0 && (
                             <div className="mt-3 pt-3 border-t border-gray-700/30">
                                 <p className="text-sm text-gray-300 mb-1">Spells custom (da salvare con l'arma):</p>
                                 <ul className="text-xs text-white list-none ml-0 space-y-1">
                                     {customSpells.map((s, idx) => (
-                                        <li key={s?.spellData?.Nome || idx} className="flex items-center gap-2 bg-gray-700/40 p-1.5 rounded">
-                                            {/* Delete Button - Use stable handleRemoveCustomSpell */}
-                                            <button
-                                                type="button"
-                                                className="text-red-400 hover:text-red-300 p-1 flex-shrink-0"
-                                                onClick={() => handleRemoveCustomSpell(idx)}
-                                                aria-label="Rimuovi spell custom"
-                                                title="Rimuovi spell custom (modifica locale)"
-                                            >
-                                                <FaTrash size="0.8em"/>
+                                        <li key={s?.spellData?.Nome || `custom-spell-${idx}`} className="flex items-center gap-2 bg-gray-700/40 p-1.5 rounded">
+                                            <button type="button" className="text-red-400 hover:text-red-300 p-1 flex-shrink-0" onClick={() => handleRemoveCustomSpell(idx)} title="Rimuovi spell custom">
+                                                <FaTrash size="0.8em" />
                                             </button>
-                                            {/* Edit Button - Use stable handleEditSpellClick */}
-                                            <button
-                                                type="button"
-                                                className="text-blue-400 hover:text-blue-300 p-1 flex-shrink-0"
-                                                onClick={() => handleEditSpellClick(idx)}
-                                                aria-label="Modifica spell custom"
-                                                title="Modifica spell custom"
-                                            >
-                                                <FaEdit size="0.8em"/>
+                                            <button type="button" className="text-blue-400 hover:text-blue-300 p-1 flex-shrink-0" onClick={() => handleEditSpellClick(idx)} title="Modifica spell custom">
+                                                <FaEdit size="0.8em" />
                                             </button>
-                                            {/* Spell Name */}
-                                            <span className="flex-grow truncate" title={s?.spellData?.Nome}>
-                                                {s?.spellData?.Nome || "Nome Mancante"}
-                                            </span>
+                                            <span className="flex-grow truncate" title={s?.spellData?.Nome}>{s?.spellData?.Nome || "Nome Mancante"}</span>
                                         </li>
                                     ))}
                                 </ul>
                             </div>
                         )}
                     </div>
-
-                    {/* List to select EXISTING spells to link */}
                     <div className="mt-4 pt-4 border-t border-gray-700/50">
                         <label className="block text-white text-sm mb-1">Collega Spells Esistenti:</label>
-                         {weaponSpellsList.map((selectedSpellName, idx) => (
-                            <div key={idx} className="flex items-center gap-2 mb-2 p-2 bg-gray-700/50 rounded">
+                        {weaponSpellsList.map((selectedSpellName, idx) => (
+                            <div key={`linked-spell-${idx}`} className="flex items-center gap-2 mb-2 p-2 bg-gray-700/50 rounded">
                                 <select
                                     value={selectedSpellName}
                                     onChange={e => {
                                         const newName = e.target.value;
                                         setWeaponSpellsList(prev => {
-                                            const newList = [...prev];
-                                            newList[idx] = newName;
-                                            return [...new Set(newList.filter(Boolean))];
-                                         });
+                                            const newList = [...prev]; newList[idx] = newName; return [...new Set(newList.filter(Boolean))];
+                                        });
                                     }}
-                                     className="flex-grow p-2 rounded bg-gray-600 text-white text-sm border border-gray-500/50"
+                                    className="flex-grow p-2 rounded bg-gray-600 text-white text-sm border border-gray-500/50"
                                 >
                                     <option value="" disabled>Seleziona spell esistente...</option>
                                     {spellsList
-                                        .filter(name =>
-                                            !customSpells.some(s => s.spellData.Nome.trim() === name) &&
-                                            (name === selectedSpellName || !weaponSpellsList.includes(name))
-                                        )
-                                        .map(name => (
-                                            <option key={name} value={name}>
-                                                {name}
-                                            </option>
-                                        ))}
+                                        .filter(name => !customSpells.some(s => s.spellData.Nome.trim() === name))
+                                        .filter(name => name === selectedSpellName || !weaponSpellsList.includes(name))
+                                        .map(name => (<option key={name} value={name}>{name}</option>))}
                                 </select>
-                                {/* Use stable removeWeaponSpellLink handler */}
                                 <button type="button" onClick={() => removeWeaponSpellLink(idx)} className="text-red-500 hover:text-red-400 p-1"><FaTrash /></button>
                             </div>
                         ))}
-                        {/* Use stable addWeaponSpellLink handler */}
                         <button
-                            type="button"
-                            onClick={addWeaponSpellLink}
+                            type="button" onClick={addWeaponSpellLink}
                             className="mt-1 text-sm text-blue-400 hover:text-blue-300 disabled:text-gray-500 disabled:cursor-not-allowed"
                             disabled={spellsList.length === 0 || spellsList.filter(name => !customSpells.some(s => s.spellData.Nome.trim() === name) && !weaponSpellsList.includes(name)).length === 0}
                         >
                             + Collega Spell Esistente
                         </button>
-                         {spellsList.length === 0 && <p className="text-xs text-gray-400 mt-1">Nessuno spell disponibile per il collegamento.</p>}
+                        {spellsList.length === 0 && <p className="text-xs text-gray-400 mt-1">Nessuno spell disponibile.</p>}
+                        {spellsList.length > 0 && spellsList.filter(name => !customSpells.some(s => s.spellData.Nome.trim() === name) && !weaponSpellsList.includes(name)).length === 0 && (
+                            <p className="text-xs text-gray-400 mt-1">Tutti gli spells disponibili sono già collegati o creati.</p>
+                          )}
                     </div>
                 </div>
             </div>
         );
     };
 
-
-    // --- Main Component Render ---
     return (
         <>
             <WeaponOverlay
-                title={editMode ? `Modifica Arma: ${initialData?.Nome || ''}` : "Aggiungi Nuova Arma"}
-                onClose={onClose}
+                title={editMode ? `Modifica Arma: ${initialData?.General?.Nome || weaponFormData.General?.Nome || ''}` : "Aggiungi Nuova Arma"}
+                onClose={() => onClose(false)}
                 onSave={handleSaveWeapon}
                 saveButtonText={editMode ? "Salva Modifiche" : "Crea Arma"}
                 isLoading={isLoading || isSchemaLoading}
             >
                 {isSchemaLoading ? (
-                     <div className="text-white p-4 text-center">Caricamento Dati...</div>
+                    <div className="text-white p-4 text-center">Caricamento Dati...</div>
                 ) : !schema ? (
-                     <div className="text-white p-4 text-center text-red-500">Errore: Impossibile caricare lo schema. Riprova o contatta l'assistenza.</div>
+                    <div className="text-white p-4 text-center text-red-500">Errore: Impossibile caricare lo schema.</div>
+                ) : !schema.General || !schema.Specific || !schema.Parametri ? (
+                    <div className="text-white p-4 text-center text-red-500">Errore: Struttura schema arma non valida.</div>
                 ) : (
                     <form onSubmit={(e) => e.preventDefault()} onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}>
                         {renderBasicFields()}
@@ -924,13 +874,12 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                 )}
             </WeaponOverlay>
 
-            {/* Spell Creation/Editing Overlay */}
             {showSpellOverlay && spellSchema && userName && (
                 <SpellOverlay
                     mode={editingSpellIndex !== null ? "edit" : "add"}
                     schema={spellSchema}
                     userName={userName}
-                    onClose={handleSpellCreate} // Already wrapped in useCallback
+                    onClose={handleSpellCreate}
                     saveButtonText={editingSpellIndex !== null ? "Salva Modifiche Spell" : "Crea Spell Custom"}
                     initialData={editingSpellIndex !== null && customSpells[editingSpellIndex] ? customSpells[editingSpellIndex].spellData : undefined}
                     imageFile={editingSpellIndex !== null && customSpells[editingSpellIndex] ? customSpells[editingSpellIndex].imageFile : undefined}
