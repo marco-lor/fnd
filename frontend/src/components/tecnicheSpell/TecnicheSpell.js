@@ -3,7 +3,7 @@ import { useAuth } from "../../AuthContext";
 import { doc, onSnapshot, getDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 import DnDBackground from "../backgrounds/DnDBackground";
-import TecnicheSide from "./elements/techiche_side";
+import TecnicheSide from "./elements/tecniche_side";
 import SpellSide from "./elements/spell_side";
 
 // Cache for storing fetched data
