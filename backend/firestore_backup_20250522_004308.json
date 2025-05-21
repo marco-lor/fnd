@@ -1,6 +1,6 @@
 {
   "items": {
-    "Armatura_di_Cuoio": {
+    "Mazza": {
       "Parametri": {
         "Base": {
           "Fortuna": {
@@ -40,6 +40,50 @@
             "1": ""
           }
         },
+        "Special": {
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "2",
+            "7": "3",
+            "10": "4",
+            "1": "1"
+          },
+          "Danno": {
+            "4": "2d4",
+            "7": "3d4",
+            "10": "4d4",
+            "1": "1d4"
+          },
+          "Penetrazione": {
+            "4": "4",
+            "7": "6",
+            "10": "8",
+            "1": "2"
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "2d6",
+            "7": "3d6",
+            "10": "4d6",
+            "1": "1d6"
+          }
+        },
         "Combattimento": {
           "Disciplina": {
             "4": "",
@@ -54,22 +98,22 @@
             "1": ""
           },
           "RiduzioneDanni": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Difesa": {
             "4": "2",
             "7": "3",
             "10": "4",
             "1": "1"
           },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
           "Salute": {
-            "4": "6",
-            "7": "9",
-            "10": "12",
-            "1": "3"
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
           },
           "Mira": {
             "4": "",
@@ -78,76 +122,177 @@
             "1": ""
           },
           "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        }
+      },
+      "item_type": "weapon",
+      "Specific": {
+        "Hands": 1,
+        "Tipo": "Mischia"
+      },
+      "General": {
+        "Nome": "Mazza",
+        "ridCostoSpellSingola": {},
+        "Slot": "Mano Principale o Secondaria",
+        "Effetto": "",
+        "prezzo": 85,
+        "requisiti": "",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Fweapon_Mazza_1747864484369_mazza_base.png?alt=media&token=44cd8282-abd9-48e1-a074-3c3c975ba2a5",
+        "ridCostoTecSingola": {},
+        "spells": {}
+      }
+    },
+    "Mazzafrusto": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "4",
+            "7": "6",
+            "10": "8",
+            "1": "2"
+          },
+          "Danno": {
+            "4": "2d10",
+            "7": "3d10",
+            "10": "4d10",
+            "1": "1d10"
+          },
+          "Penetrazione": {
             "4": "6",
             "7": "9",
             "10": "12",
             "1": "3"
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "2d6",
+            "7": "3d6",
+            "10": "4d6",
+            "1": "1d6"
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "2",
+            "7": "3",
+            "10": "4",
+            "1": "1"
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
           }
         }
       },
-      "ridCostoTec": {
-        "4": "2",
-        "7": "2",
-        "10": "2",
-        "1": "2"
+      "item_type": "weapon",
+      "Specific": {
+        "Hands": 2,
+        "Tipo": "Mischia"
       },
-      "Bonus Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Effetto": "",
-      "Hands": "-",
-      "requisiti": "",
-      "item_type": "armor",
-      "Penetrazione": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "ridCostoSpell": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Tipo": "-",
-      "Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Nome": "Armatura di Cuoio",
-      "Slot": "Corpo",
-      "Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "image_url": "",
-      "Bonus Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
+      "General": {
+        "Nome": "Mazzafrusto",
+        "Slot": "Doppia Mano",
+        "spells": {},
+        "Effetto": "",
+        "prezzo": 600,
+        "requisiti": "",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Fweapon_Mazzafrusto_1747864778605_mazzafrusto_base.png?alt=media&token=ddd3092f-153b-40b5-9264-266480ee653e",
+        "ridCostoTecSingola": {},
+        "ridCostoSpellSingola": {}
       }
     },
     "Picca": {
-      "Hands": "2",
-      "ridCostoSpellSingola": {
-        "nome_spell": ""
-      },
-      "Bonus Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Effetto": "Riduzione costo tecnica Frapposizione di 2",
       "Parametri": {
         "Base": {
           "Fortuna": {
@@ -187,6 +332,50 @@
             "1": ""
           }
         },
+        "Special": {
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "2d12",
+            "7": "3d12",
+            "10": "4d12",
+            "1": "1d12"
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "2d12",
+            "7": "3d12",
+            "10": "4d12",
+            "1": "1d12"
+          }
+        },
         "Combattimento": {
           "Disciplina": {
             "4": "",
@@ -212,7 +401,7 @@
             "10": "",
             "1": ""
           },
-          "Attacco": {
+          "Salute": {
             "4": "",
             "7": "",
             "10": "",
@@ -224,7 +413,7 @@
             "10": "8",
             "1": "2"
           },
-          "Salute": {
+          "Attacco": {
             "4": "",
             "7": "",
             "10": "",
@@ -232,51 +421,23 @@
           }
         }
       },
-      "requisiti": "",
-      "ridCostoTecSingola": {
-        "Frapposizione": 2
-      },
-      "ridCostoTec": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
       "item_type": "weapon",
-      "Penetrazione": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
+      "Specific": {
+        "Hands": 2,
+        "Tipo": "Mischia"
       },
-      "ridCostoSpell": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Tipo": "Mischia",
-      "Danno Critico": {
-        "4": "2d12",
-        "7": "3d12",
-        "10": "4d12",
-        "1": "1d12"
-      },
-      "Nome": "Picca",
-      "Slot": "Mano Principale",
-      "Danno": {
-        "4": "2d12",
-        "7": "3d12",
-        "10": "4d12",
-        "1": "1d12"
-      },
-      "prezzo": "1000",
-      "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2FPicca_20250401_0040_Albert%20Pike%20Portrait_simple_compose_01jqq5t6rjfbfaw69j2z0ms3xp.png?alt=media&token=7b35a372-c2a3-4c70-beb4-cbd24004e094",
-      "Bonus Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
+      "General": {
+        "Nome": "Picca",
+        "ridCostoSpellSingola": {},
+        "spells": {},
+        "Effetto": "",
+        "prezzo": 1000,
+        "requisiti": "",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Fweapon_Picca_1747865199654_picca_base.png?alt=media&token=4a806a91-d73b-454c-bd4b-60c5a960e6e7",
+        "ridCostoTecSingola": {
+          "Frapposizione": 2
+        },
+        "Slot": "Doppia Mano"
       }
     },
     "Pugnale": {
@@ -300,13 +461,13 @@
             "10": "",
             "1": ""
           },
-          "Destrezza": {
+          "Forza": {
             "4": "",
             "7": "",
             "10": "",
             "1": ""
           },
-          "Forza": {
+          "Destrezza": {
             "4": "",
             "7": "",
             "10": "",
@@ -317,6 +478,50 @@
             "7": "",
             "10": "",
             "1": ""
+          }
+        },
+        "Special": {
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "6",
+            "7": "9",
+            "10": "12",
+            "1": "3"
+          },
+          "Danno": {
+            "4": "2d4",
+            "7": "3d4",
+            "10": "4d4",
+            "1": "1d4"
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "6",
+            "7": "9",
+            "10": "12",
+            "1": "3"
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "2d10",
+            "7": "3d10",
+            "10": "4d10",
+            "1": "1d10"
           }
         },
         "Combattimento": {
@@ -364,75 +569,24 @@
           }
         }
       },
-      "ridCostoTec": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Bonus Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Effetto": "",
-      "Hands": 1,
-      "requisiti": "",
       "item_type": "weapon",
-      "Penetrazione": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
+      "Specific": {
+        "Hands": 1,
+        "Tipo": "Mischia"
       },
-      "ridCostoSpell": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Tipo": "Mischia",
-      "Danno Critico": {
-        "4": "2d10",
-        "7": "3d10",
-        "10": "4d10",
-        "1": "1d10"
-      },
-      "Nome": "Pugnale",
-      "Slot": "Mano Principale",
-      "Danno": {
-        "4": "2d4",
-        "7": "3d4",
-        "10": "4d4",
-        "1": "1d4"
-      },
-      "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2FPugnale_pugnale.webp?alt=media&token=e86e079b-759e-4792-9159-4608aa2ccec0",
-      "Bonus Danno Critico": {
-        "4": "6",
-        "7": "9",
-        "10": "12",
-        "1": "3"
+      "General": {
+        "Nome": "Pugnale",
+        "spells": {},
+        "ridCostoSpellSingola": {},
+        "Effetto": "",
+        "prezzo": 45,
+        "requisiti": "",
+        "ridCostoTecSingola": {},
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Fweapon_Pugnale_1747863065763_pugnale_base.png?alt=media&token=fc2acf04-f220-4533-8cd7-90b87fb1b989",
+        "Slot": "Mano Principale o Secondaria"
       }
     },
-    "Scudo": {
-      "Nome": "Scudo",
-      "Slot": "-",
-      "Bonus Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Effetto": "difende male",
-      "Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Hands": 1,
-      "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2FScudo_shield.jpg?alt=media&token=6ded2e99-83f2-4ca3-be8c-a2270bf28812",
+    "Spada": {
       "Parametri": {
         "Base": {
           "Fortuna": {
@@ -472,6 +626,50 @@
             "1": ""
           }
         },
+        "Special": {
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "2d8",
+            "7": "3d8",
+            "10": "4d8",
+            "1": "1d8"
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "2d8",
+            "7": "3d8",
+            "10": "4d8",
+            "1": "1d8"
+          }
+        },
         "Combattimento": {
           "Disciplina": {
             "4": "",
@@ -486,16 +684,308 @@
             "1": ""
           },
           "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "2",
+            "7": "3",
+            "10": "4",
+            "1": "1"
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        }
+      },
+      "item_type": "weapon",
+      "Specific": {
+        "Hands": 1,
+        "Tipo": "Mischia"
+      },
+      "General": {
+        "Nome": "Spada",
+        "spells": {},
+        "ridCostoSpellSingola": {},
+        "Effetto": "",
+        "prezzo": 400,
+        "requisiti": "",
+        "ridCostoTecSingola": {},
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Fweapon_Spada_1747863994849_spada_base.png?alt=media&token=8f785a0c-ce9e-4cd2-a02c-9a91beb00b14",
+        "Slot": "Mano Principale"
+      }
+    },
+    "Spadone": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "6",
+            "7": "9",
+            "10": "12",
+            "1": "3"
+          },
+          "Danno": {
+            "4": "4d6",
+            "7": "6d6",
+            "10": "8d6",
+            "1": "2d6"
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "4d6",
+            "7": "6d6",
+            "10": "8d6",
+            "1": "2d6"
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        }
+      },
+      "item_type": "weapon",
+      "Specific": {
+        "Hands": 2,
+        "Tipo": "Mischia"
+      },
+      "General": {
+        "Nome": "Spadone",
+        "Slot": "Doppia Mano",
+        "spells": {},
+        "Effetto": "",
+        "prezzo": 855,
+        "requisiti": "",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Fweapon_Spadone_1747865037896_spadone_base.png?alt=media&token=2bb16b8b-2b0c-4211-bcdb-a43026df3fb0",
+        "ridCostoTecSingola": {},
+        "ridCostoSpellSingola": {}
+      }
+    },
+    "Stocco": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "2d6",
+            "7": "3d6",
+            "10": "4d6",
+            "1": "1d6"
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "2d8",
+            "7": "3d8",
+            "10": "4d8",
+            "1": "1d8"
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
             "4": "2",
             "7": "3",
             "10": "4",
             "1": "1"
           },
           "Difesa": {
-            "4": "4",
-            "7": "6",
-            "10": "8",
-            "1": "2"
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
           },
           "Attacco": {
             "4": "",
@@ -504,175 +994,34 @@
             "1": ""
           },
           "Mira": {
-            "4": "-2",
-            "7": "-3",
-            "10": "-4",
-            "1": "-1"
+            "4": "2",
+            "7": "3",
+            "10": "4",
+            "1": "1"
           },
           "Salute": {
-            "4": "4",
-            "7": "6",
-            "10": "8",
-            "1": "2"
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
           }
         }
       },
       "item_type": "weapon",
-      "Penetrazione": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
+      "Specific": {
+        "Hands": 1,
+        "Tipo": "Mischia"
       },
-      "Bonus Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Tipo": "Mischia",
-      "Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      }
-    },
-    "Stivali_di_cuoio": {
-      "Parametri": {
-        "Base": {
-          "Fortuna": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Intelligenza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Saggezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Destrezza": {
-            "4": "1",
-            "7": "1",
-            "10": "1",
-            "1": "1"
-          },
-          "Forza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Costituzione": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        },
-        "Combattimento": {
-          "Disciplina": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "RiduzioneDanni": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Difesa": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Salute": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Mira": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Attacco": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        }
-      },
-      "ridCostoTec": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Bonus Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Effetto": "Comodi",
-      "Hands": "-",
-      "requisiti": "",
-      "item_type": "armor",
-      "Penetrazione": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "ridCostoSpell": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Tipo": "-",
-      "Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "Nome": "Stivali di cuoio",
-      "Slot": "Stivali",
-      "Danno": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
-      },
-      "prezzo": "150",
-      "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2FStivali_di_cuoio_stivali.webp?alt=media&token=d2eedf84-e3ed-4152-a3d9-3003b4afc7b0",
-      "Bonus Danno Critico": {
-        "4": "",
-        "7": "",
-        "10": "",
-        "1": ""
+      "General": {
+        "Nome": "Stocco",
+        "ridCostoSpellSingola": {},
+        "Slot": "Mano Secondaria",
+        "Effetto": "",
+        "prezzo": 225,
+        "requisiti": "",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Fweapon_Stocco_1747864200055_stocco_base.png?alt=media&token=abee568a-5534-4f2b-aa1d-cbf99d5a3173",
+        "ridCostoTecSingola": {},
+        "spells": {}
       }
     }
   },
@@ -2095,7 +2444,166 @@
       "Effetto": "Placeholder per effetto della tecnica.",
       "image_url": "Placeholder URL dell'immagine"
     },
-    "schema_weapon": {},
+    "schema_weapon": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Intelligenza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Saggezza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Forza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Destrezza": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Costituzione": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          }
+        },
+        "Special": {
+          "ridCostoTec": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Bonus Danno": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "ridCostoSpell": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Bonus Danno Critico": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Critico": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "RiduzioneDanni": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Difesa": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Salute": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Mira": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Attacco": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          }
+        }
+      },
+      "Specific": {
+        "Hands": [
+          1,
+          2
+        ],
+        "Tipo": [
+          "Mischia",
+          "Distanza"
+        ]
+      },
+      "General": {
+        "Nome": "",
+        "ridCostoSpellSingola": {
+          "nome_spell": 0
+        },
+        "spells": {},
+        "Effetto": "",
+        "prezzo": 0,
+        "requisiti": "",
+        "image_url": "",
+        "ridCostoTecSingola": {
+          "nomeTecnica": 0
+        },
+        "Slot": [
+          "Mano Principale",
+          "Mano Secondaria",
+          "Mano Principale o Secondaria",
+          "Doppia Mano"
+        ]
+      }
+    },
     "spells_common": {},
     "tecniche_common": {
       "Ostruzione": {
