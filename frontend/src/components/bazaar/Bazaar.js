@@ -196,7 +196,8 @@ export default function Bazaar() {
   const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
 
   // Define width for the comparison panel (used by the fixed motion.div)
-  const comparisonPanelWidth = "w-[80vw] max-w-[98vw] sm:w-[60vw] sm:max-w-[400px] md:w-[38vw] md:max-w-[550px]";
+  // const comparisonPanelWidth = "w-[80vw] max-w-[98vw] sm:w-[60vw] sm:max-w-[400px] md:w-[38vw] md:max-w-[550px]";
+  const comparisonPanelWidth = "w-[95vw] max-w-[99vw] sm:w-[80vw] sm:max-w-[400px] md:w-[38vw] md:max-w-[550px] lg:w-[28vw] lg:max-w-[750px]";
 
   return (
     <div className="relative w-full min-h-screen flex0 flex-col overflow-hidden">
