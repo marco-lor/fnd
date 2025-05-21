@@ -104,26 +104,22 @@ export default function Bazaar() {
     return () => unsubscribe();
   }, []);
 
-  // **UPDATED useEffect to refresh lockedItem data when `items` array changes**
   useEffect(() => {
-    const currentLockedItemId = lockedItem?.id; // Store ID before potential update
+    const currentLockedItemId = lockedItem?.id;
     if (currentLockedItemId) {
       const newVersionOfLockedItem = items.find(item => item.id === currentLockedItemId);
       if (newVersionOfLockedItem) {
         if (JSON.stringify(newVersionOfLockedItem) !== JSON.stringify(lockedItem)) {
-          // console.log("Bazaar: Updating lockedItem with new data from items list.", newVersionOfLockedItem.General.Nome);
           setLockedItem(newVersionOfLockedItem);
         }
       } else {
-        // console.log("Bazaar: LockedItem was deleted, clearing selection.");
         setLockedItem(null);
         if (hoveredItem && hoveredItem.id === currentLockedItemId) {
           setHoveredItem(null);
         }
       }
     }
-  // Depend on items and lockedItem?.id for stability
-  }, [items, lockedItem?.id, hoveredItem]); // Added hoveredItem to deps as it's used inside
+  }, [items, lockedItem?.id, hoveredItem]);
 
 
   const slots = ['All', ...Array.from(new Set(items.map(item => item.General?.Slot).filter(Boolean)))];
@@ -164,7 +160,7 @@ export default function Bazaar() {
            setHoveredItem(itemToToggle);
        } else {
            setLockedItem(itemToToggle);
-           setHoveredItem(null); // Clear hover when an item is locked
+           setHoveredItem(null);
        }
    };
 
@@ -189,7 +185,6 @@ export default function Bazaar() {
   };
 
   const handlePurchase = (item) => {
-    // console.log("Acquiring item:", item.General?.Nome);
     displayConfirmation(`"${item.General?.Nome || 'Oggetto'}" Acquistato!`);
   };
 
@@ -200,12 +195,17 @@ export default function Bazaar() {
   const panelItem = lockedItem || hoveredItem;
   const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
 
+  // Define widths for layout adjustments
+  const filtersWidth = "w-[15vw] min-w-[200px]";
+  const comparisonPanelWidth = "w-[28vw] max-w-[450px]"; // Same width as ComparisonPanel
+
   return (
-    <div className="relative w-full min-h-screen overflow-x-hidden">
+    <div className="relative w-full min-h-screen flex flex-col overflow-hidden"> {/* Ensure no x-overflow */}
       <InteractiveBackground />
 
-      <div className="relative z-10 flex">
-        <div className="sticky top-0 p-4 overflow-y-auto w-[15vw] min-w-[200px] h-screen">
+      <div className="relative z-10 flex flex-grow"> {/* Use flex-grow to fill height */}
+        {/* Filters Panel */}
+        <div className={`sticky top-0 p-4 overflow-y-auto h-screen ${filtersWidth}`}>
           <div className="mb-6">
             <p className="text-white font-bold mb-2">Slot:</p>
             <div className="flex flex-wrap gap-2">
@@ -250,7 +250,8 @@ export default function Bazaar() {
           </div>
         </div>
 
-         <div className={`flex-grow p-6 ${panelItem ? 'w-[calc(100%-15vw-28vw-1.5rem)]' : 'w-[calc(100%-15vw-1.5rem)]'} transition-all duration-300`}>
+        {/* Items List Panel - Width adjusts based on panelItem */}
+        <div className={`flex-grow p-6 overflow-y-auto h-screen transition-all duration-300 ease-in-out ${panelItem ? `mr-[calc(${comparisonPanelWidth})]` : 'mr-0'}`}>
           {isAdmin && (
             <div className="mb-4">
               <div className="flex flex-wrap gap-2">
@@ -295,22 +296,41 @@ export default function Bazaar() {
              )}
           </div>
         </div>
+
+        {/* Comparison Panel Container - This will host the ComparisonPanel */}
+        {/* The ComparisonPanel itself will handle its fly-in animation */}
+        <AnimatePresence>
+          {panelItem && (
+            <motion.div
+              className={`fixed right-0 top-[16rem] bottom-0 ${comparisonPanelWidth} z-40`} // Adjusted top position to align with first item
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ duration: 0.3, ease: "easeInOut" }}
+              style={{
+                height: "calc(100vh - 6rem)",  // Match the top offset
+                overflowY: "auto"  // Allow scrolling
+              }}
+            >
+              <ComparisonPanel
+                item={panelItem}
+                showMessage={displayConfirmation}
+                key={`comparisonPanel-${panelItem.id}`}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
-      <AnimatePresence>
-         {panelItem && <ComparisonPanel item={panelItem} showMessage={displayConfirmation} key={`comparisonPanel-${panelItem.id}`} />}
-      </AnimatePresence>
 
       {showOverlay && (
         <AddWeaponOverlay
           onClose={(success) => {
             setShowOverlay(false);
-            // Message and potential item list refresh are handled by AddWeaponOverlay/Firestore snapshot
           }}
           showMessage={displayConfirmation}
-          // Pass initialData only if an item is locked (for editing), otherwise it's a new weapon
           initialData={lockedItem || null}
-          editMode={!!lockedItem} // editMode is true if an item is locked
+          editMode={!!lockedItem}
         />
       )}
 
