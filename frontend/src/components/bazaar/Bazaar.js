@@ -204,7 +204,12 @@ export default function Bazaar() {
     <div className="relative w-full min-h-screen overflow-x-hidden">
       <InteractiveBackground />
 
-      <div className="relative z-10 flex">
+      <div
+        className="relative z-10 grid"
+        style={{
+          gridTemplateColumns: panelItem ? '15vw 1fr 28vw' : '15vw 1fr',
+        }}
+      >
         <div className="sticky top-0 p-4 overflow-y-auto w-[15vw] min-w-[200px] h-screen">
           <div className="mb-6">
             <p className="text-white font-bold mb-2">Slot:</p>
@@ -250,7 +255,7 @@ export default function Bazaar() {
           </div>
         </div>
 
-         <div className={`flex-grow p-6 ${panelItem ? 'w-[calc(100%-15vw-28vw-1.5rem)]' : 'w-[calc(100%-15vw-1.5rem)]'} transition-all duration-300`}>
+        <div className="p-6 transition-all duration-300">
           {isAdmin && (
             <div className="mb-4">
               <div className="flex flex-wrap gap-2">
@@ -294,12 +299,16 @@ export default function Bazaar() {
                  <p className="text-center text-gray-400 mt-8">Nessun oggetto trovato corrispondente ai filtri.</p>
              )}
           </div>
-        </div>
+        {panelItem && (
+          <AnimatePresence>
+            <ComparisonPanel
+              item={panelItem}
+              showMessage={displayConfirmation}
+              key={`comparisonPanel-${panelItem.id}`}
+            />
+          </AnimatePresence>
+        )}
       </div>
-
-      <AnimatePresence>
-         {panelItem && <ComparisonPanel item={panelItem} showMessage={displayConfirmation} key={`comparisonPanel-${panelItem.id}`} />}
-      </AnimatePresence>
 
       {showOverlay && (
         <AddWeaponOverlay
