@@ -239,14 +239,8 @@ export default function ComparisonPanel({ item, showMessage }) { // Added showMe
                 animate={{ x: 0, opacity: 1 }}
                 exit={{ x: 300, opacity: 0 }}
                 transition={{ duration: 0.3 }}
-                className="fixed right-0 p-0 overflow-y-auto z-50 rounded-l-lg overflow-hidden shadow-2xl border-l border-gray-700"
-                style={{
-                    top: '10rem',
-                    width: '28vw',
-                    maxWidth: '450px',
-                    height: 'calc(100vh - 12rem)',
-                    maxHeight: '700px'
-                }}
+                className="p-0 overflow-y-auto z-50 rounded-l-lg overflow-hidden shadow-2xl border-l border-gray-700"
+                style={{ width: '100%' }}
             >
                 <div className="relative h-full bg-gray-900">
                     {/* Confirmation Dialog */}
