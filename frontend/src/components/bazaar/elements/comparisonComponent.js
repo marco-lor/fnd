@@ -271,7 +271,11 @@ export default function ComparisonPanel({ item, showMessage }) { // Added showMe
                     {/* Background image container */}
                     <div className="h-40 w-full relative overflow-hidden">
                         {!imageError && imageUrl ? (
-                            <img src={imageUrl} alt={itemName} className="absolute inset-0 w-full h-full object-cover" />
+                            <img
+                                src={imageUrl}
+                                alt={itemName}
+                                className="absolute inset-0 w-full h-full object-cover transform scale-105"
+                            />
                         ) : (
                             <div className="absolute inset-0 bg-gray-800 flex items-center justify-center">
                                 <div className="text-6xl text-gray-600 font-bold opacity-50 select-none">
@@ -279,7 +283,8 @@ export default function ComparisonPanel({ item, showMessage }) { // Added showMe
                                 </div>
                             </div>
                         )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-gray-900 via-gray-900/70 to-transparent"></div>
+                        <div className="absolute inset-0 bg-black/20"></div>
+                        <div className="absolute inset-0 bg-gradient-to-t from-gray-900/80 via-transparent to-transparent"></div>
                     </div>
 
 
