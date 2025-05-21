@@ -195,17 +195,20 @@ export default function Bazaar() {
   const panelItem = lockedItem || hoveredItem;
   const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
 
-  // Define widths for layout adjustments
-  const filtersWidth = "w-[15vw] min-w-[200px]";
-  const comparisonPanelWidth = "w-[28vw] max-w-[450px]"; // Same width as ComparisonPanel
+  // Define width for the comparison panel (used by the fixed motion.div)
+  const comparisonPanelWidth = "w-[80vw] max-w-[98vw] sm:w-[60vw] sm:max-w-[400px] md:w-[38vw] md:max-w-[550px]";
 
   return (
-    <div className="relative w-full min-h-screen flex flex-col overflow-hidden"> {/* Ensure no x-overflow */}
+    <div className="relative w-full min-h-screen flex0 flex-col overflow-hidden">
       <InteractiveBackground />
 
-      <div className="relative z-10 flex flex-grow"> {/* Use flex-grow to fill height */}
-        {/* Filters Panel */}
-        <div className={`sticky top-0 p-4 overflow-y-auto h-screen ${filtersWidth}`}>
+      {/* Main content area using CSS Grid */}
+      {/* Grid columns: Filters (dynamic), Item List (700px), Comparison Panel Area (450px) */}
+      <div className="relative z-10 grid grid-cols-[10%_60%_30%] flex-grow items-start">
+
+        {/* Filters Panel (Column 1) */}
+        {/* Width is controlled by grid-cols definition */}
+        <div className="sticky top-0 p-4 overflow-y-auto h-screen">
           <div className="mb-6">
             <p className="text-white font-bold mb-2">Slot:</p>
             <div className="flex flex-wrap gap-2">
@@ -250,8 +253,9 @@ export default function Bazaar() {
           </div>
         </div>
 
-        {/* Items List Panel - Width adjusts based on panelItem */}
-        <div className={`flex-grow p-6 overflow-y-auto h-screen transition-all duration-300 ease-in-out ${panelItem ? `mr-[calc(${comparisonPanelWidth})]` : 'mr-0'}`}>
+        {/* Items List Panel (Column 2) */}
+        {/* Width (700px) is controlled by grid-cols. Removed flex-grow, mr-*, and transition classes for width. */}
+        <div className="p-6 overflow-y-auto h-screen">
           {isAdmin && (
             <div className="mb-4">
               <div className="flex flex-wrap gap-2">
@@ -297,29 +301,32 @@ export default function Bazaar() {
           </div>
         </div>
 
-        {/* Comparison Panel Container - This will host the ComparisonPanel */}
-        {/* The ComparisonPanel itself will handle its fly-in animation */}
-        <AnimatePresence>
-          {panelItem && (
-            <motion.div
-              className={`fixed right-0 top-[16rem] bottom-0 ${comparisonPanelWidth} z-40`} // Adjusted top position to align with first item
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ duration: 0.3, ease: "easeInOut" }}
-              style={{
-                height: "calc(100vh - 6rem)",  // Match the top offset
-                overflowY: "auto"  // Allow scrolling
-              }}
-            >
-              <ComparisonPanel
-                item={panelItem}
-                showMessage={displayConfirmation}
-                key={`comparisonPanel-${panelItem.id}`}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Comparison Panel Container (Column 3) */}
+        {/* This div occupies the 450px grid column. The ComparisonPanel is fixed-positioned within it. */}
+        {/* It needs h-screen to ensure grid row height is consistent if other columns are h-screen. */}
+        <div className="h-screen"> {/* Width (450px) is controlled by grid-cols */}
+          <AnimatePresence>
+            {panelItem && (
+              <motion.div
+                className={`fixed right-0 top-[16rem] bottom-0 ${comparisonPanelWidth} z-40`} // comparisonPanelWidth defines w-[28vw] max-w-[450px]
+                initial={{ x: "100%" }}
+                animate={{ x: 0 }}
+                exit={{ x: "100%" }}
+                transition={{ duration: 0.3, ease: "easeInOut" }}
+                style={{
+                  height: "calc(100vh - 6rem)", // Specific height for the panel
+                  overflowY: "auto"
+                }}
+              >
+                <ComparisonPanel
+                  item={panelItem}
+                  showMessage={displayConfirmation}
+                  key={`comparisonPanel-${panelItem.id}`} // Ensure re-render on item change
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
 
 
