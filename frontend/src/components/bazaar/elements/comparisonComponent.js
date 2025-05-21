@@ -72,6 +72,8 @@ export default function ComparisonPanel({ item, showMessage }) {
   const baseParams     = parametri.Base         || {};
   const combatParams   = parametri.Combattimento|| {};
   const specialParams  = parametri.Special      || {};
+  const ridCostoTecSingola = general.ridCostoTecSingola || {};
+  const ridCostoSpellSingola = general.ridCostoSpellSingola || {};
 
   const imageUrl = general.image_url;
   const itemName = general.Nome || 'Oggetto Sconosciuto';
@@ -414,6 +416,40 @@ export default function ComparisonPanel({ item, showMessage }) {
                   )}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* SPECIFIC COST REDUCTION FOR TECHNIQUES -------------------------- */}
+          {Object.keys(ridCostoTecSingola).length > 0 && (
+            <div className="mt-4">
+              <h3 className="text-md font-semibold text-white mb-2">Riduzione Costo Tecniche</h3>
+              <ul className="list-disc list-inside text-sm text-gray-300 space-y-1">
+                {Object.entries(ridCostoTecSingola).map(([tecName, costReduction]) => (
+                  <li key={`tec-${tecName}`}>
+                    {tecName}
+                    <span className="text-xs text-gray-400 ml-2">
+                      (Riduzione: {costReduction})
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* SPECIFIC COST REDUCTION FOR SPELLS ----------------------------- */}
+          {Object.keys(ridCostoSpellSingola).length > 0 && (
+            <div className="mt-4">
+              <h3 className="text-md font-semibold text-white mb-2">Riduzione Costo Spell</h3>
+              <ul className="list-disc list-inside text-sm text-gray-300 space-y-1">
+                {Object.entries(ridCostoSpellSingola).map(([spellName, costReduction]) => (
+                  <li key={`spell-${spellName}`}>
+                    {spellName}
+                    <span className="text-xs text-gray-400 ml-2">
+                      (Riduzione: {costReduction})
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

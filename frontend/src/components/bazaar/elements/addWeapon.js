@@ -93,7 +93,8 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
             for (const paramField of Object.keys(schemaData.Parametri[paramCategory] || {})) {
                 initialFormState.Parametri[paramCategory][paramField] = {};
                 for (const level of levels) {
-                    const defaultValue = schemaData.Parametri[paramCategory][paramField]?.[level] ?? '';
+                    let schemaVal = schemaData.Parametri[paramCategory][paramField]?.[level];
+                    const defaultValue = (schemaVal === 0) ? '' : (schemaVal ?? '');
                     initialFormState.Parametri[paramCategory][paramField][level] = getParamValue(paramCategory, paramField, level, defaultValue);
                 }
             }

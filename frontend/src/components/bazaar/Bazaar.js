@@ -264,7 +264,7 @@ export default function Bazaar() {
                   onClick={handleAddWeaponClick}
                   className="px-3 py-1.5 text-sm bg-green-700 text-white rounded hover:bg-green-600 transition-colors"
                 >
-                  + Arma
+                  {lockedItem && lockedItem.item_type === "weapon" ? "Modifica Arma" : "+ Arma"}
                 </button>
                 <button onClick={() => displayConfirmation("Funzionalità Armatura in arrivo!", "info")} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Armatura </button>
                 <button onClick={() => displayConfirmation("Funzionalità Accessorio in arrivo!", "info")} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Accessorio </button>
