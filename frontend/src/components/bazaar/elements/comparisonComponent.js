@@ -239,8 +239,14 @@ export default function ComparisonPanel({ item, showMessage }) { // Added showMe
                 animate={{ x: 0, opacity: 1 }}
                 exit={{ x: 300, opacity: 0 }}
                 transition={{ duration: 0.3 }}
-                className="p-0 overflow-y-auto z-50 rounded-l-lg overflow-hidden shadow-2xl border-l border-gray-700"
-                style={{ width: '100%' }}
+                className="fixed right-0 p-0 overflow-y-auto z-50 rounded-l-lg overflow-hidden shadow-2xl border-l border-gray-700"
+                style={{
+                    top: '10rem',
+                    width: '28vw',
+                    maxWidth: '450px',
+                    height: 'calc(100vh - 12rem)',
+                    maxHeight: '700px'
+                }}
             >
                 <div className="relative h-full bg-gray-900">
                     {/* Confirmation Dialog */}
@@ -271,11 +277,7 @@ export default function ComparisonPanel({ item, showMessage }) { // Added showMe
                     {/* Background image container */}
                     <div className="h-40 w-full relative overflow-hidden">
                         {!imageError && imageUrl ? (
-                            <img
-                                src={imageUrl}
-                                alt={itemName}
-                                className="absolute inset-0 w-full h-full object-cover transform scale-105"
-                            />
+                            <img src={imageUrl} alt={itemName} className="absolute inset-0 w-full h-full object-cover" />
                         ) : (
                             <div className="absolute inset-0 bg-gray-800 flex items-center justify-center">
                                 <div className="text-6xl text-gray-600 font-bold opacity-50 select-none">
@@ -283,8 +285,7 @@ export default function ComparisonPanel({ item, showMessage }) { // Added showMe
                                 </div>
                             </div>
                         )}
-                        <div className="absolute inset-0 bg-black/20"></div>
-                        <div className="absolute inset-0 bg-gradient-to-t from-gray-900/80 via-transparent to-transparent"></div>
+                        <div className="absolute inset-0 bg-gradient-to-t from-gray-900 via-gray-900/70 to-transparent"></div>
                     </div>
 
 
