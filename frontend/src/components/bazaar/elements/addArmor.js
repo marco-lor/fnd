@@ -2,7 +2,10 @@ import React, { useState } from 'react';
 import { WeaponOverlay } from '../common/WeaponOverlay';
 
 export function AddArmorOverlay({ onClose }) {
-  const [armorData, setArmorData] = useState({ Nome: '', Prezzo: '' });
+  const [armorData, setArmorData] = useState({
+    Nome: '',
+    Prezzo: '',
+  });
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -10,11 +13,20 @@ export function AddArmorOverlay({ onClose }) {
   };
 
   const handleSave = () => {
-    onClose(false);
+    // Pass the collected data back to the parent (adjust logic as needed)
+    if (onClose) {
+      onClose(armorData);
+    }
   };
 
   return (
-    <WeaponOverlay title="Aggiungi Armatura" onClose={onClose} onSave={handleSave}>
+    <WeaponOverlay
+      title="Aggiungi Armatura"
+      onClose={onClose}
+      onSave={handleSave}
+      saveButtonText="Salva"
+      cancelButtonText="Annulla"
+    >
       <form onSubmit={(e) => e.preventDefault()} className="space-y-4">
         <div>
           <label className="block text-white text-sm mb-1">Nome</label>
