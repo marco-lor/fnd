@@ -6,6 +6,7 @@ import { collection, onSnapshot } from "firebase/firestore";
 import { db } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
 import { AddWeaponOverlay } from './elements/addWeapon';
+import { AddArmaturaOverlay } from './elements/addArmatura';
 import ComparisonPanel from './elements/comparisonComponent';
 
 function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked }) {
@@ -75,6 +76,7 @@ export default function Bazaar() {
   const [hoveredItem, setHoveredItem] = useState(null);
   const [lockedItem, setLockedItem] = useState(null);
   const [showOverlay, setShowOverlay] = useState(false);
+  const [showArmaturaOverlay, setShowArmaturaOverlay] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [confirmationMessage, setConfirmationMessage] = useState("");
 
@@ -192,6 +194,10 @@ export default function Bazaar() {
     setShowOverlay(true);
   };
 
+  const handleAddArmaturaClick = () => {
+    setShowArmaturaOverlay(true);
+  };
+
   const panelItem = lockedItem || hoveredItem;
   const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
 
@@ -266,7 +272,7 @@ export default function Bazaar() {
                 >
                   {lockedItem && lockedItem.item_type === "weapon" ? "Modifica Arma" : "+ Arma"}
                 </button>
-                <button onClick={() => displayConfirmation("Funzionalità Armatura in arrivo!", "info")} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Armatura </button>
+                <button onClick={handleAddArmaturaClick} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Armatura </button>
                 <button onClick={() => displayConfirmation("Funzionalità Accessorio in arrivo!", "info")} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Accessorio </button>
                 <button onClick={() => displayConfirmation("Funzionalità Consumabile in arrivo!", "info")} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Consumabile </button>
                 <button onClick={() => displayConfirmation("Funzionalità Munizione in arrivo!", "info")} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Munizione </button>
@@ -339,6 +345,14 @@ export default function Bazaar() {
           showMessage={displayConfirmation}
           initialData={lockedItem || null}
           editMode={!!lockedItem}
+        />
+      )}
+
+      {showArmaturaOverlay && (
+        <AddArmaturaOverlay
+          onClose={() => {
+            setShowArmaturaOverlay(false);
+          }}
         />
       )}
 
