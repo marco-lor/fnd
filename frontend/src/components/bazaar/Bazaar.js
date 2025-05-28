@@ -67,12 +67,12 @@ function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked }) {
 }
 
 
-export default function Bazaar() {
-  const [items, setItems] = useState([]);
+export default function Bazaar() {  const [items, setItems] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSlot, setSelectedSlot] = useState(['All']);
   const [selectedHands, setSelectedHands] = useState(['All']);
   const [selectedTipo, setSelectedTipo] = useState(['All']);
+  const [selectedItemType, setSelectedItemType] = useState(['All']);
   const [hoveredItem, setHoveredItem] = useState(null);
   const [lockedItem, setLockedItem] = useState(null);
   const [showOverlay, setShowOverlay] = useState(false);
@@ -123,10 +123,10 @@ export default function Bazaar() {
     }
   }, [items, lockedItem?.id, hoveredItem]);
 
-
   const slots = ['All', ...Array.from(new Set(items.map(item => item.General?.Slot).filter(Boolean)))];
   const hands = ['All', ...Array.from(new Set(items.map(item => item.Specific?.Hands).filter(h => h != null))).sort((a, b) => a - b).map(String)];
   const tipos = ['All', ...Array.from(new Set(items.map(item => item.Specific?.Tipo).filter(Boolean)))];
+  const itemTypes = ['All', ...Array.from(new Set(items.map(item => item.item_type).filter(Boolean)))];
 
   const handleSearchChange = (event) => {
     setSearchTerm(event.target.value);
@@ -145,10 +145,10 @@ export default function Bazaar() {
       }
     }
   };
-
   const handleToggleSlot = (slot) => toggleFilter(selectedSlot, setSelectedSlot, slot);
   const handleToggleHands = (hand) => toggleFilter(selectedHands, setSelectedHands, hand);
   const handleToggleTipo = (tipo) => toggleFilter(selectedTipo, setSelectedTipo, tipo);
+  const handleToggleItemType = (itemType) => toggleFilter(selectedItemType, setSelectedItemType, itemType);
 
   const handleHoverItem = (item) => {
     if (!lockedItem) {
@@ -165,7 +165,6 @@ export default function Bazaar() {
            setHoveredItem(null);
        }
    };
-
   const filteredItems = items.filter((item) => {
     const matchesSearch = searchTerm.trim() === '' ||
       (item.General?.Nome && item.General.Nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -174,8 +173,9 @@ export default function Bazaar() {
     const matchesSlot = selectedSlot.includes('All') || selectedSlot.includes(item.General?.Slot);
     const matchesHands = selectedHands.includes('All') || selectedHands.includes(String(item.Specific?.Hands));
     const matchesTipo = selectedTipo.includes('All') || selectedTipo.includes(item.Specific?.Tipo);
+    const matchesItemType = selectedItemType.includes('All') || selectedItemType.includes(item.item_type);
 
-    return matchesSearch && matchesSlot && matchesHands && matchesTipo;
+    return matchesSearch && matchesSlot && matchesHands && matchesTipo && matchesItemType;
   });
 
   const displayConfirmation = (message, type = "success") => {
@@ -214,8 +214,21 @@ export default function Bazaar() {
       <div className="relative z-10 grid grid-cols-[10%_60%_30%] flex-grow items-start">
 
         {/* Filters Panel (Column 1) */}
-        {/* Width is controlled by grid-cols definition */}
-        <div className="sticky top-0 p-4 overflow-y-auto h-screen">
+        {/* Width is controlled by grid-cols definition */}        <div className="sticky top-0 p-4 overflow-y-auto h-screen">
+          <div className="mb-6">
+            <p className="text-white font-bold mb-2">Item Type:</p>
+            <div className="flex flex-wrap gap-2">
+              {itemTypes.map((itemType) => (
+                <button
+                  key={`itemType-${itemType}`}
+                  onClick={() => handleToggleItemType(itemType)}
+                   className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${selectedItemType.includes(itemType) ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600 hover:text-white'}`}
+                >
+                  {itemType || 'N/A'}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="mb-6">
             <p className="text-white font-bold mb-2">Slot:</p>
             <div className="flex flex-wrap gap-2">
