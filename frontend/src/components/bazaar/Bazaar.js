@@ -271,11 +271,9 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
               ))}
             </div>
           </div>
-        </div>
-
-        {/* Items List Panel (Column 2) */}
+        </div>        {/* Items List Panel (Column 2) */}
         {/* Width (700px) is controlled by grid-cols. Removed flex-grow, mr-*, and transition classes for width. */}
-        <div className="p-6 overflow-y-auto h-screen">
+        <div className="p-6 overflow-y-auto h-screen scrollbar-hidden">
           {isAdmin && (
             <div className="mb-4">
               <div className="flex flex-wrap gap-2">
