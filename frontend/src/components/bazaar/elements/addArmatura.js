@@ -339,17 +339,31 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
             }
         }));
     };    const handleSaveArmatura = async () => {
-        if (!armaturaFormData.General?.Nome?.trim()) {
-            if (showMessage) showMessage("Il nome dell'armatura è obbligatorio.", "warning");
+        setIsLoading(true);
+        const armaturaName = armaturaFormData.General?.Nome ? armaturaFormData.General.Nome.trim() : "";
+        if (!armaturaName) {
+            if (showMessage) showMessage("Il nome dell'armatura è obbligatorio.", "error");
+            setIsLoading(false);
             return;
         }
 
-        setIsLoading(true);
-        
-        // Define docId early to use in image handling
-        const docId = editMode ? initialData.id : `${user.uid}_${Date.now()}`;
+        const docId = editMode && initialData?.id ? initialData.id : armaturaName.replace(/\s+/g, "_");
+        if (!docId) {
+            if (showMessage) showMessage("Errore: Impossibile determinare l'ID del documento.", "error");
+            setIsLoading(false);
+            return;
+        }
+        const armaturaDocRef = doc(db, "items", docId);
         
         try {
+            if (!editMode) {
+                const existingDocSnap = await getDoc(armaturaDocRef);
+                if (existingDocSnap.exists()) {
+                    if (showMessage) showMessage(`Un'armatura con nome "${armaturaName}" (ID: ${docId}) esiste già.`, "error");
+                    setIsLoading(false);
+                    return;
+                }
+            }
             let finalArmaturaData = JSON.parse(JSON.stringify(armaturaFormData));
 
             // Handle image upload
@@ -454,20 +468,17 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
             // Clean up temporary/old schema fields from root
             ['tempSpellData', 'showSpellOverlay', 'Nome', 'Slot', 'Effetto', 'requisiti', 'prezzo', 'image_url', 'Hands', 'Tipo', 'ridCostoTecSingola', 'ridCostoSpellSingola', 'spells'].forEach(key => delete finalArmaturaData[key]);
             if (finalArmaturaData.Parametri && !finalArmaturaData.Parametri.Base) { // Ensure root Parametri is not the one from old schema
-                 delete finalArmaturaData.Parametri;
-            }            // Set item type to "armatura"
+                 delete finalArmaturaData.Parametri;            }            // Set item type to "armatura"
             finalArmaturaData.item_type = "armatura";
-
-            const armaturaDocRef = doc(db, editMode ? "bazaar_items" : "items", docId);
 
             if (editMode) {
                 console.log("Updating document:", docId, finalArmaturaData);
                 await updateDoc(armaturaDocRef, finalArmaturaData);
-                if (showMessage) showMessage("Armatura aggiornata con successo!", "success");
+                if (showMessage) showMessage(`Armatura "${armaturaName}" aggiornata!`, "success");
             } else {
                 console.log("Creating new document:", docId, finalArmaturaData);
                 await setDoc(armaturaDocRef, finalArmaturaData);
-                if (showMessage) showMessage("Armatura creata con successo!", "success");
+                if (showMessage) showMessage(`Armatura "${armaturaName}" creata!`, "success");
             }
 
             onClose(true);
@@ -478,6 +489,90 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const renderSpecificFields = () => {
+        if (isSchemaLoading) return null;
+        if (!schema?.Specific || Object.keys(schema.Specific).length === 0) return null;
+
+        const specificFields = Object.keys(schema.Specific);
+        
+        return (
+            <div className="mb-6">
+                <h3 className="text-white text-lg font-medium mb-4 border-b border-gray-600 pb-2">Campi Specifici</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {specificFields.map((fieldKey) => {
+                        const schemaValue = schema.Specific[fieldKey];
+                        const currentValue = armaturaFormData.Specific?.[fieldKey];
+                        
+                        // Handle array fields (select options)
+                        if (Array.isArray(schemaValue)) {
+                            let displayValue;
+                            if (fieldKey === 'Hands') {
+                                displayValue = currentValue !== undefined ? String(currentValue) : (schemaValue[0] !== undefined ? String(schemaValue[0]) : '');
+                            } else {
+                                displayValue = currentValue || (schemaValue[0] || '');
+                            }
+                            
+                            return (
+                                <div key={fieldKey}>
+                                    <label className="block text-white mb-1 capitalize">{fieldKey}</label>
+                                    <select
+                                        value={displayValue}
+                                        onChange={(e) => {
+                                            const value = fieldKey === 'Hands' ? e.target.value : e.target.value;
+                                            handleNestedChange(`Specific.${fieldKey}`, value);
+                                        }}
+                                        className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                    >
+                                        {schemaValue.map(option => (
+                                            <option key={option} value={String(option)}>{option}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            );
+                        }
+                        
+                        // Handle string/text fields
+                        if (typeof schemaValue === 'string') {
+                            return (
+                                <div key={fieldKey}>
+                                    <label className="block text-white mb-1 capitalize">{fieldKey}</label>
+                                    <input
+                                        type="text"
+                                        value={currentValue || ''}
+                                        onChange={(e) => handleNestedChange(`Specific.${fieldKey}`, e.target.value)}
+                                        className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                        placeholder={`Inserisci ${fieldKey.toLowerCase()}`}
+                                    />
+                                </div>
+                            );
+                        }
+                        
+                        // Handle number fields
+                        if (typeof schemaValue === 'number') {
+                            return (
+                                <div key={fieldKey}>
+                                    <label className="block text-white mb-1 capitalize">{fieldKey}</label>
+                                    <input
+                                        type="number"
+                                        value={currentValue !== undefined ? currentValue : schemaValue}
+                                        onChange={(e) => {
+                                            const value = e.target.value === '' ? '' : Number(e.target.value);
+                                            handleNestedChange(`Specific.${fieldKey}`, value);
+                                        }}
+                                        className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                        placeholder={`Inserisci ${fieldKey.toLowerCase()}`}
+                                    />
+                                </div>
+                            );
+                        }
+                        
+                        return null;
+                    })}
+                </div>
+            </div>
+        );
     };
 
     const renderBasicFields = () => {
@@ -527,46 +622,7 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                                 className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                                 placeholder="Es: Forza 15"
                             />
-                        </div>
-                    </div>
-
-                    {schema.Specific && Object.keys(schema.Specific).length > 0 && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="md:col-span-1">
-                                {schema.Specific.Tipo !== undefined && Array.isArray(schema.Specific.Tipo) && (
-                                    <>
-                                        <label className="block text-white mb-1">Tipo</label>
-                                        <select
-                                            value={armaturaFormData.Specific?.Tipo || (schema.Specific.Tipo[0] || '')}
-                                            onChange={(e) => handleNestedChange('Specific.Tipo', e.target.value)}
-                                            className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                                        >
-                                            {schema.Specific.Tipo.map(option => (
-                                                <option key={option} value={option}>{option}</option>
-                                            ))}
-                                        </select>
-                                    </>
-                                )}
-                            </div>
-
-                            <div className="md:col-span-1">
-                                {schema.Specific.Hands !== undefined && Array.isArray(schema.Specific.Hands) && (
-                                    <>
-                                        <label className="block text-white mb-1">Hands</label>
-                                        <select
-                                            value={armaturaFormData.Specific?.Hands !== undefined ? String(armaturaFormData.Specific.Hands) : (schema.Specific.Hands[0] !== undefined ? String(schema.Specific.Hands[0]) : '')}
-                                            onChange={(e) => handleNestedChange('Specific.Hands', e.target.value)}
-                                            className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                                        >
-                                            {schema.Specific.Hands.map(option => (
-                                                <option key={option} value={String(option)}>{option}</option>
-                                            ))}
-                                        </select>
-                                    </>
-                                )}
-                            </div>
-                        </div>
-                    )}
+                        </div>                    </div>
 
                     <div className="mb-4">
                         <label className="block text-white mb-1">Effetto</label>
@@ -629,12 +685,10 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
         if (!schema || !schema.Parametri || !schema.Parametri.Base || !schema.Parametri.Combattimento || !schema.Parametri.Special) {
             console.warn("Parametri structure missing or incomplete in schema:", schema?.Parametri);
             return <div className="text-orange-400 p-4 text-center">Struttura parametri nello schema incompleta.</div>;
-        }
-
-        const levels = ["1", "4", "7", "10"];
-        const specialFields = Object.keys(schema.Parametri.Special || {});
-        const baseParamFields = Object.keys(schema.Parametri.Base || {});
-        const combatParamFields = Object.keys(schema.Parametri.Combattimento || {});
+        }        const levels = ["1", "4", "7", "10"];
+        const specialFields = Object.keys(schema.Parametri.Special || {}).sort();
+        const baseParamFields = Object.keys(schema.Parametri.Base || {}).sort();
+        const combatParamFields = Object.keys(schema.Parametri.Combattimento || {}).sort();
 
         const renderTable = (title, fields, paramCategory) => {
             const schemaCategory = schema.Parametri?.[paramCategory];
@@ -853,6 +907,7 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                 ) : (
                     <form onSubmit={(e) => e.preventDefault()} onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}>
                         {renderBasicFields()}
+                        {renderSpecificFields()}
                         {renderTablesSection()}
                         {renderReductionsAndSpells()}
                     </form>

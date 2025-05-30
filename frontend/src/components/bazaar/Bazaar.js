@@ -79,66 +79,31 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   const [showArmaturaOverlay, setShowArmaturaOverlay] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [confirmationMessage, setConfirmationMessage] = useState("");
-
   const { user, userData } = useAuth();
   useEffect(() => {
-    const fetchedItems = [];
-    let pendingSnapshots = 2; // We'll listen to 2 collections
-
-    const updateItems = () => {
-      setItems([...fetchedItems]);
-      // console.log("Bazaar: Items fetched/updated from Firestore", fetchedItems.length);
-    };
-
-    // Listen to items collection (weapons)
+    // Listen to items collection (all items)
     const itemsRef = collection(db, "items");
     const unsubscribeItems = onSnapshot(
       itemsRef,
       (snapshot) => {
-        // Clear previous items from this collection
-        const currentItemsFromOtherCollections = fetchedItems.filter(item => !item._fromItemsCollection);
-        fetchedItems.length = 0;
-        fetchedItems.push(...currentItemsFromOtherCollections);
-
+        const fetchedItems = [];
         snapshot.forEach((doc) => {
            const data = doc.data();
-           if (data.item_type === 'weapon' && data.General && data.Specific && data.Parametri) {
-              fetchedItems.push({ id: doc.id, ...data, _fromItemsCollection: true });
+           // Include all items that have the required structure and item_type, excluding schema documents
+           if (data.item_type && data.General && data.Specific && data.Parametri && !doc.id.startsWith('schema_')) {
+              fetchedItems.push({ id: doc.id, ...data });
            }
         });
-        updateItems();
+        setItems(fetchedItems);
+        // console.log("Bazaar: Items fetched/updated from Firestore", fetchedItems.length);
       },
       (error) => {
         console.error("Error listening to items collection:", error);
       }
     );
 
-    // Listen to bazaar_items collection (armor and other items)
-    const bazaarItemsRef = collection(db, "bazaar_items");
-    const unsubscribeBazaarItems = onSnapshot(
-      bazaarItemsRef,
-      (snapshot) => {
-        // Clear previous items from this collection
-        const currentItemsFromOtherCollections = fetchedItems.filter(item => item._fromItemsCollection);
-        fetchedItems.length = 0;
-        fetchedItems.push(...currentItemsFromOtherCollections);
-
-        snapshot.forEach((doc) => {
-           const data = doc.data();
-           if (data.item_type && data.General && data.Specific && data.Parametri && !doc.id.startsWith('schema_')) {
-              fetchedItems.push({ id: doc.id, ...data, _fromBazaarCollection: true });
-           }
-        });
-        updateItems();
-      },
-      (error) => {
-        console.error("Error listening to bazaar_items collection:", error);
-      }
-    );
-
     return () => {
       unsubscribeItems();
-      unsubscribeBazaarItems();
     };
   }, []);
 
@@ -200,8 +165,7 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
            setLockedItem(itemToToggle);
            setHoveredItem(null);
        }
-   };
-  const filteredItems = items.filter((item) => {
+   };  const filteredItems = items.filter((item) => {
     const matchesSearch = searchTerm.trim() === '' ||
       (item.General?.Nome && item.General.Nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (item.Specific?.Tipo && item.Specific.Tipo.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -212,6 +176,10 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
     const matchesItemType = selectedItemType.includes('All') || selectedItemType.includes(item.item_type);
 
     return matchesSearch && matchesSlot && matchesHands && matchesTipo && matchesItemType;
+  }).sort((a, b) => {
+    const nameA = (a.General?.Nome || 'Oggetto Sconosciuto').toLowerCase();
+    const nameB = (b.General?.Nome || 'Oggetto Sconosciuto').toLowerCase();
+    return nameA.localeCompare(nameB);
   });
 
   const displayConfirmation = (message, type = "success") => {
