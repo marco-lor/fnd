@@ -7,11 +7,11 @@ import { db, storage } from '../../firebaseConfig';
 import { computeValue } from '../../common/computeFormula';
 import { AuthContext } from '../../../AuthContext';
 import { AddWeaponOverlay } from './addWeapon';
+import { AddArmaturaOverlay } from './addArmatura';
 import { FaTrash, FaEdit } from 'react-icons/fa';
 
 export default function ComparisonPanel({ item, showMessage }) {
   const { user } = useContext(AuthContext);
-
   /* ----------------------------------------------------------------------- */
   /*  Local state                                                            */
   /* ----------------------------------------------------------------------- */
@@ -20,6 +20,8 @@ export default function ComparisonPanel({ item, showMessage }) {
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [showEditOverlay, setShowEditOverlay] = useState(false);
   const [imageError, setImageError]  = useState(false);
+  const [schema, setSchema] = useState(null);
+  const [isSchemaLoading, setIsSchemaLoading] = useState(false);
 
   /* ----------------------------------------------------------------------- */
   /*  Fetch user & params                                                    */
@@ -58,10 +60,39 @@ export default function ComparisonPanel({ item, showMessage }) {
       } catch (e) {
         console.error('Error fetching user parameters', e);
       }
-    })();
-
-    return () => unsubscribeUser();
+    })();    return () => unsubscribeUser();
   }, [user]);
+
+  /* ----------------------------------------------------------------------- */
+  /*  Fetch schema based on item type                                        */
+  /* ----------------------------------------------------------------------- */
+  useEffect(() => {
+    const fetchSchema = async () => {
+      if (!item?.item_type) {
+        setSchema(null);
+        return;
+      }
+
+      setIsSchemaLoading(true);
+      try {
+        const schemaDocRef = doc(db, "utils", `schema_${item.item_type}`);
+        const docSnap = await getDoc(schemaDocRef);
+        if (docSnap.exists()) {
+          setSchema(docSnap.data());
+        } else {
+          console.warn(`Schema for item type "${item.item_type}" not found.`);
+          setSchema(null);
+        }
+      } catch (error) {
+        console.error(`Error fetching schema for item type "${item.item_type}":`, error);
+        setSchema(null);
+      } finally {
+        setIsSchemaLoading(false);
+      }
+    };
+
+    fetchSchema();
+  }, [item?.item_type]);
 
   /* ----------------------------------------------------------------------- */
   /*  Helpers & derived data                                                 */
@@ -117,16 +148,14 @@ export default function ComparisonPanel({ item, showMessage }) {
     !!data && ['1', '4', '7', '10'].some(
       (col) => data[col] != null && String(data[col]).trim() !== ''
     );
+  // Generate special group dynamically from actual specialParams keys
+  const specialGroup = Object.keys(specialParams).map(key => ({
+    key,
+    label: key === 'ridCostoSpell' ? 'Rid. Costo Spell' : 
+           key === 'ridCostoTec' ? 'Rid. Costo Tec' : 
+           key // Use the key as label for other fields
+  }));
 
-  const specialGroup = [
-    { key: 'Danno', label: 'Danno' },
-    { key: 'Bonus Danno', label: 'Bonus Danno' },
-    { key: 'Danno Critico', label: 'Danno Critico' },
-    { key: 'Bonus Danno Critico', label: 'Bonus Danno Critico' },
-    { key: 'Penetrazione', label: 'Penetrazione' },
-    { key: 'ridCostoSpell', label: 'Rid. Costo Spell' },
-    { key: 'ridCostoTec', label: 'Rid. Costo Tec' },
-  ];
   const baseGroup = [
     { key: 'Forza', label: 'Forza' },
     { key: 'Destrezza', label: 'Destrezza' },
@@ -144,10 +173,49 @@ export default function ComparisonPanel({ item, showMessage }) {
     { key: 'Critico', label: 'Critico' },
     { key: 'RiduzioneDanni', label: 'Riduz. Danni' },
   ];
-
   const filteredSpecialGroup  = specialGroup.filter((f) => shouldShowRow(specialParams[f.key]));
   const filteredBaseGroup     = baseGroup.filter((f) => shouldShowRow(baseParams[f.key]));
   const filteredCombatGroup   = combatGroup.filter((f) => shouldShowRow(combatParams[f.key]));
+
+  /* ----------------------------------------------------------------------- */
+  /*  Dynamic field rendering for Specific section                          */
+  /* ----------------------------------------------------------------------- */
+  const renderSpecificFields = () => {
+    if (isSchemaLoading) {
+      return (
+        <p className="text-sm text-gray-400">Caricamento campi specifici...</p>
+      );
+    }
+
+    if (!schema?.Specific) {
+      // Fallback to hardcoded fields if no schema
+      return (
+        <>
+          <p>
+            <span className="font-semibold text-gray-100">Tipo:</span>{' '}
+            {specific.Tipo || '-'}
+          </p>
+          <p>
+            <span className="font-semibold text-gray-100">Hands:</span>{' '}
+            {specific.Hands != null ? specific.Hands : '-'}
+          </p>
+        </>
+      );
+    }
+
+    // Render fields dynamically based on schema
+    return Object.keys(schema.Specific).map((fieldKey) => {
+      const fieldValue = specific[fieldKey];
+      const displayValue = fieldValue != null ? fieldValue : '-';
+      
+      return (
+        <p key={fieldKey}>
+          <span className="font-semibold text-gray-100">{fieldKey}:</span>{' '}
+          {displayValue}
+        </p>
+      );
+    });
+  };
 
   /* ----------------------------------------------------------------------- */
   /*  Delete & edit handlers                                                 */
@@ -304,18 +372,12 @@ export default function ComparisonPanel({ item, showMessage }) {
         {/*  CONTENT AREA                                                     */}
         {/* ----------------------------------------------------------------- */}
         <div className="relative z-20 p-4 pt-2 flex-grow overflow-y-auto">
-          <h2 className="text-xl font-bold text-white mb-3">{itemName}</h2>
-
-          {/* BASIC INFO ----------------------------------------------------- */}
+          <h2 className="text-xl font-bold text-white mb-3">{itemName}</h2>          {/* BASIC INFO ----------------------------------------------------- */}
           <div className="mb-4 space-y-1 text-sm text-gray-300">
-            <p>
-              <span className="font-semibold text-gray-100">Tipo:</span>{' '}
-              {specific.Tipo || '-'}
-            </p>
-            <p>
-              <span className="font-semibold text-gray-100">Hands:</span>{' '}
-              {specific.Hands != null ? specific.Hands : '-'}
-            </p>
+            {/* Dynamic Specific fields */}
+            {renderSpecificFields()}
+            
+            {/* General fields (consistent across item types) */}
             <p>
               <span className="font-semibold text-gray-100">Slot:</span>{' '}
               {general.Slot || '-'}
@@ -472,16 +534,25 @@ export default function ComparisonPanel({ item, showMessage }) {
             </div>
           )}
         </div>
-      </div>
-
-      {/* EDIT OVERLAY ------------------------------------------------------- */}
+      </div>      {/* EDIT OVERLAY ------------------------------------------------------- */}
       {showEditOverlay && (
-        <AddWeaponOverlay
-          onClose={handleCloseEditOverlay}
-          showMessage={showMessage || console.log}
-          initialData={item}
-          editMode={true}
-        />
+        <>
+          {item?.item_type === 'armatura' ? (
+            <AddArmaturaOverlay
+              onClose={handleCloseEditOverlay}
+              showMessage={showMessage || console.log}
+              initialData={item}
+              editMode={true}
+            />
+          ) : (
+            <AddWeaponOverlay
+              onClose={handleCloseEditOverlay}
+              showMessage={showMessage || console.log}
+              initialData={item}
+              editMode={true}
+            />
+          )}
+        </>
       )}
     </>
   );

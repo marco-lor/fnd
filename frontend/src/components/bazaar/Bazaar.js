@@ -67,33 +67,31 @@ function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked }) {
 }
 
 
-export default function Bazaar() {
-  const [items, setItems] = useState([]);
+export default function Bazaar() {  const [items, setItems] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSlot, setSelectedSlot] = useState(['All']);
   const [selectedHands, setSelectedHands] = useState(['All']);
   const [selectedTipo, setSelectedTipo] = useState(['All']);
+  const [selectedItemType, setSelectedItemType] = useState(['All']);
   const [hoveredItem, setHoveredItem] = useState(null);
   const [lockedItem, setLockedItem] = useState(null);
   const [showOverlay, setShowOverlay] = useState(false);
   const [showArmaturaOverlay, setShowArmaturaOverlay] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [confirmationMessage, setConfirmationMessage] = useState("");
-
   const { user, userData } = useAuth();
-
   useEffect(() => {
+    // Listen to items collection (all items)
     const itemsRef = collection(db, "items");
-    const unsubscribe = onSnapshot(
+    const unsubscribeItems = onSnapshot(
       itemsRef,
       (snapshot) => {
         const fetchedItems = [];
         snapshot.forEach((doc) => {
            const data = doc.data();
-           if (data.item_type === 'weapon' && data.General && data.Specific && data.Parametri) {
+           // Include all items that have the required structure and item_type, excluding schema documents
+           if (data.item_type && data.General && data.Specific && data.Parametri && !doc.id.startsWith('schema_')) {
               fetchedItems.push({ id: doc.id, ...data });
-           } else if (data.item_type !== 'weapon' && !doc.id.startsWith('schema_')) {
-               // console.log(`Item ${doc.id} skipped (not a weapon or invalid structure).`);
            }
         });
         setItems(fetchedItems);
@@ -103,7 +101,10 @@ export default function Bazaar() {
         console.error("Error listening to items collection:", error);
       }
     );
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribeItems();
+    };
   }, []);
 
   useEffect(() => {
@@ -123,10 +124,10 @@ export default function Bazaar() {
     }
   }, [items, lockedItem?.id, hoveredItem]);
 
-
   const slots = ['All', ...Array.from(new Set(items.map(item => item.General?.Slot).filter(Boolean)))];
   const hands = ['All', ...Array.from(new Set(items.map(item => item.Specific?.Hands).filter(h => h != null))).sort((a, b) => a - b).map(String)];
   const tipos = ['All', ...Array.from(new Set(items.map(item => item.Specific?.Tipo).filter(Boolean)))];
+  const itemTypes = ['All', ...Array.from(new Set(items.map(item => item.item_type).filter(Boolean)))];
 
   const handleSearchChange = (event) => {
     setSearchTerm(event.target.value);
@@ -145,10 +146,10 @@ export default function Bazaar() {
       }
     }
   };
-
   const handleToggleSlot = (slot) => toggleFilter(selectedSlot, setSelectedSlot, slot);
   const handleToggleHands = (hand) => toggleFilter(selectedHands, setSelectedHands, hand);
   const handleToggleTipo = (tipo) => toggleFilter(selectedTipo, setSelectedTipo, tipo);
+  const handleToggleItemType = (itemType) => toggleFilter(selectedItemType, setSelectedItemType, itemType);
 
   const handleHoverItem = (item) => {
     if (!lockedItem) {
@@ -164,9 +165,7 @@ export default function Bazaar() {
            setLockedItem(itemToToggle);
            setHoveredItem(null);
        }
-   };
-
-  const filteredItems = items.filter((item) => {
+   };  const filteredItems = items.filter((item) => {
     const matchesSearch = searchTerm.trim() === '' ||
       (item.General?.Nome && item.General.Nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (item.Specific?.Tipo && item.Specific.Tipo.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -174,8 +173,13 @@ export default function Bazaar() {
     const matchesSlot = selectedSlot.includes('All') || selectedSlot.includes(item.General?.Slot);
     const matchesHands = selectedHands.includes('All') || selectedHands.includes(String(item.Specific?.Hands));
     const matchesTipo = selectedTipo.includes('All') || selectedTipo.includes(item.Specific?.Tipo);
+    const matchesItemType = selectedItemType.includes('All') || selectedItemType.includes(item.item_type);
 
-    return matchesSearch && matchesSlot && matchesHands && matchesTipo;
+    return matchesSearch && matchesSlot && matchesHands && matchesTipo && matchesItemType;
+  }).sort((a, b) => {
+    const nameA = (a.General?.Nome || 'Oggetto Sconosciuto').toLowerCase();
+    const nameB = (b.General?.Nome || 'Oggetto Sconosciuto').toLowerCase();
+    return nameA.localeCompare(nameB);
   });
 
   const displayConfirmation = (message, type = "success") => {
@@ -193,7 +197,6 @@ export default function Bazaar() {
   const handleAddWeaponClick = () => {
     setShowOverlay(true);
   };
-
   const handleAddArmaturaClick = () => {
     setShowArmaturaOverlay(true);
   };
@@ -214,8 +217,21 @@ export default function Bazaar() {
       <div className="relative z-10 grid grid-cols-[10%_60%_30%] flex-grow items-start">
 
         {/* Filters Panel (Column 1) */}
-        {/* Width is controlled by grid-cols definition */}
-        <div className="sticky top-0 p-4 overflow-y-auto h-screen">
+        {/* Width is controlled by grid-cols definition */}        <div className="sticky top-0 p-4 overflow-y-auto h-screen">
+          <div className="mb-6">
+            <p className="text-white font-bold mb-2">Item Type:</p>
+            <div className="flex flex-wrap gap-2">
+              {itemTypes.map((itemType) => (
+                <button
+                  key={`itemType-${itemType}`}
+                  onClick={() => handleToggleItemType(itemType)}
+                   className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${selectedItemType.includes(itemType) ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600 hover:text-white'}`}
+                >
+                  {itemType || 'N/A'}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="mb-6">
             <p className="text-white font-bold mb-2">Slot:</p>
             <div className="flex flex-wrap gap-2">
@@ -258,21 +274,23 @@ export default function Bazaar() {
               ))}
             </div>
           </div>
-        </div>
-
-        {/* Items List Panel (Column 2) */}
+        </div>        {/* Items List Panel (Column 2) */}
         {/* Width (700px) is controlled by grid-cols. Removed flex-grow, mr-*, and transition classes for width. */}
-        <div className="p-6 overflow-y-auto h-screen">
+        <div className="p-6 overflow-y-auto h-screen scrollbar-hidden">
           {isAdmin && (
             <div className="mb-4">
-              <div className="flex flex-wrap gap-2">
-                <button
+              <div className="flex flex-wrap gap-2">                <button
                   onClick={handleAddWeaponClick}
                   className="px-3 py-1.5 text-sm bg-green-700 text-white rounded hover:bg-green-600 transition-colors"
                 >
                   {lockedItem && lockedItem.item_type === "weapon" ? "Modifica Arma" : "+ Arma"}
                 </button>
-                <button onClick={handleAddArmaturaClick} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Armatura </button>
+                <button 
+                  onClick={handleAddArmaturaClick} 
+                  className="px-3 py-1.5 text-sm bg-blue-700 text-white rounded hover:bg-blue-600 transition-colors"
+                > 
+                  {lockedItem && lockedItem.item_type === "armatura" ? "Modifica Armatura" : "+ Armatura"}
+                </button>
                 <button onClick={() => displayConfirmation("Funzionalità Accessorio in arrivo!", "info")} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Accessorio </button>
                 <button onClick={() => displayConfirmation("Funzionalità Consumabile in arrivo!", "info")} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Consumabile </button>
                 <button onClick={() => displayConfirmation("Funzionalità Munizione in arrivo!", "info")} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Munizione </button>
@@ -346,13 +364,14 @@ export default function Bazaar() {
           initialData={lockedItem || null}
           editMode={!!lockedItem}
         />
-      )}
-
-      {showArmaturaOverlay && (
+      )}      {showArmaturaOverlay && (
         <AddArmaturaOverlay
-          onClose={() => {
+          onClose={(success) => {
             setShowArmaturaOverlay(false);
           }}
+          showMessage={displayConfirmation}
+          initialData={lockedItem && lockedItem.item_type === "armatura" ? lockedItem : null}
+          editMode={!!(lockedItem && lockedItem.item_type === "armatura")}
         />
       )}
 
