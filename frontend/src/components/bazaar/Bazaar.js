@@ -72,7 +72,8 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   const [selectedSlot, setSelectedSlot] = useState(['All']);
   const [selectedHands, setSelectedHands] = useState(['All']);
   const [selectedTipo, setSelectedTipo] = useState(['All']);
-  const [selectedItemType, setSelectedItemType] = useState(['All']);
+  const [selectedItemType, setSelectedItemType] = useState(['All']);  const [selectedCombatParams, setSelectedCombatParams] = useState(['All']);
+  const [selectedBaseParams, setSelectedBaseParams] = useState(['All']);
   const [hoveredItem, setHoveredItem] = useState(null);
   const [lockedItem, setLockedItem] = useState(null);
   const [showOverlay, setShowOverlay] = useState(false);
@@ -123,11 +124,40 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
       }
     }
   }, [items, lockedItem?.id, hoveredItem]);
-
   const slots = ['All', ...Array.from(new Set(items.map(item => item.General?.Slot).filter(Boolean)))];
   const hands = ['All', ...Array.from(new Set(items.map(item => item.Specific?.Hands).filter(h => h != null))).sort((a, b) => a - b).map(String)];
   const tipos = ['All', ...Array.from(new Set(items.map(item => item.Specific?.Tipo).filter(Boolean)))];
-  const itemTypes = ['All', ...Array.from(new Set(items.map(item => item.item_type).filter(Boolean)))];
+  const itemTypes = ['All', ...Array.from(new Set(items.map(item => item.item_type).filter(Boolean)))];  const combatParams = ['All', ...Array.from(new Set(items.flatMap(item => 
+    item.Parametri?.Combattimento ? Object.keys(item.Parametri.Combattimento) : []
+  )))];
+  
+  const baseParams = ['All', ...Array.from(new Set(items.flatMap(item => 
+    item.Parametri?.Base ? Object.keys(item.Parametri.Base) : []
+  )))];
+    // Debug logging for combat params (remove after testing)
+  useEffect(() => {
+    if (selectedCombatParams.length > 0 && !selectedCombatParams.includes('All')) {
+      console.log('Selected combat params:', selectedCombatParams);
+      console.log('Available combat params:', combatParams);
+      
+      // Show sample item structure
+      const sampleItem = items.find(item => item.Parametri?.Combattimento);
+      if (sampleItem) {
+        console.log('Sample item combat params:', sampleItem.Parametri.Combattimento);
+      }
+    }
+    
+    if (selectedBaseParams.length > 0 && !selectedBaseParams.includes('All')) {
+      console.log('Selected base params:', selectedBaseParams);
+      console.log('Available base params:', baseParams);
+      
+      // Show sample item structure
+      const sampleItem = items.find(item => item.Parametri?.Base);
+      if (sampleItem) {
+        console.log('Sample item base params:', sampleItem.Parametri.Base);
+      }
+    }
+  }, [selectedCombatParams, selectedBaseParams, combatParams, baseParams, items]);
 
   const handleSearchChange = (event) => {
     setSearchTerm(event.target.value);
@@ -149,7 +179,17 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   const handleToggleSlot = (slot) => toggleFilter(selectedSlot, setSelectedSlot, slot);
   const handleToggleHands = (hand) => toggleFilter(selectedHands, setSelectedHands, hand);
   const handleToggleTipo = (tipo) => toggleFilter(selectedTipo, setSelectedTipo, tipo);
-  const handleToggleItemType = (itemType) => toggleFilter(selectedItemType, setSelectedItemType, itemType);
+  const handleToggleItemType = (itemType) => toggleFilter(selectedItemType, setSelectedItemType, itemType);  const handleToggleCombatParam = (param) => {
+    console.log('Toggling combat param:', param);
+    console.log('Current selected:', selectedCombatParams);
+    toggleFilter(selectedCombatParams, setSelectedCombatParams, param);
+  };
+  
+  const handleToggleBaseParam = (param) => {
+    console.log('Toggling base param:', param);
+    console.log('Current selected:', selectedBaseParams);
+    toggleFilter(selectedBaseParams, setSelectedBaseParams, param);
+  };
 
   const handleHoverItem = (item) => {
     if (!lockedItem) {
@@ -165,7 +205,7 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
            setLockedItem(itemToToggle);
            setHoveredItem(null);
        }
-   };  const filteredItems = items.filter((item) => {
+   };   const filteredItems = items.filter((item) => {
     const matchesSearch = searchTerm.trim() === '' ||
       (item.General?.Nome && item.General.Nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (item.Specific?.Tipo && item.Specific.Tipo.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -173,10 +213,81 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
     const matchesSlot = selectedSlot.includes('All') || selectedSlot.includes(item.General?.Slot);
     const matchesHands = selectedHands.includes('All') || selectedHands.includes(String(item.Specific?.Hands));
     const matchesTipo = selectedTipo.includes('All') || selectedTipo.includes(item.Specific?.Tipo);
-    const matchesItemType = selectedItemType.includes('All') || selectedItemType.includes(item.item_type);
-
-    return matchesSearch && matchesSlot && matchesHands && matchesTipo && matchesItemType;
-  }).sort((a, b) => {
+    const matchesItemType = selectedItemType.includes('All') || selectedItemType.includes(item.item_type);    return matchesSearch && matchesSlot && matchesHands && matchesTipo && matchesItemType;  }).sort((a, b) => {
+    // Debug: Log when sorting is triggered
+    const shouldSortCombat = !selectedCombatParams.includes('All') && selectedCombatParams.length > 0;
+    const shouldSortBase = !selectedBaseParams.includes('All') && selectedBaseParams.length > 0;
+    const shouldSort = shouldSortCombat || shouldSortBase;
+    
+    if (shouldSort) {
+      console.log('Attempting to sort by params - Combat:', selectedCombatParams, 'Base:', selectedBaseParams);
+    }
+    
+    // If parameters are selected for sorting, sort by their contribution at level 1
+    if (shouldSort) {
+      let scoreA = 0;
+      let scoreB = 0;
+      
+      // Add combat parameter scores
+      if (shouldSortCombat) {
+        selectedCombatParams.forEach(param => {
+          let valueA = 0;
+          let valueB = 0;
+          
+          if (a.Parametri?.Combattimento?.[param]) {
+            const paramDataA = a.Parametri.Combattimento[param];
+            valueA = paramDataA?.['1'] || paramDataA?.[1] || 0;
+          }
+          
+          if (b.Parametri?.Combattimento?.[param]) {
+            const paramDataB = b.Parametri.Combattimento[param];
+            valueB = paramDataB?.['1'] || paramDataB?.[1] || 0;
+          }
+          
+          valueA = typeof valueA === 'number' ? valueA : (parseFloat(valueA) || 0);
+          valueB = typeof valueB === 'number' ? valueB : (parseFloat(valueB) || 0);
+          
+          scoreA += valueA;
+          scoreB += valueB;
+        });
+      }
+      
+      // Add base parameter scores
+      if (shouldSortBase) {
+        selectedBaseParams.forEach(param => {
+          let valueA = 0;
+          let valueB = 0;
+          
+          if (a.Parametri?.Base?.[param]) {
+            const paramDataA = a.Parametri.Base[param];
+            valueA = paramDataA?.['1'] || paramDataA?.[1] || 0;
+          }
+          
+          if (b.Parametri?.Base?.[param]) {
+            const paramDataB = b.Parametri.Base[param];
+            valueB = paramDataB?.['1'] || paramDataB?.[1] || 0;
+          }
+          
+          valueA = typeof valueA === 'number' ? valueA : (parseFloat(valueA) || 0);
+          valueB = typeof valueB === 'number' ? valueB : (parseFloat(valueB) || 0);
+          
+          scoreA += valueA;
+          scoreB += valueB;
+        });
+      }
+      
+      // Debug logging (remove after testing)
+      if (scoreA !== scoreB) {
+        console.log(`Sorting: ${a.General?.Nome || 'Unknown'} (${scoreA}) vs ${b.General?.Nome || 'Unknown'} (${scoreB})`);
+      }
+      
+      // Sort by highest score first (descending)
+      if (scoreB !== scoreA) {
+        return scoreB - scoreA;
+      }
+    }
+    
+    // Default sort by name if no combat params selected or scores are equal
     const nameA = (a.General?.Nome || 'Oggetto Sconosciuto').toLowerCase();
     const nameB = (b.General?.Nome || 'Oggetto Sconosciuto').toLowerCase();
     return nameA.localeCompare(nameB);
@@ -214,10 +325,26 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
 
       {/* Main content area using CSS Grid */}
       {/* Grid columns: Filters (dynamic), Item List (700px), Comparison Panel Area (450px) */}
-      <div className="relative z-10 grid grid-cols-[10%_60%_30%] flex-grow items-start">
-
-        {/* Filters Panel (Column 1) */}
+      <div className="relative z-10 grid grid-cols-[10%_60%_30%] flex-grow items-start">        {/* Filters Panel (Column 1) */}
         {/* Width is controlled by grid-cols definition */}        <div className="sticky top-0 p-4 overflow-y-auto h-screen">
+          {/* Reset Filters Button */}
+          <div className="mb-4">
+            <button
+              onClick={() => {
+                setSelectedSlot(['All']);
+                setSelectedHands(['All']);
+                setSelectedTipo(['All']);
+                setSelectedItemType(['All']);
+                setSelectedCombatParams(['All']);
+                setSelectedBaseParams(['All']);
+                setSearchTerm('');
+              }}
+              className="w-full px-2 py-1 text-xs bg-gray-600 hover:bg-gray-500 text-gray-300 hover:text-white rounded border border-gray-500 transition-colors"
+            >
+              Resetta Filtri
+            </button>
+          </div>
+
           <div className="mb-6">
             <p className="text-white font-bold mb-2">Item Type:</p>
             <div className="flex flex-wrap gap-2">
@@ -228,6 +355,43 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
                    className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${selectedItemType.includes(itemType) ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600 hover:text-white'}`}
                 >
                   {itemType || 'N/A'}
+                </button>
+              ))}
+            </div>
+          </div>          <div className="mb-6">
+            <p className="text-white font-bold mb-2">
+              Combat Params (Sort)
+              {!selectedCombatParams.includes('All') && selectedCombatParams.length > 0 && (
+                <span className="ml-2 text-orange-400 text-sm">● ACTIVE</span>
+              )}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {combatParams.map((param) => (
+                <button
+                  key={`combatParam-${param}`}
+                  onClick={() => handleToggleCombatParam(param)}
+                   className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${selectedCombatParams.includes(param) ? 'bg-orange-600 border-orange-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600 hover:text-white'}`}
+                >
+                  {param}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="mb-6">
+            <p className="text-white font-bold mb-2">
+              Base Params (Sort)
+              {!selectedBaseParams.includes('All') && selectedBaseParams.length > 0 && (
+                <span className="ml-2 text-green-400 text-sm">● ACTIVE</span>
+              )}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {baseParams.map((param) => (
+                <button
+                  key={`baseParam-${param}`}
+                  onClick={() => handleToggleBaseParam(param)}
+                   className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${selectedBaseParams.includes(param) ? 'bg-green-600 border-green-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600 hover:text-white'}`}
+                >
+                  {param}
                 </button>
               ))}
             </div>
@@ -274,7 +438,7 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
               ))}
             </div>
           </div>
-        </div>        {/* Items List Panel (Column 2) */}
+        </div>{/* Items List Panel (Column 2) */}
         {/* Width (700px) is controlled by grid-cols. Removed flex-grow, mr-*, and transition classes for width. */}
         <div className="p-6 overflow-y-auto h-screen scrollbar-hidden">
           {isAdmin && (
