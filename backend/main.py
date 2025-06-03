@@ -164,14 +164,38 @@ def everything_to_json():
 
 # The JSON that must be written **as the fields** of utils/schema_armatura
 SCHEMA_ARMATURA_DATA = {
+    "General": {
+        "Nome": "Nome Armatura",
+        "Slot": [
+            "Testa", 
+            "Corpo", 
+            "Cintura", 
+            "Fodero", 
+            "Stivali", 
+            "Accessorio", 
+            "Consumabile", 
+            "Consumabile Grande", 
+            "-"
+        ],
+        "Effetto": "Descrizione dell'effetto.",
+        "requisiti": "",
+        "ridCostoTecSingola": {"nomeTecnica": 0},
+        "ridCostoSpellSingola": {"nome_spell": 0},
+        "spells": {},
+        "prezzo": 0,
+        "image_url": ""
+    },
+    "Specific": {
+        "slotCintura": 0
+    },
     "Parametri": {
         "Base": {
-            "Fortuna":        {"1": 0, "4": 0, "7": 0, "10": 0},
-            "Intelligenza":   {"1": 0, "4": 0, "7": 0, "10": 0},
-            "Saggezza":       {"1": 0, "4": 0, "7": 0, "10": 0},
-            "Forza":          {"1": 0, "4": 0, "7": 0, "10": 0},
-            "Destrezza":      {"1": 0, "4": 0, "7": 0, "10": 0},
-            "Costituzione":   {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Fortuna":       {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Intelligenza":  {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Saggezza":      {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Forza":         {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Destrezza":     {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Costituzione":  {"1": 0, "4": 0, "7": 0, "10": 0}
         },
         "Combattimento": {
             "Disciplina":     {"1": 0, "4": 0, "7": 0, "10": 0},
@@ -180,41 +204,81 @@ SCHEMA_ARMATURA_DATA = {
             "Difesa":         {"1": 0, "4": 0, "7": 0, "10": 0},
             "Salute":         {"1": 0, "4": 0, "7": 0, "10": 0},
             "Mira":           {"1": 0, "4": 0, "7": 0, "10": 0},
-            "Attacco":        {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Attacco":        {"1": 0, "4": 0, "7": 0, "10": 0}
         },
         "Special": {
-            "ridCostoTec":                      {"1": 0, "4": 0, "7": 0, "10": 0},
-            "Bonus Danno":                      {"1": 0, "4": 0, "7": 0, "10": 0},
-            "Penetrazione":                     {"1": 0, "4": 0, "7": 0, "10": 0},
-            "ridCostoSpell":                    {"1": 0, "4": 0, "7": 0, "10": 0},
-            "Danno Critico":                    {"1": "1d6", "4": "1d6", "7": "1d6", "10": "1d6"},
-            "Danno":                            {"1": "1d4", "4": "1d4", "7": "1d4", "10": "1d4"},
-            "Bonus Danno Critico":              {"1": 0, "4": 0, "7": 0, "10": 0},
-            "Mira 1H":                          {"1": 0, "4": 0, "7": 0, "10": 0},
-            "Mira 2H":                          {"1": 0, "4": 0, "7": 0, "10": 0},
-            "Riduzione Dado Effetto Critico":   {"1": 0, "4": 0, "7": 0, "10": 0},
-        },
-    },
+            "ridCostoTec":                   {"1": 0, "4": 0, "7": 0, "10": 0},
+            "ridCostoSpell":                 {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Bonus Danno":                   {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Bonus Danno Critico":           {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Penetrazione":                  {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Mira 1H":                       {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Mira 2H":                       {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Mira Ranged":                   {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Riduzione Dado Effetto Critico": {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Danno":                         {"1": "", "4": "", "7": "", "10": ""},
+            "Danno Critico":                 {"1": "", "4": "", "7": "", "10": ""}
+        }
+    }
+}
+
+SCHEMA_ACCESSORIO_DATA = {
     "General": {
+        "Nome": "Nome Armatura",
+        "Slot": [
+            "Testa", 
+            "Corpo", 
+            "Cintura", 
+            "Fodero", 
+            "Stivali", 
+            "Accessorio", 
+            "Consumabile", 
+            "Consumabile Grande", 
+            "-"
+        ],
         "Effetto": "Descrizione dell'effetto.",
         "requisiti": "",
-        "Slot": [
-            "Mano Principale", "Mano Secondaria", "Testa", "Corpo",
-            "Cintura", "Fodero", "Stivali", "Accessorio",
-            "Consumabile", "Consumabile Grande", "-"
-        ],
+        "ridCostoTecSingola": {"nomeTecnica": 0},
+        "ridCostoSpellSingola": {"nome_spell": 0},
+        "spells": {},
         "prezzo": 0,
-        "Nome": "Nome Arma",
-        "image_url": "",
-        "spells": "",
-        "ridCostoSpellSingola": 0,
-        "ridCostoTecSingola": 0,
+        "image_url": ""
     },
     "Specific": {
-        "Hands": [1, 2, "-"],
-        "Tipo": ["Mischia", "Distanza", "-"],
-        "slotCintura": 0,
+        "slotCintura": 0
     },
+    "Parametri": {
+        "Base": {
+            "Fortuna":       {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Intelligenza":  {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Saggezza":      {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Forza":         {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Destrezza":     {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Costituzione":  {"1": 0, "4": 0, "7": 0, "10": 0}
+        },
+        "Combattimento": {
+            "Disciplina":     {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Critico":        {"1": 0, "4": 0, "7": 0, "10": 0},
+            "RiduzioneDanni": {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Difesa":         {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Salute":         {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Mira":           {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Attacco":        {"1": 0, "4": 0, "7": 0, "10": 0}
+        },
+        "Special": {
+            "ridCostoTec":                   {"1": 0, "4": 0, "7": 0, "10": 0},
+            "ridCostoSpell":                 {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Bonus Danno":                   {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Bonus Danno Critico":           {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Penetrazione":                  {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Mira 1H":                       {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Mira 2H":                       {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Mira Ranged":                   {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Riduzione Dado Effetto Critico": {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Danno":                         {"1": "", "4": "", "7": "", "10": ""},
+            "Danno Critico":                 {"1": "", "4": "", "7": "", "10": ""}
+        }
+    }
 }
 
 SCHEMA_WEAPON_DATA = {
@@ -295,6 +359,22 @@ def copy_schema_weapon() -> dict:
         print(f"Errore durante la copia di schema_weapon: {exc}")
         return {"status": "error", "message": str(exc)}
 
+def copy_schema_accessorio() -> dict:
+    """
+    Write the SCHEMA_ACCESSORIO_DATA to the document 'utils/schema_accessorio'.
+    Returns a status dictionary.
+    """
+    try:
+        doc_ref = db.document("utils/schema_accessorio")
+        doc_ref.set(SCHEMA_ACCESSORIO_DATA)   # full overwrite
+        return {
+            "status":  "success",
+            "message": "schema_accessorio copied to Firestore at utils/schema_accessorio",
+        }
+    except Exception as exc:
+        print(f"Errore durante la copia di schema_accessorio: {exc}")
+        return {"status": "error", "message": str(exc)}
+
 # ---------------------------------------------------------------------------
 #  ✅ Endpoint wired to the SAME path used previously by the Codex copier
 # ---------------------------------------------------------------------------
@@ -306,13 +386,21 @@ def copy_schema_armatura_endpoint():
     """
     return copy_schema_armatura()
 
-@app.get("/test-endpoint")
+# @app.get("/test-endpoint")
 def copy_schema_weapon_endpoint():
     """
     Front-end button hits /test-endpoint.
     It now copies SCHEMA_WEAPON_DATA into 'utils/schema_weapon'.
     """
     return copy_schema_weapon()
+
+@app.get("/test-endpoint")
+def copy_schema_accessorio_endpoint():
+    """
+    Front-end button hits /test-endpoint.
+    It now copies SCHEMA_WEAPON_DATA into 'utils/schema_weapon'.
+    """
+    return copy_schema_accessorio()
 
 # ---------------------------------------------------------------------------
 #  Bulk operations – existing public endpoints (unchanged)

@@ -207,13 +207,12 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
        }
    };   const filteredItems = items.filter((item) => {
     const matchesSearch = searchTerm.trim() === '' ||
-      (item.General?.Nome && item.General.Nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (item.Specific?.Tipo && item.Specific.Tipo.toLowerCase().includes(searchTerm.toLowerCase()));
+      (item.General?.Nome && item.General.Nome.toLowerCase().includes(searchTerm.toLowerCase()));
 
     const matchesSlot = selectedSlot.includes('All') || selectedSlot.includes(item.General?.Slot);
     const matchesHands = selectedHands.includes('All') || selectedHands.includes(String(item.Specific?.Hands));
     const matchesTipo = selectedTipo.includes('All') || selectedTipo.includes(item.Specific?.Tipo);
-    const matchesItemType = selectedItemType.includes('All') || selectedItemType.includes(item.item_type);    return matchesSearch && matchesSlot && matchesHands && matchesTipo && matchesItemType;  }).sort((a, b) => {
+    const matchesItemType = selectedItemType.includes('All') || selectedItemType.includes(item.item_type);    return matchesSearch && matchesSlot && matchesHands && matchesTipo && matchesItemType;}).sort((a, b) => {
     // Debug: Log when sorting is triggered
     const shouldSortCombat = !selectedCombatParams.includes('All') && selectedCombatParams.length > 0;
     const shouldSortBase = !selectedBaseParams.includes('All') && selectedBaseParams.length > 0;
@@ -462,12 +461,11 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
             </div>
           )}
 
-          <div className="mb-4">
-            <input
+          <div className="mb-4">            <input
               type="text"
               value={searchTerm}
               onChange={handleSearchChange}
-              placeholder="Cerca per Nome o Tipo..."
+              placeholder="Cerca per Nome..."
               className="w-full border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-gray-800 text-white placeholder-gray-500"
             />
           </div>
