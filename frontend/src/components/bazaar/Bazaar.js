@@ -7,6 +7,7 @@ import { db } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
 import { AddWeaponOverlay } from './elements/addWeapon';
 import { AddArmaturaOverlay } from './elements/addArmatura';
+import { AddAccessorioOverlay } from './elements/addAccessorio';
 import ComparisonPanel from './elements/comparisonComponent';
 
 function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked }) {
@@ -75,9 +76,9 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   const [selectedItemType, setSelectedItemType] = useState(['All']);  const [selectedCombatParams, setSelectedCombatParams] = useState(['All']);
   const [selectedBaseParams, setSelectedBaseParams] = useState(['All']);
   const [hoveredItem, setHoveredItem] = useState(null);
-  const [lockedItem, setLockedItem] = useState(null);
-  const [showOverlay, setShowOverlay] = useState(false);
+  const [lockedItem, setLockedItem] = useState(null);  const [showOverlay, setShowOverlay] = useState(false);
   const [showArmaturaOverlay, setShowArmaturaOverlay] = useState(false);
+  const [showAccessorioOverlay, setShowAccessorioOverlay] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [confirmationMessage, setConfirmationMessage] = useState("");
   const { user, userData } = useAuth();
@@ -303,12 +304,14 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   const handlePurchase = (item) => {
     displayConfirmation(`"${item.General?.Nome || 'Oggetto'}" Acquistato!`);
   };
-
   const handleAddWeaponClick = () => {
     setShowOverlay(true);
   };
   const handleAddArmaturaClick = () => {
     setShowArmaturaOverlay(true);
+  };
+  const handleAddAccessorioClick = () => {
+    setShowAccessorioOverlay(true);
   };
 
   const panelItem = lockedItem || hoveredItem;
@@ -454,7 +457,12 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
                 > 
                   {lockedItem && lockedItem.item_type === "armatura" ? "Modifica Armatura" : "+ Armatura"}
                 </button>
-                <button onClick={() => displayConfirmation("Funzionalità Accessorio in arrivo!", "info")} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Accessorio </button>
+                <button 
+                  onClick={handleAddAccessorioClick} 
+                  className="px-3 py-1.5 text-sm bg-purple-700 text-white rounded hover:bg-purple-600 transition-colors"
+                > 
+                  {lockedItem && lockedItem.item_type === "accessorio" ? "Modifica Accessorio" : "+ Accessorio"}
+                </button>
                 <button onClick={() => displayConfirmation("Funzionalità Consumabile in arrivo!", "info")} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Consumabile </button>
                 <button onClick={() => displayConfirmation("Funzionalità Munizione in arrivo!", "info")} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Munizione </button>
               </div>
@@ -534,6 +542,17 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
           showMessage={displayConfirmation}
           initialData={lockedItem && lockedItem.item_type === "armatura" ? lockedItem : null}
           editMode={!!(lockedItem && lockedItem.item_type === "armatura")}
+        />
+      )}
+
+      {showAccessorioOverlay && (
+        <AddAccessorioOverlay
+          onClose={(success) => {
+            setShowAccessorioOverlay(false);
+          }}
+          showMessage={displayConfirmation}
+          initialData={lockedItem && lockedItem.item_type === "accessorio" ? lockedItem : null}
+          editMode={!!(lockedItem && lockedItem.item_type === "accessorio")}
         />
       )}
 
