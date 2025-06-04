@@ -8,6 +8,7 @@ import { computeValue } from '../../common/computeFormula';
 import { AuthContext } from '../../../AuthContext';
 import { AddWeaponOverlay } from './addWeapon';
 import { AddArmaturaOverlay } from './addArmatura';
+import { AddAccessorioOverlay } from './addAccessorio';
 import { FaTrash, FaEdit } from 'react-icons/fa';
 
 export default function ComparisonPanel({ item, showMessage }) {
@@ -539,6 +540,13 @@ export default function ComparisonPanel({ item, showMessage }) {
         <>
           {item?.item_type === 'armatura' ? (
             <AddArmaturaOverlay
+              onClose={handleCloseEditOverlay}
+              showMessage={showMessage || console.log}
+              initialData={item}
+              editMode={true}
+            />
+          ) : item?.item_type === 'accessorio' ? (
+            <AddAccessorioOverlay
               onClose={handleCloseEditOverlay}
               showMessage={showMessage || console.log}
               initialData={item}

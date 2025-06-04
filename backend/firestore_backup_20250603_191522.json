@@ -455,6 +455,332 @@
         "Slot": "Doppia Mano"
       }
     },
+    "Armatura_Completa": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "Mira 1H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "2",
+            "7": "3",
+            "10": "4",
+            "1": "1"
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "4",
+            "7": "6",
+            "10": "8",
+            "1": "2"
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "8",
+            "7": "12",
+            "10": "16",
+            "1": "4"
+          }
+        }
+      },
+      "Specific": {
+        "slotCintura": ""
+      },
+      "item_type": "armatura",
+      "General": {
+        "Nome": "Armatura Completa",
+        "Slot": "Corpo",
+        "spells": {},
+        "Effetto": "",
+        "prezzo": 4000,
+        "requisiti": "",
+        "ridCostoTecSingola": {},
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Armatura_Completa_1748634407876_armatura_completa.png?alt=media&token=be00cdb9-5c1f-4b10-b6a3-94b6565f0b96",
+        "ridCostoSpellSingola": {}
+      }
+    },
+    "Armatura_di_Cuoio": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "Mira 1H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoTec": {
+            "4": "2",
+            "7": "2",
+            "10": "2",
+            "1": "2"
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "2",
+            "7": "3",
+            "10": "4",
+            "1": "1"
+          },
+          "Attacco": {
+            "4": "6",
+            "7": "9",
+            "10": "12",
+            "1": "3"
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "6",
+            "7": "9",
+            "10": "12",
+            "1": "3"
+          }
+        }
+      },
+      "Specific": {
+        "slotCintura": ""
+      },
+      "item_type": "armatura",
+      "General": {
+        "Nome": "Armatura di Cuoio",
+        "Slot": "Corpo",
+        "spells": {},
+        "Effetto": "",
+        "prezzo": 1550,
+        "requisiti": "",
+        "ridCostoTecSingola": {},
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Armatura_di_Cuoio_1748634204621_armatura_di_cuoio.png?alt=media&token=7d122779-88ad-4868-8434-c97c7167766e",
+        "ridCostoSpellSingola": {}
+      }
+    },
     "Bacchetta": {
       "Parametri": {
         "Base": {
@@ -1185,6 +1511,664 @@
         "ridCostoSpellSingola": {}
       }
     },
+    "Cintura_Base": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "Mira 1H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        }
+      },
+      "item_type": "armatura",
+      "Specific": {
+        "slotCintura": 1
+      },
+      "General": {
+        "Nome": "Cintura Base",
+        "Slot": "Cintura",
+        "spells": {},
+        "Effetto": "Puoi equipaggiare un solo oggetto consumabile utilizzabili con tecnica \"USO CONSUMABILE IN CINTURA\".",
+        "prezzo": 50,
+        "requisiti": "",
+        "ridCostoTecSingola": {},
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Cintura_Base_1748635446779_cintura_base.png?alt=media&token=a55dc930-dc3b-49ed-9ca4-f00217757ce3",
+        "ridCostoSpellSingola": {}
+      }
+    },
+    "Cintura_Protettiva": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "Mira 1H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "4",
+            "7": "6",
+            "10": "8",
+            "1": "2"
+          }
+        }
+      },
+      "Specific": {
+        "slotCintura": 1
+      },
+      "item_type": "armatura",
+      "General": {
+        "Nome": "Cintura Protettiva",
+        "Slot": "Cintura",
+        "spells": {},
+        "Effetto": "Puoi equipaggiare un solo oggetto consumabile utilizzabili con tecnica \"USO CONSUMABILE IN CINTURA\".",
+        "prezzo": 550,
+        "requisiti": "",
+        "ridCostoTecSingola": {},
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Cintura_Protettiva_1748636165233_cintura_protettiva.png?alt=media&token=c5848924-d8a2-48a1-97c1-f4c642ebcd77",
+        "ridCostoSpellSingola": {}
+      }
+    },
+    "Cintura_da_Alchimista": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 1H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira Ranged": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        }
+      },
+      "Specific": {
+        "slotCintura": 99
+      },
+      "item_type": "armatura",
+      "General": {
+        "Nome": "Cintura da Alchimista",
+        "spells": {},
+        "ridCostoSpellSingola": {},
+        "Effetto": "Tutti gli oggetti consumabili nell'inventario sono utilizzabili con tecnica \"USO CONSUMABILE IN CINTURA\".",
+        "prezzo": 355,
+        "requisiti": "",
+        "ridCostoTecSingola": {},
+        "Slot": "Cintura",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Cintura_da_Alchimista_1748639022898_cintura_alchimista.png?alt=media&token=9843b1f0-9938-4669-ae61-74a7b0e8b708"
+      }
+    },
+    "Cintura_da_Battaglia": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "Mira 1H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoTec": {
+            "4": "2",
+            "7": "2",
+            "10": "2",
+            "1": "2"
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "2",
+            "7": "3",
+            "10": "4",
+            "1": "1"
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        }
+      },
+      "Specific": {
+        "slotCintura": 1
+      },
+      "item_type": "armatura",
+      "General": {
+        "Nome": "Cintura da Battaglia",
+        "Slot": "Cintura",
+        "spells": {},
+        "Effetto": "Puoi equipaggiare un solo oggetto consumabile utilizzabili con tecnica \"USO CONSUMABILE IN CINTURA\".",
+        "prezzo": 525,
+        "requisiti": "",
+        "ridCostoTecSingola": {},
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Cintura_da_Battaglia_1748636273427_cintura_battaglia.png?alt=media&token=83b8aafc-0258-4837-9ba1-571b6705089b",
+        "ridCostoSpellSingola": {}
+      }
+    },
     "Coltelli_da_Lancio": {
       "Parametri": {
         "Base": {
@@ -1329,6 +2313,175 @@
         "ridCostoTecSingola": {},
         "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Fweapon_Coltelli_da_Lancio_1748468714619_coltelli_lancio.png?alt=media&token=a673437e-595e-4da0-a9d5-8822f904ff4c",
         "Slot": "Mano Principale o Secondaria"
+      }
+    },
+    "Corda_della_Penitenza": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "Mira 1H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira Ranged": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "3",
+            "7": "4",
+            "10": "5",
+            "1": "1"
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        }
+      },
+      "Specific": {
+        "slotCintura": 1
+      },
+      "item_type": "armatura",
+      "General": {
+        "Nome": "Corda della Penitenza",
+        "Slot": "Cintura",
+        "spells": {},
+        "Effetto": "Puoi equipaggiare un solo oggetto consumabile utilizzabili con tecnica \"USO CONSUMABILE IN CINTURA\".",
+        "prezzo": 1000,
+        "requisiti": "",
+        "ridCostoTecSingola": {},
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Corda_della_Penitenza_1748636559969_corda_penitenza.png?alt=media&token=f626b62d-3afe-40f5-ac5a-fa2ea63dbc3c",
+        "ridCostoSpellSingola": {}
       }
     },
     "Elmo": {
@@ -1492,6 +2645,682 @@
         "ridCostoTecSingola": {},
         "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Elmo_1748625189182_elmo.png?alt=media&token=ca973983-cec6-4a91-a364-3eda06eaacf8",
         "ridCostoSpellSingola": {}
+      }
+    },
+    "Faretra": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "Mira 1H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoTec": {
+            "4": "2",
+            "7": "2",
+            "10": "2",
+            "1": "2"
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira Ranged": {
+            "4": "2",
+            "7": "3",
+            "10": "4",
+            "1": "1"
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        }
+      },
+      "Specific": {
+        "slotCintura": ""
+      },
+      "item_type": "armatura",
+      "General": {
+        "Nome": "Faretra",
+        "spells": {},
+        "ridCostoSpellSingola": {},
+        "Effetto": "Puoi equipaggiare un secondo slot di armi con UNA ARMA A UNA MANO.",
+        "prezzo": 220,
+        "requisiti": "",
+        "ridCostoTecSingola": {},
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Faretra_1748638042728_faretra.png?alt=media&token=69fb82e7-386c-415f-ba72-fe9e42c884f7",
+        "Slot": "Fodero"
+      }
+    },
+    "Fodero_Arma_a_due_Mani_di_Qualit\u00e0": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "Mira 1H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoTec": {
+            "4": "2",
+            "7": "2",
+            "10": "2",
+            "1": "2"
+          },
+          "Mira Ranged": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "2",
+            "7": "3",
+            "10": "4",
+            "1": "1"
+          },
+          "Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        }
+      },
+      "Specific": {
+        "slotCintura": ""
+      },
+      "item_type": "armatura",
+      "General": {
+        "Nome": "Fodero Arma a due Mani di Qualit\u00e0",
+        "spells": {},
+        "ridCostoSpellSingola": {},
+        "Effetto": "Puoi equipaggiare un secondo set di armi con arma  A DUE MANI (2H), una ARMA  A UNA MANO (1H), UNA ARMA A UNA MANO E SCUDO OPPURE DUE ARMI A UNA MANO  e scambiarlo con il set principale spendendo 0 MANA e un'azione CONSUMABILE.",
+        "prezzo": 900,
+        "requisiti": "",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Fodero_Arma_a_due_Mani_di_Qualit%C3%A0_1748637816848_fodero_2h_quality.png?alt=media&token=daa83bf1-91aa-4c03-84a3-928be26b7dc8",
+        "Slot": "Fodero",
+        "ridCostoTecSingola": {}
+      }
+    },
+    "Fodero_Arma_a_una_Mano_di_Qualit\u00e0": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "Mira 1H": {
+            "4": "2",
+            "7": "3",
+            "10": "4",
+            "1": "1"
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoTec": {
+            "4": "2",
+            "7": "2",
+            "10": "2",
+            "1": "2"
+          },
+          "Mira Ranged": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        }
+      },
+      "Specific": {
+        "slotCintura": ""
+      },
+      "item_type": "armatura",
+      "General": {
+        "Nome": "Fodero Arma a una Mano di Qualit\u00e0",
+        "spells": {},
+        "ridCostoSpellSingola": {},
+        "Effetto": "Puoi equipaggiare un secondo set di armi con arma  A DUE MANI (2H), una ARMA  A UNA MANO (1H), UNA ARMA A UNA MANO E SCUDO OPPURE DUE ARMI A UNA MANO  e scambiarlo con il set principale spendendo 0 MANA e un'azione CONSUMABILE.",
+        "prezzo": 700,
+        "requisiti": "",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Fodero_Arma_a_una_Mano_di_Qualit%C3%A0_1748637592540_fodero_1h_quality.png?alt=media&token=e9fde701-c8a6-4971-a378-ddc7587d90a5",
+        "Slot": "Fodero",
+        "ridCostoTecSingola": {}
+      }
+    },
+    "Fodero_Base": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "Mira 1H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoTec": {
+            "4": "2",
+            "7": "2",
+            "10": "2",
+            "1": "2"
+          },
+          "Mira Ranged": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        }
+      },
+      "Specific": {
+        "slotCintura": ""
+      },
+      "item_type": "armatura",
+      "General": {
+        "Nome": "Fodero Base",
+        "spells": {},
+        "ridCostoSpellSingola": {},
+        "Effetto": "Puoi equipaggiare un secondo set di armi con arma  A DUE MANI (2H), una ARMA  A UNA MANO (1H), UNA ARMA A UNA MANO E SCUDO OPPURE DUE ARMI A UNA MANO  e scambiarlo con il set principale spendendo 0 MANA e un'azione CONSUMABILE.",
+        "prezzo": 55,
+        "requisiti": "",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Fodero_Base_1748637193925_fodero_base.png?alt=media&token=38ba5d6c-2237-4ed7-a170-24eabc719442",
+        "Slot": "Fodero",
+        "ridCostoTecSingola": {}
       }
     },
     "Globo_Fluttuante": {
@@ -2518,6 +4347,175 @@
         "Slot": "Mano Principale o Secondaria"
       }
     },
+    "Scarpe_Eleganti": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "1",
+            "7": "1",
+            "10": "1",
+            "1": "1"
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 1H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira Ranged": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        }
+      },
+      "Specific": {
+        "slotCintura": ""
+      },
+      "item_type": "armatura",
+      "General": {
+        "Nome": "Scarpe Eleganti",
+        "spells": {},
+        "ridCostoSpellSingola": {},
+        "Effetto": "Attirano l'attenzione.",
+        "prezzo": 1000,
+        "requisiti": "",
+        "ridCostoTecSingola": {},
+        "Slot": "Stivali",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Scarpe_Eleganti_1748638783216_scarpe_eleganti.png?alt=media&token=3d7ec67a-11f0-4ed4-861c-5e41c3e5ae67"
+      }
+    },
     "Scudo": {
       "Parametri": {
         "Base": {
@@ -3102,6 +5100,344 @@
         "ridCostoSpellSingola": {}
       }
     },
+    "Stivali_Blindati": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "1",
+            "7": "1",
+            "10": "1",
+            "1": "1"
+          }
+        },
+        "Special": {
+          "Mira 1H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira Ranged": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        }
+      },
+      "Specific": {
+        "slotCintura": ""
+      },
+      "item_type": "armatura",
+      "General": {
+        "Nome": "Stivali Blindati",
+        "spells": {},
+        "ridCostoSpellSingola": {},
+        "Effetto": "Pesanti.",
+        "prezzo": 400,
+        "requisiti": "",
+        "ridCostoTecSingola": {},
+        "Slot": "Stivali",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Stivali_Blindati_1748638652021_stivali_blindati.png?alt=media&token=f979c7da-cc6a-4da0-a4ae-9021f738aaf4"
+      }
+    },
+    "Stivali_di_Cuoio": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "1",
+            "7": "1",
+            "10": "1",
+            "1": "1"
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "Mira 1H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira Ranged": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        }
+      },
+      "Specific": {
+        "slotCintura": ""
+      },
+      "item_type": "armatura",
+      "General": {
+        "Nome": "Stivali di Cuoio",
+        "spells": {},
+        "ridCostoSpellSingola": {},
+        "Effetto": "Comodi.",
+        "prezzo": 150,
+        "requisiti": "",
+        "ridCostoTecSingola": {},
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Stivali_di_Cuoio_1748638396207_stivali_cuoio.png?alt=media&token=d9bc7a50-ddf0-410a-9038-029e9039e048",
+        "Slot": "Stivali"
+      }
+    },
     "Stocco": {
       "Parametri": {
         "Base": {
@@ -3435,18 +5771,6 @@
           }
         },
         "Special": {
-          "Danno Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "ridCostoSpell": {
-            "4": "4",
-            "7": "4",
-            "10": "4",
-            "1": "4"
-          },
           "ridCostoTec": {
             "4": "",
             "7": "",
@@ -3471,25 +5795,19 @@
             "10": "",
             "1": ""
           },
-          "Mira 1H": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Mira 2H": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Riduzione Dado Effetto Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
           "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "4",
+            "7": "4",
+            "10": "4",
+            "1": "4"
+          },
+          "Danno Critico": {
             "4": "",
             "7": "",
             "10": "",
@@ -3499,17 +5817,17 @@
         "Combattimento": {
           "Disciplina": {
             "4": "8",
-            "7": "16",
-            "10": "32",
+            "7": "12",
+            "10": "16",
             "1": "4"
           },
-          "RiduzioneDanni": {
+          "Critico": {
             "4": "",
             "7": "",
             "10": "",
             "1": ""
           },
-          "Critico": {
+          "RiduzioneDanni": {
             "4": "",
             "7": "",
             "10": "",
@@ -3521,11 +5839,11 @@
             "10": "",
             "1": ""
           },
-          "Salute": {
-            "4": "4",
-            "7": "6",
-            "10": "8",
-            "1": "2"
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
           },
           "Mira": {
             "4": "",
@@ -3533,18 +5851,19 @@
             "10": "",
             "1": ""
           },
-          "Attacco": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
+          "Salute": {
+            "4": "4",
+            "7": "6",
+            "10": "8",
+            "1": "2"
           }
         }
       },
+      "item_type": "weapon",
       "Specific": {
-        "slotCintura": ""
+        "Hands": 1,
+        "Tipo": "Mischia"
       },
-      "item_type": "armatura",
       "General": {
         "Nome": "Tunica",
         "Slot": "Corpo",
@@ -4417,6 +6736,12 @@
             "7": "",
             "10": "",
             "1": ""
+          },
+          "Mira Ranged": {
+            "4": 0,
+            "7": 0,
+            "10": 0,
+            "1": 0
           },
           "Penetrazione": {
             "4": 0,

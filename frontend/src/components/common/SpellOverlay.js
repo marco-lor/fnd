@@ -31,31 +31,27 @@ export function SpellOverlay({
   const [videoFile, setVideoFile] = useState(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
-
   /* ---------------- helpers ---------------- */
   // Use useCallback to memoize buildEmptySpell if schema structure is stable
    const buildEmptySpell = useCallback((s) => ({
      Nome:            "",
      Costo:           0,
      Turni:           0,
-     Gittata:         s?.Gittata && !isNaN(parseInt(s.Gittata)) ? parseInt(s.Gittata) : 0, // Ensure number
-     "Effetti Positivi": "",
+     Gittata:         s?.Gittata && !isNaN(parseInt(s.Gittata)) ? parseInt(s.Gittata) : 0, // Ensure number     "Effetti Positivi": "",
      "Effetti Negativi": "",
-     Esperienza:        Array.isArray(s?.Esperienza)     ? s.Esperienza[0]     : "",
-     "Mod Params": {
-       Base: {
-         Costituzione: 0, Destrezza: 0, Fortuna: 0,
-         Forza: 0, Intelligenza: 0, Saggezza: 0,
-       },
-       Combattimento: {
-         Attacco: 0, Critico: 0, Difesa: 0,
-         Disciplina: 0, RiduzioneDanni: 0, Salute: 0,
-       },
-     },
-     TPC:          Object.fromEntries(["Param1","Param2","ParamTarget"].map(k=>[k, s?.TPC?.[k]?.[0] || ""])),
-     "TPC Fisico": Object.fromEntries(["Param1","Param2","ParamTarget"].map(k=>[k, s?.["TPC Fisico"]?.[k]?.[0] || ""])),
-     "TPC Mentale":Object.fromEntries(["Param1","Param2","ParamTarget"].map(k=>[k, s?.["TPC Mentale"]?.[k]?.[0] || ""])),
-     "Tipo Base":    Array.isArray(s?.["Tipo Base"]) ? s["Tipo Base"][0] : "",
+     Esperienza:        Array.isArray(s?.Esperienza)     ? s.Esperienza[s.Esperienza.length - 1]     : "",
+     Azione:           Array.isArray(s?.azione)         ? s.azione[s.azione.length - 1]         : "",       "Mod Params": {
+         Base: {
+           Costituzione: 0, Destrezza: 0, Fortuna: 0,
+           Forza: 0, Intelligenza: 0, Saggezza: 0,
+         },
+         Combattimento: {
+           Attacco: 0, Critico: 0, Difesa: 0,
+           Disciplina: 0, Mira: 0, RiduzioneDanni: 0, Salute: 0,
+         },
+       },     TPC:          Object.fromEntries(["Param1","Param2","ParamTarget"].map(k=>[k, s?.TPC?.[k]?.[s.TPC[k].length - 1] || ""])),     "TPC Fisico": Object.fromEntries(["Param1","Param2","ParamTarget"].map(k=>[k, s?.["TPC Fisico"]?.[k]?.[s["TPC Fisico"][k].length - 1] || ""])),
+     "TPC Mentale":Object.fromEntries(["Param1","Param2","ParamTarget"].map(k=>[k, s?.["TPC Mentale"]?.[k]?.[s["TPC Mentale"][k].length - 1] || ""])),
+     "Tipo Base":    Array.isArray(s?.["Tipo Base"]) ? s["Tipo Base"][s["Tipo Base"].length - 1] : "",
    }), []); // Empty dependency array assuming schema structure doesn't change based on props/state here
 
   /* initialise on mount / when schema/initialData changes */
@@ -137,8 +133,7 @@ export function SpellOverlay({
    // Use useCallback for cleanSpell if its logic is stable
    const cleanSpell = useCallback(() => {
      const num = (v) => (v === '' || isNaN(parseInt(v)) ? 0 : parseInt(v)); // Handle empty strings
-     const s = spellFormData;
-     const cleaned = {
+     const s = spellFormData;     const cleaned = {
        Nome:   s.Nome?.trim() || "", // Ensure Nome exists and trim
        Costo:  num(s.Costo),
        Turni:  num(s.Turni),
@@ -146,6 +141,7 @@ export function SpellOverlay({
        "Effetti Positivi": s["Effetti Positivi"] || "",
        "Effetti Negativi": s["Effetti Negativi"] || "",
        Esperienza: s.Esperienza || "",
+       Azione: s.azione || "",
        "Mod Params": {
          Base: {},
          Combattimento: {},
@@ -268,12 +264,11 @@ export function SpellOverlay({
             />
           </div>
         ))}
-      </div>
-
-       {/* Dropdowns/Text: Esperienza, Tipo Base */}
-       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+      </div>       {/* Dropdowns/Text: Esperienza, Azione, Tipo Base */}
+       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
          {[
            ["Esperienza", schema?.Esperienza],
+           ["Azione", schema?.azione],
            ["Tipo Base", schema?.["Tipo Base"]],
          ].map(([lbl, opts]) => (
            <div key={lbl}>
@@ -291,10 +286,9 @@ export function SpellOverlay({
                {["Base", "Combattimento"].map((grp) => (
                    <div key={grp}>
                        <h4 className="text-gray-300 font-semibold mb-2 text-base border-b border-gray-600 pb-1">{grp}</h4>
-                       <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                           {(grp === "Base"
+                       <div className="grid grid-cols-2 gap-x-4 gap-y-2">                           {(grp === "Base"
                                ? ["Costituzione", "Destrezza", "Fortuna", "Forza", "Intelligenza", "Saggezza"]
-                               : ["Attacco", "Critico", "Difesa", "Disciplina", "RiduzioneDanni", "Salute"]
+                               : ["Attacco", "Critico", "Difesa", "Disciplina", "Mira", "RiduzioneDanni", "Salute"]
                            ).map((p) => (
                                <div key={p}>
                                    <label className="block text-white text-xs mb-0.5">{p}</label>
