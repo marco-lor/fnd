@@ -23,9 +23,7 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
     const [customSpells, setCustomSpells] = useState([]);
     const [accessorioSpellsList, setAccessorioSpellsList] = useState([]);
     const [tecnicheList, setTecnicheList] = useState([]);
-    const [spellsList, setSpellsList] = useState([]);
-    const [showSpellOverlay, setShowSpellOverlay] = useState(false);
-    const [tempSpellData, setTempSpellData] = useState(null);
+    const [spellsList, setSpellsList] = useState([]);    const [showSpellOverlay, setShowSpellOverlay] = useState(false);
     const [editingSpellIndex, setEditingSpellIndex] = useState(null);
 
     const { user } = useContext(AuthContext);
@@ -149,17 +147,20 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                     selectedSpell: spell, ridValue: String(val)
                 }));
                 setRidSpellList(spellList);
+            }            // Handle custom spells and linked spells
+            const initialLinkedSpells = [];
+            const initialCustomSpellsFromData = [];
+            if (currentItemData.General?.spells && typeof currentItemData.General.spells === 'object') {
+                Object.entries(currentItemData.General.spells).forEach(([name, data]) => {
+                    if (data === true) {
+                        initialLinkedSpells.push(name);
+                    } else if (typeof data === 'object') {
+                        initialCustomSpellsFromData.push({ spellData: data, imageFile: null, videoFile: null });
+                    }
+                });
             }
-
-            // Handle custom spells
-            if (currentItemData.customSpells && Array.isArray(currentItemData.customSpells)) {
-                setCustomSpells(currentItemData.customSpells);
-            }
-
-            // Handle linked spells
-            if (currentItemData.spells && Array.isArray(currentItemData.spells)) {
-                setAccessorioSpellsList(currentItemData.spells);
-            }
+            setAccessorioSpellsList(initialLinkedSpells);
+            setCustomSpells(initialCustomSpellsFromData);
 
             if (currentItemData.General?.image_url) {
                 setImagePreviewUrl(currentItemData.General.image_url);
@@ -454,18 +455,15 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
         } finally {
             setIsLoading(false);
         }
-    };
-
-    // Spell management functions
+    };    // Spell management functions
     const handleAddSpellClick = useCallback(() => {
         setEditingSpellIndex(null);
-        setTempSpellData(null);
         setShowSpellOverlay(true);
     }, []);
 
     const handleEditSpellClick = useCallback((index) => {
+        console.log("Editing custom spell index:", index, "Data:", customSpells[index]);
         setEditingSpellIndex(index);
-        setTempSpellData(customSpells[index]?.spellData || null);
         setShowSpellOverlay(true);
     }, [customSpells]);
 
@@ -474,35 +472,22 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
     }, []);    const handleSpellCreate = useCallback((result) => {
         console.log("Spell Create/Edit Result:", result);
         if (result?.spellData?.Nome) {
-            const spellName = result.spellData.Nome.trim();
             if (editingSpellIndex !== null) {
-                console.log(`Updating custom spell at index ${editingSpellIndex}:`, spellName);
-                setCustomSpells(prev => {
-                    const updated = [...prev];
-                    const otherSpells = updated.filter((_, i) => i !== editingSpellIndex);
-                    if (otherSpells.some(s => s.spellData.Nome.trim() === spellName)) {
-                        if (showMessage) showMessage(`Uno spell custom con nome "${spellName}" esiste già. Scegli un nome diverso.`, "warning");
-                        return prev;
-                    }
-                    updated[editingSpellIndex] = result;
-                    if (showMessage) showMessage(`Spell "${spellName}" modificato localmente.`, "info");
-                    return updated;
-                });
+                // Edit existing spell
+                setCustomSpells(prev => prev.map((spell, index) => 
+                    index === editingSpellIndex ? result : spell
+                ));
+                showMessage("Spell modificata con successo!", "success");
             } else {
-                console.log("Adding new custom spell:", spellName);
-                if (customSpells.some(s => s.spellData.Nome.trim() === spellName)) {
-                    if (showMessage) showMessage(`Uno spell custom con nome "${spellName}" esiste già.`, "warning");
-                } else {
-                    setCustomSpells(prev => [...prev, result]);
-                    if (showMessage) showMessage(`Spell "${spellName}" creato localmente. Salva l'accessorio per caricarlo.`, "info");
-                }
+                // Add new spell
+                setCustomSpells(prev => [...prev, result]);
+                showMessage("Nuova spell creata con successo!", "success");
             }
         } else {
-            console.log("Spell creation/edit cancelled or no result.");
+            console.warn("Invalid spell result received:", result);
         }
         setShowSpellOverlay(false);
         setEditingSpellIndex(null);
-        setTempSpellData(null);
     }, [customSpells, editingSpellIndex, showMessage]);
 
     // Render functions
