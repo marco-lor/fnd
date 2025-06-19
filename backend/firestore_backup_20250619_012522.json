@@ -21,13 +21,13 @@
             "10": "",
             "1": ""
           },
-          "Destrezza": {
+          "Forza": {
             "4": "",
             "7": "",
             "10": "",
             "1": ""
           },
-          "Forza": {
+          "Destrezza": {
             "4": "",
             "7": "",
             "10": "",
@@ -41,7 +41,7 @@
           }
         },
         "Special": {
-          "Danno Critico": {
+          "Mira 1H": {
             "4": "",
             "7": "",
             "10": "",
@@ -71,13 +71,19 @@
             "10": "",
             "1": ""
           },
+          "Mira Ranged": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
           "Penetrazione": {
             "4": "",
             "7": "",
             "10": "",
             "1": ""
           },
-          "Mira 1H": {
+          "Bonus Danno Critico": {
             "4": "",
             "7": "",
             "10": "",
@@ -89,13 +95,13 @@
             "10": "",
             "1": ""
           },
-          "Riduzione Dado Effetto Critico": {
+          "Danno Critico": {
             "4": "",
             "7": "",
             "10": "",
             "1": ""
           },
-          "Bonus Danno Critico": {
+          "Riduzione Dado Effetto Critico": {
             "4": "",
             "7": "",
             "10": "",
@@ -153,14 +159,14 @@
       "item_type": "armatura",
       "General": {
         "Nome": "Abito",
+        "ridCostoSpellSingola": {},
         "Slot": "Corpo",
-        "spells": {},
         "Effetto": "",
         "prezzo": 40,
         "requisiti": "",
         "ridCostoTecSingola": {},
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Abito_1748625377838_abito.png?alt=media&token=027320c6-0465-4e8c-bd71-6cae85255871",
-        "ridCostoSpellSingola": {}
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Abito_1750278927147_abito.png?alt=media&token=80780a52-08a0-46c6-999a-6a203adc46f3",
+        "spells": {}
       }
     },
     "Arco_Corto": {
@@ -299,8 +305,8 @@
       },
       "General": {
         "Nome": "Arco Corto",
-        "spells": {},
         "ridCostoSpellSingola": {},
+        "spells": {},
         "Effetto": "",
         "prezzo": 75,
         "requisiti": "",
@@ -484,8 +490,8 @@
           },
           "Forza": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Costituzione": {
@@ -496,7 +502,7 @@
           }
         },
         "Special": {
-          "Mira 1H": {
+          "ridCostoSpell": {
             "4": "",
             "7": "",
             "10": "",
@@ -504,14 +510,14 @@
           },
           "Riduzione Dado Effetto Critico": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "ridCostoTec": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Bonus Danno": {
@@ -526,13 +532,19 @@
             "10": "",
             "1": ""
           },
-          "Penetrazione": {
+          "Mira Ranged": {
             "4": "",
             "7": "",
             "10": "",
             "1": ""
           },
-          "ridCostoSpell": {
+          "Penetrazione": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Mira 1H": {
             "4": "",
             "7": "",
             "10": "",
@@ -560,8 +572,14 @@
         "Combattimento": {
           "Disciplina": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "10": "",
+            "7": "",
             "1": ""
           },
           "RiduzioneDanni": {
@@ -569,12 +587,6 @@
             "7": "3",
             "10": "4",
             "1": "1"
-          },
-          "Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
           },
           "Difesa": {
             "4": "4",
@@ -584,20 +596,20 @@
           },
           "Attacco": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Mira": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Salute": {
             "4": "8",
-            "7": "12",
             "10": "16",
+            "7": "12",
             "1": "4"
           }
         }
@@ -613,24 +625,92 @@
         "Effetto": "",
         "prezzo": 4000,
         "requisiti": "",
-        "ridCostoTecSingola": {},
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Armatura_Completa_1748634407876_armatura_completa.png?alt=media&token=be00cdb9-5c1f-4b10-b6a3-94b6565f0b96",
-        "ridCostoSpellSingola": {}
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Armatura_Completa_1750278948492_armatura_completa.png?alt=media&token=e85b45a0-ed85-4f12-be32-4c2113e699e8",
+        "ridCostoSpellSingola": {},
+        "ridCostoTecSingola": {}
       }
     },
     "Armatura_di_Cuoio": {
       "Parametri": {
-        "Base": {
-          "Fortuna": {
+        "Special": {
+          "Bonus Danno Critico": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Mira 1H": {
             "4": "",
             "7": "",
             "10": "",
             "1": ""
           },
-          "Intelligenza": {
+          "ridCostoTec": {
+            "4": "2",
+            "10": "2",
+            "7": "2",
+            "1": "2"
+          },
+          "Bonus Danno": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Mira Ranged": {
             "4": "",
             "7": "",
             "10": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          }
+        },
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "10": "",
+            "7": "",
             "1": ""
           },
           "Saggezza": {
@@ -658,79 +738,11 @@
             "1": ""
           }
         },
-        "Special": {
-          "Mira 1H": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Riduzione Dado Effetto Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "ridCostoTec": {
-            "4": "2",
-            "7": "2",
-            "10": "2",
-            "1": "2"
-          },
-          "Bonus Danno": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Danno": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Penetrazione": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "ridCostoSpell": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Mira 2H": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Danno Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Bonus Danno Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        },
         "Combattimento": {
           "Disciplina": {
             "4": "",
-            "7": "",
             "10": "",
-            "1": ""
-          },
-          "RiduzioneDanni": {
-            "4": "",
             "7": "",
-            "10": "",
             "1": ""
           },
           "Critico": {
@@ -739,13 +751,19 @@
             "10": "",
             "1": ""
           },
+          "RiduzioneDanni": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
           "Difesa": {
             "4": "2",
-            "7": "3",
             "10": "4",
+            "7": "3",
             "1": "1"
           },
-          "Attacco": {
+          "Salute": {
             "4": "6",
             "7": "9",
             "10": "12",
@@ -753,11 +771,11 @@
           },
           "Mira": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
-          "Salute": {
+          "Attacco": {
             "4": "6",
             "7": "9",
             "10": "12",
@@ -771,13 +789,13 @@
       "item_type": "armatura",
       "General": {
         "Nome": "Armatura di Cuoio",
-        "Slot": "Corpo",
         "spells": {},
+        "Slot": "Corpo",
         "Effetto": "",
         "prezzo": 1550,
         "requisiti": "",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Armatura_di_Cuoio_1750278956014_armatura_di_cuoio.png?alt=media&token=aef90a19-fd5a-4a30-9d6e-385d740a982c",
         "ridCostoTecSingola": {},
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Armatura_di_Cuoio_1748634204621_armatura_di_cuoio.png?alt=media&token=7d122779-88ad-4868-8434-c97c7167766e",
         "ridCostoSpellSingola": {}
       }
     },
@@ -1367,75 +1385,7 @@
     },
     "Cappello": {
       "Parametri": {
-        "Base": {
-          "Fortuna": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Intelligenza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Saggezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Destrezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Forza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Costituzione": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        },
         "Special": {
-          "ridCostoTec": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Bonus Danno": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Danno": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Penetrazione": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "ridCostoSpell": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
           "Bonus Danno Critico": {
             "4": "",
             "7": "",
@@ -1447,72 +1397,62 @@
             "7": "",
             "10": "",
             "1": ""
+          },
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Mira Ranged": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 1H": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
           }
         },
-        "Combattimento": {
-          "Disciplina": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "RiduzioneDanni": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Difesa": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Salute": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Mira": {
-            "4": "2",
-            "7": "3",
-            "10": "4",
-            "1": "1"
-          },
-          "Attacco": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        }
-      },
-      "item_type": "weapon",
-      "Specific": {
-        "Hands": 1,
-        "Tipo": "Mischia"
-      },
-      "General": {
-        "Nome": "Cappello",
-        "Slot": "Testa",
-        "spells": {},
-        "Effetto": "",
-        "prezzo": 225,
-        "requisiti": "",
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Cappello_1748625269543_cappello.png?alt=media&token=1aac6265-2106-4fb6-8984-c33a82512b25",
-        "ridCostoTecSingola": {},
-        "ridCostoSpellSingola": {}
-      }
-    },
-    "Cintura_Base": {
-      "Parametri": {
         "Base": {
           "Fortuna": {
             "4": "",
@@ -1522,14 +1462,14 @@
           },
           "Intelligenza": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Saggezza": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Destrezza": {
@@ -1551,26 +1491,89 @@
             "1": ""
           }
         },
-        "Special": {
-          "Mira 1H": {
+        "Combattimento": {
+          "Disciplina": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
             "4": "",
             "7": "",
             "10": "",
             "1": ""
           },
-          "Riduzione Dado Effetto Critico": {
+          "Difesa": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "2",
+            "7": "3",
+            "10": "4",
+            "1": "1"
+          },
+          "Attacco": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          }
+        }
+      },
+      "item_type": "armatura",
+      "Specific": {
+        "slotCintura": ""
+      },
+      "General": {
+        "Nome": "Cappello",
+        "Slot": "Testa",
+        "ridCostoSpellSingola": {},
+        "Effetto": "",
+        "prezzo": 225,
+        "requisiti": "",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Cappello_1750280244300_cappello.png?alt=media&token=77d80810-9fc4-458d-bb1d-1c2029bd5a12",
+        "ridCostoTecSingola": {},
+        "spells": {}
+      }
+    },
+    "Cintura_Base": {
+      "Parametri": {
+        "Special": {
+          "Danno Critico": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Mira 1H": {
+            "4": "",
+            "10": "",
+            "7": "",
             "1": ""
           },
           "ridCostoTec": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
-          "Bonus Danno": {
+          "Mira Ranged": {
             "4": "",
             "7": "",
             "10": "",
@@ -1578,8 +1581,14 @@
           },
           "Danno": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "10": "",
+            "7": "",
             "1": ""
           },
           "Penetrazione": {
@@ -1600,7 +1609,7 @@
             "10": "",
             "1": ""
           },
-          "Danno Critico": {
+          "Riduzione Dado Effetto Critico": {
             "4": "",
             "7": "",
             "10": "",
@@ -1608,16 +1617,54 @@
           },
           "Bonus Danno Critico": {
             "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          }
+        },
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
             "7": "",
             "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "10": "",
+            "7": "",
             "1": ""
           }
         },
         "Combattimento": {
           "Disciplina": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "RiduzioneDanni": {
@@ -1628,8 +1675,8 @@
           },
           "Critico": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Difesa": {
@@ -1638,7 +1685,7 @@
             "10": "",
             "1": ""
           },
-          "Attacco": {
+          "Salute": {
             "4": "",
             "7": "",
             "10": "",
@@ -1650,7 +1697,7 @@
             "10": "",
             "1": ""
           },
-          "Salute": {
+          "Attacco": {
             "4": "",
             "7": "",
             "10": "",
@@ -1664,14 +1711,14 @@
       },
       "General": {
         "Nome": "Cintura Base",
-        "Slot": "Cintura",
         "spells": {},
+        "ridCostoSpellSingola": {},
         "Effetto": "Puoi equipaggiare un solo oggetto consumabile utilizzabili con tecnica \"USO CONSUMABILE IN CINTURA\".",
         "prezzo": 50,
         "requisiti": "",
         "ridCostoTecSingola": {},
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Cintura_Base_1748635446779_cintura_base.png?alt=media&token=a55dc930-dc3b-49ed-9ca4-f00217757ce3",
-        "ridCostoSpellSingola": {}
+        "Slot": "Cintura",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Cintura_Base_1750278964183_cintura_base.png?alt=media&token=720f4b9e-60f5-4b66-bcd6-14531b4565af"
       }
     },
     "Cintura_Protettiva": {
@@ -1679,14 +1726,14 @@
         "Base": {
           "Fortuna": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Intelligenza": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Saggezza": {
@@ -1697,14 +1744,14 @@
           },
           "Destrezza": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Forza": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Costituzione": {
@@ -1715,13 +1762,13 @@
           }
         },
         "Special": {
-          "Mira 1H": {
+          "Riduzione Dado Effetto Critico": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
-          "Riduzione Dado Effetto Critico": {
+          "Bonus Danno Critico": {
             "4": "",
             "7": "",
             "10": "",
@@ -1729,8 +1776,8 @@
           },
           "ridCostoTec": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Bonus Danno": {
@@ -1745,22 +1792,28 @@
             "10": "",
             "1": ""
           },
+          "Mira Ranged": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
           "Penetrazione": {
             "4": "",
             "7": "",
             "10": "",
             "1": ""
           },
-          "ridCostoSpell": {
+          "Mira 1H": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Mira 2H": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Danno Critico": {
@@ -1769,7 +1822,7 @@
             "10": "",
             "1": ""
           },
-          "Bonus Danno Critico": {
+          "ridCostoSpell": {
             "4": "",
             "7": "",
             "10": "",
@@ -1783,22 +1836,22 @@
             "10": "",
             "1": ""
           },
-          "RiduzioneDanni": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
           "Critico": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
+            "1": ""
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "10": "",
+            "7": "",
             "1": ""
           },
           "Difesa": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Attacco": {
@@ -1809,14 +1862,14 @@
           },
           "Mira": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Salute": {
             "4": "4",
-            "7": "6",
             "10": "8",
+            "7": "6",
             "1": "2"
           }
         }
@@ -1827,14 +1880,14 @@
       "item_type": "armatura",
       "General": {
         "Nome": "Cintura Protettiva",
-        "Slot": "Cintura",
         "spells": {},
+        "ridCostoSpellSingola": {},
         "Effetto": "Puoi equipaggiare un solo oggetto consumabile utilizzabili con tecnica \"USO CONSUMABILE IN CINTURA\".",
         "prezzo": 550,
         "requisiti": "",
         "ridCostoTecSingola": {},
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Cintura_Protettiva_1748636165233_cintura_protettiva.png?alt=media&token=c5848924-d8a2-48a1-97c1-f4c642ebcd77",
-        "ridCostoSpellSingola": {}
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Cintura_Protettiva_1750278994880_cintura_protettiva.png?alt=media&token=50a2073a-5b3a-4495-986a-54b983ce7faa",
+        "Slot": "Cintura"
       }
     },
     "Cintura_da_Alchimista": {
@@ -1996,14 +2049,14 @@
       "item_type": "armatura",
       "General": {
         "Nome": "Cintura da Alchimista",
-        "spells": {},
         "ridCostoSpellSingola": {},
+        "Slot": "Cintura",
         "Effetto": "Tutti gli oggetti consumabili nell'inventario sono utilizzabili con tecnica \"USO CONSUMABILE IN CINTURA\".",
         "prezzo": 355,
         "requisiti": "",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Cintura_da_Alchimista_1750278974443_cintura_alchimista.png?alt=media&token=d5875f8d-3aa9-402f-95f6-791af5b03025",
         "ridCostoTecSingola": {},
-        "Slot": "Cintura",
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Cintura_da_Alchimista_1748639022898_cintura_alchimista.png?alt=media&token=9843b1f0-9938-4669-ae61-74a7b0e8b708"
+        "spells": {}
       }
     },
     "Cintura_da_Battaglia": {
@@ -2017,17 +2070,11 @@
           },
           "Intelligenza": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Saggezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Destrezza": {
             "4": "",
             "7": "",
             "10": "",
@@ -2039,24 +2086,30 @@
             "10": "",
             "1": ""
           },
-          "Costituzione": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        },
-        "Special": {
-          "Mira 1H": {
+          "Destrezza": {
             "4": "",
             "7": "",
             "10": "",
             "1": ""
           },
-          "Riduzione Dado Effetto Critico": {
+          "Costituzione": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "Bonus Danno Critico": {
             "4": "",
             "7": "",
             "10": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "",
+            "10": "",
+            "7": "",
             "1": ""
           },
           "ridCostoTec": {
@@ -2067,8 +2120,8 @@
           },
           "Bonus Danno": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Danno": {
@@ -2077,10 +2130,16 @@
             "10": "",
             "1": ""
           },
-          "Penetrazione": {
+          "Mira Ranged": {
             "4": "",
             "7": "",
             "10": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "10": "",
+            "7": "",
             "1": ""
           },
           "ridCostoSpell": {
@@ -2095,13 +2154,13 @@
             "10": "",
             "1": ""
           },
-          "Danno Critico": {
+          "Riduzione Dado Effetto Critico": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
-          "Bonus Danno Critico": {
+          "Mira 1H": {
             "4": "",
             "7": "",
             "10": "",
@@ -2111,14 +2170,8 @@
         "Combattimento": {
           "Disciplina": {
             "4": "",
-            "7": "",
             "10": "",
-            "1": ""
-          },
-          "RiduzioneDanni": {
-            "4": "",
             "7": "",
-            "10": "",
             "1": ""
           },
           "Critico": {
@@ -2127,10 +2180,16 @@
             "10": "",
             "1": ""
           },
+          "RiduzioneDanni": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
           "Difesa": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Attacco": {
@@ -2159,14 +2218,14 @@
       "item_type": "armatura",
       "General": {
         "Nome": "Cintura da Battaglia",
-        "Slot": "Cintura",
         "spells": {},
+        "ridCostoSpellSingola": {},
         "Effetto": "Puoi equipaggiare un solo oggetto consumabile utilizzabili con tecnica \"USO CONSUMABILE IN CINTURA\".",
         "prezzo": 525,
         "requisiti": "",
-        "ridCostoTecSingola": {},
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Cintura_da_Battaglia_1748636273427_cintura_battaglia.png?alt=media&token=83b8aafc-0258-4837-9ba1-571b6705089b",
-        "ridCostoSpellSingola": {}
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Cintura_da_Battaglia_1750278985821_cintura_battaglia.png?alt=media&token=2454872d-6bf8-4c4c-833d-30db60046736",
+        "Slot": "Cintura",
+        "ridCostoTecSingola": {}
       }
     },
     "Coltelli_da_Lancio": {
@@ -2474,18 +2533,86 @@
       "item_type": "armatura",
       "General": {
         "Nome": "Corda della Penitenza",
-        "Slot": "Cintura",
+        "ridCostoSpellSingola": {},
         "spells": {},
         "Effetto": "Puoi equipaggiare un solo oggetto consumabile utilizzabili con tecnica \"USO CONSUMABILE IN CINTURA\".",
         "prezzo": 1000,
         "requisiti": "",
         "ridCostoTecSingola": {},
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Corda_della_Penitenza_1748636559969_corda_penitenza.png?alt=media&token=f626b62d-3afe-40f5-ac5a-fa2ea63dbc3c",
-        "ridCostoSpellSingola": {}
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Corda_della_Penitenza_1750279001957_corda_penitenza.png?alt=media&token=08f0f943-78a5-4f90-a020-8ab168c5af46",
+        "Slot": "Cintura"
       }
     },
     "Elmo": {
       "Parametri": {
+        "Special": {
+          "Mira 1H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira Ranged": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "4",
+            "10": "8",
+            "7": "6",
+            "1": "2"
+          }
+        },
         "Base": {
           "Fortuna": {
             "4": "",
@@ -2501,14 +2628,8 @@
           },
           "Saggezza": {
             "4": "",
-            "7": "",
             "10": "",
-            "1": ""
-          },
-          "Destrezza": {
-            "4": "",
             "7": "",
-            "10": "",
             "1": ""
           },
           "Forza": {
@@ -2517,80 +2638,24 @@
             "10": "",
             "1": ""
           },
+          "Destrezza": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
           "Costituzione": {
             "4": "",
-            "7": "",
             "10": "",
-            "1": ""
-          }
-        },
-        "Special": {
-          "Danno Critico": {
-            "4": "",
             "7": "",
-            "10": "",
-            "1": ""
-          },
-          "ridCostoSpell": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "ridCostoTec": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Bonus Danno": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Danno": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Penetrazione": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Mira 1H": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Mira 2H": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Riduzione Dado Effetto Critico": {
-            "4": "4",
-            "7": "6",
-            "10": "8",
-            "1": "2"
-          },
-          "Bonus Danno Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
             "1": ""
           }
         },
         "Combattimento": {
           "Disciplina": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "RiduzioneDanni": {
@@ -2601,20 +2666,20 @@
           },
           "Critico": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Difesa": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
-          "Salute": {
+          "Attacco": {
             "4": "",
-            "7": "",
             "10": "",
+            "7": "",
             "1": ""
           },
           "Mira": {
@@ -2623,7 +2688,7 @@
             "10": "",
             "1": ""
           },
-          "Attacco": {
+          "Salute": {
             "4": "",
             "7": "",
             "10": "",
@@ -2637,14 +2702,14 @@
       "item_type": "armatura",
       "General": {
         "Nome": "Elmo",
-        "Slot": "Testa",
+        "ridCostoSpellSingola": {},
         "spells": {},
         "Effetto": "",
         "prezzo": 750,
         "requisiti": "",
-        "ridCostoTecSingola": {},
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Elmo_1748625189182_elmo.png?alt=media&token=ca973983-cec6-4a91-a364-3eda06eaacf8",
-        "ridCostoSpellSingola": {}
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Elmo_1750279009140_elmo.png?alt=media&token=112deb89-1c00-4e83-b728-e208a29d94f5",
+        "Slot": "Testa",
+        "ridCostoTecSingola": {}
       }
     },
     "Faretra": {
@@ -2811,8 +2876,8 @@
         "Effetto": "Puoi equipaggiare un secondo slot di armi con UNA ARMA A UNA MANO.",
         "prezzo": 220,
         "requisiti": "",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Faretra_1750279016901_faretra.png?alt=media&token=7f1a1c01-ebf6-4f91-93d5-f66d4d299932",
         "ridCostoTecSingola": {},
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Faretra_1748638042728_faretra.png?alt=media&token=69fb82e7-386c-415f-ba72-fe9e42c884f7",
         "Slot": "Fodero"
       }
     },
@@ -2975,14 +3040,14 @@
       "item_type": "armatura",
       "General": {
         "Nome": "Fodero Arma a due Mani di Qualit\u00e0",
-        "spells": {},
         "ridCostoSpellSingola": {},
+        "spells": {},
         "Effetto": "Puoi equipaggiare un secondo set di armi con arma  A DUE MANI (2H), una ARMA  A UNA MANO (1H), UNA ARMA A UNA MANO E SCUDO OPPURE DUE ARMI A UNA MANO  e scambiarlo con il set principale spendendo 0 MANA e un'azione CONSUMABILE.",
         "prezzo": 900,
         "requisiti": "",
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Fodero_Arma_a_due_Mani_di_Qualit%C3%A0_1748637816848_fodero_2h_quality.png?alt=media&token=daa83bf1-91aa-4c03-84a3-928be26b7dc8",
-        "Slot": "Fodero",
-        "ridCostoTecSingola": {}
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Fodero_Arma_a_due_Mani_di_Qualit%C3%A0_1750279025905_fodero_2h_quality.png?alt=media&token=abd99b0c-6c27-42e2-b7ca-929333526d3d",
+        "ridCostoTecSingola": {},
+        "Slot": "Fodero"
       }
     },
     "Fodero_Arma_a_una_Mano_di_Qualit\u00e0": {
@@ -3144,13 +3209,13 @@
       "item_type": "armatura",
       "General": {
         "Nome": "Fodero Arma a una Mano di Qualit\u00e0",
-        "spells": {},
         "ridCostoSpellSingola": {},
+        "Slot": "Fodero",
         "Effetto": "Puoi equipaggiare un secondo set di armi con arma  A DUE MANI (2H), una ARMA  A UNA MANO (1H), UNA ARMA A UNA MANO E SCUDO OPPURE DUE ARMI A UNA MANO  e scambiarlo con il set principale spendendo 0 MANA e un'azione CONSUMABILE.",
         "prezzo": 700,
         "requisiti": "",
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Fodero_Arma_a_una_Mano_di_Qualit%C3%A0_1748637592540_fodero_1h_quality.png?alt=media&token=e9fde701-c8a6-4971-a378-ddc7587d90a5",
-        "Slot": "Fodero",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Fodero_Arma_a_una_Mano_di_Qualit%C3%A0_1750279033441_fodero_1h_quality.png?alt=media&token=f14ab723-db0a-4c70-948b-f0f1e4941954",
+        "spells": {},
         "ridCostoTecSingola": {}
       }
     },
@@ -3313,14 +3378,14 @@
       "item_type": "armatura",
       "General": {
         "Nome": "Fodero Base",
-        "spells": {},
         "ridCostoSpellSingola": {},
+        "Slot": "Fodero",
         "Effetto": "Puoi equipaggiare un secondo set di armi con arma  A DUE MANI (2H), una ARMA  A UNA MANO (1H), UNA ARMA A UNA MANO E SCUDO OPPURE DUE ARMI A UNA MANO  e scambiarlo con il set principale spendendo 0 MANA e un'azione CONSUMABILE.",
         "prezzo": 55,
         "requisiti": "",
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Fodero_Base_1748637193925_fodero_base.png?alt=media&token=38ba5d6c-2237-4ed7-a170-24eabc719442",
-        "Slot": "Fodero",
-        "ridCostoTecSingola": {}
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Fodero_Base_1750279040814_fodero_base.png?alt=media&token=665d7551-51b4-425e-861e-800d13edf80a",
+        "ridCostoTecSingola": {},
+        "spells": {}
       }
     },
     "Globo_Fluttuante": {
@@ -4507,13 +4572,13 @@
       "General": {
         "Nome": "Scarpe Eleganti",
         "spells": {},
-        "ridCostoSpellSingola": {},
+        "Slot": "Stivali",
         "Effetto": "Attirano l'attenzione.",
         "prezzo": 1000,
         "requisiti": "",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Scarpe_Eleganti_1750279050320_scarpe_eleganti.png?alt=media&token=930c2024-aa09-45e9-b3b0-8e2ec928dfd7",
         "ridCostoTecSingola": {},
-        "Slot": "Stivali",
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Scarpe_Eleganti_1748638783216_scarpe_eleganti.png?alt=media&token=3d7ec67a-11f0-4ed4-861c-5e41c3e5ae67"
+        "ridCostoSpellSingola": {}
       }
     },
     "Scudo": {
@@ -5260,13 +5325,13 @@
       "General": {
         "Nome": "Stivali Blindati",
         "spells": {},
-        "ridCostoSpellSingola": {},
+        "Slot": "Stivali",
         "Effetto": "Pesanti.",
         "prezzo": 400,
         "requisiti": "",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Stivali_Blindati_1750279057189_stivali_blindati.png?alt=media&token=5c4710a3-08a3-4635-920d-c70c2cd5ca4e",
         "ridCostoTecSingola": {},
-        "Slot": "Stivali",
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Stivali_Blindati_1748638652021_stivali_blindati.png?alt=media&token=f979c7da-cc6a-4da0-a4ae-9021f738aaf4"
+        "ridCostoSpellSingola": {}
       }
     },
     "Stivali_di_Cuoio": {
@@ -5428,14 +5493,14 @@
       "item_type": "armatura",
       "General": {
         "Nome": "Stivali di Cuoio",
-        "spells": {},
+        "Slot": "Stivali",
         "ridCostoSpellSingola": {},
         "Effetto": "Comodi.",
         "prezzo": 150,
         "requisiti": "",
         "ridCostoTecSingola": {},
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Stivali_di_Cuoio_1748638396207_stivali_cuoio.png?alt=media&token=d9bc7a50-ddf0-410a-9038-029e9039e048",
-        "Slot": "Stivali"
+        "spells": {},
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Stivali_di_Cuoio_1750279063677_stivali_cuoio.png?alt=media&token=5aca616a-ac0d-4a36-b89e-9bc6ff2224b8"
       }
     },
     "Stocco": {
@@ -5747,6 +5812,175 @@
           },
           "Saggezza": {
             "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Forza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Destrezza": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Costituzione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          }
+        },
+        "Special": {
+          "Mira 1H": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Danno Critico": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "ridCostoTec": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira Ranged": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Danno": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Bonus Danno": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Bonus Danno Critico": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Mira 2H": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "4",
+            "7": "4",
+            "10": "4",
+            "1": "4"
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "4": "8",
+            "7": "12",
+            "10": "16",
+            "1": "4"
+          },
+          "RiduzioneDanni": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Difesa": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "4",
+            "7": "6",
+            "10": "8",
+            "1": "2"
+          }
+        }
+      },
+      "item_type": "armatura",
+      "Specific": {
+        "slotCintura": ""
+      },
+      "General": {
+        "Nome": "Tunica",
+        "spells": {},
+        "ridCostoSpellSingola": {},
+        "Effetto": "",
+        "prezzo": 3000,
+        "requisiti": "",
+        "ridCostoTecSingola": {},
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Tunica_1750280342353_tunica.png?alt=media&token=88714953-2b3d-4b4b-8f11-f5f6ff323d86",
+        "Slot": "Corpo"
+      }
+    },
+    "destino_test": {
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Intelligenza": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Saggezza": {
+            "4": "",
             "7": "",
             "10": "",
             "1": ""
@@ -5795,19 +6029,25 @@
             "10": "",
             "1": ""
           },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
           "Bonus Danno Critico": {
             "4": "",
             "7": "",
             "10": "",
             "1": ""
           },
-          "ridCostoSpell": {
-            "4": "4",
-            "7": "4",
-            "10": "4",
-            "1": "4"
-          },
           "Danno Critico": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
             "4": "",
             "7": "",
             "10": "",
@@ -5816,10 +6056,10 @@
         },
         "Combattimento": {
           "Disciplina": {
-            "4": "8",
-            "7": "12",
-            "10": "16",
-            "1": "4"
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
           },
           "Critico": {
             "4": "",
@@ -5839,7 +6079,7 @@
             "10": "",
             "1": ""
           },
-          "Attacco": {
+          "Salute": {
             "4": "",
             "7": "",
             "10": "",
@@ -5851,29 +6091,262 @@
             "10": "",
             "1": ""
           },
-          "Salute": {
-            "4": "4",
-            "7": "6",
-            "10": "8",
-            "1": "2"
+          "Attacco": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
           }
         }
       },
-      "item_type": "weapon",
       "Specific": {
-        "Hands": 1,
-        "Tipo": "Mischia"
+        "Cariche": 5
       },
+      "item_type": "accessorio",
       "General": {
-        "Nome": "Tunica",
-        "Slot": "Corpo",
-        "spells": {},
-        "Effetto": "",
-        "prezzo": 3000,
+        "Nome": "destino test",
+        "Slot": "Accessorio",
+        "ridCostoSpellSingola": {},
+        "Effetto": "anello di gio",
+        "prezzo": 999,
         "requisiti": "",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Faccessorio_destino_test_1748983952919_gio.png?alt=media&token=0b4bac70-ec1a-491b-b732-6f0ab76286f6",
         "ridCostoTecSingola": {},
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Tunica_1748625536376_tunica.png?alt=media&token=dc8ab199-d339-4bbd-a8df-ad761c80b9f7",
-        "ridCostoSpellSingola": {}
+        "spells": {
+          "Stasi Personale": {
+            "Turni": 0,
+            "video_url": "",
+            "Tipo Base": "Incantamento",
+            "Gittata": 10,
+            "TPC": {
+              "Param1": "---",
+              "Param2": "---",
+              "ParamTarget": "---"
+            },
+            "Esperienza": "Principiante",
+            "Mod Params": {
+              "Base": {
+                "Fortuna": 0,
+                "Intelligenza": 0,
+                "Saggezza": 0,
+                "Destrezza": 0,
+                "Forza": 0,
+                "Costituzione": 0
+              },
+              "Combattimento": {
+                "Difesa": 0,
+                "Disciplina": 0,
+                "Critico": 0,
+                "Attacco": 0,
+                "RiduzioneDanni": 0,
+                "Salute": 0
+              }
+            },
+            "Effetti Negativi": "",
+            "Azione": "",
+            "Nome": "Stasi Personale",
+            "Costo": 1,
+            "Effetti Positivi": "Quando vieni colpito da un attacco, puoi spendere 1 carica per creare una bolla di stasi temporale di 10 metri di raggio intorno a te, l\u2019attacco viene annullato, insieme a tutti i suoi effetti.",
+            "TPC Fisico": {
+              "Param1": "---",
+              "Param2": "---",
+              "ParamTarget": "---"
+            },
+            "TPC Mentale": {
+              "Param1": "---",
+              "Param2": "---",
+              "ParamTarget": "---"
+            },
+            "image_url": ""
+          },
+          "Fenditura Temporale": {
+            "Turni": 0,
+            "video_url": "",
+            "Tipo Base": "Incantamento",
+            "Gittata": 0,
+            "TPC": {
+              "Param1": "---",
+              "Param2": "---",
+              "ParamTarget": "---"
+            },
+            "Esperienza": "Principiante",
+            "Mod Params": {
+              "Base": {
+                "Fortuna": 0,
+                "Intelligenza": 0,
+                "Saggezza": 0,
+                "Destrezza": 0,
+                "Forza": 0,
+                "Costituzione": 0
+              },
+              "Combattimento": {
+                "Disciplina": 0,
+                "Critico": 10,
+                "RiduzioneDanni": 0,
+                "Difesa": 0,
+                "Attacco": 0,
+                "Mira": 10,
+                "Salute": 0
+              }
+            },
+            "Effetti Negativi": "",
+            "Azione": "",
+            "Nome": "Fenditura Temporale",
+            "Costo": 1,
+            "Effetti Positivi": "La tua prossima azione tattica in questo turno ottiene +10 mira e +10 critico.",
+            "TPC Fisico": {
+              "Param1": "---",
+              "Param2": "---",
+              "ParamTarget": "---"
+            },
+            "TPC Mentale": {
+              "Param1": "---",
+              "Param2": "---",
+              "ParamTarget": "---"
+            },
+            "image_url": ""
+          },
+          "Stasi Protettiva": {
+            "Turni": 0,
+            "video_url": "",
+            "Tipo Base": "Incantamento",
+            "Gittata": 10,
+            "TPC": {
+              "Param1": "---",
+              "Param2": "---",
+              "ParamTarget": "---"
+            },
+            "Esperienza": "Principiante",
+            "Mod Params": {
+              "Base": {
+                "Fortuna": 0,
+                "Intelligenza": 0,
+                "Saggezza": 0,
+                "Destrezza": 0,
+                "Forza": 0,
+                "Costituzione": 0
+              },
+              "Combattimento": {
+                "Difesa": 0,
+                "Disciplina": 0,
+                "Critico": 0,
+                "Attacco": 0,
+                "RiduzioneDanni": 0,
+                "Salute": 0
+              }
+            },
+            "Effetti Negativi": "",
+            "Azione": "",
+            "Nome": "Stasi Protettiva",
+            "Costo": 2,
+            "Effetti Positivi": "Se un alleato entro 10 metri sta per essere colpito da un attacco, puoi spendere 2 cariche per negarne completamente gli effetti, come se avesse \"spostato\" il bersaglio abbastanza da fargli schivare l'attacco.",
+            "TPC Fisico": {
+              "Param1": "---",
+              "Param2": "---",
+              "ParamTarget": "---"
+            },
+            "TPC Mentale": {
+              "Param1": "---",
+              "Param2": "---",
+              "ParamTarget": "---"
+            },
+            "image_url": ""
+          },
+          "Dominio del Tempo": {
+            "Turni": 50,
+            "video_url": "",
+            "Tipo Base": "Incantamento",
+            "Gittata": 50,
+            "TPC": {
+              "Param1": "---",
+              "Param2": "---",
+              "ParamTarget": "---"
+            },
+            "Esperienza": "Principiante",
+            "Mod Params": {
+              "Base": {
+                "Fortuna": 0,
+                "Intelligenza": 0,
+                "Saggezza": 0,
+                "Destrezza": 0,
+                "Forza": 0,
+                "Costituzione": 0
+              },
+              "Combattimento": {
+                "Disciplina": 0,
+                "Critico": 0,
+                "RiduzioneDanni": 0,
+                "Difesa": 0,
+                "Attacco": 0,
+                "Mira": 0,
+                "Salute": 0
+              }
+            },
+            "Effetti Negativi": "1 minuto di concentrazione",
+            "Azione": "",
+            "Nome": "Dominio del Tempo",
+            "Costo": 3,
+            "Effetti Positivi": "Puoi bloccare il tempo in un raggio di 50 metri per 5 minuti. All'interno della bolla, tutto rimane immobile, mentre il resto del mondo continua normalmente. Quando l\u2019effetto termina, il tempo nella zona congelata accelera rapidamente per \"recuperare\" il momento perso. Solo chi possiede una profonda conoscenza dell'arcano pu\u00f2 percepire la distorsione temporale. Oggetti e persone possono essere spostati (mantengono il loro normale peso) ma fintanto che l'effetto dell'anello \u00e8 attivo sono immuni ad ogni ferita, a meno che tu non spenda 1 carica per ferirli al meglio delle tue possibilit\u00e0",
+            "TPC Fisico": {
+              "Param1": "---",
+              "Param2": "---",
+              "ParamTarget": "---"
+            },
+            "TPC Mentale": {
+              "Param1": "---",
+              "Param2": "---",
+              "ParamTarget": "---"
+            },
+            "image_url": ""
+          },
+          "Resurrezione": {
+            "Turni": 0,
+            "video_url": "",
+            "Tipo Base": "Incantamento",
+            "Gittata": 0,
+            "TPC": {
+              "Param1": "---",
+              "Param2": "---",
+              "ParamTarget": "---"
+            },
+            "Esperienza": "Principiante",
+            "Mod Params": {
+              "Base": {
+                "Fortuna": 0,
+                "Intelligenza": 0,
+                "Saggezza": 0,
+                "Destrezza": 0,
+                "Forza": 0,
+                "Costituzione": 0
+              },
+              "Combattimento": {
+                "Disciplina": 0,
+                "Critico": 0,
+                "RiduzioneDanni": 0,
+                "Difesa": 0,
+                "Attacco": 0,
+                "Mira": 0,
+                "Salute": 0
+              }
+            },
+            "Effetti Negativi": "",
+            "Azione": "",
+            "Nome": "Resurrezione",
+            "Costo": 3,
+            "Effetti Positivi": "L'anello pu\u00f2 essere utilizzato per riportare in vita un essere vivente che ha perso la vita nelle ultime 24 ore. L'effetto si attiva automaticamente se il portatore perde la vita mentre l'anello ha almeno 3 cariche, in aggiunta teleportandolo nel punto in cui si trovava\u00a0a\u00a0mezzanotte.",
+            "TPC Fisico": {
+              "Param1": "---",
+              "Param2": "---",
+              "ParamTarget": "---"
+            },
+            "TPC Mentale": {
+              "Param1": "---",
+              "Param2": "---",
+              "ParamTarget": "---"
+            },
+            "image_url": ""
+          }
+        }
       }
     }
   },
@@ -6031,71 +6504,62 @@
       "imagePath": "characters/Nyx_TQAmmVfIpOeNiRflXKSeL1NX2ak2_1745838390356",
       "spells": {
         "Barriera Cosmica (benefica)": {
-          "Tipo Base": "Incantamento",
+          "Gittata": 0,
           "video_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fvideos%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__benefica__1742682281306_video?alt=media&token=84db6620-cdcd-49a7-8469-f41bf1c4a048",
-          "Costo": 19,
-          "Effetti Positivi": " 3d10 barriera , i tuoi sensi vengono amplificati e proiettati in una zona di  10 Metri di raggio intorno a te, + 2 difesa per i tuoi prossimi tre turni, chi ti attacca in mischia subisce 1d10 danno e se ha una massa inferiore a 300 kg viene respinto 6 metri indietro, castabile su te stesso o bersaglio alleato",
-          "TPC Mentale": {
-            "Param2": "---",
-            "Param1": "---",
-            "ParamTarget": "---"
-          },
+          "Tipo Base": "Incantamento",
+          "Turni": 3,
           "TPC": {
             "Param1": "---",
             "Param2": "---",
             "ParamTarget": "---"
           },
-          "Turni": 3,
-          "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__benefica__1742671660253_image?alt=media&token=1d4b399b-6fdc-4981-9e05-6635d384fd9f",
-          "TPC Fisico": {
-            "Param2": "Saggezza",
-            "Param1": "Intelligenza",
-            "ParamTarget": "Costituzione"
-          },
-          "Esperienza": "Principiante",
           "Mod Params": {
             "Base": {
               "Fortuna": 0,
               "Intelligenza": 0,
               "Saggezza": 0,
-              "Destrezza": 0,
               "Forza": 0,
+              "Destrezza": 0,
               "Costituzione": 0
             },
             "Combattimento": {
               "Difesa": 2,
               "Disciplina": 0,
-              "Critico": 0,
+              "RiduzioneDanni": 0,
               "Attacco": 0,
               "Salute": 0,
-              "RiduzioneDanni": 0
+              "Critico": 0
             }
           },
-          "Nome": "Barriera Cosmica (benefica)",
-          "Effetti Negativi": "Sei cieco e sordo al di l\u00e0 dei dieci metri per tutta la durata dell'incantesimo; l'incantesimo pu\u00f2 essere interrotto spendendo un' azione consumabile; utilizzare questo incantesimo se Barriera Cosmica Offensiva \u00e8 attiva causa il termine immediato di Barriera Cosmica Offensiva"
-        },
-        "Barriera Cosmica (offensiva)": {
-          "Turni": 3,
-          "Nome": "Barriera Cosmica (offensiva)",
-          "Costo": 19,
-          "Effetti Positivi": "3d10 danno, nel prossimo turno il bersaglio non pu\u00f2 utilizzare l'azione di movimento, Gittata dieci metri, -2 DIFESA per tre turni contro attacchi in mischia",
-          "TPC Mentale": {
-            "Param2": "Costituzione",
-            "Param1": "Costituzione",
-            "ParamTarget": "Costituzione"
-          },
-          "TPC": {
-            "Param1": "Intelligenza",
-            "Param2": "Saggezza",
-            "ParamTarget": "''"
-          },
-          "Tipo Base": "Congiurazione",
-          "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__offensiva__1742685004831_image?alt=media&token=f942ca87-b3b1-4a52-85e0-b1a2e127df4d",
+          "Esperienza": "Principiante",
+          "Effetti Negativi": "Sei cieco e sordo al di l\u00e0 dei dieci metri per tutta la durata dell'incantesimo; l'incantesimo pu\u00f2 essere interrotto spendendo un' azione consumabile; utilizzare questo incantesimo se Barriera Cosmica Offensiva \u00e8 attiva causa il termine immediato di Barriera Cosmica Offensiva",
           "TPC Fisico": {
             "Param2": "Saggezza",
             "Param1": "Intelligenza",
             "ParamTarget": "Costituzione"
           },
+          "Nome": "Barriera Cosmica (benefica)",
+          "Costo": 19,
+          "Effetti Positivi": " 3d10 barriera , i tuoi sensi vengono amplificati e proiettati in una zona di  10 Metri di raggio intorno a te, + 2 difesa per i tuoi prossimi tre turni, chi ti attacca in mischia subisce 1d10 danno e se ha una massa inferiore a 300 kg viene respinto 6 metri indietro, castabile su te stesso o bersaglio alleato",
+          "Azione": "",
+          "TPC Mentale": {
+            "Param1": "---",
+            "Param2": "---",
+            "ParamTarget": "---"
+          },
+          "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__benefica__1742671660253_image?alt=media&token=1d4b399b-6fdc-4981-9e05-6635d384fd9f"
+        },
+        "Barriera Cosmica (offensiva)": {
+          "Turni": 3,
+          "video_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fvideos%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__offensiva__1742685004831_video?alt=media&token=36a3a79e-ac7c-4155-8dfc-2107d179261b",
+          "Tipo Base": "Congiurazione",
+          "Gittata": 0,
+          "TPC": {
+            "Param1": "Intelligenza",
+            "Param2": "Saggezza",
+            "ParamTarget": "''"
+          },
+          "Esperienza": "Principiante",
           "Mod Params": {
             "Base": {
               "Fortuna": 0,
@@ -6109,14 +6573,27 @@
               "Difesa": 0,
               "Disciplina": 0,
               "Critico": 0,
-              "Attacco": 0,
               "Salute": 0,
+              "Attacco": 0,
               "RiduzioneDanni": 0
             }
           },
-          "Esperienza": "Principiante",
-          "video_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fvideos%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__offensiva__1742685004831_video?alt=media&token=36a3a79e-ac7c-4155-8dfc-2107d179261b",
-          "Effetti Negativi": "il bersaglio ottiene +2 DIFESA  contro attacchi a distanza o (+2/int o sag) incantesimi lanciati da almeno 15 feet di distanza utilizzare questo incantesimo se Barriera Cosmica Difensiva \u00e8 attiva causa il termine immediato di Barriera Cosmica Difensiva"
+          "Effetti Negativi": "il bersaglio ottiene +2 DIFESA  contro attacchi a distanza o (+2/int o sag) incantesimi lanciati da almeno 15 feet di distanza utilizzare questo incantesimo se Barriera Cosmica Difensiva \u00e8 attiva causa il termine immediato di Barriera Cosmica Difensiva",
+          "Azione": "",
+          "Nome": "Barriera Cosmica (offensiva)",
+          "Costo": 19,
+          "Effetti Positivi": "3d10 danno, nel prossimo turno il bersaglio non pu\u00f2 utilizzare l'azione di movimento, Gittata dieci metri, -2 DIFESA per tre turni contro attacchi in mischia",
+          "TPC Fisico": {
+            "Param1": "Intelligenza",
+            "Param2": "Saggezza",
+            "ParamTarget": "Costituzione"
+          },
+          "TPC Mentale": {
+            "Param2": "Costituzione",
+            "Param1": "Costituzione",
+            "ParamTarget": "Costituzione"
+          },
+          "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/spells%2Fspell_TQAmmVfIpOeNiRflXKSeL1NX2ak2_Barriera_Cosmica__offensiva__1742685004831_image?alt=media&token=f942ca87-b3b1-4a52-85e0-b1a2e127df4d"
         }
       },
       "flags": {
@@ -6240,6 +6717,56 @@
             "1": 0
           }
         },
+        "Special": {
+          "ridCostoTec": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Bonus Danno": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Danno": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Penetrazione": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Bonus Danno Critico": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "ridCostoSpell": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          },
+          "Danno Critico": {
+            "4": "",
+            "10": "",
+            "7": "",
+            "1": ""
+          },
+          "Riduzione Dado Effetto Critico": {
+            "4": 0,
+            "10": 0,
+            "7": 0,
+            "1": 0
+          }
+        },
         "Combattimento": {
           "Disciplina": {
             "4": 0,
@@ -6285,77 +6812,27 @@
           }
         }
       },
-      "ridCostoTec": {
-        "4": 0,
-        "10": 0,
-        "7": 0,
-        "1": 0
+      "Specific": {
+        "Cariche": 0
       },
-      "Bonus Danno": {
-        "4": 0,
-        "10": 0,
-        "7": 0,
-        "1": 0
-      },
-      "Effetto": "Descrizione dell'effetto.",
-      "Hands": [
-        1,
-        2,
-        "-"
-      ],
-      "requisiti": "",
-      "Penetrazione": {
-        "4": 0,
-        "10": 0,
-        "7": 0,
-        "1": 0
-      },
-      "ridCostoSpell": {
-        "4": 0,
-        "10": 0,
-        "7": 0,
-        "1": 0
-      },
-      "Tipo": [
-        "Mischia",
-        "Distanza",
-        "-"
-      ],
-      "Danno Critico": {
-        "4": "1d6",
-        "10": "1d6",
-        "7": "1d6",
-        "1": "1d6"
-      },
-      "Nome": "Nome Arma",
-      "Slot": [
-        "Mano Principale",
-        "Mano Secondaria",
-        "Testa",
-        "Corpo",
-        "Cintura",
-        "Fodero",
-        "Stivali",
-        "Accessorio",
-        "Consumabile",
-        "Consumabile Grande",
-        "-"
-      ],
-      "Danno": {
-        "4": "1d4",
-        "10": "1d4",
-        "7": "1d4",
-        "1": "1d4"
-      },
-      "prezzo": 0,
-      "image_url": "",
-      "Bonus Danno Critico": {
-        "4": 0,
-        "10": 0,
-        "7": 0,
-        "1": 0
-      },
-      "slotCintura": 0
+      "General": {
+        "Nome": "",
+        "ridCostoSpellSingola": {
+          "nome_spell": 0
+        },
+        "spells": {},
+        "Effetto": "",
+        "prezzo": 0,
+        "requisiti": "",
+        "image_url": "",
+        "ridCostoTecSingola": {
+          "nomeTecnica": 0
+        },
+        "Slot": [
+          "Accessorio",
+          "-"
+        ]
+      }
     },
     "schema_ammo": {
       "Parametri": {
@@ -6837,9 +7314,6 @@
           "Cintura",
           "Fodero",
           "Stivali",
-          "Accessorio",
-          "Consumabile",
-          "Consumabile Grande",
           "-"
         ]
       }
@@ -7151,17 +7625,18 @@
       "username": "username"
     },
     "schema_spell": {
+      "Gittata": 0,
+      "video_url": "",
+      "Turni": 0,
       "Tipo Base": [
         "Incantamento",
         "Evocazione",
         "Congiurazione",
         "Maledizione",
         "Utility Minore",
-        "Utility Maggiore"
+        "Utility Maggiore",
+        "---"
       ],
-      "video_url": "",
-      "Turni": 0,
-      "Gittata": 0,
       "TPC": {
         "Param1": [
           "Costituzione",
@@ -7200,18 +7675,20 @@
           "Costituzione": 0
         },
         "Combattimento": {
-          "Difesa": 0,
           "Disciplina": 0,
           "Critico": 0,
-          "Attacco": 0,
           "RiduzioneDanni": 0,
+          "Difesa": 0,
+          "Attacco": 0,
+          "Mira": 0,
           "Salute": 0
         }
       },
       "Esperienza": [
         "Principiante",
         "Esperto",
-        "Maestro"
+        "Maestro",
+        "---"
       ],
       "Effetti Negativi": "",
       "TPC Fisico": {
@@ -7275,7 +7752,14 @@
           "---"
         ]
       },
-      "image_url": ""
+      "image_url": "",
+      "azione": [
+        "Tattica",
+        "Consumabile",
+        "Movimento",
+        "Comunicazione",
+        "---"
+      ]
     },
     "schema_tecnica": {
       "Azione": [
