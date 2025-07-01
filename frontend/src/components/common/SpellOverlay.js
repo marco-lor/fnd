@@ -31,6 +31,9 @@ export function SpellOverlay({
   const [videoFile, setVideoFile] = useState(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  // Track when media has been explicitly removed
+  const [imageRemoved, setImageRemoved] = useState(false);
+  const [videoRemoved, setVideoRemoved] = useState(false);
   /* ---------------- helpers ---------------- */
   // Use useCallback to memoize buildEmptySpell if schema structure is stable
    const buildEmptySpell = useCallback((s) => ({
@@ -67,6 +70,9 @@ export function SpellOverlay({
      setImagePreviewUrl(initialData?.image_url || null); // Show existing image URL if in edit mode
      setVideoFile(null);
      setVideoPreviewUrl(initialData?.video_url || null); // Show existing video URL if in edit mode
+     // Reset removal flags when initialData changes
+     setImageRemoved(false);
+     setVideoRemoved(false);
 
       // Cleanup URLs on component unmount or before setting new ones
      return () => {
@@ -122,9 +128,11 @@ export function SpellOverlay({
      if (isImg) {
        setImageFile(file);
        setImagePreviewUrl(newPreviewUrl);
+       setImageRemoved(false); // Reset removal flag when new file is selected
      } else {
        setVideoFile(file);
        setVideoPreviewUrl(newPreviewUrl);
+       setVideoRemoved(false); // Reset removal flag when new file is selected
      }
    };
 
@@ -164,17 +172,17 @@ export function SpellOverlay({
        });
      }
 
-     // Include existing URLs if in edit mode and files haven't changed
-      if (mode === 'edit' && initialData?.image_url && !imageFile) {
+     // Include existing URLs if in edit mode and files haven't changed and haven't been explicitly removed
+      if (mode === 'edit' && initialData?.image_url && !imageFile && !imageRemoved) {
           cleaned.image_url = initialData.image_url;
       }
-      if (mode === 'edit' && initialData?.video_url && !videoFile) {
+      if (mode === 'edit' && initialData?.video_url && !videoFile && !videoRemoved) {
           cleaned.video_url = initialData.video_url;
       }
 
 
      return cleaned;
-   }, [spellFormData, mode, initialData, imageFile, videoFile]); // Dependencies for cleanSpell
+   }, [spellFormData, mode, initialData, imageFile, videoFile, imageRemoved, videoRemoved]); // Dependencies for cleanSpell
 
   const initiateSave = (e) => {
     e.preventDefault();
@@ -340,7 +348,16 @@ export function SpellOverlay({
              <div className="mt-2 relative w-24 h-24">
                 <img src={imagePreviewUrl} alt="Preview" className="w-full h-full object-cover rounded border border-gray-600" />
                  {/* Add a clear button */}
-                  <button type="button" onClick={() => { if (imagePreviewUrl?.startsWith('blob:')) URL.revokeObjectURL(imagePreviewUrl); setImageFile(null); setImagePreviewUrl(initialData?.image_url || null); }} className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center -mt-1 -mr-1">&times;</button>
+                  <button type="button" onClick={() => { 
+                    // Only revoke blob URLs to prevent memory leaks
+                    if (imagePreviewUrl?.startsWith('blob:')) {
+                      URL.revokeObjectURL(imagePreviewUrl); 
+                    }
+                    // Always clear the state regardless of URL type
+                    setImageFile(null); 
+                    setImagePreviewUrl(null);
+                    setImageRemoved(true); // Mark as explicitly removed
+                  }} className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center -mt-1 -mr-1">&times;</button>
               </div>
            )}
            {!imagePreviewUrl && <div className="mt-2 w-24 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">No Image</div>}
@@ -355,7 +372,16 @@ export function SpellOverlay({
              <div className="mt-2 relative max-w-xs">
                 <video src={videoPreviewUrl} controls className="w-full max-h-48 rounded border border-gray-600" />
                 {/* Add a clear button */}
-                <button type="button" onClick={() => { if (videoPreviewUrl?.startsWith('blob:')) URL.revokeObjectURL(videoPreviewUrl); setVideoFile(null); setVideoPreviewUrl(initialData?.video_url || null); }} className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center -mt-1 -mr-1">&times;</button>
+                <button type="button" onClick={() => { 
+                  // Only revoke blob URLs to prevent memory leaks
+                  if (videoPreviewUrl?.startsWith('blob:')) {
+                    URL.revokeObjectURL(videoPreviewUrl); 
+                  }
+                  // Always clear the state regardless of URL type
+                  setVideoFile(null); 
+                  setVideoPreviewUrl(null);
+                  setVideoRemoved(true); // Mark as explicitly removed
+                }} className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center -mt-1 -mr-1">&times;</button>
               </div>
             )}
             {!videoPreviewUrl && <div className="mt-2 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">No Video</div>}
