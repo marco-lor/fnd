@@ -1,5 +1,5 @@
 // file: ./frontend/src/components/bazaar/Bazaar.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import InteractiveBackground from '../backgrounds/InteractiveBackground';
 import { collection, onSnapshot } from "firebase/firestore";
@@ -341,12 +341,14 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = () => {
-      closeAllDropdowns();
+      if (Object.values(dropdownOpen).some(open => open)) {
+        closeAllDropdowns();
+      }
     };
 
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
-  }, []);
+  }, [dropdownOpen]);
 
   const handleHoverItem = (item) => {
     if (!lockedItem) {
@@ -449,13 +451,13 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
     return nameA.localeCompare(nameB);
   });
 
-  const displayConfirmation = (message, type = "success") => {
+  const displayConfirmation = useCallback((message, type = "success") => {
     setConfirmationMessage(message);
     setShowConfirmation(true);
     setTimeout(() => {
       setShowConfirmation(false);
     }, 2500);
-  };
+  }, []);
 
   const handlePurchase = (item) => {
     displayConfirmation(`"${item.General?.Nome || 'Oggetto'}" Acquistato!`);
