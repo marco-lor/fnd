@@ -1,5 +1,5 @@
 // file: ./frontend/src/components/bazaar/Bazaar.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import InteractiveBackground from '../backgrounds/InteractiveBackground';
 import { collection, onSnapshot } from "firebase/firestore";
@@ -76,7 +76,17 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   const [selectedItemType, setSelectedItemType] = useState(['All']);  const [selectedCombatParams, setSelectedCombatParams] = useState(['All']);
   const [selectedBaseParams, setSelectedBaseParams] = useState(['All']);
   const [hoveredItem, setHoveredItem] = useState(null);
-  const [lockedItem, setLockedItem] = useState(null);  const [showOverlay, setShowOverlay] = useState(false);
+  const [lockedItem, setLockedItem] = useState(null);
+
+  // Dropdown visibility states
+  const [dropdownOpen, setDropdownOpen] = useState({
+    itemType: false,
+    slot: false,
+    hands: false,
+    tipo: false,
+    combatParams: false,
+    baseParams: false
+  });const [showOverlay, setShowOverlay] = useState(false);
   const [showArmaturaOverlay, setShowArmaturaOverlay] = useState(false);
   const [showAccessorioOverlay, setShowAccessorioOverlay] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
@@ -185,12 +195,160 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
     console.log('Current selected:', selectedCombatParams);
     toggleFilter(selectedCombatParams, setSelectedCombatParams, param);
   };
-  
-  const handleToggleBaseParam = (param) => {
+    const handleToggleBaseParam = (param) => {
     console.log('Toggling base param:', param);
     console.log('Current selected:', selectedBaseParams);
     toggleFilter(selectedBaseParams, setSelectedBaseParams, param);
   };
+
+  // Dropdown management functions
+  const toggleDropdown = (dropdownName) => {
+    setDropdownOpen(prev => ({
+      ...prev,
+      [dropdownName]: !prev[dropdownName]
+    }));
+  };
+
+  const closeAllDropdowns = () => {
+    setDropdownOpen({
+      itemType: false,
+      slot: false,
+      hands: false,
+      tipo: false,
+      combatParams: false,
+      baseParams: false
+    });
+  };
+
+  // Filter dropdown component
+  const FilterDropdown = ({ 
+    label, 
+    options, 
+    selectedOptions, 
+    onToggle, 
+    dropdownKey, 
+    icon = null, 
+    colorScheme = 'blue',
+    isSmall = false 
+  }) => {
+    const selectedFilters = selectedOptions.filter(opt => opt !== 'All');
+    const unselectedOptions = options.filter(opt => !selectedOptions.includes(opt) && opt !== 'All');
+    const isOpen = dropdownOpen[dropdownKey];
+    
+    const colorClasses = {
+      blue: {
+        selected: 'bg-blue-600/80 border-blue-400 text-white shadow-lg shadow-blue-500/20',
+        dropdown: 'bg-blue-600 border-blue-500 text-white hover:bg-blue-700',
+        badge: 'bg-blue-500/20 text-blue-300'
+      },
+      orange: {
+        selected: 'bg-orange-600/80 border-orange-400 text-white shadow-lg shadow-orange-500/20',
+        dropdown: 'bg-orange-600 border-orange-500 text-white hover:bg-orange-700',
+        badge: 'bg-orange-500/20 text-orange-300'
+      },
+      green: {
+        selected: 'bg-green-600/80 border-green-400 text-white shadow-lg shadow-green-500/20',
+        dropdown: 'bg-green-600 border-green-500 text-white hover:bg-green-700',
+        badge: 'bg-green-500/20 text-green-300'
+      }
+    };
+
+    const colors = colorClasses[colorScheme];
+    const textSize = isSmall ? 'text-xs' : 'text-sm';
+    const padding = isSmall ? 'px-2 py-1' : 'px-3 py-2';
+
+    return (
+      <div className="relative">
+        <div className="flex items-center justify-between mb-2">
+          <label className={`text-white font-medium ${textSize} flex items-center gap-2`}>
+            {icon && <span>{icon}</span>}
+            {label}
+          </label>
+          {selectedFilters.length > 0 && (
+            <span className={`text-xs ${colors.badge} px-2 py-1 rounded-full`}>
+              {selectedFilters.length} attivi
+            </span>
+          )}
+        </div>
+
+        {/* Selected filters as chips */}
+        {selectedFilters.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-2">
+            {selectedFilters.map((filter) => (
+              <button
+                key={`selected-${filter}`}
+                onClick={() => onToggle(filter)}
+                className={`${padding} ${textSize} rounded-md border transition-all duration-200 ${colors.selected} hover:opacity-80`}
+              >
+                {filter} ✕
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Dropdown for unselected options */}
+        {unselectedOptions.length > 0 && (
+          <div className="relative">
+            <button
+              onClick={() => toggleDropdown(dropdownKey)}
+              className={`w-full ${padding} ${textSize} bg-gray-700/50 border border-gray-600/50 text-gray-300 hover:bg-gray-600/70 hover:text-white rounded-md transition-all duration-200 flex items-center justify-between`}
+            >
+              <span>Aggiungi filtro...</span>
+              <span className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}>
+                ▼
+              </span>
+            </button>
+
+            <AnimatePresence>
+              {isOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                  transition={{ duration: 0.2 }}
+                  className="absolute top-full left-0 right-0 z-50 mt-1 bg-gray-800 border border-gray-600 rounded-md shadow-xl max-h-40 overflow-y-auto"
+                >
+                  {unselectedOptions.map((option) => (
+                    <button
+                      key={`dropdown-${option}`}
+                      onClick={() => {
+                        onToggle(option);
+                        closeAllDropdowns();
+                      }}
+                      className={`w-full ${padding} ${textSize} text-left hover:bg-gray-700 text-gray-300 hover:text-white transition-colors border-b border-gray-700 last:border-b-0`}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+
+        {/* "All" option when no specific filters are selected */}
+        {selectedFilters.length === 0 && (
+          <button
+            onClick={() => onToggle('All')}
+            className={`w-full ${padding} ${textSize} rounded-md border transition-all duration-200 text-left bg-gray-600/80 border-gray-500 text-gray-200`}
+          >
+            Tutti ({label})
+          </button>
+        )}
+      </div>
+    );  };
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => {
+      if (Object.values(dropdownOpen).some(open => open)) {
+        closeAllDropdowns();
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [dropdownOpen]);
 
   const handleHoverItem = (item) => {
     if (!lockedItem) {
@@ -293,13 +451,13 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
     return nameA.localeCompare(nameB);
   });
 
-  const displayConfirmation = (message, type = "success") => {
+  const displayConfirmation = useCallback((message, type = "success") => {
     setConfirmationMessage(message);
     setShowConfirmation(true);
     setTimeout(() => {
       setShowConfirmation(false);
     }, 2500);
-  };
+  }, []);
 
   const handlePurchase = (item) => {
     displayConfirmation(`"${item.General?.Nome || 'Oggetto'}" Acquistato!`);
@@ -327,11 +485,17 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
 
       {/* Main content area using CSS Grid */}
       {/* Grid columns: Filters (dynamic), Item List (700px), Comparison Panel Area (450px) */}
-      <div className="relative z-10 grid grid-cols-[10%_60%_30%] flex-grow items-start">        {/* Filters Panel (Column 1) */}
-        {/* Width is controlled by grid-cols definition */}        <div className="sticky top-0 p-4 overflow-y-auto h-screen">
-          {/* Reset Filters Button */}
-          <div className="mb-4">
-            <button
+      <div className="relative z-10 grid grid-cols-[15%_55%_30%] flex-grow items-start">        {/* Filters Panel (Column 1) */}
+        <div 
+          className="sticky top-0 p-3 overflow-y-auto h-screen bg-gradient-to-b from-gray-900/95 to-gray-800/95 backdrop-blur-sm border-r border-gray-700/50"
+          onClick={(e) => e.stopPropagation()} // Prevent dropdown close when clicking inside
+        >
+          {/* Header */}
+          <div className="mb-6">
+            <h2 className="text-xl font-bold text-white mb-3 flex items-center gap-2">
+              <span className="text-blue-400">⚙️</span>
+              Filtri
+            </h2>            <button
               onClick={() => {
                 setSelectedSlot(['All']);
                 setSelectedHands(['All']);
@@ -340,6 +504,7 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
                 setSelectedCombatParams(['All']);
                 setSelectedBaseParams(['All']);
                 setSearchTerm('');
+                closeAllDropdowns();
               }}
               className="w-full px-2 py-1 text-xs bg-gray-600 hover:bg-gray-500 text-gray-300 hover:text-white rounded border border-gray-500 transition-colors"
             >
@@ -347,97 +512,98 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
             </button>
           </div>
 
-          <div className="mb-6">
-            <p className="text-white font-bold mb-2">Item Type:</p>
-            <div className="flex flex-wrap gap-2">
-              {itemTypes.map((itemType) => (
-                <button
-                  key={`itemType-${itemType}`}
-                  onClick={() => handleToggleItemType(itemType)}
-                   className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${selectedItemType.includes(itemType) ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600 hover:text-white'}`}
-                >
-                  {itemType || 'N/A'}
-                </button>
-              ))}
+          {/* Basic Filters Section */}
+          <div className="mb-6 bg-gray-800/50 rounded-lg p-4 border border-gray-600/30">
+            <h3 className="text-lg font-semibold text-blue-300 mb-4 flex items-center gap-2">
+              <span className="w-2 h-2 bg-blue-400 rounded-full"></span>
+              Filtri Base
+            </h3>
+            
+            {/* Item Type Filter */}
+            <div className="mb-4">
+              <FilterDropdown
+                label="Tipo Oggetto"
+                options={itemTypes}
+                selectedOptions={selectedItemType}
+                onToggle={handleToggleItemType}
+                dropdownKey="itemType"
+                colorScheme="blue"
+              />
             </div>
-          </div>          <div className="mb-6">
-            <p className="text-white font-bold mb-2">
-              Combat Params (Sort)
-              {!selectedCombatParams.includes('All') && selectedCombatParams.length > 0 && (
-                <span className="ml-2 text-orange-400 text-sm">● ACTIVE</span>
-              )}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {combatParams.map((param) => (
-                <button
-                  key={`combatParam-${param}`}
-                  onClick={() => handleToggleCombatParam(param)}
-                   className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${selectedCombatParams.includes(param) ? 'bg-orange-600 border-orange-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600 hover:text-white'}`}
-                >
-                  {param}
-                </button>
-              ))}
+
+            {/* Slot Filter */}
+            <div className="mb-4">
+              <FilterDropdown
+                label="Slot"
+                options={slots}
+                selectedOptions={selectedSlot}
+                onToggle={handleToggleSlot}
+                dropdownKey="slot"
+                colorScheme="blue"
+              />
             </div>
-          </div>
-          <div className="mb-6">
-            <p className="text-white font-bold mb-2">
-              Base Params (Sort)
-              {!selectedBaseParams.includes('All') && selectedBaseParams.length > 0 && (
-                <span className="ml-2 text-green-400 text-sm">● ACTIVE</span>
-              )}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {baseParams.map((param) => (
-                <button
-                  key={`baseParam-${param}`}
-                  onClick={() => handleToggleBaseParam(param)}
-                   className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${selectedBaseParams.includes(param) ? 'bg-green-600 border-green-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600 hover:text-white'}`}
-                >
-                  {param}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="mb-6">
-            <p className="text-white font-bold mb-2">Slot:</p>
-            <div className="flex flex-wrap gap-2">
-              {slots.map((slot) => (
-                <button
-                  key={`slot-${slot}`}
-                  onClick={() => handleToggleSlot(slot)}
-                   className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${selectedSlot.includes(slot) ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600 hover:text-white'}`}
-                >
-                  {slot || 'N/A'}
-                </button>
-              ))}
+
+            {/* Hands and Tipo in a row */}
+            <div className="grid grid-cols-2 gap-3">
+              {/* Hands Filter */}
+              <div>
+                <FilterDropdown
+                  label="Mani"
+                  options={hands}
+                  selectedOptions={selectedHands}
+                  onToggle={handleToggleHands}
+                  dropdownKey="hands"
+                  colorScheme="blue"
+                  isSmall={true}
+                />
+              </div>
+
+              {/* Tipo Filter */}
+              <div>
+                <FilterDropdown
+                  label="Tipo"
+                  options={tipos}
+                  selectedOptions={selectedTipo}
+                  onToggle={handleToggleTipo}
+                  dropdownKey="tipo"
+                  colorScheme="blue"
+                  isSmall={true}
+                />
+              </div>
             </div>
           </div>
-          <div className="mb-6">
-            <p className="text-white font-bold mb-2">Hands:</p>
-            <div className="flex flex-wrap gap-2">
-              {hands.map((hand) => (
-                <button
-                  key={`hand-${hand}`}
-                  onClick={() => handleToggleHands(hand)}
-                   className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${selectedHands.includes(hand) ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600 hover:text-white'}`}
-                >
-                  {hand}
-                </button>
-              ))}
+
+          {/* Sorting Parameters Section */}
+          <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-600/30">
+            <h3 className="text-lg font-semibold text-orange-300 mb-4 flex items-center gap-2">
+              <span className="w-2 h-2 bg-orange-400 rounded-full"></span>
+              Ordinamento Parametri
+            </h3>
+            
+            {/* Combat Parameters */}
+            <div className="mb-4">
+              <FilterDropdown
+                label="Combattimento"
+                options={combatParams}
+                selectedOptions={selectedCombatParams}
+                onToggle={handleToggleCombatParam}
+                dropdownKey="combatParams"
+                icon="⚔️"
+                colorScheme="orange"
+              />
             </div>
-          </div>
-          <div>
-            <p className="text-white font-bold mb-2">Tipo:</p>
-            <div className="flex flex-wrap gap-2">
-              {tipos.map((tipo) => (
-                <button
-                  key={`tipo-${tipo}`}
-                  onClick={() => handleToggleTipo(tipo)}
-                   className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${selectedTipo.includes(tipo) ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600 hover:text-white'}`}
-                >
-                  {tipo}
-                </button>
-              ))}
+
+            {/* Base Parameters */}
+            <div>
+              <FilterDropdown
+                label="Base"
+                options={baseParams}
+                selectedOptions={selectedBaseParams}
+                onToggle={handleToggleBaseParam}
+                dropdownKey="baseParams"
+                icon="📊"
+                colorScheme="green"
+              />
             </div>
           </div>
         </div>{/* Items List Panel (Column 2) */}
