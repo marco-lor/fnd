@@ -226,12 +226,6 @@ SCHEMA_ACCESSORIO_DATA = {
     "General": {
         "Nome": "Nome Armatura",
         "Slot": [
-            "Testa", 
-            "Corpo", 
-            "Cintura", 
-            "Fodero", 
-            "Stivali", 
-            "Accessorio", 
             "Consumabile", 
             "Consumabile Grande", 
             "-"
@@ -245,7 +239,17 @@ SCHEMA_ACCESSORIO_DATA = {
         "image_url": ""
     },
     "Specific": {
-        "slotCintura": 0
+        "slotCinturaOccupati": 0,
+        "stackable": True,
+        "maxStack": 1,
+        "effects": [
+            {
+              "type": ["one-shot", "temporary", "permanent"],
+              "target": ["stats.hpCurrent", "Parametri.Base.Forza.Base", "Parametri.Combattimento.Attacco.Mod"],
+              "effect": "+2d8",
+              "duration_turns": 0 # only for temporary effects
+            }
+        ]
     },
     "Parametri": {
         "Base": {
@@ -280,6 +284,7 @@ SCHEMA_ACCESSORIO_DATA = {
         }
     }
 }
+
 
 SCHEMA_WEAPON_DATA = {
     "General": {
@@ -326,6 +331,71 @@ SCHEMA_WEAPON_DATA = {
       }
     }
   }
+SCHEMA_CONSUMABILI_DATA = {
+    "General": {
+        "Nome": "Nome Consumabile",
+        "Slot": [
+            "Consumabile",
+            "Consumabile Grande",
+            "-"
+        ],
+        "Effetto": "Descrizione dell'effetto.",
+        "requisiti": "",
+        "ridCostoTecSingola": {"nomeTecnica": 0},
+        "ridCostoSpellSingola": {"nome_spell": 0},
+        "spells": {},
+        "prezzo": 0,
+        "image_url": ""
+    },
+    "Specific": {
+        "slotCinturaOccupati": 0,
+        "Utilizzi": ["Ingestione", "Copertura Armi", "Accensione e Detonazione", "Contatto su Pelle"], # anche più di uno
+        "type": ["one-shot", "temporary", "permanent"], # selezione unica
+        "duration_turns": 0,  # only for temporary effects
+        "stackable": True,
+        "maxStack": 1,
+        "Bonus Creazione": 0, # generalmente INT + SAG del creatore
+        "Parametro Prova Ambientale": "",  # selezione unica
+    },
+    "Parametri": {
+        "Base": {
+            "Fortuna":       {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Intelligenza":  {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Saggezza":      {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Forza":         {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Destrezza":     {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Costituzione":  {"1": 0, "4": 0, "7": 0, "10": 0}
+        },
+        "Combattimento": {
+            "Disciplina":     {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Critico":        {"1": 0, "4": 0, "7": 0, "10": 0},
+            "RiduzioneDanni": {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Difesa":         {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Salute":         {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Mira":           {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Attacco":        {"1": 0, "4": 0, "7": 0, "10": 0}
+        },
+        "Special": {
+            "ridCostoTec":                   {"1": 0, "4": 0, "7": 0, "10": 0},
+            "ridCostoSpell":                 {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Bonus Danno":                   {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Bonus Danno Critico":           {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Penetrazione":                  {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Mira 1H":                       {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Mira 2H":                       {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Mira Ranged":                   {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Riduzione Dado Effetto Critico": {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Danno":                         {"1": "", "4": "", "7": "", "10": ""},
+            "Danno Critico":                 {"1": "", "4": "", "7": "", "10": ""},
+            "Tipo Danno":                    ["Fisico", "Magico", "Energia", "Acido", "Fuoco",
+                                              "Freddo", "Fulmine", "Veleno"], # anche più di uno
+            "Prova Ambientale":              {"1": 0, "4": 0, "7": 0, "10": 0},
+
+            "Rigenera Dado Anima HP":        {"1": 0, "4": 0, "7": 0, "10": 0},
+            "Rigenera Dado Anima Mana":      {"1": 0, "4": 0, "7": 0, "10": 0},
+        }
+    }
+}
 
 def copy_schema_armatura() -> dict:
     """
@@ -375,6 +445,22 @@ def copy_schema_accessorio() -> dict:
         print(f"Errore durante la copia di schema_accessorio: {exc}")
         return {"status": "error", "message": str(exc)}
 
+def copy_schema_consumabili() -> dict:
+    """
+    Write the SCHEMA_CONSUMABILI_DATA to the document 'utils/schema_consumabili'.
+    Returns a status dictionary.
+    """
+    try:
+        doc_ref = db.document("utils/schema_consumabili")
+        doc_ref.set(SCHEMA_CONSUMABILI_DATA)   # full overwrite
+        return {
+            "status":  "success",
+            "message": "schema_consumabili copied to Firestore at utils/schema_consumabili",
+        }
+    except Exception as exc:
+        print(f"Errore durante la copia di schema_consumabili: {exc}")
+        return {"status": "error", "message": str(exc)}
+
 # ---------------------------------------------------------------------------
 #  ✅ Endpoint wired to the SAME path used previously by the Codex copier
 # ---------------------------------------------------------------------------
@@ -394,13 +480,21 @@ def copy_schema_weapon_endpoint():
     """
     return copy_schema_weapon()
 
-@app.get("/test-endpoint")
+# @app.get("/test-endpoint")
 def copy_schema_accessorio_endpoint():
     """
     Front-end button hits /test-endpoint.
-    It now copies SCHEMA_WEAPON_DATA into 'utils/schema_weapon'.
+    It now copies SCHEMA_ACCESSORIO_DATA into 'utils/schema_accessorio'.
     """
     return copy_schema_accessorio()
+
+@app.get("/test-endpoint")
+def copy_schema_consumabile_endpoint():
+    """
+    Front-end button hits /test-endpoint.
+    It now copies SCHEMA_CONSUMABILI_DATA into 'utils/schema_consumabili'.
+    """
+    return copy_schema_consumabili()
 
 # ---------------------------------------------------------------------------
 #  Bulk operations – existing public endpoints (unchanged)
