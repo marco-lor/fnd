@@ -350,10 +350,10 @@ SCHEMA_CONSUMABILI_DATA = {
     "Specific": {
         "slotCinturaOccupati": 0,
         "Utilizzi": ["Ingestione", "Copertura Armi", "Accensione e Detonazione", "Contatto su Pelle"], # anche più di uno
-        "type": ["one-shot", "temporary", "permanent"], # selezione unica
+        "type": ["Uso Singolo", "Effetto Temporaneo", "Effetto Permanente"], # selezione unica
         "duration_turns": 0,  # only for temporary effects
         "stackable": True,
-        "maxStack": 1,
+        "maxStack": 2,
         "Bonus Creazione": 0, # generalmente INT + SAG del creatore
         "Parametro Prova Ambientale": "",  # selezione unica
     },
