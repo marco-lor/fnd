@@ -9,6 +9,7 @@ import { SpellOverlay } from '../../common/SpellOverlay';
 import { AddSpellButton } from '../../dmDashboard/elements/buttons/addSpell';
 import { FaTrash, FaEdit } from 'react-icons/fa';
 import { computeValue } from '../../common/computeFormula';
+import { MultiSelect } from '../../common/MultiSelect';
 
 export function AddConsumabileOverlay({ onClose, showMessage, initialData = null, editMode = false }) {
     const [consumabileFormData, setConsumabileFormData] = useState({});
@@ -516,19 +517,11 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
                                 return (
                                     <div key={fieldKey}>
                                         <label className="block text-white mb-1 capitalize">{fieldKey}</label>
-                                        <select
-                                            multiple
-                                            value={selectedVals}
-                                            onChange={(e) => {
-                                                const selected = Array.from(e.target.selectedOptions, opt => opt.value);
-                                                handleNestedChange(`Specific.${fieldKey}`, selected);
-                                            }}
-                                            className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 h-32"
-                                        >
-                                            {schemaValue.map(option => (
-                                                <option key={option} value={option}>{option}</option>
-                                            ))}
-                                        </select>
+                                        <MultiSelect
+                                            options={schemaValue}
+                                            selected={selectedVals}
+                                            onChange={(selected) => handleNestedChange(`Specific.${fieldKey}`, selected)}
+                                        />
                                     </div>
                                 );
                             }
@@ -797,11 +790,10 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
                 {specialArrayFields.map(field => (
                     <div key={field} className="w-full bg-gray-800/70 p-4 rounded-xl shadow-lg backdrop-blur-sm border border-gray-700/50">
                         <h3 className="text-white mb-3 font-medium">{field}</h3>
-                        <select
-                            multiple
-                            value={consumabileFormData.Parametri?.Special?.[field] || []}
-                            onChange={(e) => {
-                                const selected = Array.from(e.target.selectedOptions, opt => opt.value);
+                        <MultiSelect
+                            options={schema.Parametri.Special[field]}
+                            selected={consumabileFormData.Parametri?.Special?.[field] || []}
+                            onChange={(selected) => {
                                 setConsumabileFormData(prev => ({
                                     ...prev,
                                     Parametri: {
@@ -813,12 +805,7 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
                                     }
                                 }));
                             }}
-                            className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 h-32"
-                        >
-                            {schema.Parametri.Special[field].map(option => (
-                                <option key={option} value={option}>{option}</option>
-                            ))}
-                        </select>
+                        />
                     </div>
                 ))}
             </div>
