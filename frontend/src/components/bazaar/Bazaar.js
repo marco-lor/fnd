@@ -8,6 +8,7 @@ import { useAuth } from '../../AuthContext';
 import { AddWeaponOverlay } from './elements/addWeapon';
 import { AddArmaturaOverlay } from './elements/addArmatura';
 import { AddAccessorioOverlay } from './elements/addAccessorio';
+import { AddConsumabileOverlay } from './elements/addConsumabile';
 import ComparisonPanel from './elements/comparisonComponent';
 
 function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked }) {
@@ -89,6 +90,7 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   });const [showOverlay, setShowOverlay] = useState(false);
   const [showArmaturaOverlay, setShowArmaturaOverlay] = useState(false);
   const [showAccessorioOverlay, setShowAccessorioOverlay] = useState(false);
+  const [showConsumabileOverlay, setShowConsumabileOverlay] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [confirmationMessage, setConfirmationMessage] = useState("");
   const { user, userData } = useAuth();
@@ -471,6 +473,9 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   const handleAddAccessorioClick = () => {
     setShowAccessorioOverlay(true);
   };
+  const handleAddConsumabileClick = () => {
+    setShowConsumabileOverlay(true);
+  };
 
   const panelItem = lockedItem || hoveredItem;
   const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
@@ -629,7 +634,12 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
                 > 
                   {lockedItem && lockedItem.item_type === "accessorio" ? "Modifica Accessorio" : "+ Accessorio"}
                 </button>
-                <button onClick={() => displayConfirmation("Funzionalità Consumabile in arrivo!", "info")} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Consumabile </button>
+                <button
+                  onClick={handleAddConsumabileClick}
+                  className="px-3 py-1.5 text-sm bg-yellow-700 text-white rounded hover:bg-yellow-600 transition-colors"
+                >
+                  {lockedItem && lockedItem.item_type === "consumabile" ? "Modifica Consumabile" : "+ Consumabile"}
+                </button>
                 <button onClick={() => displayConfirmation("Funzionalità Munizione in arrivo!", "info")} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Munizione </button>
               </div>
             </div>
@@ -719,6 +729,17 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
           showMessage={displayConfirmation}
           initialData={lockedItem && lockedItem.item_type === "accessorio" ? lockedItem : null}
           editMode={!!(lockedItem && lockedItem.item_type === "accessorio")}
+        />
+      )}
+
+      {showConsumabileOverlay && (
+        <AddConsumabileOverlay
+          onClose={(success) => {
+            setShowConsumabileOverlay(false);
+          }}
+          showMessage={displayConfirmation}
+          initialData={lockedItem && lockedItem.item_type === "consumabile" ? lockedItem : null}
+          editMode={!!(lockedItem && lockedItem.item_type === "consumabile")}
         />
       )}
 

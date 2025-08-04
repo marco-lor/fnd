@@ -9,6 +9,7 @@ import { AuthContext } from '../../../AuthContext';
 import { AddWeaponOverlay } from './addWeapon';
 import { AddArmaturaOverlay } from './addArmatura';
 import { AddAccessorioOverlay } from './addAccessorio';
+import { AddConsumabileOverlay } from './addConsumabile';
 import { FaTrash, FaEdit } from 'react-icons/fa';
 import { GiSpellBook, GiMagicSwirl } from "react-icons/gi";
 
@@ -923,6 +924,13 @@ export default function ComparisonPanel({ item, showMessage }) {
             />
           ) : item?.item_type === 'accessorio' ? (
             <AddAccessorioOverlay
+              onClose={handleCloseEditOverlay}
+              showMessage={showMessage || console.log}
+              initialData={item}
+              editMode={true}
+            />
+          ) : item?.item_type === 'consumabile' ? (
+            <AddConsumabileOverlay
               onClose={handleCloseEditOverlay}
               showMessage={showMessage || console.log}
               initialData={item}
