@@ -1,5 +1,6 @@
 // addAccessorio.js
 import React, { useState, useEffect, useCallback, useRef, useContext } from 'react';
+import VisibilitySelector from '../../common/VisibilitySelector';
 import { collection, doc, addDoc, updateDoc, getDocs, onSnapshot, getDoc, setDoc } from "firebase/firestore";
 import { getStorage, ref, uploadBytesResumable, getDownloadURL, uploadBytes, deleteObject } from "firebase/storage";
 import { db, storage } from '../../firebaseConfig';
@@ -25,6 +26,10 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
     const [tecnicheList, setTecnicheList] = useState([]);
     const [spellsList, setSpellsList] = useState([]);    const [showSpellOverlay, setShowSpellOverlay] = useState(false);
     const [editingSpellIndex, setEditingSpellIndex] = useState(null);
+
+    const [users, setUsers] = useState([]);
+    const [visibility, setVisibility] = useState('all');
+    const [allowedUsers, setAllowedUsers] = useState([]);
 
     const { user } = useContext(AuthContext);
     const [userParams, setUserParams] = useState({ Base: {}, Combattimento: {} });
@@ -67,6 +72,40 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
     const removeSpell = useCallback(index => setRidSpellList(prev => prev.filter((_, i) => i !== index)), []);
     const addAccessorioSpellLink = useCallback(() => setAccessorioSpellsList(prev => [...prev, '']), []);
     const removeAccessorioSpellLink = useCallback(index => setAccessorioSpellsList(prev => prev.filter((_, i) => i !== index)), []);
+
+    // New visibility handler
+    const handleVisibilityChange = (newVisibility, newAllowed) => {
+        setVisibility(newVisibility);
+        setAllowedUsers(newAllowed);
+    };
+
+    useEffect(() => {
+        const fetchUsers = async () => {
+            try {
+                const snap = await getDocs(collection(db, 'users'));
+                const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                setUsers(list);
+            } catch (err) {
+                console.error('Error fetching users:', err);
+            }
+        };
+        fetchUsers();
+    }, []);
+
+    useEffect(() => {
+        if (initialData) {
+            if (initialData.visibility === 'custom') {
+                setVisibility('custom');
+                setAllowedUsers(initialData.allowed_users || []);
+            } else {
+                setVisibility('all');
+                setAllowedUsers([]);
+            }
+        } else {
+            setVisibility('all');
+            setAllowedUsers([]);
+        }
+    }, [initialData]);
 
     const initializeFormData = useCallback((schemaData, currentItemData) => {
         console.log("Attempting to initialize FormData. Edit Mode:", editMode, "Current Item Data:", currentItemData);
@@ -409,6 +448,9 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
             }
             finalAccessorioData.General.spells = finalSpells;
 
+            finalAccessorioData.visibility = visibility;
+            finalAccessorioData.allowed_users = visibility === 'custom' ? allowedUsers : [];
+
             finalAccessorioData.General.ridCostoTecSingola = ridTecnicheList.reduce((acc, { selectedTec, ridValue }) => {
                 if (selectedTec && ridValue.trim() !== '') acc[selectedTec] = Number(ridValue);
                 return acc;
@@ -581,6 +623,13 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
         return (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
                 <div className="lg:col-span-2 space-y-4">
+                    <VisibilitySelector
+                        visibility={visibility}
+                        allowedUsers={allowedUsers}
+                        users={users}
+                        onChange={handleVisibilityChange}
+                        className="mb-2"
+                    />
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="md:col-span-2">
                             <label className="block text-white mb-1">Nome*</label>

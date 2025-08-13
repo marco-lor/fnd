@@ -2,12 +2,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import InteractiveBackground from '../backgrounds/InteractiveBackground';
-import { collection, onSnapshot } from "firebase/firestore";
+import { collection, onSnapshot, query, where, or, and } from "firebase/firestore";
 import { db } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
 import { AddWeaponOverlay } from './elements/addWeapon';
 import { AddArmaturaOverlay } from './elements/addArmatura';
 import { AddAccessorioOverlay } from './elements/addAccessorio';
+import { AddConsumabileOverlay } from './elements/addConsumabile';
 import ComparisonPanel from './elements/comparisonComponent';
 
 function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked }) {
@@ -89,35 +90,47 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   });const [showOverlay, setShowOverlay] = useState(false);
   const [showArmaturaOverlay, setShowArmaturaOverlay] = useState(false);
   const [showAccessorioOverlay, setShowAccessorioOverlay] = useState(false);
+  const [showConsumabileOverlay, setShowConsumabileOverlay] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [confirmationMessage, setConfirmationMessage] = useState("");
   const { user, userData } = useAuth();
+  const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
+
+  // Listen to items respecting visibility
   useEffect(() => {
-    // Listen to items collection (all items)
+    if (!user) return;
+
     const itemsRef = collection(db, "items");
-    const unsubscribeItems = onSnapshot(
+    const q = query(
       itemsRef,
+      or(
+        where('visibility', '==', 'all'),
+        and(
+          where('visibility', '==', 'custom'),
+          where('allowed_users', 'array-contains', user.uid)
+        )
+      )
+    );
+
+    const unsubscribe = onSnapshot(
+      q,
       (snapshot) => {
         const fetchedItems = [];
         snapshot.forEach((doc) => {
-           const data = doc.data();
-           // Include all items that have the required structure and item_type, excluding schema documents
-           if (data.item_type && data.General && data.Specific && data.Parametri && !doc.id.startsWith('schema_')) {
-              fetchedItems.push({ id: doc.id, ...data });
-           }
+          const data = doc.data();
+          if (data.item_type && data.General && data.Specific && data.Parametri && !doc.id.startsWith('schema_')) {
+            fetchedItems.push({ id: doc.id, ...data });
+          }
         });
         setItems(fetchedItems);
-        // console.log("Bazaar: Items fetched/updated from Firestore", fetchedItems.length);
       },
       (error) => {
         console.error("Error listening to items collection:", error);
       }
     );
 
-    return () => {
-      unsubscribeItems();
-    };
-  }, []);
+    return () => unsubscribe();
+  }, [user]);
 
   useEffect(() => {
     const currentLockedItemId = lockedItem?.id;
@@ -471,9 +484,11 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   const handleAddAccessorioClick = () => {
     setShowAccessorioOverlay(true);
   };
+  const handleAddConsumabileClick = () => {
+    setShowConsumabileOverlay(true);
+  };
 
   const panelItem = lockedItem || hoveredItem;
-  const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
 
   // Define width for the comparison panel (used by the fixed motion.div)
   // const comparisonPanelWidth = "w-[80vw] max-w-[98vw] sm:w-[60vw] sm:max-w-[400px] md:w-[38vw] md:max-w-[550px]";
@@ -629,7 +644,12 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
                 > 
                   {lockedItem && lockedItem.item_type === "accessorio" ? "Modifica Accessorio" : "+ Accessorio"}
                 </button>
-                <button onClick={() => displayConfirmation("Funzionalità Consumabile in arrivo!", "info")} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Consumabile </button>
+                <button
+                  onClick={handleAddConsumabileClick}
+                  className="px-3 py-1.5 text-sm bg-yellow-700 text-white rounded hover:bg-yellow-600 transition-colors"
+                >
+                  {lockedItem && lockedItem.item_type === "consumabile" ? "Modifica Consumabile" : "+ Consumabile"}
+                </button>
                 <button onClick={() => displayConfirmation("Funzionalità Munizione in arrivo!", "info")} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Munizione </button>
               </div>
             </div>
@@ -719,6 +739,17 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
           showMessage={displayConfirmation}
           initialData={lockedItem && lockedItem.item_type === "accessorio" ? lockedItem : null}
           editMode={!!(lockedItem && lockedItem.item_type === "accessorio")}
+        />
+      )}
+
+      {showConsumabileOverlay && (
+        <AddConsumabileOverlay
+          onClose={(success) => {
+            setShowConsumabileOverlay(false);
+          }}
+          showMessage={displayConfirmation}
+          initialData={lockedItem && lockedItem.item_type === "consumabile" ? lockedItem : null}
+          editMode={!!(lockedItem && lockedItem.item_type === "consumabile")}
         />
       )}
 

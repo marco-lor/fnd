@@ -1,7 +1,7 @@
 // file: ./frontend/src/components/bazaar/elements/addWeapon.js
 import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { db, storage } from '../../firebaseConfig';
-import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { AuthContext } from '../../../AuthContext';
 import { computeValue } from '../../common/computeFormula';
@@ -9,6 +9,7 @@ import { AddSpellButton } from '../../dmDashboard/elements/buttons/addSpell';
 import { SpellOverlay } from '../../common/SpellOverlay';
 import { WeaponOverlay } from '../../common/WeaponOverlay';
 import { FaTrash, FaEdit } from "react-icons/fa";
+import VisibilitySelector from '../../common/VisibilitySelector';
 
 export function AddWeaponOverlay({ onClose, showMessage, initialData = null, editMode = false }) {
     const [schema, setSchema] = useState(null);
@@ -37,6 +38,10 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
     const [customSpells, setCustomSpells] = useState([]);
     const [editingSpellIndex, setEditingSpellIndex] = useState(null);
 
+    const [users, setUsers] = useState([]);
+    const [visibility, setVisibility] = useState('all');
+    const [allowedUsers, setAllowedUsers] = useState([]);
+
     // Refs to manage initialization logic
     const prevInitialDataIdRef = useRef(null);
     const formInitializedForCurrentItem = useRef(false);
@@ -48,6 +53,40 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
     const removeSpell = useCallback(index => setRidSpellList(prev => prev.filter((_, i) => i !== index)), []);
     const addWeaponSpellLink = useCallback(() => setWeaponSpellsList(prev => [...prev, '']), []);
     const removeWeaponSpellLink = useCallback(index => setWeaponSpellsList(prev => prev.filter((_, i) => i !== index)), []);
+
+    // Replaced legacy multi-select with new component handler
+    const handleVisibilityChange = (newVisibility, newAllowed) => {
+        setVisibility(newVisibility);
+        setAllowedUsers(newAllowed);
+    };
+
+    useEffect(() => {
+        const fetchUsers = async () => {
+            try {
+                const snap = await getDocs(collection(db, 'users'));
+                const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                setUsers(list);
+            } catch (err) {
+                console.error('Error fetching users:', err);
+            }
+        };
+        fetchUsers();
+    }, []);
+
+    useEffect(() => {
+        if (initialData) {
+            if (initialData.visibility === 'custom') {
+                setVisibility('custom');
+                setAllowedUsers(initialData.allowed_users || []);
+            } else {
+                setVisibility('all');
+                setAllowedUsers([]);
+            }
+        } else {
+            setVisibility('all');
+            setAllowedUsers([]);
+        }
+    }, [initialData]);
 
     const initializeFormData = useCallback((schemaData, currentItemData) => {
         console.log("Attempting to initialize FormData. Edit Mode:", editMode, "Current Item Data:", currentItemData);
@@ -446,6 +485,9 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
             }
             finalWeaponData.General.spells = finalSpells;
 
+            finalWeaponData.visibility = visibility;
+            finalWeaponData.allowed_users = visibility === 'custom' ? allowedUsers : [];
+
             finalWeaponData.General.ridCostoTecSingola = ridTecnicheList.reduce((acc, { selectedTec, ridValue }) => {
                 if (selectedTec && ridValue.trim() !== '') acc[selectedTec] = Number(ridValue);
                 return acc;
@@ -501,6 +543,14 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
 
         return (
             <div>
+                <VisibilitySelector
+                    visibility={visibility}
+                    allowedUsers={allowedUsers}
+                    users={users}
+                    onChange={handleVisibilityChange}
+                    className="mb-6"
+                />
+                {/* old select removed */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                     <div className="md:col-span-1">
                         <label className="block text-white mb-1">Nome <span className="text-red-500">*</span></label>

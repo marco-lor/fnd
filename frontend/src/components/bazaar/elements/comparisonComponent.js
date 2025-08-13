@@ -9,6 +9,7 @@ import { AuthContext } from '../../../AuthContext';
 import { AddWeaponOverlay } from './addWeapon';
 import { AddArmaturaOverlay } from './addArmatura';
 import { AddAccessorioOverlay } from './addAccessorio';
+import { AddConsumabileOverlay } from './addConsumabile';
 import { FaTrash, FaEdit } from 'react-icons/fa';
 import { GiSpellBook, GiMagicSwirl } from "react-icons/gi";
 
@@ -402,6 +403,8 @@ export default function ComparisonPanel({ item, showMessage }) {
   const [imageError, setImageError]  = useState(false);
   const [schema, setSchema] = useState(null);
   const [isSchemaLoading, setIsSchemaLoading] = useState(false);
+  const [allowedUsersNames, setAllowedUsersNames] = useState([]);
+  const [allowedUsersLoading, setAllowedUsersLoading] = useState(false);
 
   /* ----------------------------------------------------------------------- */
   /*  Fetch user & params                                                    */
@@ -664,6 +667,41 @@ export default function ComparisonPanel({ item, showMessage }) {
   const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
 
   /* ----------------------------------------------------------------------- */
+  /*  Resolve allowed user IDs to character names (for custom visibility)    */
+  /* ----------------------------------------------------------------------- */
+  useEffect(() => {
+    let cancelled = false;
+    const fetchAllowedUsers = async () => {
+      if (!isAdmin || item?.visibility !== 'custom' || !Array.isArray(item?.allowed_users) || item.allowed_users.length === 0) {
+        setAllowedUsersNames([]);
+        return;
+      }
+      setAllowedUsersLoading(true);
+      try {
+        const names = [];
+        for (const uid of item.allowed_users) {
+          try {
+            const snap = await getDoc(doc(db, 'users', uid));
+            if (snap.exists()) {
+              const d = snap.data();
+              names.push(d.characterId || d.email || uid);
+            } else {
+              names.push(uid);
+            }
+          } catch (e) {
+            names.push(uid);
+          }
+        }
+        if (!cancelled) setAllowedUsersNames(names);
+      } finally {
+        if (!cancelled) setAllowedUsersLoading(false);
+      }
+    };
+    fetchAllowedUsers();
+    return () => { cancelled = true; };
+  }, [isAdmin, item?.visibility, item?.allowed_users && item.allowed_users.join(',')]);
+
+  /* ----------------------------------------------------------------------- */
   /*  Render                                                                 */
   /* ----------------------------------------------------------------------- */
   return (
@@ -756,6 +794,21 @@ export default function ComparisonPanel({ item, showMessage }) {
           <div className="mb-4 space-y-1 text-sm text-gray-300">
             {/* Dynamic Specific fields */}
             {renderSpecificFields()}
+            {/* Visibility (only for admins) */}
+            {isAdmin && (
+              <p>
+                <span className="font-semibold text-gray-100">Visibilità:</span>{' '}
+                {item.visibility || '-'}
+              </p>
+            )}
+            {isAdmin && item.visibility === 'custom' && (
+              <p>
+                <span className="font-semibold text-gray-100">Utenti Abilitati:</span>{' '}
+                {allowedUsersLoading ? 'Caricamento...' : (
+                  allowedUsersNames.length > 0 ? allowedUsersNames.join(', ') : 'Nessuno'
+                )}
+              </p>
+            )}
             
             {/* General fields (consistent across item types) */}
             <p>
@@ -923,6 +976,13 @@ export default function ComparisonPanel({ item, showMessage }) {
             />
           ) : item?.item_type === 'accessorio' ? (
             <AddAccessorioOverlay
+              onClose={handleCloseEditOverlay}
+              showMessage={showMessage || console.log}
+              initialData={item}
+              editMode={true}
+            />
+          ) : item?.item_type === 'consumabile' ? (
+            <AddConsumabileOverlay
               onClose={handleCloseEditOverlay}
               showMessage={showMessage || console.log}
               initialData={item}
