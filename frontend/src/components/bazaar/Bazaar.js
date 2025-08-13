@@ -95,42 +95,67 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   const [confirmationMessage, setConfirmationMessage] = useState("");
   const { user, userData } = useAuth();
   const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
+  const isDM = userData?.role === 'dm'; // DMs can see all items regardless of custom visibility
 
   // Listen to items respecting visibility
   useEffect(() => {
     if (!user) return;
 
-    const itemsRef = collection(db, "items");
-    const q = query(
-      itemsRef,
-      or(
-        where('visibility', '==', 'all'),
-        and(
-          where('visibility', '==', 'custom'),
-          where('allowed_users', 'array-contains', user.uid)
-        )
-      )
-    );
+    const itemsRef = collection(db, 'items');
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const fetchedItems = [];
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          if (data.item_type && data.General && data.Specific && data.Parametri && !doc.id.startsWith('schema_')) {
-            fetchedItems.push({ id: doc.id, ...data });
+    // If the user is a DM they can see ALL items (except schema docs) without visibility filtering
+    // Otherwise apply existing visibility rules: 'all' OR ('custom' AND allowed_users contains user)
+    const buildUnsubscribe = () => {
+      if (isDM) {
+        return onSnapshot(
+          itemsRef,
+          (snapshot) => {
+            const allItems = [];
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              if (data.item_type && data.General && data.Specific && data.Parametri && !doc.id.startsWith('schema_')) {
+                allItems.push({ id: doc.id, ...data });
+              }
+            });
+            setItems(allItems);
+          },
+          (error) => {
+            console.error('Error listening to items collection (DM view):', error);
           }
-        });
-        setItems(fetchedItems);
-      },
-      (error) => {
-        console.error("Error listening to items collection:", error);
+        );
+      } else {
+        const q = query(
+          itemsRef,
+            or(
+              where('visibility', '==', 'all'),
+              and(
+                where('visibility', '==', 'custom'),
+                where('allowed_users', 'array-contains', user.uid)
+              )
+            )
+        );
+        return onSnapshot(
+          q,
+          (snapshot) => {
+            const filteredItems = [];
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              if (data.item_type && data.General && data.Specific && data.Parametri && !doc.id.startsWith('schema_')) {
+                filteredItems.push({ id: doc.id, ...data });
+              }
+            });
+            setItems(filteredItems);
+          },
+          (error) => {
+            console.error('Error listening to items collection:', error);
+          }
+        );
       }
-    );
+    };
 
+    const unsubscribe = buildUnsubscribe();
     return () => unsubscribe();
-  }, [user]);
+  }, [user, isDM]);
 
   useEffect(() => {
     const currentLockedItemId = lockedItem?.id;
