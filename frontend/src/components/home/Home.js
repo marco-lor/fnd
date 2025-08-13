@@ -159,7 +159,11 @@ function Home() {
               <StatsBars />
             </div>
           </div>  {/* end stats row */}
-          <Extra userData={userData} />
+          <Extra
+            lingue={userData?.lingue}
+            conoscenze={userData?.conoscenze}
+            professioni={userData?.professioni}
+          />
         </main>
       </div>
       {rolling && (
