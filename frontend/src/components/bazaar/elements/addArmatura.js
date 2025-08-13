@@ -1,7 +1,7 @@
 // file: ./frontend/src/components/bazaar/elements/addArmatura.js
 import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { db, storage } from '../../firebaseConfig';
-import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { AuthContext } from '../../../AuthContext';
 import { computeValue } from '../../common/computeFormula';
@@ -9,6 +9,7 @@ import { AddSpellButton } from '../../dmDashboard/elements/buttons/addSpell';
 import { SpellOverlay } from '../../common/SpellOverlay';
 import { WeaponOverlay } from '../../common/WeaponOverlay';
 import { FaTrash, FaEdit } from "react-icons/fa";
+import VisibilitySelector from '../../common/VisibilitySelector';
 
 export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, editMode = false }) {
     const [schema, setSchema] = useState(null);
@@ -37,6 +38,10 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
     const [customSpells, setCustomSpells] = useState([]);
     const [editingSpellIndex, setEditingSpellIndex] = useState(null);
 
+    const [users, setUsers] = useState([]);
+    const [visibility, setVisibility] = useState('all');
+    const [allowedUsers, setAllowedUsers] = useState([]);
+
     // Refs to manage initialization logic
     const prevInitialDataIdRef = useRef(null);
     const formInitializedForCurrentItem = useRef(false);
@@ -47,6 +52,40 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
     const removeSpell = useCallback(index => setRidSpellList(prev => prev.filter((_, i) => i !== index)), []);
     const addArmaturaSpellLink = useCallback(() => setArmaturaSpellsList(prev => [...prev, '']), []);
     const removeArmaturaSpellLink = useCallback(index => setArmaturaSpellsList(prev => prev.filter((_, i) => i !== index)), []);
+
+    // New visibility handler
+    const handleVisibilityChange = (newVisibility, newAllowed) => {
+        setVisibility(newVisibility);
+        setAllowedUsers(newAllowed);
+    };
+
+    useEffect(() => {
+        const fetchUsers = async () => {
+            try {
+                const snap = await getDocs(collection(db, 'users'));
+                const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                setUsers(list);
+            } catch (err) {
+                console.error('Error fetching users:', err);
+            }
+        };
+        fetchUsers();
+    }, []);
+
+    useEffect(() => {
+        if (initialData) {
+            if (initialData.visibility === 'custom') {
+                setVisibility('custom');
+                setAllowedUsers(initialData.allowed_users || []);
+            } else {
+                setVisibility('all');
+                setAllowedUsers([]);
+            }
+        } else {
+            setVisibility('all');
+            setAllowedUsers([]);
+        }
+    }, [initialData]);
 
     const initializeFormData = useCallback((schemaData, currentItemData) => {
         console.log("Attempting to initialize FormData. Edit Mode:", editMode, "Current Item Data:", currentItemData);
@@ -443,6 +482,9 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
             }
             finalArmaturaData.General.spells = finalSpells;
 
+            finalArmaturaData.visibility = visibility;
+            finalArmaturaData.allowed_users = visibility === 'custom' ? allowedUsers : [];
+
             finalArmaturaData.General.ridCostoTecSingola = ridTecnicheList.reduce((acc, { selectedTec, ridValue }) => {
                 if (selectedTec && ridValue.trim() !== '') acc[selectedTec] = Number(ridValue);
                 return acc;
@@ -581,7 +623,15 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
         return (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
                 <div className="lg:col-span-2 space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">                        <div className="md:col-span-2">
+                    <VisibilitySelector
+                        visibility={visibility}
+                        allowedUsers={allowedUsers}
+                        users={users}
+                        onChange={handleVisibilityChange}
+                        className="mb-2"
+                    />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="md:col-span-2">
                             <label className="block text-white mb-1">Nome*</label>
                             <input
                                 type="text"

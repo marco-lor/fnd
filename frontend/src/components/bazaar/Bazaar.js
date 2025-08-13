@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import InteractiveBackground from '../backgrounds/InteractiveBackground';
-import { collection, onSnapshot } from "firebase/firestore";
+import { collection, onSnapshot, query, where, or, and } from "firebase/firestore";
 import { db } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
 import { AddWeaponOverlay } from './elements/addWeapon';
@@ -94,32 +94,43 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [confirmationMessage, setConfirmationMessage] = useState("");
   const { user, userData } = useAuth();
+  const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
+
+  // Listen to items respecting visibility
   useEffect(() => {
-    // Listen to items collection (all items)
+    if (!user) return;
+
     const itemsRef = collection(db, "items");
-    const unsubscribeItems = onSnapshot(
+    const q = query(
       itemsRef,
+      or(
+        where('visibility', '==', 'all'),
+        and(
+          where('visibility', '==', 'custom'),
+          where('allowed_users', 'array-contains', user.uid)
+        )
+      )
+    );
+
+    const unsubscribe = onSnapshot(
+      q,
       (snapshot) => {
         const fetchedItems = [];
         snapshot.forEach((doc) => {
-           const data = doc.data();
-           // Include all items that have the required structure and item_type, excluding schema documents
-           if (data.item_type && data.General && data.Specific && data.Parametri && !doc.id.startsWith('schema_')) {
-              fetchedItems.push({ id: doc.id, ...data });
-           }
+          const data = doc.data();
+          if (data.item_type && data.General && data.Specific && data.Parametri && !doc.id.startsWith('schema_')) {
+            fetchedItems.push({ id: doc.id, ...data });
+          }
         });
         setItems(fetchedItems);
-        // console.log("Bazaar: Items fetched/updated from Firestore", fetchedItems.length);
       },
       (error) => {
         console.error("Error listening to items collection:", error);
       }
     );
 
-    return () => {
-      unsubscribeItems();
-    };
-  }, []);
+    return () => unsubscribe();
+  }, [user]);
 
   useEffect(() => {
     const currentLockedItemId = lockedItem?.id;
@@ -478,7 +489,6 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   };
 
   const panelItem = lockedItem || hoveredItem;
-  const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
 
   // Define width for the comparison panel (used by the fixed motion.div)
   // const comparisonPanelWidth = "w-[80vw] max-w-[98vw] sm:w-[60vw] sm:max-w-[400px] md:w-[38vw] md:max-w-[550px]";
