@@ -134,7 +134,7 @@ const EquippedInventory = () => {
     return (
       <div key={slotKey} className="group relative">
         <div
-          className={`relative h-20 w-full rounded-xl border transition-all flex flex-col items-center justify-center text-center cursor-pointer select-none
+          className={`relative h-24 w-full rounded-xl border transition-all flex flex-col items-center justify-center text-center cursor-pointer select-none
             ${item ? 'border-indigo-500/60 bg-indigo-500/10 hover:border-indigo-300/80' : 'border-slate-600/60 bg-slate-800/40 hover:border-slate-400/70'}
           `}
           onClick={() => item ? handleUnequip(slotKey) : openEquipModal(slotKey)}
@@ -162,7 +162,7 @@ const EquippedInventory = () => {
   // Decorative middle column element replacing textual body part labels
   const CharSilhouette = () => (
     <div className="flex items-center justify-center">
-      <div className="relative h-20 w-28 flex items-center justify-center">
+  <div className="relative h-24 w-32 flex items-center justify-center">
         {/* Vertical energy pillar */}
         <div className="absolute inset-x-[48%] top-2 bottom-2 bg-gradient-to-b from-indigo-400/40 via-fuchsia-400/20 to-transparent rounded-full blur-[2px]" />
         <div className="absolute inset-x-[47%] top-4 bottom-4 bg-gradient-to-b from-transparent via-indigo-500/30 to-fuchsia-500/30 rounded-full blur-[6px] opacity-70 animate-pulse" />
@@ -180,7 +180,7 @@ const EquippedInventory = () => {
   );
 
   return (
-    <div className="relative backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 shadow-lg overflow-hidden">
+    <div className="relative h-full flex flex-col backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 shadow-lg overflow-hidden">
       <div className="absolute -left-16 -top-16 w-52 h-52 bg-indigo-500/10 rounded-full blur-3xl" />
       <div className="absolute -right-10 -bottom-24 w-64 h-64 bg-fuchsia-500/10 rounded-full blur-3xl" />
       <div className="relative flex flex-col gap-4">
@@ -188,7 +188,7 @@ const EquippedInventory = () => {
           <h2 className="text-base font-semibold tracking-wide text-slate-200">Oggetti Equipaggiati</h2>
           {loading && <span className="absolute right-0 text-[10px] text-slate-400 animate-pulse">salvataggio…</span>}
         </div>
-        <div className="mx-auto">
+  <div className="mx-auto">
           <div className="grid gap-4" style={{ gridTemplateColumns: '90px 140px 90px' }}>
             {LAYOUT_ROWS.map(([left, part, right], i) => (
               <React.Fragment key={i}>
@@ -198,8 +198,7 @@ const EquippedInventory = () => {
               </React.Fragment>
             ))}
           </div>
-        </div>
-  <p className="text-[10px] text-slate-500 mt-1">Clicca uno slot vuoto per equipaggiare; clicca uno slot equipaggiato per rimuovere.</p>
+  </div>
       </div>
 
       {activeSlot && (

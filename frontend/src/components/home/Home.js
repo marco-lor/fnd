@@ -171,15 +171,17 @@ function Home() {
           <div className="grid gap-6 xl:grid-cols-12">
             <div className="xl:col-span-8 space-y-6">
               {/* Tables & Bars */}
-              <div className="grid gap-6 lg:grid-cols-2 items-start">
-                <div className="relative">
+              <div className="grid gap-6 lg:grid-cols-2 items-stretch">
+                <div className="relative h-full">
                   <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-indigo-500/10 via-transparent to-fuchsia-500/10 pointer-events-none" />
                   <MergedStatsTable />
                 </div>
-                <div className="relative flex flex-col gap-6">
+                <div className="relative flex flex-col gap-6 h-full">
                   <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-transparent to-blue-500/10 pointer-events-none" />
                   <StatsBars />
-                  <EquippedInventory />
+                  <div className="flex-1 min-h-0">
+                    <EquippedInventory />
+                  </div>
                 </div>
               </div>
             </div>

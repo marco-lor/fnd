@@ -244,17 +244,17 @@ const StatsBars = () => {
     const pct = total ? Math.max(0, (current / total) * 100) : 0;
     const overflowPct = total && current > total ? ((current - total) / total) * 100 : 0;
     return (
-      <div className="flex items-center gap-3 w-full">
-        <div className="flex items-center gap-2 w-32">
-          <div className="relative inline-flex items-center justify-center h-9 w-9 rounded-xl border border-slate-600/60 bg-slate-800/50 text-slate-300">
-            <Icon className="w-5 h-5" />
+      <div className="flex items-center gap-2 w-full">
+        <div className="flex items-center gap-2 w-28">
+          <div className="relative inline-flex items-center justify-center h-8 w-8 rounded-xl border border-slate-600/60 bg-slate-800/50 text-slate-300">
+            <Icon className="w-4 h-4" />
           </div>
           <span className="text-sm font-medium text-slate-200">{label}</span>
         </div>
-        <div className="flex items-center gap-2 flex-1">
+        <div className="flex items-center gap-1.5 flex-1">
           <button
             onClick={onReset}
-            className="relative inline-flex items-center justify-center h-8 w-8 rounded-xl bg-gradient-to-br from-emerald-600 to-green-600 text-white shadow-sm hover:scale-105 active:scale-95 transition-transform focus:outline-none focus:ring-2 focus:ring-emerald-400/40"
+            className="relative inline-flex items-center justify-center h-7 w-7 rounded-xl bg-gradient-to-br from-emerald-600 to-green-600 text-white shadow-sm hover:scale-105 active:scale-95 transition-transform focus:outline-none focus:ring-2 focus:ring-emerald-400/40"
             title={`Reset ${label}`}
           >
             <FaRedo className="w-3.5 h-3.5" />
@@ -265,17 +265,17 @@ const StatsBars = () => {
             onMouseLeave={onDecEnd}
             onTouchStart={onDecStart}
             onTouchEnd={onDecEnd}
-            className="inline-flex items-center justify-center h-8 w-8 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white"
+            className="inline-flex items-center justify-center h-7 w-7 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white"
             title={`-1 ${label}`}
           >
-            <FaAngleLeft className="w-4 h-4" />
+            <FaAngleLeft className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={onOpenDec}
-            className="inline-flex items-center justify-center h-8 w-8 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white"
+            className="inline-flex items-center justify-center h-7 w-7 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white"
             title={`Sottrai ${label} (valore custom)`}
           >
-            <FaAnglesLeft className="w-4 h-4" />
+            <FaAnglesLeft className="w-3.5 h-3.5" />
           </button>
           <div className={`relative flex-1 h-5 rounded-lg ${colorTrack} overflow-visible border border-slate-600/50`}>
             {/* fill */}
@@ -295,10 +295,10 @@ const StatsBars = () => {
           </div>
           <button
             onClick={onOpenInc}
-            className="inline-flex items-center justify-center h-8 w-8 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white"
+            className="inline-flex items-center justify-center h-7 w-7 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white"
             title={`Aggiungi ${label} (valore custom)`}
           >
-            <FaAnglesRight className="w-4 h-4" />
+            <FaAnglesRight className="w-3.5 h-3.5" />
           </button>
           <button
             onMouseDown={onIncStart}
@@ -306,12 +306,12 @@ const StatsBars = () => {
             onMouseLeave={onIncEnd}
             onTouchStart={onIncStart}
             onTouchEnd={onIncEnd}
-            className="inline-flex items-center justify-center h-8 w-8 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white"
+            className="inline-flex items-center justify-center h-7 w-7 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white"
             title={`+1 ${label}`}
           >
-            <FaAngleRight className="w-4 h-4" />
+            <FaAngleRight className="w-3.5 h-3.5" />
           </button>
-          <span className="min-w-[86px] text-right text-sm text-slate-200">
+          <span className="min-w-[72px] text-right text-sm text-slate-200">
             {current}/{total}
           </span>
         </div>
