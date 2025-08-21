@@ -39,8 +39,10 @@ const ExtraComponent = ({ lingue, conoscenze, professioni }) => {
   ), [professioni]);
 
   return (
-    <div className="bg-[rgba(40,40,60,0.8)] p-4 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.4)] w-1/4 mb-5">
-      <div className="grid grid-cols-1 divide-y divide-gray-700">
+    <div className="relative overflow-hidden backdrop-blur bg-slate-900/70 border border-slate-700/50 p-5 rounded-2xl shadow-[0_4px_22px_-4px_rgba(0,0,0,0.6)]">
+      <div className="absolute -left-10 -top-10 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl" />
+      <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-sky-500/10 rounded-full blur-3xl" />
+      <div className="relative grid grid-cols-1 divide-y divide-slate-700/60">
         {/* Lingue */}
         <div className="py-4">
           <h3 className="text-lg font-semibold text-white mb-1">Lingue</h3>
@@ -54,7 +56,7 @@ const ExtraComponent = ({ lingue, conoscenze, professioni }) => {
               ))}
             </ul>
           ) : <p className="text-gray-400">Nessuna lingua.</p>}
-        </div>
+  </div>
         {/* Conoscenze */}
         <div className="py-4">
           <h3 className="text-lg font-semibold text-white mb-1">Conoscenze</h3>
@@ -68,7 +70,7 @@ const ExtraComponent = ({ lingue, conoscenze, professioni }) => {
               ))}
             </ul>
           ) : <p className="text-gray-400">Nessuna conoscenza.</p>}
-        </div>
+  </div>
         {/* Professioni */}
         <div className="py-4">
           <h3 className="text-lg font-semibold text-white mb-1">Professioni</h3>
@@ -82,7 +84,7 @@ const ExtraComponent = ({ lingue, conoscenze, professioni }) => {
               ))}
             </ul>
           ) : <p className="text-gray-400">Nessuna professione.</p>}
-        </div>
+  </div>
       </div>
     </div>
   );

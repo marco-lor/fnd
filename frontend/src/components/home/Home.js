@@ -3,6 +3,7 @@ import React, { useState, useEffect } from "react";
 import { useAuth } from "../../AuthContext";
 import DnDBackground from "../backgrounds/DnDBackground";
 import StatsBars from "./elements/StatsBars";
+import EquippedInventory from "./elements/EquippedInventory";
 import { MergedStatsTable } from "./elements/paramTables";
 import { API_BASE_URL } from "../firebaseConfig";
 import { doc, getDoc } from "firebase/firestore";
@@ -97,73 +98,99 @@ function Home() {
   }
 
   return (
-    <div className="relative w-full min-h-screen overflow-x-hidden">
+  <div className="relative w-full min-h-screen overflow-x-hidden">
+      {/* Dynamic Background */}
       <DnDBackground />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.06),transparent_60%),radial-gradient(circle_at_80%_70%,rgba(255,255,255,0.04),transparent_65%)] mix-blend-overlay" />
+
       <div className="relative z-10 flex flex-col">
-        <main className="flex flex-col items-start justify-start p-5 w-full">
-          {/* Render Test API button only if user role is webmaster */}
+        <main className="flex flex-col p-6 w-full gap-6">
           {userData?.role === "webmaster" && (
-            <div className="mb-5 flex gap-3">
+            <div className="flex flex-wrap gap-3 justify-start">
               <button
-                className="bg-[#6610f2] text-white text-lg py-2 px-4 rounded-[8px] cursor-pointer transition-colors duration-300 hover:bg-[#520dc2]"
+                className="group relative overflow-hidden bg-gradient-to-br from-fuchsia-600 to-violet-600 text-white text-sm md:text-base py-2 px-4 rounded-xl focus:outline-none focus:ring-2 focus:ring-fuchsia-400/50 transition-all shadow hover:shadow-fuchsia-500/30"
                 onClick={handleUpdateAllUsersClick}
               >
-                Update All Users
+                <span className="relative z-10">Update All Users</span>
+                <span className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.3),transparent_70%)]" />
               </button>
               <button
-                className="bg-[#007BFF] text-white text-lg py-2 px-4 rounded-[8px] cursor-pointer transition-colors duration-300 hover:bg-[#0056b3]"
+                className="group relative overflow-hidden bg-gradient-to-br from-sky-600 to-blue-600 text-white text-sm md:text-base py-2 px-4 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-400/50 transition-all shadow hover:shadow-sky-500/30"
                 onClick={handleTestButtonClick}
               >
-                Test API Call
+                <span className="relative z-10">Test API</span>
+                <span className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity bg-[radial-gradient(circle_at_70%_80%,rgba(255,255,255,0.25),transparent_70%)]" />
               </button>
               <button
-                className="bg-[#28a745] text-white text-lg py-2 px-4 rounded-[8px] cursor-pointer transition-colors duration-300 hover:bg-[#218838]"
+                className="group relative overflow-hidden bg-gradient-to-br from-emerald-600 to-green-600 text-white text-sm md:text-base py-2 px-4 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400/50 transition-all shadow hover:shadow-emerald-500/30"
                 onClick={handleListEverythingClick}
               >
-                List Everything
+                <span className="relative z-10">List Everything</span>
+                <span className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity bg-[radial-gradient(circle_at_50%_50%,rgba(255,255,255,0.25),transparent_65%)]" />
               </button>
             </div>
           )}
+          
           {dadiAnimaByLevel.length > 1 && userData?.stats?.level && (
-            <div className="mb-5 text-white text-lg flex items-center w-full justify-between">
-              {/* Left: Dado Anima and roll button */}
-              <div className="flex items-center space-x-4">
-                <span>Dado Anima: {dadiAnimaByLevel[userData.stats.level]}</span>
-                <button onClick={handleRollDice} className="text-white hover:text-gray-300" title="Roll Dado Anima">
-                  <FaDiceD20 className="inline-block" />
-                </button>
+            <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+              {/* Dado Anima Card */}
+              <div className="group relative overflow-hidden backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 flex items-center justify-between shadow-lg">
+                <div>
+                  <p className="text-slate-400 text-xs uppercase tracking-wider mb-1">Dado Anima</p>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-semibold text-indigo-300 drop-shadow">{dadiAnimaByLevel[userData.stats.level]}</span>
+                    <button
+                      onClick={handleRollDice}
+                      className="relative inline-flex items-center justify-center h-11 w-11 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-900/40 hover:scale-105 active:scale-95 transition-transform focus:outline-none focus:ring-2 focus:ring-indigo-400/60"
+                      title="Roll Dado Anima"
+                    >
+                      <FaDiceD20 className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+                <div className="absolute -right-8 -top-8 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl group-hover:opacity-70 opacity-40 transition-opacity" />
               </div>
-              {/* Right: Anima Livello fields */}
-              <div className="bg-[rgba(40,40,60,0.8)] p-4 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.4)] flex space-x-4">
-                <div>
-                  <span className="font-semibold">Anima Livello 1:</span>
-                  <span className={`ml-1 font-semibold ${getAnimaColorClass(getAnimaField('Anima_1'))}`}>{getAnimaField('Anima_1')}</span>
+              {/* Anima Livello Card */}
+              <div className="relative overflow-hidden backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 shadow-lg flex flex-col gap-3 xl:col-span-2">
+                <p className="text-slate-400 text-xs uppercase tracking-wider">Anima Livelli</p>
+                <div className="flex flex-wrap gap-6">
+                  {['1','4','7'].map(liv => (
+                    <div key={liv} className="flex flex-col">
+                      <span className="text-xs text-slate-400">Livello {liv}</span>
+                      <span className={`text-lg font-semibold tracking-wide ${getAnimaColorClass(getAnimaField(`Anima_${liv}`))}`}>{getAnimaField(`Anima_${liv}`) || '—'}</span>
+                    </div>
+                  ))}
                 </div>
-                <div>
-                  <span className="font-semibold">Anima Livello 4:</span>
-                  <span className={`ml-1 font-semibold ${getAnimaColorClass(getAnimaField('Anima_4'))}`}>{getAnimaField('Anima_4')}</span>
-                </div>
-                <div>
-                  <span className="font-semibold">Anima Livello 7:</span>
-                  <span className={`ml-1 font-semibold ${getAnimaColorClass(getAnimaField('Anima_7'))}`}>{getAnimaField('Anima_7')}</span>
-                </div>
+                <div className="absolute -left-10 -bottom-10 w-40 h-40 bg-emerald-500/10 rounded-full blur-3xl" />
+                <div className="absolute -right-10 -top-10 w-40 h-40 bg-fuchsia-500/10 rounded-full blur-3xl" />
               </div>
             </div>
           )}
-          {/* Main content: tables on left, stats bars on right */}
-          <div className="mb-5 w-full flex flex-row">
-            <div className="flex flex-col gap-5 w-auto">
-              <MergedStatsTable />
+
+          {/* Core Content Grid */}
+          <div className="grid gap-6 xl:grid-cols-12">
+            <div className="xl:col-span-8 space-y-6">
+              {/* Tables & Bars */}
+              <div className="grid gap-6 lg:grid-cols-2">
+                <div className="relative">
+                  <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-indigo-500/10 via-transparent to-fuchsia-500/10 pointer-events-none" />
+                  <MergedStatsTable />
+                </div>
+                <div className="relative flex flex-col gap-6">
+                  <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-transparent to-blue-500/10 pointer-events-none" />
+                  <StatsBars />
+                  <EquippedInventory />
+                </div>
+              </div>
             </div>
-            <div className="ml-5 flex-1">
-              <StatsBars />
+            <div className="xl:col-span-4">
+              <Extra
+                lingue={userData?.lingue}
+                conoscenze={userData?.conoscenze}
+                professioni={userData?.professioni}
+              />
             </div>
-          </div>  {/* end stats row */}
-          <Extra
-            lingue={userData?.lingue}
-            conoscenze={userData?.conoscenze}
-            professioni={userData?.professioni}
-          />
+          </div>
         </main>
       </div>
       {rolling && (
