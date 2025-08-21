@@ -3,17 +3,17 @@ import { AuthContext } from '../../../AuthContext';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 import { FaTimes } from 'react-icons/fa';
-import { GiChestArmor, GiBoots, GiGloves, GiBroadsword, GiShield, GiRing, GiEmeraldNecklace } from 'react-icons/gi';
+import { GiChestArmor, GiBoots, GiGloves, GiBroadsword, GiShield, GiRing, GiEmeraldNecklace, GiCrackedHelm, GiBlackBelt, GiSteeltoeBoots, GiScabbard } from 'react-icons/gi';
 
 // Slot metadata (icon + label) retained; layout will be Diablo-like around a silhouette
 const SLOT_DEFS = [
-  { key: 'headArmor', label: 'Testa', icon: GiEmeraldNecklace },
+  { key: 'headArmor', label: 'Testa', icon: GiCrackedHelm },
   { key: 'chestArmor', label: 'Corpo', icon: GiChestArmor },
-  { key: 'cintura', label: 'Cintura', icon: GiEmeraldNecklace },
-  { key: 'stivali', label: 'Stivali', icon: GiBoots },
+  { key: 'cintura', label: 'Cintura', icon: GiBlackBelt },
+  { key: 'stivali', label: 'Stivali', icon: GiSteeltoeBoots },
   { key: 'weaponMain', label: 'Mano Principale', icon: GiBroadsword },
   { key: 'weaponOff', label: 'Mano Secondaria', icon: GiShield },
-  { key: 'foderoArma', label: 'Fodero Arma', icon: GiBroadsword },
+  { key: 'foderoArma', label: 'Fodero Arma', icon: GiScabbard },
   { key: 'accessorio', label: 'Accessorio', icon: GiRing },
 ];
 
@@ -28,10 +28,10 @@ const LAYOUT_ROWS = [
   ['stivali', 'slotD', 'foderoArma'],
 ];
 
-// Fallback silhouette element
+// Fallback placeholder when slot is empty
 const Silhouette = () => (
-  <div className="absolute inset-0 flex items-center justify-center text-slate-700/50 select-none text-[8px] tracking-wider">
-    EMPTY
+  <div className="pointer-events-none absolute inset-0 flex items-end justify-center pb-1 text-slate-600/50 select-none text-[8px] tracking-wider">
+    vuoto
   </div>
 );
 
@@ -160,9 +160,9 @@ const EquippedInventory = () => {
       <div className="absolute -left-16 -top-16 w-52 h-52 bg-indigo-500/10 rounded-full blur-3xl" />
       <div className="absolute -right-10 -bottom-24 w-64 h-64 bg-fuchsia-500/10 rounded-full blur-3xl" />
       <div className="relative flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold tracking-wide text-slate-200">Equipped Items</h2>
-          {loading && <span className="text-[10px] text-slate-400 animate-pulse">saving…</span>}
+        <div className="flex items-center justify-center relative">
+          <h2 className="text-base font-semibold tracking-wide text-slate-200">Oggetti Equipaggiati</h2>
+          {loading && <span className="absolute right-0 text-[10px] text-slate-400 animate-pulse">salvataggio…</span>}
         </div>
         <div className="mx-auto">
           <div className="grid gap-4" style={{ gridTemplateColumns: '90px 140px 90px' }}>
