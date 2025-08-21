@@ -367,11 +367,7 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
       displayConfirmation('Devi essere loggato per acquistare.', 'error');
       return;
     }
-    const alreadyInInventory = Array.isArray(userData?.inventory) && userData.inventory.includes(item.id);
-    if (alreadyInInventory) {
-      displayConfirmation(`Possiedi già "${item.General?.Nome || 'Oggetto'}".`, 'info');
-      return;
-    }
+  // Stacking allowed: no early return if already owned
     const gold = userData?.stats?.gold ?? 0;
     const rawPrice = item?.General?.prezzo;
     const price = typeof rawPrice === 'number' ? rawPrice : parseInt(rawPrice, 10) || 0;
@@ -391,11 +387,7 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
     }
     const price = typeof item?.General?.prezzo === 'number' ? item.General.prezzo : parseInt(item?.General?.prezzo, 10) || 0;
     const name = item.General?.Nome || 'Oggetto';
-    const alreadyInInventory = Array.isArray(userData?.inventory) && userData.inventory.includes(item.id);
-    if (alreadyInInventory) {
-      displayConfirmation(`Possiedi già "${name}".`, 'info');
-      return;
-    }
+  // Stacking allowed: skip already-owned guard
     const gold = userData?.stats?.gold ?? 0;
     if (price > gold) {
       displayConfirmation(`Oro insufficiente: ${gold} / ${price}`, 'error');
@@ -406,12 +398,14 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
       const res = await acquireItem(user.uid, item);
       if (res?.error) {
         displayConfirmation(`Errore: ${res.error}`, 'error');
-      } else if (res?.alreadyOwned) {
-        displayConfirmation(`Possiedi già "${name}".`, 'info');
       } else if (res?.insufficient) {
         displayConfirmation(`Oro insufficiente: ${res.gold} / ${res.price}`, 'error');
       } else if (res?.success) {
-        displayConfirmation(`Acquisto completato: "${name}". Oro rimanente: ${res.newGold}`);
+        if (res.newQty && res.newQty > 1) {
+          displayConfirmation(`Acquisto completato: ora possiedi ${res.newQty}x "${name}". Oro rimanente: ${res.newGold}`);
+        } else {
+          displayConfirmation(`Acquisto completato: "${name}". Oro rimanente: ${res.newGold}`);
+        }
       } else {
         displayConfirmation('Risposta inattesa dalla transazione.', 'error');
       }

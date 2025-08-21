@@ -94,11 +94,35 @@ const EquippedInventory = () => {
   };
 
   // Items not already equipped (simple identity by name or id)
-  const equippedSet = new Set(Object.values(equipped || {}).filter(Boolean).map(i => typeof i === 'string' ? i : i?.id || i?.name));
-  const availableItems = inventory.filter(it => {
-    const key = typeof it === 'string' ? it : it?.id || it?.name;
-    return key && !equippedSet.has(key);
+  // Collect equipped counts per item id (allow duplicates across different slots)
+  const equippedCounts = {};
+  Object.values(equipped || {}).forEach(val => {
+    if (!val) return;
+    const id = typeof val === 'string' ? val : val.id || val.name;
+    if (!id) return;
+    equippedCounts[id] = (equippedCounts[id] || 0) + 1;
   });
+
+  // Normalize inventory entries: allow primitives, objects {id, qty}, or full item objects
+  const normalizedInventory = inventory.map(entry => {
+    if (!entry) return null;
+    if (typeof entry === 'string') return { id: entry, qty: 1, name: entry };
+    if (typeof entry === 'object') {
+      if (entry.id) return { id: entry.id, qty: entry.qty || 1, name: entry.name || entry.id, ...entry };
+      if (entry.name) return { id: entry.name, qty: entry.qty || 1, name: entry.name, ...entry };
+    }
+    return null;
+  }).filter(Boolean);
+
+  // Collapse duplicates (safeguard) and compute remaining quantity (owned - equipped)
+  const collapsed = {};
+  for (const it of normalizedInventory) {
+    if (!collapsed[it.id]) collapsed[it.id] = { ...it };
+    else collapsed[it.id].qty += it.qty || 1;
+  }
+  const availableItems = Object.values(collapsed)
+    .map(it => ({ ...it, remaining: Math.max(0, (it.qty || 0) - (equippedCounts[it.id] || 0)) }))
+    .filter(it => it.remaining > 0);
 
   // Render a single slot cell (side used for beam direction)
   const renderSlot = (slotKey, side) => {
@@ -183,16 +207,20 @@ const EquippedInventory = () => {
           {availableItems.length ? (
             <ul className="space-y-2">
               {availableItems.map((it, idx) => {
-                const name = typeof it === 'string' ? it : it?.name || `Item ${idx + 1}`;
-                const rarity = typeof it === 'object' ? it?.rarity : null;
+                const name = it.name || it.id || `Item ${idx + 1}`;
+                const rarity = it?.rarity;
+                const qty = it?.qty || 1;
+                const remaining = it.remaining != null ? it.remaining : qty; // fallback
                 return (
-                  <li key={name + idx}>
+                  <li key={it.id + idx}>
                     <button
                       onClick={() => handleEquip(it)}
                       className="w-full text-left px-3 py-2 rounded-lg bg-slate-800/70 hover:bg-slate-700/70 border border-slate-600/50 hover:border-slate-400/50 transition flex items-center justify-between"
                     >
-                      <span className="text-sm text-slate-200 truncate">{name}</span>
-                      {rarity && <span className="text-[10px] uppercase tracking-wide text-fuchsia-300">{rarity}</span>}
+                      <span className="text-sm text-slate-200 truncate">{name}{qty > 1 && <span className="ml-2 text-[10px] text-amber-300">x{qty}</span>}{remaining !== qty && <span className="ml-2 text-[10px] text-emerald-300">(resta {remaining})</span>}</span>
+                      <div className="flex items-center gap-2">
+                        {rarity && <span className="text-[10px] uppercase tracking-wide text-fuchsia-300">{rarity}</span>}
+                      </div>
                     </button>
                   </li>
                 );
