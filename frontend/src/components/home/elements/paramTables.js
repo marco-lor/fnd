@@ -11,15 +11,17 @@ const functions = getFunctions();
 const spendCharacterPoint = httpsCallable(functions, "spendCharacterPoint");
 
 // ---------------------------------------------------------------------------
-//  Reusable Button
+//  Reusable Button - minimal circular ghost button
 // ---------------------------------------------------------------------------
 const StatButton = ({ onClick, disabled, children, className = "" }) => (
   <button
     onClick={(e) => { onClick(e); e.currentTarget.blur(); }}
     disabled={disabled}
     className={`
-      text-gray-300 hover:text-white disabled:opacity-50
-      ${disabled ? 'cursor-not-allowed' : ''}
+      inline-flex h-6 w-6 items-center justify-center rounded-full text-xs
+      text-slate-300 hover:text-white transition
+      ring-1 ring-inset ring-white/10 hover:ring-white/20 hover:bg-white/10 active:scale-95
+      disabled:opacity-40 disabled:cursor-not-allowed
       ${className}
     `}
   >
@@ -155,79 +157,172 @@ export function MergedStatsTable() {
     const combKeys = Object.keys(combStats).sort();
 
     return (
-      <div className="bg-gray-800 rounded-lg overflow-hidden border border-gray-700">
-        <div className="px-4 py-2 bg-gray-700 text-sm text-gray-300 flex justify-between">
-          <span>Base: {basePointsAvailable} spent {basePointsSpent}</span>
-          <span>Combat: {combatTokensAvailable} spent {combatTokensSpent}</span>
+      <div className="rounded-2xl overflow-hidden bg-gradient-to-b from-slate-900/80 to-slate-800/60 backdrop-blur ring-1 ring-white/10">
+        {/* Header */}
+        <div className="px-4 py-3 flex items-center justify-between">
+          <div className="text-sm text-slate-300">
+            <span className="mr-2">Base</span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-emerald-300 ring-1 ring-inset ring-emerald-400/30">
+              <span className="opacity-75">Avail</span>
+              <strong className="font-semibold">{basePointsAvailable}</strong>
+            </span>
+            <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-slate-400/10 px-2 py-0.5 text-slate-300 ring-1 ring-inset ring-white/10">
+              <span className="opacity-70">Spent</span>
+              <strong className="font-semibold">{basePointsSpent}</strong>
+            </span>
+          </div>
+          <div className="text-sm text-slate-300">
+            <span className="mr-2">Combat</span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-indigo-400/10 px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30">
+              <span className="opacity-75">Avail</span>
+              <strong className="font-semibold">{combatTokensAvailable}</strong>
+            </span>
+            <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-slate-400/10 px-2 py-0.5 text-slate-300 ring-1 ring-inset ring-white/10">
+              <span className="opacity-70">Spent</span>
+              <strong className="font-semibold">{combatTokensSpent}</strong>
+            </span>
+          </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="table-auto w-auto mx-auto text-sm text-left text-gray-300">
-            <thead className="text-xs text-gray-400 uppercase bg-gray-700">
+
+        {/* Table */}
+        <div className="overflow-hidden">
+          <table className="w-full text-sm text-left text-slate-300">
+            <thead className="text-[11px] uppercase tracking-wider text-slate-400/80 bg-white/5">
               <tr>
-                <th className="px-3 py-2">Stat</th>
-                {columns.map(c => (
-                  <th
-                    key={c}
-                    className={`px-3 py-2 text-center ${c === 'Tot' ? 'bg-blue-900/50 text-white font-semibold' : ''}`}
-                  >
+                <th className="px-4 py-2 font-medium">Stat</th>
+                {columns.map((c) => (
+                  <th key={c} className="px-3 py-2 text-center font-medium">
                     {c}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody>
-              <tr><td colSpan={columns.length+1} className="px-3 py-1 bg-gray-700 text-xs text-gray-400">Base Stats</td></tr>
-              {baseKeys.map((name,i) => {
-                const stat = baseStats[name]; const even = i%2===0;
-                const val = Number(stat.Base)||0;
+            <tbody className="divide-y divide-white/5">
+              <tr>
+                <td colSpan={columns.length + 1} className="px-4 py-2 text-[11px] uppercase tracking-wider text-slate-400/70 bg-white/[0.03]">
+                  Parametri Base
+                </td>
+              </tr>
+              {baseKeys.map((name, i) => {
+                const stat = baseStats[name];
+                const val = Number(stat.Base) || 0;
                 return (
-                  <tr key={name} className={even?"bg-gray-800":"bg-gray-900/50"}>
-                    <td className="px-3 py-2 font-medium text-white">
-                      <div className="flex items-center space-x-1">
-                        <FaDiceD20 className="cursor-pointer text-gray-400 hover:text-white" title={`Roll ${name}`} onClick={() => handleRollParam(name, Number(stat.Tot)||0)} />
+                  <tr key={name} className="odd:bg-transparent even:bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
+                    <td className="px-4 py-2 font-medium text-white">
+                      <div className="flex items-center gap-2">
+                        <FaDiceD20
+                          className="cursor-pointer text-slate-400 hover:text-indigo-300 transition"
+                          title={`Roll ${name}`}
+                          onClick={() => handleRollParam(name, Number(stat.Tot) || 0)}
+                        />
                         <span>{name}</span>
                       </div>
                     </td>
-                    {columns.map(col => {
-                      // Highlight Tot column
-                      const cellCls = `px-3 py-2 text-center ${col === 'Tot' ? 'bg-blue-900/50 font-semibold text-white' : ''}`;
-                      if (col === 'Base') return (
-                        <td key={col} className={cellCls}>
-                          {!lockBase ? (
-                            <div className="flex justify-center space-x-1">
-                              <StatButton onClick={() => handlePointChange(name, 'Base', -1)} disabled={val <= -1}>–</StatButton>
-                              <span>{stat.Base}</span>
-                              <StatButton onClick={() => handlePointChange(name, 'Base', 1)} disabled={val >= 0 && basePointsAvailable <= 0}>+</StatButton>
+                    {columns.map((col) => {
+                      const baseCell = "px-3 py-2 text-center";
+                      if (col === 'Base')
+                        return (
+                          <td key={col} className={baseCell}>
+                            {!lockBase ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <StatButton onClick={() => handlePointChange(name, 'Base', -1)} disabled={val <= -1}>-</StatButton>
+                                <span className="tabular-nums w-6 text-center">{stat.Base}</span>
+                                <StatButton onClick={() => handlePointChange(name, 'Base', 1)} disabled={val >= 0 && basePointsAvailable <= 0}>+</StatButton>
+                              </div>
+                            ) : (
+                              <span className="tabular-nums">{stat.Base}</span>
+                            )}
+                          </td>
+                        );
+                      if (col === 'Mod')
+                        return (
+                          <td key={col} className={baseCell}>
+                            <div className="flex items-center justify-center gap-1">
+                              <StatButton onClick={() => handleModChange(name, 'Base', -1)}>-</StatButton>
+                              <span className="tabular-nums w-6 text-center">{stat.Mod}</span>
+                              <StatButton onClick={() => handleModChange(name, 'Base', 1)}>+</StatButton>
                             </div>
-                          ) : (
-                            <span>{stat.Base}</span>
-                          )}
+                          </td>
+                        );
+                      if (col === 'Tot')
+                        return (
+                          <td key={col} className="px-3 py-2 text-center">
+                            <span className="inline-flex min-w-[2.25rem] justify-center rounded-md bg-indigo-500/10 px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30 tabular-nums">
+                              {stat[col] || 0}
+                            </span>
+                          </td>
+                        );
+                      return (
+                        <td key={col} className={baseCell}>
+                          <span className="tabular-nums">{stat[col] || 0}</span>
                         </td>
                       );
-                      if (col === 'Mod') return <td key={col} className={cellCls}><div className="flex justify-center space-x-1"><StatButton onClick={()=>handleModChange(name,'Base',-1)}>-</StatButton><span>{stat.Mod}</span><StatButton onClick={()=>handleModChange(name,'Base',1)}>+</StatButton></div></td>;
-                      return <td key={col} className={cellCls}>{stat[col]||0}</td>;
                     })}
                   </tr>
                 );
               })}
-              <tr><td colSpan={columns.length+1} className="px-3 py-1 bg-gray-700 text-xs text-gray-400">Combat Stats</td></tr>
-              {combKeys.map((name,i) => {
-                const stat = combStats[name]; const even=(i%2===0);
-                const cost = combatCosts[name]||0; const afford=combatTokensAvailable>=cost;
+
+              <tr>
+                <td colSpan={columns.length + 1} className="px-4 py-2 text-[11px] uppercase tracking-wider text-slate-400/70 bg-white/[0.03]">
+                  Parametri Combattimento
+                </td>
+              </tr>
+              {combKeys.map((name) => {
+                const stat = combStats[name];
+                const cost = combatCosts[name] || 0;
+                const afford = combatTokensAvailable >= cost;
                 return (
-                  <tr key={name} className={even?"bg-gray-800":"bg-gray-900/50"}>
-                    <td className="px-3 py-2 font-medium text-white" title={`Cost: ${cost}`}>
-                      <div className="flex items-center space-x-1">
-                        <FaDiceD20 className="cursor-pointer text-gray-400 hover:text-white" title={`Roll ${name}`} onClick={() => handleRollParam(name, Number(stat.Tot)||0)} />
+                  <tr key={name} className="odd:bg-transparent even:bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
+                    <td className="px-4 py-2 font-medium text-white" title={`Cost: ${cost}`}>
+                      <div className="flex items-center gap-2">
+                        <FaDiceD20
+                          className="cursor-pointer text-slate-400 hover:text-indigo-300 transition"
+                          title={`Roll ${name}`}
+                          onClick={() => handleRollParam(name, Number(stat.Tot) || 0)}
+                        />
                         <span>{name}</span>
+                        <span className="ml-2 text-[10px] text-slate-400/70">Cost {cost}</span>
                       </div>
                     </td>
-                    {columns.map(col=>{
-                      // Highlight Tot column
-                      const cellCls = `px-3 py-2 text-center ${col === 'Tot' ? 'bg-blue-900/50 font-semibold text-white' : ''}`;
-                      if(col==='Base') return <td key={col} className={cellCls}>{!lockCombat?<div className="flex justify-center space-x-1"><StatButton onClick={()=>handlePointChange(name,'Combat',-1)} disabled={Number(stat.Base)<=0}>–</StatButton><span>{stat.Base}</span><StatButton onClick={()=>handlePointChange(name,'Combat',1)} disabled={!afford}>+</StatButton></div>:<span>{stat.Base}</span>}</td>;
-                      if(col==='Mod') return <td key={col} className={cellCls}><div className="flex justify-center space-x-1"><StatButton onClick={()=>handleModChange(name,'Combat',-1)}>-</StatButton><span>{stat.Mod}</span><StatButton onClick={()=>handleModChange(name,'Combat',1)}>+</StatButton></div></td>;
-                      return <td key={col} className={cellCls}>{stat[col]||0}</td>;
+                    {columns.map((col) => {
+                      const baseCell = "px-3 py-2 text-center";
+                      if (col === 'Base')
+                        return (
+                          <td key={col} className={baseCell}>
+                            {!lockCombat ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <StatButton onClick={() => handlePointChange(name, 'Combat', -1)} disabled={Number(stat.Base) <= 0}>-</StatButton>
+                                <span className="tabular-nums w-6 text-center">{stat.Base}</span>
+                                <StatButton onClick={() => handlePointChange(name, 'Combat', 1)} disabled={!afford}>+</StatButton>
+                              </div>
+                            ) : (
+                              <span className="tabular-nums">{stat.Base}</span>
+                            )}
+                          </td>
+                        );
+                      if (col === 'Mod')
+                        return (
+                          <td key={col} className={baseCell}>
+                            <div className="flex items-center justify-center gap-1">
+                              <StatButton onClick={() => handleModChange(name, 'Combat', -1)}>-</StatButton>
+                              <span className="tabular-nums w-6 text-center">{stat.Mod}</span>
+                              <StatButton onClick={() => handleModChange(name, 'Combat', 1)}>+</StatButton>
+                            </div>
+                          </td>
+                        );
+                      if (col === 'Tot')
+                        return (
+                          <td key={col} className="px-3 py-2 text-center">
+                            <span className="inline-flex min-w-[2.25rem] justify-center rounded-md bg-indigo-500/10 px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30 tabular-nums">
+                              {stat[col] || 0}
+                            </span>
+                          </td>
+                        );
+                      return (
+                        <td key={col} className={baseCell}>
+                          <span className="tabular-nums">{stat[col] || 0}</span>
+                        </td>
+                      );
                     })}
                   </tr>
                 );
@@ -241,13 +336,8 @@ export function MergedStatsTable() {
 
   return (
     <>   
-      <div className="p-4 bg-gray-900 rounded-xl shadow-md w-auto inline-block">
-        <h2 className="mb-3 text-lg font-semibold text-white">Stats Overview</h2>
-        {errorMsg && <div className="mb-2 text-red-400 text-sm">{errorMsg}</div>}
-        <div className="w-auto inline-block">
-          {renderTable()}
-        </div>
-      </div>
+  {errorMsg && <div className="mb-2 text-red-400 text-sm">{errorMsg}</div>}
+  {renderTable()}
       {/* Dice Roller Overlay */}
       {roller.visible && (
         <DiceRoller

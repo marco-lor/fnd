@@ -171,7 +171,7 @@ function Home() {
           <div className="grid gap-6 xl:grid-cols-12">
             <div className="xl:col-span-8 space-y-6">
               {/* Tables & Bars */}
-              <div className="grid gap-6 lg:grid-cols-2">
+              <div className="grid gap-6 lg:grid-cols-2 items-start">
                 <div className="relative">
                   <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-indigo-500/10 via-transparent to-fuchsia-500/10 pointer-events-none" />
                   <MergedStatsTable />
