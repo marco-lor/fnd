@@ -7,13 +7,12 @@ import { GiChestArmor, GiBoots, GiGloves, GiBroadsword, GiShield, GiRing, GiEmer
 
 // Slot metadata (icon + label) retained; layout will be Diablo-like around a silhouette
 const SLOT_DEFS = [
-  { key: 'headArmor', label: 'Head Armor', icon: GiEmeraldNecklace },
-  { key: 'chestArmor', label: 'Chest Armor', icon: GiChestArmor },
+  { key: 'headArmor', label: 'Testa', icon: GiEmeraldNecklace },
+  { key: 'chestArmor', label: 'Corpo', icon: GiChestArmor },
   { key: 'cintura', label: 'Cintura', icon: GiEmeraldNecklace },
-  { key: 'beltExtra', label: 'Belt', icon: GiRing },
   { key: 'stivali', label: 'Stivali', icon: GiBoots },
-  { key: 'weaponMain', label: 'Main Hand', icon: GiBroadsword },
-  { key: 'weaponOff', label: 'Off Hand', icon: GiShield },
+  { key: 'weaponMain', label: 'Mano Principale', icon: GiBroadsword },
+  { key: 'weaponOff', label: 'Mano Secondaria', icon: GiShield },
   { key: 'foderoArma', label: 'Fodero Arma', icon: GiBroadsword },
   { key: 'accessorio', label: 'Accessorio', icon: GiRing },
 ];
@@ -21,12 +20,12 @@ const SLOT_DEFS = [
 const SLOT_MAP = SLOT_DEFS.reduce((acc, s) => { acc[s.key] = s; return acc; }, {});
 
 // Layout rows: [leftSlot, bodyPart, rightSlot]
+// Middle column labels removed; we retain placeholders for layout symmetry
 const LAYOUT_ROWS = [
-  ['headArmor', 'head', 'accessorio'],
-  ['chestArmor', 'torso', 'weaponMain'],
-  ['cintura', 'waist', 'weaponOff'],
-  ['beltExtra', 'legs', 'foderoArma'],
-  ['stivali', 'feet', null],
+  ['headArmor', 'slotA', 'accessorio'],
+  ['chestArmor', 'slotB', 'weaponMain'],
+  ['cintura', 'slotC', 'weaponOff'],
+  ['stivali', 'slotD', 'foderoArma'],
 ];
 
 // Fallback silhouette element
@@ -101,8 +100,8 @@ const EquippedInventory = () => {
     return key && !equippedSet.has(key);
   });
 
-  // Render a single slot cell
-  const renderSlot = (slotKey) => {
+  // Render a single slot cell (side used for beam direction)
+  const renderSlot = (slotKey, side) => {
     if (!slotKey) return <div />;
     const def = SLOT_MAP[slotKey];
     if (!def) return <div />;
@@ -118,23 +117,40 @@ const EquippedInventory = () => {
           title={item ? `Click to unequip ${item.name || item}` : `Equip ${label}`}
         >
           <Icon className={`w-6 h-6 mb-1 ${item ? 'text-indigo-300 drop-shadow' : 'text-slate-500 group-hover:text-slate-300'}`} />
-          <span className="text-[10px] uppercase tracking-wide text-slate-300 leading-none line-clamp-1 px-1">{label}</span>
+          <span className="text-[10px] uppercase tracking-wide text-slate-300 leading-tight px-1 text-center whitespace-normal">{label}</span>
           {!item && <Silhouette />}
           {item && (
             <div className="absolute inset-0 flex flex-col items-center justify-end pb-1">
               <span className="text-[9px] text-emerald-300 font-medium max-w-full truncate px-1">{item.name || item}</span>
             </div>
           )}
+          {item && side === 'left' && (
+            <div className="pointer-events-none absolute top-1/2 left-full -translate-y-1/2 h-px w-[86px] bg-gradient-to-r from-indigo-400/0 via-indigo-400/70 to-fuchsia-400/0 drop-shadow-[0_0_4px_rgba(129,140,248,0.6)]" />
+          )}
+          {item && side === 'right' && (
+            <div className="pointer-events-none absolute top-1/2 right-full -translate-y-1/2 h-px w-[86px] bg-gradient-to-l from-indigo-400/0 via-fuchsia-400/70 to-indigo-400/0 drop-shadow-[0_0_4px_rgba(217,70,239,0.6)]" />
+          )}
         </div>
       </div>
     );
   };
 
-  const CharSilhouette = ({ part }) => (
+  // Decorative middle column element replacing textual body part labels
+  const CharSilhouette = () => (
     <div className="flex items-center justify-center">
       <div className="relative h-20 w-28 flex items-center justify-center">
-        <div className="absolute inset-0 opacity-10 bg-gradient-to-b from-indigo-400/40 to-fuchsia-400/40 rounded-full blur-md" />
-        <div className="text-[10px] tracking-wider text-slate-500 uppercase select-none">{part}</div>
+        {/* Vertical energy pillar */}
+        <div className="absolute inset-x-[48%] top-2 bottom-2 bg-gradient-to-b from-indigo-400/40 via-fuchsia-400/20 to-transparent rounded-full blur-[2px]" />
+        <div className="absolute inset-x-[47%] top-4 bottom-4 bg-gradient-to-b from-transparent via-indigo-500/30 to-fuchsia-500/30 rounded-full blur-[6px] opacity-70 animate-pulse" />
+        {/* Soft concentric glow */}
+        <div className="absolute w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500/30 to-fuchsia-500/30 blur-xl opacity-50" />
+        <div className="absolute w-6 h-6 rounded-full bg-gradient-to-br from-fuchsia-400/40 to-transparent blur-md opacity-70 animate-ping" />
+        {/* Subtle dotted spine */}
+        <div className="absolute inset-y-3 flex flex-col justify-between">
+          {[...Array(5)].map((_, i) => (
+            <span key={i} className="block w-1 h-1 rounded-full bg-slate-400/30" />
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -152,14 +168,14 @@ const EquippedInventory = () => {
           <div className="grid gap-4" style={{ gridTemplateColumns: '90px 140px 90px' }}>
             {LAYOUT_ROWS.map(([left, part, right], i) => (
               <React.Fragment key={i}>
-                {renderSlot(left)}
+                {renderSlot(left, 'left')}
                 <CharSilhouette part={part} />
-                {renderSlot(right)}
+                {renderSlot(right, 'right')}
               </React.Fragment>
             ))}
           </div>
         </div>
-        <p className="text-[10px] text-slate-500 mt-1">Click empty slot to equip; click equipped slot to unequip.</p>
+  <p className="text-[10px] text-slate-500 mt-1">Clicca uno slot vuoto per equipaggiare; clicca uno slot equipaggiato per rimuovere.</p>
       </div>
 
       {activeSlot && (
