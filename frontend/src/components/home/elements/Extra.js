@@ -53,7 +53,7 @@ const Badge = ({ children, color = 'emerald' }) => {
   );
 };
 
-const ExtraComponent = ({ lingue, conoscenze, professioni }) => {
+const ExtraComponent = ({ lingue, conoscenze, professioni, variant = 'stack' }) => {
   const sortedLingue = useMemo(() => (
     lingue ? Object.entries(lingue).sort(([a],[b]) => a.localeCompare(b,'it',{sensitivity:'base'})) : []
   ), [lingue]);
@@ -64,6 +64,95 @@ const ExtraComponent = ({ lingue, conoscenze, professioni }) => {
     professioni ? Object.entries(professioni).sort(([a],[b]) => a.localeCompare(b,'it',{sensitivity:'base'})) : []
   ), [professioni]);
 
+  // Helper renderers to reuse across variants
+  const renderLingue = () => (
+    sortedLingue.length ? (
+      <ul className="space-y-2 text-slate-300">
+        {sortedLingue.map(([name, descrizione]) => (
+          <li key={name} className="group flex flex-col rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2 hover:bg-slate-800/60 transition-colors">
+            <div className="flex items-center">
+              <span className="mr-3 h-2.5 w-2.5 flex-shrink-0 rounded-full bg-gradient-to-br from-indigo-400 to-violet-400 shadow shadow-indigo-900/30" />
+              <span className="font-medium text-slate-200">{name}</span>
+            </div>
+            {descrizione && (
+              <p className="mt-1 pl-6 text-sm leading-snug text-slate-400">{descrizione}</p>
+            )}
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <p className="text-slate-400">Nessuna lingua.</p>
+    )
+  );
+
+  const renderConoscenze = () => (
+    sortedConoscenze.length ? (
+      <ul className="space-y-2 text-slate-300">
+        {sortedConoscenze.map(([name, { livello, descrizione }]) => (
+          <li key={name} className="group flex flex-col rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2 hover:bg-slate-800/60 transition-colors">
+            <div className="flex items-center flex-wrap">
+              <span className="mr-3 h-2.5 w-2.5 flex-shrink-0 rounded-full bg-gradient-to-br from-emerald-400 to-teal-400 shadow shadow-emerald-900/30" />
+              <span className="font-medium text-slate-200">{name}</span>
+              {livello ? <Badge color="emerald">{livello}</Badge> : null}
+            </div>
+            {descrizione && (
+              <p className="mt-1 pl-6 text-sm leading-snug text-slate-400">{descrizione}</p>
+            )}
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <p className="text-slate-400">Nessuna conoscenza.</p>
+    )
+  );
+
+  const renderProfessioni = () => (
+    sortedProfessioni.length ? (
+      <ul className="space-y-2 text-slate-300">
+        {sortedProfessioni.map(([name, { livello, descrizione }]) => (
+          <li key={name} className="group flex flex-col rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2 hover:bg-slate-800/60 transition-colors">
+            <div className="flex items-center flex-wrap">
+              <span className="mr-3 h-2.5 w-2.5 flex-shrink-0 rounded-full bg-gradient-to-br from-amber-400 to-orange-400 shadow shadow-amber-900/30" />
+              <span className="font-medium text-slate-200">{name}</span>
+              {livello ? <Badge color="amber">{livello}</Badge> : null}
+            </div>
+            {descrizione && (
+              <p className="mt-1 pl-6 text-sm leading-snug text-slate-400">{descrizione}</p>
+            )}
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <p className="text-slate-400">Nessuna professione.</p>
+    )
+  );
+
+  if (variant === 'columns') {
+    return (
+      <div className="relative overflow-hidden backdrop-blur bg-slate-900/70 border border-slate-700/50 p-5 rounded-2xl shadow-[0_4px_22px_-4px_rgba(0,0,0,0.6)]">
+        <div className="absolute -left-10 -top-10 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl" />
+        <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-fuchsia-500/10 rounded-full blur-3xl" />
+
+        <div className="relative grid gap-6 md:grid-cols-3">
+          <div>
+            <Section icon={FiGlobe} title="Lingue" />
+            {renderLingue()}
+          </div>
+          <div>
+            <Section icon={FiBookOpen} title="Conoscenze" />
+            {renderConoscenze()}
+          </div>
+          <div>
+            <Section icon={FiBriefcase} title="Professioni" />
+            {renderProfessioni()}
+          </div>
+        </div>
+
+        <div className="pointer-events-none absolute left-0 right-0 bottom-0 h-16 bg-gradient-to-t from-slate-900/90 via-slate-900/50 to-transparent" />
+      </div>
+    );
+  }
+
   return (
     <div className="relative overflow-hidden backdrop-blur bg-slate-900/70 border border-slate-700/50 p-5 rounded-2xl shadow-[0_4px_22px_-4px_rgba(0,0,0,0.6)]">
       {/* soft glow accents */}
@@ -72,69 +161,13 @@ const ExtraComponent = ({ lingue, conoscenze, professioni }) => {
 
   <div className="relative grid grid-cols-1 divide-y divide-slate-700/60">
         {/* Lingue */}
-        <Section icon={FiGlobe} title="Lingue">
-          {sortedLingue.length ? (
-            <ul className="space-y-2 text-slate-300">
-              {sortedLingue.map(([name, descrizione]) => (
-                <li key={name} className="group flex flex-col rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2 hover:bg-slate-800/60 transition-colors">
-                  <div className="flex items-center">
-                    <span className="mr-3 h-2.5 w-2.5 flex-shrink-0 rounded-full bg-gradient-to-br from-indigo-400 to-violet-400 shadow shadow-indigo-900/30" />
-                    <span className="font-medium text-slate-200">{name}</span>
-                  </div>
-                  {descrizione && (
-                    <p className="mt-1 pl-6 text-sm leading-snug text-slate-400">{descrizione}</p>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-slate-400">Nessuna lingua.</p>
-          )}
-        </Section>
+        <Section icon={FiGlobe} title="Lingue">{renderLingue()}</Section>
 
         {/* Conoscenze */}
-        <Section icon={FiBookOpen} title="Conoscenze">
-          {sortedConoscenze.length ? (
-            <ul className="space-y-2 text-slate-300">
-              {sortedConoscenze.map(([name, { livello, descrizione }]) => (
-                <li key={name} className="group flex flex-col rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2 hover:bg-slate-800/60 transition-colors">
-                  <div className="flex items-center flex-wrap">
-                    <span className="mr-3 h-2.5 w-2.5 flex-shrink-0 rounded-full bg-gradient-to-br from-emerald-400 to-teal-400 shadow shadow-emerald-900/30" />
-                    <span className="font-medium text-slate-200">{name}</span>
-                    {livello ? <Badge color="emerald">{livello}</Badge> : null}
-                  </div>
-                  {descrizione && (
-                    <p className="mt-1 pl-6 text-sm leading-snug text-slate-400">{descrizione}</p>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-slate-400">Nessuna conoscenza.</p>
-          )}
-        </Section>
+        <Section icon={FiBookOpen} title="Conoscenze">{renderConoscenze()}</Section>
 
         {/* Professioni */}
-        <Section icon={FiBriefcase} title="Professioni">
-          {sortedProfessioni.length ? (
-            <ul className="space-y-2 text-slate-300">
-              {sortedProfessioni.map(([name, { livello, descrizione }]) => (
-                <li key={name} className="group flex flex-col rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2 hover:bg-slate-800/60 transition-colors">
-                  <div className="flex items-center flex-wrap">
-                    <span className="mr-3 h-2.5 w-2.5 flex-shrink-0 rounded-full bg-gradient-to-br from-amber-400 to-orange-400 shadow shadow-amber-900/30" />
-                    <span className="font-medium text-slate-200">{name}</span>
-                    {livello ? <Badge color="amber">{livello}</Badge> : null}
-                  </div>
-                  {descrizione && (
-                    <p className="mt-1 pl-6 text-sm leading-snug text-slate-400">{descrizione}</p>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-slate-400">Nessuna professione.</p>
-          )}
-        </Section>
+        <Section icon={FiBriefcase} title="Professioni">{renderProfessioni()}</Section>
       </div>
 
   {/* Bottom fade to soften overflow and allow future extension */}

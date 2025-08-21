@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useContext } from 'react';
 import { AuthContext } from '../../../AuthContext';
-import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, collection } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 import { FaTimes } from 'react-icons/fa';
-import { GiChestArmor, GiBoots, GiGloves, GiBroadsword, GiShield, GiRing, GiEmeraldNecklace, GiCrackedHelm, GiBlackBelt, GiSteeltoeBoots, GiScabbard } from 'react-icons/gi';
+import { GiChestArmor, GiBroadsword, GiShield, GiRing, GiCrackedHelm, GiBlackBelt, GiSteeltoeBoots, GiScabbard } from 'react-icons/gi';
 
 // Slot metadata (icon + label) retained; layout will be Diablo-like around a silhouette
 const SLOT_DEFS = [
@@ -58,6 +58,7 @@ const EquippedInventory = () => {
   const [inventory, setInventory] = useState([]); // simple array of item objects or strings
   const [activeSlot, setActiveSlot] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [catalog, setCatalog] = useState({}); // id -> General.Nome
 
   useEffect(() => {
     if (!user) return;
@@ -69,6 +70,20 @@ const EquippedInventory = () => {
     });
     return () => unsub();
   }, [user]);
+
+  // Subscribe to items catalog for display names
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'items'), snap => {
+      const next = {};
+      snap.forEach(docSnap => {
+        const data = docSnap.data();
+        const display = data?.General?.Nome || data?.name || docSnap.id;
+        next[docSnap.id] = display;
+      });
+      setCatalog(next);
+    });
+    return () => unsub();
+  }, []);
 
   const handleUnequip = async (slotKey) => {
     if (!user) return;
@@ -98,7 +113,7 @@ const EquippedInventory = () => {
   const equippedCounts = {};
   Object.values(equipped || {}).forEach(val => {
     if (!val) return;
-    const id = typeof val === 'string' ? val : val.id || val.name;
+  const id = typeof val === 'string' ? val : val.id || val.name;
     if (!id) return;
     equippedCounts[id] = (equippedCounts[id] || 0) + 1;
   });
@@ -106,10 +121,10 @@ const EquippedInventory = () => {
   // Normalize inventory entries: allow primitives, objects {id, qty}, or full item objects
   const normalizedInventory = inventory.map(entry => {
     if (!entry) return null;
-    if (typeof entry === 'string') return { id: entry, qty: 1, name: entry };
+    if (typeof entry === 'string') return { id: entry, qty: 1, name: catalog[entry] || entry };
     if (typeof entry === 'object') {
-      if (entry.id) return { id: entry.id, qty: entry.qty || 1, name: entry.name || entry.id, ...entry };
-      if (entry.name) return { id: entry.name, qty: entry.qty || 1, name: entry.name, ...entry };
+      if (entry.id) return { id: entry.id, qty: entry.qty || 1, name: catalog[entry.id] || entry.name || entry.id, ...entry };
+      if (entry.name) return { id: entry.name, qty: entry.qty || 1, name: catalog[entry.name] || entry.name, ...entry };
     }
     return null;
   }).filter(Boolean);
@@ -143,9 +158,9 @@ const EquippedInventory = () => {
           <Icon className={`w-6 h-6 mb-1 ${item ? 'text-indigo-300 drop-shadow' : 'text-slate-500 group-hover:text-slate-300'}`} />
           <span className="text-[10px] uppercase tracking-wide text-slate-300 leading-tight px-1 text-center whitespace-normal">{label}</span>
           {!item && <Silhouette />}
-          {item && (
+      {item && (
             <div className="absolute inset-0 flex flex-col items-center justify-end pb-1">
-              <span className="text-[9px] text-emerald-300 font-medium max-w-full truncate px-1">{item.name || item}</span>
+        <span className="text-[9px] text-emerald-300 font-medium max-w-full truncate px-1">{(typeof item === 'string' ? (catalog[item] || item) : (item.name || catalog[item.id] || item.id))}</span>
             </div>
           )}
           {item && side === 'left' && (

@@ -4,6 +4,7 @@ import { useAuth } from "../../AuthContext";
 import DnDBackground from "../backgrounds/DnDBackground";
 import StatsBars from "./elements/StatsBars";
 import EquippedInventory from "./elements/EquippedInventory";
+import Inventory from "./elements/Inventory";
 import { MergedStatsTable } from "./elements/paramTables";
 import { API_BASE_URL } from "../firebaseConfig";
 import { doc, getDoc } from "firebase/firestore";
@@ -186,12 +187,18 @@ function Home() {
               </div>
             </div>
             <div className="xl:col-span-4">
-              <Extra
-                lingue={userData?.lingue}
-                conoscenze={userData?.conoscenze}
-                professioni={userData?.professioni}
-              />
+              <Inventory />
             </div>
+          </div>
+
+          {/* Bottom horizontal extra (Lingue, Conoscenze, Professioni) */}
+          <div className="mt-2">
+            <Extra
+              variant="columns"
+              lingue={userData?.lingue}
+              conoscenze={userData?.conoscenze}
+              professioni={userData?.professioni}
+            />
           </div>
         </main>
       </div>
