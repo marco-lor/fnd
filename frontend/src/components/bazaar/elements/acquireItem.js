@@ -1,7 +1,8 @@
 // file: ./frontend/src/components/bazaar/elements/acquireItem.js
 // Helper to acquire an item: checks user gold against item price and, if sufficient,
-// atomically subtracts gold and appends the item id to the inventory (by id only).
-// Uses a Firestore transaction to avoid race conditions on concurrent purchases.
+// atomically subtracts gold and appends a full snapshot of the item to the user's inventory
+// (1:1 copy per purchase, not just an id pointer). Uses a Firestore transaction
+// to avoid race conditions on concurrent purchases.
 
 import { doc, runTransaction } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
@@ -11,9 +12,10 @@ import { db } from '../../firebaseConfig';
  * Contract:
  *  - Reads user doc (expects stats.gold (number) & inventory (array))
  *  - Validates: sufficient gold, non-negative price
- *  - Supports stacking: if inventory already contains the item id (as a string or object {id, qty}),
- *    increments quantity instead of blocking purchase.
- *  - On success: decrements gold and updates inventory entry (new object shape: {id, qty})
+ *  - Appends a deep copy of the item into inventory for each purchase, with metadata
+ *    (instanceId, acquiredAt, pricePaid). No stacking is performed; UI can still
+ *    aggregate by item.id if desired.
+ *  - On success: decrements gold and pushes the new snapshot entry
  *  - Returns status object (no throw for business rule failures)
  * @param {string} userId Firestore user document id
  * @param {object} item Item object (must contain id and General.prezzo)
@@ -41,36 +43,31 @@ export async function acquireItem(userId, item) {
         return { insufficient: true, price, gold };
       }
 
-      // Find existing entry (could be primitive string id, or object {id, qty})
-      let foundIndex = -1;
+      // Count how many of this item (by id) the user owns before purchase
+      let qtyBefore = 0;
       for (let i = 0; i < inventory.length; i++) {
         const entry = inventory[i];
-        if ((typeof entry === 'string' && entry === item.id) || (entry && typeof entry === 'object' && entry.id === item.id)) {
-          foundIndex = i;
-          break;
-        }
+        const entryId = typeof entry === 'string' ? entry : (entry && typeof entry === 'object' ? entry.id : undefined);
+        if (entryId && entryId === item.id) qtyBefore += (typeof entry === 'object' && entry.qty ? entry.qty : 1);
       }
 
-      let newQty = 1;
-      if (foundIndex === -1) {
-        // Push new structured entry
-        inventory.push({ id: item.id, qty: 1 });
-      } else {
-        const existing = inventory[foundIndex];
-        if (typeof existing === 'string') {
-          newQty = 2; // second copy
-          inventory[foundIndex] = { id: existing, qty: newQty };
-        } else {
-          newQty = (existing.qty || 1) + 1;
-          inventory[foundIndex] = { id: existing.id, qty: newQty };
-        }
-      }
+      // Deep copy item snapshot and add minimal metadata for the instance
+      const instanceId = `inv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const snapshot = JSON.parse(JSON.stringify(item));
+      // Ensure base id is preserved so UI can aggregate, plus store instance metadata
+      snapshot.id = item.id;
+      snapshot._instance = { instanceId, acquiredAt: new Date(), pricePaid: price, source: 'bazaar' };
+
+      // Push a new entry (no stacking)
+      inventory.push(snapshot);
 
       const newGold = gold - price;
       transaction.update(userRef, {
         'stats.gold': newGold,
         inventory
       });
+
+      const newQty = qtyBefore + 1;
       return { success: true, newGold, price, gold, newQty };
     });
     return result;

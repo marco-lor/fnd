@@ -12,7 +12,7 @@ import { computeValue } from '../../common/computeFormula';
 import { MultiSelect } from '../../common/MultiSelect';
 import VisibilitySelector from '../../common/VisibilitySelector';
 
-export function AddConsumabileOverlay({ onClose, showMessage, initialData = null, editMode = false }) {
+export function AddConsumabileOverlay({ onClose, showMessage, initialData = null, editMode = false, inventoryEditMode = false, inventoryUserId = null, inventoryItemId = null }) {
     const [consumabileFormData, setConsumabileFormData] = useState({});
     const [schema, setSchema] = useState(null);
     const [isSchemaLoading, setIsSchemaLoading] = useState(true);
@@ -218,12 +218,12 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
         setIsSchemaLoading(true);
         const fetchConsumabileSchema = async () => {
             try {
-                const schemaDocRef = doc(db, "utils", "schema_consumabili");
+                const schemaDocRef = doc(db, "utils", "schema_consumabile");
                 const docSnap = await getDoc(schemaDocRef);
                 if (docSnap.exists()) {
                     setSchema(docSnap.data());
                 } else {
-                    console.error("Consumabile schema (schema_consumabili) not found!");
+                    console.error("Consumabile schema (schema_consumabile) not found!");
                     if (showMessage) showMessage("Errore: Schema consumabile non trovato.", "error");
                 }
             } catch (error) {
@@ -383,13 +383,13 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
                 const consumabileImgRef = ref(storage, 'items/' + consumabileImgFileName);
                 await uploadBytes(consumabileImgRef, imageFile);
                 newImageUrl = await getDownloadURL(consumabileImgRef);
-                if (editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
+                if (!inventoryEditMode && editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
                     try {
                         const oldPath = decodeURIComponent(initialData.General.image_url.split('/o/')[1].split('?')[0]);
                         await deleteObject(ref(storage, oldPath));
                     } catch (e) { console.warn("Failed to delete old image:", e.code === 'storage/object-not-found' ? 'Old file not found.' : e.message); }
                 }
-            } else if (editMode && !imagePreviewUrl && initialData?.General?.image_url) {
+            } else if (!inventoryEditMode && editMode && !imagePreviewUrl && initialData?.General?.image_url) {
                 newImageUrl = null;
                 try {
                     const oldPath = decodeURIComponent(initialData.General.image_url.split('/o/')[1].split('?')[0]);
@@ -420,7 +420,7 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
                 }
                 
                 // Delete old files if editing
-                if (editMode && initialData?.General?.spells?.[spellNameKey] && typeof initialData.General.spells[spellNameKey] === 'object') {
+                if (!inventoryEditMode && editMode && initialData?.General?.spells?.[spellNameKey] && typeof initialData.General.spells[spellNameKey] === 'object') {
                     const initialSpellFromData = initialData.General.spells[spellNameKey];
                     if (customSpell.imageFile && initialSpellFromData.image_url) {
                         try { await deleteObject(ref(storage, decodeURIComponent(initialSpellFromData.image_url.split('/o/')[1].split('?')[0]))); } catch (e) { console.warn("Failed to delete old spell image for", spellNameKey, e); }
@@ -440,7 +440,7 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
                 }
             });
 
-            if (editMode && initialData?.General?.spells) {
+            if (!inventoryEditMode && editMode && initialData?.General?.spells) {
                 for (const initialSpellName in initialData.General.spells) {
                     if (!finalSpells[initialSpellName]) {
                         const initialSpellDetails = initialData.General.spells[initialSpellName];
@@ -484,17 +484,47 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
                  delete finalConsumabileData.Parametri;            }            // Set item type to "consumabile"
             finalConsumabileData.item_type = "consumabile";
 
-            if (editMode) {
-                console.log("Updating document:", docId, finalConsumabileData);
-                await updateDoc(consumabileDocRef, finalConsumabileData);
-                if (showMessage) showMessage(`Consumabile "${consumabileName}" aggiornato!`, "success");
+            if (inventoryEditMode && inventoryUserId && (inventoryItemId || initialData?.id)) {
+                try {
+                    const targetUserRef = doc(db, 'users', inventoryUserId);
+                    const userSnap = await getDoc(targetUserRef);
+                    const currentData = userSnap.exists() ? userSnap.data() : {};
+                    const invArr = Array.isArray(currentData.inventory) ? currentData.inventory : [];
+                    const targetId = inventoryItemId || docId;
+                    const nextInv = invArr.map((entry) => {
+                        if (!entry) return entry;
+                        if (typeof entry === 'string') {
+                            if (entry === targetId) return { id: targetId, qty: 1, ...finalConsumabileData };
+                            return entry;
+                        }
+                        const entryId = entry.id || entry.name || entry?.General?.Nome;
+                        if (entryId === targetId) {
+                            const qty = typeof entry.qty === 'number' ? entry.qty : 1;
+                            return { id: targetId, qty, ...finalConsumabileData };
+                        }
+                        return entry;
+                    });
+                    await updateDoc(targetUserRef, { inventory: nextInv });
+                    if (showMessage) showMessage(`Consumabile aggiornato nell'inventario utente.`, 'success');
+                } catch (e) {
+                    console.error('Failed updating user inventory:', e);
+                    if (showMessage) showMessage(`Errore aggiornando inventario utente: ${e.message}`, 'error');
+                    setIsLoading(false);
+                    return;
+                }
+                onClose(true);
             } else {
-                console.log("Creating new document:", docId, finalConsumabileData);
-                await setDoc(consumabileDocRef, finalConsumabileData);
-                if (showMessage) showMessage(`Consumabile "${consumabileName}" creato!`, "success");
+                if (editMode) {
+                    console.log("Updating document:", docId, finalConsumabileData);
+                    await updateDoc(consumabileDocRef, finalConsumabileData);
+                    if (showMessage) showMessage(`Consumabile "${consumabileName}" aggiornato!`, "success");
+                } else {
+                    console.log("Creating new document:", docId, finalConsumabileData);
+                    await setDoc(consumabileDocRef, finalConsumabileData);
+                    if (showMessage) showMessage(`Consumabile "${consumabileName}" creato!`, "success");
+                }
+                onClose(true);
             }
-
-            onClose(true);
 
         } catch (error) {
             console.error("Error saving consumabile:", error);
@@ -663,7 +693,7 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
                                 value={consumabileFormData.General?.Nome || ''}
                                 onChange={(e) => handleNestedChange('General.Nome', e.target.value)}
                                 className="w-full p-2 rounded bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                                placeholder="Es: Anello del Potere"
+                                placeholder="Es: Pozione di Guarigione"
                                 required
                                 disabled={editMode}
                                 title={editMode ? "Il nome non può essere modificato." : ""}
@@ -706,7 +736,7 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
                             value={consumabileFormData.General?.Effetto || ''}
                             onChange={(e) => handleNestedChange('General.Effetto', e.target.value)}
                             className="w-full p-2 rounded bg-gray-700 text-white h-20 border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                            placeholder="Descrivi l'effetto dell'consumabile..."
+                            placeholder="Descrivi l'effetto del consumabile..."
                         />
                     </div>
 

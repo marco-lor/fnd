@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useContext } from 'react';
 import { AuthContext } from '../../../AuthContext';
-import { doc, onSnapshot, updateDoc, collection } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 import { FaTimes } from 'react-icons/fa';
 import { GiChestArmor, GiBroadsword, GiShield, GiRing, GiCrackedHelm, GiBlackBelt, GiSteeltoeBoots, GiScabbard } from 'react-icons/gi';
@@ -59,8 +59,7 @@ const EquippedInventory = () => {
   const [inventory, setInventory] = useState([]); // simple array of item objects or strings
   const [activeSlot, setActiveSlot] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [catalog, setCatalog] = useState({}); // id -> General.Nome
-  const [itemDocs, setItemDocs] = useState({}); // id -> full doc
+  // Full item specifics now come from user's inventory/equipped entries directly
   const [previewItem, setPreviewItem] = useState(null); // item object to show in details modal
 
   useEffect(() => {
@@ -74,22 +73,7 @@ const EquippedInventory = () => {
     return () => unsub();
   }, [user]);
 
-  // Subscribe to items catalog for display names
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'items'), snap => {
-      const next = {};
-      const docs = {};
-      snap.forEach(docSnap => {
-        const data = docSnap.data();
-        const display = data?.General?.Nome || data?.name || docSnap.id;
-        next[docSnap.id] = display;
-        docs[docSnap.id] = { id: docSnap.id, ...data };
-      });
-      setCatalog(next);
-      setItemDocs(docs);
-    });
-    return () => unsub();
-  }, []);
+  // No subscription to global items; specifics are already in user's data
 
   const handleUnequip = async (slotKey) => {
     if (!user) return;
@@ -119,7 +103,7 @@ const EquippedInventory = () => {
   const equippedCounts = {};
   Object.values(equipped || {}).forEach(val => {
     if (!val) return;
-  const id = typeof val === 'string' ? val : val.id || val.name;
+    const id = typeof val === 'string' ? val : val.id || val.name || val?.General?.Nome;
     if (!id) return;
     equippedCounts[id] = (equippedCounts[id] || 0) + 1;
   });
@@ -127,10 +111,10 @@ const EquippedInventory = () => {
   // Normalize inventory entries: allow primitives, objects {id, qty}, or full item objects
   const normalizedInventory = inventory.map(entry => {
     if (!entry) return null;
-    if (typeof entry === 'string') return { id: entry, qty: 1, name: catalog[entry] || entry };
+    if (typeof entry === 'string') return { id: entry, qty: 1, name: entry };
     if (typeof entry === 'object') {
-      if (entry.id) return { id: entry.id, qty: entry.qty || 1, name: catalog[entry.id] || entry.name || entry.id, ...entry };
-      if (entry.name) return { id: entry.name, qty: entry.qty || 1, name: catalog[entry.name] || entry.name, ...entry };
+      if (entry.id) return { id: entry.id, qty: entry.qty || 1, name: entry?.General?.Nome || entry.name || entry.id, ...entry };
+      if (entry.name) return { id: entry.name, qty: entry.qty || 1, name: entry?.General?.Nome || entry.name, ...entry };
     }
     return null;
   }).filter(Boolean);
@@ -148,9 +132,8 @@ const EquippedInventory = () => {
   // Resolve inventory/equipped entry to full item doc if possible
   const resolveItemDoc = (entry) => {
     if (!entry) return null;
-    if (typeof entry === 'string') return itemDocs[entry] || null;
-    const key = entry.id || entry.name;
-    return itemDocs[key] ? { ...itemDocs[key], ...entry } : entry;
+    // Entries already contain full specifics; if it's a string, we can't resolve further
+    return typeof entry === 'object' ? entry : null;
   };
 
   // Render a single slot cell (side used for beam direction)
@@ -173,7 +156,7 @@ const EquippedInventory = () => {
         >
           {item && imgUrl ? (
             <div className="h-10 w-10 mb-1 rounded-lg overflow-hidden border border-indigo-400/40 bg-slate-900/40 shadow-inner">
-              <img src={imgUrl} alt={typeof item === 'string' ? (catalog[item] || item) : (item.name || item.id)} className="h-full w-full object-contain" />
+              <img src={imgUrl} alt={typeof item === 'string' ? (item) : (item.name || item?.General?.Nome || item.id)} className="h-full w-full object-contain" />
             </div>
           ) : (
             <Icon className={`w-6 h-6 mb-1 ${item ? 'text-indigo-300 drop-shadow' : 'text-slate-500 group-hover:text-slate-300'}`} />
@@ -182,10 +165,10 @@ const EquippedInventory = () => {
           {!item && <Silhouette />}
       {item && (
             <div className="absolute inset-0 flex flex-col items-center justify-end pb-1">
-        <span className="text-[9px] text-emerald-300 font-medium max-w-full truncate px-1">{(typeof item === 'string' ? (catalog[item] || item) : (item.name || catalog[item.id] || item.id))}</span>
+        <span className="text-[9px] text-emerald-300 font-medium max-w-full truncate px-1">{(typeof item === 'string' ? (item) : (item.name || item?.General?.Nome || item.id))}</span>
             </div>
           )}
-          {item && (
+          {item && itemDoc && (
             <button
               onClick={(e) => { e.stopPropagation(); setPreviewItem(itemDoc); }}
               className="absolute top-1 right-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-900/70 border border-slate-600/60 text-slate-300 hover:border-slate-400/60"

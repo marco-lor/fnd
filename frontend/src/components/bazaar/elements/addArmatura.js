@@ -11,7 +11,7 @@ import { WeaponOverlay } from '../../common/WeaponOverlay';
 import { FaTrash, FaEdit } from "react-icons/fa";
 import VisibilitySelector from '../../common/VisibilitySelector';
 
-export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, editMode = false }) {
+export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, editMode = false, inventoryEditMode = false, inventoryUserId = null, inventoryItemId = null }) {
     const [schema, setSchema] = useState(null);
     const [armaturaFormData, setArmaturaFormData] = useState({
         General: {},
@@ -412,13 +412,13 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                 const armaturaImgRef = ref(storage, 'items/' + armaturaImgFileName);
                 await uploadBytes(armaturaImgRef, imageFile);
                 newImageUrl = await getDownloadURL(armaturaImgRef);
-                if (editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
+                if (!inventoryEditMode && editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
                     try {
                         const oldPath = decodeURIComponent(initialData.General.image_url.split('/o/')[1].split('?')[0]);
                         await deleteObject(ref(storage, oldPath));
                     } catch (e) { console.warn("Failed to delete old image:", e.code === 'storage/object-not-found' ? 'Old file not found.' : e.message); }
                 }
-            } else if (editMode && !imagePreviewUrl && initialData?.General?.image_url) {
+            } else if (!inventoryEditMode && editMode && !imagePreviewUrl && initialData?.General?.image_url) {
                 newImageUrl = null;
                 try {
                     const oldPath = decodeURIComponent(initialData.General.image_url.split('/o/')[1].split('?')[0]);
@@ -451,10 +451,10 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                 // Delete old files if editing
                 if (editMode && initialData?.General?.spells?.[spellNameKey] && typeof initialData.General.spells[spellNameKey] === 'object') {
                     const initialSpellFromData = initialData.General.spells[spellNameKey];
-                    if (customSpell.imageFile && initialSpellFromData.image_url) {
+                    if (!inventoryEditMode && customSpell.imageFile && initialSpellFromData.image_url) {
                         try { await deleteObject(ref(storage, decodeURIComponent(initialSpellFromData.image_url.split('/o/')[1].split('?')[0]))); } catch (e) { console.warn("Failed to delete old spell image for", spellNameKey, e); }
                     }
-                    if (customSpell.videoFile && initialSpellFromData.video_url) {
+                        if (!inventoryEditMode && customSpell.videoFile && initialSpellFromData.video_url) {
                         try { await deleteObject(ref(storage, decodeURIComponent(initialSpellFromData.video_url.split('/o/')[1].split('?')[0]))); } catch (e) { console.warn("Failed to delete old spell video for", spellNameKey, e); }
                     }
                 }
@@ -469,7 +469,7 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                 }
             });
 
-            if (editMode && initialData?.General?.spells) {
+            if (!inventoryEditMode && editMode && initialData?.General?.spells) {
                 for (const initialSpellName in initialData.General.spells) {
                     if (!finalSpells[initialSpellName]) {
                         const initialSpellDetails = initialData.General.spells[initialSpellName];
@@ -513,17 +513,47 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                  delete finalArmaturaData.Parametri;            }            // Set item type to "armatura"
             finalArmaturaData.item_type = "armatura";
 
-            if (editMode) {
-                console.log("Updating document:", docId, finalArmaturaData);
-                await updateDoc(armaturaDocRef, finalArmaturaData);
-                if (showMessage) showMessage(`Armatura "${armaturaName}" aggiornata!`, "success");
+            if (inventoryEditMode && inventoryUserId && (inventoryItemId || initialData?.id)) {
+                try {
+                    const targetUserRef = doc(db, 'users', inventoryUserId);
+                    const userSnap = await getDoc(targetUserRef);
+                    const currentData = userSnap.exists() ? userSnap.data() : {};
+                    const invArr = Array.isArray(currentData.inventory) ? currentData.inventory : [];
+                    const targetId = inventoryItemId || docId;
+                    const nextInv = invArr.map((entry) => {
+                        if (!entry) return entry;
+                        if (typeof entry === 'string') {
+                            if (entry === targetId) return { id: targetId, qty: 1, ...finalArmaturaData };
+                            return entry;
+                        }
+                        const entryId = entry.id || entry.name || entry?.General?.Nome;
+                        if (entryId === targetId) {
+                            const qty = typeof entry.qty === 'number' ? entry.qty : 1;
+                            return { id: targetId, qty, ...finalArmaturaData };
+                        }
+                        return entry;
+                    });
+                    await updateDoc(targetUserRef, { inventory: nextInv });
+                    if (showMessage) showMessage(`Armatura aggiornata nell'inventario utente.`, 'success');
+                } catch (e) {
+                    console.error('Failed updating user inventory:', e);
+                    if (showMessage) showMessage(`Errore aggiornando inventario utente: ${e.message}`, 'error');
+                    setIsLoading(false);
+                    return;
+                }
+                onClose(true);
             } else {
-                console.log("Creating new document:", docId, finalArmaturaData);
-                await setDoc(armaturaDocRef, finalArmaturaData);
-                if (showMessage) showMessage(`Armatura "${armaturaName}" creata!`, "success");
+                if (editMode) {
+                    console.log("Updating document:", docId, finalArmaturaData);
+                    await updateDoc(armaturaDocRef, finalArmaturaData);
+                    if (showMessage) showMessage(`Armatura "${armaturaName}" aggiornata!`, "success");
+                } else {
+                    console.log("Creating new document:", docId, finalArmaturaData);
+                    await setDoc(armaturaDocRef, finalArmaturaData);
+                    if (showMessage) showMessage(`Armatura "${armaturaName}" creata!`, "success");
+                }
+                onClose(true);
             }
-
-            onClose(true);
 
         } catch (error) {
             console.error("Error saving armor:", error);

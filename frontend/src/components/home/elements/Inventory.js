@@ -1,8 +1,8 @@
 import React, { useContext, useEffect, useState } from 'react';
 import { AuthContext } from '../../../AuthContext';
 import { db } from '../../firebaseConfig';
-import { doc, onSnapshot, collection, getDoc, updateDoc } from 'firebase/firestore';
-import { FiPackage, FiSearch, FiTrash2 } from 'react-icons/fi';
+import { doc, onSnapshot, getDoc, updateDoc } from 'firebase/firestore';
+import { FiPackage, FiSearch, FiTrash2, FiPlus, FiMinus } from 'react-icons/fi';
 import { FaCoins } from 'react-icons/fa';
 import ItemDetailsModal from './ItemDetailsModal';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
@@ -13,13 +13,16 @@ const Inventory = () => {
 	const { user } = useContext(AuthContext);
 	const [items, setItems] = useState([]);
 	const [q, setQ] = useState('');
-	const [catalog, setCatalog] = useState({}); // id -> General.Nome
-	const [docs, setDocs] = useState({}); // id -> full item doc
 	const [previewItem, setPreviewItem] = useState(null);
 	const [gold, setGold] = useState(0);
 	const [busyId, setBusyId] = useState(null);
-    const [confirmTarget, setConfirmTarget] = useState(null); // { id, name }
+	const [confirmTarget, setConfirmTarget] = useState(null); // { id, name }
 	const [equippedCounts, setEquippedCounts] = useState({}); // id -> count equipped
+	// gold adjustment overlay state
+	const [showGoldOverlay, setShowGoldOverlay] = useState(false);
+	const [goldDir, setGoldDir] = useState(1); // 1 for add, -1 for subtract
+	const [goldDelta, setGoldDelta] = useState('');
+	const [goldBusy, setGoldBusy] = useState(false);
 
 	useEffect(() => {
 		if (!user) return;
@@ -39,19 +42,19 @@ const Inventory = () => {
 				eqCounts[id] = (eqCounts[id] || 0) + 1;
 			});
 			setEquippedCounts(eqCounts);
-			// Normalize
+			// Normalize directly from user's inventory entries (which now contain full item data)
 			const normalized = inv.map((e, i) => {
 				if (!e) return null;
 				if (typeof e === 'string') {
 					const id = e;
-					const name = catalog[id] || id;
-					return { id, name, qty: 1 };
+					const name = id;
+					return { id, name, qty: 1, doc: null };
 				}
 				const id = e.id || e.name || e?.General?.Nome || `item-${i}`;
-				const name = catalog[id] || e?.General?.Nome || e.name || id;
-				return { id, name, qty: e.qty || 1, rarity: e.rarity, type: e.type, ...e };
+				const name = e?.General?.Nome || e.name || id;
+				return { id, name, qty: e.qty || 1, rarity: e.rarity, type: e.type, doc: { ...e, id } };
 			}).filter(Boolean);
-			// Collapse by id
+			// Collapse by id (keep first doc as representative)
 			const map = {};
 			for (const it of normalized) {
 				if (!map[it.id]) map[it.id] = { ...it };
@@ -60,24 +63,9 @@ const Inventory = () => {
 			setItems(Object.values(map));
 		});
 		return () => unsub();
-	}, [user, catalog]);
+	}, [user]);
 
-	// Load item catalog once (id -> General.Nome)
-	useEffect(() => {
-		const unsub = onSnapshot(collection(db, 'items'), snap => {
-			const next = {};
-			const full = {};
-			snap.forEach(docSnap => {
-				const data = docSnap.data();
-				const display = data?.General?.Nome || data?.name || docSnap.id;
-				next[docSnap.id] = display;
-				full[docSnap.id] = { id: docSnap.id, ...data };
-			});
-			setCatalog(next);
-			setDocs(full);
-		});
-		return () => unsub();
-	}, []);
+	// No longer loading the global items catalog; full item specifics are in user's inventory
 
 	// Helper to derive an id from an inventory entry (string or object)
 	const deriveId = (e, i) => {
@@ -129,6 +117,40 @@ const Inventory = () => {
 		}
 	};
 
+	// Open overlay to adjust gold
+	const openGoldOverlay = (dir) => {
+		setGoldDir(dir);
+		setGoldDelta('');
+		setShowGoldOverlay(true);
+	};
+
+	// Apply gold delta to Firestore, clamped to >= 0
+	const applyGoldDelta = async () => {
+		if (!user) return;
+		const amount = Math.abs(parseInt(goldDelta, 10));
+		if (!amount || Number.isNaN(amount)) {
+			// no valid amount entered
+			return;
+		}
+		try {
+			setGoldBusy(true);
+			const ref = doc(db, 'users', user.uid);
+			const snap = await getDoc(ref);
+			if (!snap.exists()) return;
+			const data = snap.data() || {};
+			const curr = typeof data?.stats?.gold === 'number' ? data.stats.gold : parseInt(data?.stats?.gold, 10) || 0;
+			const next = Math.max(0, curr + (goldDir >= 0 ? amount : -amount));
+			await updateDoc(ref, {
+				stats: { ...(data.stats || {}), gold: next }
+			});
+			setShowGoldOverlay(false);
+		} catch (err) {
+			console.error('Error updating gold', err);
+		} finally {
+			setGoldBusy(false);
+		}
+	};
+
 	const filtered = items.filter(it =>
 		!q || it.name?.toLowerCase().includes(q.toLowerCase()) || it.type?.toLowerCase().includes(q.toLowerCase())
 	);
@@ -138,10 +160,26 @@ const Inventory = () => {
 			<div className="absolute -left-10 -top-10 w-40 h-40 bg-indigo-500/10 rounded-full blur-3xl" />
 			<div className="absolute -right-10 -bottom-10 w-48 h-48 bg-fuchsia-500/10 rounded-full blur-3xl" />
 
-			{/* Gold badge */}
+			{/* Gold badge + controls */}
 			<div className="absolute top-4 right-4 z-10 inline-flex items-center gap-1.5 rounded-full border border-amber-400/40 bg-amber-500/15 px-3 py-1 backdrop-blur-sm">
 				<FaCoins className="h-3.5 w-3.5 text-amber-300" />
 				<span className="text-xs font-medium text-amber-200">{gold}</span>
+				<div className="ml-2 flex items-center gap-1">
+					<button
+						className="inline-flex h-5 w-5 items-center justify-center rounded-md border border-emerald-400/40 text-emerald-300 hover:bg-emerald-500/10"
+						title="Aggiungi oro"
+						onClick={() => openGoldOverlay(1)}
+					>
+						<FiPlus className="h-3 w-3" />
+					</button>
+					<button
+						className="inline-flex h-5 w-5 items-center justify-center rounded-md border border-rose-400/40 text-rose-300 hover:bg-rose-500/10"
+						title="Rimuovi oro"
+						onClick={() => openGoldOverlay(-1)}
+					>
+						<FiMinus className="h-3 w-3" />
+					</button>
+				</div>
 			</div>
 
 			<div className="relative mb-3 flex items-center justify-between">
@@ -167,8 +205,8 @@ const Inventory = () => {
 				{filtered.length ? (
 					<ul className="space-y-2">
 						{filtered.map((it) => {
-							const docObj = docs[it.id] ? { ...docs[it.id], ...it } : it;
-							const imgUrl = docObj?.General?.image_url || it?.General?.image_url;
+			    const docObj = it.doc || it;
+			    const imgUrl = docObj?.General?.image_url || it?.General?.image_url;
 							return (
 								<li key={it.id} className="flex items-center justify-between rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2">
 									{imgUrl && (
@@ -176,7 +214,7 @@ const Inventory = () => {
 											<img src={imgUrl} alt={it.name} className="h-full w-full object-contain" />
 										</div>
 									)}
-									<button onClick={() => setPreviewItem(docObj)} className="min-w-0 text-left flex-1 hover:bg-slate-700/40 rounded-md px-2 py-1">
+				    <button onClick={() => setPreviewItem(docObj)} className="min-w-0 text-left flex-1 hover:bg-slate-700/40 rounded-md px-2 py-1">
 										<div className="text-sm text-slate-200 truncate">{it.name}</div>
 										<div className="text-[11px] text-slate-400 truncate">{it.type || 'oggetto'}</div>
 									</button>
@@ -218,6 +256,46 @@ const Inventory = () => {
 						setConfirmTarget(null);
 					}}
 				/>
+			)}
+
+			{/* Overlay to input gold delta */}
+			{showGoldOverlay && (
+				<div className="absolute inset-0 z-20 flex items-center justify-center">
+					<div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => !goldBusy && setShowGoldOverlay(false)} />
+					<div className="relative z-10 w-72 rounded-xl border border-slate-700/60 bg-slate-800/90 p-4 shadow-xl">
+						<h3 className="text-sm font-semibold text-slate-200">
+							{goldDir >= 0 ? 'Aggiungi oro' : 'Rimuovi oro'}
+						</h3>
+						<p className="mt-1 text-xs text-slate-400">Oro attuale: <span className="text-amber-300 font-medium">{gold}</span></p>
+						<div className="mt-3">
+							<label className="block text-xs text-slate-300 mb-1">Quantità</label>
+							<input
+								type="number"
+								min="0"
+								placeholder="Es. 10"
+								value={goldDelta}
+								onChange={(e) => setGoldDelta(e.target.value)}
+								className="w-full rounded-md bg-slate-900/60 border border-slate-600/60 px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-slate-400"
+							/>
+						</div>
+						<div className="mt-4 flex justify-end gap-2">
+							<button
+								className="inline-flex items-center justify-center rounded-md border border-slate-600/60 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700/40"
+								onClick={() => !goldBusy && setShowGoldOverlay(false)}
+								disabled={goldBusy}
+							>
+								Annulla
+							</button>
+							<button
+								className={`inline-flex items-center justify-center rounded-md px-3 py-1.5 text-xs ${goldDir>=0 ? 'bg-emerald-600/80 hover:bg-emerald-600 text-white' : 'bg-rose-600/80 hover:bg-rose-600 text-white'} disabled:opacity-60`}
+								onClick={applyGoldDelta}
+								disabled={goldBusy}
+							>
+								Conferma
+							</button>
+						</div>
+					</div>
+				</div>
 			)}
 		</div>
 	);

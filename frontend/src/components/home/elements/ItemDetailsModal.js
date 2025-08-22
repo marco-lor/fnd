@@ -22,12 +22,7 @@ const Pill = ({ children, color = 'indigo' }) => (
   <span className={`inline-flex items-center rounded-full px-2 py-[2px] text-[10px] border bg-${color}-500/10 border-${color}-400/30 text-${color}-200 mr-2 mb-2`}>{children}</span>
 );
 
-const Section = ({ title, children }) => (
-  <div>
-    <div className="text-[11px] uppercase tracking-wider text-slate-400 mb-2">{title}</div>
-    <div>{children}</div>
-  </div>
-);
+// Note: Removed unused Section component to satisfy ESLint no-unused-vars
 
 // Normalize and derive quick facts from an item document
 const useItemFacts = (item) => {

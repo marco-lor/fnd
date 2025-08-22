@@ -1,5 +1,5 @@
 // frontend/src/components/dmDashboard/elements/playerInfo.js
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faEdit, faTrash } from "@fortawesome/free-solid-svg-icons";
 import { library } from "@fortawesome/fontawesome-svg-core";
@@ -25,6 +25,11 @@ import { EditConoscenzaPersonaleOverlay } from "./buttons/editConoscenzaPersonal
 import AddProfessionePersonale, { AddProfessionePersonaleOverlay } from "./buttons/addProfessionePersonale";
 import { DelProfessionePersonaleOverlay } from "./buttons/delProfessionePersonale";
 import { EditProfessionePersonaleOverlay } from "./buttons/editProfessionePersonale";
+// Bazaar item overlays (for editing inventory items by type)
+import { AddWeaponOverlay } from "../../bazaar/elements/addWeapon";
+import { AddArmaturaOverlay } from "../../bazaar/elements/addArmatura";
+import { AddAccessorioOverlay } from "../../bazaar/elements/addAccessorio";
+import { AddConsumabileOverlay } from "../../bazaar/elements/addConsumabile";
 // --- End Imports ---
 
 library.add(faEdit, faTrash);
@@ -34,6 +39,14 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [showEditConoscenzaOverlay, setShowEditConoscenzaOverlay] = useState(false);
   const [showEditProfessioneOverlay, setShowEditProfessioneOverlay] = useState(false);
+  // items catalog (id -> display name)
+  const [catalog, setCatalog] = useState({});
+  // items docs (id -> full doc incl. item_type)
+  const [itemsDocs, setItemsDocs] = useState({});
+  // inventory item edit overlay
+  const [showEditItemOverlay, setShowEditItemOverlay] = useState(false);
+  const [editItemData, setEditItemData] = useState(null);
+  const [selectedEditItemId, setSelectedEditItemId] = useState(null);
   
   // Conoscenza
   const [showConoscenzaOverlay, setShowConoscenzaOverlay] = useState(false);
@@ -77,6 +90,39 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
     } catch (err) {
       console.error("Error refreshing users:", err);
     }
+  };
+
+  // Load item catalog once (to resolve inventory string ids to names) and store full docs
+  useEffect(() => {
+    const loadItems = async () => {
+      try {
+        const snap = await getDocs(collection(db, "items"));
+        const next = {};
+        const docs = {};
+        snap.forEach(d => {
+          const data = d.data();
+          next[d.id] = data?.General?.Nome || data?.name || d.id;
+          docs[d.id] = { id: d.id, ...data };
+        });
+        setCatalog(next);
+        setItemsDocs(docs);
+      } catch (e) {
+        console.warn("Failed to load item catalog", e);
+      }
+    };
+    loadItems();
+  }, []);
+
+  // Helpers to normalize inventory entries
+  const deriveId = (e, i) => {
+    if (!e) return `item-${i}`;
+    if (typeof e === "string") return e;
+    return e.id || e.name || e?.General?.Nome || `item-${i}`;
+  };
+  const toDisplayName = (e, i) => {
+    if (!e) return `item-${i}`;
+    if (typeof e === "string") return catalog[e] || e;
+    return catalog[e.id] || e?.General?.Nome || e.name || deriveId(e, i);
   };
 
   // --- Handlers to open overlays ---
@@ -138,6 +184,28 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
     setSelectedUserId(userId);
     setSelectedProfessione(name);
     setShowDeleteProfessioneOverlay(true);
+  };
+  // Edit inventory item (reuses bazaar overlays based on item_type)
+  const handleEditInventoryItem = (userId, itemId) => {
+    const u = users.find(x => x.id === userId);
+    // Prefer the user's inventory copy if present (object entry), else fallback to global catalog doc
+    let invData = null;
+    const invArr = Array.isArray(u?.inventory) ? u.inventory : [];
+    for (const entry of invArr) {
+      if (!entry || typeof entry !== "object") continue;
+      const eid = entry.id || entry.name || entry?.General?.Nome;
+      if (eid === itemId) { invData = entry; break; }
+    }
+    const baseDoc = itemsDocs[itemId];
+    const initial = invData || baseDoc;
+    if (!initial) {
+      console.warn("No data found for inventory item id:", itemId);
+      return;
+    }
+    setSelectedUserId(userId);
+    setSelectedEditItemId(itemId);
+    setEditItemData(initial);
+    setShowEditItemOverlay(true);
   };
   // --- end handlers ---
 
@@ -346,6 +414,64 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                 </td>
               ))}
             </tr>
+
+            {/* Inventario */}
+            <tr className="bg-gray-800 hover:bg-gray-700">
+              <td className="border border-gray-600 px-4 py-2 font-medium">Inventario</td>
+              {users.map((u) => {
+                const inv = Array.isArray(u?.inventory) ? u.inventory : [];
+                // Normalize and collapse by id
+                const normalized = inv
+                  .map((entry, i) => {
+                    if (!entry) return null;
+                    if (typeof entry === "string") {
+                      const id = entry;
+                      return { id, name: catalog[id] || id, qty: 1 };
+                    }
+                    const id = deriveId(entry, i);
+                    const name = toDisplayName(entry, i);
+                    const qty = typeof entry.qty === "number" ? entry.qty : 1;
+                    return { id, name, qty };
+                  })
+                  .filter(Boolean);
+                const collapsed = {};
+                for (const it of normalized) {
+                  if (!collapsed[it.id]) collapsed[it.id] = { ...it };
+                  else collapsed[it.id].qty += it.qty || 1;
+                }
+                const list = Object.values(collapsed).sort((a, b) => a.name.localeCompare(b.name));
+                const gold = typeof u?.stats?.gold === "number" ? u.stats.gold : parseInt(u?.stats?.gold, 10) || 0;
+
+                return (
+                  <td key={u.id+"-inv"} className="border border-gray-600 px-4 py-2 align-top">
+                    <div className="mb-2 text-xs text-amber-300">Gold: {gold}</div>
+                    {list.length ? (
+                      <ul className="space-y-1 pr-1">
+                        {list.map((it) => (
+                          <li key={it.id} className="flex items-center justify-between text-sm">
+                            <span className="truncate mr-2">{it.name}</span>
+                            <div className="flex items-center space-x-2">
+                              {itemsDocs?.[it.id]?.item_type && (
+                                <button
+                                  className={iconEdit}
+                                  title="Modifica oggetto"
+                                  onClick={() => handleEditInventoryItem(u.id, it.id)}
+                                >
+                                  <FontAwesomeIcon icon="edit" className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              <span className="text-amber-300 text-xs">x{it.qty}</span>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <span className="text-gray-400 italic text-sm">Inventario vuoto</span>
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
           </tbody>
         </table>
       </div>
@@ -515,6 +641,137 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
             if (ok) refreshUserData();
           }}
         />
+      )}
+      {/* Inventory item edit overlay (type-aware) */}
+      {showEditItemOverlay && editItemData && (
+        <>
+    {editItemData?.item_type === 'armatura' ? (
+            <AddArmaturaOverlay
+              onClose={(ok) => {
+                setShowEditItemOverlay(false);
+                setEditItemData(null);
+                setSelectedUserId(null);
+                if (ok) {
+                  // reload items to refresh names/types
+                  (async () => {
+                    try {
+                      const snap = await getDocs(collection(db, "items"));
+                      const next = {};
+                      const docs = {};
+                      snap.forEach(d => {
+                        const data = d.data();
+                        next[d.id] = data?.General?.Nome || data?.name || d.id;
+                        docs[d.id] = { id: d.id, ...data };
+                      });
+                      setCatalog(next);
+                      setItemsDocs(docs);
+          await refreshUserData();
+                    } catch (e) { /* noop */ }
+                  })();
+                }
+              }}
+              showMessage={console.log}
+              initialData={editItemData}
+              editMode={true}
+              inventoryEditMode={true}
+              inventoryUserId={selectedUserId}
+              inventoryItemId={selectedEditItemId}
+            />
+          ) : editItemData?.item_type === 'accessorio' ? (
+            <AddAccessorioOverlay
+              onClose={(ok) => {
+                setShowEditItemOverlay(false);
+                setEditItemData(null);
+                setSelectedUserId(null);
+                if (ok) {
+                  (async () => {
+                    try {
+                      const snap = await getDocs(collection(db, "items"));
+                      const next = {};
+                      const docs = {};
+                      snap.forEach(d => {
+                        const data = d.data();
+                        next[d.id] = data?.General?.Nome || data?.name || d.id;
+                        docs[d.id] = { id: d.id, ...data };
+                      });
+                      setCatalog(next);
+                      setItemsDocs(docs);
+          await refreshUserData();
+                    } catch (e) { /* noop */ }
+                  })();
+                }
+              }}
+              showMessage={console.log}
+              initialData={editItemData}
+              editMode={true}
+              inventoryEditMode={true}
+              inventoryUserId={selectedUserId}
+              inventoryItemId={selectedEditItemId}
+            />
+          ) : editItemData?.item_type === 'consumabile' ? (
+            <AddConsumabileOverlay
+              onClose={(ok) => {
+                setShowEditItemOverlay(false);
+                setEditItemData(null);
+                setSelectedUserId(null);
+                if (ok) {
+                  (async () => {
+                    try {
+                      const snap = await getDocs(collection(db, "items"));
+                      const next = {};
+                      const docs = {};
+                      snap.forEach(d => {
+                        const data = d.data();
+                        next[d.id] = data?.General?.Nome || data?.name || d.id;
+                        docs[d.id] = { id: d.id, ...data };
+                      });
+                      setCatalog(next);
+                      setItemsDocs(docs);
+          await refreshUserData();
+                    } catch (e) { /* noop */ }
+                  })();
+                }
+              }}
+              showMessage={console.log}
+              initialData={editItemData}
+              editMode={true}
+              inventoryEditMode={true}
+              inventoryUserId={selectedUserId}
+              inventoryItemId={selectedEditItemId}
+            />
+          ) : (
+            <AddWeaponOverlay
+              onClose={(ok) => {
+                setShowEditItemOverlay(false);
+                setEditItemData(null);
+                setSelectedUserId(null);
+                if (ok) {
+                  (async () => {
+                    try {
+                      const snap = await getDocs(collection(db, "items"));
+                      const next = {};
+                      const docs = {};
+                      snap.forEach(d => {
+                        const data = d.data();
+                        next[d.id] = data?.General?.Nome || data?.name || d.id;
+                        docs[d.id] = { id: d.id, ...data };
+                      });
+                      setCatalog(next);
+                      setItemsDocs(docs);
+          await refreshUserData();
+                    } catch (e) { /* noop */ }
+                  })();
+                }
+              }}
+              showMessage={console.log}
+              initialData={editItemData}
+              editMode={true}
+              inventoryEditMode={true}
+              inventoryUserId={selectedUserId}
+              inventoryItemId={selectedEditItemId}
+            />
+          )}
+        </>
       )}
     </div>
   );
