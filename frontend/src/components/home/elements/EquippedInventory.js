@@ -4,6 +4,7 @@ import { doc, onSnapshot, updateDoc, collection } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 import { FaTimes } from 'react-icons/fa';
 import { GiChestArmor, GiBroadsword, GiShield, GiRing, GiCrackedHelm, GiBlackBelt, GiSteeltoeBoots, GiScabbard } from 'react-icons/gi';
+import ItemDetailsModal from './ItemDetailsModal';
 
 // Slot metadata (icon + label) retained; layout will be Diablo-like around a silhouette
 const SLOT_DEFS = [
@@ -59,6 +60,8 @@ const EquippedInventory = () => {
   const [activeSlot, setActiveSlot] = useState(null);
   const [loading, setLoading] = useState(false);
   const [catalog, setCatalog] = useState({}); // id -> General.Nome
+  const [itemDocs, setItemDocs] = useState({}); // id -> full doc
+  const [previewItem, setPreviewItem] = useState(null); // item object to show in details modal
 
   useEffect(() => {
     if (!user) return;
@@ -75,12 +78,15 @@ const EquippedInventory = () => {
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'items'), snap => {
       const next = {};
+      const docs = {};
       snap.forEach(docSnap => {
         const data = docSnap.data();
         const display = data?.General?.Nome || data?.name || docSnap.id;
         next[docSnap.id] = display;
+        docs[docSnap.id] = { id: docSnap.id, ...data };
       });
       setCatalog(next);
+      setItemDocs(docs);
     });
     return () => unsub();
   }, []);
@@ -139,6 +145,14 @@ const EquippedInventory = () => {
     .map(it => ({ ...it, remaining: Math.max(0, (it.qty || 0) - (equippedCounts[it.id] || 0)) }))
     .filter(it => it.remaining > 0);
 
+  // Resolve inventory/equipped entry to full item doc if possible
+  const resolveItemDoc = (entry) => {
+    if (!entry) return null;
+    if (typeof entry === 'string') return itemDocs[entry] || null;
+    const key = entry.id || entry.name;
+    return itemDocs[key] ? { ...itemDocs[key], ...entry } : entry;
+  };
+
   // Render a single slot cell (side used for beam direction)
   const renderSlot = (slotKey, side) => {
     if (!slotKey) return <div />;
@@ -146,6 +160,8 @@ const EquippedInventory = () => {
     if (!def) return <div />;
     const { label, icon: Icon } = def;
     const item = equipped?.[slotKey];
+    const itemDoc = resolveItemDoc(item);
+    const imgUrl = itemDoc?.General?.image_url || item?.General?.image_url;
     return (
       <div key={slotKey} className="group relative">
         <div
@@ -155,13 +171,28 @@ const EquippedInventory = () => {
           onClick={() => item ? handleUnequip(slotKey) : openEquipModal(slotKey)}
           title={item ? `Click to unequip ${item.name || item}` : `Equip ${label}`}
         >
-          <Icon className={`w-6 h-6 mb-1 ${item ? 'text-indigo-300 drop-shadow' : 'text-slate-500 group-hover:text-slate-300'}`} />
+          {item && imgUrl ? (
+            <div className="h-10 w-10 mb-1 rounded-lg overflow-hidden border border-indigo-400/40 bg-slate-900/40 shadow-inner">
+              <img src={imgUrl} alt={typeof item === 'string' ? (catalog[item] || item) : (item.name || item.id)} className="h-full w-full object-contain" />
+            </div>
+          ) : (
+            <Icon className={`w-6 h-6 mb-1 ${item ? 'text-indigo-300 drop-shadow' : 'text-slate-500 group-hover:text-slate-300'}`} />
+          )}
           <span className="text-[10px] uppercase tracking-wide text-slate-300 leading-tight px-1 text-center whitespace-normal">{label}</span>
           {!item && <Silhouette />}
       {item && (
             <div className="absolute inset-0 flex flex-col items-center justify-end pb-1">
         <span className="text-[9px] text-emerald-300 font-medium max-w-full truncate px-1">{(typeof item === 'string' ? (catalog[item] || item) : (item.name || catalog[item.id] || item.id))}</span>
             </div>
+          )}
+          {item && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setPreviewItem(itemDoc); }}
+              className="absolute top-1 right-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-900/70 border border-slate-600/60 text-slate-300 hover:border-slate-400/60"
+              title="Dettagli"
+            >
+              i
+            </button>
           )}
           {item && side === 'left' && (
             <div className="pointer-events-none absolute top-1/2 left-full -translate-y-1/2 h-px w-[86px] bg-gradient-to-r from-indigo-400/0 via-indigo-400/70 to-fuchsia-400/0 drop-shadow-[0_0_4px_rgba(129,140,248,0.6)]" />
@@ -225,17 +256,33 @@ const EquippedInventory = () => {
                 const rarity = it?.rarity;
                 const qty = it?.qty || 1;
                 const remaining = it.remaining != null ? it.remaining : qty; // fallback
+                const docObj = resolveItemDoc(it);
+                const imgUrl = docObj?.General?.image_url || it?.General?.image_url;
                 return (
                   <li key={it.id + idx}>
-                    <button
-                      onClick={() => handleEquip(it)}
-                      className="w-full text-left px-3 py-2 rounded-lg bg-slate-800/70 hover:bg-slate-700/70 border border-slate-600/50 hover:border-slate-400/50 transition flex items-center justify-between"
-                    >
-                      <span className="text-sm text-slate-200 truncate">{name}{qty > 1 && <span className="ml-2 text-[10px] text-amber-300">x{qty}</span>}{remaining !== qty && <span className="ml-2 text-[10px] text-emerald-300">(resta {remaining})</span>}</span>
-                      <div className="flex items-center gap-2">
-                        {rarity && <span className="text-[10px] uppercase tracking-wide text-fuchsia-300">{rarity}</span>}
-                      </div>
-                    </button>
+                    <div className="w-full px-3 py-2 rounded-lg bg-slate-800/70 border border-slate-600/50 flex items-center justify-between gap-2">
+                      {imgUrl && (
+                        <div className="h-8 w-8 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/50 mr-2">
+                          <img src={imgUrl} alt={name} className="h-full w-full object-contain" />
+                        </div>
+                      )}
+                      <button
+                        onClick={() => handleEquip(it)}
+                        className="flex-1 text-left hover:bg-slate-700/60 rounded-md px-2 py-1 transition"
+                      >
+                        <span className="text-sm text-slate-200 truncate">{name}{qty > 1 && <span className="ml-2 text-[10px] text-amber-300">x{qty}</span>}{remaining !== qty && <span className="ml-2 text-[10px] text-emerald-300">(resta {remaining})</span>}</span>
+                        <div className="flex items-center gap-2 mt-1">
+                          {rarity && <span className="text-[10px] uppercase tracking-wide text-fuchsia-300">{rarity}</span>}
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => setPreviewItem(docObj)}
+                        className="shrink-0 text-[11px] px-2 py-1 rounded-md bg-slate-900/60 border border-slate-600/60 text-slate-300 hover:border-slate-400/60"
+                        title="Dettagli"
+                      >
+                        Dettagli
+                      </button>
+                    </div>
                   </li>
                 );
               })}
@@ -244,6 +291,10 @@ const EquippedInventory = () => {
             <div className="text-xs text-slate-400">No available items in inventory.</div>
           )}
         </Modal>
+      )}
+
+      {previewItem && (
+        <ItemDetailsModal item={previewItem} onClose={() => setPreviewItem(null)} />
       )}
     </div>
   );

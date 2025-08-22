@@ -3,6 +3,7 @@ import { AuthContext } from '../../../AuthContext';
 import { db } from '../../firebaseConfig';
 import { doc, onSnapshot, collection } from 'firebase/firestore';
 import { FiPackage, FiSearch } from 'react-icons/fi';
+import ItemDetailsModal from './ItemDetailsModal';
 
 // Simple inventory browser to occupy the right column
 // Shows a searchable, grouped list of items in user's inventory
@@ -11,6 +12,8 @@ const Inventory = () => {
 	const [items, setItems] = useState([]);
 	const [q, setQ] = useState('');
 	const [catalog, setCatalog] = useState({}); // id -> General.Nome
+	const [docs, setDocs] = useState({}); // id -> full item doc
+	const [previewItem, setPreviewItem] = useState(null);
 
 	useEffect(() => {
 		if (!user) return;
@@ -44,12 +47,15 @@ const Inventory = () => {
 	useEffect(() => {
 		const unsub = onSnapshot(collection(db, 'items'), snap => {
 			const next = {};
+			const full = {};
 			snap.forEach(docSnap => {
 				const data = docSnap.data();
 				const display = data?.General?.Nome || data?.name || docSnap.id;
 				next[docSnap.id] = display;
+				full[docSnap.id] = { id: docSnap.id, ...data };
 			});
 			setCatalog(next);
+			setDocs(full);
 		});
 		return () => unsub();
 	}, []);
@@ -85,25 +91,38 @@ const Inventory = () => {
 			<div className="relative flex-1 min-h-0 overflow-auto pr-1 custom-scroll">
 				{filtered.length ? (
 					<ul className="space-y-2">
-						{filtered.map((it) => (
-							<li key={it.id} className="flex items-center justify-between rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2">
-								<div className="min-w-0">
-									<div className="text-sm text-slate-200 truncate">{it.name}</div>
-									<div className="text-[11px] text-slate-400 truncate">{it.type || 'oggetto'}</div>
-								</div>
-								<div className="ml-3 flex items-center gap-2">
-									{it.rarity && (
-										<span className="text-[10px] uppercase tracking-wide text-fuchsia-300">{it.rarity}</span>
+						{filtered.map((it) => {
+							const docObj = docs[it.id] ? { ...docs[it.id], ...it } : it;
+							const imgUrl = docObj?.General?.image_url || it?.General?.image_url;
+							return (
+								<li key={it.id} className="flex items-center justify-between rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2">
+									{imgUrl && (
+										<div className="h-8 w-8 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/50 mr-2">
+											<img src={imgUrl} alt={it.name} className="h-full w-full object-contain" />
+										</div>
 									)}
-									<span className="text-xs text-amber-300">x{it.qty}</span>
-								</div>
-							</li>
-						))}
+									<button onClick={() => setPreviewItem(docObj)} className="min-w-0 text-left flex-1 hover:bg-slate-700/40 rounded-md px-2 py-1">
+										<div className="text-sm text-slate-200 truncate">{it.name}</div>
+										<div className="text-[11px] text-slate-400 truncate">{it.type || 'oggetto'}</div>
+									</button>
+									<div className="ml-3 flex items-center gap-2">
+										{it.rarity && (
+											<span className="text-[10px] uppercase tracking-wide text-fuchsia-300">{it.rarity}</span>
+										)}
+										<span className="text-xs text-amber-300">x{it.qty}</span>
+									</div>
+								</li>
+							);
+						})}
 					</ul>
 				) : (
 					<div className="text-slate-400 text-sm">Inventario vuoto.</div>
 				)}
 			</div>
+
+			{previewItem && (
+				<ItemDetailsModal item={previewItem} onClose={() => setPreviewItem(null)} />
+			)}
 		</div>
 	);
 };
