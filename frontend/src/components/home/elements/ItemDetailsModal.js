@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { FaTimes } from 'react-icons/fa';
 import { useAuth } from '../../../AuthContext';
 import { computeValue } from '../../common/computeFormula';
+import { db } from '../../firebaseConfig';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { FiTrash2 } from 'react-icons/fi';
+import ConfirmDeleteModal from './ConfirmDeleteModal';
 
 // Utility: safely get nested value by path
 const get = (obj, path, dflt) => {
@@ -147,8 +152,11 @@ const SpellsList = ({ spells }) => {
 };
 
 const ItemDetailsModal = ({ item, onClose }) => {
-  const { userData } = useAuth();
+  const { user, userData } = useAuth();
   const facts = useItemFacts(item);
+  // Ensure we only portal on client
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
   // Determine default level based on user level and thresholds 1,4,7,10 (floor to nearest)
   const defaultLevel = useMemo(() => {
     const thresholds = [1, 4, 7, 10];
@@ -159,14 +167,93 @@ const ItemDetailsModal = ({ item, onClose }) => {
     return '1';
   }, [userData?.stats?.level]);
   const [level, setLevel] = useState(defaultLevel);
+  const [busy, setBusy] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [equippedCount, setEquippedCount] = useState(0);
   useEffect(() => {
     setLevel(defaultLevel);
   }, [defaultLevel]);
+  // Compute if this item is equipped based on userData.equipped (unconditional hook)
+  useEffect(() => {
+    try {
+      const eq = userData?.equipped || {};
+      const targetId = item ? (item.id || item.name || item?.General?.Nome) : undefined;
+      let cnt = 0;
+      Object.values(eq).forEach((val) => {
+        if (!val) return;
+        const id = typeof val === 'string' ? val : (val.id || val.name || val?.General?.Nome);
+        if (id && targetId && id === targetId) cnt += 1;
+      });
+      setEquippedCount(cnt);
+    } catch {}
+  }, [userData?.equipped, item]);
+
   if (!facts) return null;
   const { name, type, slot, img, price, effect, specific, params, spells } = facts;
 
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+  const removeOne = async () => {
+    try {
+      // The user document id matches the authenticated user's uid.
+      const userId = user?.uid;
+      if (!userId) return;
+      setBusy(true);
+      const ref = doc(db, 'users', userId);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return;
+      const data = snap.data() || {};
+      const inv = Array.isArray(data.inventory) ? [...data.inventory] : [];
+      const targetId = item?.id || item?.name || name;
+      let removed = false;
+      const deriveId = (e, i) => {
+        if (!e) return `item-${i}`;
+        if (typeof e === 'string') return e;
+        return e.id || e.name || e?.General?.Nome || `item-${i}`;
+      };
+      const next = [];
+      for (let i = 0; i < inv.length; i++) {
+        const entry = inv[i];
+        if (removed) {
+          next.push(entry);
+          continue;
+        }
+        const id = deriveId(entry, i);
+        if (id !== targetId) {
+          next.push(entry);
+          continue;
+        }
+        if (typeof entry === 'object' && entry && typeof entry.qty === 'number') {
+          const newQty = Math.max(0, (entry.qty || 0) - 1);
+          if (newQty > 0) next.push({ ...entry, qty: newQty });
+        } else {
+          // string or object without qty -> remove single occurrence
+        }
+        removed = true;
+      }
+      if (!removed) return;
+      await updateDoc(ref, { inventory: next });
+      // Optional: close if item no longer present at all
+      onClose && onClose();
+    } catch (e) {
+      console.error('Failed to remove item', e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const handleBackdropMouseDown = (e) => {
+    // Close only when clicking the backdrop itself (not children),
+    // and avoid closing while the confirmation dialog is open
+    if (e.target === e.currentTarget && !confirmOpen) {
+      onClose && onClose();
+    }
+  };
+
+  const modal = (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+      onMouseDown={handleBackdropMouseDown}
+      role="dialog"
+      aria-modal="true"
+    >
       <div className="w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-700/60 bg-slate-900/90 shadow-2xl">
         <div className="relative">
           {/* Header banner */}
@@ -193,7 +280,17 @@ const ItemDetailsModal = ({ item, onClose }) => {
                 {effect && <div className="mt-2 text-sm text-slate-300 whitespace-pre-wrap break-words" title={effect}>{effect}</div>}
               </div>
               {/* Level selector */}
-              <div className="flex items-start">
+              <div className="flex items-start gap-2">
+                {/* Delete one */}
+                <button
+                  className={`self-start mt-0 rounded-lg border p-2 inline-flex items-center justify-center ${(busy || equippedCount>0) ? 'opacity-60 cursor-not-allowed' : 'hover:bg-red-500/10'} border-red-400/40 text-red-300`}
+                  onClick={() => equippedCount===0 && setConfirmOpen(true)}
+                  disabled={busy || equippedCount>0}
+                  aria-label="Rimuovi 1"
+                  title={equippedCount>0 ? "Prima rimuovi l'oggetto" : "Rimuovi 1 dall'inventario"}
+                >
+                  <FiTrash2 className="h-3 w-3" />
+                </button>
                 <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-2">
                   <div className="text-[10px] text-slate-400 mb-1 text-center">Livello</div>
                   <div className="grid grid-cols-2 gap-1">
@@ -233,8 +330,21 @@ const ItemDetailsModal = ({ item, onClose }) => {
           <SpellsList spells={spells} />
         </div>
       </div>
+      {confirmOpen && (
+        <ConfirmDeleteModal
+          itemName={name}
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={async () => {
+            await removeOne();
+            setConfirmOpen(false);
+          }}
+        />
+      )}
     </div>
   );
+
+  if (!mounted) return null;
+  return createPortal(modal, document.body);
 };
 
 export default ItemDetailsModal;

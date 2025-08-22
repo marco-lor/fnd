@@ -1,9 +1,11 @@
 import React, { useContext, useEffect, useState } from 'react';
 import { AuthContext } from '../../../AuthContext';
 import { db } from '../../firebaseConfig';
-import { doc, onSnapshot, collection } from 'firebase/firestore';
-import { FiPackage, FiSearch } from 'react-icons/fi';
+import { doc, onSnapshot, collection, getDoc, updateDoc } from 'firebase/firestore';
+import { FiPackage, FiSearch, FiTrash2 } from 'react-icons/fi';
+import { FaCoins } from 'react-icons/fa';
 import ItemDetailsModal from './ItemDetailsModal';
+import ConfirmDeleteModal from './ConfirmDeleteModal';
 
 // Simple inventory browser to occupy the right column
 // Shows a searchable, grouped list of items in user's inventory
@@ -14,12 +16,29 @@ const Inventory = () => {
 	const [catalog, setCatalog] = useState({}); // id -> General.Nome
 	const [docs, setDocs] = useState({}); // id -> full item doc
 	const [previewItem, setPreviewItem] = useState(null);
+	const [gold, setGold] = useState(0);
+	const [busyId, setBusyId] = useState(null);
+    const [confirmTarget, setConfirmTarget] = useState(null); // { id, name }
+	const [equippedCounts, setEquippedCounts] = useState({}); // id -> count equipped
 
 	useEffect(() => {
 		if (!user) return;
 		const unsub = onSnapshot(doc(db, 'users', user.uid), snap => {
 			const data = snap.data();
 			const inv = Array.isArray(data?.inventory) ? data.inventory : [];
+			setGold(typeof data?.stats?.gold === 'number' ? data.stats.gold : parseInt(data?.stats?.gold, 10) || 0);
+			// Compute equipped counts by id
+			const equipped = data?.equipped || {};
+			const eqCounts = {};
+			Object.values(equipped).forEach((val, idx) => {
+				if (!val) return;
+				let id;
+				if (typeof val === 'string') id = val;
+				else id = val.id || val.name || val?.General?.Nome || `eq-${idx}`;
+				if (!id) return;
+				eqCounts[id] = (eqCounts[id] || 0) + 1;
+			});
+			setEquippedCounts(eqCounts);
 			// Normalize
 			const normalized = inv.map((e, i) => {
 				if (!e) return null;
@@ -60,6 +79,56 @@ const Inventory = () => {
 		return () => unsub();
 	}, []);
 
+	// Helper to derive an id from an inventory entry (string or object)
+	const deriveId = (e, i) => {
+		if (!e) return `item-${i}`;
+		if (typeof e === 'string') return e;
+		return e.id || e.name || e?.General?.Nome || `item-${i}`;
+	};
+
+	// Remove a single unit of an item by id from the user's inventory
+	const removeOne = async (targetId) => {
+		if (!user || !targetId) return;
+		try {
+			setBusyId(targetId);
+			const ref = doc(db, 'users', user.uid);
+			const snap = await getDoc(ref);
+			if (!snap.exists()) return;
+			const data = snap.data() || {};
+			const inv = Array.isArray(data.inventory) ? [...data.inventory] : [];
+			let removed = false;
+			const next = [];
+			for (let i = 0; i < inv.length; i++) {
+				const entry = inv[i];
+				if (removed) {
+					next.push(entry);
+					continue;
+				}
+				const id = deriveId(entry, i);
+				if (id !== targetId) {
+					next.push(entry);
+					continue;
+				}
+				// Match found
+				if (typeof entry === 'object' && entry && typeof entry.qty === 'number') {
+					const newQty = Math.max(0, (entry.qty || 0) - 1);
+					if (newQty > 0) {
+						next.push({ ...entry, qty: newQty });
+					}
+				} else {
+					// string or object without qty: remove this single occurrence by skipping push
+				}
+				removed = true;
+			}
+			if (!removed) return; // nothing to do
+			await updateDoc(ref, { inventory: next });
+		} catch (err) {
+			console.error('Error removing item from inventory', err);
+		} finally {
+			setBusyId(null);
+		}
+	};
+
 	const filtered = items.filter(it =>
 		!q || it.name?.toLowerCase().includes(q.toLowerCase()) || it.type?.toLowerCase().includes(q.toLowerCase())
 	);
@@ -68,6 +137,12 @@ const Inventory = () => {
 		<div className="relative overflow-hidden backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 shadow-lg h-full flex flex-col">
 			<div className="absolute -left-10 -top-10 w-40 h-40 bg-indigo-500/10 rounded-full blur-3xl" />
 			<div className="absolute -right-10 -bottom-10 w-48 h-48 bg-fuchsia-500/10 rounded-full blur-3xl" />
+
+			{/* Gold badge */}
+			<div className="absolute top-4 right-4 z-10 inline-flex items-center gap-1.5 rounded-full border border-amber-400/40 bg-amber-500/15 px-3 py-1 backdrop-blur-sm">
+				<FaCoins className="h-3.5 w-3.5 text-amber-300" />
+				<span className="text-xs font-medium text-amber-200">{gold}</span>
+			</div>
 
 			<div className="relative mb-3 flex items-center justify-between">
 				<div className="flex items-center gap-2">
@@ -110,6 +185,16 @@ const Inventory = () => {
 											<span className="text-[10px] uppercase tracking-wide text-fuchsia-300">{it.rarity}</span>
 										)}
 										<span className="text-xs text-amber-300">x{it.qty}</span>
+										{(() => { const isEquipped = (equippedCounts[it.id] || 0) > 0; return (
+											<button
+												className={`ml-1 inline-flex items-center justify-center rounded-md border p-1.5 transition ${(busyId===it.id || isEquipped) ? 'opacity-60 cursor-not-allowed' : 'hover:bg-red-500/10'} border-red-400/40 text-red-300`}
+												onClick={() => !isEquipped && setConfirmTarget({ id: it.id, name: it.name })}
+												disabled={busyId===it.id || isEquipped}
+												title={isEquipped ? "Prima rimuovi l'oggetto" : "Rimuovi 1"}
+											>
+												<FiTrash2 className="h-3 w-3" />
+											</button>
+										); })()}
 									</div>
 								</li>
 							);
@@ -122,6 +207,17 @@ const Inventory = () => {
 
 			{previewItem && (
 				<ItemDetailsModal item={previewItem} onClose={() => setPreviewItem(null)} />
+			)}
+
+			{confirmTarget && (
+				<ConfirmDeleteModal
+					itemName={confirmTarget.name}
+					onCancel={() => setConfirmTarget(null)}
+					onConfirm={async () => {
+						await removeOne(confirmTarget.id);
+						setConfirmTarget(null);
+					}}
+				/>
 			)}
 		</div>
 	);
