@@ -1,5 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { FaTimes } from 'react-icons/fa';
+import { useAuth } from '../../../AuthContext';
+import { computeValue } from '../../common/computeFormula';
 
 // Utility: safely get nested value by path
 const get = (obj, path, dflt) => {
@@ -41,9 +43,16 @@ const useItemFacts = (item) => {
 
 const LEVELS = ['1', '4', '7', '10'];
 
-const ParametriGrid = ({ params, level }) => {
+const ParametriGrid = ({ params, level, userParams }) => {
   if (!params) return null;
   const cats = ['Combattimento', 'Special', 'Base'];
+  const isDice = (s) => typeof s === 'string' && /\b\d+d\d+\b/i.test(s);
+  const looksLikeFormula = (s) => {
+    if (typeof s !== 'string') return false;
+    if (isDice(s)) return false; // keep dice text (e.g., 9d6)
+    // Heuristic: contains math ops or MAX/MIN or a known param name-like token
+    return /[+\-*/()]|\bMAX\b|\bMIN\b|[A-Za-z]/i.test(s);
+  };
   return (
     <div className="space-y-2">
       {cats.map((cat) => {
@@ -52,18 +61,35 @@ const ParametriGrid = ({ params, level }) => {
         // Filter only non-empty values for selected level
         const entries = Object.entries(group)
           .map(([k, v]) => [k, (v && (v[level] ?? '')) || ''])
-          .filter(([_, v]) => (typeof v === 'number' ? v !== 0 : (v ?? '').toString().trim() !== ''));
+          .filter(([_, v]) => (typeof v === 'number' ? v !== 0 : (v ?? '').toString().trim() !== ''))
+          .map(([k, rawVal]) => {
+            let computed = null;
+            if (looksLikeFormula(rawVal) && userParams) {
+              computed = computeValue(String(rawVal), userParams);
+            }
+            return [k, rawVal, computed];
+          });
         if (!entries.length) return null;
         return (
           <div key={cat} className="rounded-xl border border-slate-700/50 bg-slate-800/40">
             <div className="px-3 py-2 text-[11px] tracking-wide text-slate-300 border-b border-slate-700/50">{cat}</div>
-            <div className="p-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {entries.map(([k, v]) => (
-                <div key={k} className="flex items-center justify-between rounded-lg bg-slate-900/30 px-2 py-1 border border-slate-700/40">
-                  <span className="text-[11px] text-slate-300 mr-2 truncate" title={k}>{k}</span>
-                  <span className="text-[11px] text-emerald-300 font-medium">{v}</span>
-                </div>
-              ))}
+            <div className="p-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {entries.map(([k, rawVal, computed]) => {
+                const showComputed = computed !== null && !Number.isNaN(computed);
+                return (
+                  <div key={k} className="rounded-lg bg-slate-900/30 px-2 py-2 border border-slate-700/40">
+                    <div className="text-[11px] text-slate-300 mb-1 break-words" title={k}>{k}</div>
+                    <div className="text-[12px] text-emerald-300 font-medium whitespace-pre-wrap break-words leading-snug">
+                      {showComputed ? String(computed) : String(rawVal)}
+                    </div>
+                    {showComputed && (
+                      <div className="mt-0.5 text-[10px] text-slate-400 whitespace-pre-wrap break-words" title={String(rawVal)}>
+                        {String(rawVal)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         );
@@ -121,8 +147,21 @@ const SpellsList = ({ spells }) => {
 };
 
 const ItemDetailsModal = ({ item, onClose }) => {
+  const { userData } = useAuth();
   const facts = useItemFacts(item);
-  const [level, setLevel] = useState('1');
+  // Determine default level based on user level and thresholds 1,4,7,10 (floor to nearest)
+  const defaultLevel = useMemo(() => {
+    const thresholds = [1, 4, 7, 10];
+    const userLevel = Number(userData?.stats?.level || 1);
+    for (let i = thresholds.length - 1; i >= 0; i--) {
+      if (userLevel >= thresholds[i]) return String(thresholds[i]);
+    }
+    return '1';
+  }, [userData?.stats?.level]);
+  const [level, setLevel] = useState(defaultLevel);
+  useEffect(() => {
+    setLevel(defaultLevel);
+  }, [defaultLevel]);
   if (!facts) return null;
   const { name, type, slot, img, price, effect, specific, params, spells } = facts;
 
@@ -151,16 +190,36 @@ const ItemDetailsModal = ({ item, onClose }) => {
                   {slot && <Pill color="indigo">Slot: {slot}</Pill>}
                   {price != null && <Pill color="amber">Prezzo: {price}</Pill>}
                 </div>
-                {effect && <div className="mt-2 text-sm text-slate-300 line-clamp-3" title={effect}>{effect}</div>}
+                {effect && <div className="mt-2 text-sm text-slate-300 whitespace-pre-wrap break-words" title={effect}>{effect}</div>}
               </div>
               {/* Level selector */}
               <div className="flex items-start">
                 <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-2">
                   <div className="text-[10px] text-slate-400 mb-1 text-center">Livello</div>
                   <div className="grid grid-cols-2 gap-1">
-                    {LEVELS.map((lv) => (
-                      <button key={lv} onClick={() => setLevel(lv)} className={`px-2 py-1 rounded-lg text-[11px] border transition ${level === lv ? 'bg-indigo-600/40 text-white border-indigo-400/50' : 'bg-slate-800/60 text-slate-300 border-slate-600/60 hover:border-slate-400/60'}`}>{lv}</button>
-                    ))}
+                    {LEVELS.map((lv) => {
+                      const isSelected = level === lv;
+                      const isDefault = defaultLevel === lv;
+                      return (
+                        <button
+                          key={lv}
+                          onClick={() => setLevel(lv)}
+                          className={`px-2 py-1 rounded-lg text-[11px] border transition ${
+                            isSelected
+                              ? 'bg-indigo-600/40 text-white border-indigo-400/50'
+                              : 'bg-slate-800/60 text-slate-300 border-slate-600/60 hover:border-slate-400/60'
+                          } ${isDefault ? 'ring-2 ring-amber-400/70' : ''}`}
+                          title={isDefault ? 'Default dal livello giocatore' : undefined}
+                        >
+                          <span className="flex items-center gap-1">
+                            {lv}
+                            {isDefault && (
+                              <span className="text-amber-300 text-[10px]" aria-label="default">★</span>
+                            )}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -170,7 +229,7 @@ const ItemDetailsModal = ({ item, onClose }) => {
 
         <div className="px-5 py-4 space-y-4">
           <SpecificBlock type={type} specific={specific} />
-          <ParametriGrid params={params} level={level} />
+          <ParametriGrid params={params} level={level} userParams={userData?.Parametri} />
           <SpellsList spells={spells} />
         </div>
       </div>
