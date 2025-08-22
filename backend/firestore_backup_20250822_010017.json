@@ -172,24 +172,6 @@
       }
     },
     "Arco_Corto": {
-      "visibility": "all",
-      "item_type": "weapon",
-      "allowed_users": [],
-      "Specific": {
-        "Hands": 2,
-        "Tipo": "Distanza"
-      },
-      "General": {
-        "Nome": "Arco Corto",
-        "Slot": "Doppia Mano",
-        "ridCostoSpellSingola": {},
-        "Effetto": "",
-        "prezzo": 75,
-        "requisiti": "",
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Fweapon_Arco_Corto_1748467833864_arco_corto.png?alt=media&token=7a638be1-87a4-4b27-b1d6-0fe9702ca4b4",
-        "ridCostoTecSingola": {},
-        "spells": {}
-      },
       "Parametri": {
         "Base": {
           "Fortuna": {
@@ -317,7 +299,25 @@
             "1": ""
           }
         }
-      }
+      },
+      "item_type": "weapon",
+      "Specific": {
+        "Hands": 2,
+        "Tipo": "Distanza"
+      },
+      "allowed_users": [],
+      "General": {
+        "Nome": "Arco Corto",
+        "Slot": "Doppia Mano",
+        "ridCostoSpellSingola": {},
+        "Effetto": "",
+        "prezzo": 75,
+        "requisiti": "",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Fweapon_Arco_Corto_1748467833864_arco_corto.png?alt=media&token=7a638be1-87a4-4b27-b1d6-0fe9702ca4b4",
+        "ridCostoTecSingola": {},
+        "spells": {}
+      },
+      "visibility": "all"
     },
     "Arco_Lungo": {
       "visibility": "all",
@@ -4320,202 +4320,204 @@
         }
       }
     },
-    "Pornhub": {
-      "visibility": "all",
-      "item_type": "consumabile",
-      "allowed_users": [],
-      "Specific": {
-        "Parametro Prova Ambientale": "",
-        "Utilizzi": [],
-        "slotCinturaOccupati": 0,
-        "type": "Uso Singolo",
-        "duration_turns": 0,
-        "stackable": true,
-        "maxStack": 2,
-        "Bonus Creazione": 0
-      },
-      "General": {
-        "Nome": "Pornhub",
-        "Slot": "Consumabile",
-        "ridCostoSpellSingola": {},
-        "Effetto": "Descrizione dell'effetto.",
-        "prezzo": 0,
-        "requisiti": "",
-        "image_url": null,
-        "ridCostoTecSingola": {},
-        "spells": {}
-      },
+    "Pozione_di_Guarigione": {
       "Parametri": {
         "Base": {
           "Fortuna": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           },
           "Intelligenza": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           },
           "Saggezza": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           },
           "Forza": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           },
           "Destrezza": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           },
           "Costituzione": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           }
         },
         "Special": {
           "ridCostoTec": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           },
           "Mira Ranged": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           },
           "Bonus Danno": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           },
           "Penetrazione": {
             "4": "",
-            "10": "",
             "7": "",
-            "1": ""
-          },
-          "ridCostoSpell": {
-            "4": "",
             "10": "",
-            "7": "",
             "1": ""
           },
           "Mira 1H": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
+            "1": ""
+          },
+          "ridCostoSpell": {
+            "4": "",
+            "7": "",
+            "10": "",
             "1": ""
           },
           "Danno Critico": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           },
           "Rigenera Dado Anima HP": {
-            "4": "",
-            "10": "",
-            "7": "",
-            "1": ""
+            "4": "2",
+            "7": "3",
+            "10": "4",
+            "1": "1"
           },
           "Danno": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           },
           "Prova Ambientale": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           },
           "Tipo Danno": [],
           "Rigenera Dado Anima Mana": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           },
           "Bonus Danno Critico": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           },
           "Mira 2H": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           },
           "Riduzione Dado Effetto Critico": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           }
         },
         "Combattimento": {
           "Disciplina": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           },
           "Critico": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           },
           "RiduzioneDanni": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
             "1": ""
           },
           "Difesa": {
             "4": "",
-            "10": "",
             "7": "",
-            "1": ""
-          },
-          "Salute": {
-            "4": "",
             "10": "",
-            "7": "",
-            "1": ""
-          },
-          "Mira": {
-            "4": "",
-            "10": "",
-            "7": "",
             "1": ""
           },
           "Attacco": {
             "4": "",
-            "10": "",
             "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Mira": {
+            "4": "",
+            "7": "",
+            "10": "",
+            "1": ""
+          },
+          "Salute": {
+            "4": "",
+            "7": "",
+            "10": "",
             "1": ""
           }
         }
-      }
+      },
+      "Specific": {
+        "type": "Uso Singolo",
+        "Utilizzi": [
+          "Ingestione"
+        ],
+        "Parametro Prova Ambientale": "",
+        "slotCinturaOccupati": 1,
+        "duration_turns": 0,
+        "stackable": true,
+        "maxStack": 99,
+        "Bonus Creazione": 0
+      },
+      "visibility": "all",
+      "allowed_users": [],
+      "General": {
+        "Nome": "Pozione di Guarigione",
+        "Slot": "Consumabile",
+        "spells": {},
+        "Effetto": "Se CREATA, aggiunge la SAGGEZZA e L'INTELLIGENZA del creatore al quantitativo di PF rigenerati statici e incrementali.",
+        "prezzo": 150,
+        "requisiti": "",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Fconsumabile_Pozione_di_Guarigione_1755817145157_pozione_hp.png?alt=media&token=7bca5ac2-66ea-4d58-bd0e-8e0aa9161357",
+        "ridCostoTecSingola": {},
+        "ridCostoSpellSingola": {}
+      },
+      "item_type": "consumabile"
     },
     "Pugnale": {
       "visibility": "all",
@@ -6580,9 +6582,7 @@
       "Specific": {
         "Cariche": 5
       },
-      "allowed_users": [
-        "GQsfPuWrNKbQKhLHCiVViNzJyWx1"
-      ],
+      "allowed_users": [],
       "General": {
         "Nome": "destino test",
         "Slot": "Accessorio",
@@ -6590,17 +6590,17 @@
         "Effetto": "anello di gio",
         "prezzo": 999,
         "requisiti": "",
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Faccessorio_destino_test_1748983952919_gio.png?alt=media&token=0b4bac70-ec1a-491b-b732-6f0ab76286f6",
+        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Faccessorio_destino_test_1755108670457_aaanello.jpeg?alt=media&token=7c90cd46-ca07-4e2f-bafc-10d8065b47c4",
         "ridCostoTecSingola": {},
         "spells": {
-          "Stasi Personale": {
-            "Gittata": 10,
+          "Resurrezione": {
+            "Gittata": 0,
             "video_url": "",
-            "Turni": 0,
             "Tipo Base": "Incantamento",
+            "Turni": 0,
             "TPC": {
-              "Param2": "---",
               "Param1": "---",
+              "Param2": "---",
               "ParamTarget": "---"
             },
             "Esperienza": "Principiante",
@@ -6609,47 +6609,47 @@
                 "Fortuna": 0,
                 "Intelligenza": 0,
                 "Saggezza": 0,
-                "Destrezza": 0,
                 "Forza": 0,
+                "Destrezza": 0,
                 "Costituzione": 0
               },
               "Combattimento": {
-                "Difesa": 0,
                 "Disciplina": 0,
+                "RiduzioneDanni": 0,
                 "Critico": 0,
+                "Difesa": 0,
                 "Attacco": 0,
-                "Salute": 0,
-                "RiduzioneDanni": 0
+                "Mira": 0,
+                "Salute": 0
               }
             },
             "Effetti Negativi": "",
-            "Azione": "",
-            "Nome": "Stasi Personale",
-            "Costo": 1,
-            "Effetti Positivi": "Quando vieni colpito da un attacco, puoi spendere 1 carica per creare una bolla di stasi temporale di 10 metri di raggio intorno a te, l\u2019attacco viene annullato, insieme a tutti i suoi effetti.",
             "TPC Fisico": {
-              "Param2": "---",
               "Param1": "---",
+              "Param2": "---",
               "ParamTarget": "---"
             },
+            "Nome": "Resurrezione",
+            "Costo": 3,
+            "Effetti Positivi": "L'anello pu\u00f2 essere utilizzato per riportare in vita un essere vivente che ha perso la vita nelle ultime 24 ore. L'effetto si attiva automaticamente se il portatore perde la vita mentre l'anello ha almeno 3 cariche, in aggiunta teleportandolo nel punto in cui si trovava\u00a0a\u00a0mezzanotte.",
+            "Azione": "",
             "TPC Mentale": {
-              "Param2": "---",
               "Param1": "---",
+              "Param2": "---",
               "ParamTarget": "---"
             },
             "image_url": ""
           },
           "Fenditura Temporale": {
-            "Gittata": 0,
-            "video_url": "",
             "Turni": 0,
+            "video_url": "",
             "Tipo Base": "Incantamento",
+            "Gittata": 0,
             "TPC": {
               "Param2": "---",
               "Param1": "---",
               "ParamTarget": "---"
             },
-            "Esperienza": "Principiante",
             "Mod Params": {
               "Base": {
                 "Fortuna": 0,
@@ -6669,8 +6669,13 @@
                 "Salute": 0
               }
             },
+            "Esperienza": "Principiante",
             "Effetti Negativi": "",
-            "Azione": "",
+            "TPC Mentale": {
+              "Param2": "---",
+              "Param1": "---",
+              "ParamTarget": "---"
+            },
             "Nome": "Fenditura Temporale",
             "Costo": 1,
             "Effetti Positivi": "La tua prossima azione tattica in questo turno ottiene +10 mira e +10 critico.",
@@ -6679,31 +6684,26 @@
               "Param1": "---",
               "ParamTarget": "---"
             },
-            "TPC Mentale": {
-              "Param2": "---",
-              "Param1": "---",
-              "ParamTarget": "---"
-            },
+            "Azione": "",
             "image_url": ""
           },
           "Stasi Protettiva": {
-            "Gittata": 10,
+            "Tipo Base": "Incantamento",
             "video_url": "",
             "Turni": 0,
-            "Tipo Base": "Incantamento",
+            "Gittata": 10,
             "TPC": {
-              "Param2": "---",
               "Param1": "---",
+              "Param2": "---",
               "ParamTarget": "---"
             },
-            "Esperienza": "Principiante",
             "Mod Params": {
               "Base": {
                 "Fortuna": 0,
                 "Intelligenza": 0,
                 "Saggezza": 0,
-                "Destrezza": 0,
                 "Forza": 0,
+                "Destrezza": 0,
                 "Costituzione": 0
               },
               "Combattimento": {
@@ -6715,8 +6715,13 @@
                 "RiduzioneDanni": 0
               }
             },
+            "Esperienza": "Principiante",
             "Effetti Negativi": "",
-            "Azione": "",
+            "TPC Mentale": {
+              "Param1": "---",
+              "Param2": "---",
+              "ParamTarget": "---"
+            },
             "Nome": "Stasi Protettiva",
             "Costo": 2,
             "Effetti Positivi": "Se un alleato entro 10 metri sta per essere colpito da un attacco, puoi spendere 2 cariche per negarne completamente gli effetti, come se avesse \"spostato\" il bersaglio abbastanza da fargli schivare l'attacco.",
@@ -6725,17 +6730,13 @@
               "Param1": "---",
               "ParamTarget": "---"
             },
-            "TPC Mentale": {
-              "Param2": "---",
-              "Param1": "---",
-              "ParamTarget": "---"
-            },
+            "Azione": "",
             "image_url": ""
           },
-          "Resurrezione": {
-            "Gittata": 0,
-            "video_url": "",
+          "Stasi Personale": {
             "Turni": 0,
+            "video_url": "",
+            "Gittata": 10,
             "Tipo Base": "Incantamento",
             "TPC": {
               "Param2": "---",
@@ -6748,40 +6749,39 @@
                 "Fortuna": 0,
                 "Intelligenza": 0,
                 "Saggezza": 0,
-                "Destrezza": 0,
                 "Forza": 0,
+                "Destrezza": 0,
                 "Costituzione": 0
               },
               "Combattimento": {
+                "Difesa": 0,
                 "Disciplina": 0,
                 "Critico": 0,
-                "RiduzioneDanni": 0,
-                "Difesa": 0,
                 "Attacco": 0,
-                "Mira": 0,
+                "RiduzioneDanni": 0,
                 "Salute": 0
               }
             },
             "Effetti Negativi": "",
-            "Azione": "",
-            "Nome": "Resurrezione",
-            "Costo": 3,
-            "Effetti Positivi": "L'anello pu\u00f2 essere utilizzato per riportare in vita un essere vivente che ha perso la vita nelle ultime 24 ore. L'effetto si attiva automaticamente se il portatore perde la vita mentre l'anello ha almeno 3 cariche, in aggiunta teleportandolo nel punto in cui si trovava\u00a0a\u00a0mezzanotte.",
             "TPC Fisico": {
-              "Param2": "---",
               "Param1": "---",
+              "Param2": "---",
               "ParamTarget": "---"
             },
+            "Nome": "Stasi Personale",
+            "Costo": 1,
+            "Effetti Positivi": "Quando vieni colpito da un attacco, puoi spendere 1 carica per creare una bolla di stasi temporale di 10 metri di raggio intorno a te, l\u2019attacco viene annullato, insieme a tutti i suoi effetti.",
             "TPC Mentale": {
               "Param2": "---",
               "Param1": "---",
               "ParamTarget": "---"
             },
+            "Azione": "",
             "image_url": ""
           }
         }
       },
-      "visibility": "custom"
+      "visibility": "all"
     },
     "nyx_3": {
       "Parametri": {
@@ -6917,9 +6917,7 @@
         "Hands": 1,
         "Tipo": "Mischia"
       },
-      "allowed_users": [
-        "TQAmmVfIpOeNiRflXKSeL1NX2ak2"
-      ],
+      "visibility": "custom",
       "General": {
         "Nome": "nyx 3",
         "ridCostoSpellSingola": {},
@@ -6931,7 +6929,9 @@
         "ridCostoTecSingola": {},
         "Slot": "Mano Principale"
       },
-      "visibility": "custom"
+      "allowed_users": [
+        "OgVlbkriGFdtUu1WEkP8OCaXyKL2"
+      ]
     }
   },
   "users": {
@@ -6954,7 +6954,16 @@
         }
       },
       "imageUrl": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/characters%2FNyx_TQAmmVfIpOeNiRflXKSeL1NX2ak2_1745838390356?alt=media&token=bff25470-cc2b-4c7b-90ac-4295e329e5db",
-      "inventory": [],
+      "inventory": [
+        {
+          "qty": 2,
+          "id": "Abito"
+        },
+        {
+          "qty": 1,
+          "id": "Arco_Lungo"
+        }
+      ],
       "Parametri": {
         "Base": {
           "Fortuna": {
@@ -7046,9 +7055,9 @@
           "Salute": {
             "Base": 2,
             "Equip": 0,
-            "Tot": 3,
+            "Tot": 2,
             "Anima": 0,
-            "Mod": 1
+            "Mod": 0
           }
         }
       },
@@ -7063,14 +7072,14 @@
       },
       "race": "Fata",
       "settings": {
-        "lock_param_combat": false,
+        "lock_param_combat": true,
         "notifications": true,
         "theme": "dark",
-        "lock_param_base": false
+        "lock_param_base": true
       },
       "stats": {
-        "manaCurrent": 68,
-        "gold": 0,
+        "hpTotal": 18,
+        "gold": 20,
         "combatTokensAvailable": 2,
         "basePointsSpent": 5,
         "combatTokensSpent": 66,
@@ -7078,9 +7087,9 @@
         "negativeBaseStatCount": 2,
         "manaTotal": 68,
         "lastAnimaShard": "Spirito",
-        "hpTotal": 23,
+        "manaCurrent": 68,
         "basePointsAvailable": 0,
-        "hpCurrent": 23
+        "hpCurrent": 18
       },
       "lingue": {
         "Comune": "Il personaggio comprende e si esprime perfettamente nella lingua pi\u00f9 diffusa di Etherium."
@@ -7183,12 +7192,25 @@
       "flags": {
         "characterCreationDone": true
       },
+      "equipped": {
+        "beltExtra": null,
+        "accessorio": null,
+        "headArmor": null,
+        "cintura": null,
+        "weaponMain": null,
+        "stivali": null,
+        "chestArmor": null
+      },
       "role": "webmaster",
       "email": "marcolorenzo92@gmail.com",
       "professioni": {
         "Agricoltore": {
           "livello": "Avanzato",
           "descrizione": "Gestione della vita rurale: coltivazione, allevamento, cura degli animali da fattoria."
+        },
+        "Gioielliere": {
+          "livello": "Base",
+          "descrizione": "Riconoscere qualit\u00e0, valore e incantamenti di gioielli, accessori e pietre preziose. Gestire e modificare tali oggetti. Avanzato: produzione di nuovi gioielli incantati o speciali."
         },
         "Arcanista": {
           "livello": "Base",
