@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { FaTimes } from 'react-icons/fa';
 import { useAuth } from '../../../AuthContext';
 import { computeValue } from '../../common/computeFormula';
-import { db } from '../../firebaseConfig';
+import { db, storage } from '../../firebaseConfig';
+import { ref as storageRef, deleteObject } from 'firebase/storage';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { FiTrash2 } from 'react-icons/fi';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
@@ -28,11 +29,11 @@ const Pill = ({ children, color = 'indigo' }) => (
 const useItemFacts = (item) => {
   return useMemo(() => {
     if (!item) return null;
-    const isVarie = (item.type || item.item_type) === 'varie';
+  const isVarie = ((item.type || item.item_type || '').toLowerCase() === 'varie');
     const name = get(item, 'General.Nome') || item.name || item.id;
-    const type = isVarie ? 'varie' : (item.item_type || item.type || get(item, 'General.Slot') || 'oggetto');
+  const type = isVarie ? 'varie' : (item.item_type || item.type || get(item, 'General.Slot') || 'oggetto');
     const slot = isVarie ? undefined : get(item, 'General.Slot');
-    const img = isVarie ? undefined : get(item, 'General.image_url');
+  const img = isVarie ? (item.image_url || get(item, 'General.image_url')) : get(item, 'General.image_url');
     const price = isVarie ? undefined : get(item, 'General.prezzo');
     const effect = isVarie ? (item.description || '') : get(item, 'General.Effetto');
     const specific = isVarie ? {} : (item.Specific || {});
@@ -200,6 +201,7 @@ const ItemDetailsModal = ({ item, onClose }) => {
       const inv = Array.isArray(data.inventory) ? [...data.inventory] : [];
       const targetId = item?.id || item?.name || name;
       let removed = false;
+      let deletedImageUrl = null;
       const deriveId = (e, i) => {
         if (!e) return `item-${i}`;
         if (typeof e === 'string') return e;
@@ -208,26 +210,38 @@ const ItemDetailsModal = ({ item, onClose }) => {
       const next = [];
       for (let i = 0; i < inv.length; i++) {
         const entry = inv[i];
-        if (removed) {
-          next.push(entry);
-          continue;
-        }
+        if (removed) { next.push(entry); continue; }
         const id = deriveId(entry, i);
-        if (id !== targetId) {
-          next.push(entry);
-          continue;
-        }
+        if (id !== targetId) { next.push(entry); continue; }
         if (typeof entry === 'object' && entry && typeof entry.qty === 'number') {
           const newQty = Math.max(0, (entry.qty || 0) - 1);
-          if (newQty > 0) next.push({ ...entry, qty: newQty });
+          if (newQty > 0) {
+            next.push({ ...entry, qty: newQty });
+          } else {
+            if ((entry.type || '').toLowerCase() === 'varie' && entry.image_url) {
+              deletedImageUrl = entry.image_url;
+            }
+            // fully removed; do not push
+          }
         } else {
           // string or object without qty -> remove single occurrence
+          if (typeof entry === 'object' && (entry.type || '').toLowerCase() === 'varie' && entry.image_url) {
+            deletedImageUrl = entry.image_url;
+          }
         }
         removed = true;
       }
       if (!removed) return;
       await updateDoc(ref, { inventory: next });
-      // Optional: close if item no longer present at all
+      // If we deleted the last Varie with an image, clean up storage
+      if (deletedImageUrl) {
+        try {
+          const path = decodeURIComponent(deletedImageUrl.split('/o/')[1].split('?')[0]);
+          await deleteObject(storageRef(storage, path));
+        } catch (e) {
+          console.warn('Failed to delete varie image from storage (modal)', e);
+        }
+      }
       onClose && onClose();
     } catch (e) {
       console.error('Failed to remove item', e);

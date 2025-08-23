@@ -1,7 +1,8 @@
 import React, { useContext, useEffect, useState } from 'react';
 import { AuthContext } from '../../../AuthContext';
-import { db } from '../../firebaseConfig';
+import { db, storage } from '../../firebaseConfig';
 import { doc, onSnapshot, getDoc, updateDoc } from 'firebase/firestore';
+import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { FiPackage, FiSearch, FiTrash2, FiPlus, FiMinus } from 'react-icons/fi';
 import { FaCoins } from 'react-icons/fa';
 import ItemDetailsModal from './ItemDetailsModal';
@@ -30,6 +31,8 @@ const Inventory = () => {
 	const [vDesc, setVDesc] = useState('');
 	const [vQty, setVQty] = useState('1');
 	const [vBusy, setVBusy] = useState(false);
+	const [vImageFile, setVImageFile] = useState(null);
+	const [vImagePreviewUrl, setVImagePreviewUrl] = useState(null);
 
 	useEffect(() => {
 		if (!user) return;
@@ -91,34 +94,107 @@ const Inventory = () => {
 			if (!snap.exists()) return;
 			const data = snap.data() || {};
 			const inv = Array.isArray(data.inventory) ? [...data.inventory] : [];
+
 			let removed = false;
+			let deletedImageUrl = null;
 			const next = [];
+
 			for (let i = 0; i < inv.length; i++) {
 				const entry = inv[i];
-				if (removed) {
-					next.push(entry);
-					continue;
-				}
+				if (removed) { next.push(entry); continue; }
+
 				const id = deriveId(entry, i);
-				if (id !== targetId) {
-					next.push(entry);
-					continue;
-				}
-				// Match found
+				if (id !== targetId) { next.push(entry); continue; }
+
+				// match
 				if (typeof entry === 'object' && entry && typeof entry.qty === 'number') {
 					const newQty = Math.max(0, (entry.qty || 0) - 1);
 					if (newQty > 0) {
 						next.push({ ...entry, qty: newQty });
+					} else {
+						// fully removed; if it was a Varie with its own image, mark for deletion
+						if ((entry.type || '').toLowerCase() === 'varie' && entry.image_url) {
+							deletedImageUrl = entry.image_url;
+						}
+						// if this standard item had a user-specific custom image, delete it as well
+						if ((entry.type || '').toLowerCase() !== 'varie' && entry.user_image_custom && entry.user_image_url) {
+							deletedImageUrl = deletedImageUrl || entry.user_image_url;
+						}
+						// fully removed; do not push
 					}
 				} else {
 					// string or object without qty: remove this single occurrence by skipping push
+					if (typeof entry === 'object') {
+						if ((entry.type || '').toLowerCase() === 'varie' && entry.image_url) {
+							deletedImageUrl = entry.image_url;
+						}
+						if ((entry.type || '').toLowerCase() !== 'varie' && entry.user_image_custom && entry.user_image_url) {
+							deletedImageUrl = deletedImageUrl || entry.user_image_url;
+						}
+					}
 				}
 				removed = true;
 			}
+
 			if (!removed) return; // nothing to do
 			await updateDoc(ref, { inventory: next });
+
+			// After Firestore update, delete storage file if this was a Varie or a user-custom image and it was fully removed
+			if (deletedImageUrl) {
+				try {
+					const path = decodeURIComponent(deletedImageUrl.split('/o/')[1].split('?')[0]);
+					await deleteObject(storageRef(storage, path));
+				} catch (e) {
+					console.warn('Failed to delete inventory image from storage', e);
+				}
+			}
 		} catch (err) {
 			console.error('Error removing item from inventory', err);
+		} finally {
+			setBusyId(null);
+		}
+	};
+
+	// Remove all units of an item by id from the user's inventory
+	const removeAllUnits = async (targetId) => {
+		if (!user || !targetId) return;
+		try {
+			setBusyId(targetId);
+			const ref = doc(db, 'users', user.uid);
+			const snap = await getDoc(ref);
+			if (!snap.exists()) return;
+			const data = snap.data() || {};
+			const inv = Array.isArray(data.inventory) ? [...data.inventory] : [];
+			let deletedImageUrl = null;
+			const next = [];
+			for (let i = 0; i < inv.length; i++) {
+				const entry = inv[i];
+				const id = deriveId(entry, i);
+				if (id === targetId) {
+					if (typeof entry === 'object') {
+						if ((entry.type || '').toLowerCase() === 'varie' && entry.image_url) {
+							deletedImageUrl = entry.image_url;
+						}
+						if ((entry.type || '').toLowerCase() !== 'varie' && entry.user_image_custom && entry.user_image_url) {
+							deletedImageUrl = deletedImageUrl || entry.user_image_url;
+						}
+					}
+					// skip to remove
+					continue;
+				}
+				next.push(entry);
+			}
+			await updateDoc(ref, { inventory: next });
+			if (deletedImageUrl) {
+				try {
+					const path = decodeURIComponent(deletedImageUrl.split('/o/')[1].split('?')[0]);
+					await deleteObject(storageRef(storage, path));
+				} catch (e) {
+					console.warn('Failed to delete inventory image from storage', e);
+				}
+			}
+		} catch (err) {
+			console.error('Error removing all units from inventory', err);
 		} finally {
 			setBusyId(null);
 		}
@@ -137,11 +213,27 @@ const Inventory = () => {
 			if (!snap.exists()) return;
 			const data = snap.data() || {};
 			const inv = Array.isArray(data.inventory) ? [...data.inventory] : [];
+
 			const id = `varie_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
-			inv.push({ id, name, description: (vDesc||'').trim(), type: 'varie', qty: qtyNum });
+			let image_url = null;
+			if (vImageFile) {
+				try {
+					const safe = name.replace(/[^a-zA-Z0-9]/g, '_');
+					const fileName = `varie_${user.uid}_${safe}_${Date.now()}_${vImageFile.name}`;
+					const imgRef = storageRef(storage, 'items/' + fileName);
+					await uploadBytes(imgRef, vImageFile);
+					image_url = await getDownloadURL(imgRef);
+				} catch (e) {
+					console.error('Failed to upload varie image', e);
+				}
+			}
+
+			inv.push({ id, name, description: (vDesc||'').trim(), type: 'varie', qty: qtyNum, ...(image_url ? { image_url } : {}) });
 			await updateDoc(ref, { inventory: inv });
+
+			// reset and close
 			setShowVarieOverlay(false);
-			setVName(''); setVDesc(''); setVQty('1');
+			setVName(''); setVDesc(''); setVQty('1'); setVImageFile(null); setVImagePreviewUrl(null);
 		} catch (err) {
 			console.error('Error adding custom varie item', err);
 		} finally {
@@ -190,7 +282,7 @@ const Inventory = () => {
 	const otherList = filtered.filter(it => (it.type || '').toLowerCase() !== 'varie');
 
 	return (
-		<div className="relative overflow-hidden backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 shadow-lg h-full max-h-[64vh] flex flex-col">
+		<div className="relative overflow-hidden backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl px-5 pt-5 pb-4 shadow-lg h-[64vh] xl:h-[690px] 2xl:h-[690px] flex flex-col">
 			<div className="absolute -left-10 -top-10 w-40 h-40 bg-indigo-500/10 rounded-full blur-3xl" />
 			<div className="absolute -right-10 -bottom-10 w-48 h-48 bg-fuchsia-500/10 rounded-full blur-3xl" />
 
@@ -242,8 +334,8 @@ const Inventory = () => {
 						{otherList.length > 0 && (
 							<ul className="space-y-2">
 								{otherList.map((it) => {
-			    const docObj = it.doc || it;
-			    const imgUrl = docObj?.General?.image_url || it?.General?.image_url;
+					    const docObj = it.doc || it;
+					    const imgUrl = docObj?.user_image_url || docObj?.General?.image_url || it?.General?.image_url;
 									return (
 										<li key={it.id} className="flex items-center justify-between rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2">
 									{imgUrl && (
@@ -291,25 +383,34 @@ const Inventory = () => {
 							</div>
 							{varieList.length ? (
 								<ul className="space-y-2">
-									{varieList.map((it) => (
-										<li key={it.id} className="flex items-center justify-between rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2">
-											<button onClick={() => setPreviewItem(it.doc || it)} className="min-w-0 text-left flex-1 hover:bg-slate-700/40 rounded-md px-2 py-1">
-												<div className="text-sm text-slate-200 truncate">{it.name}</div>
-												<div className="text-[11px] text-slate-400 truncate">Varie</div>
-											</button>
-											<div className="ml-3 flex items-center gap-2">
-												<span className="text-xs text-amber-300">x{it.qty}</span>
-												<button
-													className={`ml-1 inline-flex items-center justify-center rounded-md border p-1.5 transition ${busyId===it.id ? 'opacity-60 cursor-not-allowed' : 'hover:bg-red-500/10'} border-red-400/40 text-red-300`}
-													onClick={() => setConfirmTarget({ id: it.id, name: it.name })}
-													disabled={busyId===it.id}
-													title="Rimuovi 1"
-												>
-													<FiTrash2 className="h-3 w-3" />
+									{varieList.map((it) => {
+										const docObj = it.doc || it;
+										const imgUrl = docObj?.image_url;
+										return (
+											<li key={it.id} className="flex items-center justify-between rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2">
+												{imgUrl && (
+													<div className="h-8 w-8 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/50 mr-2">
+														<img src={imgUrl} alt={it.name} className="h-full w-full object-contain" />
+													</div>
+												)}
+												<button onClick={() => setPreviewItem(docObj)} className="min-w-0 text-left flex-1 hover:bg-slate-700/40 rounded-md px-2 py-1">
+													<div className="text-sm text-slate-200 truncate">{it.name}</div>
+													<div className="text-[11px] text-slate-400 truncate">Varie</div>
 												</button>
-											</div>
-										</li>
-									))}
+												<div className="ml-3 flex items-center gap-2">
+													<span className="text-xs text-amber-300">x{it.qty}</span>
+													<button
+														className={`ml-1 inline-flex items-center justify-center rounded-md border p-1.5 transition ${busyId===it.id ? 'opacity-60 cursor-not-allowed' : 'hover:bg-red-500/10'} border-red-400/40 text-red-300`}
+														onClick={() => setConfirmTarget({ id: it.id, name: it.name })}
+														disabled={busyId===it.id}
+														title="Rimuovi 1"
+													>
+														<FiTrash2 className="h-3 w-3" />
+													</button>
+												</div>
+											</li>
+										);
+									})}
 								</ul>
 							) : (
 								<div className="text-slate-500 text-xs">Nessun oggetto varie</div>
@@ -331,6 +432,11 @@ const Inventory = () => {
 					onCancel={() => setConfirmTarget(null)}
 					onConfirm={async () => {
 						await removeOne(confirmTarget.id);
+						setConfirmTarget(null);
+					}}
+					enableDeleteAll={true}
+					onConfirmAll={async () => {
+						await removeAllUnits(confirmTarget.id);
 						setConfirmTarget(null);
 					}}
 				/>
@@ -379,45 +485,58 @@ const Inventory = () => {
 			{/* Overlay to add custom Varie item */}
 			{showVarieOverlay && (
 				<div className="absolute inset-0 z-20 flex items-center justify-center">
-					<div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => !vBusy && setShowVarieOverlay(false)} />
+					<div
+						className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+						onClick={() => {
+							if (!vBusy) {
+								setShowVarieOverlay(false);
+								setVName(''); setVDesc(''); setVQty('1'); setVImageFile(null); setVImagePreviewUrl(null);
+							}
+						}}
+					/>
 					<div className="relative z-10 w-[28rem] max-w-[90vw] rounded-xl border border-slate-700/60 bg-slate-800/90 p-4 shadow-xl">
 						<h3 className="text-sm font-semibold text-slate-200">Aggiungi oggetto "Varie"</h3>
 						<div className="mt-3 grid grid-cols-1 gap-3">
 							<div>
 								<label className="block text-xs text-slate-300 mb-1">Nome</label>
-								<input
-									type="text"
-									placeholder="Es. Corda di canapa"
-									value={vName}
-									onChange={(e) => setVName(e.target.value)}
-									className="w-full rounded-md bg-slate-900/60 border border-slate-600/60 px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-slate-400"
-								/>
+								<input type="text" placeholder="Es. Corda di canapa" value={vName} onChange={(e) => setVName(e.target.value)} className="w-full rounded-md bg-slate-900/60 border border-slate-600/60 px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-slate-400" />
 							</div>
 							<div>
 								<label className="block text-xs text-slate-300 mb-1">Descrizione</label>
-								<textarea
-									rows={3}
-									placeholder="Dettagli opzionali"
-									value={vDesc}
-									onChange={(e) => setVDesc(e.target.value)}
-									className="w-full rounded-md bg-slate-900/60 border border-slate-600/60 px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-slate-400"
-								/>
+								<textarea rows={3} placeholder="Dettagli opzionali" value={vDesc} onChange={(e) => setVDesc(e.target.value)} className="w-full rounded-md bg-slate-900/60 border border-slate-600/60 px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-slate-400" />
+							</div>
+							<div>
+								<label className="block text-xs text-slate-300 mb-1">Immagine (opzionale)</label>
+								<div className="flex items-center gap-3">
+									<input
+										type="file"
+										accept="image/*"
+										onChange={(e) => {
+											const f = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+											setVImageFile(f);
+											setVImagePreviewUrl(f ? URL.createObjectURL(f) : null);
+										}}
+										className="text-xs text-slate-300"
+									/>
+									{vImagePreviewUrl && (
+										<div className="flex items-center gap-2">
+											<div className="h-10 w-10 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/50">
+												<img src={vImagePreviewUrl} alt="Preview" className="h-full w-full object-cover" />
+											</div>
+											<button type="button" onClick={() => { setVImageFile(null); setVImagePreviewUrl(null); }} className="text-[11px] text-slate-300 border border-slate-600/60 rounded px-2 py-1 hover:bg-slate-700/40">Rimuovi</button>
+										</div>
+									)}
+								</div>
 							</div>
 							<div>
 								<label className="block text-xs text-slate-300 mb-1">Quantità</label>
-								<input
-									type="number"
-									min="1"
-									value={vQty}
-									onChange={(e) => setVQty(e.target.value)}
-									className="w-28 rounded-md bg-slate-900/60 border border-slate-600/60 px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-slate-400"
-								/>
+								<input type="number" min="1" value={vQty} onChange={(e) => setVQty(e.target.value)} className="w-28 rounded-md bg-slate-900/60 border border-slate-600/60 px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-slate-400" />
 							</div>
 						</div>
 						<div className="mt-4 flex justify-end gap-2">
 							<button
 								className="inline-flex items-center justify-center rounded-md border border-slate-600/60 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700/40"
-								onClick={() => !vBusy && setShowVarieOverlay(false)}
+								onClick={() => { if (!vBusy) { setShowVarieOverlay(false); setVName(''); setVDesc(''); setVQty('1'); setVImageFile(null); setVImagePreviewUrl(null); } }}
 								disabled={vBusy}
 							>
 								Annulla
