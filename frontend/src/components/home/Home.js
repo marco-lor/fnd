@@ -7,7 +7,7 @@ import EquippedInventory from "./elements/EquippedInventory";
 import Inventory from "./elements/Inventory";
 import { MergedStatsTable } from "./elements/paramTables";
 import { API_BASE_URL } from "../firebaseConfig";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 import { FaDiceD20 } from "react-icons/fa";
 import DiceRoller from "../common/DiceRoller";
@@ -32,6 +32,9 @@ function Home() {
   const [rolling, setRolling] = useState(false);
   const [rollingFaces, setRollingFaces] = useState(0);
   const [rollingDescription, setRollingDescription] = useState("");
+  // Anima selection overlay
+  const [animaPickerOpen, setAnimaPickerOpen] = useState(false);
+  const [animaPickerLevel, setAnimaPickerLevel] = useState(null); // 4 or 7
 
   useEffect(() => {
     const fetchDadiAnima = async () => {
@@ -46,6 +49,24 @@ function Home() {
     };
     fetchDadiAnima();
   }, []);
+
+  // Prompt to select Anima shard when reaching level 4 or 7 and field is empty
+  useEffect(() => {
+    const lvl = userData?.stats?.level || 1;
+    const a4 = getAnimaField('Anima_4');
+    const a7 = getAnimaField('Anima_7');
+    if (lvl >= 7 && !a7) {
+      setAnimaPickerLevel(7);
+      setAnimaPickerOpen(true);
+    } else if (lvl >= 4 && !a4) {
+      setAnimaPickerLevel(4);
+      setAnimaPickerOpen(true);
+    } else {
+      setAnimaPickerOpen(false);
+      setAnimaPickerLevel(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userData?.stats?.level, userData?.AltriParametri?.Anima_4, userData?.AltriParametri?.Anima_7]);
 
   // Test API Call handler
   const handleTestButtonClick = async () => {
@@ -155,12 +176,26 @@ function Home() {
               <div className="relative overflow-hidden backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 shadow-lg flex flex-col gap-3 xl:col-span-2">
                 <p className="text-slate-400 text-xs uppercase tracking-wider">Anima Livelli</p>
                 <div className="flex flex-wrap gap-6">
-                  {['1','4','7'].map(liv => (
-                    <div key={liv} className="flex flex-col">
-                      <span className="text-xs text-slate-400">Livello {liv}</span>
-                      <span className={`text-lg font-semibold tracking-wide ${getAnimaColorClass(getAnimaField(`Anima_${liv}`))}`}>{getAnimaField(`Anima_${liv}`) || '—'}</span>
-                    </div>
-                  ))}
+                  {['1','4','7'].map(liv => {
+                    const val = getAnimaField(`Anima_${liv}`);
+                    const needsPick = (liv === '4' || liv === '7') && !val;
+                    return (
+                      <div key={liv} className="flex flex-col">
+                        <span className="text-xs text-slate-400">Livello {liv}</span>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-lg font-semibold tracking-wide ${getAnimaColorClass(val)}`}>{val || '—'}</span>
+                          {needsPick && (
+                            <button
+                              className="text-[11px] px-2 py-0.5 rounded-md border border-slate-600/60 text-slate-200 hover:bg-slate-800/60"
+                              onClick={() => { setAnimaPickerLevel(Number(liv)); setAnimaPickerOpen(true); }}
+                            >
+                              Scegli Anima
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
                 <div className="absolute -left-10 -bottom-10 w-40 h-40 bg-emerald-500/10 rounded-full blur-3xl" />
                 <div className="absolute -right-10 -top-10 w-40 h-40 bg-fuchsia-500/10 rounded-full blur-3xl" />
@@ -214,9 +249,58 @@ function Home() {
           }}
         />
       )}
+      {animaPickerOpen && animaPickerLevel && (
+        <AnimaPickerOverlay
+          level={animaPickerLevel}
+          onClose={() => setAnimaPickerOpen(false)}
+          onSelect={async (choice) => {
+            try {
+              if (!user) return;
+              const key = animaPickerLevel === 7 ? 'Anima_7' : 'Anima_4';
+              await updateDoc(doc(db, 'users', user.uid), {
+                [`AltriParametri.${key}`]: choice,
+              });
+            } catch (e) {
+              console.error('Failed to save anima choice', e);
+            } finally {
+              setAnimaPickerOpen(false);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
 
 export default Home;
+
+// Minimal overlay to choose Anima shard at level 4/7
+function AnimaPickerOverlay({ level, onClose, onSelect }) {
+  const options = ['Potenza', 'Astuzia', 'Spirito'];
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative z-10 max-w-md w-[92vw] rounded-2xl border border-slate-700/60 bg-slate-900/90 p-5 shadow-2xl">
+        <h3 className="text-lg font-semibold text-slate-100">Seleziona un nuovo Frammento d'Anima</h3>
+        <p className="mt-1 text-slate-300 text-sm">Hai raggiunto il livello {level}. Scegli il tuo Anima per questo traguardo.</p>
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {options.map(opt => (
+            <button
+              key={opt}
+              onClick={() => onSelect && onSelect(opt)}
+              className={`px-3 py-2 rounded-md text-sm font-medium border border-slate-600/60 hover:border-slate-500 transition ${
+                opt === 'Spirito' ? 'text-blue-300' : opt === 'Astuzia' ? 'text-green-300' : 'text-red-300'
+              }`}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+        <div className="mt-4 flex justify-end">
+          <button onClick={onClose} className="text-xs text-slate-300 border border-slate-600/60 rounded px-3 py-1.5 hover:bg-slate-800/60">Annulla</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
