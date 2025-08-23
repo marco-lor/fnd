@@ -11,7 +11,7 @@ import { WeaponOverlay } from '../../common/WeaponOverlay';
 import { FaTrash, FaEdit } from "react-icons/fa";
 import VisibilitySelector from '../../common/VisibilitySelector';
 
-export function AddWeaponOverlay({ onClose, showMessage, initialData = null, editMode = false }) {
+export function AddWeaponOverlay({ onClose, showMessage, initialData = null, editMode = false, inventoryEditMode = false, inventoryUserId = null, inventoryItemId = null, inventoryItemIndex = null }) {
     const [schema, setSchema] = useState(null);
     const [weaponFormData, setWeaponFormData] = useState({
         General: {},
@@ -418,13 +418,13 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                 const weaponImgRef = ref(storage, 'items/' + weaponImgFileName);
                 await uploadBytes(weaponImgRef, imageFile);
                 newImageUrl = await getDownloadURL(weaponImgRef);
-                if (editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
+                if (!inventoryEditMode && editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
                     try {
                         const oldPath = decodeURIComponent(initialData.General.image_url.split('/o/')[1].split('?')[0]);
                         await deleteObject(ref(storage, oldPath));
                     } catch (e) { console.warn("Failed to delete old image:", e.code === 'storage/object-not-found' ? 'Old file not found.' : e.message); }
                 }
-            } else if (editMode && !imagePreviewUrl && initialData?.General?.image_url) {
+            } else if (!inventoryEditMode && editMode && !imagePreviewUrl && initialData?.General?.image_url) {
                 newImageUrl = null;
                 try {
                     const oldPath = decodeURIComponent(initialData.General.image_url.split('/o/')[1].split('?')[0]);
@@ -449,7 +449,7 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                     const spellImgRef = ref(storage, `spells/${safeBase}_image`);
                     await uploadBytes(spellImgRef, spellObj.imageFile);
                     spellImageUrlToSave = await getDownloadURL(spellImgRef);
-                    if (initialSpellFromData.image_url && initialSpellFromData.image_url !== spellImageUrlToSave) {
+                    if (!inventoryEditMode && initialSpellFromData.image_url && initialSpellFromData.image_url !== spellImageUrlToSave) {
                         try { await deleteObject(ref(storage, decodeURIComponent(initialSpellFromData.image_url.split('/o/')[1].split('?')[0]))); } catch (e) { console.warn("Failed to delete old spell image for", spellNameKey, e); }
                     }
                 }
@@ -457,7 +457,7 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                     const spellVidRef = ref(storage, `spells/videos/${safeBase}_video`);
                     await uploadBytes(spellVidRef, spellObj.videoFile);
                     spellVideoUrlToSave = await getDownloadURL(spellVidRef);
-                    if (initialSpellFromData.video_url && initialSpellFromData.video_url !== spellVideoUrlToSave) {
+                    if (!inventoryEditMode && initialSpellFromData.video_url && initialSpellFromData.video_url !== spellVideoUrlToSave) {
                         try { await deleteObject(ref(storage, decodeURIComponent(initialSpellFromData.video_url.split('/o/')[1].split('?')[0]))); } catch (e) { console.warn("Failed to delete old spell video for", spellNameKey, e); }
                     }
                 }
@@ -472,7 +472,7 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                 }
             });
 
-            if (editMode && initialData?.General?.spells) {
+            if (!inventoryEditMode && editMode && initialData?.General?.spells) {
                 for (const initialSpellName in initialData.General.spells) {
                     if (!finalSpells[initialSpellName]) {
                         const initialSpellDetails = initialData.General.spells[initialSpellName];
@@ -517,16 +517,80 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
             }
 
 
-            if (editMode) {
-                console.log("Updating document:", docId, finalWeaponData);
-                await updateDoc(weaponDocRef, finalWeaponData);
-                if (showMessage) showMessage(`Arma "${weaponName}" aggiornata!`, "success");
+            // If editing a user's inventory copy, update the user doc instead of the global items collection
+            if (inventoryEditMode && inventoryUserId && (inventoryItemId || initialData?.id)) {
+                try {
+                    const targetUserRef = doc(db, 'users', inventoryUserId);
+                    const userSnap = await getDoc(targetUserRef);
+                    const currentData = userSnap.exists() ? userSnap.data() : {};
+                    const invArr = Array.isArray(currentData.inventory) ? currentData.inventory : [];
+                    const targetId = inventoryItemId || docId;
+                    let userImageDeleted = false;
+                    const nextInv = invArr.map((entry, idx) => {
+                        // If a precise inventory index is provided, only update that index
+                        if (Number.isInteger(inventoryItemIndex)) {
+                            if (idx !== inventoryItemIndex) return entry;
+                            const current = entry;
+                            const qty = typeof current?.qty === 'number' ? current.qty : 1;
+                            if (current?.user_image_custom && current?.user_image_url) {
+                                if (imageFile || (!imagePreviewUrl && initialData?.General?.image_url)) {
+                                    userImageDeleted = current.user_image_url;
+                                }
+                            }
+                            const baseUpdated = { id: targetId, qty, ...finalWeaponData };
+                            if (imageFile) return { ...baseUpdated, user_image_custom: true, user_image_url: newImageUrl };
+                            if (!imagePreviewUrl) { const { user_image_custom, user_image_url, ...rest } = baseUpdated; return rest; }
+                            return { ...baseUpdated, ...(current?.user_image_custom ? { user_image_custom: true, user_image_url: current.user_image_url } : {}) };
+                        }
+                        // Fallback: id-based update (legacy)
+                        if (!entry) return entry;
+                        if (typeof entry === 'string') {
+                            if (entry === targetId) return { id: targetId, qty: 1, ...finalWeaponData, ...(imageFile ? { user_image_custom: true, user_image_url: newImageUrl } : {}) };
+                            return entry;
+                        }
+                        const entryId = entry.id || entry.name || entry?.General?.Nome;
+                        if (entryId === targetId) {
+                            const qty = typeof entry.qty === 'number' ? entry.qty : 1;
+                            if (entry.user_image_custom && entry.user_image_url) {
+                                if (imageFile || (!imagePreviewUrl && initialData?.General?.image_url)) {
+                                    userImageDeleted = entry.user_image_url;
+                                }
+                            }
+                            const baseUpdated = { id: targetId, qty, ...finalWeaponData };
+                            if (imageFile) return { ...baseUpdated, user_image_custom: true, user_image_url: newImageUrl };
+                            else if (!imagePreviewUrl) { const { user_image_custom, user_image_url, ...rest } = baseUpdated; return rest; }
+                            return { ...baseUpdated, ...(entry.user_image_custom ? { user_image_custom: true, user_image_url: entry.user_image_url } : {}) };
+                        }
+                        return entry;
+                    });
+                    await updateDoc(targetUserRef, { inventory: nextInv });
+                    // Delete previously set user custom image if it was replaced/removed
+                    if (userImageDeleted) {
+                        try {
+                            const oldPath = decodeURIComponent(userImageDeleted.split('/o/')[1].split('?')[0]);
+                            await deleteObject(ref(storage, oldPath));
+                        } catch (e) { console.warn('Failed to delete previous user custom image:', e); }
+                    }
+                    if (showMessage) showMessage(`Arma aggiornata nell'inventario utente.`, 'success');
+                } catch (e) {
+                    console.error('Failed updating user inventory:', e);
+                    if (showMessage) showMessage(`Errore aggiornando inventario utente: ${e.message}`, 'error');
+                    setIsLoading(false);
+                    return;
+                }
+                onClose(true);
             } else {
-                console.log("Creating document:", docId, finalWeaponData);
-                await setDoc(weaponDocRef, finalWeaponData);
-                if (showMessage) showMessage(`Arma "${weaponName}" creata!`, "success");
+                if (editMode) {
+                    console.log("Updating document:", docId, finalWeaponData);
+                    await updateDoc(weaponDocRef, finalWeaponData);
+                    if (showMessage) showMessage(`Arma "${weaponName}" aggiornata!`, "success");
+                } else {
+                    console.log("Creating document:", docId, finalWeaponData);
+                    await setDoc(weaponDocRef, finalWeaponData);
+                    if (showMessage) showMessage(`Arma "${weaponName}" creata!`, "success");
+                }
+                onClose(true);
             }
-            onClose(true);
 
         } catch (error) {
             console.error("Error saving weapon:", error);

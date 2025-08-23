@@ -8,8 +8,18 @@ import React, { useMemo, useState } from 'react';
  *  - onChange: (visibility, allowedUsers) => void
  *  - className: optional wrapper classes
  */
+/* VisibilitySelector
+ * Props:
+ *  - visibility: 'all' | 'custom' (legacy 'private' will be coerced to 'all')
+ *  - allowedUsers: string[]
+ *  - users: array of user objects (expects fields: id/uid/email, displayName/characterId)
+ *  - onChange: (visibility, allowedUsers) => void
+ *  - className: optional wrapper classes
+ */
 export default function VisibilitySelector({ visibility, allowedUsers, users = [], onChange, className = '' }) {
   const [query, setQuery] = useState('');
+  // Normalize legacy value
+  const effectiveVisibility = visibility === 'private' ? 'all' : visibility;
 
   const normalizedUsers = useMemo(() => users.map(u => ({
     id: u.id || u.uid || u.email,
@@ -25,7 +35,6 @@ export default function VisibilitySelector({ visibility, allowedUsers, users = [
 
   const setVis = (v) => {
     if (v === 'all') onChange('all', []);
-    else if (v === 'private') onChange('private', []);
     else onChange('custom', allowedUsers);
   };
 
@@ -44,7 +53,6 @@ export default function VisibilitySelector({ visibility, allowedUsers, users = [
       <div className="flex flex-wrap gap-2 mb-4">
         {[
           { key: 'all', label: 'Tutti' },
-          { key: 'private', label: 'Solo Me' },
           { key: 'custom', label: 'Utenti Selezionati' }
         ].map(opt => (
           <button
@@ -60,7 +68,7 @@ export default function VisibilitySelector({ visibility, allowedUsers, users = [
         ))}
       </div>
 
-      {visibility === 'custom' && (
+      {effectiveVisibility === 'custom' && (
         <div className="space-y-3">
           <div className="relative">
             <input
@@ -120,7 +128,6 @@ export default function VisibilitySelector({ visibility, allowedUsers, users = [
       )}
       <div className="mt-4 text-[10px] md:text-xs text-gray-400 leading-relaxed space-y-0.5">
         <p><span className="text-gray-300 font-medium">Tutti</span>: visibile a chiunque può accedere al bazaar.</p>
-        <p><span className="text-gray-300 font-medium">Solo Me</span>: solo tu puoi vederlo.</p>
         <p><span className="text-gray-300 font-medium">Utenti Selezionati</span>: mostra l'elemento solo agli utenti indicati.</p>
       </div>
     </div>

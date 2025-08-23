@@ -1,10 +1,12 @@
 // file: ./frontend/src/components/home/elements/StatsBars.js
 import React, { useEffect, useState, useRef, useContext } from 'react';
+import { createPortal } from 'react-dom';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 import { AuthContext } from '../../../AuthContext';
 import { FaAngleRight, FaAngleLeft, FaAnglesRight, FaAnglesLeft } from 'react-icons/fa6';
 import { FaRedo } from 'react-icons/fa';
+import { GiHearts, GiMagicSwirl } from 'react-icons/gi';
 
 const StatsBars = () => {
   const { user } = useContext(AuthContext);
@@ -223,120 +225,178 @@ const StatsBars = () => {
     }
   };
 
-  return (
-    <div className="bg-[rgba(40,40,60,0.8)] p-4 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.4)]">
-      {/* Custom Input Modal */}
-      {showCustomInput && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-80">
-            <h2 className="text-white text-lg mb-4">{promptMessage}</h2>
-            {!customFeedbackMessage ? (
-              <>
-                <input
-                  type="number"
-                  value={customInputValue}
-                  onChange={(e) => setCustomInputValue(e.target.value)}
-                  className="w-full p-2 rounded bg-gray-700 text-white mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <div className="flex justify-end space-x-2">
-                  <button onClick={closeCustomInput} className="px-4 py-1 bg-red-600 text-white rounded hover:bg-red-700">Annulla</button>
-                  <button onClick={handleCustomSubmit} className="px-4 py-1 bg-green-600 text-white rounded hover:bg-green-700">OK</button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="text-white mb-4">{customFeedbackMessage}</p>
-                <div className="flex justify-end">
-                  <button onClick={closeCustomInput} className="px-4 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">Chiudi</button>
-                </div>
-              </>
+  // Small reusable stat row
+  const StatRow = ({
+    label,
+    icon: Icon,
+    colorTrack,
+    colorFill,
+    current,
+    total,
+    onReset,
+    onDecStart,
+    onDecEnd,
+    onIncStart,
+    onIncEnd,
+    onOpenDec,
+    onOpenInc,
+  }) => {
+    const pct = total ? Math.max(0, (current / total) * 100) : 0;
+    const overflowPct = total && current > total ? ((current - total) / total) * 100 : 0;
+    return (
+      <div className="flex items-center gap-2 w-full">
+        <div className="flex items-center gap-2 w-28">
+          <div className="relative inline-flex items-center justify-center h-8 w-8 rounded-xl border border-slate-600/60 bg-slate-800/50 text-slate-300">
+            <Icon className="w-4 h-4" />
+          </div>
+          <span className="text-sm font-medium text-slate-200">{label}</span>
+        </div>
+        <div className="flex items-center gap-1.5 flex-1">
+          <button
+            onClick={onReset}
+            className="relative inline-flex items-center justify-center h-7 w-7 rounded-xl bg-gradient-to-br from-emerald-600 to-green-600 text-white shadow-sm hover:scale-105 active:scale-95 transition-transform focus:outline-none focus:ring-2 focus:ring-emerald-400/40"
+            title={`Reset ${label}`}
+          >
+            <FaRedo className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onMouseDown={onDecStart}
+            onMouseUp={onDecEnd}
+            onMouseLeave={onDecEnd}
+            onTouchStart={onDecStart}
+            onTouchEnd={onDecEnd}
+            className="inline-flex items-center justify-center h-7 w-7 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white"
+            title={`-1 ${label}`}
+          >
+            <FaAngleLeft className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={onOpenDec}
+            className="inline-flex items-center justify-center h-7 w-7 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white"
+            title={`Sottrai ${label} (valore custom)`}
+          >
+            <FaAnglesLeft className="w-3.5 h-3.5" />
+          </button>
+          <div className={`relative flex-1 h-5 rounded-lg ${colorTrack} overflow-visible border border-slate-600/50`}>
+            {/* fill */}
+            <div
+              style={{ width: `${Math.min(100, pct)}%` }}
+              className={`h-full rounded-md ${colorFill}`}
+            />
+            {/* overflow fill */}
+            {overflowPct > 0 && (
+              <div
+                style={{ width: `${overflowPct}%` }}
+                className="h-full bg-amber-400 rounded-r-md"
+              />
             )}
+            {/* subtle stripes */}
+            <div className="pointer-events-none absolute inset-0 bg-[repeating-linear-gradient(45deg,rgba(255,255,255,0.06)_0px,rgba(255,255,255,0.06)_6px,transparent_6px,transparent_12px)] rounded-lg" />
           </div>
+          <button
+            onClick={onOpenInc}
+            className="inline-flex items-center justify-center h-7 w-7 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white"
+            title={`Aggiungi ${label} (valore custom)`}
+          >
+            <FaAnglesRight className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onMouseDown={onIncStart}
+            onMouseUp={onIncEnd}
+            onMouseLeave={onIncEnd}
+            onTouchStart={onIncStart}
+            onTouchEnd={onIncEnd}
+            className="inline-flex items-center justify-center h-7 w-7 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white"
+            title={`+1 ${label}`}
+          >
+            <FaAngleRight className="w-3.5 h-3.5" />
+          </button>
+          <span className="min-w-[72px] text-right text-sm text-slate-200">
+            {current}/{total}
+          </span>
         </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="relative backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 shadow-lg overflow-hidden">
+      {/* Decorative glows to match EquippedInventory */}
+      <div className="absolute -left-16 -top-16 w-52 h-52 bg-indigo-500/10 rounded-full blur-3xl" />
+      <div className="absolute -right-10 -bottom-24 w-64 h-64 bg-fuchsia-500/10 rounded-full blur-3xl" />
+
+      {/* Custom Input Modal (full-screen overlay retained via portal to avoid clipping) */}
+      {showCustomInput && createPortal(
+        (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="w-full max-w-md bg-slate-900/90 border border-slate-700/70 rounded-2xl shadow-xl overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-700/60">
+                <h2 className="text-sm font-medium text-slate-200 tracking-wide">{promptMessage}</h2>
+              </div>
+              <div className="p-4">
+                {!customFeedbackMessage ? (
+                  <>
+                    <input
+                      type="number"
+                      value={customInputValue}
+                      onChange={(e) => setCustomInputValue(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleCustomSubmit(); }}
+                      className="w-full p-2 rounded-lg bg-slate-800/80 text-slate-100 mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-500 border border-slate-600/60"
+                      placeholder="0"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button onClick={closeCustomInput} className="px-4 py-2 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70">Annulla</button>
+                      <button onClick={handleCustomSubmit} className="px-4 py-2 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow hover:opacity-95">OK</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-slate-200 mb-4">{customFeedbackMessage}</p>
+                    <div className="flex justify-end">
+                      <button onClick={closeCustomInput} className="px-4 py-2 rounded-xl bg-gradient-to-br from-sky-600 to-blue-600 text-white shadow hover:opacity-95">Chiudi</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        ),
+        document.body
       )}
-      <div className="mt-2 space-y-3 flex flex-col items-center">
-        {/* HP Bar */}
-        <div className="flex items-center w-full">
-          <span className="text-base font-bold text-red-700 w-16 text-right mr-2">HP:</span>
-          <div className="flex items-center space-x-2 flex-1">
-            <button onClick={handleResetHP} className="bg-green-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-green-600" title="Reset HP">
-              <FaRedo className="w-3 h-3" />
-            </button>
-            <button onMouseDown={handleDecrementHPStart} onMouseUp={handleDecrementHPEnd} onMouseLeave={handleDecrementHPEnd} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Decrease HP by 1">
-              <FaAngleLeft className="w-3 h-3" />
-            </button>
-            <button onClick={() => openCustomInput('hp-decrement')} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Decrease HP by custom value">
-              <FaAnglesLeft className="w-3 h-3" />
-            </button>
-            <div className="flex-1 h-5 bg-red-200 rounded flex overflow-visible">
-              {userData?.stats?.hpTotal ? (() => {
-                const hpCurrent = userData.stats.hpCurrent;
-                const hpTotal = userData.stats.hpTotal;
-                if (hpCurrent <= hpTotal) {
-                  return <div style={{ width: `${(hpCurrent / hpTotal) * 100}%` }} className="h-full bg-red-500 rounded"></div>;
-                } else {
-                  const extraPercent = ((hpCurrent - hpTotal) / hpTotal) * 100;
-                  return (
-                    <>
-                      <div style={{ width: '100%' }} className="h-full bg-red-500 rounded-l"></div>
-                      <div style={{ width: `${extraPercent}%` }} className="h-full bg-yellow-500 rounded-r"></div>
-                    </>
-                  );
-                }
-              })() : null}
-            </div>
-            <button onClick={() => openCustomInput('hp-increment')} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Increase HP by custom value">
-              <FaAnglesRight className="w-3 h-3" />
-            </button>
-            <button onMouseDown={handleIncrementHPStart} onMouseUp={handleIncrementHPEnd} onMouseLeave={handleIncrementHPEnd} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Increase HP by 1">
-              <FaAngleRight className="w-3 h-3" />
-            </button>
-            <span className="text-base text-white w-16 text-right">
-              {userData?.stats?.hpCurrent}/{userData?.stats?.hpTotal}
-            </span>
-          </div>
-        </div>
-        
-        {/* Mana Bar */}
-        <div className="flex items-center w-full">
-          <span className="text-base font-bold text-purple-700 w-16 text-right mr-2">Mana:</span>
-          <div className="flex items-center space-x-2 flex-1">
-            <button onClick={handleResetMana} className="bg-green-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-green-600" title="Reset Mana">
-              <FaRedo className="w-3 h-3" />
-            </button>
-            <button onMouseDown={handleDecrementManaStart} onMouseUp={handleDecrementManaEnd} onMouseLeave={handleDecrementManaEnd} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Decrease Mana by 1">
-              <FaAngleLeft className="w-3 h-3" />
-            </button>
-            <button onClick={() => openCustomInput('mana-decrement')} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Decrease Mana by custom value">
-              <FaAnglesLeft className="w-3 h-3" />
-            </button>
-            <div className="flex-1 h-5 bg-purple-200 rounded flex overflow-visible">
-              {userData?.stats?.manaTotal ? (() => {
-                const manaCurrent = userData.stats.manaCurrent;
-                const manaTotal = userData.stats.manaTotal;
-                if (manaCurrent <= manaTotal) {
-                  return <div style={{ width: `${(manaCurrent / manaTotal) * 100}%` }} className="h-full bg-purple-600 rounded"></div>;
-                } else {
-                  const extraPercent = ((manaCurrent - manaTotal) / manaTotal) * 100;
-                  return (
-                    <>
-                      <div style={{ width: '100%' }} className="h-full bg-purple-600 rounded-l"></div>
-                      <div style={{ width: `${extraPercent}%` }} className="h-full bg-yellow-500 rounded-r"></div>
-                    </>
-                  );
-                }
-              })() : null}
-            </div>
-            <button onClick={() => openCustomInput('mana-increment')} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Increase Mana by custom value">
-              <FaAnglesRight className="w-3 h-3" />
-            </button>
-            <button onMouseDown={handleIncrementManaStart} onMouseUp={handleIncrementManaEnd} onMouseLeave={handleIncrementManaEnd} className="bg-gray-500 text-white h-4 w-4 flex items-center justify-center rounded hover:bg-gray-600" title="Increase Mana by 1">
-              <FaAngleRight className="w-3 h-3" />
-            </button>
-            <span className="text-base text-white w-16 text-right">
-              {userData?.stats?.manaCurrent}/{userData?.stats?.manaTotal}
-            </span>
-          </div>
+
+      <div className="relative flex flex-col gap-4">
+        <div className="space-y-4">
+          <StatRow
+            label="HP"
+            icon={GiHearts}
+            colorTrack="bg-red-900/30"
+            colorFill="bg-gradient-to-r from-red-500 to-rose-500"
+            current={userData?.stats?.hpCurrent || 0}
+            total={userData?.stats?.hpTotal || 0}
+            onReset={handleResetHP}
+            onDecStart={handleDecrementHPStart}
+            onDecEnd={handleDecrementHPEnd}
+            onIncStart={handleIncrementHPStart}
+            onIncEnd={handleIncrementHPEnd}
+            onOpenDec={() => openCustomInput('hp-decrement')}
+            onOpenInc={() => openCustomInput('hp-increment')}
+          />
+
+          <StatRow
+            label="Mana"
+            icon={GiMagicSwirl}
+            colorTrack="bg-indigo-900/30"
+            colorFill="bg-gradient-to-r from-indigo-600 to-fuchsia-600"
+            current={userData?.stats?.manaCurrent || 0}
+            total={userData?.stats?.manaTotal || 0}
+            onReset={handleResetMana}
+            onDecStart={handleDecrementManaStart}
+            onDecEnd={handleDecrementManaEnd}
+            onIncStart={handleIncrementManaStart}
+            onIncEnd={handleIncrementManaEnd}
+            onOpenDec={() => openCustomInput('mana-decrement')}
+            onOpenInc={() => openCustomInput('mana-increment')}
+          />
         </div>
       </div>
     </div>

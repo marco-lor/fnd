@@ -12,7 +12,7 @@ import { AddSpellButton } from '../../dmDashboard/elements/buttons/addSpell';
 import { FaTrash, FaEdit } from 'react-icons/fa';
 import { computeValue } from '../../common/computeFormula';
 
-export function AddAccessorioOverlay({ onClose, showMessage, initialData = null, editMode = false }) {
+export function AddAccessorioOverlay({ onClose, showMessage, initialData = null, editMode = false, inventoryEditMode = false, inventoryUserId = null, inventoryItemId = null, inventoryItemIndex = null }) {
     const [accessorioFormData, setAccessorioFormData] = useState({});
     const [schema, setSchema] = useState(null);
     const [isSchemaLoading, setIsSchemaLoading] = useState(true);
@@ -378,13 +378,13 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                 const accessorioImgRef = ref(storage, 'items/' + accessorioImgFileName);
                 await uploadBytes(accessorioImgRef, imageFile);
                 newImageUrl = await getDownloadURL(accessorioImgRef);
-                if (editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
+                if (!inventoryEditMode && editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
                     try {
                         const oldPath = decodeURIComponent(initialData.General.image_url.split('/o/')[1].split('?')[0]);
                         await deleteObject(ref(storage, oldPath));
                     } catch (e) { console.warn("Failed to delete old image:", e.code === 'storage/object-not-found' ? 'Old file not found.' : e.message); }
                 }
-            } else if (editMode && !imagePreviewUrl && initialData?.General?.image_url) {
+            } else if (!inventoryEditMode && editMode && !imagePreviewUrl && initialData?.General?.image_url) {
                 newImageUrl = null;
                 try {
                     const oldPath = decodeURIComponent(initialData.General.image_url.split('/o/')[1].split('?')[0]);
@@ -415,7 +415,7 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                 }
                 
                 // Delete old files if editing
-                if (editMode && initialData?.General?.spells?.[spellNameKey] && typeof initialData.General.spells[spellNameKey] === 'object') {
+                if (!inventoryEditMode && editMode && initialData?.General?.spells?.[spellNameKey] && typeof initialData.General.spells[spellNameKey] === 'object') {
                     const initialSpellFromData = initialData.General.spells[spellNameKey];
                     if (customSpell.imageFile && initialSpellFromData.image_url) {
                         try { await deleteObject(ref(storage, decodeURIComponent(initialSpellFromData.image_url.split('/o/')[1].split('?')[0]))); } catch (e) { console.warn("Failed to delete old spell image for", spellNameKey, e); }
@@ -435,7 +435,7 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                 }
             });
 
-            if (editMode && initialData?.General?.spells) {
+            if (!inventoryEditMode && editMode && initialData?.General?.spells) {
                 for (const initialSpellName in initialData.General.spells) {
                     if (!finalSpells[initialSpellName]) {
                         const initialSpellDetails = initialData.General.spells[initialSpellName];
@@ -479,17 +479,73 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                  delete finalAccessorioData.Parametri;            }            // Set item type to "accessorio"
             finalAccessorioData.item_type = "accessorio";
 
-            if (editMode) {
-                console.log("Updating document:", docId, finalAccessorioData);
-                await updateDoc(accessorioDocRef, finalAccessorioData);
-                if (showMessage) showMessage(`Accessorio "${accessorioName}" aggiornato!`, "success");
+            if (inventoryEditMode && inventoryUserId && (inventoryItemId || initialData?.id)) {
+                try {
+                    const targetUserRef = doc(db, 'users', inventoryUserId);
+                    const userSnap = await getDoc(targetUserRef);
+                    const currentData = userSnap.exists() ? userSnap.data() : {};
+                    const invArr = Array.isArray(currentData.inventory) ? currentData.inventory : [];
+                    const targetId = inventoryItemId || docId;
+                    let userImageDeleted = false;
+                    const nextInv = invArr.map((entry, idx) => {
+                        if (Number.isInteger(inventoryItemIndex)) {
+                            if (idx !== inventoryItemIndex) return entry;
+                            const current = entry;
+                            const qty = typeof current?.qty === 'number' ? current.qty : 1;
+                            if (current?.user_image_custom && current?.user_image_url) {
+                                if (imageFile || (!imagePreviewUrl && initialData?.General?.image_url)) {
+                                    userImageDeleted = current.user_image_url;
+                                }
+                            }
+                            const baseUpdated = { id: targetId, qty, ...finalAccessorioData };
+                            if (imageFile) return { ...baseUpdated, user_image_custom: true, user_image_url: newImageUrl };
+                            if (!imagePreviewUrl) { const { user_image_custom, user_image_url, ...rest } = baseUpdated; return rest; }
+                            return { ...baseUpdated, ...(current?.user_image_custom ? { user_image_custom: true, user_image_url: current.user_image_url } : {}) };
+                        }
+                        if (!entry) return entry;
+                        if (typeof entry === 'string') {
+                            if (entry === targetId) return { id: targetId, qty: 1, ...finalAccessorioData, ...(imageFile ? { user_image_custom: true, user_image_url: newImageUrl } : {}) };
+                            return entry;
+                        }
+                        const entryId = entry.id || entry.name || entry?.General?.Nome;
+                        if (entryId === targetId) {
+                            const qty = typeof entry.qty === 'number' ? entry.qty : 1;
+                            if (entry.user_image_custom && entry.user_image_url) {
+                                if (imageFile || (!imagePreviewUrl && initialData?.General?.image_url)) {
+                                    userImageDeleted = entry.user_image_url;
+                                }
+                            }
+                            const baseUpdated = { id: targetId, qty, ...finalAccessorioData };
+                            if (imageFile) return { ...baseUpdated, user_image_custom: true, user_image_url: newImageUrl };
+                            else if (!imagePreviewUrl) { const { user_image_custom, user_image_url, ...rest } = baseUpdated; return rest; }
+                            return { ...baseUpdated, ...(entry.user_image_custom ? { user_image_custom: true, user_image_url: entry.user_image_url } : {}) };
+                        }
+                        return entry;
+                    });
+                    await updateDoc(targetUserRef, { inventory: nextInv });
+                    if (userImageDeleted) {
+                        try { const oldPath = decodeURIComponent(userImageDeleted.split('/o/')[1].split('?')[0]); await deleteObject(ref(storage, oldPath)); } catch (e) { console.warn('Failed to delete previous user custom image:', e); }
+                    }
+                    if (showMessage) showMessage(`Accessorio aggiornato nell'inventario utente.`, 'success');
+                } catch (e) {
+                    console.error('Failed updating user inventory:', e);
+                    if (showMessage) showMessage(`Errore aggiornando inventario utente: ${e.message}`, 'error');
+                    setIsLoading(false);
+                    return;
+                }
+                onClose(true);
             } else {
-                console.log("Creating new document:", docId, finalAccessorioData);
-                await setDoc(accessorioDocRef, finalAccessorioData);
-                if (showMessage) showMessage(`Accessorio "${accessorioName}" creato!`, "success");
+                if (editMode) {
+                    console.log("Updating document:", docId, finalAccessorioData);
+                    await updateDoc(accessorioDocRef, finalAccessorioData);
+                    if (showMessage) showMessage(`Accessorio "${accessorioName}" aggiornato!`, "success");
+                } else {
+                    console.log("Creating new document:", docId, finalAccessorioData);
+                    await setDoc(accessorioDocRef, finalAccessorioData);
+                    if (showMessage) showMessage(`Accessorio "${accessorioName}" creato!`, "success");
+                }
+                onClose(true);
             }
-
-            onClose(true);
 
         } catch (error) {
             console.error("Error saving accessorio:", error);

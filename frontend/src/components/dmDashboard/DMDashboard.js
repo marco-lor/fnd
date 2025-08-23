@@ -1,7 +1,8 @@
 // file: ./frontend/src/components/dmDashboard/DMDashboard.js
 import React, { useState, useEffect } from "react";
-import { db } from "../firebaseConfig";
+import { db, app } from "../firebaseConfig";
 import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { useAuth } from "../../AuthContext";
 import { useNavigate } from "react-router-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -18,6 +19,11 @@ const DMDashboard = () => {
   const [error, setError] = useState(null);
   const { userData } = useAuth();
   const navigate = useNavigate();
+  const functions = getFunctions(app, "europe-west8");
+  const levelUpAll = httpsCallable(functions, "levelUpAll");
+  const levelUpUser = httpsCallable(functions, "levelUpUser");
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState(null);
 
   // Fetch users only once after confirming DM status
   useEffect(() => {
@@ -48,6 +54,65 @@ const DMDashboard = () => {
 
     fetchUsers();
   }, [userData, navigate]);
+
+  const refreshUsers = async () => {
+    try {
+      const usersRef = collection(db, "users");
+      const snapshot = await getDocs(usersRef);
+      const usersData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      setUsers(usersData);
+    } catch (e) {
+      console.error("Refresh users failed", e);
+    }
+  };
+
+  const handleLevelUpAll = async () => {
+    if (userData.role !== "dm") {
+      setError("Permission denied: Only DMs can level up players");
+      return;
+    }
+    if (!window.confirm("Are you sure you want to increase the level of all players by 1?")) {
+      return;
+    }
+    try {
+      setBusy(true);
+      setToast(null);
+      const res = await levelUpAll({ idempotencyKey: `${Date.now()}` });
+      const payload = res?.data;
+      const updatedCount = Array.isArray(payload?.updated) ? payload.updated.filter((r)=>r.toLevel).length : 0;
+      setToast(`Level up done. Updated ${updatedCount} players.`);
+      await refreshUsers();
+    } catch (e) {
+      console.error("Level up all failed", e);
+      setError("Level up failed. See console.");
+    } finally {
+      setBusy(false);
+      setTimeout(()=>setToast(null), 4000);
+    }
+  };
+
+  const handleLevelUpOne = async (targetUserId) => {
+    if (userData.role !== "dm") {
+      setError("Permission denied: Only DMs can level up players");
+      return;
+    }
+    if (!window.confirm("Confirm level up for this player?")) {
+      return;
+    }
+    try {
+      setBusy(true);
+      setToast(null);
+      await levelUpUser({ userId: targetUserId });
+      setToast(`Level up done for user.`);
+      await refreshUsers();
+    } catch (e) {
+      console.error("Level up user failed", e);
+      setError("Level up failed. See console.");
+    } finally {
+      setBusy(false);
+      setTimeout(()=>setToast(null), 3000);
+    }
+  };
 
   // Handler to toggle a given lock field (either lock_param_base or lock_param_combat)
   const handleToggleLock = async (userId, field, currentValue) => {
@@ -104,7 +169,20 @@ const DMDashboard = () => {
                 <th className="border px-4 py-2">Setting</th>
                 {users.map((user) => (
                   <th key={user.id} className="border px-4 py-2">
-                    {user.characterId || user.email || "Unknown User"}
+                    <div className="flex flex-col items-center gap-1">
+                      <div className="text-sm font-medium">
+                        {user.characterId || user.email || "Unknown User"}
+                      </div>
+                      <div className="text-xs text-gray-300">Lv {user?.stats?.level || 1}</div>
+                      <button
+                        onClick={() => handleLevelUpOne(user.id)}
+                        disabled={busy}
+                        className={`mt-1 px-2 py-1 rounded text-xs ${busy ? 'bg-emerald-400' : 'bg-emerald-600 hover:bg-emerald-500'} text-white`}
+                        title="Increase level by 1 for this player"
+                      >
+                        Level Up
+                      </button>
+                    </div>
                   </th>
                 ))}
               </tr>
@@ -182,9 +260,22 @@ const DMDashboard = () => {
       <div className="container mx-auto p-4">
         <h1 className="text-3xl font-bold mb-6">DM Dashboard</h1>
         <div className="bg-gray-800 rounded-lg p-6">
-          <p>
-            Welcome to the DM Dashboard. This area is only accessible to users with the DM role.
-          </p>
+          <div className="flex items-center justify-between">
+            <p>
+              Welcome to the DM Dashboard. This area is only accessible to users with the DM role.
+            </p>
+            <button
+              onClick={handleLevelUpAll}
+              disabled={busy}
+              className={`px-4 py-2 rounded-md text-white text-sm ${busy ? 'bg-indigo-400' : 'bg-indigo-600 hover:bg-indigo-500'} `}
+              title="Increase level by 1 for all players"
+            >
+              {busy ? 'Leveling…' : 'Level Up All'}
+            </button>
+          </div>
+          {toast && (
+            <div className="mt-3 text-sm text-green-300">{toast}</div>
+          )}
         </div>
         {renderLockSettingsTable()}
         <PlayerInfo 

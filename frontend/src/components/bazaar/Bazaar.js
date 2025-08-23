@@ -10,14 +10,20 @@ import { AddArmaturaOverlay } from './elements/addArmatura';
 import { AddAccessorioOverlay } from './elements/addAccessorio';
 import { AddConsumabileOverlay } from './elements/addConsumabile';
 import ComparisonPanel from './elements/comparisonComponent';
+import { acquireItem } from './elements/acquireItem';
+import PurchaseConfirmModal from './elements/PurchaseConfirmModal';
+import FiltersSection from './elements/FiltersSection';
 
-function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked }) {
+function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purchasing, userGold }) {
   const [imageError, setImageError] = useState(false);
   const title = item.General?.Nome || 'Oggetto Sconosciuto';
   const imageUrl = item.General?.image_url;
   const slot = item.General?.Slot || '-';
   const tipo = item.Specific?.Tipo || '-';
   const hands = item.Specific?.Hands != null ? item.Specific.Hands : '-';
+  const rawPrice = item?.General?.prezzo ?? 0;
+  const price = typeof rawPrice === 'number' ? rawPrice : parseInt(rawPrice, 10) || 0;
+  const affordable = (userGold ?? 0) >= price;
 
   useEffect(() => {
      setImageError(false);
@@ -28,7 +34,10 @@ function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked }) {
 
   return (
     <motion.div
-      className={`flex items-center p-2 bg-gray-800 bg-opacity-80 shadow rounded-lg hover:bg-gray-700 transition-colors cursor-pointer ${isLocked ? 'border-2 border-blue-500' : ''}`}
+      className={`flex items-center p-2 bg-gray-800 bg-opacity-80 shadow rounded-lg transition-colors cursor-pointer relative group
+        ${isLocked ? 'border-2 border-blue-500' : 'border border-gray-700/60'}
+        ${!affordable && price > 0 ? 'opacity-60 grayscale-[35%] hover:opacity-75' : 'hover:bg-gray-700'}
+      `}
       whileHover={{ scale: 1.02 }}
       onMouseEnter={() => onHoverItem(item)}
       onMouseLeave={() => onHoverItem(null)}
@@ -49,21 +58,39 @@ function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked }) {
           {title?.charAt(0)?.toUpperCase() || "?"}
         </div>
       )}
-      <div className="flex-grow">
-        <h2 className="text-lg font-bold text-white">{title}</h2>
-        <p className="text-sm text-gray-300">
+      <div className="flex-grow pr-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-bold text-white truncate" title={title}>{title}</h2>
+          {price > 0 && (
+            <span className={`text-xs px-2 py-0.5 rounded-full border
+              ${affordable ? 'bg-emerald-600/30 border-emerald-400/40 text-emerald-200' : 'bg-rose-700/30 border-rose-500/40 text-rose-200'}
+            `} title={affordable ? 'Puoi permettertelo' : 'Oro insufficiente'}>
+              {price}
+            </span>
+          )}
+        </div>
+        <p className="text-xs mt-0.5 text-gray-300">
           Slot: {slot} | Tipo: {tipo} | Hands: {hands}
         </p>
       </div>
       <button
         onClick={(e) => {
           e.stopPropagation();
-          onPurchase(item);
+          if (!purchasing && affordable) onPurchase(item);
         }}
-        className="px-3 py-1 rounded bg-[rgba(25,50,128,0.4)] text-white hover:bg-[rgba(35,60,148,0.6)] transition-colors"
+        disabled={purchasing || (!affordable && price > 0)}
+        className={`px-3 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap
+          ${purchasing ? 'bg-gray-500 cursor-not-allowed opacity-60 text-white'
+            : !affordable && price > 0 ? 'bg-gray-700/60 text-gray-300 cursor-not-allowed border border-gray-600'
+            : 'bg-[rgba(25,50,128,0.55)] text-white hover:bg-[rgba(35,60,148,0.7)]'}
+        `}
+        title={purchasing ? 'Acquisto in corso...' : (!affordable && price > 0 ? 'Oro insufficiente' : 'Acquista')}
       >
-        Acquire
+        {purchasing ? '...' : (!affordable && price > 0 ? 'No Gold' : 'Acquire')}
       </button>
+      {!affordable && price > 0 && (
+        <div className="absolute inset-0 pointer-events-none rounded-lg border border-rose-600/20" />
+      )}
     </motion.div>
   );
 }
@@ -78,59 +105,79 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   const [selectedBaseParams, setSelectedBaseParams] = useState(['All']);
   const [hoveredItem, setHoveredItem] = useState(null);
   const [lockedItem, setLockedItem] = useState(null);
+  const [onlyAffordable, setOnlyAffordable] = useState(false);
 
-  // Dropdown visibility states
-  const [dropdownOpen, setDropdownOpen] = useState({
-    itemType: false,
-    slot: false,
-    hands: false,
-    tipo: false,
-    combatParams: false,
-    baseParams: false
-  });const [showOverlay, setShowOverlay] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(false);
   const [showArmaturaOverlay, setShowArmaturaOverlay] = useState(false);
   const [showAccessorioOverlay, setShowAccessorioOverlay] = useState(false);
   const [showConsumabileOverlay, setShowConsumabileOverlay] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [confirmationMessage, setConfirmationMessage] = useState("");
   const { user, userData } = useAuth();
+  const [purchasingItemId, setPurchasingItemId] = useState(null);
+  const [pendingPurchaseItem, setPendingPurchaseItem] = useState(null);
   const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
+  const isDM = userData?.role === 'dm'; // DMs can see all items regardless of custom visibility
 
   // Listen to items respecting visibility
   useEffect(() => {
     if (!user) return;
 
-    const itemsRef = collection(db, "items");
-    const q = query(
-      itemsRef,
-      or(
-        where('visibility', '==', 'all'),
-        and(
-          where('visibility', '==', 'custom'),
-          where('allowed_users', 'array-contains', user.uid)
-        )
-      )
-    );
+    const itemsRef = collection(db, 'items');
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const fetchedItems = [];
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          if (data.item_type && data.General && data.Specific && data.Parametri && !doc.id.startsWith('schema_')) {
-            fetchedItems.push({ id: doc.id, ...data });
+    // If the user is a DM they can see ALL items (except schema docs) without visibility filtering
+    // Otherwise apply existing visibility rules: 'all' OR ('custom' AND allowed_users contains user)
+    const buildUnsubscribe = () => {
+      if (isDM) {
+        return onSnapshot(
+          itemsRef,
+          (snapshot) => {
+            const allItems = [];
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              if (data.item_type && data.General && data.Specific && data.Parametri && !doc.id.startsWith('schema_')) {
+                allItems.push({ id: doc.id, ...data });
+              }
+            });
+            setItems(allItems);
+          },
+          (error) => {
+            console.error('Error listening to items collection (DM view):', error);
           }
-        });
-        setItems(fetchedItems);
-      },
-      (error) => {
-        console.error("Error listening to items collection:", error);
+        );
+      } else {
+        const q = query(
+          itemsRef,
+            or(
+              where('visibility', '==', 'all'),
+              and(
+                where('visibility', '==', 'custom'),
+                where('allowed_users', 'array-contains', user.uid)
+              )
+            )
+        );
+        return onSnapshot(
+          q,
+          (snapshot) => {
+            const filteredItems = [];
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              if (data.item_type && data.General && data.Specific && data.Parametri && !doc.id.startsWith('schema_')) {
+                filteredItems.push({ id: doc.id, ...data });
+              }
+            });
+            setItems(filteredItems);
+          },
+          (error) => {
+            console.error('Error listening to items collection:', error);
+          }
+        );
       }
-    );
+    };
 
+    const unsubscribe = buildUnsubscribe();
     return () => unsubscribe();
-  }, [user]);
+  }, [user, isDM]);
 
   useEffect(() => {
     const currentLockedItemId = lockedItem?.id;
@@ -163,19 +210,14 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
     if (selectedCombatParams.length > 0 && !selectedCombatParams.includes('All')) {
       console.log('Selected combat params:', selectedCombatParams);
       console.log('Available combat params:', combatParams);
-      
-      // Show sample item structure
       const sampleItem = items.find(item => item.Parametri?.Combattimento);
       if (sampleItem) {
         console.log('Sample item combat params:', sampleItem.Parametri.Combattimento);
       }
     }
-    
     if (selectedBaseParams.length > 0 && !selectedBaseParams.includes('All')) {
       console.log('Selected base params:', selectedBaseParams);
       console.log('Available base params:', baseParams);
-      
-      // Show sample item structure
       const sampleItem = items.find(item => item.Parametri?.Base);
       if (sampleItem) {
         console.log('Sample item base params:', sampleItem.Parametri.Base);
@@ -183,185 +225,28 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
     }
   }, [selectedCombatParams, selectedBaseParams, combatParams, baseParams, items]);
 
-  const handleSearchChange = (event) => {
-    setSearchTerm(event.target.value);
-  };
-
+  // Generic toggle utility and specific handlers (restored after refactor)
   const toggleFilter = (currentFilters, setFilters, value) => {
     if (value === 'All') {
       setFilters(['All']);
     } else {
       const filtersWithoutAll = currentFilters.filter(f => f !== 'All');
       if (filtersWithoutAll.includes(value)) {
-        const newFilters = filtersWithoutAll.filter((v) => v !== value);
+        const newFilters = filtersWithoutAll.filter(v => v !== value);
         setFilters(newFilters.length === 0 ? ['All'] : newFilters);
       } else {
         setFilters([...filtersWithoutAll, value]);
       }
     }
   };
+
   const handleToggleSlot = (slot) => toggleFilter(selectedSlot, setSelectedSlot, slot);
   const handleToggleHands = (hand) => toggleFilter(selectedHands, setSelectedHands, hand);
   const handleToggleTipo = (tipo) => toggleFilter(selectedTipo, setSelectedTipo, tipo);
-  const handleToggleItemType = (itemType) => toggleFilter(selectedItemType, setSelectedItemType, itemType);  const handleToggleCombatParam = (param) => {
-    console.log('Toggling combat param:', param);
-    console.log('Current selected:', selectedCombatParams);
-    toggleFilter(selectedCombatParams, setSelectedCombatParams, param);
-  };
-    const handleToggleBaseParam = (param) => {
-    console.log('Toggling base param:', param);
-    console.log('Current selected:', selectedBaseParams);
-    toggleFilter(selectedBaseParams, setSelectedBaseParams, param);
-  };
-
-  // Dropdown management functions
-  const toggleDropdown = (dropdownName) => {
-    setDropdownOpen(prev => ({
-      ...prev,
-      [dropdownName]: !prev[dropdownName]
-    }));
-  };
-
-  const closeAllDropdowns = () => {
-    setDropdownOpen({
-      itemType: false,
-      slot: false,
-      hands: false,
-      tipo: false,
-      combatParams: false,
-      baseParams: false
-    });
-  };
-
-  // Filter dropdown component
-  const FilterDropdown = ({ 
-    label, 
-    options, 
-    selectedOptions, 
-    onToggle, 
-    dropdownKey, 
-    icon = null, 
-    colorScheme = 'blue',
-    isSmall = false 
-  }) => {
-    const selectedFilters = selectedOptions.filter(opt => opt !== 'All');
-    const unselectedOptions = options.filter(opt => !selectedOptions.includes(opt) && opt !== 'All');
-    const isOpen = dropdownOpen[dropdownKey];
-    
-    const colorClasses = {
-      blue: {
-        selected: 'bg-blue-600/80 border-blue-400 text-white shadow-lg shadow-blue-500/20',
-        dropdown: 'bg-blue-600 border-blue-500 text-white hover:bg-blue-700',
-        badge: 'bg-blue-500/20 text-blue-300'
-      },
-      orange: {
-        selected: 'bg-orange-600/80 border-orange-400 text-white shadow-lg shadow-orange-500/20',
-        dropdown: 'bg-orange-600 border-orange-500 text-white hover:bg-orange-700',
-        badge: 'bg-orange-500/20 text-orange-300'
-      },
-      green: {
-        selected: 'bg-green-600/80 border-green-400 text-white shadow-lg shadow-green-500/20',
-        dropdown: 'bg-green-600 border-green-500 text-white hover:bg-green-700',
-        badge: 'bg-green-500/20 text-green-300'
-      }
-    };
-
-    const colors = colorClasses[colorScheme];
-    const textSize = isSmall ? 'text-xs' : 'text-sm';
-    const padding = isSmall ? 'px-2 py-1' : 'px-3 py-2';
-
-    return (
-      <div className="relative">
-        <div className="flex items-center justify-between mb-2">
-          <label className={`text-white font-medium ${textSize} flex items-center gap-2`}>
-            {icon && <span>{icon}</span>}
-            {label}
-          </label>
-          {selectedFilters.length > 0 && (
-            <span className={`text-xs ${colors.badge} px-2 py-1 rounded-full`}>
-              {selectedFilters.length} attivi
-            </span>
-          )}
-        </div>
-
-        {/* Selected filters as chips */}
-        {selectedFilters.length > 0 && (
-          <div className="flex flex-wrap gap-1 mb-2">
-            {selectedFilters.map((filter) => (
-              <button
-                key={`selected-${filter}`}
-                onClick={() => onToggle(filter)}
-                className={`${padding} ${textSize} rounded-md border transition-all duration-200 ${colors.selected} hover:opacity-80`}
-              >
-                {filter} ✕
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Dropdown for unselected options */}
-        {unselectedOptions.length > 0 && (
-          <div className="relative">
-            <button
-              onClick={() => toggleDropdown(dropdownKey)}
-              className={`w-full ${padding} ${textSize} bg-gray-700/50 border border-gray-600/50 text-gray-300 hover:bg-gray-600/70 hover:text-white rounded-md transition-all duration-200 flex items-center justify-between`}
-            >
-              <span>Aggiungi filtro...</span>
-              <span className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}>
-                ▼
-              </span>
-            </button>
-
-            <AnimatePresence>
-              {isOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                  transition={{ duration: 0.2 }}
-                  className="absolute top-full left-0 right-0 z-50 mt-1 bg-gray-800 border border-gray-600 rounded-md shadow-xl max-h-40 overflow-y-auto"
-                >
-                  {unselectedOptions.map((option) => (
-                    <button
-                      key={`dropdown-${option}`}
-                      onClick={() => {
-                        onToggle(option);
-                        closeAllDropdowns();
-                      }}
-                      className={`w-full ${padding} ${textSize} text-left hover:bg-gray-700 text-gray-300 hover:text-white transition-colors border-b border-gray-700 last:border-b-0`}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        )}
-
-        {/* "All" option when no specific filters are selected */}
-        {selectedFilters.length === 0 && (
-          <button
-            onClick={() => onToggle('All')}
-            className={`w-full ${padding} ${textSize} rounded-md border transition-all duration-200 text-left bg-gray-600/80 border-gray-500 text-gray-200`}
-          >
-            Tutti ({label})
-          </button>
-        )}
-      </div>
-    );  };
-
-  // Close dropdowns when clicking outside
-  useEffect(() => {
-    const handleClickOutside = () => {
-      if (Object.values(dropdownOpen).some(open => open)) {
-        closeAllDropdowns();
-      }
-    };
-
-    document.addEventListener('click', handleClickOutside);
-    return () => document.removeEventListener('click', handleClickOutside);
-  }, [dropdownOpen]);
+  const handleToggleItemType = (itemType) => toggleFilter(selectedItemType, setSelectedItemType, itemType);
+  const handleToggleCombatParam = (param) => toggleFilter(selectedCombatParams, setSelectedCombatParams, param);
+  const handleToggleBaseParam = (param) => toggleFilter(selectedBaseParams, setSelectedBaseParams, param);
+  const handleSearchChange = (e) => setSearchTerm(e.target.value);
 
   const handleHoverItem = (item) => {
     if (!lockedItem) {
@@ -384,7 +269,12 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
     const matchesSlot = selectedSlot.includes('All') || selectedSlot.includes(item.General?.Slot);
     const matchesHands = selectedHands.includes('All') || selectedHands.includes(String(item.Specific?.Hands));
     const matchesTipo = selectedTipo.includes('All') || selectedTipo.includes(item.Specific?.Tipo);
-    const matchesItemType = selectedItemType.includes('All') || selectedItemType.includes(item.item_type);    return matchesSearch && matchesSlot && matchesHands && matchesTipo && matchesItemType;}).sort((a, b) => {
+    const matchesItemType = selectedItemType.includes('All') || selectedItemType.includes(item.item_type);    
+    const userGold = userData?.stats?.gold ?? 0;
+    const rawPrice = item?.General?.prezzo ?? 0;
+    const price = typeof rawPrice === 'number' ? rawPrice : parseInt(rawPrice, 10) || 0;
+    const matchesAffordable = !onlyAffordable || price <= userGold;
+    return matchesSearch && matchesSlot && matchesHands && matchesTipo && matchesItemType && matchesAffordable;}).sort((a, b) => {
     // Debug: Log when sorting is triggered
     const shouldSortCombat = !selectedCombatParams.includes('All') && selectedCombatParams.length > 0;
     const shouldSortBase = !selectedBaseParams.includes('All') && selectedBaseParams.length > 0;
@@ -472,8 +362,59 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
     }, 2500);
   }, []);
 
-  const handlePurchase = (item) => {
-    displayConfirmation(`"${item.General?.Nome || 'Oggetto'}" Acquistato!`);
+  const startPurchaseFlow = (item) => {
+    if (!user) {
+      displayConfirmation('Devi essere loggato per acquistare.', 'error');
+      return;
+    }
+  // Stacking allowed: no early return if already owned
+    const gold = userData?.stats?.gold ?? 0;
+    const rawPrice = item?.General?.prezzo;
+    const price = typeof rawPrice === 'number' ? rawPrice : parseInt(rawPrice, 10) || 0;
+    if (price > gold) {
+      displayConfirmation(`Oro insufficiente: ${gold} / ${price}`, 'error');
+      return;
+    }
+    setPendingPurchaseItem(item);
+  };
+
+  const confirmPurchase = async () => {
+    const item = pendingPurchaseItem;
+    if (!item || !user) { setPendingPurchaseItem(null); return; }
+    if (!user) {
+      displayConfirmation('Devi essere loggato per acquistare.', 'error');
+      return;
+    }
+    const price = typeof item?.General?.prezzo === 'number' ? item.General.prezzo : parseInt(item?.General?.prezzo, 10) || 0;
+    const name = item.General?.Nome || 'Oggetto';
+  // Stacking allowed: skip already-owned guard
+    const gold = userData?.stats?.gold ?? 0;
+    if (price > gold) {
+      displayConfirmation(`Oro insufficiente: ${gold} / ${price}`, 'error');
+      return;
+    }
+    try {
+      setPurchasingItemId(item.id);
+      const res = await acquireItem(user.uid, item);
+      if (res?.error) {
+        displayConfirmation(`Errore: ${res.error}`, 'error');
+      } else if (res?.insufficient) {
+        displayConfirmation(`Oro insufficiente: ${res.gold} / ${res.price}`, 'error');
+      } else if (res?.success) {
+        if (res.newQty && res.newQty > 1) {
+          displayConfirmation(`Acquisto completato: ora possiedi ${res.newQty}x "${name}". Oro rimanente: ${res.newGold}`);
+        } else {
+          displayConfirmation(`Acquisto completato: "${name}". Oro rimanente: ${res.newGold}`);
+        }
+      } else {
+        displayConfirmation('Risposta inattesa dalla transazione.', 'error');
+      }
+    } catch (e) {
+      displayConfirmation(`Errore durante l'acquisto: ${e.message}`, 'error');
+    } finally {
+      setPurchasingItemId(null);
+    setPendingPurchaseItem(null);
+    }
   };
   const handleAddWeaponClick = () => {
     setShowOverlay(true);
@@ -501,127 +442,39 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
       {/* Main content area using CSS Grid */}
       {/* Grid columns: Filters (dynamic), Item List (700px), Comparison Panel Area (450px) */}
       <div className="relative z-10 grid grid-cols-[15%_55%_30%] flex-grow items-start">        {/* Filters Panel (Column 1) */}
-        <div 
-          className="sticky top-0 p-3 overflow-y-auto h-screen bg-gradient-to-b from-gray-900/95 to-gray-800/95 backdrop-blur-sm border-r border-gray-700/50"
-          onClick={(e) => e.stopPropagation()} // Prevent dropdown close when clicking inside
-        >
-          {/* Header */}
-          <div className="mb-6">
-            <h2 className="text-xl font-bold text-white mb-3 flex items-center gap-2">
-              <span className="text-blue-400">⚙️</span>
-              Filtri
-            </h2>            <button
-              onClick={() => {
-                setSelectedSlot(['All']);
-                setSelectedHands(['All']);
-                setSelectedTipo(['All']);
-                setSelectedItemType(['All']);
-                setSelectedCombatParams(['All']);
-                setSelectedBaseParams(['All']);
-                setSearchTerm('');
-                closeAllDropdowns();
-              }}
-              className="w-full px-2 py-1 text-xs bg-gray-600 hover:bg-gray-500 text-gray-300 hover:text-white rounded border border-gray-500 transition-colors"
-            >
-              Resetta Filtri
-            </button>
-          </div>
-
-          {/* Basic Filters Section */}
-          <div className="mb-6 bg-gray-800/50 rounded-lg p-4 border border-gray-600/30">
-            <h3 className="text-lg font-semibold text-blue-300 mb-4 flex items-center gap-2">
-              <span className="w-2 h-2 bg-blue-400 rounded-full"></span>
-              Filtri Base
-            </h3>
-            
-            {/* Item Type Filter */}
-            <div className="mb-4">
-              <FilterDropdown
-                label="Tipo Oggetto"
-                options={itemTypes}
-                selectedOptions={selectedItemType}
-                onToggle={handleToggleItemType}
-                dropdownKey="itemType"
-                colorScheme="blue"
-              />
-            </div>
-
-            {/* Slot Filter */}
-            <div className="mb-4">
-              <FilterDropdown
-                label="Slot"
-                options={slots}
-                selectedOptions={selectedSlot}
-                onToggle={handleToggleSlot}
-                dropdownKey="slot"
-                colorScheme="blue"
-              />
-            </div>
-
-            {/* Hands and Tipo in a row */}
-            <div className="grid grid-cols-2 gap-3">
-              {/* Hands Filter */}
-              <div>
-                <FilterDropdown
-                  label="Mani"
-                  options={hands}
-                  selectedOptions={selectedHands}
-                  onToggle={handleToggleHands}
-                  dropdownKey="hands"
-                  colorScheme="blue"
-                  isSmall={true}
-                />
-              </div>
-
-              {/* Tipo Filter */}
-              <div>
-                <FilterDropdown
-                  label="Tipo"
-                  options={tipos}
-                  selectedOptions={selectedTipo}
-                  onToggle={handleToggleTipo}
-                  dropdownKey="tipo"
-                  colorScheme="blue"
-                  isSmall={true}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Sorting Parameters Section */}
-          <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-600/30">
-            <h3 className="text-lg font-semibold text-orange-300 mb-4 flex items-center gap-2">
-              <span className="w-2 h-2 bg-orange-400 rounded-full"></span>
-              Ordinamento Parametri
-            </h3>
-            
-            {/* Combat Parameters */}
-            <div className="mb-4">
-              <FilterDropdown
-                label="Combattimento"
-                options={combatParams}
-                selectedOptions={selectedCombatParams}
-                onToggle={handleToggleCombatParam}
-                dropdownKey="combatParams"
-                icon="⚔️"
-                colorScheme="orange"
-              />
-            </div>
-
-            {/* Base Parameters */}
-            <div>
-              <FilterDropdown
-                label="Base"
-                options={baseParams}
-                selectedOptions={selectedBaseParams}
-                onToggle={handleToggleBaseParam}
-                dropdownKey="baseParams"
-                icon="📊"
-                colorScheme="green"
-              />
-            </div>
-          </div>
-        </div>{/* Items List Panel (Column 2) */}
+        <FiltersSection
+          slots={slots}
+          hands={hands}
+          tipos={tipos}
+          itemTypes={itemTypes}
+          combatParams={combatParams}
+          baseParams={baseParams}
+          selectedSlot={selectedSlot}
+          selectedHands={selectedHands}
+          selectedTipo={selectedTipo}
+          selectedItemType={selectedItemType}
+          selectedCombatParams={selectedCombatParams}
+          selectedBaseParams={selectedBaseParams}
+          onToggleSlot={handleToggleSlot}
+          onToggleHands={handleToggleHands}
+          onToggleTipo={handleToggleTipo}
+          onToggleItemType={handleToggleItemType}
+          onToggleCombatParam={handleToggleCombatParam}
+          onToggleBaseParam={handleToggleBaseParam}
+          onlyAffordable={onlyAffordable}
+          setOnlyAffordable={setOnlyAffordable}
+          onResetFilters={() => {
+            setSelectedSlot(['All']);
+            setSelectedHands(['All']);
+            setSelectedTipo(['All']);
+            setSelectedItemType(['All']);
+            setSelectedCombatParams(['All']);
+            setSelectedBaseParams(['All']);
+            setSearchTerm('');
+            setOnlyAffordable(false);
+          }}
+        />
+        {/* Items List Panel (Column 2) */}
         {/* Width (700px) is controlled by grid-cols. Removed flex-grow, mr-*, and transition classes for width. */}
         <div className="p-6 overflow-y-auto h-screen scrollbar-hidden">
           {isAdmin && (
@@ -667,14 +520,16 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
           <div className="flex flex-col gap-3">
              {filteredItems.length > 0 ? (
                  filteredItems.map((item) => (
-                     <ItemCard
-                         key={item.id}
-                         item={item}
-                         onPurchase={handlePurchase}
-                         onHoverItem={handleHoverItem}
-                         onLockToggle={() => handleLockToggle(item)}
-                         isLocked={lockedItem && lockedItem.id === item.id}
-                     />
+           <ItemCard
+             key={item.id}
+             item={item}
+                         onPurchase={startPurchaseFlow}
+             onHoverItem={handleHoverItem}
+             onLockToggle={() => handleLockToggle(item)}
+             isLocked={lockedItem && lockedItem.id === item.id}
+             purchasing={purchasingItemId === item.id}
+             userGold={userData?.stats?.gold ?? 0}
+           />
                  ))
              ) : (
                  <p className="text-center text-gray-400 mt-8">Nessun oggetto trovato corrispondente ai filtri.</p>
@@ -768,6 +623,16 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
           </motion.div>
         )}
       </AnimatePresence>
+      {/* Purchase Confirmation Modal */}
+      {pendingPurchaseItem && (
+        <PurchaseConfirmModal
+          item={pendingPurchaseItem}
+            userGold={userData?.stats?.gold ?? 0}
+          onConfirm={confirmPurchase}
+          onClose={() => !purchasingItemId && setPendingPurchaseItem(null)}
+          isProcessing={!!purchasingItemId}
+        />
+      )}
     </div>
   );
 }
