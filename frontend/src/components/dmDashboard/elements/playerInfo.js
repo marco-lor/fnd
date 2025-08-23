@@ -3,8 +3,9 @@ import React, { useState, useEffect } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faEdit, faTrash } from "@fortawesome/free-solid-svg-icons";
 import { library } from "@fortawesome/fontawesome-svg-core";
-import { collection, getDocs } from "firebase/firestore";
-import { db } from "../../firebaseConfig";
+import { collection, getDocs, doc, getDoc, updateDoc } from "firebase/firestore";
+import { db, storage } from "../../firebaseConfig";
+import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 
 // --- Import Add/Edit/Del Overlays & Buttons ---
 import { AddTecnicaPersonaleOverlay, AddTecnicaButton } from "./buttons/addTecnicaPersonale";
@@ -454,7 +455,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                             <span className="truncate mr-2">{it.name}{(it.type||"").toLowerCase()==='varie' ? ' (Varie)' : ''}</span>
                             <div className="flex items-center space-x-2">
                               {/* Allow edit only for catalog-backed items */}
-                              {itemsDocs?.[it.id]?.item_type && (
+                              {(itemsDocs?.[it.id]?.item_type || ((it.type||"").toLowerCase()==='varie')) && (
                                 <button
                                   className={iconEdit}
                                   title="Modifica oggetto"
@@ -648,7 +649,19 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
       {/* Inventory item edit overlay (type-aware) */}
       {showEditItemOverlay && editItemData && (
         <>
-    {editItemData?.item_type === 'armatura' ? (
+    {((editItemData?.type || editItemData?.item_type || '').toLowerCase() === 'varie') ? (
+            <EditVarieItemOverlay
+              userId={selectedUserId}
+              initialData={editItemData}
+              inventoryItemId={selectedEditItemId}
+              onClose={async (ok) => {
+                setShowEditItemOverlay(false);
+                setEditItemData(null);
+                setSelectedUserId(null);
+                if (ok) await refreshUserData();
+              }}
+            />
+          ) : editItemData?.item_type === 'armatura' ? (
             <AddArmaturaOverlay
               onClose={(ok) => {
                 setShowEditItemOverlay(false);
@@ -781,3 +794,137 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
 };
 
 export default PlayerInfo;
+
+// Lightweight overlay to edit Varie items in a user's inventory
+export const EditVarieItemOverlay = ({ userId, initialData, inventoryItemId, onClose }) => {
+  const [name, setName] = React.useState(initialData?.name || initialData?.General?.Nome || '');
+  const [desc, setDesc] = React.useState(initialData?.description || '');
+  const [qty, setQty] = React.useState(typeof initialData?.qty === 'number' ? String(initialData.qty) : '1');
+  const [busy, setBusy] = React.useState(false);
+  const [imageFile, setImageFile] = React.useState(null);
+  const [previewUrl, setPreviewUrl] = React.useState(null);
+  const [currentImageUrl, setCurrentImageUrl] = React.useState(initialData?.image_url || null);
+  const originalUrlRef = React.useRef(initialData?.image_url || null);
+  const [removeExisting, setRemoveExisting] = React.useState(false);
+
+  const closeAll = (ok) => onClose && onClose(ok);
+
+  const save = async () => {
+    if (!userId) return;
+    const cleanName = (name || '').trim();
+    const qtyNum = Math.max(1, Math.abs(parseInt(qty, 10) || 1));
+    if (!cleanName) return;
+    try {
+      setBusy(true);
+      const userDocRef = doc(db, 'users', userId);
+      const userDocSnap = await getDoc(userDocRef);
+      if (!userDocSnap.exists()) throw new Error('User not found');
+      const data = userDocSnap.data() || {};
+      const inv = Array.isArray(data.inventory) ? [...data.inventory] : [];
+      let newImageUrl = currentImageUrl;
+
+      // If a new image is chosen, upload and replace
+      if (imageFile) {
+        const safe = cleanName.replace(/[^a-zA-Z0-9]/g, '_');
+        const fileName = `varie_${userId}_${safe}_${Date.now()}_${imageFile.name}`;
+        const imgRef = storageRef(storage, 'items/' + fileName);
+        await uploadBytes(imgRef, imageFile);
+        newImageUrl = await getDownloadURL(imgRef);
+        // schedule deleting old if there was one
+        if (originalUrlRef.current && originalUrlRef.current !== newImageUrl) {
+          setRemoveExisting(true);
+        }
+      }
+
+      // Update the first matching entry by id
+      let updated = false;
+      for (let i = 0; i < inv.length; i++) {
+        const e = inv[i];
+        const eid = (e && (e.id || e.name || e?.General?.Nome)) || `item-${i}`;
+        if (eid === inventoryItemId) {
+          const nextEntry = {
+            ...e,
+            id: inventoryItemId,
+            type: 'varie',
+            name: cleanName,
+            description: (desc || '').trim(),
+            qty: qtyNum,
+          };
+          if (newImageUrl) nextEntry.image_url = newImageUrl; else delete nextEntry.image_url;
+          inv[i] = nextEntry;
+          updated = true;
+          break;
+        }
+      }
+      if (!updated) throw new Error('Item not found');
+
+      await updateDoc(userDocRef, { inventory: inv });
+      // After Firestore update, handle deletions
+      if (removeExisting && originalUrlRef.current && originalUrlRef.current !== newImageUrl) {
+        try {
+          const path = decodeURIComponent(originalUrlRef.current.split('/o/')[1].split('?')[0]);
+          await deleteObject(storageRef(storage, path));
+        } catch {}
+      }
+      closeAll(true);
+    } catch (e) {
+      console.error('Failed to save Varie item', e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeImage = () => {
+    if (!currentImageUrl) return;
+    setRemoveExisting(true);
+    setCurrentImageUrl(null);
+    setImageFile(null);
+    setPreviewUrl(null);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60" onClick={() => !busy && closeAll(false)} />
+      <div className="relative z-10 w-[30rem] max-w-[92vw] rounded-xl border border-slate-700/60 bg-slate-900/90 p-4 shadow-2xl">
+        <h3 className="text-sm font-semibold text-slate-200">Modifica Varie</h3>
+        <div className="mt-3 grid grid-cols-1 gap-3">
+          <div>
+            <label className="block text-xs text-slate-300 mb-1">Nome</label>
+            <input className="w-full rounded-md bg-slate-900/60 border border-slate-600/60 px-3 py-2 text-slate-200" value={name} onChange={(e)=>setName(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-300 mb-1">Descrizione</label>
+            <textarea rows={3} className="w-full rounded-md bg-slate-900/60 border border-slate-600/60 px-3 py-2 text-slate-200" value={desc} onChange={(e)=>setDesc(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-300 mb-1">Immagine</label>
+            <div className="flex items-center gap-3">
+              <input type="file" accept="image/*" className="text-xs text-slate-300" onChange={(e)=>{
+                const f = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                setImageFile(f); setPreviewUrl(f ? URL.createObjectURL(f) : null);
+              }} />
+              {(previewUrl || currentImageUrl) && (
+                <div className="flex items-center gap-2">
+                  <div className="h-12 w-12 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/50">
+                    <img src={previewUrl || currentImageUrl} alt="preview" className="h-full w-full object-cover" />
+                  </div>
+                  {currentImageUrl && (
+                    <button type="button" onClick={removeImage} className="text-[11px] text-slate-300 border border-slate-600/60 rounded px-2 py-1 hover:bg-slate-700/40" disabled={busy}>Rimuovi immagine</button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-300 mb-1">Quantità</label>
+            <input type="number" min="1" className="w-28 rounded-md bg-slate-900/60 border border-slate-600/60 px-3 py-2 text-slate-200" value={qty} onChange={(e)=>setQty(e.target.value)} />
+          </div>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button className="inline-flex items-center justify-center rounded-md border border-slate-600/60 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700/40" onClick={()=>!busy && closeAll(false)} disabled={busy}>Annulla</button>
+          <button className="inline-flex items-center justify-center rounded-md px-3 py-1.5 text-xs bg-indigo-600/80 hover:bg-indigo-600 text-white disabled:opacity-60" onClick={save} disabled={busy || !name.trim()}>Salva</button>
+        </div>
+      </div>
+    </div>
+  );
+};
