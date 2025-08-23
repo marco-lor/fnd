@@ -52,25 +52,60 @@ const Inventory = () => {
 				eqCounts[id] = (eqCounts[id] || 0) + 1;
 			});
 			setEquippedCounts(eqCounts);
-			// Normalize directly from user's inventory entries (which now contain full item data)
-			const normalized = inv.map((e, i) => {
-				if (!e) return null;
+			// Build list where Varie items are stacked but normal items are not
+			const nonVarieInstances = [];
+			const varieMap = {};
+			for (let i = 0; i < inv.length; i++) {
+				const e = inv[i];
+				if (!e) continue;
+				// derive basics
+				let baseId, baseName, type, rarity;
 				if (typeof e === 'string') {
-					const id = e;
-					const name = id;
-					return { id, name, qty: 1, doc: null };
+					baseId = e;
+					baseName = e;
+					type = undefined;
+					rarity = undefined;
+				} else {
+					baseId = e.id || e.name || e?.General?.Nome || `item-${i}`;
+					baseName = e?.General?.Nome || e.name || baseId;
+					type = (e.type || e.item_type || '').toLowerCase();
+					rarity = e.rarity;
 				}
-				const id = e.id || e.name || e?.General?.Nome || `item-${i}`;
-				const name = e?.General?.Nome || e.name || id;
-				return { id, name, qty: e.qty || 1, rarity: e.rarity, type: e.type, doc: { ...e, id } };
-			}).filter(Boolean);
-			// Collapse by id (keep first doc as representative)
-			const map = {};
-			for (const it of normalized) {
-				if (!map[it.id]) map[it.id] = { ...it };
-				else map[it.id].qty += it.qty || 1;
+				const qty = (typeof e === 'object' && typeof e.qty === 'number') ? Math.max(1, e.qty) : 1;
+				const docObj = typeof e === 'object' ? { ...e, id: baseId } : null;
+				const isVarie = (type === 'varie');
+				if (isVarie) {
+					if (!varieMap[baseId]) {
+						varieMap[baseId] = { id: baseId, name: baseName, qty: 0, rarity, type: 'varie', doc: docObj };
+					}
+					varieMap[baseId].qty += qty;
+				} else {
+					// expand into individual instances (unstacked)
+					for (let u = 0; u < qty; u++) {
+						nonVarieInstances.push({
+							id: baseId,
+							name: baseName,
+							rarity,
+							type: (type || 'oggetto'),
+							doc: docObj,
+							invIndex: i
+						});
+					}
+				}
 			}
-			setItems(Object.values(map));
+			// number duplicates for non-varie for display
+			const seenCounts = {};
+			const numberedNonVarie = nonVarieInstances.map((it) => {
+				const count = (seenCounts[it.id] = (seenCounts[it.id] || 0) + 1);
+				const displayName = count > 1 ? `${it.name} (${count})` : it.name;
+				return { ...it, displayName };
+			});
+			// final items array: keep non-varie instances (qty implicitly 1) and stacked varie
+			const combined = [
+				...numberedNonVarie,
+				...Object.values(varieMap)
+			];
+			setItems(combined);
 		});
 		return () => unsub();
 	}, [user]);
@@ -84,8 +119,8 @@ const Inventory = () => {
 		return e.id || e.name || e?.General?.Nome || `item-${i}`;
 	};
 
-	// Remove a single unit of an item by id from the user's inventory
-	const removeOne = async (targetId) => {
+	// Remove a single unit of an item; if matchIndex is provided, remove at that inventory index
+	const removeOne = async (targetId, matchIndex) => {
 		if (!user || !targetId) return;
 		try {
 			setBusyId(targetId);
@@ -103,8 +138,13 @@ const Inventory = () => {
 				const entry = inv[i];
 				if (removed) { next.push(entry); continue; }
 
-				const id = deriveId(entry, i);
-				if (id !== targetId) { next.push(entry); continue; }
+				// If a specific inventory index is requested, match by index first
+				if (typeof matchIndex === 'number') {
+					if (i !== matchIndex) { next.push(entry); continue; }
+				} else {
+					const id = deriveId(entry, i);
+					if (id !== targetId) { next.push(entry); continue; }
+				}
 
 				// match
 				if (typeof entry === 'object' && entry && typeof entry.qty === 'number') {
@@ -333,30 +373,35 @@ const Inventory = () => {
 						{/* Non-Varie items */}
 						{otherList.length > 0 && (
 							<ul className="space-y-2">
-								{otherList.map((it) => {
+								{otherList.map((it, idx) => {
 					    const docObj = it.doc || it;
 					    const imgUrl = docObj?.user_image_url || docObj?.General?.image_url || it?.General?.image_url;
+							    const display = it.displayName || it.name;
+							    const key = `${it.id}-${it.invIndex ?? 'x'}-${idx}`;
 									return (
-										<li key={it.id} className="flex items-center justify-between rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2">
+											<li key={key} className="flex items-center justify-between rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2">
 									{imgUrl && (
 										<div className="h-8 w-8 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/50 mr-2">
 											<img src={imgUrl} alt={it.name} className="h-full w-full object-contain" />
 										</div>
 									)}
-				    <button onClick={() => setPreviewItem(docObj)} className="min-w-0 text-left flex-1 hover:bg-slate-700/40 rounded-md px-2 py-1">
-										<div className="text-sm text-slate-200 truncate">{it.name}</div>
+							    <button onClick={() => {
+							    const modalItem = docObj ? { ...docObj, __invIndex: it.invIndex } : { id: it.id, name: it.name, type: it.type, __invIndex: it.invIndex };
+							    setPreviewItem(modalItem);
+							    }} className="min-w-0 text-left flex-1 hover:bg-slate-700/40 rounded-md px-2 py-1">
+												<div className="text-sm text-slate-200 truncate">{display}</div>
 										<div className="text-[11px] text-slate-400 truncate">{it.type || 'oggetto'}</div>
 									</button>
 									<div className="ml-3 flex items-center gap-2">
 										{it.rarity && (
 											<span className="text-[10px] uppercase tracking-wide text-fuchsia-300">{it.rarity}</span>
 										)}
-										<span className="text-xs text-amber-300">x{it.qty}</span>
+												{/* Non-varie are unstacked; no qty badge */}
 										{(() => { const isEquipped = (equippedCounts[it.id] || 0) > 0; return (
 											<button
-												className={`ml-1 inline-flex items-center justify-center rounded-md border p-1.5 transition ${(busyId===it.id || isEquipped) ? 'opacity-60 cursor-not-allowed' : 'hover:bg-red-500/10'} border-red-400/40 text-red-300`}
-												onClick={() => !isEquipped && setConfirmTarget({ id: it.id, name: it.name })}
-												disabled={busyId===it.id || isEquipped}
+														className={`ml-1 inline-flex items-center justify-center rounded-md border p-1.5 transition ${(busyId===it.id || isEquipped) ? 'opacity-60 cursor-not-allowed' : 'hover:bg-red-500/10'} border-red-400/40 text-red-300`}
+														onClick={() => !isEquipped && setConfirmTarget({ id: it.id, name: display, invIndex: it.invIndex })}
+														disabled={busyId===it.id || isEquipped}
 												title={isEquipped ? "Prima rimuovi l'oggetto" : "Rimuovi 1"}
 											>
 												<FiTrash2 className="h-3 w-3" />
@@ -431,11 +476,12 @@ const Inventory = () => {
 					itemName={confirmTarget.name}
 					onCancel={() => setConfirmTarget(null)}
 					onConfirm={async () => {
-						await removeOne(confirmTarget.id);
+						await removeOne(confirmTarget.id, confirmTarget.invIndex);
 						setConfirmTarget(null);
 					}}
 					enableDeleteAll={true}
 					onConfirmAll={async () => {
+						// For non-varie, delete-all will still remove all by id
 						await removeAllUnits(confirmTarget.id);
 						setConfirmTarget(null);
 					}}

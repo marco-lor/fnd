@@ -48,6 +48,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
   const [showEditItemOverlay, setShowEditItemOverlay] = useState(false);
   const [editItemData, setEditItemData] = useState(null);
   const [selectedEditItemId, setSelectedEditItemId] = useState(null);
+  const [selectedEditItemIndex, setSelectedEditItemIndex] = useState(null);
   
   // Conoscenza
   const [showConoscenzaOverlay, setShowConoscenzaOverlay] = useState(false);
@@ -188,15 +189,21 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
     setShowDeleteProfessioneOverlay(true);
   };
   // Edit inventory item (reuses bazaar overlays based on item_type)
-  const handleEditInventoryItem = (userId, itemId) => {
+  const handleEditInventoryItem = (userId, itemId, invIndex = null) => {
     const u = users.find(x => x.id === userId);
     // Prefer the user's inventory copy if present (object entry), else fallback to global catalog doc
     let invData = null;
     const invArr = Array.isArray(u?.inventory) ? u.inventory : [];
-    for (const entry of invArr) {
-      if (!entry || typeof entry !== "object") continue;
-      const eid = entry.id || entry.name || entry?.General?.Nome;
-      if (eid === itemId) { invData = entry; break; }
+    if (Number.isInteger(invIndex) && invIndex >= 0 && invIndex < invArr.length) {
+      const entry = invArr[invIndex];
+      if (entry) invData = entry;
+    }
+    if (!invData) {
+      for (const entry of invArr) {
+        if (!entry || typeof entry !== "object") continue;
+        const eid = entry.id || entry.name || entry?.General?.Nome;
+        if (eid === itemId) { invData = entry; break; }
+      }
     }
     const baseDoc = itemsDocs[itemId];
     const initial = invData || baseDoc;
@@ -206,6 +213,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
     }
     setSelectedUserId(userId);
     setSelectedEditItemId(itemId);
+    setSelectedEditItemIndex(Number.isInteger(invIndex) ? invIndex : null);
     setEditItemData(initial);
     setShowEditItemOverlay(true);
   };
@@ -422,27 +430,50 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
               <td className="border border-gray-600 px-4 py-2 font-medium">Inventario</td>
               {users.map((u) => {
                 const inv = Array.isArray(u?.inventory) ? u.inventory : [];
-                // Normalize and collapse by id
-                const normalized = inv
-                  .map((entry, i) => {
-                    if (!entry) return null;
-                    if (typeof entry === "string") {
-                      const id = entry;
-                      return { id, name: catalog[id] || id, qty: 1 };
+                // Build non-varie instances (unstacked) and stack only Varie
+                const nonVarieInstances = [];
+                const varieMap = {};
+                for (let i = 0; i < inv.length; i++) {
+                  const entry = inv[i];
+                  if (!entry) continue;
+                  if (typeof entry === 'string') {
+                    const id = entry;
+                    const name = catalog[id] || id;
+                    const type = (itemsDocs[id]?.item_type || itemsDocs[id]?.type || '').toLowerCase();
+                    if (type === 'varie') {
+                      if (!varieMap[id]) varieMap[id] = { id, name, qty: 0, type: 'varie' };
+                      varieMap[id].qty += 1;
+                    } else {
+                      nonVarieInstances.push({ id, name, type: type || 'oggetto', invIndex: i });
                     }
-                    const id = deriveId(entry, i);
-                    const name = toDisplayName(entry, i);
-                    const qty = typeof entry.qty === "number" ? entry.qty : 1;
-                    const type = entry.type || itemsDocs[id]?.item_type || itemsDocs[id]?.type;
-                    return { id, name, qty, type };
-                  })
-                  .filter(Boolean);
-                const collapsed = {};
-                for (const it of normalized) {
-                  if (!collapsed[it.id]) collapsed[it.id] = { ...it };
-                  else collapsed[it.id].qty += it.qty || 1;
+                    continue;
+                  }
+                  const id = deriveId(entry, i);
+                  const name = toDisplayName(entry, i);
+                  const type = (entry.type || itemsDocs[id]?.item_type || itemsDocs[id]?.type || '').toLowerCase();
+                  const qty = typeof entry.qty === 'number' ? Math.max(1, entry.qty) : 1;
+                  if (type === 'varie') {
+                    if (!varieMap[id]) varieMap[id] = { id, name, qty: 0, type: 'varie' };
+                    varieMap[id].qty += qty;
+                  } else {
+                    for (let q = 0; q < qty; q++) {
+                      nonVarieInstances.push({ id, name, type: type || 'oggetto', invIndex: i });
+                    }
+                  }
                 }
-                const list = Object.values(collapsed).sort((a, b) => a.name.localeCompare(b.name));
+                // Number duplicates among non-varie by id
+                const seen = {};
+                const numbered = nonVarieInstances
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .map(it => {
+                    const n = (seen[it.id] = (seen[it.id] || 0) + 1);
+                    return { ...it, displayName: n > 1 ? `${it.name} (${n})` : it.name };
+                  });
+                // Compose final list: unstacked non-varie (implicit qty 1) + stacked varie
+                const list = [
+                  ...numbered,
+                  ...Object.values(varieMap).sort((a, b) => a.name.localeCompare(b.name))
+                ];
                 const gold = typeof u?.stats?.gold === "number" ? u.stats.gold : parseInt(u?.stats?.gold, 10) || 0;
 
                 return (
@@ -450,24 +481,31 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                     <div className="mb-2 text-xs text-amber-300">Gold: {gold}</div>
                     {list.length ? (
                       <ul className="space-y-1 pr-1">
-                        {list.map((it) => (
-                          <li key={it.id} className="flex items-center justify-between text-sm">
-                            <span className="truncate mr-2">{it.name}{(it.type||"").toLowerCase()==='varie' ? ' (Varie)' : ''}</span>
-                            <div className="flex items-center space-x-2">
-                              {/* Allow edit only for catalog-backed items */}
-                              {(itemsDocs?.[it.id]?.item_type || ((it.type||"").toLowerCase()==='varie')) && (
-                                <button
-                                  className={iconEdit}
-                                  title="Modifica oggetto"
-                                  onClick={() => handleEditInventoryItem(u.id, it.id)}
-                                >
-                                  <FontAwesomeIcon icon="edit" className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                              <span className="text-amber-300 text-xs">x{it.qty}</span>
-                            </div>
-                          </li>
-                        ))}
+                        {list.map((it, idx) => {
+                          const isVarie = (it.type || '').toLowerCase() === 'varie';
+                          const disp = isVarie ? it.name : (it.displayName || it.name);
+                          const key = `${it.id}-${isVarie ? 'v' : 'n'}-${idx}`;
+                          return (
+                            <li key={key} className="flex items-center justify-between text-sm">
+                              <span className="truncate mr-2">{disp}{isVarie ? ' (Varie)' : ''}</span>
+                              <div className="flex items-center space-x-2">
+                                {/* Allow edit only for catalog-backed items or Varie */}
+                                {(itemsDocs?.[it.id]?.item_type || isVarie) && (
+                                  <button
+                                    className={iconEdit}
+                                    title="Modifica oggetto"
+                                    onClick={() => handleEditInventoryItem(u.id, it.id, isVarie ? null : it.invIndex)}
+                                  >
+                                    <FontAwesomeIcon icon="edit" className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                {isVarie && (
+                                  <span className="text-amber-300 text-xs">x{it.qty}</span>
+                                )}
+                              </div>
+                            </li>
+                          );
+                        })}
                       </ul>
                     ) : (
                       <span className="text-gray-400 italic text-sm">Inventario vuoto</span>
@@ -654,10 +692,12 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
               userId={selectedUserId}
               initialData={editItemData}
               inventoryItemId={selectedEditItemId}
+              inventoryItemIndex={selectedEditItemIndex}
               onClose={async (ok) => {
                 setShowEditItemOverlay(false);
                 setEditItemData(null);
                 setSelectedUserId(null);
+                setSelectedEditItemIndex(null);
                 if (ok) await refreshUserData();
               }}
             />
@@ -667,6 +707,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                 setShowEditItemOverlay(false);
                 setEditItemData(null);
                 setSelectedUserId(null);
+                setSelectedEditItemIndex(null);
                 if (ok) {
                   // reload items to refresh names/types
                   (async () => {
@@ -692,6 +733,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
               inventoryEditMode={true}
               inventoryUserId={selectedUserId}
               inventoryItemId={selectedEditItemId}
+              inventoryItemIndex={selectedEditItemIndex}
             />
           ) : editItemData?.item_type === 'accessorio' ? (
             <AddAccessorioOverlay
@@ -699,6 +741,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                 setShowEditItemOverlay(false);
                 setEditItemData(null);
                 setSelectedUserId(null);
+                setSelectedEditItemIndex(null);
                 if (ok) {
                   (async () => {
                     try {
@@ -723,6 +766,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
               inventoryEditMode={true}
               inventoryUserId={selectedUserId}
               inventoryItemId={selectedEditItemId}
+              inventoryItemIndex={selectedEditItemIndex}
             />
           ) : editItemData?.item_type === 'consumabile' ? (
             <AddConsumabileOverlay
@@ -730,6 +774,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                 setShowEditItemOverlay(false);
                 setEditItemData(null);
                 setSelectedUserId(null);
+                setSelectedEditItemIndex(null);
                 if (ok) {
                   (async () => {
                     try {
@@ -754,6 +799,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
               inventoryEditMode={true}
               inventoryUserId={selectedUserId}
               inventoryItemId={selectedEditItemId}
+              inventoryItemIndex={selectedEditItemIndex}
             />
           ) : (
             <AddWeaponOverlay
@@ -761,6 +807,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                 setShowEditItemOverlay(false);
                 setEditItemData(null);
                 setSelectedUserId(null);
+                setSelectedEditItemIndex(null);
                 if (ok) {
                   (async () => {
                     try {
@@ -785,6 +832,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
               inventoryEditMode={true}
               inventoryUserId={selectedUserId}
               inventoryItemId={selectedEditItemId}
+              inventoryItemIndex={selectedEditItemIndex}
             />
           )}
         </>

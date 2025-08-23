@@ -186,26 +186,59 @@ const EquippedInventory = () => {
     equippedCounts[id] = (equippedCounts[id] || 0) + 1;
   });
 
-  // Normalize inventory entries: allow primitives, objects {id, qty}, or full item objects
-  const normalizedInventory = inventory.map(entry => {
-    if (!entry) return null;
-    if (typeof entry === 'string') return { id: entry, qty: 1, name: entry };
-    if (typeof entry === 'object') {
-      if (entry.id) return { id: entry.id, qty: entry.qty || 1, name: entry?.General?.Nome || entry.name || entry.id, ...entry };
-      if (entry.name) return { id: entry.name, qty: entry.qty || 1, name: entry?.General?.Nome || entry.name, ...entry };
+  // Build available list: keep non-Varie unstacked per instance, stack only Varie
+  const expandedAvailable = (() => {
+    const nonVarieInstances = [];
+    const varieTotals = {};
+    // Walk raw inventory to preserve per-entry specifics and images
+    for (let i = 0; i < inventory.length; i++) {
+      const entry = inventory[i];
+      if (!entry) continue;
+      if (typeof entry === 'string') {
+        // Unknown type without global catalog here; treat as non-varie by default
+        nonVarieInstances.push({ id: entry, name: entry, qty: 1, type: 'oggetto', isVarie: false, invIndex: i });
+        continue;
+      }
+      const id = entry.id || entry.name || entry?.General?.Nome;
+      const name = entry?.General?.Nome || entry.name || id;
+      const t = (entry.type || entry.item_type || '').toLowerCase();
+      const qty = typeof entry.qty === 'number' ? Math.max(1, entry.qty) : 1;
+      if (t === 'varie') {
+        if (!varieTotals[id]) varieTotals[id] = { id, name, qty: 0, type: 'varie', isVarie: true };
+        varieTotals[id].qty += qty;
+      } else {
+        for (let q = 0; q < qty; q++) {
+          nonVarieInstances.push({ ...entry, id, name, qty: 1, type: t || 'oggetto', isVarie: false, invIndex: i });
+        }
+      }
     }
-    return null;
-  }).filter(Boolean);
 
-  // Collapse duplicates (safeguard) and compute remaining quantity (owned - equipped)
-  const collapsed = {};
-  for (const it of normalizedInventory) {
-    if (!collapsed[it.id]) collapsed[it.id] = { ...it };
-    else collapsed[it.id].qty += it.qty || 1;
-  }
-  const availableItems = Object.values(collapsed)
-    .map(it => ({ ...it, remaining: Math.max(0, (it.qty || 0) - (equippedCounts[it.id] || 0)) }))
-    .filter(it => it.remaining > 0);
+    // Remove already-equipped instances by id (first N instances per id)
+    const usedById = {};
+    const availableNonVarie = nonVarieInstances.filter(inst => {
+      const id = inst.id;
+      const used = usedById[id] || 0;
+      const eq = equippedCounts[id] || 0;
+      if (used < eq) { usedById[id] = used + 1; return false; }
+      return true;
+    });
+
+    // Compute remaining for Varie after subtracting equipped
+    const availableVarie = Object.values(varieTotals)
+      .map(v => ({ ...v, qty: Math.max(0, v.qty - (equippedCounts[v.id] || 0)) }))
+      .filter(v => v.qty > 0)
+      .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+
+    // Number duplicates among non-Varie by id for display only
+    const seen = {};
+    const numberedNonVarie = availableNonVarie.map(it => {
+      const n = (seen[it.id] = (seen[it.id] || 0) + 1);
+      const baseName = it.name || it.id;
+      return { ...it, displayName: n > 1 ? `${baseName} (${n})` : baseName };
+    });
+
+    return [...numberedNonVarie, ...availableVarie];
+  })();
 
   // Resolve inventory/equipped entry to full item doc if possible
   const resolveItemDoc = (entry) => {
@@ -406,18 +439,18 @@ const EquippedInventory = () => {
             </div>
           )}
           {(() => {
-            const compatibleItems = availableItems.filter(it => isItemCompatibleWithSlot(it, activeSlot) && canEquipUnderTwoHConstraints(it, activeSlot));
+            const compatibleItems = expandedAvailable.filter(it => isItemCompatibleWithSlot(it, activeSlot) && canEquipUnderTwoHConstraints(it, activeSlot));
             return compatibleItems.length ? (
             <ul className="space-y-2">
               {compatibleItems.map((it, idx) => {
-                const name = it.name || it.id || `Item ${idx + 1}`;
+                const name = (it.isVarie ? (it.name || it.id) : (it.displayName || it.name || it.id || `Item ${idx + 1}`));
                 const rarity = it?.rarity;
                 const qty = it?.qty || 1;
                 const remaining = it.remaining != null ? it.remaining : qty; // fallback
                 const docObj = resolveItemDoc(it);
                 const imgUrl = docObj?.General?.image_url || it?.General?.image_url;
                 return (
-                  <li key={it.id + idx}>
+                  <li key={`${it.id}-${idx}`}>
                     <div className="w-full px-3 py-2 rounded-lg bg-slate-800/70 border border-slate-600/50 flex items-center justify-between gap-2">
                       {imgUrl && (
                         <div className="h-8 w-8 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/50 mr-2">
@@ -428,7 +461,7 @@ const EquippedInventory = () => {
                         onClick={() => handleEquip(it)}
                         className="flex-1 text-left hover:bg-slate-700/60 rounded-md px-2 py-1 transition"
                       >
-                        <span className="text-sm text-slate-200 truncate">{name}{qty > 1 && <span className="ml-2 text-[10px] text-amber-300">x{qty}</span>}{remaining !== qty && <span className="ml-2 text-[10px] text-emerald-300">(resta {remaining})</span>}</span>
+                        <span className="text-sm text-slate-200 truncate">{name}{(it.isVarie && qty > 1) && <span className="ml-2 text-[10px] text-amber-300">x{qty}</span>}{(it.isVarie && remaining !== qty) && <span className="ml-2 text-[10px] text-emerald-300">(resta {remaining})</span>}</span>
                         <div className="flex items-center gap-2 mt-1">
                           {rarity && <span className="text-[10px] uppercase tracking-wide text-fuchsia-300">{rarity}</span>}
                         </div>

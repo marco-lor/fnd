@@ -199,7 +199,8 @@ const ItemDetailsModal = ({ item, onClose }) => {
       if (!snap.exists()) return;
       const data = snap.data() || {};
       const inv = Array.isArray(data.inventory) ? [...data.inventory] : [];
-      const targetId = item?.id || item?.name || name;
+  const targetId = item?.id || item?.name || name;
+  const targetIndex = typeof item?.__invIndex === 'number' ? item.__invIndex : undefined;
       let removed = false;
       let deletedImageUrl = null;
       const deriveId = (e, i) => {
@@ -211,8 +212,13 @@ const ItemDetailsModal = ({ item, onClose }) => {
       for (let i = 0; i < inv.length; i++) {
         const entry = inv[i];
         if (removed) { next.push(entry); continue; }
-        const id = deriveId(entry, i);
-        if (id !== targetId) { next.push(entry); continue; }
+        // If a specific instance index is known, match on that first
+        if (typeof targetIndex === 'number') {
+          if (i !== targetIndex) { next.push(entry); continue; }
+        } else {
+          const id = deriveId(entry, i);
+          if (id !== targetId) { next.push(entry); continue; }
+        }
         if (typeof entry === 'object' && entry && typeof entry.qty === 'number') {
           const newQty = Math.max(0, (entry.qty || 0) - 1);
           if (newQty > 0) {
