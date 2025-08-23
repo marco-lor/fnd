@@ -16,6 +16,8 @@ import {spendCharacterPoint} from "./spendCharacterPoint";
 // Import the delete user function
 import {deleteUser} from "./deleteUser";
 import {updateAnimaModifier} from "./updateAnimaModifier";
+import {levelUpAll} from "./levelUpAll";
+import {levelUpUser} from "./levelUpUser";
 
 admin.initializeApp();
 
@@ -27,4 +29,6 @@ export {
   spendCharacterPoint,
   deleteUser,
   updateAnimaModifier,
+  levelUpAll,
+  levelUpUser,
 };
