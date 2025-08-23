@@ -520,20 +520,32 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                     const currentData = userSnap.exists() ? userSnap.data() : {};
                     const invArr = Array.isArray(currentData.inventory) ? currentData.inventory : [];
                     const targetId = inventoryItemId || docId;
+                    let userImageDeleted = false;
                     const nextInv = invArr.map((entry) => {
                         if (!entry) return entry;
                         if (typeof entry === 'string') {
-                            if (entry === targetId) return { id: targetId, qty: 1, ...finalArmaturaData };
+                            if (entry === targetId) return { id: targetId, qty: 1, ...finalArmaturaData, ...(imageFile ? { user_image_custom: true, user_image_url: newImageUrl } : {}) };
                             return entry;
                         }
                         const entryId = entry.id || entry.name || entry?.General?.Nome;
                         if (entryId === targetId) {
                             const qty = typeof entry.qty === 'number' ? entry.qty : 1;
-                            return { id: targetId, qty, ...finalArmaturaData };
+                            if (entry.user_image_custom && entry.user_image_url) {
+                                if (imageFile || (!imagePreviewUrl && initialData?.General?.image_url)) {
+                                    userImageDeleted = entry.user_image_url;
+                                }
+                            }
+                            const baseUpdated = { id: targetId, qty, ...finalArmaturaData };
+                            if (imageFile) return { ...baseUpdated, user_image_custom: true, user_image_url: newImageUrl };
+                            else if (!imagePreviewUrl) { const { user_image_custom, user_image_url, ...rest } = baseUpdated; return rest; }
+                            return { ...baseUpdated, ...(entry.user_image_custom ? { user_image_custom: true, user_image_url: entry.user_image_url } : {}) };
                         }
                         return entry;
                     });
                     await updateDoc(targetUserRef, { inventory: nextInv });
+                    if (userImageDeleted) {
+                        try { const oldPath = decodeURIComponent(userImageDeleted.split('/o/')[1].split('?')[0]); await deleteObject(ref(storage, oldPath)); } catch (e) { console.warn('Failed to delete previous user custom image:', e); }
+                    }
                     if (showMessage) showMessage(`Armatura aggiornata nell'inventario utente.`, 'success');
                 } catch (e) {
                     console.error('Failed updating user inventory:', e);

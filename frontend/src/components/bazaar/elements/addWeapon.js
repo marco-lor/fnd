@@ -525,22 +525,51 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                     const currentData = userSnap.exists() ? userSnap.data() : {};
                     const invArr = Array.isArray(currentData.inventory) ? currentData.inventory : [];
                     const targetId = inventoryItemId || docId;
+                    let userImageDeleted = false;
                     const nextInv = invArr.map((entry) => {
                         if (!entry) return entry;
                         if (typeof entry === 'string') {
                             if (entry === targetId) {
-                                return { id: targetId, qty: 1, ...finalWeaponData };
+                                return {
+                                    id: targetId,
+                                    qty: 1,
+                                    ...finalWeaponData,
+                                    ...(imageFile ? { user_image_custom: true, user_image_url: newImageUrl } : {}),
+                                };
                             }
                             return entry;
                         }
                         const entryId = entry.id || entry.name || entry?.General?.Nome;
                         if (entryId === targetId) {
                             const qty = typeof entry.qty === 'number' ? entry.qty : 1;
-                            return { id: targetId, qty, ...finalWeaponData };
+                            // If a previous custom image existed and we're replacing/removing it in inventory mode, track for deletion
+                            if (entry.user_image_custom && entry.user_image_url) {
+                                if (imageFile || (!imagePreviewUrl && initialData?.General?.image_url)) {
+                                    userImageDeleted = entry.user_image_url;
+                                }
+                            }
+                            // Build updated entry
+                            const baseUpdated = { id: targetId, qty, ...finalWeaponData };
+                            if (imageFile) {
+                                // Set/override custom image marker for inventory copy
+                                return { ...baseUpdated, user_image_custom: true, user_image_url: newImageUrl };
+                            } else if (!imagePreviewUrl) {
+                                // Image removed from UI: clear custom markers
+                                const { user_image_custom, user_image_url, ...rest } = baseUpdated;
+                                return rest;
+                            }
+                            return { ...baseUpdated, ...(entry.user_image_custom ? { user_image_custom: true, user_image_url: entry.user_image_url } : {}) };
                         }
                         return entry;
                     });
                     await updateDoc(targetUserRef, { inventory: nextInv });
+                    // Delete previously set user custom image if it was replaced/removed
+                    if (userImageDeleted) {
+                        try {
+                            const oldPath = decodeURIComponent(userImageDeleted.split('/o/')[1].split('?')[0]);
+                            await deleteObject(ref(storage, oldPath));
+                        } catch (e) { console.warn('Failed to delete previous user custom image:', e); }
+                    }
                     if (showMessage) showMessage(`Arma aggiornata nell'inventario utente.`, 'success');
                 } catch (e) {
                     console.error('Failed updating user inventory:', e);
