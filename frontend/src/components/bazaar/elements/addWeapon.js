@@ -11,7 +11,7 @@ import { WeaponOverlay } from '../../common/WeaponOverlay';
 import { FaTrash, FaEdit } from "react-icons/fa";
 import VisibilitySelector from '../../common/VisibilitySelector';
 
-export function AddWeaponOverlay({ onClose, showMessage, initialData = null, editMode = false, inventoryEditMode = false, inventoryUserId = null, inventoryItemId = null }) {
+export function AddWeaponOverlay({ onClose, showMessage, initialData = null, editMode = false, inventoryEditMode = false, inventoryUserId = null, inventoryItemId = null, inventoryItemIndex = null }) {
     const [schema, setSchema] = useState(null);
     const [weaponFormData, setWeaponFormData] = useState({
         General: {},
@@ -526,38 +526,39 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                     const invArr = Array.isArray(currentData.inventory) ? currentData.inventory : [];
                     const targetId = inventoryItemId || docId;
                     let userImageDeleted = false;
-                    const nextInv = invArr.map((entry) => {
+                    const nextInv = invArr.map((entry, idx) => {
+                        // If a precise inventory index is provided, only update that index
+                        if (Number.isInteger(inventoryItemIndex)) {
+                            if (idx !== inventoryItemIndex) return entry;
+                            const current = entry;
+                            const qty = typeof current?.qty === 'number' ? current.qty : 1;
+                            if (current?.user_image_custom && current?.user_image_url) {
+                                if (imageFile || (!imagePreviewUrl && initialData?.General?.image_url)) {
+                                    userImageDeleted = current.user_image_url;
+                                }
+                            }
+                            const baseUpdated = { id: targetId, qty, ...finalWeaponData };
+                            if (imageFile) return { ...baseUpdated, user_image_custom: true, user_image_url: newImageUrl };
+                            if (!imagePreviewUrl) { const { user_image_custom, user_image_url, ...rest } = baseUpdated; return rest; }
+                            return { ...baseUpdated, ...(current?.user_image_custom ? { user_image_custom: true, user_image_url: current.user_image_url } : {}) };
+                        }
+                        // Fallback: id-based update (legacy)
                         if (!entry) return entry;
                         if (typeof entry === 'string') {
-                            if (entry === targetId) {
-                                return {
-                                    id: targetId,
-                                    qty: 1,
-                                    ...finalWeaponData,
-                                    ...(imageFile ? { user_image_custom: true, user_image_url: newImageUrl } : {}),
-                                };
-                            }
+                            if (entry === targetId) return { id: targetId, qty: 1, ...finalWeaponData, ...(imageFile ? { user_image_custom: true, user_image_url: newImageUrl } : {}) };
                             return entry;
                         }
                         const entryId = entry.id || entry.name || entry?.General?.Nome;
                         if (entryId === targetId) {
                             const qty = typeof entry.qty === 'number' ? entry.qty : 1;
-                            // If a previous custom image existed and we're replacing/removing it in inventory mode, track for deletion
                             if (entry.user_image_custom && entry.user_image_url) {
                                 if (imageFile || (!imagePreviewUrl && initialData?.General?.image_url)) {
                                     userImageDeleted = entry.user_image_url;
                                 }
                             }
-                            // Build updated entry
                             const baseUpdated = { id: targetId, qty, ...finalWeaponData };
-                            if (imageFile) {
-                                // Set/override custom image marker for inventory copy
-                                return { ...baseUpdated, user_image_custom: true, user_image_url: newImageUrl };
-                            } else if (!imagePreviewUrl) {
-                                // Image removed from UI: clear custom markers
-                                const { user_image_custom, user_image_url, ...rest } = baseUpdated;
-                                return rest;
-                            }
+                            if (imageFile) return { ...baseUpdated, user_image_custom: true, user_image_url: newImageUrl };
+                            else if (!imagePreviewUrl) { const { user_image_custom, user_image_url, ...rest } = baseUpdated; return rest; }
                             return { ...baseUpdated, ...(entry.user_image_custom ? { user_image_custom: true, user_image_url: entry.user_image_url } : {}) };
                         }
                         return entry;

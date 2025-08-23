@@ -11,7 +11,7 @@ import { WeaponOverlay } from '../../common/WeaponOverlay';
 import { FaTrash, FaEdit } from "react-icons/fa";
 import VisibilitySelector from '../../common/VisibilitySelector';
 
-export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, editMode = false, inventoryEditMode = false, inventoryUserId = null, inventoryItemId = null }) {
+export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, editMode = false, inventoryEditMode = false, inventoryUserId = null, inventoryItemId = null, inventoryItemIndex = null }) {
     const [schema, setSchema] = useState(null);
     const [armaturaFormData, setArmaturaFormData] = useState({
         General: {},
@@ -521,7 +521,21 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                     const invArr = Array.isArray(currentData.inventory) ? currentData.inventory : [];
                     const targetId = inventoryItemId || docId;
                     let userImageDeleted = false;
-                    const nextInv = invArr.map((entry) => {
+                    const nextInv = invArr.map((entry, idx) => {
+                        if (Number.isInteger(inventoryItemIndex)) {
+                            if (idx !== inventoryItemIndex) return entry;
+                            const current = entry;
+                            const qty = typeof current?.qty === 'number' ? current.qty : 1;
+                            if (current?.user_image_custom && current?.user_image_url) {
+                                if (imageFile || (!imagePreviewUrl && initialData?.General?.image_url)) {
+                                    userImageDeleted = current.user_image_url;
+                                }
+                            }
+                            const baseUpdated = { id: targetId, qty, ...finalArmaturaData };
+                            if (imageFile) return { ...baseUpdated, user_image_custom: true, user_image_url: newImageUrl };
+                            if (!imagePreviewUrl) { const { user_image_custom, user_image_url, ...rest } = baseUpdated; return rest; }
+                            return { ...baseUpdated, ...(current?.user_image_custom ? { user_image_custom: true, user_image_url: current.user_image_url } : {}) };
+                        }
                         if (!entry) return entry;
                         if (typeof entry === 'string') {
                             if (entry === targetId) return { id: targetId, qty: 1, ...finalArmaturaData, ...(imageFile ? { user_image_custom: true, user_image_url: newImageUrl } : {}) };
