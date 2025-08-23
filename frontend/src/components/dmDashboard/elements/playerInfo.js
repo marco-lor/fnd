@@ -113,7 +113,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
     loadItems();
   }, []);
 
-  // Helpers to normalize inventory entries
+  // Helpers to normalize inventory entries (match client Inventory)
   const deriveId = (e, i) => {
     if (!e) return `item-${i}`;
     if (typeof e === "string") return e;
@@ -122,7 +122,8 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
   const toDisplayName = (e, i) => {
     if (!e) return `item-${i}`;
     if (typeof e === "string") return catalog[e] || e;
-    return catalog[e.id] || e?.General?.Nome || e.name || deriveId(e, i);
+    // Prefer user-stored name/General.Nome, fallback to catalog name
+    return e?.General?.Nome || e.name || catalog[e.id] || deriveId(e, i);
   };
 
   // --- Handlers to open overlays ---
@@ -431,7 +432,8 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                     const id = deriveId(entry, i);
                     const name = toDisplayName(entry, i);
                     const qty = typeof entry.qty === "number" ? entry.qty : 1;
-                    return { id, name, qty };
+                    const type = entry.type || itemsDocs[id]?.item_type || itemsDocs[id]?.type;
+                    return { id, name, qty, type };
                   })
                   .filter(Boolean);
                 const collapsed = {};
@@ -449,8 +451,9 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                       <ul className="space-y-1 pr-1">
                         {list.map((it) => (
                           <li key={it.id} className="flex items-center justify-between text-sm">
-                            <span className="truncate mr-2">{it.name}</span>
+                            <span className="truncate mr-2">{it.name}{(it.type||"").toLowerCase()==='varie' ? ' (Varie)' : ''}</span>
                             <div className="flex items-center space-x-2">
+                              {/* Allow edit only for catalog-backed items */}
                               {itemsDocs?.[it.id]?.item_type && (
                                 <button
                                   className={iconEdit}

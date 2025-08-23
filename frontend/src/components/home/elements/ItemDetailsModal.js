@@ -28,15 +28,16 @@ const Pill = ({ children, color = 'indigo' }) => (
 const useItemFacts = (item) => {
   return useMemo(() => {
     if (!item) return null;
+    const isVarie = (item.type || item.item_type) === 'varie';
     const name = get(item, 'General.Nome') || item.name || item.id;
-    const type = item.item_type || item.type || get(item, 'General.Slot') || 'oggetto';
-    const slot = get(item, 'General.Slot');
-    const img = get(item, 'General.image_url');
-    const price = get(item, 'General.prezzo');
-    const effect = get(item, 'General.Effetto');
-    const specific = item.Specific || {};
-    const params = item.Parametri || {};
-    const spells = get(item, 'General.spells') || {};
+    const type = isVarie ? 'varie' : (item.item_type || item.type || get(item, 'General.Slot') || 'oggetto');
+    const slot = isVarie ? undefined : get(item, 'General.Slot');
+    const img = isVarie ? undefined : get(item, 'General.image_url');
+    const price = isVarie ? undefined : get(item, 'General.prezzo');
+    const effect = isVarie ? (item.description || '') : get(item, 'General.Effetto');
+    const specific = isVarie ? {} : (item.Specific || {});
+    const params = isVarie ? {} : (item.Parametri || {});
+    const spells = isVarie ? {} : (get(item, 'General.spells') || {});
     return { name, type, slot, img, price, effect, specific, params, spells };
   }, [item]);
 };
