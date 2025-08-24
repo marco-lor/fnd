@@ -14,7 +14,7 @@ interface SingleParam {
 interface Parametri {
   Base?: Record<string, SingleParam>;
   Combattimento?: Record<string, SingleParam>;
-  // ... altre sezioni se necessarie
+  Special?: Record<string, SingleParam>;
 }
 
 export const updateTotParameters = onDocumentWritten(
@@ -68,6 +68,20 @@ export const updateTotParameters = onDocumentWritten(
         if (p) {
           const newTot = computeTotal(p);
           // Aggiorna solo se il totale calcolato è diverso.
+          if (p.Tot !== newTot) {
+            p.Tot = newTot;
+            changes = true;
+          }
+        }
+      }
+    }
+
+    // Elabora la sezione Special se disponibile.
+    if (updatedParams.Special) {
+      for (const key of Object.keys(updatedParams.Special)) {
+        const p = updatedParams.Special[key];
+        if (p) {
+          const newTot = computeTotal(p);
           if (p.Tot !== newTot) {
             p.Tot = newTot;
             changes = true;
