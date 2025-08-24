@@ -204,7 +204,7 @@ function Home() {
           )}
 
           {/* Core Content Grid */}
-          <div className="grid gap-6 xl:grid-cols-12">
+          <div className="grid gap-6 xl:grid-cols-12 items-stretch">
             <div className="xl:col-span-8 space-y-6">
               {/* Tables & Bars */}
               <div className="grid gap-6 lg:grid-cols-2 items-stretch">
@@ -221,7 +221,7 @@ function Home() {
                 </div>
               </div>
             </div>
-            <div className="xl:col-span-4">
+            <div className="xl:col-span-4 h-full min-h-0">
               <Inventory />
             </div>
           </div>
