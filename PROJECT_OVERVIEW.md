@@ -1,254 +1,120 @@
-# FND (Fantasy & Dragons) - D&D-like Web Application
+# FND (Fantasy & Dragons) – D&D‑like Web Application
 
-## Project Overview
+Modern web app for character creation and campaign play, backed by Firestore, FastAPI, and Firebase Functions.
 
-FND is a comprehensive web-based role-playing game application inspired by Dungeons & Dragons. The project provides a complete digital platform for players and dungeon masters to create characters, manage campaigns, and interact in a fantasy gaming environment.
+## Status at a glance
 
-## Technology Stack
+- Auth: Firebase Auth integrated with role-based access (player, dm, webmaster).
+- Character params: Real-time totals via Firestore triggers; HP/Mana auto-recalc by level and stats.
+- Points economy: Callable function validates Base/Combat point spending and credits during creation.
+- Admin utils: Webmaster-only user deletion; bulk user update and Firestore export endpoints.
+- Schema writers: Backend endpoints to seed item/armor/weapon/accessory schemas under `utils/`.
 
-### Frontend
-- **Framework**: React 18 with JavaScript
-- **Routing**: React Router DOM v7
-- **Styling**: CSS, Tailwind CSS, Styled Components
-- **UI/Animation**: 
-  - Framer Motion for animations
-  - Three.js and React Three Fiber for 3D graphics
-  - Konva and React-Konva for 2D canvas interactions
-  - FontAwesome icons
-- **State Management**: React Context API (AuthContext)
-- **Build Tool**: Create React App
+## Tech stack
 
-### Backend
-- **API Framework**: FastAPI (Python)
-- **Database**: Google Cloud Firestore (NoSQL)
-- **Cloud Functions**: Firebase Functions (TypeScript)
-- **Authentication**: Firebase Authentication
-- **File Storage**: Firebase Storage
-- **Deployment**: 
-  - Frontend: Firebase Hosting
-  - Backend: Render
+- Frontend: React 18 (Create React App), React Router DOM v7, Tailwind CSS, Framer Motion, Three.js + R3F, Konva/React-Konva, FontAwesome.
+- Backend API: FastAPI (Python) with CORS to `fatins.web.app`, `firebaseapp.com`, and `localhost:3000`.
+- Realtime + Auth + Storage: Firebase (Firestore, Auth, Storage).
+- Cloud Functions: Firebase Functions v2 (TypeScript).
+- Deploy: Frontend on Firebase Hosting; Backend on Render; Firestore in europe-west8.
 
-### Additional Libraries
-- **Dice Rolling**: threejs-dice
-- **Expression Evaluation**: expr-eval
-- **HTTP Client**: Axios
-
-## Architecture Overview
+## Architecture
 
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────────┐
-│   React Frontend │    │   FastAPI Backend │    │   Firebase Services │
-│   (Firebase      │    │   (Render)        │    │   - Firestore DB    │
-│    Hosting)      │    │                   │    │   - Authentication  │
-│                  │    │                   │    │   - Storage         │
-│                  │    │                   │    │   - Cloud Functions │
-└─────────────────┘    └──────────────────┘    └─────────────────────┘
+┌────────────────┐   ┌──────────────────┐   ┌─────────────────────────┐
+│ React Frontend │ → │ FastAPI (Render) │ → │ Firebase Services       │
+│ (Hosting)      │   │ (utility routes) │   │ - Firestore (europe‑w8) │
+│                │   │                  │   │ - Auth / Storage        │
+└────────────────┘   └──────────────────┘   │ - Cloud Functions v2    │
+                                            └─────────────────────────┘
 ```
 
-## Core Features
+## Frontend modules
 
-### 1. User Management & Authentication
-- Email/password authentication via Firebase Auth
-- Role-based access control (Player, DM, Webmaster)
-- Real-time user data synchronization
-- Profile image management
+- AuthContext + protected routes.
+- Home, Bazaar, Combat Tool, Codex, Spell/Technique, DM dashboard, Admin panel (structure present; features incremental).
+- 3D (three/r3f) and 2D canvas (konva) utilities available.
 
-### 2. Character Creation System
-- Multi-step character creation wizard
-- Race selection with racial bonuses
-- Anima Shard system for magical abilities
-- Statistical point distribution
-- Character details and customization
+## Backend API (FastAPI)
 
-### 3. Game Mechanics
-- **Character Statistics**:
-  - Base Parameters (Forza, Destrezza, Costituzione, etc.)
-  - Combat Parameters (Attacco, Difesa, Disciplina, etc.)
-  - HP/Mana management with real-time updates
-- **Point System**:
-  - Base points for character creation
-  - Combat tokens for combat abilities
-  - Automated validation and constraints
+Base URL (local): http://127.0.0.1:8000
 
-### 4. Game Modules
-- **Home Dashboard**: Character overview and quick stats
-- **Bazaar**: Item marketplace and inventory management
-- **Combat Tool**: Battle management system
-- **Codex**: Game rules and reference materials
-- **Spell/Technique System**: Magical abilities management
-- **Echi di Viaggio**: Campaign/story elements
+- GET `/` – healthcheck.
+- GET `/characters` – list character document IDs from `characters` collection.
+- POST `/characters` – create a new `characters/{id}`.
+- GET `/update-all-users` – utility; normalizes `stats` for all `users/*`.
+- GET `/all-data` – dumps Firestore (server-side) and writes a timestamped JSON backup in `backend/`.
+- GET `/test-endpoint` – seeds `utils/schema_consumabili` with default schema (other schema writers available in code).
 
-### 5. Administrative Tools
-- **DM Dashboard**: Player management and campaign tools
-- **Admin Panel**: User role management (Webmaster only)
-- **Lock System**: DM can lock/unlock player parameter editing
+Notes
+- CORS allowed origins: `https://fatins.web.app`, `https://fatins.firebaseapp.com/`, `http://localhost:3000`.
 
-## Data Flow Architecture
+## Cloud Functions (v2)
 
-### 1. Authentication Flow
-```
-User Login → Firebase Auth → AuthContext → Real-time User Data Sync → Route Protection
-```
+Initialized in `frontend/functions/src/index.ts`; all TypeScript v2 triggers.
 
-### 2. Character Creation Flow
-```
-New User → Firebase Auth → Character Creation Wizard → Firestore Data Creation → Home Dashboard
-```
+- onDocumentWritten users/{userId} (region: europe-west8)
+  - `updateTotParameters`: recalculates Tot for Base/Combattimento from Base+Anima+Equip+Mod.
+- onDocumentUpdated users/{userId} (region: europe-west8)
+  - `updateHpTotal`: recomputes `stats.hpTotal` from `Parametri.Combattimento.Salute.Tot` and `utils/varie.hpMultByLevel`.
+  - `updateManaTotal`: recomputes `stats.manaTotal` from `Parametri.Combattimento.Disciplina.Tot` and `utils/varie.manaMultByLevel`.
+- onCall HTTPS
+  - `spendCharacterPoint` (region: us-central1): validates and applies Base/Combat point spend/refund with creation-phase credits and token costs (`utils/varie.cost_params_combat`).
+  - `deleteUser` (region: europe-west8): webmaster-only deletion of a user’s Auth record and `users/{uid}` doc.
+  - `levelUpAll`, `levelUpUser`: exported and available (see source) for bulk/targeted level-up flows.
 
-### 3. Real-time Data Updates
-```
-User Action → Firebase Functions/Direct Firestore → Real-time Listeners → UI Updates
-```
+Region note
+- Firestore is in europe-west8; most functions are europe-west8, while `spendCharacterPoint` is us-central1. Consider aligning `spendCharacterPoint` to europe-west8 to reduce cross-region latency.
 
-### 4. Parameter Management Flow
-```
-Stat Change Request → Validation → Cloud Function → Firestore Update → Real-time Sync → UI Reflection
-```
+## Data model (Firestore)
 
-## Database Structure (Firestore)
+Collections
+- `users/{userId}`
+  - `Parametri.Base|Combattimento.<Stat> = { Base, Anima, Equip, Mod, Tot }`
+  - `stats`: `{ level, hpTotal, hpCurrent, manaTotal, manaCurrent, basePointsAvailable, basePointsSpent, combatTokensAvailable, combatTokensSpent, negativeBaseStatCount? }`
+  - `flags`: `{ characterCreationDone: boolean }`
+  - `settings`: `{ lock_param_base: boolean, lock_param_combat: boolean }`
+  - `inventory`, `spells`, `tecniche`, `conoscenze`, `professioni`.
+- `items/{itemId}`: marketplace items (stats/effects).
+- `utils/`
+  - `varie`: global config (`hpMultByLevel`, `manaMultByLevel`, `cost_params_combat`, ...).
+  - `schema_pg`: character template.
+  - `schema_armatura`, `schema_weapon`, `schema_accessorio`, `schema_consumabili`: seeded via backend utilities.
 
-### Collections:
+## Data flows
 
-#### `users/{userId}`
-```json
-{
-  "characterId": "string",
-  "email": "string",
-  "role": "player|dm|webmaster",
-  "imageUrl": "string",
-  "race": "string",
-  "Parametri": {
-    "Base": {
-      "Forza": {"Base": 0, "Bonus": 0, "Tot": 0},
-      "Destrezza": {...},
-      // ... other base stats
-    },
-    "Combattimento": {
-      "Attacco": {"Base": 0, "Bonus": 0, "Tot": 0},
-      "Difesa": {...},
-      // ... other combat stats
-    }
-  },
-  "stats": {
-    "level": 1,
-    "hpTotal": 0,
-    "hpCurrent": 0,
-    "manaTotal": 0,
-    "manaCurrent": 0,
-    "basePointsAvailable": 4,
-    "basePointsSpent": 0,
-    "combatTokensAvailable": 50,
-    "combatTokensSpent": 0
-  },
-  "flags": {
-    "characterCreationDone": boolean
-  },
-  "settings": {
-    "lock_param_base": boolean,
-    "lock_param_combat": boolean
-  },
-  "inventory": {...},
-  "spells": {...},
-  "tecniche": {...},
-  "conoscenze": {...},
-  "professioni": {...}
-}
-```
+1) Auth and user session
+User Login → Firebase Auth → AuthContext → route protection + user doc listener
 
-#### `items/{itemId}`
-- Marketplace items with stats and effects
+2) Stat change and totals
+UI action → `spendCharacterPoint` (onCall) → Firestore update → `updateTotParameters` → `updateHpTotal`/`updateManaTotal` → UI listeners reflect new values
 
-#### `utils/`
-- `schema_pg`: Character template schema
-- `possible_lists`: Available options (races, roles, etc.)
-- `varie`: Game configuration (combat costs, etc.)
+3) Admin utilities
+Webmaster → `deleteUser` (onCall) or FastAPI bulk endpoints → Firestore/Auth updates → UI refresh
 
-## Cloud Functions
+## Development
 
-### Automated Functions (Firebase Functions)
-- **updateHpTotal**: Recalculates HP when Costituzione changes
-- **updateManaTotal**: Recalculates Mana when Disciplina changes
-- **updateTotParameters**: Updates total parameter values when base/bonus change
-- **updateAnimaModifier**: Manages Anima-based bonuses
-- **spendCharacterPoint**: Handles point spending with validation
-- **deleteUser**: Admin function for user deletion
+- Frontend: CRA scripts (`npm start`, `npm run build`).
+- Backend: `uvicorn main:app --reload` from `backend/` (defaults to 127.0.0.1:8000).
+- Emulation: Firebase emulators recommended for Functions/Firestore during local dev.
 
-### API Endpoints (FastAPI)
-- Character CRUD operations
-- Data manipulation utilities
-- Integration endpoints for frontend communication
+Preconditions
+- Ensure `utils/varie` exists with `hpMultByLevel`, `manaMultByLevel`, and `cost_params_combat` set to avoid function early exits.
 
-## Security & Permissions
+## Security & permissions
 
-### Role-Based Access Control
-- **Player**: Standard character management
-- **DM**: Player oversight, lock controls, campaign management
-- **Webmaster**: Full administrative access, user management
+- Role-based UI (player, dm, webmaster).
+- Callable functions require Auth; `deleteUser` enforces `role === "webmaster"`.
+- Firestore security rules expected to protect write paths (see functions assumptions above).
 
-### Data Validation
-- Client-side validation for immediate feedback
-- Server-side validation in Cloud Functions
-- Firestore security rules for data protection
+## Known gaps / next steps
 
-## Deployment Architecture
-
-### Frontend (Firebase Hosting)
-- Production URL: `https://fatins.web.app`
-- Automatic builds from repository
-- CDN distribution for global performance
-
-### Backend (Render)
-- Production URL: `https://fnd-64ts.onrender.com`
-- Auto-scaling FastAPI service
-- Environment-based configuration
-
-### Database (Firestore)
-- Multi-region deployment (europe-west8)
-- Real-time synchronization
-- Automatic backups
-
-## Development Workflow
-
-### Local Development
-- Frontend: `npm start` (localhost:3000)
-- Backend: `uvicorn main:app --reload` (localhost:8000)
-- Firebase emulators for local testing
-
-### Deployment
-- Frontend: `npm run build` → `firebase deploy`
-- Backend: Automatic deployment via Render GitHub integration
-- Functions: Deployed via Firebase CLI
-
-## Key Design Patterns
-
-### 1. Real-time Data Synchronization
-- Uses Firestore listeners for immediate UI updates
-- Optimistic UI updates with server validation
-- Caching strategies for performance
-
-### 2. Component Architecture
-- Modular component structure
-- Reusable UI components in `common/`
-- Feature-based organization
-
-### 3. State Management
-- AuthContext for global user state
-- Local component state for UI interactions
-- Firestore as single source of truth
-
-### 4. Error Handling
-- Comprehensive error boundaries
-- User-friendly error messages
-- Logging for debugging
-
-## Future Enhancements
-
-- Enhanced 3D visualization
-- Real-time multiplayer sessions
-- Advanced combat mechanics
-- Mobile application
-- AI-powered game assistance
+- Align `spendCharacterPoint` region to europe-west8.
+- Wire additional schema writer endpoints or expose them with explicit routes.
+- Add API docs for FastAPI endpoints and consider auth on utility routes.
+- Expand tests for point-spend edge cases and negative credits.
+- Document and enforce lock settings (`settings.lock_param_*`) in UI.
 
 ---
 
-*This project represents a comprehensive digital transformation of traditional tabletop RPG mechanics into a modern, scalable web application.*
+This overview reflects the current codebase (functions, endpoints, and data flows) and is intended to stay close to implementation.
