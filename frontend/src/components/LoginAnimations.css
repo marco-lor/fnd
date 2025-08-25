@@ -54,3 +54,44 @@
   50% { border-radius: 60% 50% 70% 40% / 70% 60% 40% 50%; transform: translate(-130%, -50%) scale(1.05); }
   100% { border-radius: 50% 40% 60% 70% / 60% 50% 70% 40%; transform: translate(-120%, -50%) scale(1); }
 }
+
+/* Aurora and ambient animations */
+@keyframes auroraSweep {
+  0% { transform: translateX(-20%) skewY(-6deg); opacity: 0.6; }
+  50% { transform: translateX(10%) skewY(-4deg); opacity: 0.8; }
+  100% { transform: translateX(-20%) skewY(-6deg); opacity: 0.6; }
+}
+@keyframes auroraSweep2 {
+  0% { transform: translateX(15%) skewY(6deg); opacity: 0.5; }
+  50% { transform: translateX(-15%) skewY(3deg); opacity: 0.7; }
+  100% { transform: translateX(15%) skewY(6deg); opacity: 0.5; }
+}
+@keyframes twinkle {
+  0% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.4); }
+  100% { opacity: 0.3; transform: scale(1); }
+}
+@keyframes slowSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Utility classes (scoped to login) */
+.aurora-layer {
+  background: radial-gradient(1200px 500px at 10% 20%, rgba(94,234,212,0.25), transparent 60%),
+              radial-gradient(900px 400px at 80% 30%, rgba(96,165,250,0.25), transparent 60%),
+              radial-gradient(1000px 450px at 30% 80%, rgba(244,114,182,0.25), transparent 60%);
+  animation: auroraSweep 14s ease-in-out infinite;
+}
+.aurora-layer-2 {
+  background: radial-gradient(1000px 420px at 20% 70%, rgba(96,165,250,0.25), transparent 60%),
+              radial-gradient(1200px 520px at 70% 20%, rgba(244,114,182,0.2), transparent 60%),
+              radial-gradient(900px 380px at 60% 80%, rgba(94,234,212,0.2), transparent 60%);
+  animation: auroraSweep2 18s ease-in-out infinite;
+}
+.twinkle {
+  animation: twinkle 3.5s ease-in-out infinite;
+}
+.animate-slow-spin {
+  animation: slowSpin 18s linear infinite;
+}
