@@ -1,7 +1,6 @@
 // file: ./frontend/src/components/bazaar/Bazaar.js
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import InteractiveBackground from '../backgrounds/InteractiveBackground';
 import { collection, onSnapshot, query, where, or, and } from "firebase/firestore";
 import { db } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
@@ -436,8 +435,7 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   const comparisonPanelWidth = "w-[95vw] max-w-[99vw] sm:w-[80vw] sm:max-w-[400px] md:w-[38vw] md:max-w-[550px] lg:w-[28vw] lg:max-w-[750px]";
 
   return (
-    <div className="relative w-full min-h-screen flex0 flex-col overflow-hidden">
-      <InteractiveBackground />
+    <div className="relative w-full min-h-screen flex flex-col">
 
       {/* Main content area using CSS Grid */}
       {/* Grid columns: Filters (dynamic), Item List (700px), Comparison Panel Area (450px) */}
@@ -563,8 +561,7 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
             )}
           </AnimatePresence>
         </div>
-      </div>
-
+  </div>
 
       {showOverlay && (
         <AddWeaponOverlay

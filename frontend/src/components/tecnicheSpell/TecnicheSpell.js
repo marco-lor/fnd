@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { useAuth } from "../../AuthContext";
 import { doc, onSnapshot, getDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
-import DnDBackground from "../backgrounds/DnDBackground";
 import TecnicheSide from "./elements/tecniche_side";
 import SpellSide from "./elements/spell_side";
 
@@ -201,8 +200,7 @@ function TecnicheSpell() {
 
   // Render the component only when isReady, prevents flickering
   return (
-    <div className="w-full min-h-full relative">
-      <DnDBackground />
+  <div className="w-full min-h-full relative">
       <div className="relative z-10 w-full min-h-full">
         {/* Filter Section */}
         <div className="px-5 pt-4">

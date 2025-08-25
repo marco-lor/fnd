@@ -1,7 +1,6 @@
 // file: ./frontend/src/components/home/Home.js
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../../AuthContext";
-import DnDBackground from "../backgrounds/DnDBackground";
 import StatsBars from "./elements/StatsBars";
 import EquippedInventory from "./elements/EquippedInventory";
 import Inventory from "./elements/Inventory";
@@ -121,8 +120,7 @@ function Home() {
 
   return (
   <div className="relative w-full min-h-screen overflow-x-hidden">
-      {/* Dynamic Background */}
-      <DnDBackground />
+      {/* Background is provided by Layout's GlobalAuroraBackground */}
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.06),transparent_60%),radial-gradient(circle_at_80%_70%,rgba(255,255,255,0.04),transparent_65%)] mix-blend-overlay" />
 
       <div className="relative z-10 flex flex-col">
