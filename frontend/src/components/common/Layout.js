@@ -1,5 +1,6 @@
 import React from 'react';
 import Navbar from './navbar';
+import GlobalAuroraBackground from '../backgrounds/GlobalAuroraBackground';
 
 /**
  * Layout component that wraps page content and includes the navbar
@@ -8,9 +9,10 @@ import Navbar from './navbar';
  */
 const Layout = ({ children }) => {
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="relative min-h-screen flex flex-col">
+      <GlobalAuroraBackground density={140} />
       <Navbar />
-      <main className="flex-grow">
+      <main className="relative z-10 flex-grow">
         {children}
       </main>
     </div>

@@ -15,7 +15,8 @@ const SLOT_DEFS = [
   { key: 'stivali', label: 'Stivali', icon: GiSteeltoeBoots },
   { key: 'weaponMain', label: 'Mano Principale', icon: GiBroadsword },
   { key: 'weaponOff', label: 'Mano Secondaria', icon: GiShield },
-  { key: 'foderoArma', label: 'Fodero Arma', icon: GiScabbard },
+  // IMPORTANT: label must match Firestore General.Slot exactly ("Fodero")
+  { key: 'foderoArma', label: 'Fodero', icon: GiScabbard },
   { key: 'accessorio', label: 'Accessorio', icon: GiRing },
 ];
 
@@ -129,9 +130,10 @@ const EquippedInventory = () => {
       }
     };
 
-    // Apply only Base and Combattimento to user Parametri
-    applyGroup('Base');
-    applyGroup('Combattimento');
+  // Apply Base, Combattimento, and Special to user Parametri
+  applyGroup('Base');
+  applyGroup('Combattimento');
+  applyGroup('Special');
     return updates;
   };
 

@@ -20,27 +20,64 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
   const hasImage = tecnica.image_url && tecnica.image_url.trim() !== "";
   const db = getFirestore();
 
-  // --- Mana validation logic - now memoized for performance ---
-  const { manaCost, currentMana, hasSufficientMana } = useMemo(() => {
-    const extractManaCost = () => {
+  // --- Mana validation logic with special reduction (ridCostoTec) ---
+  const { manaCost, originalCost, costReduction, currentMana, hasSufficientMana } = useMemo(() => {
+    const extractOriginalCost = () => {
       const costStr = tecnica.Costo?.toString() || "0";
       const match = costStr.match(/(\d+)/);
       return match ? parseInt(match[1], 10) : 0;
     };
-  
-    const getCurrentMana = () => {
-      return userData?.stats?.manaCurrent || 0;
+
+    const getCurrentMana = () => userData?.stats?.manaCurrent || 0;
+
+    // Find a reduction value in Parametri.Special using robust key matching
+    const getSpecialReduction = (specialObj, desiredKey) => {
+      if (!specialObj) return 0;
+      const extractVal = (node) => {
+        if (typeof node === 'number') return node;
+        if (node && typeof node === 'object') {
+          return Number(node.Tot ?? node.tot ?? node.value ?? 0) || 0;
+        }
+        return Number(node) || 0;
+      };
+      // Try exact key first
+      if (specialObj[desiredKey] !== undefined) {
+        const v = extractVal(specialObj[desiredKey]);
+        if (!isNaN(v) && v) return v;
+      }
+      const norm = (s) => s.toLowerCase().replace(/\s|_/g, '');
+      const desired = norm(desiredKey);
+      // Try normalized equality
+      for (const k of Object.keys(specialObj)) {
+        if (norm(k) === desired) {
+          const v = extractVal(specialObj[k]);
+          if (!isNaN(v) && v) return v;
+        }
+      }
+      // Try substring match
+      for (const k of Object.keys(specialObj)) {
+        if (norm(k).includes(desired)) {
+          const v = extractVal(specialObj[k]);
+          if (!isNaN(v) && v) return v;
+        }
+      }
+      return 0;
     };
-  
-    const cost = extractManaCost();
+
+    const orig = extractOriginalCost();
+    const rid = getSpecialReduction(userData?.Parametri?.Special, 'ridCostoTec');
+    // If original cost > 0, apply reduction with a minimum effective cost of 1
+    const effective = orig > 0 ? Math.max(1, orig - rid) : 0;
     const mana = getCurrentMana();
-    
+
     return {
-      manaCost: cost,
+      originalCost: orig,
+      costReduction: rid,
+      manaCost: effective,
       currentMana: mana,
-      hasSufficientMana: mana >= cost
+      hasSufficientMana: mana >= effective
     };
-  }, [tecnica.Costo, userData?.stats?.manaCurrent]);
+  }, [tecnica.Costo, userData?.stats?.manaCurrent, userData?.Parametri?.Special]);
 
   // Save initial card position for animation
   useEffect(() => {
@@ -298,13 +335,29 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
             <div className="grid grid-cols-2 gap-2 mb-2">
               <div className="bg-black/50 p-2 rounded">
                 <p className="text-purple-300 font-bold text-sm">Costo</p>
-                <p className="text-gray-200">{tecnica.Costo}</p>
+                <p className="text-gray-200">
+                  {manaCost}
+                  {originalCost > 0 && costReduction > 0 && (
+                    <span className="text-[10px] text-gray-400 ml-1">(base {originalCost} -{costReduction})</span>
+                  )}
+                </p>
               </div>
               <div className="bg-black/50 p-2 rounded">
                 <p className="text-purple-300 font-bold text-sm">Azione</p>
                 <p className="text-gray-200">{tecnica.Azione}</p>
               </div>
             </div>
+            {originalCost > 0 && costReduction > 0 && (
+              <div className="mb-3 -mt-1 rounded-md border border-purple-600/40 bg-purple-900/20 p-2">
+                <p className="text-[11px] text-purple-200 font-semibold">Riduzione applicata</p>
+                <p className="text-xs text-purple-100">
+                  Base {originalCost} − Riduzione {costReduction}
+                  <span className="ml-1">⇒</span>
+                  <span className="ml-1 font-bold text-white">{manaCost}</span>
+                  <span className="ml-1 text-purple-300">(minimo 1)</span>
+                </p>
+              </div>
+            )}
             <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto mb-4">
               <p className="text-purple-300 font-bold text-sm mb-1">Effetto</p>
               <p className="text-gray-200 text-sm">{tecnica.Effetto}</p>
@@ -337,9 +390,20 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
               Stai per utilizzare la tecnica{" "}
               <span className="text-purple-500 font-bold">
                 {tecnica.Nome || tecnicaName}
-              </span>, costa{" "}
-              <span className="text-purple-500 font-bold">{tecnica.Costo}</span> mana
+              </span>, costo effettivo{" "}
+              <span className="text-purple-500 font-bold">{manaCost}</span> mana
             </p>
+                {originalCost > 0 && costReduction > 0 && (
+                  <div className="mb-4 mt-1 rounded-md border border-purple-600/40 bg-purple-900/20 p-2">
+                    <p className="text-[11px] text-purple-200 font-semibold">Riduzione applicata</p>
+                    <p className="text-xs text-purple-100">
+                      Base {originalCost} − Riduzione {costReduction}
+                      <span className="ml-1">⇒</span>
+                      <span className="ml-1 font-bold text-white">{manaCost}</span>
+                      {originalCost > 0 ? <span className="ml-1 text-purple-300">(minimo 1)</span> : null}
+                    </p>
+                  </div>
+                )}
             <div className="mb-6 p-2 rounded bg-black/30">
               <p className="text-gray-200">
                 Mana disponibile:{" "}

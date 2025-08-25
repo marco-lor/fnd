@@ -1,0 +1,64 @@
+/* Aurora animations and utilities for the global background */
+@keyframes auroraSweep {
+  0% { transform: translateX(-20%) skewY(-6deg); opacity: 0.6; }
+  50% { transform: translateX(10%) skewY(-4deg); opacity: 0.8; }
+  100% { transform: translateX(-20%) skewY(-6deg); opacity: 0.6; }
+}
+@keyframes auroraSweep2 {
+  0% { transform: translateX(15%) skewY(6deg); opacity: 0.5; }
+  50% { transform: translateX(-15%) skewY(3deg); opacity: 0.7; }
+  100% { transform: translateX(15%) skewY(6deg); opacity: 0.5; }
+}
+@keyframes twinkle {
+  0% { opacity: 0.25; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.35); }
+  100% { opacity: 0.25; transform: scale(1); }
+}
+
+/* Scoped classes to avoid collisions */
+.global-aurora__layer {
+  background: radial-gradient(1200px 500px at 10% 20%, rgba(94,234,212,0.22), transparent 60%),
+              radial-gradient(900px 400px at 80% 30%, rgba(96,165,250,0.22), transparent 60%),
+              radial-gradient(1000px 450px at 30% 80%, rgba(244,114,182,0.22), transparent 60%);
+  animation: auroraSweep 16s ease-in-out infinite;
+}
+.global-aurora__layer--b {
+  background: radial-gradient(1000px 420px at 20% 70%, rgba(96,165,250,0.2), transparent 60%),
+              radial-gradient(1200px 520px at 70% 20%, rgba(244,114,182,0.18), transparent 60%),
+              radial-gradient(900px 380px at 60% 80%, rgba(94,234,212,0.18), transparent 60%);
+  animation: auroraSweep2 20s ease-in-out infinite;
+}
+.global-aurora__twinkle {
+  animation: twinkle 4s ease-in-out infinite;
+}
+
+/* Shooting stars */
+.shooting-star {
+  position: absolute;
+  z-index: 1; /* above base background and stars */
+  pointer-events: none;
+}
+.shooting-star__trail {
+  position: relative;
+  border-radius: 9999px;
+  filter: blur(0.3px);
+  transform: translate3d(0, 0, 0);
+  animation: meteor-travel var(--duration, 1400ms) cubic-bezier(0.22, 1, 0.36, 1) forwards,
+             meteor-fade   var(--duration, 1400ms) ease-out forwards;
+}
+.shooting-star__head {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  border-radius: 9999px;
+}
+
+@keyframes meteor-travel {
+  0% { transform: translateX(0) scale(1); opacity: 1; }
+  100% { transform: translateX(var(--travel, 600px)) scale(0.98); opacity: 0.85; }
+}
+@keyframes meteor-fade {
+  0% { filter: brightness(1); opacity: 1; }
+  80% { filter: brightness(1); opacity: 0.9; }
+  100% { filter: brightness(0.85); opacity: 0; }
+}

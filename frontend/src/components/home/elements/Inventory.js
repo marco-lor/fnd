@@ -322,7 +322,7 @@ const Inventory = () => {
 	const otherList = filtered.filter(it => (it.type || '').toLowerCase() !== 'varie');
 
 	return (
-		<div className="relative overflow-hidden backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl px-5 pt-5 pb-4 shadow-lg h-[64vh] xl:h-[690px] 2xl:h-[690px] flex flex-col">
+		<div className="relative overflow-hidden backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl px-5 pt-5 pb-4 shadow-lg h-full flex flex-col">
 			<div className="absolute -left-10 -top-10 w-40 h-40 bg-indigo-500/10 rounded-full blur-3xl" />
 			<div className="absolute -right-10 -bottom-10 w-48 h-48 bg-fuchsia-500/10 rounded-full blur-3xl" />
 

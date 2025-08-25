@@ -1,5 +1,6 @@
 // file: ./frontend/src/components/codex/Codex.js
 import React, { useState, useEffect, useRef } from 'react';
+import CodexBackground from '../backgrounds/CodexBackground';
 import { useAuth } from '../../AuthContext';
 import { db } from '../firebaseConfig';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -304,8 +305,10 @@ function Codex() {
 
   // Main component return
   return (
-    <div className="codex-page-container bg-gray-900 min-h-screen text-white">
-      <main className="p-4 md:p-8">
+    <div className="codex-page-container relative min-h-screen text-white">
+      {/* Page-scoped background for Codex */}
+      <CodexBackground className="z-0" />
+      <main className="relative z-10 p-4 md:p-8">
         <h1 className="text-3xl font-bold text-center mb-8">Codex</h1>
         {renderCodexContent()}
       </main>

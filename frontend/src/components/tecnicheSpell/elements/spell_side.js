@@ -54,18 +54,51 @@ const SpellCard = ({ spellName, spell, userData }) => {
     fetchDadiAnima();
   }, [db]);
 
-  // --- Mana validation logic ---
-  const extractManaCost = () => {
+  // --- Mana validation logic with special reduction (ridCostoSpell) ---
+  const extractOriginalCost = () => {
     const costStr = spell.Costo?.toString() || "0";
     const match = costStr.match(/(\d+)/);
     return match ? parseInt(match[1], 10) : 0;
   };
 
-  const getCurrentMana = () => {
-    return userData?.stats?.manaCurrent || 0;
+  const getCurrentMana = () => userData?.stats?.manaCurrent || 0;
+
+  const getSpecialReduction = (specialObj, desiredKey) => {
+    if (!specialObj) return 0;
+    const extractVal = (node) => {
+      if (typeof node === 'number') return node;
+      if (node && typeof node === 'object') {
+        return Number(node.Tot ?? node.tot ?? node.value ?? 0) || 0;
+      }
+      return Number(node) || 0;
+    };
+    // exact
+    if (specialObj[desiredKey] !== undefined) {
+      const v = extractVal(specialObj[desiredKey]);
+      if (!isNaN(v) && v) return v;
+    }
+    const norm = (s) => s.toLowerCase().replace(/\s|_/g, '');
+    const desired = norm(desiredKey);
+    // normalized equality
+    for (const k of Object.keys(specialObj)) {
+      if (norm(k) === desired) {
+        const v = extractVal(specialObj[k]);
+        if (!isNaN(v) && v) return v;
+      }
+    }
+    // substring match
+    for (const k of Object.keys(specialObj)) {
+      if (norm(k).includes(desired)) {
+        const v = extractVal(specialObj[k]);
+        if (!isNaN(v) && v) return v;
+      }
+    }
+    return 0;
   };
 
-  const manaCost = extractManaCost();
+  const originalCost = extractOriginalCost();
+  const costReduction = getSpecialReduction(userData?.Parametri?.Special, 'ridCostoSpell');
+  const manaCost = originalCost > 0 ? Math.max(1, originalCost - costReduction) : 0;
   const currentMana = getCurrentMana();
   const hasSufficientMana = currentMana >= manaCost;
 
@@ -369,13 +402,29 @@ const SpellCard = ({ spellName, spell, userData }) => {
             <div className="grid grid-cols-3 gap-2 mb-2">
               <div className="bg-black/50 p-2 rounded">
                 <p className={`text-indigo-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'}`}>Costo</p>
-                <p className={`text-gray-200 ${isExpanded ? 'text-base' : 'text-sm'}`}>{spell.Costo}</p>
+                <p className={`text-gray-200 ${isExpanded ? 'text-base' : 'text-sm'}`}>
+                  {manaCost}
+                  {originalCost > 0 && costReduction > 0 && (
+                    <span className="text-[10px] text-gray-400 ml-1">(base {originalCost} -{costReduction})</span>
+                  )}
+                </p>
               </div>
               <div className="bg-black/50 p-2 rounded col-span-2">
                 <p className={`text-indigo-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'}`}>Esperienza</p>
                 <p className={`text-gray-200 ${isExpanded ? 'text-base' : 'text-sm'}`}>{spell.Esperienza || "---"}</p>
               </div>
             </div>
+            {originalCost > 0 && costReduction > 0 && (
+              <div className="mb-3 -mt-1 rounded-md border border-indigo-600/40 bg-indigo-900/20 p-2">
+                <p className="text-[11px] text-indigo-200 font-semibold">Riduzione applicata</p>
+                <p className={`text-xs text-indigo-100`}>
+                  Base {originalCost} − Riduzione {costReduction}
+                  <span className="ml-1">⇒</span>
+                  <span className="ml-1 font-bold text-white">{manaCost}</span>
+                  <span className="ml-1 text-indigo-300">(minimo 1)</span>
+                </p>
+              </div>
+            )}
             <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto mb-2">
               {spell["Effetti Positivi"] && (
                 <div className="mb-2">
@@ -489,9 +538,20 @@ const SpellCard = ({ spellName, spell, userData }) => {
               Stai per lanciare l'incantesimo{" "}
               <span className="text-indigo-500 font-bold">
                 {spell.Nome || spellName}
-              </span>, costa{" "}
-              <span className="text-indigo-500 font-bold">{spell.Costo}</span> mana
+              </span>, costo effettivo{" "}
+              <span className="text-indigo-500 font-bold">{manaCost}</span> mana
             </p>
+            {originalCost > 0 && costReduction > 0 && (
+              <div className="mb-4 mt-1 rounded-md border border-indigo-600/40 bg-indigo-900/20 p-2">
+                <p className="text-[11px] text-indigo-200 font-semibold">Riduzione applicata</p>
+                <p className="text-xs text-indigo-100">
+                  Base {originalCost} − Riduzione {costReduction}
+                  <span className="ml-1">⇒</span>
+                  <span className="ml-1 font-bold text-white">{manaCost}</span>
+                  {originalCost > 0 ? <span className="ml-1 text-indigo-300">(minimo 1)</span> : null}
+                </p>
+              </div>
+            )}
             <div className="mb-6 p-2 rounded bg-black/30">
               <p className="text-gray-200">
                 Mana disponibile:{" "}

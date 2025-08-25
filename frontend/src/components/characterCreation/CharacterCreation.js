@@ -5,7 +5,7 @@ import { auth, db, storage } from "../firebaseConfig";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { doc, getDoc, updateDoc, setDoc } from "firebase/firestore";
 import { useAuth } from "../../AuthContext";
-import DnDBackground from "../backgrounds/DnDBackground";
+import GlobalAuroraBackground from "../backgrounds/GlobalAuroraBackground";
 // Import the components for each step
 import RaceSelection from "./elements/RaceSelection";
 import AnimaShardSelection from "./elements/AnimaShardSelection";
@@ -369,8 +369,8 @@ function CharacterCreation() {
   // Show initializing state
   if (initializing) {
     return (
-      <div className="relative w-screen h-screen overflow-hidden">
-        <DnDBackground />
+  <div className="relative w-screen h-screen">
+        <GlobalAuroraBackground density={120} />
         <div className="relative z-10 flex justify-center items-center h-full">
           <div className="text-white text-xl bg-[rgba(0,0,0,0.6)] p-4 rounded">Initializing...</div>
         </div>
@@ -493,8 +493,8 @@ function CharacterCreation() {
 
   // Main component JSX structure
   return (
-    <div className="relative w-screen h-screen overflow-hidden">
-      <DnDBackground />
+  <div className="relative w-screen h-screen">
+      <GlobalAuroraBackground density={140} />
       <div className="relative z-10 flex justify-center items-center h-full p-4">
         <div className="bg-[rgba(40,40,60,0.85)] p-6 md:p-8 rounded-[15px] text-center w-full md:w-[80%] max-w-none shadow-[0_4px_15px_rgba(100,100,200,0.2)] border border-[rgba(150,150,255,0.2)] overflow-y-auto max-h-[95vh]">
           {/* Title */}
