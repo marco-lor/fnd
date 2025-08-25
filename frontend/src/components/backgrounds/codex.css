@@ -1,0 +1,98 @@
+/* Codex page cosmic background: nebulas + quasar pulses */
+
+@keyframes nebulaDrift {
+	0% { transform: translate(-50%, -50%) rotate(0deg) scale(1); filter: hue-rotate(0deg) saturate(1); }
+	50% { transform: translate(-48%, -52%) rotate(6deg) scale(1.05); filter: hue-rotate(10deg) saturate(1.15); }
+	100% { transform: translate(-50%, -50%) rotate(0deg) scale(1); filter: hue-rotate(0deg) saturate(1); }
+}
+
+@keyframes quasarPulse {
+	0% { opacity: 0; transform: translate(-50%, -50%) scale(0.6); filter: brightness(1.2); }
+	15% { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: brightness(1.6); }
+	70% { opacity: 0.85; filter: brightness(1.1); }
+	100% { opacity: 0; transform: translate(-50%, -50%) scale(1.25); filter: brightness(0.9); }
+}
+
+@keyframes beamSweep {
+	0% { opacity: 0; transform: scaleX(0.8); }
+	15% { opacity: 1; transform: scaleX(1); }
+	100% { opacity: 0; transform: scaleX(1.25); }
+}
+
+/* Subtle grid mask for a "knowledge" feel */
+.codex-grid-mask {
+	background-image:
+		linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
+		linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
+	background-size: 40px 40px, 40px 40px;
+	mask-image: radial-gradient(70% 60% at 50% 45%, black 55%, transparent 100%);
+	-webkit-mask-image: radial-gradient(70% 60% at 50% 45%, black 55%, transparent 100%);
+}
+
+.codex-nebula {
+	position: absolute;
+	border-radius: 40% 55% 45% 60% / 60% 40% 55% 45%;
+	mix-blend-mode: screen;
+	filter: blur(22px) saturate(1.1);
+	animation: nebulaDrift 22s ease-in-out infinite;
+}
+
+/* Palette variants tuned to match aurora aesthetic */
+.codex-nebula--a {
+	background: radial-gradient(closest-side, rgba(56,189,248,0.22), rgba(56,189,248,0.08) 55%, transparent 70%),
+							radial-gradient(farthest-side, rgba(94,234,212,0.18), transparent 70%);
+}
+.codex-nebula--b {
+	background: radial-gradient(closest-side, rgba(244,114,182,0.18), rgba(244,114,182,0.06) 55%, transparent 70%),
+							radial-gradient(farthest-side, rgba(167,139,250,0.18), transparent 70%);
+}
+.codex-nebula--c {
+	background: radial-gradient(closest-side, rgba(99,102,241,0.18), rgba(99,102,241,0.06) 55%, transparent 70%),
+							radial-gradient(farthest-side, rgba(56,189,248,0.16), transparent 70%);
+}
+
+.codex-quasar {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	animation: quasarPulse var(--q-duration, 1600ms) ease-out forwards;
+}
+
+.codex-quasar__flare {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	width: 160px;
+	height: 160px;
+	transform: translate(-50%, -50%);
+	border-radius: 9999px;
+	background: radial-gradient(circle at 50% 50%,
+		rgba(255,255,255,var(--q-alpha, 0.7)) 10%,
+		hsla(var(--q-hue, 230), 90%, 70%, var(--q-alpha, 0.6)) 35%,
+		hsla(var(--q-hue, 230), 80%, 60%, 0.32) 60%,
+		rgba(0,0,0,0) 72%);
+	box-shadow:
+		0 0 22px hsla(var(--q-hue, 230), 90%, 70%, 0.55),
+		0 0 60px hsla(var(--q-hue, 230), 90%, 70%, 0.25);
+	filter: blur(0.6px);
+}
+
+.codex-quasar__beam {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	width: 600px;
+	height: 2px;
+	border-radius: 9999px;
+	background: linear-gradient(90deg,
+		rgba(0,0,0,0),
+		hsla(var(--q-hue, 230), 100%, 75%, calc(var(--q-alpha, 0.7) * 0.9)),
+		rgba(0,0,0,0));
+	box-shadow: 0 0 14px hsla(var(--q-hue, 230), 100%, 75%, 0.45);
+	mix-blend-mode: screen;
+	animation: beamSweep var(--q-duration, 1600ms) ease-out forwards;
+}
+.codex-quasar__beam--a { transform: translate(-50%, -50%) rotate(0deg); }
+.codex-quasar__beam--b { transform: translate(-50%, -50%) rotate(90deg); }
+
