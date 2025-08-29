@@ -177,6 +177,8 @@ function Home() {
                   {['1','4','7'].map(liv => {
                     const val = getAnimaField(`Anima_${liv}`);
                     const needsPick = (liv === '4' || liv === '7') && !val;
+                    const currentLevel = userData?.stats?.level || 1;
+                    const isExactLevel = Number(liv) === currentLevel;
                     return (
                       <div key={liv} className="flex flex-col">
                         <span className="text-xs text-slate-400">Livello {liv}</span>
@@ -184,8 +186,18 @@ function Home() {
                           <span className={`text-lg font-semibold tracking-wide ${getAnimaColorClass(val)}`}>{val || '—'}</span>
                           {needsPick && (
                             <button
-                              className="text-[11px] px-2 py-0.5 rounded-md border border-slate-600/60 text-slate-200 hover:bg-slate-800/60"
-                              onClick={() => { setAnimaPickerLevel(Number(liv)); setAnimaPickerOpen(true); }}
+                              className={`text-[11px] px-2 py-0.5 rounded-md border text-slate-200 transition ${
+                                isExactLevel
+                                  ? 'border-slate-600/60 hover:bg-slate-800/60'
+                                  : 'border-slate-800/60 opacity-60 cursor-not-allowed'
+                              }`}
+                              disabled={!isExactLevel}
+                              title={isExactLevel ? undefined : `Selezionabile solo al livello ${liv}`}
+                              onClick={() => {
+                                if (!isExactLevel) return;
+                                setAnimaPickerLevel(Number(liv));
+                                setAnimaPickerOpen(true);
+                              }}
                             >
                               Scegli Anima
                             </button>

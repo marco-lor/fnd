@@ -38,73 +38,106 @@ export function MergedStatsTable() {
   const [combatCosts, setCombatCosts] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
   // UI: collapse/expand Parametri Speciali table
-  const [showSpecial, setShowSpecial] = useState(true);
+  // Initialize closed by default
+  const [showSpecial, setShowSpecial] = useState(false);
   const specialRef = useRef(null);
   const didMountRef = useRef(false);
+  const endHandlerRef = useRef(null);
 
-  // Animate expand/collapse for Parametri Speciali
+  // Animate expand/collapse for Parametri Speciali (robust sequencing)
   useEffect(() => {
     const el = specialRef.current;
     if (!el) return;
 
-    const onEnd = (e) => {
-      if (e.propertyName !== 'max-height') return;
-      // After expanding, remove max-height to allow natural growth
-      if (showSpecial) {
-        el.style.maxHeight = 'none';
-      }
-    };
-    el.addEventListener('transitionend', onEnd);
+    // Clean previous transitionend listener (if any)
+    if (endHandlerRef.current) {
+      el.removeEventListener('transitionend', endHandlerRef.current);
+      endHandlerRef.current = null;
+    }
 
-    // Ensure will animate from current state
-    const run = () => {
+    // First mount: set state without animation
+    if (!didMountRef.current) {
       el.style.overflow = 'hidden';
       el.style.willChange = 'max-height, opacity';
-      el.style.transition = 'max-height 300ms ease, opacity 200ms ease';
-
-      // First paint: set immediate styles without animation
-      if (!didMountRef.current) {
-        if (showSpecial) {
-          el.style.maxHeight = 'none';
-          el.style.opacity = '1';
-          el.style.display = 'block';
-        } else {
-          el.style.maxHeight = '0px';
-          el.style.opacity = '0';
-          el.style.display = 'block';
-        }
-        didMountRef.current = true;
-        return;
-      }
-
+      el.style.transition = 'none';
+      el.style.display = 'block';
       if (showSpecial) {
-        // Start from 0 and expand to scrollHeight
-        el.style.display = 'block';
-        const target = el.scrollHeight;
-        el.style.maxHeight = '0px';
-        el.style.opacity = '0';
-        // Force reflow then animate
-        // eslint-disable-next-line no-unused-expressions
-        el.offsetHeight;
-        el.style.maxHeight = `${target}px`;
+        el.style.maxHeight = 'none';
         el.style.opacity = '1';
       } else {
-        // Collapse from current height to 0
-        const current = el.scrollHeight;
-        el.style.maxHeight = `${current}px`;
-        el.style.opacity = '1';
-        // Force reflow then animate
-        // eslint-disable-next-line no-unused-expressions
-        el.offsetHeight;
         el.style.maxHeight = '0px';
         el.style.opacity = '0';
       }
+      didMountRef.current = true;
+      return;
+    }
+
+    const animateOpen = () => {
+      // Prepare from closed state
+      el.style.display = 'block';
+      el.style.overflow = 'hidden';
+      el.style.willChange = 'max-height, opacity';
+      el.style.transition = 'none';
+      el.style.maxHeight = '0px';
+      el.style.opacity = '0';
+
+      requestAnimationFrame(() => {
+        const target = el.scrollHeight || 1; // guard against 0
+        // Switch on transitions in the next frame
+        requestAnimationFrame(() => {
+          el.style.transition = 'max-height 300ms ease, opacity 200ms ease';
+          el.style.maxHeight = `${target}px`;
+          el.style.opacity = '1';
+        });
+      });
+
+      const onEnd = (e) => {
+        if (e.propertyName !== 'max-height') return;
+        // Allow natural growth after expansion
+        el.style.transition = 'opacity 200ms ease';
+        el.style.maxHeight = 'none';
+        el.removeEventListener('transitionend', onEnd);
+        endHandlerRef.current = null;
+      };
+      el.addEventListener('transitionend', onEnd);
+      endHandlerRef.current = onEnd;
     };
 
-    run();
+    const animateClose = () => {
+      // From open (possibly auto), set a fixed start height then collapse
+      const start = el.scrollHeight || 0;
+      el.style.overflow = 'hidden';
+      el.style.willChange = 'max-height, opacity';
+      el.style.transition = 'none';
+      el.style.maxHeight = `${start}px`;
+      el.style.opacity = '1';
+
+      requestAnimationFrame(() => {
+        // Enable transition then collapse
+        requestAnimationFrame(() => {
+          el.style.transition = 'max-height 300ms ease, opacity 200ms ease';
+          el.style.maxHeight = '0px';
+          el.style.opacity = '0';
+        });
+      });
+
+      const onEnd = (e) => {
+        if (e.propertyName !== 'max-height') return;
+        el.removeEventListener('transitionend', onEnd);
+        endHandlerRef.current = null;
+      };
+      el.addEventListener('transitionend', onEnd);
+      endHandlerRef.current = onEnd;
+    };
+
+    if (showSpecial) animateOpen(); else animateClose();
 
     return () => {
-      el.removeEventListener('transitionend', onEnd);
+      // Cleanup listener on dependency change/unmount
+      if (endHandlerRef.current) {
+        el.removeEventListener('transitionend', endHandlerRef.current);
+        endHandlerRef.current = null;
+      }
     };
   }, [showSpecial]);
 
@@ -409,6 +442,14 @@ export function MergedStatsTable() {
             ref={specialRef}
             className="overflow-hidden"
             aria-hidden={!showSpecial}
+            // Ensure first paint matches the initial state (closed) to avoid mismatch
+            style={
+              !didMountRef.current
+                ? (showSpecial
+                    ? { maxHeight: 'none', opacity: 1, overflow: 'hidden', display: 'block' }
+                    : { maxHeight: 0, opacity: 0, overflow: 'hidden', display: 'block' })
+                : undefined
+            }
           >
             <table className="w-full text-sm text-left text-slate-300">
               <thead className="text-[11px] uppercase tracking-wider text-slate-400/80 bg-white/5">

@@ -17,7 +17,7 @@ import DiceRoller from "../common/DiceRoller";
 // Encounter schema (Firestore: collection "encounters")
 // New structure:
 // encounters/{encounterId}
-//   { name, status: 'draft'|'published'|'deleted', createdAt, createdBy, ...generalInfo }
+//   { name, status: 'published'|'deleted', createdAt, createdBy, ...generalInfo }
 //   participants (subcollection)
 //     {userId}:
 //       {
@@ -59,9 +59,9 @@ const Chip = ({ children, onRemove, muted }) => (
 
 const Section = ({ title, children, actions }) => (
 	<section className="group relative overflow-hidden backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 shadow-lg mb-6">
-		<div className="flex items-center justify-between">
+		<div className="flex flex-wrap items-center justify-between gap-2">
 			<h2 className="m-0 text-lg font-semibold text-slate-100">{title}</h2>
-			<div className="flex gap-2">{actions}</div>
+			<div className="flex flex-wrap gap-2 w-full sm:w-auto justify-end">{actions}</div>
 		</div>
 		<div className="mt-3 text-slate-200">{children}</div>
 	</section>
@@ -92,8 +92,14 @@ const TextArea = ({ label, value, onChange, placeholder, rows = 3 }) => (
 	</label>
 );
 
-const Button = ({ children, onClick, kind = "primary", disabled, title }) => {
-	const base = "px-3 py-2 rounded-xl text-sm transition focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed";
+const Button = ({ children, onClick, kind = "primary", disabled, title, size = "md" }) => {
+	const sizeCls =
+		size === "lg"
+			? "px-4 py-2.5 rounded-2xl text-sm"
+			: size === "sm"
+			? "px-2.5 py-1.5 rounded-lg text-xs"
+			: "px-3 py-2 rounded-xl text-sm";
+	const base = `${sizeCls} transition focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed`;
 	const variants = {
 		primary:
 			"group relative overflow-hidden bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow hover:shadow-indigo-900/30 focus:ring-2 focus:ring-indigo-400/60",
@@ -129,8 +135,10 @@ const EncounterCreator = ({ isDM, currentUid }) => {
 			const list = [];
 			snap.forEach((d) => {
 				const data = d.data();
+				// Prefer the auth UID stored in the user document, fallback to doc id
+				const authUid = data?.uid || d.id;
 				list.push({
-					uid: d.id,
+					uid: authUid,
 					characterId: data.characterId || "",
 					email: data.email || "",
 				});
@@ -186,7 +194,7 @@ const EncounterCreator = ({ isDM, currentUid }) => {
 			const encRef = doc(collection(db, "encounters"));
 			batch.set(encRef, {
 				name: name.trim(),
-				status: "draft",
+				status: "published",
 				createdAt: serverTimestamp(),
 				createdBy: currentUid,
 				participants,
@@ -224,21 +232,21 @@ const EncounterCreator = ({ isDM, currentUid }) => {
 
 		return (
 			<Section
-				title="Create Encounter"
-				actions={<Button onClick={createEncounter} disabled={!canCreate}>Create (draft)</Button>}
+					title="Create Encounter"
+					actions={<Button size="lg" onClick={createEncounter} disabled={!canCreate}>Crea Encounter</Button>}
 			>
-				<TextInput label="Encounter name" value={name} onChange={setName} placeholder="e.g., Goblin Ambush" />
+				<div className="grid grid-cols-1 gap-4">
+					<TextInput label="Encounter name" value={name} onChange={setName} placeholder="e.g., Goblin Ambush" />
 
-						<div className="grid grid-cols-1 gap-3">
 					<div>
 						<div className="text-xs text-slate-300 mb-1.5">Add player by Character ID</div>
-						<div className="flex gap-2">
+						<div className="flex flex-wrap gap-2 items-center">
 							<input
 								value={singleInput}
 								onChange={(e) => setSingleInput(e.target.value)}
 								placeholder="Exact characterId"
 								list="characterIdOptions"
-								className="flex-1 px-3 py-2 rounded-md border border-slate-700/60 bg-slate-900/60 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+								className="min-w-0 flex-1 px-3 py-2 rounded-md border border-slate-700/60 bg-slate-900/60 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
 							/>
 							<datalist id="characterIdOptions">
 								{assignableUsers
@@ -248,16 +256,22 @@ const EncounterCreator = ({ isDM, currentUid }) => {
 										<option key={u.uid} value={u.characterId} />
 									))}
 							</datalist>
-							<Button kind="secondary" onClick={onAddSingle} disabled={!singleInput.trim()}>Add</Button>
-									<Button
-										kind="secondary"
-										onClick={onAddAll}
-										disabled={assignableUsers.filter((u) => !selected.some((s) => s.uid === u.uid)).length === 0}
-										title="Aggiungi tutti i giocatori disponibili"
-									>
-										Aggiungi tutti
-									</Button>
+							<div className="shrink-0">
+								<Button size="sm" kind="secondary" onClick={onAddSingle} disabled={!singleInput.trim()}>Add</Button>
+							</div>
+							<div className="shrink-0">
+								<Button
+									size="sm"
+									kind="secondary"
+									onClick={onAddAll}
+									disabled={assignableUsers.filter((u) => !selected.some((s) => s.uid === u.uid)).length === 0}
+									title="Aggiungi tutti i giocatori disponibili"
+								>
+									Aggiungi tutti
+								</Button>
+							</div>
 						</div>
+						<div className="mt-1 text-[11px] text-slate-400">Suggerimento: inizia a digitare per vedere le opzioni.</div>
 					</div>
 
 					{notFound.length > 0 && (
@@ -268,7 +282,7 @@ const EncounterCreator = ({ isDM, currentUid }) => {
 
 					<div>
 						<div className="text-xs text-slate-300 mb-1.5">Selected players</div>
-						<div>
+						<div className="min-h-[2.25rem] rounded-xl border border-slate-700/60 bg-slate-900/40 p-2">
 							{selected.length === 0 && <span className="text-slate-400">None selected yet</span>}
 							{selected.map((u) => (
 								<Chip key={u.uid} onRemove={() => removeSelected(u.uid)}>
@@ -287,46 +301,58 @@ const EncountersList = ({ isDM, currentUid }) => {
 	const [loading, setLoading] = useState(true);
 	const [expanded, setExpanded] = useState({}); // { [encounterId]: true }
 	const mountedRef = useRef(false);
-	const { user } = useAuth();
+	const { user, userData } = useAuth();
 
 		useEffect(() => {
 			if (!user) return;
 			const baseColl = collection(db, "encounters");
-			const qRef = isDM
-				? baseColl
-				: query(baseColl, where("participantIds", "array-contains", user.uid), where("status", "in", ["draft", "published"]));
-
-			// Realtime: DM sees all; players see only their encounters
-			const unsub = onSnapshot(qRef, (snap) => {
-			const rows = [];
-			snap.forEach((d) => {
-				const data = d.data();
-				if (!data) return;
-					// Client-side hide deleted just in case
-					if (data.status === "deleted") return;
-				if (isDM) {
-					rows.push({ id: d.id, ...data });
-				} else {
+			// DM sees all; non-DM see by UID or by characterId
+			if (isDM) {
+				const unsubAll = onSnapshot(baseColl, (snap) => {
+					const rows = [];
+					snap.forEach((d) => {
+						const data = d.data();
+						if (!data || data.status === "deleted") return;
 						rows.push({ id: d.id, ...data });
-				}
-			});
-			// Sort by createdAt desc
-			rows.sort((a, b) => {
-				const ta = a.createdAt?.toMillis?.() || 0;
-				const tb = b.createdAt?.toMillis?.() || 0;
-				return tb - ta;
-			});
-			setEncounters(rows);
-			setLoading(false);
-		});
-		return () => unsub();
-	}, [isDM, user]);
+					});
+					rows.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+					setEncounters(rows);
+					setLoading(false);
+				});
+				return () => unsubAll();
+			}
+
+			const unsubs = [];
+			const byId = new Map();
+			const applySnap = (snap) => {
+				snap.forEach((d) => {
+					const data = d.data();
+					if (!data || data.status === "deleted") return;
+					byId.set(d.id, { id: d.id, ...data });
+				});
+				const rows = Array.from(byId.values());
+				rows.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+				setEncounters(rows);
+				setLoading(false);
+			};
+
+			// Query by participant UID
+			unsubs.push(
+				onSnapshot(query(baseColl, where("participantIds", "array-contains", user.uid)), applySnap)
+			);
+			// Query by characterId if available
+			const cid = userData?.characterId;
+			if (cid) {
+				unsubs.push(
+					onSnapshot(query(baseColl, where("participantCharacterIds", "array-contains", cid)), applySnap)
+				);
+			}
+			return () => unsubs.forEach((u) => u());
+		}, [isDM, user, userData?.characterId]);
 
 	const setStatus = async (id, status) => {
 		try {
-			await updateDoc(doc(db, "encounters", id), {
-				status,
-			});
+			await updateDoc(doc(db, "encounters", id), { status });
 		} catch (e) {
 			console.error("Failed to update status", e);
 			alert("Failed to update encounter status.");
@@ -355,21 +381,14 @@ const EncountersList = ({ isDM, currentUid }) => {
 										<div key={e.id} className="border border-slate-700/50 rounded-2xl p-3 bg-slate-900/60 grid gap-2">
 											<div className="flex items-center justify-between gap-2">
 									<div>
-													<div className="font-semibold text-slate-100">{e.name || "Untitled"}</div>
-										<div className="text-xs text-slate-400">Status: {e.status}</div>
+												<div className="font-semibold text-slate-100">{e.name || "Untitled"}</div>
 									</div>
-												<div className="flex gap-2 items-center">
+												<div className="flex flex-wrap gap-2 items-center justify-end">
 													<Button kind="secondary" onClick={() => toggleExpand(e.id)}>
 														{expanded[e.id] ? "Nascondi" : "Espandi"}
 													</Button>
 													{isDM && (
 														<>
-															{e.status !== "published" && (
-																<Button kind="primary" onClick={() => setStatus(e.id, "published")}>Publish</Button>
-															)}
-															{e.status !== "draft" && (
-																<Button kind="secondary" onClick={() => setStatus(e.id, "draft")}>Mark Draft</Button>
-															)}
 															<Button kind="danger" onClick={() => handleDelete(e.id, e.name)}>Delete</Button>
 														</>
 													)}
@@ -407,11 +426,16 @@ const EncountersList = ({ isDM, currentUid }) => {
 					const [dadiAnimaByLevel, setDadiAnimaByLevel] = useState([]);
 					// Self-edit state for the current participant
 					const [selfState, setSelfState] = useState({ hpCurrent: "", hpTemp: "", manaCurrent: "", conditions: "", notes: "" });
+					// Store the key of my participant doc (could be uid or characterId for legacy data)
+					const [myDocKey, setMyDocKey] = useState(null);
 
+					// Determine if the current user is a participant using the live subcollection snapshot
 					const isParticipant = useMemo(() => {
 						if (!user) return false;
-						return Array.isArray(encounter.participantIds) && encounter.participantIds.includes(user.uid);
-					}, [user, encounter.participantIds]);
+						const cid = userData?.characterId;
+						const keys = Object.keys(participantsMap || {});
+						return keys.includes(user.uid) || (cid ? keys.includes(cid) : false);
+					}, [user, userData?.characterId, participantsMap]);
 
 					useEffect(() => {
 						// Load dadiAnimaByLevel once
@@ -442,20 +466,22 @@ const EncountersList = ({ isDM, currentUid }) => {
 						return () => unsub();
 					}, [encounter.id]);
 
-					// Populate self edit form when my doc changes
+					// Determine my participant document key and populate self edit form
 					useEffect(() => {
 						if (!user) return;
-						const me = participantsMap[user.uid];
-						if (me) {
+						const cid = userData?.characterId;
+						const candidate = participantsMap[user.uid] || (cid ? participantsMap[cid] : null);
+						if (candidate) {
+							setMyDocKey(participantsMap[user.uid] ? user.uid : cid || null);
 							setSelfState({
-								hpCurrent: me?.hp?.current ?? "",
-								hpTemp: me?.hp?.temp ?? "",
-								manaCurrent: me?.mana?.current ?? "",
-								conditions: Array.isArray(me?.conditions) ? me.conditions.join(", ") : "",
-								notes: me?.notes ?? "",
+								hpCurrent: candidate?.hp?.current ?? "",
+								hpTemp: candidate?.hp?.temp ?? "",
+								manaCurrent: candidate?.mana?.current ?? "",
+								conditions: Array.isArray(candidate?.conditions) ? candidate.conditions.join(", ") : "",
+								notes: candidate?.notes ?? "",
 							});
 						}
-					}, [participantsMap, user]);
+					}, [participantsMap, user, userData?.characterId]);
 
 					const getDexTot = () => {
 						const base = userData?.Parametri?.Base || {};
@@ -480,8 +506,9 @@ const EncountersList = ({ isDM, currentUid }) => {
 					const saveInitiative = async (total, faces, modifier) => {
 						if (!user) return;
 						try {
+							const key = myDocKey || user.uid;
 							await setDoc(
-								doc(db, "encounters", encounter.id, "participants", user.uid),
+								doc(db, "encounters", encounter.id, "participants", key),
 								{
 									uid: user.uid,
 									characterId: userData?.characterId || null,
@@ -509,8 +536,9 @@ const EncountersList = ({ isDM, currentUid }) => {
 							.map((s) => s.trim())
 							.filter(Boolean);
 						try {
+							const key = myDocKey || user.uid;
 							await setDoc(
-								doc(db, "encounters", encounter.id, "participants", user.uid),
+								doc(db, "encounters", encounter.id, "participants", key),
 								{
 									uid: user.uid,
 									hp: { current: selfState.hpCurrent === "" ? null : Number(selfState.hpCurrent), temp: selfState.hpTemp === "" ? 0 : Number(selfState.hpTemp) },
@@ -527,28 +555,47 @@ const EncountersList = ({ isDM, currentUid }) => {
 						}
 					};
 
-					// Prefer reading participants from the subcollection; if absent, fall back to the parent list.
-					const participants = encounter.participants || [];
-					const rows = participants.map((p) => {
-						const init = initMap[p.uid] || null;
+					// Build rows directly from the live participants subcollection for real-time updates
+					const rows = Object.entries(participantsMap).map(([docKey, data]) => {
+						const initiativeVal = data?.initiative?.value ?? (typeof data?.initiative === "number" ? data.initiative : null);
 						return {
-							uid: p.uid,
-							label: p.characterId || p.email || p.uid,
-							initiative: init?.value ?? (init && typeof init === "number" ? init : null),
-							meta: init && typeof init === "object" ? init : init ? { value: init } : null,
+							key: docKey,
+							uid: data?.uid || docKey,
+							label: data?.characterId || data?.email || data?.uid || docKey,
+							initiative: initiativeVal,
+							meta: data && typeof data.initiative === "object" ? data.initiative : initiativeVal != null ? { value: initiativeVal } : null,
 						};
 					});
 					rows.sort((a, b) => (b.initiative ?? -Infinity) - (a.initiative ?? -Infinity));
 
 					return (
 						<div className="mt-2 rounded-xl border border-slate-700/50 bg-slate-900/50 p-3">
-							<div className="flex items-center justify-between mb-2">
+							<div className="flex items-center justify-between mb-2 gap-2">
 								<div className="text-sm text-slate-300">Dettagli Incontro</div>
-								{isParticipant && (
-									<Button kind="primary" onClick={startRoll}>
-										Tira Iniziativa (Dado Anima + Destrezza)
-									</Button>
-								)}
+								<div className="flex flex-wrap gap-2 justify-end">
+									{isParticipant && (
+										<Button kind="primary" onClick={startRoll}>
+											Tira Iniziativa (Dado Anima + Destrezza)
+										</Button>
+									)}
+									{isDM && (
+										<Button
+											kind="danger"
+											onClick={async () => {
+												const ok = window.confirm(`Sei sicuro di voler eliminare l'incontro${encounter.name ? ` "${encounter.name}"` : ""}?\nQuesta azione lo sposterà nello stato 'deleted'.`);
+												if (!ok) return;
+												try {
+													await updateDoc(doc(db, "encounters", encounter.id), { status: "deleted" });
+												} catch (e) {
+													console.error(e);
+													alert("Failed to delete");
+												}
+											}}
+										>
+											Delete
+										</Button>
+									)}
+								</div>
 							</div>
 
 							{isParticipant && (
@@ -604,12 +651,14 @@ const EncountersList = ({ isDM, currentUid }) => {
 											<th className="px-3 py-2 font-medium">Giocatore</th>
 											<th className="px-3 py-2 text-center font-medium">Iniziativa</th>
 											<th className="px-3 py-2 text-center font-medium">Dettagli</th>
-											<th className="px-3 py-2 text-center font-medium">HP/Mana</th>
+											{isDM && (
+												<th className="px-3 py-2 text-center font-medium">HP/Mana</th>
+											)}
 										</tr>
 									</thead>
 									<tbody className="divide-y divide-white/5">
 										{rows.map((r) => (
-											<tr key={r.uid} className="odd:bg-transparent even:bg-white/[0.02]">
+											<tr key={r.key} className="odd:bg-transparent even:bg-white/[0.02]">
 												<td className="px-3 py-2 text-white">{r.label}</td>
 												<td className="px-3 py-2 text-center">
 													{r.initiative !== null ? (
@@ -623,14 +672,16 @@ const EncountersList = ({ isDM, currentUid }) => {
 												<td className="px-3 py-2 text-center text-xs text-slate-400">
 													{r.meta ? `d${r.meta.faces} ${r.meta.modifier ? "+ " + r.meta.modifier : ""}` : ""}
 												</td>
-												<td className="px-3 py-2 text-center text-xs text-slate-400">
-													{(() => {
-														const p = participantsMap[r.uid] || {};
-														const hp = p.hp || {};
-														const mana = p.mana || {};
-														return `HP ${hp.current ?? "?"}${hp.temp ? ` (+${hp.temp})` : ""} / Mana ${mana.current ?? "?"}`;
-													})()}
-												</td>
+												{isDM && (
+													<td className="px-3 py-2 text-center text-xs text-slate-400">
+														{(() => {
+															const p = participantsMap[r.key] || {};
+															const hp = p.hp || {};
+															const mana = p.mana || {};
+															return `HP ${hp.current ?? "?"}${hp.temp ? ` (+${hp.temp})` : ""} / Mana ${mana.current ?? "?"}`;
+														})()}
+													</td>
+												)}
 											</tr>
 										))}
 									</tbody>
@@ -653,31 +704,142 @@ const EncountersList = ({ isDM, currentUid }) => {
 					);
 				};
 
+// Sidebar list of encounters (click to view details on the right)
+const EncounterSidebarList = ({ isDM, onSelect, selectedId }) => {
+	const { user, userData } = useAuth();
+    const [encounters, setEncounters] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+	useEffect(() => {
+		if (!user) return;
+		const baseColl = collection(db, "encounters");
+		if (isDM) {
+			const unsubAll = onSnapshot(baseColl, (snap) => {
+				const rows = [];
+				snap.forEach((d) => {
+					const data = d.data();
+					if (!data || data.status === "deleted") return;
+					rows.push({ id: d.id, ...data });
+				});
+				rows.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+				setEncounters(rows);
+				setLoading(false);
+			});
+			return () => unsubAll();
+		}
+
+		const unsubs = [];
+		const byId = new Map();
+		const applySnap = (snap) => {
+			snap.forEach((d) => {
+				const data = d.data();
+				if (!data || data.status === "deleted") return;
+				byId.set(d.id, { id: d.id, ...data });
+			});
+			const rows = Array.from(byId.values());
+			rows.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+			setEncounters(rows);
+			setLoading(false);
+		};
+
+		// by UID
+		unsubs.push(onSnapshot(query(baseColl, where("participantIds", "array-contains", user.uid)), applySnap));
+		// by characterId
+		const cid = userData?.characterId;
+		if (cid) {
+			unsubs.push(onSnapshot(query(baseColl, where("participantCharacterIds", "array-contains", cid)), applySnap));
+		}
+		return () => unsubs.forEach((u) => u());
+	}, [isDM, user, userData?.characterId]);
+
+    useEffect(() => {
+        if (!onSelect) return;
+        if (loading) return;
+        if (selectedId) return;
+        if (encounters.length > 0) onSelect(encounters[0]);
+    }, [onSelect, loading, selectedId, encounters]);
+
+    if (loading) return <div className="text-slate-300">Loading encounters…</div>;
+
+    return (
+        <Section title="Encounters">
+            {encounters.length === 0 ? (
+                <div className="text-slate-400">No encounters yet.</div>
+            ) : (
+                <div className="grid gap-2">
+                    {encounters.map((e) => {
+                        const isSelected = selectedId === e.id;
+                        return (
+                            <button
+                                key={e.id}
+                                onClick={() => onSelect && onSelect(e)}
+                                className={`text-left border rounded-2xl p-3 transition bg-slate-900/60 border-slate-700/50 hover:border-indigo-600/60 hover:bg-slate-900/80 ${
+                                    isSelected ? "ring-2 ring-indigo-500/60" : ""
+                                }`}
+                            >
+                                <div className="flex items-center justify-between gap-2">
+									<div>
+										<div className="font-semibold text-slate-100 truncate">{e.name || "Untitled"}</div>
+									</div>
+                                    <div className="text-xs text-slate-400">
+                                        {(e.participants || []).length} players
+                                    </div>
+                                </div>
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+        </Section>
+    );
+};
+
 const CombatPage = () => {
 	const { user, userData } = useAuth();
 	const isDM = (userData?.role || "") === "dm"; // Webmaster is NOT treated as DM here
 
-		return (
-			<div className="relative w-full min-h-screen overflow-x-hidden">
-				{/* Background overlay similar to Home */}
-				<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.06),transparent_60%),radial-gradient(circle_at_80%_70%,rgba(255,255,255,0.04),transparent_65%)] mix-blend-overlay" />
+	const [selectedEncounter, setSelectedEncounter] = useState(null);
 
-				<div className="relative z-10 flex flex-col">
-					<main className="flex flex-col p-6 w-full gap-6 max-w-5xl mx-auto">
-						<h1 className="text-2xl font-semibold text-slate-100">Combat Tool</h1>
+	return (
+		<div className="relative w-full min-h-screen overflow-hidden">
+			{/* Background overlay similar to Home */}
+			<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.06),transparent_60%),radial-gradient(circle_at_80%_70%,rgba(255,255,255,0.04),transparent_65%)] mix-blend-overlay" />
 
-						{!user && <div className="text-slate-300">Please log in to access encounters.</div>}
+			<div className="relative z-10 flex flex-col h-full">
+				<header className="px-6 pt-6">
+					<h1 className="text-2xl font-semibold text-slate-100">Combat Tool</h1>
+				</header>
 
-						{user && (
-							<>
-								<EncounterCreator isDM={isDM} currentUid={user.uid} />
-								<EncountersList isDM={isDM} currentUid={user.uid} />
-							</>
-						)}
-					</main>
-				</div>
+				<main className="flex-1 px-6 pb-6 pt-4 w-full">
+					{!user && <div className="text-slate-300">Please log in to access encounters.</div>}
+
+					{user && (
+						<div className="grid grid-cols-1 md:grid-cols-[20rem_1fr] gap-6 items-start">
+							<div className="md:sticky md:top-0 md:self-start md:max-h-[calc(100vh-5rem)] overflow-y-auto pr-1">
+								{isDM && <EncounterCreator isDM={isDM} currentUid={user.uid} />}
+								<EncounterSidebarList
+									isDM={isDM}
+									onSelect={setSelectedEncounter}
+									selectedId={selectedEncounter?.id}
+								/>
+							</div>
+							<div className="min-h-[50vh]">
+								{selectedEncounter ? (
+									<Section title={selectedEncounter.name || "Encounter"}>
+										<EncounterDetails encounter={selectedEncounter} isDM={isDM} />
+									</Section>
+								) : (
+									<Section title="Encounter Details">
+										<div className="text-slate-400">Seleziona un incontro dalla lista a sinistra.</div>
+									</Section>
+								)}
+							</div>
+						</div>
+					)}
+				</main>
 			</div>
-		);
+		</div>
+	);
 };
 
 export default CombatPage;
