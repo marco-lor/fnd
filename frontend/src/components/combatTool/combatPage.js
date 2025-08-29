@@ -3,6 +3,7 @@ import { useAuth } from "../../AuthContext";
 import EncounterCreator from "./elements/EncounterCreator";
 import EncounterSidebarList from "./elements/EncounterSidebarList";
 import EncounterDetails from "./elements/EncounterDetails";
+import EncounterLog from "./elements/EncounterLog";
 import { Section } from "./elements/ui";
 
 const CombatPage = () => {
@@ -24,8 +25,8 @@ const CombatPage = () => {
 				<main className="flex-1 px-6 pb-6 pt-4 w-full">
 					{!user && <div className="text-slate-300">Please log in to access encounters.</div>}
 
-					{user && (
-						<div className="grid grid-cols-1 md:grid-cols-[20rem_1fr] gap-6 items-start">
+						{user && (
+							<div className="grid grid-cols-1 md:grid-cols-[20rem_1fr_20rem] gap-6 items-start">
 							<div className="md:sticky md:top-0 md:self-start md:max-h-[calc(100vh-5rem)] overflow-y-auto pr-1">
 								{isDM && <EncounterCreator isDM={isDM} currentUid={user.uid} />}
 								<EncounterSidebarList
@@ -34,7 +35,7 @@ const CombatPage = () => {
 									selectedId={selectedEncounter?.id}
 								/>
 							</div>
-							<div className="min-h-[50vh]">
+								<div className="min-h-[50vh]">
 								{selectedEncounter ? (
 									<Section title={selectedEncounter.name || "Encounter"}>
 										<EncounterDetails encounter={selectedEncounter} isDM={isDM} />
@@ -45,6 +46,9 @@ const CombatPage = () => {
 									</Section>
 								)}
 							</div>
+								<div className="md:sticky md:top-0 md:self-start md:max-h-[calc(100vh-5rem)] overflow-y-auto pr-1">
+									{selectedEncounter && <EncounterLog encounterId={selectedEncounter.id} />}
+								</div>
 						</div>
 					)}
 				</main>

@@ -9,6 +9,7 @@ import {
     setDoc,
     writeBatch,
     getDocs,
+    addDoc,
 } from "firebase/firestore";
 import DiceRoller from "../../common/DiceRoller";
 import { Button } from "./ui";
@@ -18,8 +19,13 @@ const EncounterDetails = ({ encounter, isDM }) => {
     const [participantsMap, setParticipantsMap] = useState({}); // { uid: full participant doc }
     const [roller, setRoller] = useState({ visible: false, faces: 0, modifier: 0 });
     const [dadiAnimaByLevel, setDadiAnimaByLevel] = useState([]);
-    const [selfState, setSelfState] = useState({ hpCurrent: "", hpTemp: "", manaCurrent: "", conditions: "", notes: "" });
+    // Only keep a personal note for the encounter; HP/Mana are now auto-fetched from user profile
+    const [selfNote, setSelfNote] = useState("");
     const [myDocKey, setMyDocKey] = useState(null);
+    // Live encounter meta (link mode)
+    const [encMeta, setEncMeta] = useState({});
+    // Live users map (uid -> user doc) when encounter is linked to user parameters
+    const [liveUsersMap, setLiveUsersMap] = useState({});
 
     const isParticipant = useMemo(() => {
         if (!user) return false;
@@ -57,21 +63,53 @@ const EncounterDetails = ({ encounter, isDM }) => {
         };
     }, [encounter.id]);
 
+    // Listen to encounter meta (to know if it's detached from user params)
+    useEffect(() => {
+        let active = true;
+        const encRef = doc(db, "encounters", encounter.id);
+        const unsub = onSnapshot(encRef, (snap) => {
+            if (!active) return;
+            setEncMeta(snap.data() || {});
+        });
+        return () => {
+            active = false;
+            unsub();
+        };
+    }, [encounter.id]);
+
     useEffect(() => {
         if (!user) return;
         const cid = userData?.characterId;
         const candidate = participantsMap[user.uid] || (cid ? participantsMap[cid] : null);
         if (candidate) {
             setMyDocKey(participantsMap[user.uid] ? user.uid : cid || null);
-            setSelfState({
-                hpCurrent: candidate?.hp?.current ?? "",
-                hpTemp: candidate?.hp?.temp ?? "",
-                manaCurrent: candidate?.mana?.current ?? "",
-                conditions: Array.isArray(candidate?.conditions) ? candidate.conditions.join(", ") : "",
-                notes: candidate?.notes ?? "",
-            });
+            setSelfNote(candidate?.notes ?? "");
         }
     }, [participantsMap, user, userData?.characterId]);
+
+    // Subscribe to user docs for all participants (only when linked to user params)
+    useEffect(() => {
+        const linkMode = encMeta?.linkMode || "live"; // default live
+        const unsubs = [];
+        if (linkMode !== "detached") {
+            const uids = Object.values(participantsMap)
+                .map((p) => p?.uid)
+                .filter(Boolean);
+            const unique = Array.from(new Set(uids));
+            unique.forEach((uid) => {
+                const uRef = doc(db, "users", uid);
+                const unsub = onSnapshot(uRef, (snap) => {
+                    setLiveUsersMap((prev) => ({ ...prev, [uid]: snap.data() || null }));
+                });
+                unsubs.push(unsub);
+            });
+        } else {
+            setLiveUsersMap({});
+        }
+        return () => {
+            unsubs.forEach((u) => u());
+        };
+    }, [encMeta?.linkMode, JSON.stringify(Object.values(participantsMap).map((p) => p?.uid).sort())]);
 
     const getDexTot = () => {
         const base = userData?.Parametri?.Base || {};
@@ -93,7 +131,7 @@ const EncounterDetails = ({ encounter, isDM }) => {
         setRoller({ visible: true, faces, modifier });
     };
 
-    const saveInitiative = async (total, faces, modifier) => {
+    const saveInitiative = async (total, faces, modifier, details) => {
         if (!user) return;
         try {
             const key = myDocKey || user.uid;
@@ -113,28 +151,42 @@ const EncounterDetails = ({ encounter, isDM }) => {
                 },
                 { merge: true }
             );
+
+            // Write to shared log
+            try {
+                const display = userData?.characterId || user?.email || user.uid;
+                const expr = `d${faces}${modifier ? (modifier > 0 ? `+${modifier}` : `${modifier}`) : ""}`;
+                await addDoc(collection(db, "encounters", encounter.id, "logs"), {
+                    type: "roll",
+                    kind: "initiative",
+                    by: display,
+                    uid: user.uid,
+                    description: `Iniziativa (Destrezza ${modifier >= 0 ? "+" : ""}${modifier})`,
+                    expression: expr,
+                    total,
+                    rolls: details?.rolls || [],
+                    modifier,
+                    faces,
+                    createdAt: serverTimestamp(),
+                });
+            } catch (logErr) {
+                console.warn("Failed to write roll log", logErr);
+            }
         } catch (e) {
             console.error("Failed to save initiative", e);
             alert("Non hai i permessi per salvare l'iniziativa. Contatta il DM.");
         }
     };
 
-    const saveSelfState = async () => {
+    const saveSelfNote = async () => {
         if (!user) return;
-        const conditions = selfState.conditions
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean);
         try {
             const key = myDocKey || user.uid;
             await setDoc(
                 doc(db, "encounters", encounter.id, "participants", key),
                 {
                     uid: user.uid,
-                    hp: { current: selfState.hpCurrent === "" ? null : Number(selfState.hpCurrent), temp: selfState.hpTemp === "" ? 0 : Number(selfState.hpTemp) },
-                    mana: { current: selfState.manaCurrent === "" ? null : Number(selfState.manaCurrent) },
-                    conditions,
-                    notes: selfState.notes,
+                    notes: selfNote,
                     updatedAt: serverTimestamp(),
                 },
                 { merge: true }
@@ -166,6 +218,38 @@ const EncounterDetails = ({ encounter, isDM }) => {
                         <Button kind="primary" onClick={startRoll}>Tira Iniziativa (Dado Anima + Destrezza)</Button>
                     )}
                     {isDM && (
+                        <>
+                        <Button
+                            kind="secondary"
+                            onClick={async () => {
+                                if (encMeta?.linkMode === "detached") return; // already detached
+                                const ok = window.confirm("Staccare l'incontro dai parametri utente? Verranno salvati gli HP/Mana attuali come istantanea.");
+                                if (!ok) return;
+                                try {
+                                    const batch = writeBatch(db);
+                                    // Snapshot current stats into participant docs
+                                    for (const [pKey, pdata] of Object.entries(participantsMap)) {
+                                        const uid = pdata?.uid || pKey;
+                                        const u = liveUsersMap[uid];
+                                        const hpC = u?.stats?.hpCurrent ?? null;
+                                        const manaC = u?.stats?.manaCurrent ?? null;
+                                        const pRef = doc(db, "encounters", encounter.id, "participants", pKey);
+                                        batch.set(pRef, { hp: { current: hpC, temp: 0 }, mana: { current: manaC } }, { merge: true });
+                                    }
+                                    // Mark encounter as detached
+                                    const encRef = doc(db, "encounters", encounter.id);
+                                    batch.set(encRef, { linkMode: "detached", detachedAt: serverTimestamp() }, { merge: true });
+                                    await batch.commit();
+                                } catch (e) {
+                                    console.error(e);
+                                    alert("Impossibile staccare l'incontro.");
+                                }
+                            }}
+                            disabled={encMeta?.linkMode === "detached"}
+                            title={encMeta?.linkMode === "detached" ? "Già staccato" : "Stacca dai parametri utente"}
+                        >
+                            {encMeta?.linkMode === "detached" ? "Staccato" : "Stacca (HP/Mana)"}
+                        </Button>
                         <Button
                             kind="danger"
                             onClick={async () => {
@@ -191,53 +275,23 @@ const EncounterDetails = ({ encounter, isDM }) => {
                         >
                             Delete
                         </Button>
+                        </>
                     )}
                 </div>
             </div>
 
             {isParticipant && (
-                <div className="mb-3 grid gap-2 md:grid-cols-2">
-                    <div className="text-xs text-slate-400 md:col-span-2">Aggiorna il tuo stato</div>
-                    <div className="flex gap-2">
-                        <input
-                            type="number"
-                            value={selfState.hpCurrent}
-                            onChange={(e) => setSelfState((s) => ({ ...s, hpCurrent: e.target.value }))}
-                            placeholder="HP attuali"
-                            className="w-full px-3 py-2 rounded-md border border-slate-700/60 bg-slate-900/60 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-                        />
-                        <input
-                            type="number"
-                            value={selfState.hpTemp}
-                            onChange={(e) => setSelfState((s) => ({ ...s, hpTemp: e.target.value }))}
-                            placeholder="HP temporanei"
-                            className="w-full px-3 py-2 rounded-md border border-slate-700/60 bg-slate-900/60 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-                        />
-                    </div>
-                    <div className="flex gap-2">
-                        <input
-                            type="number"
-                            value={selfState.manaCurrent}
-                            onChange={(e) => setSelfState((s) => ({ ...s, manaCurrent: e.target.value }))}
-                            placeholder="Mana attuale"
-                            className="w-full px-3 py-2 rounded-md border border-slate-700/60 bg-slate-900/60 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-                        />
-                        <input
-                            value={selfState.conditions}
-                            onChange={(e) => setSelfState((s) => ({ ...s, conditions: e.target.value }))}
-                            placeholder="Condizioni (separate da virgola)"
-                            className="w-full px-3 py-2 rounded-md border border-slate-700/60 bg-slate-900/60 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-                        />
-                    </div>
+                <div className="mb-3 grid gap-2">
+                    <div className="text-xs text-slate-400">Note personali per il combattimento</div>
                     <textarea
                         rows={2}
-                        value={selfState.notes}
-                        onChange={(e) => setSelfState((s) => ({ ...s, notes: e.target.value }))}
-                        placeholder="Note personali per il combattimento"
+                        value={selfNote}
+                        onChange={(e) => setSelfNote(e.target.value)}
+                        placeholder="Aggiungi note utili per questo incontro"
                         className="w-full px-3 py-2 rounded-md border border-slate-700/60 bg-slate-900/60 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
                     />
                     <div>
-                        <Button kind="secondary" onClick={saveSelfState}>Salva Stato</Button>
+                        <Button kind="secondary" onClick={saveSelfNote}>Salva Note</Button>
                     </div>
                 </div>
             )}
@@ -248,7 +302,6 @@ const EncounterDetails = ({ encounter, isDM }) => {
                         <tr>
                             <th className="px-3 py-2 font-medium">Giocatore</th>
                             <th className="px-3 py-2 text-center font-medium">Iniziativa</th>
-                            <th className="px-3 py-2 text-center font-medium">Dettagli</th>
                             {isDM && (
                                 <th className="px-3 py-2 text-center font-medium">HP/Mana</th>
                             )}
@@ -267,12 +320,18 @@ const EncounterDetails = ({ encounter, isDM }) => {
                                         <span className="text-slate-500">—</span>
                                     )}
                                 </td>
-                                <td className="px-3 py-2 text-center text-xs text-slate-400">
-                                    {r.meta ? `d${r.meta.faces} ${r.meta.modifier ? "+ " + r.meta.modifier : ""}` : ""}
-                                </td>
                                 {isDM && (
                                     <td className="px-3 py-2 text-center text-xs text-slate-400">
                                         {(() => {
+                                            const linkMode = encMeta?.linkMode || "live";
+                                            if (linkMode !== "detached") {
+                                                const u = liveUsersMap[r.uid] || {};
+                                                const hpC = u?.stats?.hpCurrent;
+                                                const manaC = u?.stats?.manaCurrent;
+                                                const hpStr = hpC == null ? "?" : hpC;
+                                                const manaStr = manaC == null ? "?" : manaC;
+                                                return `HP ${hpStr} / Mana ${manaStr}`;
+                                            }
                                             const p = participantsMap[r.key] || {};
                                             const hp = p.hp || {};
                                             const mana = p.mana || {};
@@ -292,8 +351,8 @@ const EncounterDetails = ({ encounter, isDM }) => {
                     count={1}
                     modifier={roller.modifier}
                     description={`Iniziativa (d${roller.faces} + ${roller.modifier})`}
-                    onComplete={(total) => {
-                        saveInitiative(total, roller.faces, roller.modifier);
+                    onComplete={(total, info) => {
+                        saveInitiative(total, roller.faces, roller.modifier, info);
                         setRoller({ visible: false, faces: 0, modifier: 0 });
                     }}
                 />

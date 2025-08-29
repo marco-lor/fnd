@@ -43,7 +43,7 @@ export default function DiceRoller({ faces, count, modifier, description, onComp
         )}
         {finished && (
           <button
-            onClick={() => onComplete(currentTotal)}
+            onClick={() => onComplete(currentTotal, { rolls: currentRolls, modifier, faces, count, description })}
             aria-label="Close"
             className="absolute top-2 right-3 text-gray-400 hover:text-white text-xl"
           >

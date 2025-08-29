@@ -89,6 +89,7 @@ const EncounterCreator = ({ isDM, currentUid }) => {
                 status: "published",
                 createdAt: serverTimestamp(),
                 createdBy: currentUid,
+                linkMode: "live", // encounter initially linked to user parameters
                 participants,
                 participantIds: participants.map((p) => p.uid),
                 participantCharacterIds: participants.map((p) => p.characterId).filter(Boolean),
@@ -100,9 +101,7 @@ const EncounterCreator = ({ isDM, currentUid }) => {
                     characterId: p.characterId || null,
                     email: p.email || null,
                     initiative: null,
-                    hp: { current: null, temp: 0 },
-                    mana: { current: null },
-                    conditions: [],
+                    // hp/mana/conditions are not stored initially; they will be fetched live from user profile until detached
                     notes: "",
                     updatedAt: serverTimestamp(),
                 });
