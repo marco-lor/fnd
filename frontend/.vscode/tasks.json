@@ -1,0 +1,27 @@
+{
+  "$schema": "vscode://schemas/tasks",
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Deploy Firebase Rules",
+      "type": "shell",
+  "command": "npx firebase deploy --only firestore:rules,storage --project fatins",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Deploy Hosting",
+      "type": "shell",
+      "command": "npx firebase deploy --only hosting --project fatins",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Start Emulators (FS/Storage/Functions/Hosting)",
+      "type": "shell",
+      "command": "npx firebase emulators:start --only firestore,storage,functions,hosting",
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}

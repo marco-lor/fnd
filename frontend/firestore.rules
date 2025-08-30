@@ -1,0 +1,129 @@
+// Firestore Security Rules
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDocPath(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+
+    function authedCharacterId() {
+      return isSignedIn() && exists(userDocPath(request.auth.uid))
+        ? get(userDocPath(request.auth.uid)).data.characterId
+        : null;
+    }
+
+    function isDM() {
+      return isSignedIn()
+        && exists(userDocPath(request.auth.uid))
+        && get(userDocPath(request.auth.uid)).data.role == "dm";
+    }
+
+    function isWebmaster() {
+      return isSignedIn()
+        && exists(userDocPath(request.auth.uid))
+        && get(userDocPath(request.auth.uid)).data.role == "webmaster";
+    }
+
+    function isPlayer() {
+      return isSignedIn()
+        && exists(userDocPath(request.auth.uid))
+        && get(userDocPath(request.auth.uid)).data.role == "player";
+    }
+
+    // Encounter helpers
+    function encounterPath(encounterId) {
+      return /databases/$(database)/documents/encounters/$(encounterId);
+    }
+
+    // Can the authed user read this encounter document (by uid or characterId), excluding deleted ones?
+    // Use resource.data when available (reading the encounter doc itself) to avoid extra reads.
+    function canReadEncounterDoc() {
+      return isSignedIn()
+        && resource.data.status != "deleted"
+        && (
+             (request.auth.uid in resource.data.participantIds)
+             || (authedCharacterId() != null
+                 && authedCharacterId() in resource.data.participantCharacterIds)
+           );
+    }
+
+    // Same check when evaluating access from a subcollection (need to get the parent encounter)
+    function canReadEncounterById(encounterId) {
+      return isSignedIn()
+        && exists(encounterPath(encounterId))
+        && get(encounterPath(encounterId)).data.status != "deleted"
+        && (
+             (request.auth.uid in get(encounterPath(encounterId)).data.participantIds)
+             || (authedCharacterId() != null
+                 && authedCharacterId() in get(encounterPath(encounterId)).data.participantCharacterIds)
+           );
+    }
+
+    // DMs can do everything anywhere
+    match /{document=**} {
+      allow read, write: if isDM();
+    }
+
+    // Users
+    match /users/{userId} {
+      // Owner read, plus webmaster read. (Note: players cannot read other users.)
+      allow read: if isSignedIn() && (request.auth.uid == userId || isWebmaster());
+      // Owner write or webmaster write (DM already covered by global rule)
+      allow write: if isSignedIn() && (request.auth.uid == userId || isWebmaster());
+    }
+
+    // Items
+    match /items/{docId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // Utils
+    match /utils/{docId} {
+      allow read, write: if isSignedIn();
+      match /Razze/{raceId} {
+        allow read: if isSignedIn();
+      }
+    }
+
+    // Encounters
+    match /encounters/{encounterId} {
+      // Read: DM, Webmaster, or participant (by uid or characterId), not deleted
+      allow read: if isDM() || isWebmaster() || canReadEncounterDoc();
+
+      // Create/Update/Delete: DM only (global DM rule already allows this)
+      allow write: if isDM();
+
+      // Per-encounter participants
+      match /participants/{pid} {
+        // Read: DM, Webmaster, or any participant of this encounter
+        allow read: if isDM() || isWebmaster() || canReadEncounterById(encounterId);
+
+        // Create/Update: DM, or the signed-in user updating their own participant doc
+        // The participant doc id may be either the user's uid or their characterId; allow both for the owner.
+        allow create, update: if isDM()
+          || (
+               isSignedIn()
+               && canReadEncounterById(encounterId)
+               && (pid == request.auth.uid || pid == authedCharacterId())
+             );
+
+        // Delete: DM only
+        allow delete: if isDM();
+      }
+
+      // Shared logs — OPEN TO ALL SIGNED-IN USERS (any role)
+      match /logs/{logId} {
+        // Read & Write for any authenticated user; DM still has global allow.
+        allow read, write: if isSignedIn();
+      }
+    }
+  }
+}
