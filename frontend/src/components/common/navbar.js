@@ -233,6 +233,18 @@ const Navbar = () => {
               DM Dashboard
             </button>
           )}
+          {userData?.role === "dm" && (
+            <button
+              onClick={() => navigate("/foes-hub")}
+              className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
+                isActive("/foes-hub")
+                  ? "bg-[#FFA500] text-white font-semibold shadow-md"
+                  : "bg-transparent text-white hover:bg-[#e69500]"
+              }`}
+            >
+              Foes Hub
+            </button>
+          )}
           {userData?.role === "webmaster" && (
             <button
               onClick={() => navigate("/admin")}
