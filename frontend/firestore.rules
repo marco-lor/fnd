@@ -95,16 +95,16 @@ service cloud.firestore {
 
     // Encounters
     match /encounters/{encounterId} {
-      // Read: DM, Webmaster, or participant (by uid or characterId), not deleted
-      allow read: if isDM() || isWebmaster() || canReadEncounterDoc();
+  // Read: DM, Webmaster, or Player (full read like webmaster), or participant (by uid or characterId), not deleted
+  allow read: if isDM() || isWebmaster() || isPlayer() || canReadEncounterDoc();
 
       // Create/Update/Delete: DM only (global DM rule already allows this)
       allow write: if isDM();
 
       // Per-encounter participants
       match /participants/{pid} {
-        // Read: DM, Webmaster, or any participant of this encounter
-        allow read: if isDM() || isWebmaster() || canReadEncounterById(encounterId);
+  // Read: DM, Webmaster, Player (full read like webmaster), or any participant of this encounter
+  allow read: if isDM() || isWebmaster() || isPlayer() || canReadEncounterById(encounterId);
 
         // Create/Update: DM, or the signed-in user updating their own participant doc
         // The participant doc id may be either the user's uid or their characterId; allow both for the owner.

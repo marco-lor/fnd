@@ -25,6 +25,13 @@ const EncounterSidebarList = ({ isDM, onSelect, selectedId }) => {
                 rows.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
                 setEncountersAll(rows);
                 setLoading(false);
+            }, (err) => {
+                if (typeof process !== "undefined" && process.env && process.env.NODE_ENV !== "production") {
+                    // eslint-disable-next-line no-console
+                    console.warn("encounters onSnapshot error (all)", err?.message || err);
+                }
+                setEncountersAll([]);
+                setLoading(false);
             });
             return () => unsubAll();
         }
@@ -42,6 +49,13 @@ const EncounterSidebarList = ({ isDM, onSelect, selectedId }) => {
                 });
                 setEncByUid(rows);
                 setLoading(false);
+            }, (err) => {
+                if (typeof process !== "undefined" && process.env && process.env.NODE_ENV !== "production") {
+                    // eslint-disable-next-line no-console
+                    console.warn("encounters onSnapshot error (by uid)", err?.message || err);
+                }
+                setEncByUid([]);
+                setLoading(false);
             })
         );
 
@@ -56,6 +70,13 @@ const EncounterSidebarList = ({ isDM, onSelect, selectedId }) => {
                         rows.push({ id: d.id, ...data });
                     });
                     setEncByCid(rows);
+                    setLoading(false);
+                }, (err) => {
+                    if (typeof process !== "undefined" && process.env && process.env.NODE_ENV !== "production") {
+                        // eslint-disable-next-line no-console
+                        console.warn("encounters onSnapshot error (by cid)", err?.message || err);
+                    }
+                    setEncByCid([]);
                     setLoading(false);
                 })
             );
