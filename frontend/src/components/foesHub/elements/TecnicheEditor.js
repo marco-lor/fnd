@@ -8,7 +8,7 @@ const TecnicheEditor = ({ value = [], onChange }) => {
     const next = list.map((it, i) => i === idx ? { ...it, ...patch } : it);
     onChange(next);
   };
-  const addItem = () => onChange([...(list || []), { name: '', description: '', imageUrl: '', imagePath: '' }]);
+  const addItem = () => onChange([...(list || []), { name: '', description: '', danni: '', effetti: '', imageUrl: '', imagePath: '' }]);
   const removeItem = (idx) => onChange(list.filter((_, i) => i !== idx));
 
   return (
@@ -46,6 +46,14 @@ const TecnicheEditor = ({ value = [], onChange }) => {
                       )}
                     </div>
                   </div>
+                  <label className="block">
+                    <div className="text-[11px] text-slate-300 mb-1">Danni</div>
+                    <input className="w-full rounded-lg bg-slate-900/60 px-3 py-2 text-white border border-slate-700/60 focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={it.danni || ''} onChange={(e) => setItem(idx, { danni: e.target.value })} />
+                  </label>
+                  <label className="block">
+                    <div className="text-[11px] text-slate-300 mb-1">Effetti</div>
+                    <input className="w-full rounded-lg bg-slate-900/60 px-3 py-2 text-white border border-slate-700/60 focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={it.effetti || ''} onChange={(e) => setItem(idx, { effetti: e.target.value })} />
+                  </label>
                   <label className="block sm:col-span-2">
                     <div className="text-[11px] text-slate-300 mb-1">Description</div>
                     <textarea className="w-full h-20 rounded-lg bg-slate-900/60 px-3 py-2 text-white border border-slate-700/60 focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={it.description || ''} onChange={(e) => setItem(idx, { description: e.target.value })} />

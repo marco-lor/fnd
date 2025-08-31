@@ -13,12 +13,17 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { FiPlus, FiChevronDown, FiChevronRight, FiEdit2, FiTrash2, FiX } from 'react-icons/fi';
+import { FiPlus, FiChevronDown, FiChevronRight, FiEdit2, FiTrash2, FiX, FiCopy } from 'react-icons/fi';
 import { computeParamTotals, deepClone, Pill, SectionTitle } from './elements/utils';
 import { ParametersEditor, ParamTotalsPreview } from './elements/ParamEditors';
 import StatsEditor from './elements/StatsEditor';
 import TecnicheEditor from './elements/TecnicheEditor';
 import SpellsEditor from './elements/SpellsEditor';
+
+// Allow only persisted HTTP(S) image URLs when reading/saving.
+// This prevents storing temporary blob:/data: URLs in Firestore.
+const isSafeImageUrl = (u) => typeof u === 'string' && /^https?:\/\//i.test(u);
+const normalizeImageUrl = (u) => (isSafeImageUrl(u) ? u : '');
 
 // Overlay form (create/edit)
 const FoeFormModal = ({ open, initial, onCancel, onSave, schema }) => {
@@ -49,13 +54,16 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema }) => {
   }, [schema, foe?.Parametri?.Special]);
 
   const setField = (path, value) => {
+    // Shallow-immutable update to preserve non-serializable values (e.g., File)
     setFoe((prev) => {
-      const next = deepClone(prev);
       const segs = path.split('.');
+      const next = { ...prev };
       let obj = next;
       for (let i = 0; i < segs.length - 1; i++) {
-        obj[segs[i]] = obj[segs[i]] ?? {};
-        obj = obj[segs[i]];
+        const key = segs[i];
+        const cur = obj[key];
+        obj[key] = Array.isArray(cur) ? cur.slice() : { ...(cur || {}) };
+        obj = obj[key];
       }
       obj[segs[segs.length - 1]] = value;
       return next;
@@ -128,11 +136,14 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema }) => {
                       <div className="text-[11px] text-slate-300 mb-1">Image</div>
                       <div className="flex items-center gap-3">
                         <div className="w-20 h-20 rounded-lg overflow-hidden border border-slate-700/60 bg-slate-900/60 flex items-center justify-center text-slate-400">
-                          {(previewUrl || foe?.imageUrl) ? (
-                            <img src={previewUrl || foe?.imageUrl} alt="preview" className="w-full h-full object-cover" />
-                          ) : (
-                            <span>No Img</span>
-                          )}
+                          {(() => {
+                            const src = previewUrl || (isSafeImageUrl(foe?.imageUrl) ? foe.imageUrl : null);
+                            return src ? (
+                              <img src={src} alt="preview" className="w-full h-full object-cover" />
+                            ) : (
+                              <span>No Img</span>
+                            );
+                          })()}
                         </div>
                         <div className="flex flex-col gap-2">
                           <input
@@ -166,6 +177,10 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema }) => {
                         </div>
                       </div>
                     </div>
+                    <label className="block">
+                      <div className="text-[11px] text-slate-300 mb-1">Dado Anima</div>
+                      <input className="w-full rounded-lg bg-slate-900/60 px-3 py-2 text-white border border-slate-700/60 focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={foe?.dadoAnima || ''} onChange={(e) => setField('dadoAnima', e.target.value)} placeholder="es. d6, d8, d10…" />
+                    </label>
                     <label className="block">
                       <div className="text-[11px] text-slate-300 mb-1">Notes</div>
                       <input className="w-full rounded-lg bg-slate-900/60 px-3 py-2 text-white border border-slate-700/60 focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={foe?.notes || ''} onChange={(e) => setField('notes', e.target.value)} placeholder="Optional notes" />
@@ -206,20 +221,36 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema }) => {
 
 // removed inline editors and preview in favor of modular components
 
-const FoeRow = ({ foe, onEdit, onDelete }) => {
+const FoeRow = ({ foe, onEdit, onDelete, onDuplicate }) => {
   const [open, setOpen] = useState(false);
   const params = useMemo(() => computeParamTotals(foe?.Parametri || {}), [foe?.Parametri]);
   const hpTxt = `${Number(foe?.stats?.hpCurrent ?? foe?.stats?.hpTotal ?? 0)}/${Number(foe?.stats?.hpTotal ?? 0)}`;
   const manaTxt = `${Number(foe?.stats?.manaCurrent ?? foe?.stats?.manaTotal ?? 0)}/${Number(foe?.stats?.manaTotal ?? 0)}`;
   return (
     <div className="rounded-xl border border-white/10 bg-white/5 overflow-hidden">
-      <div className="px-4 py-3 flex items-center justify-between">
+      <div
+        className="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen((v) => !v);
+          }
+        }}
+        role="button"
+        aria-expanded={open}
+        tabIndex={0}
+      >
         <div className="flex items-center gap-3 min-w-0">
-          <button onClick={() => setOpen((v) => !v)} className="text-slate-300 hover:text-white" aria-label={open ? 'collapse' : 'expand'}>
+          <button
+            onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+            className="text-slate-300 hover:text-white"
+            aria-label={open ? 'collapse' : 'expand'}
+          >
             {open ? <FiChevronDown /> : <FiChevronRight />}
           </button>
           <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-700/60 bg-slate-800/60 flex items-center justify-center shrink-0">
-            {foe?.imageUrl ? (
+            {isSafeImageUrl(foe?.imageUrl) ? (
               <img src={foe.imageUrl} alt={foe?.name || 'foe'} className="w-full h-full object-cover" />
             ) : (
               <span className="text-slate-400 text-sm">
@@ -235,16 +266,23 @@ const FoeRow = ({ foe, onEdit, onDelete }) => {
         <div className="flex items-center gap-2">
           <Pill color="emerald">HP {hpTxt}</Pill>
           <Pill color="sky">Mana {manaTxt}</Pill>
-          <button onClick={() => onEdit(foe)} className="inline-flex items-center gap-1 rounded-lg border border-indigo-400/40 text-indigo-200 hover:bg-indigo-500/10 px-2 py-1 text-[12px]">
+          <button onClick={(e) => { e.stopPropagation(); onEdit(foe); }} className="inline-flex items-center gap-1 rounded-lg border border-indigo-400/40 text-indigo-200 hover:bg-indigo-500/10 px-2 py-1 text-[12px]">
             <FiEdit2 /> Edit
           </button>
-          <button onClick={() => onDelete(foe)} className="inline-flex items-center gap-1 rounded-lg border border-red-400/40 text-red-200 hover:bg-red-500/10 px-2 py-1 text-[12px]">
+          <button onClick={(e) => { e.stopPropagation(); onDuplicate(foe); }} className="inline-flex items-center gap-1 rounded-lg border border-amber-400/40 text-amber-200 hover:bg-amber-500/10 px-2 py-1 text-[12px]">
+            <FiCopy /> Duplicate
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); onDelete(foe); }} className="inline-flex items-center gap-1 rounded-lg border border-red-400/40 text-red-200 hover:bg-red-500/10 px-2 py-1 text-[12px]">
             <FiTrash2 /> Delete
           </button>
         </div>
       </div>
       {open && (
-        <div className="px-4 pb-4">
+        <div className="px-4 pt-3 pb-4">
+          {/* General extra info */}
+          {foe?.dadoAnima && (
+            <div className="mb-3 text-[12px] text-indigo-200"><span className="text-indigo-300/80">Dado Anima:</span> {foe.dadoAnima}</div>
+          )}
           {/* Totals preview */}
           <div className="rounded-xl border border-slate-700/50 bg-slate-800/40 p-3">
             <ParamTotalsPreview params={params} />
@@ -252,6 +290,68 @@ const FoeRow = ({ foe, onEdit, onDelete }) => {
           {/* Notes */}
           {foe?.notes && (
             <div className="mt-3 text-[12px] text-slate-300">{foe.notes}</div>
+          )}
+          {/* Tecniche */}
+          {Array.isArray(foe?.tecniche) && foe.tecniche.length > 0 && (
+            <div className="mt-4 rounded-xl border border-fuchsia-700/40 bg-fuchsia-900/10 p-3">
+              <SectionTitle>Tecniche</SectionTitle>
+              <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+                {foe.tecniche.map((t, i) => (
+                  <div key={i} className="flex items-start gap-3 rounded-lg border border-slate-700/50 bg-slate-900/40 p-3">
+                    <div className="w-14 h-14 rounded-md overflow-hidden border border-slate-700/60 bg-slate-800/60 shrink-0 flex items-center justify-center">
+                      {isSafeImageUrl(t?.imageUrl) ? (
+                        <img src={t.imageUrl} alt={t?.name || `tecnica-${i}`} className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-slate-400 text-xs">No Img</span>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-white truncate">{t?.name || '—'}</div>
+                      {t?.danni && (
+                        <div className="text-[12px] text-rose-300 whitespace-pre-wrap break-words"><span className="text-rose-200/80">Danni:</span> {t.danni}</div>
+                      )}
+                      {t?.effetti && (
+                        <div className="text-[12px] text-fuchsia-200 whitespace-pre-wrap break-words"><span className="text-fuchsia-300/80">Effetti:</span> {t.effetti}</div>
+                      )}
+                      {t?.description && (
+                        <div className="text-[12px] text-slate-300 whitespace-pre-wrap break-words">{t.description}</div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* Spells */}
+          {Array.isArray(foe?.spells) && foe.spells.length > 0 && (
+            <div className="mt-4 rounded-xl border border-sky-700/40 bg-sky-900/10 p-3">
+              <SectionTitle>Spells</SectionTitle>
+              <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+                {foe.spells.map((s, i) => (
+                  <div key={i} className="flex items-start gap-3 rounded-lg border border-slate-700/50 bg-slate-900/40 p-3">
+                    <div className="w-14 h-14 rounded-md overflow-hidden border border-slate-700/60 bg-slate-800/60 shrink-0 flex items-center justify-center">
+                      {isSafeImageUrl(s?.imageUrl) ? (
+                        <img src={s.imageUrl} alt={s?.name || `spell-${i}`} className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-slate-400 text-xs">No Img</span>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-white truncate">{s?.name || '—'}</div>
+                      {s?.danni && (
+                        <div className="text-[12px] text-rose-300 whitespace-pre-wrap break-words"><span className="text-rose-200/80">Danni:</span> {s.danni}</div>
+                      )}
+                      {s?.effetti && (
+                        <div className="text-[12px] text-sky-200 whitespace-pre-wrap break-words"><span className="text-sky-300/80">Effetti:</span> {s.effetti}</div>
+                      )}
+                      {s?.description && (
+                        <div className="text-[12px] text-slate-300 whitespace-pre-wrap break-words">{s.description}</div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -267,6 +367,12 @@ const FoesHub = () => {
   const [editing, setEditing] = useState(null); // foe doc or null
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // Duplicate modal state
+  const [dupOpen, setDupOpen] = useState(false);
+  const [dupTarget, setDupTarget] = useState(null);
+  const [dupName, setDupName] = useState('');
+  const [dupBusy, setDupBusy] = useState(false);
+  const [dupError, setDupError] = useState('');
 
   // Subscribe foes
   useEffect(() => {
@@ -310,6 +416,7 @@ const FoesHub = () => {
       rank: '',
       imageUrl: '',
       notes: '',
+  dadoAnima: '',
       Parametri: p,
       stats: { level: 1, hpTotal: 0, hpCurrent: 0, manaTotal: 0, manaCurrent: 0, initiative: 0, ...st },
       tecniche: deepClone(schema?.tecniche || {}),
@@ -326,6 +433,14 @@ const FoesHub = () => {
   const handleEdit = (foe) => {
     setEditing(foe);
     setModalOpen(true);
+  };
+
+  const handleDuplicateOpen = (foe) => {
+    setDupTarget(foe);
+    const base = foe?.name?.toString()?.trim() || 'Foe';
+    setDupName(`${base} (copy)`);
+    setDupError('');
+    setDupOpen(true);
   };
 
   const handleDelete = async (foe) => {
@@ -382,7 +497,8 @@ const FoesHub = () => {
       setBusy(true);
       setError('');
       const { imageFile, removeImage, originalImageUrl, originalImagePath } = options;
-      const basePayload = { ...deepClone(foeData) };
+      // Keep File references for nested items; we'll replace arrays after upload
+      const basePayload = { ...foeData };
       // Ensure current hp/mana mirror totals at save time
       const hpTotal = Number(basePayload?.stats?.hpTotal || 0);
       const manaTotal = Number(basePayload?.stats?.manaTotal || 0);
@@ -412,7 +528,7 @@ const FoesHub = () => {
         imagePath = null;
       }
 
-      // Upload tecniche images
+      // Upload tecniche/spells entry images
       const uploadEntryImage = async (folder, entry) => {
         let eUrl = entry.imageUrl || '';
         let ePath = entry.imagePath || '';
@@ -427,8 +543,12 @@ const FoesHub = () => {
         } else if (entry.removeImage) {
           eUrl = '';
           ePath = '';
+        } else {
+          // Preserve only safe persisted URLs
+          eUrl = normalizeImageUrl(eUrl);
         }
-        return { ...entry, imageUrl: eUrl, imagePath: ePath };
+        // Persist only relevant fields
+        return { name: entry.name || '', description: entry.description || '', danni: entry.danni || '', effetti: entry.effetti || '', imageUrl: eUrl, imagePath: ePath };
       };
 
       const withTec = Array.isArray(basePayload.tecniche) ? await Promise.all(basePayload.tecniche.map((t) => uploadEntryImage('tecniche', t))) : [];
@@ -436,7 +556,7 @@ const FoesHub = () => {
       basePayload.tecniche = withTec;
       basePayload.spells = withSp;
 
-      const payload = { ...basePayload, imageUrl: imageUrl || '', imagePath: imagePath || '', updated_at: serverTimestamp() };
+      const payload = { ...basePayload, imageUrl: normalizeImageUrl(imageUrl) || '', imagePath: imagePath || '', updated_at: serverTimestamp() };
 
       let docId = editing?.id;
       if (docId) {
@@ -486,6 +606,124 @@ const FoesHub = () => {
     }
   };
 
+  // Duplicate logic (copies firestore doc and re-uploads images to new paths)
+  const handleDuplicateConfirm = async () => {
+    if (!dupTarget || !dupName.trim()) return;
+    try {
+      setDupBusy(true);
+      setDupError('');
+
+      const source = dupTarget;
+      const safeName = (str) => (str || '').toString().trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_\-]/g, '').slice(0, 60) || 'foe';
+      const safeNew = safeName(dupName);
+
+      const hpTotal = Number(source?.stats?.hpTotal || 0);
+      const manaTotal = Number(source?.stats?.manaTotal || 0);
+
+      // Helper: get a download URL for an item having imageUrl/imagePath
+      const getSrcUrl = async (item) => {
+        const u = item?.imageUrl && /^https?:\/\//i.test(item.imageUrl) ? item.imageUrl : '';
+        if (u) return u;
+        const p = item?.imagePath ? item.imagePath : '';
+        if (p) {
+          try {
+            const ref = storageRef(storage, p);
+            return await getDownloadURL(ref);
+          } catch {
+            return '';
+          }
+        }
+        return '';
+      };
+
+      // Helper: copy a source URL to a new storage path under foes/<safeNew>/...
+      const copyUrlToPath = async (srcUrl, pathHint) => {
+        if (!srcUrl) return { url: '', path: '' };
+        const res = await fetch(srcUrl);
+        if (!res.ok) return { url: '', path: '' };
+        const blob = await res.blob();
+        const ext = (blob.type && blob.type.includes('/') ? blob.type.split('/')[1] : '') || '';
+        const fname = `${pathHint}_${Date.now()}${ext ? '.' + ext : ''}`;
+        const path = `foes/${safeNew}/${fname}`;
+        const ref = storageRef(storage, path);
+        await uploadBytes(ref, blob, { contentType: blob.type || undefined });
+        const url = await getDownloadURL(ref);
+        return { url, path };
+      };
+
+      // Copy main image
+      let newImageUrl = '';
+      let newImagePath = '';
+      try {
+        const src = await getSrcUrl(source);
+        if (src) {
+          const { url, path } = await copyUrlToPath(src, 'main');
+          newImageUrl = url;
+          newImagePath = path;
+        }
+      } catch {}
+
+      // Copy tecniche images
+      const copyEntries = async (folder, arr) => {
+        const list = Array.isArray(arr) ? arr : [];
+        const out = [];
+        for (let i = 0; i < list.length; i++) {
+          const e = list[i] || {};
+          let eUrl = '';
+          let ePath = '';
+          try {
+            const src = await getSrcUrl(e);
+            if (src) {
+              const hint = `${folder}_${safeName(e.name || folder)}_${i}`;
+              const r = await copyUrlToPath(src, hint);
+              eUrl = r.url; ePath = r.path;
+            }
+          } catch {}
+          out.push({
+            name: e.name || '',
+            description: e.description || '',
+            danni: e.danni || '',
+            effetti: e.effetti || '',
+            imageUrl: eUrl,
+            imagePath: ePath,
+          });
+        }
+        return out;
+      };
+
+      const newTecniche = await copyEntries('tecniche', source?.tecniche);
+      const newSpells = await copyEntries('spells', source?.spells);
+
+      const payload = {
+        ...source,
+        id: undefined,
+        name: dupName.trim(),
+        imageUrl: newImageUrl,
+        imagePath: newImagePath,
+        stats: {
+          ...(source?.stats || {}),
+          hpCurrent: hpTotal,
+          manaCurrent: manaTotal,
+        },
+        tecniche: newTecniche,
+        spells: newSpells,
+        updated_at: serverTimestamp(),
+      };
+      delete payload.id;
+
+      await addDoc(collection(db, 'foes'), { ...payload, created_at: serverTimestamp() });
+
+      setDupOpen(false);
+      setDupTarget(null);
+      setDupName('');
+    } catch (e) {
+      console.error('duplicate foe failed', e);
+      setDupError('Duplicazione fallita.');
+    } finally {
+      setDupBusy(false);
+    }
+  };
+
   // Initial foe for modal
   const initialForModal = editing ? editing : newFoeFromSchema();
 
@@ -514,7 +752,7 @@ const FoesHub = () => {
               <div className="text-slate-400">Nessun foe creato. Clicca "Nuovo foe" per iniziare.</div>
             ) : (
               foes.map((f) => (
-                <FoeRow key={f.id} foe={f} onEdit={handleEdit} onDelete={handleDelete} />
+                <FoeRow key={f.id} foe={f} onEdit={handleEdit} onDelete={handleDelete} onDuplicate={handleDuplicateOpen} />
               ))
             )}
           </div>
@@ -523,6 +761,26 @@ const FoesHub = () => {
 
       {/* Modal */}
   <FoeFormModal open={modalOpen} initial={initialForModal} onCancel={() => { setModalOpen(false); setEditing(null); }} onSave={handleSave} schema={schema} />
+      {dupOpen && createPortal(
+        <div className="fixed inset-0 z-[75] flex items-center justify-center p-4 bg-black/60">
+          <div className="w-full max-w-md rounded-xl border border-slate-700/60 bg-slate-900/95 p-4">
+            <div className="flex items-start justify-between mb-2">
+              <div className="text-white font-semibold">Duplicate foe</div>
+              <button className="text-slate-300 hover:text-white" onClick={() => setDupOpen(false)} aria-label="close"><FiX /></button>
+            </div>
+            {dupError && <div className="mb-2 text-sm text-red-300">{dupError}</div>}
+            <label className="block mb-3">
+              <div className="text-[11px] text-slate-300 mb-1">New name</div>
+              <input disabled={dupBusy} className="w-full rounded-lg bg-slate-900/60 px-3 py-2 text-white border border-slate-700/60 focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={dupName} onChange={(e) => setDupName(e.target.value)} />
+            </label>
+            <div className="flex items-center justify-end gap-2">
+              <button disabled={dupBusy} onClick={() => setDupOpen(false)} className="px-3 py-1 rounded-md border border-slate-400/40 text-slate-200 hover:bg-slate-500/10 text-[12px]">Cancel</button>
+              <button disabled={dupBusy || !dupName.trim()} onClick={handleDuplicateConfirm} className="inline-flex items-center gap-2 rounded-lg bg-amber-600/80 hover:bg-amber-600 text-white px-3 py-1 border border-amber-400/40 text-[12px]">
+                <FiCopy /> {dupBusy ? 'Duplicating…' : 'Duplicate'}
+              </button>
+            </div>
+          </div>
+        </div>, document.body)}
     </div>
   );
 };
