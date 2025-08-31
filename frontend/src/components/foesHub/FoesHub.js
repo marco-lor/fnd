@@ -1,7 +1,7 @@
 // DM Foes Hub: create, list, expand, edit, delete foes in Firestore "foes" collection
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { db, storage } from '../firebaseConfig';
+import { db, storage, functions } from '../firebaseConfig';
 import {
   addDoc,
   collection,
@@ -13,6 +13,7 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { httpsCallable } from 'firebase/functions';
 import { FiPlus, FiChevronDown, FiChevronRight, FiEdit2, FiTrash2, FiX, FiCopy } from 'react-icons/fi';
 import { computeParamTotals, deepClone, Pill, SectionTitle } from './elements/utils';
 import { ParametersEditor, ParamTotalsPreview } from './elements/ParamEditors';
@@ -612,107 +613,10 @@ const FoesHub = () => {
     try {
       setDupBusy(true);
       setDupError('');
-
-      const source = dupTarget;
-      const safeName = (str) => (str || '').toString().trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_\-]/g, '').slice(0, 60) || 'foe';
-      const safeNew = safeName(dupName);
-
-      const hpTotal = Number(source?.stats?.hpTotal || 0);
-      const manaTotal = Number(source?.stats?.manaTotal || 0);
-
-      // Helper: get a download URL for an item having imageUrl/imagePath
-      const getSrcUrl = async (item) => {
-        const u = item?.imageUrl && /^https?:\/\//i.test(item.imageUrl) ? item.imageUrl : '';
-        if (u) return u;
-        const p = item?.imagePath ? item.imagePath : '';
-        if (p) {
-          try {
-            const ref = storageRef(storage, p);
-            return await getDownloadURL(ref);
-          } catch {
-            return '';
-          }
-        }
-        return '';
-      };
-
-      // Helper: copy a source URL to a new storage path under foes/<safeNew>/...
-      const copyUrlToPath = async (srcUrl, pathHint) => {
-        if (!srcUrl) return { url: '', path: '' };
-        const res = await fetch(srcUrl);
-        if (!res.ok) return { url: '', path: '' };
-        const blob = await res.blob();
-        const ext = (blob.type && blob.type.includes('/') ? blob.type.split('/')[1] : '') || '';
-        const fname = `${pathHint}_${Date.now()}${ext ? '.' + ext : ''}`;
-        const path = `foes/${safeNew}/${fname}`;
-        const ref = storageRef(storage, path);
-        await uploadBytes(ref, blob, { contentType: blob.type || undefined });
-        const url = await getDownloadURL(ref);
-        return { url, path };
-      };
-
-      // Copy main image
-      let newImageUrl = '';
-      let newImagePath = '';
-      try {
-        const src = await getSrcUrl(source);
-        if (src) {
-          const { url, path } = await copyUrlToPath(src, 'main');
-          newImageUrl = url;
-          newImagePath = path;
-        }
-      } catch {}
-
-      // Copy tecniche images
-      const copyEntries = async (folder, arr) => {
-        const list = Array.isArray(arr) ? arr : [];
-        const out = [];
-        for (let i = 0; i < list.length; i++) {
-          const e = list[i] || {};
-          let eUrl = '';
-          let ePath = '';
-          try {
-            const src = await getSrcUrl(e);
-            if (src) {
-              const hint = `${folder}_${safeName(e.name || folder)}_${i}`;
-              const r = await copyUrlToPath(src, hint);
-              eUrl = r.url; ePath = r.path;
-            }
-          } catch {}
-          out.push({
-            name: e.name || '',
-            description: e.description || '',
-            danni: e.danni || '',
-            effetti: e.effetti || '',
-            imageUrl: eUrl,
-            imagePath: ePath,
-          });
-        }
-        return out;
-      };
-
-      const newTecniche = await copyEntries('tecniche', source?.tecniche);
-      const newSpells = await copyEntries('spells', source?.spells);
-
-      const payload = {
-        ...source,
-        id: undefined,
-        name: dupName.trim(),
-        imageUrl: newImageUrl,
-        imagePath: newImagePath,
-        stats: {
-          ...(source?.stats || {}),
-          hpCurrent: hpTotal,
-          manaCurrent: manaTotal,
-        },
-        tecniche: newTecniche,
-        spells: newSpells,
-        updated_at: serverTimestamp(),
-      };
-      delete payload.id;
-
-      await addDoc(collection(db, 'foes'), { ...payload, created_at: serverTimestamp() });
-
+      const callable = httpsCallable(functions, 'duplicateFoeWithAssets');
+      const res = await callable({ sourceFoeId: dupTarget.id, newFoeName: dupName.trim() });
+      // Optional: we could resolve URLs for previews here using getDownloadURL on returned paths
+      // but no need to mutate state; the Firestore onSnapshot will include the new doc
       setDupOpen(false);
       setDupTarget(null);
       setDupName('');

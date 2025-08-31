@@ -18,6 +18,7 @@ import {deleteUser} from "./deleteUser";
 import {updateAnimaModifier} from "./updateAnimaModifier";
 import {levelUpAll} from "./levelUpAll";
 import {levelUpUser} from "./levelUpUser";
+import {duplicateFoeWithAssets} from "./duplicateFoeWithAssets";
 
 admin.initializeApp();
 
@@ -31,4 +32,5 @@ export {
   updateAnimaModifier,
   levelUpAll,
   levelUpUser,
+  duplicateFoeWithAssets,
 };
