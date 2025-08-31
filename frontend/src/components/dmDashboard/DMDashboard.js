@@ -1,7 +1,7 @@
 // file: ./frontend/src/components/dmDashboard/DMDashboard.js
 import React, { useState, useEffect } from "react";
 import { db, app } from "../firebaseConfig";
-import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc, increment } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { useAuth } from "../../AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -114,6 +114,41 @@ const DMDashboard = () => {
     }
   };
 
+  // Add combat tokens to a specific user
+  const handleAddCombatTokens = async (targetUserId) => {
+    if (userData.role !== "dm") {
+      setError("Permission denied: Only DMs can modify tokens");
+      return;
+    }
+    const input = window.prompt("How many combat tokens to add? (use negative to remove)", "1");
+    if (input === null) return; // cancelled
+    const amount = parseInt(input, 10);
+    if (Number.isNaN(amount) || !Number.isFinite(amount)) {
+      setError("Invalid number.");
+      return;
+    }
+    if (amount === 0) return;
+    if (amount < 0 && !window.confirm(`Remove ${Math.abs(amount)} tokens from this player?`)) {
+      return;
+    }
+    try {
+      setBusy(true);
+      setToast(null);
+      const userRef = doc(db, "users", targetUserId);
+      await updateDoc(userRef, {
+        "stats.combatTokensAvailable": increment(amount),
+      });
+      setToast(`${amount > 0 ? "Added" : "Removed"} ${Math.abs(amount)} combat token${Math.abs(amount) === 1 ? "" : "s"}.`);
+      await refreshUsers();
+    } catch (e) {
+      console.error("Add tokens failed", e);
+      setError("Failed to update tokens. See console.");
+    } finally {
+      setBusy(false);
+      setTimeout(() => setToast(null), 3000);
+    }
+  };
+
   // Handler to toggle a given lock field (either lock_param_base or lock_param_combat)
   const handleToggleLock = async (userId, field, currentValue) => {
     if (userData.role !== "dm") {
@@ -181,6 +216,14 @@ const DMDashboard = () => {
                         title="Increase level by 1 for this player"
                       >
                         Level Up
+                      </button>
+                      <button
+                        onClick={() => handleAddCombatTokens(user.id)}
+                        disabled={busy}
+                        className={`mt-1 px-2 py-1 rounded text-xs ${busy ? 'bg-amber-400' : 'bg-amber-600 hover:bg-amber-500'} text-white`}
+                        title="Add combat tokens to this player"
+                      >
+                        Add Tokens
                       </button>
                     </div>
                   </th>
