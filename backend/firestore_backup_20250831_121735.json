@@ -1,6 +1,6 @@
 {
   "encounters": {
-    "EYafz5TZP2PTyT27wtQj": {
+    "b9qpLs93SBFH8AksEpNe": {
       "createdBy": "hOmn5SAsF0c3OtQWkmM7qNnfj1o2",
       "participants": [
         {
@@ -51,63 +51,319 @@
         "TQAmmVfIpOeNiRflXKSeL1NX2ak2"
       ],
       "status": "published",
-      "createdAt": "2025-08-29T21:47:01.829000+00:00",
+      "createdAt": "2025-08-30T11:20:56.538000+00:00",
       "linkMode": "live",
-      "name": "test2"
-    },
-    "IRCxSHj6pGSfZs5XC8mz": {
-      "createdBy": "hOmn5SAsF0c3OtQWkmM7qNnfj1o2",
-      "participants": [
+      "name": "goblins"
+    }
+  },
+  "foes": {
+    "bkG5Buqj6vEP8jeKtrGu": {
+      "created_at": "2025-08-31T10:17:49.362000+00:00",
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Intelligenza": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Saggezza": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Destrezza": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Forza": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Costituzione": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "RiduzioneDanni": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Critico": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Difesa": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Attacco": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Mira": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Salute": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          }
+        }
+      },
+      "imageUrl": "",
+      "inventory": [],
+      "tecniche": [
         {
-          "uid": "81hKeOGSAuMhiO2H4AT67i0Z8OD3",
-          "characterId": "k8iemsk",
-          "email": "k8iemsk@gmail.com"
+          "imagePath": "",
+          "description": "boh",
+          "imageUrl": "",
+          "effetti": "tanti",
+          "danni": "100d100",
+          "name": "a"
         },
         {
-          "uid": "ExFSquk4flRArGkD2WET4mhxy5a2",
-          "characterId": "MarcoTEST",
-          "email": "f.mrc.lorenzo@gmail.com"
-        },
-        {
-          "uid": "GQsfPuWrNKbQKhLHCiVViNzJyWx1",
-          "characterId": "Bro",
-          "email": "giovanniorzes@live.it"
-        },
-        {
-          "uid": "M2N82LOu2lPh07axUcUDwngyO5o2",
-          "characterId": "Aarci",
-          "email": "lavezzi.tiber@gmail.com"
-        },
-        {
-          "uid": "OgVlbkriGFdtUu1WEkP8OCaXyKL2",
-          "characterId": "Scasso",
-          "email": "dollfieville@gmail.com"
-        },
-        {
-          "uid": "TQAmmVfIpOeNiRflXKSeL1NX2ak2",
-          "characterId": "Nyx",
-          "email": "marcolorenzo92@gmail.com"
+          "imagePath": "",
+          "description": "non mi andava",
+          "imageUrl": "",
+          "effetti": "no",
+          "danni": "1d1",
+          "name": "publeemo"
         }
       ],
-      "participantCharacterIds": [
-        "k8iemsk",
-        "MarcoTEST",
-        "Bro",
-        "Aarci",
-        "Scasso",
-        "Nyx"
+      "updated_at": "2025-08-31T10:17:49.362000+00:00",
+      "stats": {
+        "lastAnimaShard": "",
+        "manaTotal": 61,
+        "gold": 0,
+        "combatTokensAvailable": 0,
+        "basePointsSpent": 0,
+        "combatTokensSpent": 0,
+        "level": 1,
+        "negativeBaseStatCount": 0,
+        "initiative": 0,
+        "hpTotal": 28,
+        "manaCurrent": 61,
+        "hpCurrent": 28,
+        "basePointsAvailable": 0
+      },
+      "rank": "",
+      "name": "test (copy)",
+      "imagePath": "",
+      "notes": "",
+      "spells": [
+        {
+          "imagePath": "",
+          "description": "si attiva alla terza fase",
+          "imageUrl": "",
+          "effetti": "paralizza tutti",
+          "danni": "2d10",
+          "name": "b"
+        }
       ],
-      "participantIds": [
-        "81hKeOGSAuMhiO2H4AT67i0Z8OD3",
-        "ExFSquk4flRArGkD2WET4mhxy5a2",
-        "GQsfPuWrNKbQKhLHCiVViNzJyWx1",
-        "M2N82LOu2lPh07axUcUDwngyO5o2",
-        "OgVlbkriGFdtUu1WEkP8OCaXyKL2",
-        "TQAmmVfIpOeNiRflXKSeL1NX2ak2"
+      "dadoAnima": "d10",
+      "category": ""
+    },
+    "p7DjbHDpcVZeaLbgH6oV": {
+      "created_at": {
+        "nanoseconds": 920000000,
+        "seconds": 1756577703
+      },
+      "imageUrl": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/foes%2Ftest_1756577661803?alt=media&token=62c03df3-0e90-45c3-9b1d-1d67bda8bb81",
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Intelligenza": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Saggezza": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Destrezza": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Forza": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Costituzione": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Critico": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "RiduzioneDanni": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Difesa": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Salute": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Mira": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Attacco": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          }
+        }
+      },
+      "inventory": [],
+      "id": "p7DjbHDpcVZeaLbgH6oV",
+      "tecniche": [
+        {
+          "imagePath": "foes/tecniche/a_1756577662302",
+          "description": "boh",
+          "imageUrl": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/foes%2Ftecniche%2Fa_1756577662302?alt=media&token=7c244d18-1d6d-4798-8ee5-b264a499dfc9",
+          "effetti": "tanti",
+          "danni": "100d100",
+          "name": "a"
+        },
+        {
+          "imagePath": "foes/tecniche/publeemo_1756578406916",
+          "description": "non mi andava",
+          "imageUrl": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/foes%2Ftecniche%2Fpubleemo_1756578406916?alt=media&token=4e4993eb-544b-40b6-b598-020184836d66",
+          "effetti": "no",
+          "danni": "1d1",
+          "name": "publeemo"
+        }
       ],
-      "status": "published",
-      "createdAt": "2025-08-29T21:30:38.917000+00:00",
-      "name": "test1"
+      "updated_at": "2025-08-30T18:31:05.606000+00:00",
+      "stats": {
+        "manaTotal": 61,
+        "lastAnimaShard": "",
+        "gold": 0,
+        "combatTokensAvailable": 0,
+        "basePointsSpent": 0,
+        "combatTokensSpent": 0,
+        "level": 1,
+        "negativeBaseStatCount": 0,
+        "initiative": 0,
+        "hpTotal": 28,
+        "manaCurrent": 61,
+        "hpCurrent": 28,
+        "basePointsAvailable": 0
+      },
+      "rank": "",
+      "name": "test",
+      "imagePath": "foes/test_1756577661803",
+      "notes": "",
+      "spells": [
+        {
+          "imagePath": "foes/spells/b_1756577663151",
+          "description": "si attiva alla terza fase",
+          "imageUrl": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/foes%2Fspells%2Fb_1756577663151?alt=media&token=8f97b25a-203e-46f0-9d33-50c6e79db9e4",
+          "effetti": "paralizza tutti",
+          "danni": "2d10",
+          "name": "b"
+        }
+      ],
+      "dadoAnima": "d10",
+      "category": ""
     }
   },
   "items": {
