@@ -62,6 +62,12 @@ const EncounterLog = ({ encounterId }) => {
             const list = [];
             snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
             setEntries(list);
+        }, (err) => {
+            if (typeof process !== "undefined" && process.env && process.env.NODE_ENV !== "production") {
+                // eslint-disable-next-line no-console
+                console.warn("logs onSnapshot error", err?.message || err);
+            }
+            setEntries([]);
         });
         return () => unsub();
     }, [encounterId]);

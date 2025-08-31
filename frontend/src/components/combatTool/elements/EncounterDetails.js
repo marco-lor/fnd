@@ -88,7 +88,14 @@ const EncounterDetails = ({ encounter, isDM }) => {
     }, [participantsMap, user, userData?.characterId]);
 
     // Subscribe to user docs for all participants (only when linked to user params)
+    // IMPORTANT: Only DMs should subscribe to other users' docs (players/webmasters shouldn't to avoid permission errors).
     useEffect(() => {
+        // Only allow DM to read other users' docs
+        if (!isDM) {
+            setLiveUsersMap({});
+            return;
+        }
+
         const linkMode = encMeta?.linkMode || "live"; // default live
         const unsubs = [];
         if (linkMode !== "detached") {
@@ -98,9 +105,19 @@ const EncounterDetails = ({ encounter, isDM }) => {
             const unique = Array.from(new Set(uids));
             unique.forEach((uid) => {
                 const uRef = doc(db, "users", uid);
-                const unsub = onSnapshot(uRef, (snap) => {
-                    setLiveUsersMap((prev) => ({ ...prev, [uid]: snap.data() || null }));
-                });
+                const unsub = onSnapshot(
+                    uRef,
+                    (snap) => {
+                        setLiveUsersMap((prev) => ({ ...prev, [uid]: snap.data() || null }));
+                    },
+                    // Swallow permission errors gracefully
+                    (err) => {
+                        if (typeof process !== "undefined" && process.env && process.env.NODE_ENV !== "production") {
+                            // eslint-disable-next-line no-console
+                            console.warn("users doc subscription error", uid, err?.message || err);
+                        }
+                    }
+                );
                 unsubs.push(unsub);
             });
         } else {
@@ -109,7 +126,8 @@ const EncounterDetails = ({ encounter, isDM }) => {
         return () => {
             unsubs.forEach((u) => u());
         };
-    }, [encMeta?.linkMode, JSON.stringify(Object.values(participantsMap).map((p) => p?.uid).sort())]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isDM, encMeta?.linkMode, JSON.stringify(Object.values(participantsMap).map((p) => p?.uid).sort())]);
 
     const getDexTot = () => {
         const base = userData?.Parametri?.Base || {};

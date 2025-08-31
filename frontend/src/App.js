@@ -6,6 +6,7 @@ import CharacterCreation from "./components/characterCreation/CharacterCreation"
 import Home from "./components/home/Home";
 import Bazaar from "./components/bazaar/Bazaar";
 import DMDashboard from "./components/dmDashboard/DMDashboard"; // DM page
+import FoesHub from "./components/foesHub/FoesHub"; // DM Foes Hub page
 import TecnicheSpell from "./components/tecnicheSpell/TecnicheSpell"; // TecnicheSpell page
 import CombatPage from "./components/combatTool/combatPage"; // Combat page
 import AdminPage from "./components/admin/adminPage"; // AdminPage
@@ -68,6 +69,14 @@ function AppRoutes() {
           element={
             <ProtectedDMRoute>
               <DMDashboard />
+            </ProtectedDMRoute>
+          }
+        />
+        <Route
+          path="/foes-hub"
+          element={
+            <ProtectedDMRoute>
+              <FoesHub />
             </ProtectedDMRoute>
           }
         />

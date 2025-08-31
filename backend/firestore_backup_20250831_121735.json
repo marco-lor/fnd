@@ -1,4 +1,371 @@
 {
+  "encounters": {
+    "b9qpLs93SBFH8AksEpNe": {
+      "createdBy": "hOmn5SAsF0c3OtQWkmM7qNnfj1o2",
+      "participants": [
+        {
+          "uid": "81hKeOGSAuMhiO2H4AT67i0Z8OD3",
+          "characterId": "k8iemsk",
+          "email": "k8iemsk@gmail.com"
+        },
+        {
+          "uid": "ExFSquk4flRArGkD2WET4mhxy5a2",
+          "characterId": "MarcoTEST",
+          "email": "f.mrc.lorenzo@gmail.com"
+        },
+        {
+          "uid": "GQsfPuWrNKbQKhLHCiVViNzJyWx1",
+          "characterId": "Bro",
+          "email": "giovanniorzes@live.it"
+        },
+        {
+          "uid": "M2N82LOu2lPh07axUcUDwngyO5o2",
+          "characterId": "Aarci",
+          "email": "lavezzi.tiber@gmail.com"
+        },
+        {
+          "uid": "OgVlbkriGFdtUu1WEkP8OCaXyKL2",
+          "characterId": "Scasso",
+          "email": "dollfieville@gmail.com"
+        },
+        {
+          "uid": "TQAmmVfIpOeNiRflXKSeL1NX2ak2",
+          "characterId": "Nyx",
+          "email": "marcolorenzo92@gmail.com"
+        }
+      ],
+      "participantCharacterIds": [
+        "k8iemsk",
+        "MarcoTEST",
+        "Bro",
+        "Aarci",
+        "Scasso",
+        "Nyx"
+      ],
+      "participantIds": [
+        "81hKeOGSAuMhiO2H4AT67i0Z8OD3",
+        "ExFSquk4flRArGkD2WET4mhxy5a2",
+        "GQsfPuWrNKbQKhLHCiVViNzJyWx1",
+        "M2N82LOu2lPh07axUcUDwngyO5o2",
+        "OgVlbkriGFdtUu1WEkP8OCaXyKL2",
+        "TQAmmVfIpOeNiRflXKSeL1NX2ak2"
+      ],
+      "status": "published",
+      "createdAt": "2025-08-30T11:20:56.538000+00:00",
+      "linkMode": "live",
+      "name": "goblins"
+    }
+  },
+  "foes": {
+    "bkG5Buqj6vEP8jeKtrGu": {
+      "created_at": "2025-08-31T10:17:49.362000+00:00",
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Intelligenza": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Saggezza": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Destrezza": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Forza": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Costituzione": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "RiduzioneDanni": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Critico": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Difesa": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Attacco": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Mira": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Salute": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          }
+        }
+      },
+      "imageUrl": "",
+      "inventory": [],
+      "tecniche": [
+        {
+          "imagePath": "",
+          "description": "boh",
+          "imageUrl": "",
+          "effetti": "tanti",
+          "danni": "100d100",
+          "name": "a"
+        },
+        {
+          "imagePath": "",
+          "description": "non mi andava",
+          "imageUrl": "",
+          "effetti": "no",
+          "danni": "1d1",
+          "name": "publeemo"
+        }
+      ],
+      "updated_at": "2025-08-31T10:17:49.362000+00:00",
+      "stats": {
+        "lastAnimaShard": "",
+        "manaTotal": 61,
+        "gold": 0,
+        "combatTokensAvailable": 0,
+        "basePointsSpent": 0,
+        "combatTokensSpent": 0,
+        "level": 1,
+        "negativeBaseStatCount": 0,
+        "initiative": 0,
+        "hpTotal": 28,
+        "manaCurrent": 61,
+        "hpCurrent": 28,
+        "basePointsAvailable": 0
+      },
+      "rank": "",
+      "name": "test (copy)",
+      "imagePath": "",
+      "notes": "",
+      "spells": [
+        {
+          "imagePath": "",
+          "description": "si attiva alla terza fase",
+          "imageUrl": "",
+          "effetti": "paralizza tutti",
+          "danni": "2d10",
+          "name": "b"
+        }
+      ],
+      "dadoAnima": "d10",
+      "category": ""
+    },
+    "p7DjbHDpcVZeaLbgH6oV": {
+      "created_at": {
+        "nanoseconds": 920000000,
+        "seconds": 1756577703
+      },
+      "imageUrl": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/foes%2Ftest_1756577661803?alt=media&token=62c03df3-0e90-45c3-9b1d-1d67bda8bb81",
+      "Parametri": {
+        "Base": {
+          "Fortuna": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Intelligenza": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Saggezza": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Destrezza": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Forza": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Costituzione": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          }
+        },
+        "Combattimento": {
+          "Disciplina": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Critico": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "RiduzioneDanni": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Difesa": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Salute": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          },
+          "Mira": {
+            "Base": 0,
+            "Anima": 0,
+            "Tot": 0,
+            "Equip": 0,
+            "Mod": 0
+          },
+          "Attacco": {
+            "Base": 0,
+            "Equip": 0,
+            "Tot": 0,
+            "Anima": 0,
+            "Mod": 0
+          }
+        }
+      },
+      "inventory": [],
+      "id": "p7DjbHDpcVZeaLbgH6oV",
+      "tecniche": [
+        {
+          "imagePath": "foes/tecniche/a_1756577662302",
+          "description": "boh",
+          "imageUrl": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/foes%2Ftecniche%2Fa_1756577662302?alt=media&token=7c244d18-1d6d-4798-8ee5-b264a499dfc9",
+          "effetti": "tanti",
+          "danni": "100d100",
+          "name": "a"
+        },
+        {
+          "imagePath": "foes/tecniche/publeemo_1756578406916",
+          "description": "non mi andava",
+          "imageUrl": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/foes%2Ftecniche%2Fpubleemo_1756578406916?alt=media&token=4e4993eb-544b-40b6-b598-020184836d66",
+          "effetti": "no",
+          "danni": "1d1",
+          "name": "publeemo"
+        }
+      ],
+      "updated_at": "2025-08-30T18:31:05.606000+00:00",
+      "stats": {
+        "manaTotal": 61,
+        "lastAnimaShard": "",
+        "gold": 0,
+        "combatTokensAvailable": 0,
+        "basePointsSpent": 0,
+        "combatTokensSpent": 0,
+        "level": 1,
+        "negativeBaseStatCount": 0,
+        "initiative": 0,
+        "hpTotal": 28,
+        "manaCurrent": 61,
+        "hpCurrent": 28,
+        "basePointsAvailable": 0
+      },
+      "rank": "",
+      "name": "test",
+      "imagePath": "foes/test_1756577661803",
+      "notes": "",
+      "spells": [
+        {
+          "imagePath": "foes/spells/b_1756577663151",
+          "description": "si attiva alla terza fase",
+          "imageUrl": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/foes%2Fspells%2Fb_1756577663151?alt=media&token=8f97b25a-203e-46f0-9d33-50c6e79db9e4",
+          "effetti": "paralizza tutti",
+          "danni": "2d10",
+          "name": "b"
+        }
+      ],
+      "dadoAnima": "d10",
+      "category": ""
+    }
+  },
   "items": {
     "Abito": {
       "visibility": "all",
@@ -8775,304 +9142,6 @@
       "Specific": {
         "Cariche": 5
       }
-    },
-    "nyx_3": {
-      "Parametri": {
-        "Base": {
-          "Fortuna": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Intelligenza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Saggezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Destrezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Forza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Costituzione": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        },
-        "Special": {
-          "ridCostoTec": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Bonus Danno": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Danno": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Penetrazione": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Bonus Danno Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "ridCostoSpell": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Danno Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        },
-        "Combattimento": {
-          "Disciplina": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "RiduzioneDanni": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Difesa": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Attacco": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Mira": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Salute": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        }
-      },
-      "item_type": "weapon",
-      "Specific": {
-        "Hands": 1,
-        "Tipo": "Mischia"
-      },
-      "visibility": "custom",
-      "General": {
-        "Nome": "nyx 3",
-        "ridCostoSpellSingola": {},
-        "spells": {},
-        "Effetto": "",
-        "prezzo": 0,
-        "requisiti": "",
-        "image_url": null,
-        "ridCostoTecSingola": {},
-        "Slot": "Mano Principale"
-      },
-      "allowed_users": [
-        "OgVlbkriGFdtUu1WEkP8OCaXyKL2"
-      ]
-    },
-    "test": {
-      "Parametri": {
-        "Base": {
-          "Fortuna": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Intelligenza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Saggezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Destrezza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Forza": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Costituzione": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        },
-        "Special": {
-          "ridCostoTec": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Bonus Danno": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Danno": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Penetrazione": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "ridCostoSpell": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Bonus Danno Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Danno Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        },
-        "Combattimento": {
-          "Disciplina": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "RiduzioneDanni": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Critico": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Difesa": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Attacco": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Mira": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          },
-          "Salute": {
-            "4": "",
-            "7": "",
-            "10": "",
-            "1": ""
-          }
-        }
-      },
-      "item_type": "weapon",
-      "Specific": {
-        "Hands": 1,
-        "Tipo": "Mischia"
-      },
-      "visibility": "all",
-      "General": {
-        "Nome": "test",
-        "Slot": "Mano Principale",
-        "spells": {},
-        "Effetto": "",
-        "prezzo": 0,
-        "requisiti": "",
-        "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Fweapon_test_1755954720649_Tycus_token.png?alt=media&token=83954094-76c8-4225-8341-6caca6899b58",
-        "ridCostoTecSingola": {},
-        "ridCostoSpellSingola": {}
-      },
-      "allowed_users": []
     }
   },
   "users": {
@@ -9428,6 +9497,1079 @@
             "ridCostoTecSingola": {},
             "Slot": "Doppia Mano"
           }
+        },
+        {
+          "Parametri": {
+            "Special": {
+              "ridCostoSpell": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira 1H": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "ridCostoTec": {
+                "4": "2",
+                "7": "2",
+                "10": "2",
+                "1": "2"
+              },
+              "Bonus Danno": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Danno": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira Ranged": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Penetrazione": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Bonus Danno Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira 2H": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Danno Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Riduzione Dado Effetto Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              }
+            },
+            "Base": {
+              "Fortuna": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Intelligenza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Saggezza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Destrezza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Forza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Costituzione": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              }
+            },
+            "Combattimento": {
+              "Disciplina": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "RiduzioneDanni": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Difesa": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Attacco": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Salute": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              }
+            }
+          },
+          "item_type": "armatura",
+          "id": "Fodero_Base",
+          "_instance": {
+            "acquiredAt": "2025-08-24T16:41:32.728000+00:00",
+            "pricePaid": 55,
+            "source": "bazaar",
+            "instanceId": "inv_1756053692728_f37m02"
+          },
+          "visibility": "all",
+          "allowed_users": [],
+          "Specific": {
+            "slotCintura": 0
+          },
+          "General": {
+            "Nome": "Fodero Base",
+            "Slot": "Fodero",
+            "ridCostoSpellSingola": {},
+            "Effetto": "Puoi equipaggiare un secondo set di armi con arma  A DUE MANI (2H), una ARMA  A UNA MANO (1H), UNA ARMA A UNA MANO E SCUDO OPPURE DUE ARMI A UNA MANO  e scambiarlo con il set principale spendendo 0 MANA e un'azione CONSUMABILE.",
+            "prezzo": 55,
+            "requisiti": "",
+            "ridCostoTecSingola": {},
+            "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Fodero_Base_1750279040814_fodero_base.png?alt=media&token=665d7551-51b4-425e-861e-800d13edf80a",
+            "spells": {}
+          }
+        },
+        {
+          "Parametri": {
+            "Base": {
+              "Fortuna": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Intelligenza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Saggezza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Destrezza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Forza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Costituzione": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              }
+            },
+            "Special": {
+              "Riduzione Dado Effetto Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "ridCostoSpell": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "ridCostoTec": {
+                "4": "2",
+                "7": "2",
+                "10": "2",
+                "1": "2"
+              },
+              "Bonus Danno": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Danno": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira Ranged": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Penetrazione": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira 1H": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira 2H": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Danno Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Bonus Danno Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              }
+            },
+            "Combattimento": {
+              "Disciplina": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "RiduzioneDanni": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Difesa": {
+                "4": "2",
+                "7": "3",
+                "10": "4",
+                "1": "1"
+              },
+              "Attacco": {
+                "4": "6",
+                "7": "9",
+                "10": "12",
+                "1": "3"
+              },
+              "Mira": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Salute": {
+                "4": "6",
+                "7": "9",
+                "10": "12",
+                "1": "3"
+              }
+            }
+          },
+          "item_type": "armatura",
+          "id": "Armatura_di_Cuoio",
+          "_instance": {
+            "acquiredAt": "2025-08-24T18:39:08.972000+00:00",
+            "pricePaid": 1550,
+            "source": "bazaar",
+            "instanceId": "inv_1756060748972_90wqqn"
+          },
+          "visibility": "all",
+          "Specific": {
+            "slotCintura": ""
+          },
+          "allowed_users": [],
+          "General": {
+            "Nome": "Armatura di Cuoio",
+            "Slot": "Corpo",
+            "ridCostoSpellSingola": {},
+            "Effetto": "",
+            "prezzo": 1550,
+            "requisiti": "",
+            "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Armatura_di_Cuoio_1750278956014_armatura_di_cuoio.png?alt=media&token=aef90a19-fd5a-4a30-9d6e-385d740a982c",
+            "ridCostoTecSingola": {},
+            "spells": {}
+          }
+        },
+        {
+          "Parametri": {
+            "Special": {
+              "ridCostoTec": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Bonus Danno": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Danno": {
+                "4": "2d4",
+                "7": "3d4",
+                "10": "4d4",
+                "1": "1d4"
+              },
+              "Penetrazione": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Bonus Danno Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "ridCostoSpell": {
+                "4": "2",
+                "7": "2",
+                "10": "2",
+                "1": "2"
+              },
+              "Danno Critico": {
+                "4": "2d4",
+                "7": "3d4",
+                "10": "4d4",
+                "1": "1d4"
+              }
+            },
+            "Base": {
+              "Fortuna": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Intelligenza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Saggezza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Forza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Destrezza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Costituzione": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              }
+            },
+            "Combattimento": {
+              "Disciplina": {
+                "4": "2",
+                "7": "3",
+                "10": "4",
+                "1": "1"
+              },
+              "Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "RiduzioneDanni": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Difesa": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Attacco": {
+                "4": "2",
+                "7": "3",
+                "10": "4",
+                "1": "1"
+              },
+              "Mira": {
+                "4": "2",
+                "7": "3",
+                "10": "4",
+                "1": "1"
+              },
+              "Salute": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              }
+            }
+          },
+          "item_type": "weapon",
+          "id": "Bacchetta",
+          "_instance": {
+            "acquiredAt": "2025-08-24T18:39:13.511000+00:00",
+            "pricePaid": 500,
+            "source": "bazaar",
+            "instanceId": "inv_1756060753511_7389xe"
+          },
+          "visibility": "all",
+          "Specific": {
+            "Hands": 1,
+            "Tipo": "Distanza"
+          },
+          "allowed_users": [],
+          "General": {
+            "Nome": "Bacchetta",
+            "ridCostoSpellSingola": {},
+            "spells": {},
+            "Effetto": "Utilizza l'incantesimo contenuto nella bacchetta. Il costo del mana aumenta ad ogni uso finch\u00e8 non viene riparata (valori speicifici variano da bacchetta a bacchetta).",
+            "prezzo": 500,
+            "requisiti": "",
+            "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Fweapon_Bacchetta_1748468834316_bacchetta.png?alt=media&token=b1412add-2982-4e02-9271-dff3038202d7",
+            "ridCostoTecSingola": {},
+            "Slot": "Mano Principale"
+          }
+        },
+        {
+          "Parametri": {
+            "Special": {
+              "ridCostoSpell": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira 1H": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "ridCostoTec": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Bonus Danno": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Danno": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira Ranged": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Penetrazione": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Bonus Danno Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira 2H": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Danno Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Riduzione Dado Effetto Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              }
+            },
+            "Base": {
+              "Fortuna": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Intelligenza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Saggezza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Destrezza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Forza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Costituzione": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              }
+            },
+            "Combattimento": {
+              "Disciplina": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "RiduzioneDanni": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Difesa": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Salute": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Attacco": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              }
+            }
+          },
+          "item_type": "armatura",
+          "id": "Abito",
+          "_instance": {
+            "acquiredAt": "2025-08-25T08:51:02.445000+00:00",
+            "pricePaid": 40,
+            "source": "bazaar",
+            "instanceId": "inv_1756111862445_9a5e09"
+          },
+          "visibility": "all",
+          "Specific": {
+            "slotCintura": ""
+          },
+          "allowed_users": [],
+          "General": {
+            "Nome": "Abito",
+            "spells": {},
+            "Slot": "Corpo",
+            "Effetto": "",
+            "prezzo": 40,
+            "requisiti": "",
+            "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Abito_1750278927147_abito.png?alt=media&token=80780a52-08a0-46c6-999a-6a203adc46f3",
+            "ridCostoTecSingola": {},
+            "ridCostoSpellSingola": {}
+          }
+        },
+        {
+          "Parametri": {
+            "Base": {
+              "Fortuna": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Intelligenza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Saggezza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Forza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Destrezza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Costituzione": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              }
+            },
+            "Special": {
+              "ridCostoTec": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Bonus Danno": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira Ranged": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Penetrazione": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira 1H": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "ridCostoSpell": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Danno Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Rigenera Dado Anima HP": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Danno": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Prova Ambientale": {
+                "4": "8",
+                "7": "9",
+                "10": "10",
+                "1": "7"
+              },
+              "Tipo Danno": [],
+              "Rigenera Dado Anima Mana": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Bonus Danno Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira 2H": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Riduzione Dado Effetto Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              }
+            },
+            "Combattimento": {
+              "Disciplina": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "RiduzioneDanni": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Difesa": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Salute": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Attacco": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              }
+            }
+          },
+          "item_type": "consumabile",
+          "id": "Bomba_Ipnotica",
+          "_instance": {
+            "acquiredAt": "2025-08-25T10:17:39.351000+00:00",
+            "pricePaid": 200,
+            "source": "bazaar",
+            "instanceId": "inv_1756117059351_mu1eb2"
+          },
+          "visibility": "all",
+          "Specific": {
+            "Parametro Prova Ambientale": "SAGGEZZA",
+            "slotCinturaOccupati": 1,
+            "type": "Effetto Temporaneo",
+            "Utilizzi": [
+              "Accensione e Detonazione"
+            ],
+            "duration_turns": 1,
+            "stackable": true,
+            "maxStack": 99,
+            "Bonus Creazione": 0
+          },
+          "allowed_users": [],
+          "General": {
+            "Nome": "Bomba Ipnotica",
+            "spells": {},
+            "ridCostoSpellSingola": {},
+            "Effetto": "Il bersaglio e tutti coloro nelle immediate vicinanze subiscono IMPEDIMENTO (Fino alla fine del prossimo turno il bersaglio ha ATTACCO dimezzato OPPURE non pu\u00f2 usare azione di movimento OPPURE MIRA dimezzata).",
+            "prezzo": 200,
+            "requisiti": "",
+            "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Fconsumabile_Bomba_Ipnotica_1755897321459_bomba%20ipnotica.png?alt=media&token=b447b107-b4ad-4a97-b0fc-a01dcd300f83",
+            "ridCostoTecSingola": {},
+            "Slot": "Consumabile"
+          }
+        },
+        {
+          "Parametri": {
+            "Special": {
+              "Bonus Danno Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "ridCostoSpell": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "ridCostoTec": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira Ranged": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Danno": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Bonus Danno": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Penetrazione": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira 1H": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira 2H": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Riduzione Dado Effetto Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Danno Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              }
+            },
+            "Base": {
+              "Fortuna": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Intelligenza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Saggezza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Forza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Destrezza": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Costituzione": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              }
+            },
+            "Combattimento": {
+              "Disciplina": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "RiduzioneDanni": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Critico": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Difesa": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Attacco": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              },
+              "Mira": {
+                "4": "2",
+                "7": "3",
+                "10": "4",
+                "1": "1"
+              },
+              "Salute": {
+                "4": "",
+                "7": "",
+                "10": "",
+                "1": ""
+              }
+            }
+          },
+          "item_type": "armatura",
+          "id": "Cappello",
+          "_instance": {
+            "acquiredAt": "2025-08-25T10:17:52.077000+00:00",
+            "pricePaid": 225,
+            "source": "bazaar",
+            "instanceId": "inv_1756117072077_d3dr46"
+          },
+          "visibility": "all",
+          "allowed_users": [],
+          "Specific": {
+            "slotCintura": ""
+          },
+          "General": {
+            "Nome": "Cappello",
+            "spells": {},
+            "ridCostoSpellSingola": {},
+            "Effetto": "",
+            "prezzo": 225,
+            "requisiti": "",
+            "ridCostoTecSingola": {},
+            "image_url": "https://firebasestorage.googleapis.com/v0/b/fatins.firebasestorage.app/o/items%2Farmatura_Cappello_1750280244300_cappello.png?alt=media&token=77d80810-9fc4-458d-bb1d-1c2029bd5a12",
+            "Slot": "Testa"
+          }
         }
       ],
       "Parametri": {
@@ -9475,6 +10617,16 @@
             "Mod": 3
           }
         },
+        "Special": {
+          "ridCostoTec": {
+            "Equip": 0,
+            "Tot": 0
+          },
+          "ridCostoSpell": {
+            "Equip": 0,
+            "Tot": 0
+          }
+        },
         "Combattimento": {
           "Disciplina": {
             "Base": 8,
@@ -9504,10 +10656,10 @@
             "Equip": 0,
             "Mod": 0
           },
-          "Attacco": {
-            "Base": 3,
+          "Salute": {
+            "Base": 2,
             "Anima": 0,
-            "Tot": 3,
+            "Tot": 2,
             "Equip": 0,
             "Mod": 0
           },
@@ -9518,10 +10670,10 @@
             "Equip": 0,
             "Mod": 0
           },
-          "Salute": {
-            "Base": 2,
+          "Attacco": {
+            "Base": 3,
             "Anima": 0,
-            "Tot": 2,
+            "Tot": 3,
             "Equip": 0,
             "Mod": 0
           }
@@ -9544,16 +10696,16 @@
         "lock_param_base": true
       },
       "stats": {
-        "manaCurrent": 173,
-        "gold": 12099,
+        "hpTotal": 26,
         "combatTokensAvailable": 38,
+        "gold": 9529,
         "basePointsSpent": 5,
         "combatTokensSpent": 72,
         "level": 7,
         "negativeBaseStatCount": 2,
         "manaTotal": 173,
         "lastAnimaShard": "Spirito",
-        "hpTotal": 26,
+        "manaCurrent": 173,
         "basePointsAvailable": 0,
         "hpCurrent": 26
       },
@@ -9660,6 +10812,7 @@
       },
       "equipped": {
         "accessorio": null,
+        "foderoArma": null,
         "headArmor": null,
         "cintura": null,
         "weaponOff": null,
