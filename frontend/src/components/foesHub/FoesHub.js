@@ -16,6 +16,7 @@ import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'fi
 import { httpsCallable } from 'firebase/functions';
 import { FiPlus, FiChevronDown, FiChevronRight, FiEdit2, FiTrash2, FiX, FiCopy } from 'react-icons/fi';
 import { computeParamTotals, deepClone, Pill, SectionTitle } from './elements/utils';
+import RadarChart from './elements/RadarChart';
 import { ParametersEditor, ParamTotalsPreview } from './elements/ParamEditors';
 import StatsEditor from './elements/StatsEditor';
 import TecnicheEditor from './elements/TecnicheEditor';
@@ -284,10 +285,24 @@ const FoeRow = ({ foe, onEdit, onDelete, onDuplicate }) => {
           {foe?.dadoAnima && (
             <div className="mb-3 text-[12px] text-indigo-200"><span className="text-indigo-300/80">Dado Anima:</span> {foe.dadoAnima}</div>
           )}
-          {/* Totals preview */}
-          <div className="rounded-xl border border-slate-700/50 bg-slate-800/40 p-3">
-            <ParamTotalsPreview params={params} />
-          </div>
+          {/* Radar charts */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <RadarChart
+                title="Parametri Base"
+                labels={Object.keys(params?.Base || {}).sort()}
+                values={Object.keys(params?.Base || {}).sort().map((k) => Number(params?.Base?.[k]?.Tot || 0))}
+                color="sky"
+                size={300}
+              />
+              <RadarChart
+                title="Parametri Combattimento"
+                labels={Object.keys(params?.Combattimento || {}).sort()}
+                values={Object.keys(params?.Combattimento || {}).sort().map((k) => Number(params?.Combattimento?.[k]?.Tot || 0))}
+                color="fuchsia"
+                size={300}
+              />
+            </div>
+          
           {/* Notes */}
           {foe?.notes && (
             <div className="mt-3 text-[12px] text-slate-300">{foe.notes}</div>
