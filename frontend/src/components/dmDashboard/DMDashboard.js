@@ -24,6 +24,13 @@ const DMDashboard = () => {
   const levelUpUser = httpsCallable(functions, "levelUpUser");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
+  // Collapsible sections state
+  const [sectionsOpen, setSectionsOpen] = useState({
+    overview: true,
+    vitals: true,
+    locks: true,
+    playerInfo: true,
+  });
 
   // Fetch users only once after confirming DM status
   useEffect(() => {
@@ -65,6 +72,19 @@ const DMDashboard = () => {
       console.error("Refresh users failed", e);
     }
   };
+
+  // Simple section header with show/hide control
+  const SectionHeader = ({ title, sectionKey }) => (
+    <div className="mb-3 flex items-center justify-between">
+      <h2 className="text-slate-100 text-xl font-semibold tracking-tight">{title}</h2>
+      <button
+        className="text-xs px-2 py-1 rounded border border-slate-700 text-slate-200 hover:bg-slate-700/40"
+        onClick={() => setSectionsOpen((prev) => ({ ...prev, [sectionKey]: !prev[sectionKey] }))}
+      >
+        {sectionsOpen[sectionKey] ? "Hide" : "Show"}
+      </button>
+    </div>
+  );
 
   const handleLevelUpAll = async () => {
     if (userData.role !== "dm") {
@@ -180,6 +200,75 @@ const DMDashboard = () => {
     }
   };
 
+  // Player overview cards with quick actions
+  const renderPlayerOverview = () => {
+    if (loading) return null;
+    if (!users.length) return null;
+
+    return (
+      <div className="mt-8">
+        <SectionHeader title="Players Overview" sectionKey="overview" />
+        {sectionsOpen.overview && (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {users.map((user) => {
+              const bAvail = Number(user?.stats?.basePointsAvailable) || 0;
+              const bSpent = Number(user?.stats?.basePointsSpent) || 0;
+              const bTot = bAvail + bSpent;
+              const cAvail = Number(user?.stats?.combatTokensAvailable) || 0;
+              const cSpent = Number(user?.stats?.combatTokensSpent) || 0;
+              const cTot = cAvail + cSpent;
+              return (
+                <div key={user.id} className="rounded-lg border border-slate-700/60 bg-gray-800/90 p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-medium text-slate-100">
+                        {user.characterId || user.email || "Unknown User"}
+                      </div>
+                      <div className="text-xs text-gray-300">Lv {user?.stats?.level || 1}</div>
+                    </div>
+                  </div>
+                  <div className="mt-3 space-y-1">
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className="text-slate-400/80">Base</span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-emerald-300 ring-1 ring-inset ring-emerald-400/30" title="Base points available">A {bAvail}</span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-400/10 px-2 py-0.5 text-slate-300 ring-1 ring-inset ring-white/10" title="Base points spent">S {bSpent}</span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-slate-200 ring-1 ring-inset ring-white/10" title="Base points total">T {bTot}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className="text-slate-400/80">Combat</span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-indigo-400/10 px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30" title="Combat tokens available">A {cAvail}</span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-400/10 px-2 py-0.5 text-slate-300 ring-1 ring-inset ring-white/10" title="Combat tokens spent">S {cSpent}</span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-slate-200 ring-1 ring-inset ring-white/10" title="Combat tokens total">T {cTot}</span>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => handleLevelUpOne(user.id)}
+                      disabled={busy}
+                      className={`px-2 py-1 rounded text-xs ${busy ? 'bg-emerald-400' : 'bg-emerald-600 hover:bg-emerald-500'} text-white shadow-sm`}
+                      title="Increase level by 1 for this player"
+                    >
+                      Level Up
+                    </button>
+                    <button
+                      onClick={() => handleAddCombatTokens(user.id)}
+                      disabled={busy}
+                      className={`px-2 py-1 rounded text-xs ${busy ? 'bg-amber-400' : 'bg-amber-600 hover:bg-amber-500'} text-white shadow-sm`}
+                      title="Add combat tokens to this player"
+                    >
+                      Add Tokens
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+  
+
   // Render the lock settings table
   const renderLockSettingsTable = () => {
     if (loading) {
@@ -196,80 +285,160 @@ const DMDashboard = () => {
 
     return (
       <div className="mt-8">
-        <h2 className="mb-3 text-white text-xl">User Lock Settings</h2>
-        <div className="overflow-x-auto">
-          <table className="min-w-full border-collapse text-white">
-            <thead>
-              <tr>
-                <th className="border px-4 py-2">Setting</th>
-                {users.map((user) => (
-                  <th key={user.id} className="border px-4 py-2">
-                    <div className="flex flex-col items-center gap-1">
-                      <div className="text-sm font-medium">
-                        {user.characterId || user.email || "Unknown User"}
-                      </div>
-                      <div className="text-xs text-gray-300">Lv {user?.stats?.level || 1}</div>
+        <SectionHeader title="User Lock Settings" sectionKey="locks" />
+        {sectionsOpen.locks && (
+          <div className="overflow-x-auto rounded-lg border border-slate-700/60 shadow-sm">
+            <table className="min-w-max border-collapse text-white bg-gray-800 text-sm">
+              <thead className="bg-gray-700/80 backdrop-blur supports-[backdrop-filter]:bg-gray-700/70">
+                <tr className="text-slate-100">
+                  <th className="sticky left-0 z-20 border border-gray-600 px-4 py-2 text-left bg-gray-700/80">Setting</th>
+                  {users.map((user) => {
+                    const bAvail = Number(user?.stats?.basePointsAvailable) || 0;
+                    const bSpent = Number(user?.stats?.basePointsSpent) || 0;
+                    const bTot = bAvail + bSpent;
+                    const cAvail = Number(user?.stats?.combatTokensAvailable) || 0;
+                    const cSpent = Number(user?.stats?.combatTokensSpent) || 0;
+                    const cTot = cAvail + cSpent;
+                    return (
+                      <th key={user.id} className="border border-gray-600 px-3 py-2 align-top">
+                        <div className="flex flex-col items-center gap-1 min-w-[12.5rem]">
+                          <div className="text-sm font-medium">
+                            {user.characterId || user.email || "Unknown User"}
+                          </div>
+                          <div className="text-xs text-gray-300">Lv {user?.stats?.level || 1}</div>
+                          {/* Base points badges */}
+                          <div className="mt-1 flex items-center gap-1 text-[11px]">
+                            <span className="text-slate-400/80">Base</span>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-emerald-300 ring-1 ring-inset ring-emerald-400/30" title="Base points available">A {bAvail}</span>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-slate-400/10 px-2 py-0.5 text-slate-300 ring-1 ring-inset ring-white/10" title="Base points spent">S {bSpent}</span>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-slate-200 ring-1 ring-inset ring-white/10" title="Base points total">T {bTot}</span>
+                          </div>
+                          {/* Combat tokens badges */}
+                          <div className="flex items-center gap-1 text-[11px]">
+                            <span className="text-slate-400/80">Combat</span>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-indigo-400/10 px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30" title="Combat tokens available">A {cAvail}</span>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-slate-400/10 px-2 py-0.5 text-slate-300 ring-1 ring-inset ring-white/10" title="Combat tokens spent">S {cSpent}</span>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-slate-200 ring-1 ring-inset ring-white/10" title="Combat tokens total">T {cTot}</span>
+                          </div>
+                          {/* Quick actions moved to the overview section to declutter this header */}
+                        </div>
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="sticky left-0 z-10 border border-gray-600 px-4 py-2 bg-gray-800 font-medium">Lock Parametri Base</td>
+                  {users.map((user) => (
+                    <td key={`${user.id}-base`} className="border border-gray-600 px-4 py-2 text-center">
                       <button
-                        onClick={() => handleLevelUpOne(user.id)}
-                        disabled={busy}
-                        className={`mt-1 px-2 py-1 rounded text-xs ${busy ? 'bg-emerald-400' : 'bg-emerald-600 hover:bg-emerald-500'} text-white`}
-                        title="Increase level by 1 for this player"
+                        onClick={() =>
+                          handleToggleLock(user.id, "lock_param_base", user.settings?.lock_param_base || false)
+                        }
+                        className="focus:outline-none"
                       >
-                        Level Up
+                        <FontAwesomeIcon
+                          icon={user.settings?.lock_param_base ? faLock : faLockOpen}
+                          className={user.settings?.lock_param_base ? "text-red-500" : "text-green-500"}
+                        />
                       </button>
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td className="sticky left-0 z-10 border border-gray-600 px-4 py-2 bg-gray-800 font-medium">Lock Parametri Combattimento</td>
+                  {users.map((user) => (
+                    <td key={`${user.id}-combat`} className="border border-gray-600 px-4 py-2 text-center">
                       <button
-                        onClick={() => handleAddCombatTokens(user.id)}
-                        disabled={busy}
-                        className={`mt-1 px-2 py-1 rounded text-xs ${busy ? 'bg-amber-400' : 'bg-amber-600 hover:bg-amber-500'} text-white`}
-                        title="Add combat tokens to this player"
+                        onClick={() =>
+                          handleToggleLock(user.id, "lock_param_combat", user.settings?.lock_param_combat || false)
+                        }
+                        className="focus:outline-none"
                       >
-                        Add Tokens
+                        <FontAwesomeIcon
+                          icon={user.settings?.lock_param_combat ? faLock : faLockOpen}
+                          className={user.settings?.lock_param_combat ? "text-red-500" : "text-green-500"}
+                        />
                       </button>
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="border px-4 py-2">Lock Parametri Base</td>
-                {users.map((user) => (
-                  <td key={`${user.id}-base`} className="border px-4 py-2 text-center">
-                    <button
-                      onClick={() =>
-                        handleToggleLock(user.id, "lock_param_base", user.settings?.lock_param_base || false)
-                      }
-                      className="focus:outline-none"
-                    >
-                      <FontAwesomeIcon
-                        icon={user.settings?.lock_param_base ? faLock : faLockOpen}
-                        className={user.settings?.lock_param_base ? "text-red-500" : "text-green-500"}
-                      />
-                    </button>
-                  </td>
-                ))}
-              </tr>
-              <tr>
-                <td className="border px-4 py-2">Lock Parametri Combattimento</td>
-                {users.map((user) => (
-                  <td key={`${user.id}-combat`} className="border px-4 py-2 text-center">
-                    <button
-                      onClick={() =>
-                        handleToggleLock(user.id, "lock_param_combat", user.settings?.lock_param_combat || false)
-                      }
-                      className="focus:outline-none"
-                    >
-                      <FontAwesomeIcon
-                        icon={user.settings?.lock_param_combat ? faLock : faLockOpen}
-                        className={user.settings?.lock_param_combat ? "text-red-500" : "text-green-500"}
-                      />
-                    </button>
-                  </td>
-                ))}
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Render player vitals (HP and Mana) for each user
+  const renderVitalsTable = () => {
+    if (loading) return null;
+    if (!users.length) return null;
+
+    const VBar = ({ pct, track, fill }) => (
+      <div className={`w-28 h-2 ${track} rounded overflow-hidden border border-slate-700/50`}>
+        <div className={`${fill} h-full`} style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
+      </div>
+    );
+
+    return (
+      <div className="mt-8">
+        <SectionHeader title="Player Vitals" sectionKey="vitals" />
+        {sectionsOpen.vitals && (
+          <div className="overflow-x-auto rounded-lg border border-slate-700/60 shadow-sm">
+            <table className="min-w-max border-collapse text-white bg-gray-800 text-sm">
+              <thead className="bg-gray-700/80 backdrop-blur supports-[backdrop-filter]:bg-gray-700/70">
+                <tr className="text-slate-100">
+                  <th className="sticky left-0 z-20 border border-gray-600 px-4 py-2 text-left bg-gray-700/80">Stat</th>
+                  {users.map((u) => (
+                    <th key={u.id} className="border border-gray-600 px-3 py-2 text-center min-w-[10rem] align-top">
+                      <div className="text-sm font-medium">{u.characterId || u.email || 'Unknown User'}</div>
+                      <div className="text-xs text-gray-300">Lv {u?.stats?.level || 1}</div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {/* HP row */}
+                <tr className="bg-gray-800 hover:bg-gray-700/60">
+                  <td className="sticky left-0 z-10 border border-gray-600 px-4 py-2 bg-gray-800 font-medium">HP</td>
+                  {users.map((u) => {
+                    const cur = Number(u?.stats?.hpCurrent) || 0;
+                    const tot = Number(u?.stats?.hpTotal) || 0;
+                    const pct = tot > 0 ? (cur / tot) * 100 : 0;
+                    return (
+                      <td key={`${u.id}-hp`} className="border border-gray-600 px-4 py-2 text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <VBar pct={pct} track="bg-red-900/30" fill="bg-gradient-to-r from-red-500 to-rose-500" />
+                          <div className="text-xs tabular-nums text-slate-300">{cur}/{tot}</div>
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+                {/* Mana row */}
+                <tr className="bg-gray-800 hover:bg-gray-700/60">
+                  <td className="sticky left-0 z-10 border border-gray-600 px-4 py-2 bg-gray-800 font-medium">Mana</td>
+                  {users.map((u) => {
+                    const cur = Number(u?.stats?.manaCurrent) || 0;
+                    const tot = Number(u?.stats?.manaTotal) || 0;
+                    const pct = tot > 0 ? (cur / tot) * 100 : 0;
+                    return (
+                      <td key={`${u.id}-mana`} className="border border-gray-600 px-4 py-2 text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <VBar pct={pct} track="bg-indigo-900/30" fill="bg-gradient-to-r from-indigo-600 to-fuchsia-600" />
+                          <div className="text-xs tabular-nums text-slate-300">{cur}/{tot}</div>
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     );
   };
@@ -277,7 +446,7 @@ const DMDashboard = () => {
   if (!userData) {
     return (
       <div className="min-h-screen bg-gray-900 text-white">
-        <div className="container mx-auto p-4">
+        <div className="w-full max-w-none mx-0 p-4">
           <div className="bg-gray-800 rounded-lg p-6">
             <p>Loading...</p>
           </div>
@@ -289,7 +458,7 @@ const DMDashboard = () => {
   if (userData.role !== "dm") {
     return (
       <div className="min-h-screen bg-gray-900 text-white">
-        <div className="container mx-auto p-4">
+        <div className="w-full max-w-none mx-0 p-4">
           <div className="bg-gray-800 rounded-lg p-6 text-red-500">
             <p>Access denied. This area is only accessible to DMs.</p>
           </div>
@@ -300,33 +469,49 @@ const DMDashboard = () => {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
-      <div className="container mx-auto p-4">
-        <h1 className="text-3xl font-bold mb-6">DM Dashboard</h1>
-        <div className="bg-gray-800 rounded-lg p-6">
+      {/* Full-width, left-aligned wrapper (no centered container) */}
+      <div className="w-full max-w-none mx-0 p-4">
+        {/* Sticky top bar with global actions */}
+        <div className="sticky top-0 z-20 -mx-4 mb-6 border-b border-slate-800/60 bg-gray-900/80 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-gray-900/60">
           <div className="flex items-center justify-between">
-            <p>
-              Welcome to the DM Dashboard. This area is only accessible to users with the DM role.
-            </p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-slate-100 tracking-tight">DM Dashboard</h1>
             <button
               onClick={handleLevelUpAll}
               disabled={busy}
-              className={`px-4 py-2 rounded-md text-white text-sm ${busy ? 'bg-indigo-400' : 'bg-indigo-600 hover:bg-indigo-500'} `}
+              className={`px-4 py-2 rounded-md text-white text-sm shadow ${busy ? 'bg-indigo-400' : 'bg-indigo-600 hover:bg-indigo-500'} `}
               title="Increase level by 1 for all players"
             >
               {busy ? 'Leveling…' : 'Level Up All'}
             </button>
           </div>
-          {toast && (
-            <div className="mt-3 text-sm text-green-300">{toast}</div>
+          {toast && <div className="mt-2 text-xs text-emerald-300">{toast}</div>}
+        </div>
+
+        {/* Welcome blurb */}
+        <div className="bg-gray-800/90 border border-slate-700/60 rounded-lg p-4">
+          <p className="text-slate-200 text-sm">
+            Welcome to the DM Dashboard. This area is only accessible to users with the DM role.
+          </p>
+        </div>
+
+        {renderPlayerOverview()}
+        {renderVitalsTable()}
+        {renderLockSettingsTable()}
+
+        {/* Player info table */}
+        <div className="mt-8">
+          <SectionHeader title="Player Info" sectionKey="playerInfo" />
+          {sectionsOpen.playerInfo && (
+            <div className="overflow-x-auto">
+              <PlayerInfo 
+                users={users}
+                loading={loading}
+                error={error}
+                setUsers={setUsers}
+              />
+            </div>
           )}
         </div>
-        {renderLockSettingsTable()}
-        <PlayerInfo 
-          users={users}
-          loading={loading}
-          error={error}
-          setUsers={setUsers}
-        />
       </div>
     </div>
   );

@@ -229,14 +229,15 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
 
   return (
     <div className="mt-8">
-      <h2 className="mb-3 text-white text-xl">Player Info</h2>
-      <div className="rounded-lg shadow-lg">
-        <table className="min-w-full border-collapse text-white bg-gray-800">
-          <thead className="bg-gray-700">
-            <tr>
-              <th className="border border-gray-600 px-4 py-2 text-left">Category</th>
+      <h2 className="mb-3 text-slate-100 text-xl font-semibold tracking-tight">Player Info</h2>
+      {/* Horizontal scroll wrapper so very wide tables don't break layout */}
+      <div className="rounded-lg border border-slate-700/60 shadow-sm overflow-x-auto">
+        <table className="min-w-max border-collapse text-white bg-gray-800 text-sm">
+          <thead className="bg-gray-700/80 backdrop-blur supports-[backdrop-filter]:bg-gray-700/70">
+            <tr className="text-slate-100">
+              <th className="sticky left-0 z-20 border border-gray-600 px-4 py-2 text-left bg-gray-700/80">Category</th>
               {users.map(u => (
-                <th key={u.id} className="border border-gray-600 px-4 py-2 text-center">
+                <th key={u.id} className="border border-gray-600 px-4 py-2 text-center min-w-[11rem]">
                   {u.characterId || u.email}
                 </th>
               ))}
@@ -245,7 +246,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
           <tbody>
             {/* Actions */}
             <tr className="bg-gray-800 hover:bg-gray-700">
-              <td className="border border-gray-600 px-4 py-2 font-medium">Actions</td>
+              <td className="sticky left-0 z-10 border border-gray-600 px-4 py-2 bg-gray-800 font-medium">Actions</td>
               {users.map(u => (
                 <td key={u.id+"-actions"} className="border border-gray-600 px-4 py-2 text-center">
                   <div className="flex flex-col items-center space-y-1">
@@ -270,7 +271,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
 
             {/* Tecniche */}
             <tr className="bg-gray-800 hover:bg-gray-700">
-              <td className="border border-gray-600 px-4 py-2 font-medium">Tecniche</td>
+              <td className="sticky left-0 z-10 border border-gray-600 px-4 py-2 bg-gray-800 font-medium">Tecniche</td>
               {users.map(u => (
                 <td key={u.id+"-tec"} className="border border-gray-600 px-4 py-2">
                   {u.tecniche && Object.keys(u.tecniche).length
@@ -303,7 +304,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
 
             {/* Spells */}
             <tr className="bg-gray-800 hover:bg-gray-700">
-              <td className="border border-gray-600 px-4 py-2 font-medium">Spells</td>
+              <td className="sticky left-0 z-10 border border-gray-600 px-4 py-2 bg-gray-800 font-medium">Spells</td>
               {users.map(u => (
                 <td key={u.id+"-sp"} className="border border-gray-600 px-4 py-2">
                   {u.spells && Object.keys(u.spells).length
@@ -336,7 +337,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
 
             {/* Conoscenze */}
             <tr className="bg-gray-800 hover:bg-gray-700">
-              <td className="border border-gray-600 px-4 py-2 font-medium">Conoscenze</td>
+              <td className="sticky left-0 z-10 border border-gray-600 px-4 py-2 bg-gray-800 font-medium">Conoscenze</td>
               {users.map(u => (
                 <td key={u.id+"-co"} className="border border-gray-600 px-4 py-2">
                   {u.conoscenze && Object.keys(u.conoscenze).length
@@ -369,7 +370,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
 
             {/* Professioni */}
             <tr className="bg-gray-800 hover:bg-gray-700">
-              <td className="border border-gray-600 px-4 py-2 font-medium">Professioni</td>
+              <td className="sticky left-0 z-10 border border-gray-600 px-4 py-2 bg-gray-800 font-medium">Professioni</td>
               {users.map(u => (
                 <td key={u.id+"-pr"} className="border border-gray-600 px-4 py-2">
                   {u.professioni && Object.keys(u.professioni).length
@@ -402,7 +403,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
 
             {/* Lingue */}
             <tr className="bg-gray-800 hover:bg-gray-700">
-              <td className="border border-gray-600 px-4 py-2 font-medium">Lingue</td>
+              <td className="sticky left-0 z-10 border border-gray-600 px-4 py-2 bg-gray-800 font-medium">Lingue</td>
               {users.map(u => (
                 <td key={u.id+"-li"} className="border border-gray-600 px-4 py-2">
                   {u.lingue && Object.keys(u.lingue).length
@@ -427,7 +428,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
 
             {/* Inventario */}
             <tr className="bg-gray-800 hover:bg-gray-700">
-              <td className="border border-gray-600 px-4 py-2 font-medium">Inventario</td>
+              <td className="sticky left-0 z-10 border border-gray-600 px-4 py-2 bg-gray-800 font-medium">Inventario</td>
               {users.map((u) => {
                 const inv = Array.isArray(u?.inventory) ? u.inventory : [];
                 // Build non-varie instances (unstacked) and stack only Varie
@@ -515,7 +516,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
               })}
             </tr>
           </tbody>
-        </table>
+  </table>
       </div>
 
       {/* Overlays */}
@@ -837,7 +838,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
           )}
         </>
       )}
-    </div>
+  </div>
   );
 };
 
