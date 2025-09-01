@@ -8,6 +8,13 @@ function RaceSelection({ user, onRaceSelect, selectedRace }) {
   const [loadingRaces, setLoadingRaces] = useState(true);
   const [error, setError] = useState("");
 
+  // Always-available placeholder race with no creation bonuses
+  const PLACEHOLDER_RACE = {
+    id: "Evocazione Permanente",
+    description:
+      "Placeholder per evocazioni permanenti. Nessun bonus di creazione. Usa Anima e i costi di distribuzione punti standard.",
+  };
+
   // --- Fetch races from Firestore (Map Structure) ---
   useEffect(() => {
     const fetchRaces = async () => {
@@ -31,22 +38,26 @@ function RaceSelection({ user, onRaceSelect, selectedRace }) {
                 description: description // e.g., "Le Fate sono note..." (this is the value from the map)
               };
             });
-            setRaces(racesArray);
+            // Ensure placeholder race is included once
+            const hasPlaceholder = racesArray.some(r => r.id === PLACEHOLDER_RACE.id);
+            const finalRaces = hasPlaceholder ? racesArray : [...racesArray, PLACEHOLDER_RACE];
+            setRaces(finalRaces);
             console.log("Races loaded successfully (Map Structure):", racesArray);
           } else {
-            console.log("Codex document found, but 'Razze' field is missing or not an object.");
-            setRaces([]);
-            setError("Race data format is incorrect in the database.");
+            console.log("Codex document found, but 'Razze' field is missing or not an object. Falling back to placeholder race.");
+            setRaces([PLACEHOLDER_RACE]);
+            setError("");
           }
         } else {
-          console.log("Codex document ('/utils/codex') not found in Firestore.");
-          setRaces([]);
-          setError("Could not find the Codex configuration in the database.");
+          console.log("Codex document ('/utils/codex') not found in Firestore. Falling back to placeholder race.");
+          setRaces([PLACEHOLDER_RACE]);
+          setError("");
         }
       } catch (error) {
         console.error("Error fetching codex document:", error);
-        setError(`Failed to fetch race data: ${error.message}`);
-        setRaces([]);
+        // On error, still allow character creation using the placeholder race
+        setRaces([PLACEHOLDER_RACE]);
+        setError("");
       } finally {
         setLoadingRaces(false);
       }

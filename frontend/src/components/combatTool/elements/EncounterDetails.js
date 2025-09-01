@@ -10,6 +10,7 @@ import {
     writeBatch,
     getDocs,
     addDoc,
+    runTransaction,
 } from "firebase/firestore";
 import DiceRoller from "../../common/DiceRoller";
 import { Button } from "./ui";
@@ -87,6 +88,27 @@ const EncounterDetails = ({ encounter, isDM }) => {
         }
     }, [participantsMap, user, userData?.characterId]);
 
+    // Determine if current player has already rolled initiative
+    const myParticipant = useMemo(() => {
+        return (
+            (myDocKey && participantsMap[myDocKey]) ||
+            (user?.uid ? participantsMap[user.uid] : null) ||
+            (userData?.characterId ? participantsMap[userData.characterId] : null) ||
+            null
+        );
+    }, [participantsMap, myDocKey, user?.uid, userData?.characterId]);
+
+    const hasRolledInitiative = useMemo(() => {
+        const ids = new Set([user?.uid, userData?.characterId].filter(Boolean));
+        for (const [k, data] of Object.entries(participantsMap)) {
+            if (ids.has(k) || ids.has(data?.uid) || ids.has(data?.characterId)) {
+                const init = data?.initiative;
+                if (init != null && (typeof init === "number" || init?.value != null)) return true;
+            }
+        }
+        return false;
+    }, [participantsMap, user?.uid, userData?.characterId]);
+
     // Subscribe to user docs for all participants (only when linked to user params)
     // IMPORTANT: Only DMs should subscribe to other users' docs (players/webmasters shouldn't to avoid permission errors).
     useEffect(() => {
@@ -143,6 +165,10 @@ const EncounterDetails = ({ encounter, isDM }) => {
     };
 
     const startRoll = () => {
+        if (hasRolledInitiative) {
+            alert("Hai già tirato l'iniziativa per questo incontro.");
+            return;
+        }
         const faces = computeFaces();
         const modifier = getDexTot();
         if (!faces) return alert("Impossibile determinare il Dado Anima.");
@@ -151,24 +177,54 @@ const EncounterDetails = ({ encounter, isDM }) => {
 
     const saveInitiative = async (total, faces, modifier, details) => {
         if (!user) return;
+        if (hasRolledInitiative) {
+            alert("Hai già tirato l'iniziativa per questo incontro.");
+            return;
+        }
         try {
             const key = myDocKey || user.uid;
-            await setDoc(
-                doc(db, "encounters", encounter.id, "participants", key),
-                {
-                    uid: user.uid,
-                    characterId: userData?.characterId || null,
-                    email: user?.email || null,
-                    initiative: {
-                        value: total,
-                        faces,
-                        modifier,
-                        rolledAt: serverTimestamp(),
+            const pRef = doc(db, "encounters", encounter.id, "participants", key);
+
+            // Atomic guard: only set initiative if not already present
+            await runTransaction(db, async (tx) => {
+                const snap = await tx.get(pRef);
+                const data = snap.exists() ? snap.data() : {};
+                const alreadyHere = data?.initiative != null && (typeof data.initiative === "number" || data.initiative?.value != null);
+                // Also guard against an alt participant doc (uid vs characterId)
+                const altKeys = [];
+                if (userData?.characterId && userData.characterId !== key) altKeys.push(userData.characterId);
+                if (user?.uid && user.uid !== key) altKeys.push(user.uid);
+                let alreadyAlt = false;
+                for (const ak of altKeys) {
+                    const aRef = doc(db, "encounters", encounter.id, "participants", ak);
+                    const aSnap = await tx.get(aRef);
+                    const aData = aSnap.exists() ? aSnap.data() : {};
+                    const init = aData?.initiative;
+                    if (init != null && (typeof init === "number" || init?.value != null)) {
+                        alreadyAlt = true;
+                        break;
+                    }
+                }
+                if (alreadyHere || alreadyAlt) {
+                    throw new Error("already-rolled");
+                }
+                tx.set(
+                    pRef,
+                    {
+                        uid: user.uid,
+                        characterId: userData?.characterId || null,
+                        email: user?.email || null,
+                        initiative: {
+                            value: total,
+                            faces,
+                            modifier,
+                            rolledAt: serverTimestamp(),
+                        },
+                        updatedAt: serverTimestamp(),
                     },
-                    updatedAt: serverTimestamp(),
-                },
-                { merge: true }
-            );
+                    { merge: true }
+                );
+            });
 
             // Write to shared log
             try {
@@ -191,6 +247,11 @@ const EncounterDetails = ({ encounter, isDM }) => {
                 console.warn("Failed to write roll log", logErr);
             }
         } catch (e) {
+            if (e && e.message === "already-rolled") {
+                alert("Hai già tirato l'iniziativa per questo incontro.");
+                setRoller({ visible: false, faces: 0, modifier: 0 });
+                return;
+            }
             console.error("Failed to save initiative", e);
             alert("Non hai i permessi per salvare l'iniziativa. Contatta il DM.");
         }
@@ -233,7 +294,14 @@ const EncounterDetails = ({ encounter, isDM }) => {
                 <div className="text-sm text-slate-300">Dettagli Incontro</div>
                 <div className="flex flex-wrap gap-2 justify-end">
                     {isParticipant && (
-                        <Button kind="primary" onClick={startRoll}>Tira Iniziativa (Dado Anima + Destrezza)</Button>
+                        <Button
+                            kind="primary"
+                            onClick={startRoll}
+                            disabled={hasRolledInitiative}
+                            title={hasRolledInitiative ? "Hai già tirato l'iniziativa" : undefined}
+                        >
+                            {hasRolledInitiative ? "Iniziativa già tirata" : "Tira Iniziativa (Dado Anima + Destrezza)"}
+                        </Button>
                     )}
                     {isDM && (
                         <>
