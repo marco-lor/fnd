@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 
 // Lightweight, dependency-free Radar chart using SVG
 // Props:
@@ -64,11 +64,11 @@ export default function RadarChart({ title, labels = [], values = [], color = 's
   const r = Math.min(cx, cy) - padding;
   const ringCount = 4; // grid rings
 
-  const polarToXY = (pct, i, n) => {
+  const polarToXY = useCallback((pct, i, n) => {
     const angle = (Math.PI * 2 * i) / n - Math.PI / 2; // start at top
     const radius = r * pct;
     return [cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius];
-  };
+  }, [r, cx, cy]);
 
   const polygonPath = useMemo(() => {
     const n = Math.max(labels.length, data.points.length) || 1;
@@ -76,7 +76,7 @@ export default function RadarChart({ title, labels = [], values = [], color = 's
     return pts.length
       ? `M ${pts.map((p) => p.join(',')).join(' L ')} Z`
       : '';
-  }, [labels.length, data.points]);
+  }, [labels.length, data.points, polarToXY]);
 
   const axes = useMemo(() => {
     const n = labels.length || data.points.length;
@@ -92,7 +92,7 @@ export default function RadarChart({ title, labels = [], values = [], color = 's
       const [lx, ly] = polarToXY(labelPct, i, n);
       return { i, x, y, lx, ly, angle };
     });
-  }, [labels.length, data.points.length]);
+  }, [labels.length, data.points.length, polarToXY]);
 
   const hasData = (values || []).some((v) => Number(v || 0) > 0);
 

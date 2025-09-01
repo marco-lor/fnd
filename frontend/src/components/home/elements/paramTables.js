@@ -249,11 +249,19 @@ export function MergedStatsTable() {
   const handleRollParam = (statName, total) => {
     const level = userData?.stats?.level;
     if (!level) return;
-    const diceTypeStr = dadiAnimaByLevel[level - 1];
+    // Use the same indexing convention as Home (anima die shown there uses [level])
+    const diceTypeStr = dadiAnimaByLevel[level];
     if (!diceTypeStr) return;
     const faces = parseInt(diceTypeStr.replace(/^d/, ''), 10);
     if (isNaN(faces)) return;
-    setRoller({ visible: true, faces, count: 1, modifier: total, description: `${statName} Roll` });
+    // Roll the anima die; the parameter total acts as a flat modifier
+    setRoller({
+      visible: true,
+      faces,
+      count: 1,
+      modifier: total,
+      description: `${statName} (${diceTypeStr} + ${total})`
+    });
   };
 
   const renderTable = () => {
@@ -271,7 +279,7 @@ export function MergedStatsTable() {
             <div className="text-sm text-slate-300">
               <span className="mr-2">Base</span>
               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-emerald-300 ring-1 ring-inset ring-emerald-400/30">
-                <span className="opacity-75">Avail</span>
+                <span className="opacity-75">Pool</span>
                 <strong className="font-semibold">{basePointsAvailable}</strong>
               </span>
               <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-slate-400/10 px-2 py-0.5 text-slate-300 ring-1 ring-inset ring-white/10">
@@ -282,7 +290,7 @@ export function MergedStatsTable() {
             <div className="text-sm text-slate-300">
               <span className="mr-2">Combat</span>
               <span className="inline-flex items-center gap-1 rounded-full bg-indigo-400/10 px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30">
-                <span className="opacity-75">Avail</span>
+                <span className="opacity-75">Pool</span>
                 <strong className="font-semibold">{combatTokensAvailable}</strong>
               </span>
               <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-slate-400/10 px-2 py-0.5 text-slate-300 ring-1 ring-inset ring-white/10">

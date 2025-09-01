@@ -5,10 +5,10 @@ import { collection, getDocs, doc, updateDoc, increment } from "firebase/firesto
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { useAuth } from "../../AuthContext";
 import { useNavigate } from "react-router-dom";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faLock, faLockOpen } from "@fortawesome/free-solid-svg-icons";
 import { library } from "@fortawesome/fontawesome-svg-core";
+import { faLock, faLockOpen } from "@fortawesome/free-solid-svg-icons";
 import PlayerInfo from "./elements/playerInfo";
+import LockSettingsTable from "./elements/LockSettingsTable";
 
 // Add icons to library
 library.add(faLock, faLockOpen);
@@ -169,36 +169,7 @@ const DMDashboard = () => {
     }
   };
 
-  // Handler to toggle a given lock field (either lock_param_base or lock_param_combat)
-  const handleToggleLock = async (userId, field, currentValue) => {
-    if (userData.role !== "dm") {
-      setError("Permission denied: Only DMs can modify settings");
-      return;
-    }
-
-    try {
-      const userRef = doc(db, "users", userId);
-      await updateDoc(userRef, {
-        [`settings.${field}`]: !currentValue,
-      });
-
-      setUsers(users.map(u => {
-        if (u.id === userId) {
-          return {
-            ...u,
-            settings: {
-              ...u.settings,
-              [field]: !currentValue
-            }
-          };
-        }
-        return u;
-      }));
-    } catch (error) {
-      console.error("Error updating lock setting:", error);
-      setError("Failed to update setting. Please try again.");
-    }
-  };
+  // Note: lock toggles handled in LockSettingsTable to avoid whole-page re-renders
 
   // Player overview cards with quick actions
   const renderPlayerOverview = () => {
@@ -269,16 +240,14 @@ const DMDashboard = () => {
   };
   
 
-  // Render the lock settings table
+  // Render the lock settings table (delegates to child to avoid rerendering the whole page)
   const renderLockSettingsTable = () => {
     if (loading) {
       return <div className="text-white mt-4">Loading user data...</div>;
     }
-
     if (error) {
       return <div className="text-red-500 mt-4">{error}</div>;
     }
-
     if (users.length === 0) {
       return <div className="text-white mt-4">No users found.</div>;
     }
@@ -287,86 +256,7 @@ const DMDashboard = () => {
       <div className="mt-8">
         <SectionHeader title="User Lock Settings" sectionKey="locks" />
         {sectionsOpen.locks && (
-          <div className="overflow-x-auto rounded-lg border border-slate-700/60 shadow-sm">
-            <table className="min-w-max border-collapse text-white bg-gray-800 text-sm">
-              <thead className="bg-gray-700/80 backdrop-blur supports-[backdrop-filter]:bg-gray-700/70">
-                <tr className="text-slate-100">
-                  <th className="sticky left-0 z-20 border border-gray-600 px-4 py-2 text-left bg-gray-700/80">Setting</th>
-                  {users.map((user) => {
-                    const bAvail = Number(user?.stats?.basePointsAvailable) || 0;
-                    const bSpent = Number(user?.stats?.basePointsSpent) || 0;
-                    const bTot = bAvail + bSpent;
-                    const cAvail = Number(user?.stats?.combatTokensAvailable) || 0;
-                    const cSpent = Number(user?.stats?.combatTokensSpent) || 0;
-                    const cTot = cAvail + cSpent;
-                    return (
-                      <th key={user.id} className="border border-gray-600 px-3 py-2 align-top">
-                        <div className="flex flex-col items-center gap-1 min-w-[12.5rem]">
-                          <div className="text-sm font-medium">
-                            {user.characterId || user.email || "Unknown User"}
-                          </div>
-                          <div className="text-xs text-gray-300">Lv {user?.stats?.level || 1}</div>
-                          {/* Base points badges */}
-                          <div className="mt-1 flex items-center gap-1 text-[11px]">
-                            <span className="text-slate-400/80">Base</span>
-                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-emerald-300 ring-1 ring-inset ring-emerald-400/30" title="Base points available">A {bAvail}</span>
-                            <span className="inline-flex items-center gap-1 rounded-full bg-slate-400/10 px-2 py-0.5 text-slate-300 ring-1 ring-inset ring-white/10" title="Base points spent">S {bSpent}</span>
-                            <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-slate-200 ring-1 ring-inset ring-white/10" title="Base points total">T {bTot}</span>
-                          </div>
-                          {/* Combat tokens badges */}
-                          <div className="flex items-center gap-1 text-[11px]">
-                            <span className="text-slate-400/80">Combat</span>
-                            <span className="inline-flex items-center gap-1 rounded-full bg-indigo-400/10 px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30" title="Combat tokens available">A {cAvail}</span>
-                            <span className="inline-flex items-center gap-1 rounded-full bg-slate-400/10 px-2 py-0.5 text-slate-300 ring-1 ring-inset ring-white/10" title="Combat tokens spent">S {cSpent}</span>
-                            <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-slate-200 ring-1 ring-inset ring-white/10" title="Combat tokens total">T {cTot}</span>
-                          </div>
-                          {/* Quick actions moved to the overview section to declutter this header */}
-                        </div>
-                      </th>
-                    );
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td className="sticky left-0 z-10 border border-gray-600 px-4 py-2 bg-gray-800 font-medium">Lock Parametri Base</td>
-                  {users.map((user) => (
-                    <td key={`${user.id}-base`} className="border border-gray-600 px-4 py-2 text-center">
-                      <button
-                        onClick={() =>
-                          handleToggleLock(user.id, "lock_param_base", user.settings?.lock_param_base || false)
-                        }
-                        className="focus:outline-none"
-                      >
-                        <FontAwesomeIcon
-                          icon={user.settings?.lock_param_base ? faLock : faLockOpen}
-                          className={user.settings?.lock_param_base ? "text-red-500" : "text-green-500"}
-                        />
-                      </button>
-                    </td>
-                  ))}
-                </tr>
-                <tr>
-                  <td className="sticky left-0 z-10 border border-gray-600 px-4 py-2 bg-gray-800 font-medium">Lock Parametri Combattimento</td>
-                  {users.map((user) => (
-                    <td key={`${user.id}-combat`} className="border border-gray-600 px-4 py-2 text-center">
-                      <button
-                        onClick={() =>
-                          handleToggleLock(user.id, "lock_param_combat", user.settings?.lock_param_combat || false)
-                        }
-                        className="focus:outline-none"
-                      >
-                        <FontAwesomeIcon
-                          icon={user.settings?.lock_param_combat ? faLock : faLockOpen}
-                          className={user.settings?.lock_param_combat ? "text-red-500" : "text-green-500"}
-                        />
-                      </button>
-                    </td>
-                  ))}
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <LockSettingsTable users={users} canEdit={userData.role === 'dm'} />
         )}
       </div>
     );

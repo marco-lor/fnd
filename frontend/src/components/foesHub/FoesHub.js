@@ -31,22 +31,29 @@ const normalizeImageUrl = (u) => (isSafeImageUrl(u) ? u : '');
 const FoeFormModal = ({ open, initial, onCancel, onSave, schema }) => {
   const [foe, setFoe] = useState(() => deepClone(initial));
   const [tab, setTab] = useState('general');
-  const [jsonErr, setJsonErr] = useState('');
+  // jsonErr removed (was unused)
   const [imageFile, setImageFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [removeExisting, setRemoveExisting] = useState(false);
 
+  // Reset form when opening / switching initial foe
   useEffect(() => {
     if (open) {
       setFoe(deepClone(initial));
-      setJsonErr('');
       setTab('general');
       setImageFile(null);
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      // clear previous preview (revocation handled in separate effect)
       setPreviewUrl(null);
       setRemoveExisting(false);
     }
   }, [open, initial]);
+
+  // Revoke object URL when previewUrl changes or component unmounts
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   const params = useMemo(() => computeParamTotals(foe?.Parametri || {}), [foe?.Parametri]);
   const specialKeys = useMemo(() => {
@@ -629,7 +636,7 @@ const FoesHub = () => {
       setDupBusy(true);
       setDupError('');
       const callable = httpsCallable(functions, 'duplicateFoeWithAssets');
-      const res = await callable({ sourceFoeId: dupTarget.id, newFoeName: dupName.trim() });
+  await callable({ sourceFoeId: dupTarget.id, newFoeName: dupName.trim() });
       // Optional: we could resolve URLs for previews here using getDownloadURL on returned paths
       // but no need to mutate state; the Firestore onSnapshot will include the new doc
       setDupOpen(false);

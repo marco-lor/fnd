@@ -3,7 +3,7 @@ import { AuthContext } from '../../../AuthContext';
 import { doc, onSnapshot, updateDoc, increment } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 import { FaTimes } from 'react-icons/fa';
-import { GiChestArmor, GiBroadsword, GiShield, GiRing, GiCrackedHelm, GiBlackBelt, GiSteeltoeBoots, GiScabbard } from 'react-icons/gi';
+import { GiChestArmor, GiBroadsword, GiShield, GiRing, GiCrackedHelm, GiBlackBelt, GiSteeltoeBoots, GiScabbard, GiPotionBall } from 'react-icons/gi';
 import ItemDetailsModal from './ItemDetailsModal';
 import { computeValue } from '../../common/computeFormula';
 
@@ -81,7 +81,6 @@ const EquippedInventory = () => {
   // ------------------------------
   // Parametri helpers (same logic as details overlay)
   // ------------------------------
-  const LEVELS = ['1', '4', '7', '10'];
   const getDefaultLevelKey = () => {
     const thresholds = [1, 4, 7, 10];
     const userLevel = Number(userData?.stats?.level || 1);
@@ -102,6 +101,47 @@ const EquippedInventory = () => {
     const n = Number(val);
     return Number.isFinite(n) ? n : 0;
   };
+
+  // --- Belt (Cintura) helpers: dynamic consumable slots --------------------
+  // Capacity comes from equipped belt item Specific.slotCintura
+  // Any number >= 1 is rendered; 99 means unlimited but UI should not render anything.
+  const getBeltInfo = () => {
+    const beltEntry = equipped?.cintura;
+    const beltObj = beltEntry && typeof beltEntry === 'object' ? beltEntry : null;
+    const n = Number(beltObj?.Specific?.slotCintura);
+    if (!Number.isFinite(n)) return { capacity: 0, unlimited: false };
+    if (n === 99) return { capacity: 0, unlimited: true };
+    const cap = Math.max(0, Math.floor(n));
+    return { capacity: cap, unlimited: false };
+  };
+  const { capacity: beltCapacity, unlimited: beltUnlimited } = getBeltInfo();
+  const getBeltSlotKeys = (cap) => Array.from({ length: cap }, (_, i) => `beltC${i + 1}`);
+  const beltSlotKeys = getBeltSlotKeys(beltCapacity);
+
+  // When capacity decreases, automatically clear extra equipped consumables beyond capacity
+  useEffect(() => {
+    if (!user) return;
+    const cap = beltCapacity;
+    if (!equipped) return;
+    if (beltUnlimited) return; // sentinel 99: keep whatever is stored; UI just hides
+    const updates = {};
+    let needs = false;
+    Object.keys(equipped).forEach((k) => {
+      const m = /^beltC(\d+)$/.exec(k);
+      if (!m) return;
+      const idx = parseInt(m[1], 10);
+      if (!Number.isFinite(idx)) return;
+      if (cap === 0 || idx > cap) {
+        if (equipped[k]) {
+          updates[`equipped.${k}`] = null;
+          needs = true;
+        }
+      }
+    });
+    if (needs) {
+      updateDoc(doc(db, 'users', user.uid), updates).catch(console.error);
+    }
+  }, [beltCapacity, beltUnlimited, user, equipped]);
 
   // Build an object of FieldValue.increment updates for this item's Parametri
   const buildEquipDeltaFromItem = (item, sign = +1) => {
@@ -161,12 +201,14 @@ const EquippedInventory = () => {
       const toCheck = resolveItemDoc(item) || item;
       if (!isItemCompatibleWithSlot(toCheck, activeSlot)) {
         setEquipError('Oggetto non compatibile con questo slot');
-        return;
+  setLoading(false);
+  return;
       }
       // Validate two-handed constraints
       if (!canEquipUnderTwoHConstraints(toCheck, activeSlot)) {
         setEquipError('Non è possibile: arma a due mani richiede entrambe le mani libere');
-        return;
+  setLoading(false);
+  return;
       }
       // Build increments: subtract previous item in slot (if any), add new item
       const prevItem = equipped?.[activeSlot];
@@ -278,10 +320,15 @@ const EquippedInventory = () => {
     return { allowed: [s], twoHandedBySlot: false };
   };
 
-  const slotLabelFor = (slotKey) => SLOT_MAP[slotKey]?.label;
+  // Extend slot label resolution for dynamic belt slots
+  const slotLabelForDynamic = (slotKey) => {
+    if (SLOT_MAP[slotKey]) return SLOT_MAP[slotKey].label;
+    if (typeof slotKey === 'string' && slotKey.startsWith('beltC')) return 'Consumabile';
+    return undefined;
+  };
 
   const isItemCompatibleWithSlot = (entry, slotKey) => {
-    const label = slotLabelFor(slotKey);
+    const label = slotLabelForDynamic(slotKey);
     if (!label) return false;
     const slots = getItemSlotValues(entry);
     for (const raw of slots) {
@@ -332,9 +379,11 @@ const EquippedInventory = () => {
   // Render a single slot cell (side used for beam direction)
   const renderSlot = (slotKey, side) => {
     if (!slotKey) return <div />;
+    // Allow dynamic belt slots: default label/icon when not in SLOT_MAP
     const def = SLOT_MAP[slotKey];
-    if (!def) return <div />;
-    const { label, icon: Icon } = def;
+    const label = def?.label ?? slotLabelForDynamic(slotKey);
+  const Icon = def?.icon ?? GiPotionBall;
+    if (!label) return <div />;
     const item = equipped?.[slotKey];
     const itemDoc = resolveItemDoc(item);
     const imgUrl = itemDoc?.General?.image_url || item?.General?.image_url;
@@ -362,8 +411,10 @@ const EquippedInventory = () => {
           <span className="text-[10px] uppercase tracking-wide text-slate-300 leading-tight px-1 text-center whitespace-normal">{label}</span>
           {!item && <Silhouette />}
           {blocked && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-[10px] text-rose-300 bg-rose-500/10 border border-rose-400/30 rounded px-1.5 py-0.5">Bloccato (2 mani)</span>
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-xl bg-slate-900/80 backdrop-blur-sm border border-rose-400/30 text-center px-2">
+              <span className="text-[10px] uppercase tracking-wide text-rose-200">Bloccato</span>
+              <span className="text-xs font-semibold text-rose-300">2 Mani</span>
+              <span className="mt-1 text-[9px] text-slate-300/80">Libera l'altra mano</span>
             </div>
           )}
       {item && (
@@ -433,8 +484,23 @@ const EquippedInventory = () => {
   </div>
       </div>
 
+  {/* Belt (Cintura) consumable slots */}
+  {beltCapacity > 0 && !beltUnlimited && (
+        <div className="mt-5">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs uppercase tracking-wider text-slate-400">Cintura: Consumabili</p>
+            <span className="text-[10px] text-slate-500">{beltCapacity} slot</span>
+          </div>
+          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${beltCapacity}, minmax(72px, 1fr))` }}>
+            {beltSlotKeys.map((k) => (
+              <div key={k}>{renderSlot(k)}</div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {activeSlot && (
-        <Modal title={`Equip ${SLOT_MAP[activeSlot]?.label || ''}`} onClose={() => setActiveSlot(null)}>
+        <Modal title={`Equip ${slotLabelForDynamic(activeSlot) || ''}`} onClose={() => setActiveSlot(null)}>
           {equipError && (
             <div className="mb-2 text-[11px] text-rose-300 bg-rose-500/10 border border-rose-400/30 rounded px-2 py-1">
               {equipError}
