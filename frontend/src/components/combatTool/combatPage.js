@@ -47,7 +47,7 @@ const CombatPage = () => {
 								)}
 							</div>
 								<div className="md:sticky md:top-0 md:self-start md:max-h-[calc(100vh-5rem)] overflow-y-auto pr-1">
-									{selectedEncounter && <EncounterLog encounterId={selectedEncounter.id} />}
+									<EncounterLog encounterId={selectedEncounter?.id} />
 								</div>
 						</div>
 					)}

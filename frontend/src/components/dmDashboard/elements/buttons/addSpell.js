@@ -55,6 +55,11 @@ export function AddSpellOverlay({ userId, onClose, savePath = null }) {
 
     try {
       const { spellData, imageFile, videoFile } = result;
+      // Normalize key casing for Azione for backward compatibility
+      if (!('Azione' in spellData) && ('azione' in spellData)) {
+        spellData.Azione = spellData.azione;
+        try { delete spellData.azione; } catch {}
+      }
       const spellName = spellData.Nome.trim();
       const safeBase  = `spell_${(savePath?.id || userId)}_${spellName.replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}`;
 
@@ -87,8 +92,8 @@ export function AddSpellOverlay({ userId, onClose, savePath = null }) {
         onClose(false); return;
       }
 
-      const prev   = snap.data().spells || {};
-      const next   = { ...prev, [spellName]: spellData };
+  const prev   = snap.data().spells || {};
+  const next   = { ...prev, [spellName]: spellData };
 
       if (JSON.stringify(next).length > 900_000) {
         alert("Data too large – usa un’immagine o video più piccoli.");

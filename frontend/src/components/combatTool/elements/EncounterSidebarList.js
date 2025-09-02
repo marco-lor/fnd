@@ -103,6 +103,17 @@ const EncounterSidebarList = ({ isDM, onSelect, selectedId }) => {
         if (encounters.length > 0) onSelect(encounters[0]);
     }, [onSelect, loading, selectedId, encounters]);
 
+    // If the selected encounter was removed, switch to the first one or clear selection
+    useEffect(() => {
+        if (!onSelect) return;
+        if (loading) return;
+        if (!selectedId) return; // already empty, handled by previous effect
+        const stillExists = encounters.some((e) => e.id === selectedId);
+        if (!stillExists) {
+            onSelect(encounters[0] || null);
+        }
+    }, [encounters, loading, onSelect, selectedId]);
+
     if (loading) return <div className="text-slate-300">Loading encounters…</div>;
 
     return (

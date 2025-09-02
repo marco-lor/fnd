@@ -55,7 +55,11 @@ const EncounterLog = ({ encounterId }) => {
     const containerRef = useRef(null);
 
     useEffect(() => {
-        if (!encounterId) return;
+        // If no encounter is selected, clear entries and skip subscribing
+        if (!encounterId) {
+            setEntries([]);
+            return () => {};
+        }
         const logsRef = collection(db, "encounters", encounterId, "logs");
         const q = query(logsRef, orderBy("createdAt", "desc"), limit(200));
         const unsub = onSnapshot(q, (snap) => {
@@ -79,10 +83,14 @@ const EncounterLog = ({ encounterId }) => {
         if (containerRef.current) containerRef.current.scrollTop = 0;
     }, [content.length]);
 
+    const noSelection = !encounterId;
+
     return (
         <Section title="Encounter Log">
             <div ref={containerRef} className="max-h-[60vh] md:max-h-[calc(100vh-12rem)] overflow-y-auto pr-1 grid gap-2">
-                {content.length === 0 ? (
+                {noSelection ? (
+                    <div className="text-slate-400 text-sm">Nessun incontro selezionato. Seleziona un incontro per vedere i log.</div>
+                ) : content.length === 0 ? (
                     <div className="text-slate-400 text-sm">No logs yet. Rolls will appear here.</div>
                 ) : (
                     content.map((e) => <LogRow key={e.id} entry={e} />)
