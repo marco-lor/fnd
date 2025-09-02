@@ -462,7 +462,11 @@ const TecnicheSide = ({ personalTecniche = {}, commonTecniche = {}, userData = {
         {Object.keys(personalTecniche).length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {Object.entries(personalTecniche)
-              .sort((a, b) => a[0].localeCompare(b[0]))
+              .sort((a, b) => {
+                const nameA = (a[1]?.Nome || a[0] || "").toString();
+                const nameB = (b[1]?.Nome || b[0] || "").toString();
+                return nameA.localeCompare(nameB, undefined, { sensitivity: "base" });
+              })
               .map(([tecnicaName, tecnica]) => (
                 <MemoizedTecnicaCard
                   key={tecnicaName}
@@ -485,7 +489,11 @@ const TecnicheSide = ({ personalTecniche = {}, commonTecniche = {}, userData = {
         {Object.keys(commonTecniche).length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {Object.entries(commonTecniche)
-              .sort((a, b) => a[0].localeCompare(b[0]))
+              .sort((a, b) => {
+                const nameA = (a[1]?.Nome || a[0] || "").toString();
+                const nameB = (b[1]?.Nome || b[0] || "").toString();
+                return nameA.localeCompare(nameB, undefined, { sensitivity: "base" });
+              })
               .map(([tecnicaName, tecnica]) => (
                 <MemoizedTecnicaCard
                   key={tecnicaName}
