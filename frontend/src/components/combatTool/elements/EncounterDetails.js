@@ -157,10 +157,13 @@ const EncounterDetails = ({ encounter, isDM }) => {
         return Number(base?.[key]?.Tot) || 0;
     };
 
+    // Use the exact same criteria as Home page: pick dice by current level index and parse faces from string like "d6", "d8", ...
     const computeFaces = () => {
-        const lvl = Number(userData?.stats?.level) || 0;
-        const diceStr = dadiAnimaByLevel[(lvl - 1) | 0] || dadiAnimaByLevel[lvl] || "";
-        const faces = parseInt(String(diceStr).replace(/^d/i, ""), 10);
+        const level = userData?.stats?.level;
+        if (!level) return 0;
+        const diceTypeStr = dadiAnimaByLevel[level];
+        if (!diceTypeStr) return 0;
+        const faces = parseInt(String(diceTypeStr).replace(/^d/i, ""), 10);
         return Number.isFinite(faces) && faces > 0 ? faces : 0;
     };
 
@@ -340,19 +343,33 @@ const EncounterDetails = ({ encounter, isDM }) => {
                             kind="danger"
                             onClick={async () => {
                                 const ok = window.confirm(
-                                    `Sei sicuro di voler eliminare l'incontro${encounter.name ? ` "${encounter.name}"` : ""}?\nQuesta azione eliminerà definitivamente il documento e i partecipanti.`
+                                    `Sei sicuro di voler eliminare l'incontro${encounter.name ? ` "${encounter.name}"` : ""}?\nQuesta azione eliminerà definitivamente il documento, i partecipanti e i log.`
                                 );
                                 if (!ok) return;
                                 try {
                                     const encRef = doc(db, "encounters", encounter.id);
                                     const participantsRef = collection(db, "encounters", encounter.id, "participants");
-                                    const batch = writeBatch(db);
-                                    // Delete all participants docs first
+                                    const logsRef = collection(db, "encounters", encounter.id, "logs");
+
+                                    // Collect all docs to delete (participants + logs), then delete in chunks to stay under batch limit
+                                    const toDelete = [];
                                     const partSnap = await getDocs(participantsRef);
-                                    partSnap.forEach((d) => batch.delete(d.ref));
-                                    // Delete the encounter doc itself
-                                    batch.delete(encRef);
-                                    await batch.commit();
+                                    partSnap.forEach((d) => toDelete.push(d.ref));
+                                    const logsSnap = await getDocs(logsRef);
+                                    logsSnap.forEach((d) => toDelete.push(d.ref));
+
+                                    const CHUNK = 450; // safety margin under 500 operations per batch
+                                    for (let i = 0; i < toDelete.length; i += CHUNK) {
+                                        const batch = writeBatch(db);
+                                        const slice = toDelete.slice(i, i + CHUNK);
+                                        slice.forEach((ref) => batch.delete(ref));
+                                        await batch.commit();
+                                    }
+
+                                    // Finally delete the encounter document itself
+                                    const finalBatch = writeBatch(db);
+                                    finalBatch.delete(encRef);
+                                    await finalBatch.commit();
                                 } catch (e) {
                                     console.error(e);
                                     alert("Failed to delete encounter.");

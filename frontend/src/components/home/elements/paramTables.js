@@ -10,11 +10,17 @@ import DiceRoller from '../../common/DiceRoller';
 const functions = getFunctions();
 const spendCharacterPoint = httpsCallable(functions, "spendCharacterPoint");
 
+// Readable label overrides for specific parameter keys
+const NAME_OVERRIDES = {
+  RiduzioneDanni: 'Riduz Danni',
+};
+const displayName = (k) => NAME_OVERRIDES[k] || k;
+
 const StatButton = ({ onClick, disabled, children, className = "" }) => (
   <button
     onClick={(e) => { onClick(e); e.currentTarget.blur(); }}
     disabled={disabled}
-    className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs text-slate-300 hover:text-white transition ring-1 ring-inset ring-white/10 hover:ring-white/20 hover:bg-white/10 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed ${className}`}
+  className={`inline-flex h-5 w-5 md:h-6 md:w-6 items-center justify-center rounded-full text-[10px] md:text-xs text-slate-300 hover:text-white transition ring-1 ring-inset ring-white/10 hover:ring-white/20 hover:bg-white/10 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed ${className}`}
   >
     {children}
   </button>
@@ -267,7 +273,16 @@ export function MergedStatsTable() {
   const renderTable = () => {
     if (!baseStats || !combStats || combatCosts === null) return <div className="text-center text-gray-400">Loading…</div>;
     const columns = ['Base','Anima','Equip','Mod','Tot'];
-  const columnsSpecial = ['Equip','Mod','Tot'];
+    const columnsSpecial = ['Equip','Mod','Tot'];
+    // Responsive visibility per column to avoid horizontal scroll
+    const colVisible = {
+      Base: 'hidden md:table-cell',    // show from md+
+      Anima: 'hidden lg:table-cell',   // show from lg+
+      Equip: 'hidden xl:table-cell',   // show from xl+
+      Mod: '',                         // always visible
+      Tot: ''                          // always visible
+    };
+  const abbr = { Base: 'B', Anima: 'A', Equip: 'E', Mod: 'M', Tot: 'T' };
   const baseKeys = Object.keys(baseStats).sort();
   const combKeys = Object.keys(combStats).sort();
   const specialKeys = Array.from(new Set([...(specialSchemaKeys || []), ...Object.keys(specialStats || {})])).sort();
@@ -300,39 +315,44 @@ export function MergedStatsTable() {
             </div>
           </div>
           <div className="overflow-hidden">
-            <table className="w-full text-sm text-left text-slate-300">
-              <thead className="text-[11px] uppercase tracking-wider text-slate-400/80 bg-white/5">
+            <table className="w-full table-fixed text-[13px] md:text-sm leading-tight text-left text-slate-300">
+              <thead className="text-[10px] md:text-[11px] uppercase tracking-wider text-slate-400/80 bg-white/5">
                 <tr>
-                  <th className="px-4 py-2 font-medium">Stat</th>
+                  <th className="px-1 md:px-4 py-2 font-medium w-[7rem] md:w-[12rem]">
+                    Stat
+                  </th>
                   {columns.map((c) => (
-                    <th key={c} className="px-3 py-2 text-center font-medium">{c}</th>
+                    <th key={c} className={`${c === 'Base' ? 'pl-1 pr-2 md:px-3' : 'px-2 md:px-3'} py-2 text-center font-medium ${colVisible[c]}`} aria-label={c}>
+                      <span className="inline min-[1600px]:hidden">{abbr[c] || c}</span>
+                      <span className="hidden min-[1600px]:inline">{c}</span>
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
                 <tr>
-                  <td colSpan={columns.length + 1} className="px-4 py-2 text-[11px] uppercase tracking-wider text-slate-400/70 bg-white/[0.03]">Parametri Base</td>
+                  <td colSpan={columns.length + 1} className="px-3 md:px-4 py-2 text-[10px] md:text-[11px] uppercase tracking-wider text-slate-400/70 bg-white/[0.03]">Parametri Base</td>
                 </tr>
                 {baseKeys.map((name) => {
                   const stat = baseStats[name];
                   const val = Number(stat.Base) || 0;
                   return (
                     <tr key={name} className="odd:bg-transparent even:bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
-                      <td className="px-4 py-2 font-medium text-white">
-                        <div className="flex items-center gap-2">
-                          <FaDiceD20 className="cursor-pointer text-slate-400 hover:text-indigo-300 transition" title={`Roll ${name}`} onClick={() => handleRollParam(name, Number(stat.Tot) || 0)} />
-                          <span>{name}</span>
+                      <td className="px-1 md:px-4 py-2 font-medium text-white">
+                        <div className="flex items-center gap-1 md:gap-2">
+                          <FaDiceD20 className="shrink-0 cursor-pointer text-slate-400 hover:text-indigo-300 transition" title={`Roll ${name}`} onClick={() => handleRollParam(name, Number(stat.Tot) || 0)} />
+                          <span className="truncate max-w-[10ch] md:max-w-none" title={name}>{displayName(name)}</span>
                         </div>
                       </td>
                       {columns.map((col) => {
-                        const baseCell = "px-3 py-2 text-center";
+                        const baseCell = `px-2 md:px-3 py-1 md:py-2 text-center ${colVisible[col]}`;
                         if (col === 'Base') {
                           return (
-                            <td key={col} className={baseCell}>
+                            <td key={col} className={`pl-1 pr-2 md:px-3 py-1 md:py-2 text-center ${colVisible[col]}`}>
                               {!lockBase ? (
-                                <div className="flex items-center justify-center gap-1">
+                                <div className="flex items-center justify-center gap-1 md:gap-1.5">
                                   <StatButton onClick={() => handlePointChange(name, 'Base', -1)} disabled={val <= -1}>-</StatButton>
-                                  <span className="tabular-nums w-6 text-center">{stat.Base}</span>
+                                  <span className="tabular-nums w-5 md:w-6 text-center">{stat.Base}</span>
                                   <StatButton onClick={() => handlePointChange(name, 'Base', 1)} disabled={val >= 0 && basePointsAvailable <= 0}>+</StatButton>
                                 </div>
                               ) : (
@@ -344,9 +364,9 @@ export function MergedStatsTable() {
                         if (col === 'Mod') {
                           return (
                             <td key={col} className={baseCell}>
-                              <div className="flex items-center justify-center gap-1">
+                              <div className="flex items-center justify-center gap-1 md:gap-1.5">
                                 <StatButton onClick={() => handleModChange(name, 'Base', -1)}>-</StatButton>
-                                <span className="tabular-nums w-6 text-center">{stat.Mod}</span>
+                                <span className="tabular-nums w-5 md:w-6 text-center">{stat.Mod}</span>
                                 <StatButton onClick={() => handleModChange(name, 'Base', 1)}>+</StatButton>
                               </div>
                             </td>
@@ -354,8 +374,8 @@ export function MergedStatsTable() {
                         }
                         if (col === 'Tot') {
                           return (
-                            <td key={col} className="px-3 py-2 text-center">
-                              <span className="inline-flex min-w-[2.25rem] justify-center rounded-md bg-indigo-500/10 px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30 tabular-nums">{stat[col] || 0}</span>
+                            <td key={col} className={`px-2 md:px-3 py-1 md:py-2 text-center ${colVisible[col]}`}>
+                              <span className="inline-flex min-w-[2rem] md:min-w-[2.25rem] justify-center rounded-md bg-indigo-500/10 px-1.5 md:px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30 tabular-nums">{stat[col] || 0}</span>
                             </td>
                           );
                         }
@@ -369,7 +389,7 @@ export function MergedStatsTable() {
                   );
                 })}
                 <tr>
-                  <td colSpan={columns.length + 1} className="px-4 py-2 text-[11px] uppercase tracking-wider text-slate-400/70 bg-white/[0.03]">Parametri Combattimento</td>
+                  <td colSpan={columns.length + 1} className="px-3 md:px-4 py-2 text-[10px] md:text-[11px] uppercase tracking-wider text-slate-400/70 bg-white/[0.03]">Parametri Combattimento</td>
                 </tr>
                 {combKeys.map((name) => {
                   const stat = combStats[name];
@@ -377,22 +397,25 @@ export function MergedStatsTable() {
                   const afford = combatTokensAvailable >= cost;
                   return (
                     <tr key={name} className="odd:bg-transparent even:bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
-                      <td className="px-4 py-2 font-medium text-white" title={`Cost: ${cost}`}>
-                        <div className="flex items-center gap-2">
-                          <FaDiceD20 className="cursor-pointer text-slate-400 hover:text-indigo-300 transition" title={`Roll ${name}`} onClick={() => handleRollParam(name, Number(stat.Tot) || 0)} />
-                          <span>{name}</span>
-                          <span className="ml-2 text-[10px] text-slate-400/70">Cost {cost}</span>
+                      <td className="px-1 md:px-4 py-2 font-medium text-white" title={`Cost: ${cost}`}> 
+                        <div className="flex items-center gap-1 md:gap-2">
+                          <FaDiceD20 className="shrink-0 cursor-pointer text-slate-400 hover:text-indigo-300 transition" title={`Roll ${name}`} onClick={() => handleRollParam(name, Number(stat.Tot) || 0)} />
+                          <span className="truncate max-w-[10ch] md:max-w-none" title={name}>{displayName(name)}</span>
+                          <span className="ml-1 md:ml-2 text-[9px] md:text-[10px] text-slate-400/70">
+                            <span className="hidden min-[1600px]:inline">Cost </span>
+                            <span className="tabular-nums">{cost}</span>
+                          </span>
                         </div>
                       </td>
                       {columns.map((col) => {
-                        const baseCell = "px-3 py-2 text-center";
+                        const baseCell = `px-2 md:px-3 py-1 md:py-2 text-center ${colVisible[col]}`;
                         if (col === 'Base') {
                           return (
-                            <td key={col} className={baseCell}>
+                            <td key={col} className={`pl-1 pr-2 md:px-3 py-1 md:py-2 text-center ${colVisible[col]}`}>
                               {!lockCombat ? (
-                                <div className="flex items-center justify-center gap-1">
+                                <div className="flex items-center justify-center gap-1 md:gap-1.5">
                                   <StatButton onClick={() => handlePointChange(name, 'Combat', -1)} disabled={Number(stat.Base) <= 0}>-</StatButton>
-                                  <span className="tabular-nums w-6 text-center">{stat.Base}</span>
+                                  <span className="tabular-nums w-5 md:w-6 text-center">{stat.Base}</span>
                                   <StatButton onClick={() => handlePointChange(name, 'Combat', 1)} disabled={!afford}>+</StatButton>
                                 </div>
                               ) : (
@@ -404,9 +427,9 @@ export function MergedStatsTable() {
                         if (col === 'Mod') {
                           return (
                             <td key={col} className={baseCell}>
-                              <div className="flex items-center justify-center gap-1">
+                              <div className="flex items-center justify-center gap-1 md:gap-1.5">
                                 <StatButton onClick={() => handleModChange(name, 'Combat', -1)}>-</StatButton>
-                                <span className="tabular-nums w-6 text-center">{stat.Mod}</span>
+                                <span className="tabular-nums w-5 md:w-6 text-center">{stat.Mod}</span>
                                 <StatButton onClick={() => handleModChange(name, 'Combat', 1)}>+</StatButton>
                               </div>
                             </td>
@@ -414,8 +437,8 @@ export function MergedStatsTable() {
                         }
                         if (col === 'Tot') {
                           return (
-                            <td key={col} className="px-3 py-2 text-center">
-                              <span className="inline-flex min-w-[2.25rem] justify-center rounded-md bg-indigo-500/10 px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30 tabular-nums">{stat[col] || 0}</span>
+                            <td key={col} className={`px-2 md:px-3 py-1 md:py-2 text-center ${colVisible[col]}`}>
+                              <span className="inline-flex min-w-[2rem] md:min-w-[2.25rem] justify-center rounded-md bg-indigo-500/10 px-1.5 md:px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30 tabular-nums">{stat[col] || 0}</span>
                             </td>
                           );
                         }
@@ -459,12 +482,15 @@ export function MergedStatsTable() {
                 : undefined
             }
           >
-            <table className="w-full text-sm text-left text-slate-300">
-              <thead className="text-[11px] uppercase tracking-wider text-slate-400/80 bg-white/5">
+            <table className="w-full table-fixed text-[13px] md:text-sm leading-tight text-left text-slate-300">
+              <thead className="text-[10px] md:text-[11px] uppercase tracking-wider text-slate-400/80 bg-white/5">
                 <tr>
-                  <th className="px-4 py-2 font-medium">Stat</th>
+                  <th className="px-3 md:px-4 py-2 font-medium w-[9.5rem] md:w-[12rem]">Stat</th>
                   {columnsSpecial.map((c) => (
-                    <th key={c} className="px-3 py-2 text-center font-medium">{c}</th>
+                    <th key={c} className={`px-2 md:px-3 py-2 text-center font-medium ${c === 'Equip' ? 'hidden xl:table-cell' : ''}`} aria-label={c}>
+                      <span className="inline min-[1600px]:hidden">{abbr[c] || c}</span>
+                      <span className="hidden min-[1600px]:inline">{c}</span>
+                    </th>
                   ))}
                 </tr>
               </thead>
@@ -473,19 +499,19 @@ export function MergedStatsTable() {
                   const stat = specialStats?.[name] || {};
                   return (
                     <tr key={name} className="odd:bg-transparent even:bg-white/[0.02] hover:bg-white/[0.04] transition-colors">
-                      <td className="px-4 py-2 font-medium text-white">
+                      <td className="px-3 md:px-4 py-2 font-medium text-white">
                         <div className="flex items-center gap-2">
-                          <span>{name}</span>
+                          <span className="truncate max-w-[12ch] md:max-w-none" title={name}>{displayName(name)}</span>
                         </div>
                       </td>
                       {columnsSpecial.map((col) => {
-                        const baseCell = "px-3 py-2 text-center";
+                        const baseCell = `px-2 md:px-3 py-1 md:py-2 text-center ${col === 'Equip' ? 'hidden xl:table-cell' : ''}`;
                         if (col === 'Mod') {
                           return (
                             <td key={col} className={baseCell}>
-                              <div className="flex items-center justify-center gap-1">
+                              <div className="flex items-center justify-center gap-1 md:gap-1.5">
                                 <StatButton onClick={() => handleModChange(name, 'Special', -1)}>-</StatButton>
-                                <span className="tabular-nums w-6 text-center">{stat.Mod || 0}</span>
+                                <span className="tabular-nums w-5 md:w-6 text-center">{stat.Mod || 0}</span>
                                 <StatButton onClick={() => handleModChange(name, 'Special', 1)}>+</StatButton>
                               </div>
                             </td>
@@ -493,8 +519,8 @@ export function MergedStatsTable() {
                         }
                         if (col === 'Tot') {
                           return (
-                            <td key={col} className="px-3 py-2 text-center">
-                              <span className="inline-flex min-w-[2.25rem] justify-center rounded-md bg-indigo-500/10 px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30 tabular-nums">{stat[col] || 0}</span>
+                            <td key={col} className="px-2 md:px-3 py-1 md:py-2 text-center">
+                              <span className="inline-flex min-w-[2rem] md:min-w-[2.25rem] justify-center rounded-md bg-indigo-500/10 px-1.5 md:px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30 tabular-nums">{stat[col] || 0}</span>
                             </td>
                           );
                         }
