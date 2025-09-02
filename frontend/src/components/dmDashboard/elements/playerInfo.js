@@ -309,7 +309,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                 <td key={u.id+"-sp"} className="border border-gray-600 px-4 py-2">
                   {u.spells && Object.keys(u.spells).length
                     ? <ul className="space-y-1">
-                        {Object.keys(u.spells).map(name => (
+                        {Object.keys(u.spells).sort((a, b) => a.localeCompare(b)).map(name => (
                           <li key={name} className="flex justify-between items-center group">
                             <span className="truncate mr-2">{name}</span>
                             <div className="opacity-50 group-hover:opacity-100 space-x-1 flex">
