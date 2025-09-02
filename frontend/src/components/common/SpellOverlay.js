@@ -43,7 +43,12 @@ export function SpellOverlay({
      Gittata:         s?.Gittata && !isNaN(parseInt(s.Gittata)) ? parseInt(s.Gittata) : 0, // Ensure number     "Effetti Positivi": "",
      "Effetti Negativi": "",
      Esperienza:        Array.isArray(s?.Esperienza)     ? s.Esperienza[s.Esperienza.length - 1]     : "",
-     Azione:           Array.isArray(s?.azione)         ? s.azione[s.azione.length - 1]         : "",       "Mod Params": {
+     Azione:           (Array.isArray(s?.Azione) && s.Azione.length)
+                        ? s.Azione[s.Azione.length - 1]
+                        : (Array.isArray(s?.azione) && s.azione.length)
+                          ? s.azione[s.azione.length - 1]
+                          : "",
+       "Mod Params": {
          Base: {
            Costituzione: 0, Destrezza: 0, Fortuna: 0,
            Forza: 0, Intelligenza: 0, Saggezza: 0,
@@ -52,7 +57,9 @@ export function SpellOverlay({
            Attacco: 0, Critico: 0, Difesa: 0,
            Disciplina: 0, Mira: 0, RiduzioneDanni: 0, Salute: 0,
          },
-       },     TPC:          Object.fromEntries(["Param1","Param2","ParamTarget"].map(k=>[k, s?.TPC?.[k]?.[s.TPC[k].length - 1] || ""])),     "TPC Fisico": Object.fromEntries(["Param1","Param2","ParamTarget"].map(k=>[k, s?.["TPC Fisico"]?.[k]?.[s["TPC Fisico"][k].length - 1] || ""])),
+       },
+       TPC:          Object.fromEntries(["Param1","Param2","ParamTarget"].map(k=>[k, s?.TPC?.[k]?.[s.TPC[k].length - 1] || ""])),
+       "TPC Fisico": Object.fromEntries(["Param1","Param2","ParamTarget"].map(k=>[k, s?.["TPC Fisico"]?.[k]?.[s["TPC Fisico"][k].length - 1] || ""])),
      "TPC Mentale":Object.fromEntries(["Param1","Param2","ParamTarget"].map(k=>[k, s?.["TPC Mentale"]?.[k]?.[s["TPC Mentale"][k].length - 1] || ""])),
      "Tipo Base":    Array.isArray(s?.["Tipo Base"]) ? s["Tipo Base"][s["Tipo Base"].length - 1] : "",
    }), []); // Empty dependency array assuming schema structure doesn't change based on props/state here
@@ -149,7 +156,7 @@ export function SpellOverlay({
        "Effetti Positivi": s["Effetti Positivi"] || "",
        "Effetti Negativi": s["Effetti Negativi"] || "",
        Esperienza: s.Esperienza || "",
-       Azione: s.azione || "",
+     Azione: s.Azione || s.azione || "",
        "Mod Params": {
          Base: {},
          Combattimento: {},
@@ -276,7 +283,7 @@ export function SpellOverlay({
        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
          {[
            ["Esperienza", schema?.Esperienza],
-           ["Azione", schema?.azione],
+           ["Azione", schema?.azione || schema?.Azione],
            ["Tipo Base", schema?.["Tipo Base"]],
          ].map(([lbl, opts]) => (
            <div key={lbl}>

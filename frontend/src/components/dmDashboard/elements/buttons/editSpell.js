@@ -42,6 +42,11 @@ export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
 
     try {
       const { spellData: newData, imageFile, videoFile } = result;
+      // Normalize key casing for Azione
+      if (!('Azione' in newData) && ('azione' in newData)) {
+        newData.Azione = newData.azione;
+        try { delete newData.azione; } catch {}
+      }
       const newName  = newData.Nome.trim();
       const safeBase = `spell_${userId}_${newName.replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}`;
 
