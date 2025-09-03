@@ -4,7 +4,7 @@ import { useAuth } from "../../../AuthContext";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { Section } from "./ui";
 
-const EncounterSidebarList = ({ isDM, onSelect, selectedId }) => {
+const EncounterSidebarList = ({ isDM, onSelect, selectedId, actions }) => {
     const { user, userData } = useAuth();
     const [encountersAll, setEncountersAll] = useState([]); // DM only
     const [encByUid, setEncByUid] = useState([]); // non-DM by user uid
@@ -117,7 +117,7 @@ const EncounterSidebarList = ({ isDM, onSelect, selectedId }) => {
     if (loading) return <div className="text-slate-300">Loading encounters…</div>;
 
     return (
-        <Section title="Encounters">
+        <Section title="Encounters" actions={actions}>
             {encounters.length === 0 ? (
                 <div className="text-slate-400">No encounters yet.</div>
             ) : (
