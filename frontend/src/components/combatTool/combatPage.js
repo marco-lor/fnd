@@ -6,6 +6,7 @@ import EncounterSidebarList from "./elements/EncounterSidebarList";
 import EncounterDetails from "./elements/EncounterDetails";
 import EncounterLog from "./elements/EncounterLog";
 import { Section } from "./elements/ui";
+import AddFoesOverlay from "./elements/AddFoesOverlay";
 
 const CombatPage = () => {
 	const { user, userData } = useAuth();
@@ -99,7 +100,14 @@ const CombatPage = () => {
 								{/* Main content */}
 								<div className="min-h-[50vh]">
 									{selectedEncounter ? (
-										<Section title={selectedEncounter.name || "Encounter"}>
+										<Section
+											title={selectedEncounter.name || "Encounter"}
+											actions={
+												isDM ? (
+													<AddFoesOverlay encounterId={selectedEncounter.id} isDM={isDM} />
+												) : null
+											}
+										>
 											<EncounterDetails encounter={selectedEncounter} isDM={isDM} />
 										</Section>
 									) : (
