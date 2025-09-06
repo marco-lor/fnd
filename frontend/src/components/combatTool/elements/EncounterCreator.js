@@ -13,7 +13,7 @@ import { Button, Section, TextInput, Chip } from "./ui";
 
 const normalize = (s) => (s || "").trim().toLowerCase();
 
-const EncounterCreator = ({ isDM, currentUid }) => {
+const EncounterCreator = ({ isDM, currentUid, collapseControl }) => {
     const [name, setName] = useState("");
     const [assignableUsers, setAssignableUsers] = useState([]); // {uid, characterId, email}
     const [selected, setSelected] = useState([]); // same shape as above
@@ -123,7 +123,12 @@ const EncounterCreator = ({ isDM, currentUid }) => {
     return (
         <Section
             title="Create Encounter"
-            actions={<Button size="lg" onClick={createEncounter} disabled={!canCreate}>Crea Encounter</Button>}
+            actions={
+                <div className="flex items-center gap-2">
+                    {collapseControl}
+                    <Button size="lg" onClick={createEncounter} disabled={!canCreate}>Crea Encounter</Button>
+                </div>
+            }
         >
             <div className="grid grid-cols-1 gap-4">
                 <TextInput label="Encounter name" value={name} onChange={setName} placeholder="e.g., Goblin Ambush" />

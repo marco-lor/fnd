@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { GiAnimalSkull } from "react-icons/gi";
 import { db } from "../../firebaseConfig";
 import { useAuth } from "../../../AuthContext";
 import {
@@ -27,6 +28,8 @@ const EncounterDetails = ({ encounter, isDM }) => {
     const [encMeta, setEncMeta] = useState({});
     // Live users map (uid -> user doc) when encounter is linked to user parameters
     const [liveUsersMap, setLiveUsersMap] = useState({});
+    // Live foes map (foeId -> foe doc) when encounter includes foes and is linked
+    const [liveFoesMap, setLiveFoesMap] = useState({});
 
     const isParticipant = useMemo(() => {
         if (!user) return false;
@@ -115,6 +118,7 @@ const EncounterDetails = ({ encounter, isDM }) => {
         // Only allow DM to read other users' docs
         if (!isDM) {
             setLiveUsersMap({});
+            setLiveFoesMap({});
             return;
         }
 
@@ -142,14 +146,176 @@ const EncounterDetails = ({ encounter, isDM }) => {
                 );
                 unsubs.push(unsub);
             });
+
+            // Subscribe to foes for foe participants
+            const foeIds = Object.values(participantsMap)
+                .filter((p) => p?.type === "foe" && p?.foeId)
+                .map((p) => p.foeId);
+            const uniqueFoes = Array.from(new Set(foeIds));
+            uniqueFoes.forEach((foeId) => {
+                const fRef = doc(db, "foes", foeId);
+                const unsubF = onSnapshot(
+                    fRef,
+                    (snap) => {
+                        setLiveFoesMap((prev) => ({ ...prev, [foeId]: snap.data() || null }));
+                    },
+                    (err) => {
+                        if (typeof process !== "undefined" && process.env && process.env.NODE_ENV !== "production") {
+                            // eslint-disable-next-line no-console
+                            console.warn("foes doc subscription error", foeId, err?.message || err);
+                        }
+                    }
+                );
+                unsubs.push(unsubF);
+            });
         } else {
             setLiveUsersMap({});
+            setLiveFoesMap({});
         }
         return () => {
             unsubs.forEach((u) => u());
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isDM, encMeta?.linkMode, JSON.stringify(Object.values(participantsMap).map((p) => p?.uid).sort())]);
+    }, [
+        isDM,
+        encMeta?.linkMode,
+        JSON.stringify(Object.values(participantsMap).map((p) => p?.uid).sort()),
+        JSON.stringify(
+            Object.values(participantsMap)
+                .filter((p) => p?.type === "foe" && p?.foeId)
+                .map((p) => p.foeId)
+                .sort()
+        ),
+    ]);
+
+    // For foe participants, create a snapshot copy in their participant doc if missing
+    useEffect(() => {
+        if (!isDM) return;
+        const linkMode = encMeta?.linkMode || "live";
+        if (linkMode === "detached") return;
+        const entries = Object.entries(participantsMap);
+        const toWrite = entries.filter(([key, p]) => p?.type === "foe" && p?.foeId && !p?.foeSnapshot && liveFoesMap[p.foeId]);
+        if (toWrite.length === 0) return;
+        (async () => {
+            try {
+                for (const [pKey, p] of toWrite) {
+                    const foe = liveFoesMap[p.foeId];
+                    if (!foe) continue;
+                    const pRef = doc(db, "encounters", encounter.id, "participants", pKey);
+                    await setDoc(
+                        pRef,
+                        {
+                            foeSnapshot: {
+                                id: p.foeId,
+                                name: foe?.name || "",
+                                category: foe?.category || "",
+                                rank: foe?.rank || "",
+                                dadoAnima: foe?.dadoAnima || "",
+                                stats: foe?.stats || {},
+                                Parametri: foe?.Parametri || {},
+                                imageUrl: foe?.imageUrl || "",
+                            },
+                            foeSnapshotAt: serverTimestamp(),
+                        },
+                        { merge: true }
+                    );
+                }
+            } catch (e) {
+                if (typeof process !== "undefined" && process.env && process.env.NODE_ENV !== "production") {
+                    // eslint-disable-next-line no-console
+                    console.warn("failed to write foeSnapshot", e);
+                }
+            }
+        })();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isDM, encMeta?.linkMode, encounter.id, JSON.stringify(participantsMap), JSON.stringify(liveFoesMap)]);
+
+    // DM-only: Foe initiative roller
+    const [foeRoller, setFoeRoller] = useState({ visible: false, faces: 0, modifier: 0, pKey: null, label: "" });
+
+    const getFoeDexTot = (foeDocOrSnap) => {
+        try {
+            const base = foeDocOrSnap?.Parametri?.Base || {};
+            const key = Object.keys(base).find((k) => k.toLowerCase() === "destrezza");
+            return Number(base?.[key]?.Tot) || 0;
+        } catch {
+            return 0;
+        }
+    };
+
+    const parseFacesFromDado = (dadoStr) => {
+        const faces = parseInt(String(dadoStr || "").replace(/^d/i, ""), 10);
+        return Number.isFinite(faces) && faces > 0 ? faces : 0;
+    };
+
+    const startFoeRoll = (pKey) => {
+        const p = participantsMap[pKey];
+        if (!p || p?.initiative != null) return;
+        let src = null;
+        const linkMode = encMeta?.linkMode || "live";
+        if (linkMode !== "detached") {
+            src = (p?.foeId && liveFoesMap[p.foeId]) || p?.foeSnapshot || null;
+        } else {
+            src = p?.foeSnapshot || null;
+        }
+        const faces = parseFacesFromDado(src?.dadoAnima || src?.stats?.dadoAnima);
+        const modifier = getFoeDexTot(src);
+        if (!faces) {
+            alert("Impossibile determinare il Dado Anima del foe.");
+            return;
+        }
+        const label = p?.characterId || p?.email || pKey;
+        setFoeRoller({ visible: true, faces, modifier, pKey, label });
+    };
+
+    const saveFoeInitiative = async (total, faces, modifier, details) => {
+        const pKey = foeRoller.pKey;
+        if (!pKey) return;
+        try {
+            const pRef = doc(db, "encounters", encounter.id, "participants", pKey);
+            // Atomic: set only if not set yet
+            await runTransaction(db, async (tx) => {
+                const snap = await tx.get(pRef);
+                const data = snap.exists() ? snap.data() : {};
+                const already = data?.initiative != null && (typeof data.initiative === "number" || data.initiative?.value != null);
+                if (already) throw new Error("already-rolled");
+                tx.set(
+                    pRef,
+                    {
+                        initiative: { value: total, faces, modifier, rolledAt: serverTimestamp() },
+                        updatedAt: serverTimestamp(),
+                    },
+                    { merge: true }
+                );
+            });
+
+            // Log entry
+            try {
+                const expr = `d${faces}${modifier ? (modifier > 0 ? `+${modifier}` : `${modifier}`) : ""}`;
+                await addDoc(collection(db, "encounters", encounter.id, "logs"), {
+                    type: "roll",
+                    kind: "initiative",
+                    by: foeRoller.label,
+                    uid: null,
+                    description: `Iniziativa foe (Destrezza ${modifier >= 0 ? "+" : ""}${modifier})`,
+                    expression: expr,
+                    total,
+                    rolls: details?.rolls || [],
+                    modifier,
+                    faces,
+                    createdAt: serverTimestamp(),
+                });
+            } catch {}
+        } catch (e) {
+            if (e && e.message === "already-rolled") {
+                alert("Iniziativa già tirata per questo foe.");
+                setFoeRoller({ visible: false, faces: 0, modifier: 0, pKey: null, label: "" });
+                return;
+            }
+            console.error("Failed to save foe initiative", e);
+            alert("Impossibile salvare l'iniziativa del foe.");
+        }
+    };
 
     const getDexTot = () => {
         const base = userData?.Parametri?.Base || {};
@@ -411,23 +577,58 @@ const EncounterDetails = ({ encounter, isDM }) => {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
-                        {rows.map((r) => (
-                            <tr key={r.key} className="odd:bg-transparent even:bg-white/[0.02]">
-                                <td className="px-3 py-2 text-white">{r.label}</td>
-                                <td className="px-3 py-2 text-center">
-                                    {r.initiative !== null ? (
-                                        <span className="inline-flex min-w-[2.25rem] justify-center rounded-md bg-indigo-500/10 px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30 tabular-nums">
-                                            {r.initiative}
-                                        </span>
-                                    ) : (
-                                        <span className="text-slate-500">—</span>
-                                    )}
-                                </td>
+                        {rows.map((r) => {
+                            const p = participantsMap[r.key] || {};
+                            const isFoe = p?.type === "foe";
+                            return (
+                                <tr key={r.key} className={`odd:bg-transparent even:bg-white/[0.02] ${isFoe ? "bg-rose-900/10" : ""}`}>
+                                    <td className="px-3 py-2">
+                                        <span className={isFoe ? "text-rose-200" : "text-white"}>{r.label}</span>
+                                        {isFoe && (
+                                            <span className="ml-2 inline-flex items-center rounded-full px-2 py-[2px] text-[10px] border bg-rose-500/10 border-rose-400/30 text-rose-200 align-middle" title="Foe">
+                                                <GiAnimalSkull className="w-4 h-4" />
+                                            </span>
+                                        )}
+                                    </td>
+                                    <td className="px-3 py-2 text-center">
+                                        {r.initiative !== null ? (
+                                            <span className={
+                                                isFoe
+                                                    ? "inline-flex min-w-[2.25rem] justify-center rounded-md bg-rose-500/10 px-2 py-0.5 text-rose-300 ring-1 ring-inset ring-rose-400/30 tabular-nums"
+                                                    : "inline-flex min-w-[2.25rem] justify-center rounded-md bg-indigo-500/10 px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30 tabular-nums"
+                                            }>
+                                                {r.initiative}
+                                            </span>
+                                        ) : (
+                                            <div className="flex items-center justify-center gap-2">
+                                                <span className="text-slate-500">—</span>
+                                                {isDM && isFoe && (
+                                                    <button
+                                                        onClick={() => startFoeRoll(r.key)}
+                                                        className="px-2 py-0.5 rounded-md text-[11px] bg-rose-900/30 text-rose-200 border border-rose-700/50 hover:bg-rose-900/50"
+                                                        title="Tira iniziativa (foe)"
+                                                    >
+                                                        Roll
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </td>
                                 {isDM && (
                                     <td className="px-3 py-2 text-center text-xs text-slate-400">
                                         {(() => {
                                             const linkMode = encMeta?.linkMode || "live";
                                             if (linkMode !== "detached") {
+                                                // For foes, read from live foes snapshot; for users, from live users
+                                                const p = participantsMap[r.key] || {};
+                                                if (p?.type === "foe" && p?.foeId) {
+                                                    const foe = liveFoesMap[p.foeId] || {};
+                                                    const hpC = foe?.stats?.hpCurrent ?? foe?.stats?.hpTotal;
+                                                    const manaC = foe?.stats?.manaCurrent ?? foe?.stats?.manaTotal;
+                                                    const hpStr = hpC == null ? "?" : hpC;
+                                                    const manaStr = manaC == null ? "?" : manaC;
+                                                    return `HP ${hpStr} / Mana ${manaStr}`;
+                                                }
                                                 const u = liveUsersMap[r.uid] || {};
                                                 const hpC = u?.stats?.hpCurrent;
                                                 const manaC = u?.stats?.manaCurrent;
@@ -442,8 +643,9 @@ const EncounterDetails = ({ encounter, isDM }) => {
                                         })()}
                                     </td>
                                 )}
-                            </tr>
-                        ))}
+                                </tr>
+                            );
+                        })}
                     </tbody>
                 </table>
             </div>
@@ -457,6 +659,19 @@ const EncounterDetails = ({ encounter, isDM }) => {
                     onComplete={(total, info) => {
                         saveInitiative(total, roller.faces, roller.modifier, info);
                         setRoller({ visible: false, faces: 0, modifier: 0 });
+                    }}
+                />
+            )}
+
+            {foeRoller.visible && (
+                <DiceRoller
+                    faces={foeRoller.faces}
+                    count={1}
+                    modifier={foeRoller.modifier}
+                    description={`Iniziativa foe (d${foeRoller.faces} + ${foeRoller.modifier})`}
+                    onComplete={(total, info) => {
+                        saveFoeInitiative(total, foeRoller.faces, foeRoller.modifier, info);
+                        setFoeRoller({ visible: false, faces: 0, modifier: 0, pKey: null, label: "" });
                     }}
                 />
             )}

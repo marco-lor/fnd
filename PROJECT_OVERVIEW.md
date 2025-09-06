@@ -1,4 +1,4 @@
-# FND (Fantasy & Dragons) – D&D‑like Web Application
+# FND (Fantasy & Dragons) – D&D‑like Web Application 
 
 Modern web app for character creation and campaign play, backed by Firestore, FastAPI, and Firebase Functions.
 
