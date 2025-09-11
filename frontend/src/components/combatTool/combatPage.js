@@ -45,10 +45,7 @@ const CombatPage = () => {
 			<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.06),transparent_60%),radial-gradient(circle_at_80%_70%,rgba(255,255,255,0.04),transparent_65%)] mix-blend-overlay" />
 
 			<div className="relative z-10 flex flex-col h-full">
-				<header className="px-6 pt-6">
-					<h1 className="text-2xl font-semibold text-slate-100">Combat Tool</h1>
-				</header>
-
+				{/* Removed page title header per request */}
 				<main className="flex-1 px-6 pb-6 pt-4 w-full">
 					{!user && <div className="text-slate-300">Please log in to access encounters.</div>}
 
