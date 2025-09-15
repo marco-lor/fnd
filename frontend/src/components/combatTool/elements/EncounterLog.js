@@ -87,7 +87,7 @@ const EncounterLog = ({ encounterId }) => {
 
     return (
         <Section title="Encounter Log">
-            <div ref={containerRef} className="max-h-[60vh] md:max-h-[calc(100vh-12rem)] overflow-y-auto pr-1 grid gap-2">
+            <div ref={containerRef} className="max-h-[60vh] md:max-h-[calc(100vh-12rem)] overflow-y-auto pr-1 grid gap-2 log-scroll">
                 {noSelection ? (
                     <div className="text-slate-400 text-sm">Nessun incontro selezionato. Seleziona un incontro per vedere i log.</div>
                 ) : content.length === 0 ? (

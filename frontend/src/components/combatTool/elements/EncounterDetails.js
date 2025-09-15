@@ -457,6 +457,115 @@ const EncounterDetails = ({ encounter, isDM }) => {
     });
     rows.sort((a, b) => (b.initiative ?? -Infinity) - (a.initiative ?? -Infinity));
 
+    // ---------------- TURN ORDER STATE ----------------
+    const allHaveInitiative = useMemo(() => rows.length > 0 && rows.every((r) => r.initiative != null), [rows]);
+    const turnState = encMeta?.turn || null; // { order: [participantDocKey], index, round }
+    const currentOrder = useMemo(() => {
+        if (!turnState?.order) return [];
+        return turnState.order.filter((k) => participantsMap[k]);
+    }, [turnState, participantsMap]);
+    const currentIndex = turnState?.index ?? 0;
+    const currentRound = turnState?.round ?? 0;
+    const activeKey = currentOrder[currentIndex];
+
+    const startTurnOrder = async () => {
+        if (!isDM) return;
+        if (!allHaveInitiative) return alert("Iniziative mancanti.");
+        if (turnState) return alert("Turn order già iniziato.");
+        try {
+            const encRef = doc(db, "encounters", encounter.id);
+            const order = rows.map((r) => r.key); // already sorted desc
+            await runTransaction(db, async (tx) => {
+                const snap = await tx.get(encRef);
+                const data = snap.data() || {};
+                if (data.turn) throw new Error("already-started");
+                tx.set(encRef, { turn: { order, index: 0, round: 1, startedAt: serverTimestamp(), updatedAt: serverTimestamp() } }, { merge: true });
+            });
+            const orderStr = rows.map((r) => r.label).join(" > ");
+            await addDoc(collection(db, "encounters", encounter.id, "logs"), {
+                type: "turn",
+                by: "DM",
+                message: `Turn order started: ${orderStr}`,
+                createdAt: serverTimestamp(),
+            });
+            const first = rows[0];
+            if (first) {
+                await addDoc(collection(db, "encounters", encounter.id, "logs"), {
+                    type: "turn",
+                    by: "DM",
+                    message: `Turn begins: ${first.label} (Turno 1)` ,
+                    createdAt: serverTimestamp(),
+                });
+            }
+        } catch (e) {
+            if (e?.message === "already-started") return;
+            console.error("startTurnOrder failed", e);
+            alert("Impossibile avviare il turn order.");
+        }
+    };
+
+    const advanceTurn = async () => {
+        if (!isDM || !turnState) return;
+        try {
+            const encRef = doc(db, "encounters", encounter.id);
+            let nextState = null;
+            await runTransaction(db, async (tx) => {
+                const snap = await tx.get(encRef);
+                const data = snap.data() || {};
+                const t = data.turn;
+                if (!t?.order || t.order.length === 0) throw new Error("no-turn");
+                const cleanOrder = t.order.filter((k) => participantsMap[k]);
+                if (cleanOrder.length === 0) throw new Error("empty");
+                let idx = (t.index ?? 0) + 1;
+                let round = t.round ?? 1;
+                if (idx >= cleanOrder.length) {
+                    idx = 0;
+                    round += 1;
+                }
+                nextState = { order: cleanOrder, index: idx, round, startedAt: t.startedAt || serverTimestamp(), updatedAt: serverTimestamp() };
+                tx.set(encRef, { turn: nextState }, { merge: true });
+            });
+            if (nextState) {
+                const nextKey = nextState.order[nextState.index];
+                const label = rows.find((r) => r.key === nextKey)?.label || nextKey;
+                await addDoc(collection(db, "encounters", encounter.id, "logs"), {
+                    type: "turn",
+                    by: "DM",
+                    message: `Turn begins: ${label} (Turno ${nextState.round})` ,
+                    createdAt: serverTimestamp(),
+                });
+            }
+        } catch (e) {
+            console.error("advanceTurn failed", e);
+            alert("Impossibile avanzare il turno.");
+        }
+    };
+
+    const rebuildOrder = async () => {
+        if (!isDM || !turnState) return;
+        try {
+            const encRef = doc(db, "encounters", encounter.id);
+            const order = rows.map((r) => r.key);
+            await runTransaction(db, async (tx) => {
+                const snap = await tx.get(encRef);
+                if (!snap.exists()) throw new Error("missing");
+                const data = snap.data() || {};
+                if (!data.turn) throw new Error("no-turn");
+                const existing = data.turn;
+                tx.set(encRef, { turn: { ...existing, order, index: 0, updatedAt: serverTimestamp() } }, { merge: true });
+            });
+            await addDoc(collection(db, "encounters", encounter.id, "logs"), {
+                type: "turn",
+                by: "DM",
+                message: `Turn order rebuilt: ${rows.map((r) => r.label).join(" > ")}` ,
+                createdAt: serverTimestamp(),
+            });
+        } catch (e) {
+            console.error("rebuildOrder failed", e);
+            alert("Impossibile ricostruire il turn order.");
+        }
+    };
+
     return (
         <div className="mt-2 rounded-xl border border-slate-700/50 bg-slate-900/50 p-3">
             <div className="flex items-center justify-between mb-2 gap-2">
@@ -580,10 +689,24 @@ const EncounterDetails = ({ encounter, isDM }) => {
                         {rows.map((r) => {
                             const p = participantsMap[r.key] || {};
                             const isFoe = p?.type === "foe";
+                            const isActive = !!turnState && r.key === activeKey;
                             return (
-                                <tr key={r.key} className={`odd:bg-transparent even:bg-white/[0.02] ${isFoe ? "bg-rose-900/10" : ""}`}>
+                                <tr
+                                    key={r.key}
+                                    aria-current={isActive ? "true" : undefined}
+                                    className={`transition-colors ${
+                                        isActive
+                                            ? (isFoe ? "bg-rose-500/15" : "bg-emerald-500/15")
+                                            : `odd:bg-transparent even:bg-white/[0.02] ${isFoe ? "bg-rose-900/10" : ""}`
+                                    }`}
+                                >
                                     <td className="px-3 py-2">
-                                        <span className={isFoe ? "text-rose-200" : "text-white"}>{r.label}</span>
+                                        <span className={`${isFoe ? "text-rose-200" : "text-white"} ${isActive ? "font-semibold" : ""}`}>
+                                            {isActive && (
+                                                <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse mr-2 align-middle" title="Turno attivo" />
+                                            )}
+                                            {r.label}
+                                        </span>
                                         {isFoe && (
                                             <span className="ml-2 inline-flex items-center rounded-full px-2 py-[2px] text-[10px] border bg-rose-500/10 border-rose-400/30 text-rose-200 align-middle" title="Foe">
                                                 <GiAnimalSkull className="w-4 h-4" />
@@ -648,6 +771,57 @@ const EncounterDetails = ({ encounter, isDM }) => {
                         })}
                     </tbody>
                 </table>
+            </div>
+
+            {/* TURN ORDER */}
+            <div className="mt-6 border-t border-slate-700/50 pt-4">
+                <div className="flex items-center justify-between mb-2">
+                    <div className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                        Turn Order {turnState && <span className="text-[11px] font-normal text-slate-400">Turno {currentRound || 1}</span>}
+                    </div>
+                    {isDM && (
+                        <div className="flex gap-2 flex-wrap justify-end">
+                            {!turnState && (
+                                <Button size="sm" onClick={startTurnOrder} disabled={!allHaveInitiative} title={!allHaveInitiative ? "Serve iniziativa per tutti" : undefined}>
+                                    Avvia Turni
+                                </Button>
+                            )}
+                            {turnState && (
+                                <>
+                                    <Button size="sm" kind="primary" onClick={advanceTurn}>Avanza</Button>
+                                    <Button size="sm" kind="secondary" onClick={rebuildOrder} title="Ricostruisci dall'iniziativa (index reset)">Rebuild</Button>
+                                </>
+                            )}
+                        </div>
+                    )}
+                </div>
+                {!turnState && !allHaveInitiative && (
+                    <div className="text-xs text-slate-400">Tira l'iniziativa per tutti i partecipanti per avviare il turn order.</div>
+                )}
+                {!turnState && allHaveInitiative && (
+                    <div className="text-xs text-slate-400">Tutte le iniziative pronte. Il DM può avviare i turni.</div>
+                )}
+                {turnState && (
+                    <div className="flex flex-wrap gap-2">
+                        {currentOrder.map((k) => {
+                            const r = rows.find((row) => row.key === k);
+                            if (!r) return null;
+                            const active = k === activeKey;
+                            return (
+                                <div
+                                    key={k}
+                                    className={`px-3 py-1 rounded-full text-xs flex items-center gap-1 border tabular-nums ${active ? "bg-emerald-600/20 border-emerald-500/50 text-emerald-200 shadow-inner" : "bg-slate-800/40 border-slate-600/50 text-slate-300"}`}
+                                    title={`Iniziativa ${r.initiative}`}
+                                >
+                                    <span className="font-mono">{r.initiative}</span>
+                                    <span className="text-slate-400">•</span>
+                                    <span className="truncate max-w-[8rem]">{r.label}</span>
+                                    {active && <span className="ml-1 text-[10px] uppercase tracking-wide">ATTIVO</span>}
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
 
             {roller.visible && (
