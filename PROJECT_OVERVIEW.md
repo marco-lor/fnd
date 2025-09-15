@@ -1,4 +1,4 @@
-<!-- LAST VERIFIED: 2025-09-06 -->
+<!--- LAST VERIFIED: 2025-09-06 --->
 
 # FND (Fantasy & Dragons) – D&D‑like Web Application
 
