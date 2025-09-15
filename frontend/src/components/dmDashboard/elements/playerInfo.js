@@ -1,7 +1,7 @@
 // frontend/src/components/dmDashboard/elements/playerInfo.js
 import React, { useState, useEffect } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faEdit, faTrash } from "@fortawesome/free-solid-svg-icons";
+import { faEdit, faTrash, faPlus, faMinus, faCoins } from "@fortawesome/free-solid-svg-icons";
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { collection, getDocs, doc, getDoc, updateDoc } from "firebase/firestore";
 import { db, storage } from "../../firebaseConfig";
@@ -33,7 +33,7 @@ import { AddAccessorioOverlay } from "../../bazaar/elements/addAccessorio";
 import { AddConsumabileOverlay } from "../../bazaar/elements/addConsumabile";
 // --- End Imports ---
 
-library.add(faEdit, faTrash);
+library.add(faEdit, faTrash, faPlus, faMinus, faCoins);
 
 const PlayerInfo = ({ users, loading, error, setUsers }) => {
   // common state
@@ -72,6 +72,9 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
   const [showLinguaOverlay, setShowLinguaOverlay] = useState(false);
   const [showDeleteLinguaOverlay, setShowDeleteLinguaOverlay] = useState(false);
   const [selectedLingua, setSelectedLingua] = useState(null);
+  const [goldAdjustments, setGoldAdjustments] = useState({});
+  const [goldUpdating, setGoldUpdating] = useState({});
+  const [goldOverlay, setGoldOverlay] = useState(null);
   // new edit handlers
   const handleEditConoscenzaClick = (userId, name) => {
     setSelectedUserId(userId);
@@ -84,6 +87,22 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
     setShowEditProfessioneOverlay(true);
   };
 
+  const openGoldOverlay = (userId, direction) => {
+    if (!userId || goldUpdating[userId]) return;
+    setGoldAdjustments((prev) => {
+      if (Object.prototype.hasOwnProperty.call(prev, userId)) return prev;
+      return { ...prev, [userId]: "" };
+    });
+    const sign = direction > 0 ? 1 : -1;
+    setGoldOverlay({ userId, direction: sign });
+  };
+
+  const closeGoldOverlay = () => setGoldOverlay(null);
+
+  const handleGoldInputChange = (userId, value) => {
+    setGoldAdjustments((prev) => ({ ...prev, [userId]: value }));
+  };
+
   const refreshUserData = async () => {
     try {
       const snapshot = await getDocs(collection(db, "users"));
@@ -92,6 +111,41 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
     } catch (err) {
       console.error("Error refreshing users:", err);
     }
+  };
+  const adjustUserGold = async (userId, direction) => {
+    const rawValue = (goldAdjustments[userId] ?? "").trim();
+    const amount = Math.abs(parseInt(rawValue, 10));
+    if (!userId || Number.isNaN(amount) || amount === 0) return;
+    try {
+      setGoldUpdating((prev) => ({ ...prev, [userId]: true }));
+      const userDocRef = doc(db, "users", userId);
+      const userDocSnap = await getDoc(userDocRef);
+      let currentGold = 0;
+      if (userDocSnap.exists()) {
+        const data = userDocSnap.data();
+        const existing = data?.stats?.gold;
+        currentGold = typeof existing === "number" ? existing : parseInt(existing, 10) || 0;
+      }
+      const delta = direction > 0 ? amount : -amount;
+      const nextGold = currentGold + delta;
+      await updateDoc(userDocRef, { "stats.gold": nextGold });
+      setGoldAdjustments((prev) => ({ ...prev, [userId]: "" }));
+      setGoldOverlay(null);
+      await refreshUserData();
+    } catch (err) {
+      console.error('Failed to update gold', err);
+    } finally {
+      setGoldUpdating((prev) => {
+        const next = { ...prev };
+        delete next[userId];
+        return next;
+      });
+    }
+  };
+
+  const confirmGoldOverlay = () => {
+    if (!goldOverlay) return;
+    adjustUserGold(goldOverlay.userId, goldOverlay.direction);
   };
 
   // Load item catalog once (to resolve inventory string ids to names) and store full docs
@@ -226,6 +280,15 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
   const iconEdit = "text-blue-400 hover:text-blue-300 transition transform hover:scale-110 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded";
   const iconDel  = "text-red-500  hover:text-red-400 transition transform hover:scale-110 focus:outline-none focus:ring-1 focus:ring-red-600 rounded";
   const sleekBtn  = "w-36 px-2 py-1 bg-gradient-to-r from-blue-800 to-indigo-900 hover:from-blue-700 hover:to-indigo-800 text-white text-xs font-medium rounded-md transition-all duration-150 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 shadow-sm";
+
+  const activeGoldUser = goldOverlay ? users.find((u) => u.id === goldOverlay.userId) : null;
+  const activeGoldValue = goldOverlay ? goldAdjustments[goldOverlay.userId] ?? "" : "";
+  const activeGoldAmount = goldOverlay ? Math.abs(parseInt(activeGoldValue, 10)) || 0 : 0;
+  const activeGoldBusy = goldOverlay ? !!goldUpdating[goldOverlay.userId] : false;
+  const activeGoldAction = goldOverlay?.direction > 0 ? "Aggiungi" : "Sottrai";
+  const activeGoldConfirmClasses = goldOverlay?.direction > 0
+    ? "bg-emerald-600/80 hover:bg-emerald-600"
+    : "bg-rose-600/80 hover:bg-rose-600";
 
   return (
     <div className="mt-8">
@@ -476,10 +539,36 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
                   ...Object.values(varieMap).sort((a, b) => a.name.localeCompare(b.name))
                 ];
                 const gold = typeof u?.stats?.gold === "number" ? u.stats.gold : parseInt(u?.stats?.gold, 10) || 0;
+                const goldBusy = !!goldUpdating[u.id];
 
                 return (
                   <td key={u.id+"-inv"} className="border border-gray-600 px-4 py-2 align-top">
-                    <div className="mb-2 text-xs text-amber-300">Gold: {gold}</div>
+                    <div className="mb-3">
+                      <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/60 bg-slate-900/60 px-3 py-1">
+                        <div className="flex items-center gap-1 text-sm text-amber-300">
+                          <FontAwesomeIcon icon="coins" className="h-4 w-4" />
+                          <span>{gold}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            className="flex h-7 w-7 items-center justify-center rounded-full border border-emerald-500/70 text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-50"
+                            onClick={() => openGoldOverlay(u.id, 1)}
+                            disabled={goldBusy}
+                            title="Aggiungi gold"
+                          >
+                            <FontAwesomeIcon icon="plus" className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            className="flex h-7 w-7 items-center justify-center rounded-full border border-rose-500/70 text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-50"
+                            onClick={() => openGoldOverlay(u.id, -1)}
+                            disabled={goldBusy}
+                            title="Sottrai gold"
+                          >
+                            <FontAwesomeIcon icon="minus" className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                     {list.length ? (
                       <ul className="space-y-1 pr-1">
                         {list.map((it, idx) => {
@@ -518,6 +607,47 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
           </tbody>
   </table>
       </div>
+
+      {goldOverlay && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/60"
+            onClick={() => !activeGoldBusy && closeGoldOverlay()}
+          />
+          <div className="relative z-10 w-[18rem] max-w-[90vw] rounded-xl border border-amber-500/50 bg-slate-900/95 p-4 shadow-2xl">
+            <h3 className="text-sm font-semibold text-amber-200">{activeGoldAction} gold</h3>
+            <p className="mt-1 text-xs text-slate-300">{activeGoldUser?.displayName || activeGoldUser?.name || activeGoldUser?.pgName || activeGoldUser?.email || 'Giocatore'}</p>
+            <div className="mt-3">
+              <label className="mb-1 block text-[11px] uppercase tracking-wide text-amber-300/80">Importo</label>
+              <input
+                type="number"
+                min="0"
+                className="w-full rounded-md border border-amber-400/50 bg-slate-900/70 px-3 py-2 text-sm text-amber-100 focus:outline-none focus:ring-1 focus:ring-amber-400 disabled:opacity-60"
+                value={activeGoldValue}
+                onChange={(e) => handleGoldInputChange(goldOverlay.userId, e.target.value)}
+                disabled={activeGoldBusy}
+                autoFocus
+              />
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                className="rounded-md border border-slate-600/70 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700/40 disabled:opacity-50"
+                onClick={() => !activeGoldBusy && closeGoldOverlay()}
+                disabled={activeGoldBusy}
+              >
+                Annulla
+              </button>
+              <button
+                className={`rounded-md px-3 py-1.5 text-xs text-white disabled:opacity-60 ${activeGoldConfirmClasses}`}
+                onClick={confirmGoldOverlay}
+                disabled={activeGoldBusy || !activeGoldAmount}
+              >
+                {activeGoldAction}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Overlays */}
       {showTecnicaOverlay && selectedUserId && (
