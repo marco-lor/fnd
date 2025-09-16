@@ -32,6 +32,7 @@ import PlayerInfoConoscenzeRow from "./playerInfo/sections/PlayerInfoConoscenzeR
 import PlayerInfoProfessioniRow from "./playerInfo/sections/PlayerInfoProfessioniRow";
 import PlayerInfoLingueRow from "./playerInfo/sections/PlayerInfoLingueRow";
 import PlayerInfoInventoryRow from "./playerInfo/sections/PlayerInfoInventoryRow";
+import PlayerInfoDiceRollsRow from "./playerInfo/sections/PlayerInfoDiceRollsRow";
 import GoldAdjustmentOverlay from "./playerInfo/overlays/GoldAdjustmentOverlay";
 import EditVarieItemOverlay from "./playerInfo/overlays/EditVarieItemOverlay";
 import AddVarieItemOverlay from "./playerInfo/overlays/AddVarieItemOverlay";
@@ -374,6 +375,9 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
               onOpenGoldOverlay={openGoldOverlay}
               goldUpdating={goldUpdating}
               onAddVarie={handleAddVarieForUser}
+            />
+            <PlayerInfoDiceRollsRow
+              users={users}
             />
           </tbody>
         </table>

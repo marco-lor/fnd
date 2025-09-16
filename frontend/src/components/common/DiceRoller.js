@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { FaDiceD20, FaTimes } from 'react-icons/fa';
 import PropTypes from 'prop-types';
+import { useAuth } from '../../AuthContext';
+import logDiceRoll from './diceLogger';
 
 export default function DiceRoller({ faces, count, modifier, description, onComplete }) {
   const [currentTotal, setCurrentTotal] = useState(0);
   const [currentRolls, setCurrentRolls] = useState([]);
   const [finished, setFinished] = useState(false);
+  const { user } = useAuth();
 
   useEffect(() => {
     let iterations = 0;
@@ -47,7 +50,16 @@ export default function DiceRoller({ faces, count, modifier, description, onComp
         )}
         {finished && (
           <button
-            onClick={() => onComplete(currentTotal, { rolls: currentRolls, modifier, faces, count, description })}
+            onClick={async () => {
+              const meta = { rolls: currentRolls, modifier, faces, count, description };
+              // Fire logging first (non-blocking, but we await to reduce race on immediate unmount)
+              try {
+                await logDiceRoll(user?.uid, { total: currentTotal, meta });
+              } catch (e) {
+                // already logged in utility but keep silent here
+              }
+              onComplete(currentTotal, meta);
+            }}
             aria-label="Close"
             className="absolute top-2 right-3 text-gray-400 hover:text-white text-xl"
           >
