@@ -77,6 +77,12 @@ service cloud.firestore {
       allow read: if isSignedIn() && (request.auth.uid == userId || isWebmaster());
       // Owner write or webmaster write (DM already covered by global rule)
       allow write: if isSignedIn() && (request.auth.uid == userId || isWebmaster());
+
+      // Dice roll logs subcollection: each user can manage ONLY their own dice rolls
+      match /diceRolls/{rollId} {
+        // Owner full access (DM already globally allowed). Webmaster may access via parent rule if desired, but keep explicit owner rule.
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
     }
 
     // Items
