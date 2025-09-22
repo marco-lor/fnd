@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import DelInventoryItemOverlay from "../../buttons/delInventoryItem";
 import DelVarieItemUnitsOverlay from "../../buttons/delVarieItemUnits";
+// DM utility overlay to grant bazaar items for free (no gold deduction)
+import AddBazaarItemOverlay from "../overlays/AddBazaarItemOverlay"; // new overlay to grant existing bazaar items
 
 const deriveInventoryId = (entry, index) => {
   if (!entry) return `item-${index}`;
@@ -15,9 +17,10 @@ const resolveDisplayName = (entry, index, catalog) => {
   return entry?.General?.Nome || entry.name || (entry.id && catalog[entry.id]) || deriveInventoryId(entry, index);
 };
 
-const PlayerInfoInventoryRow = ({ users, catalog, itemsDocs, iconEditClass, onEditInventoryItem, onOpenGoldOverlay, goldUpdating, onAddVarie, canDeleteInventory = true }) => {
+const PlayerInfoInventoryRow = ({ users, catalog, itemsDocs, iconEditClass, onEditInventoryItem, onOpenGoldOverlay, goldUpdating, onAddVarie, canDeleteInventory = true, canGrantBazaar = true }) => {
   const [deleteTarget, setDeleteTarget] = useState(null); // non-varie delete
   const [deleteVarieTarget, setDeleteVarieTarget] = useState(null); // varie delete (with qty)
+  const [grantUserId, setGrantUserId] = useState(null); // when set, opens AddBazaarItemOverlay for that user
 
   return (
     <>
@@ -112,6 +115,16 @@ const PlayerInfoInventoryRow = ({ users, catalog, itemsDocs, iconEditClass, onEd
                         Varie +
                       </button>
                     )}
+                    {canGrantBazaar && (
+                      <button
+                        className="ml-1 flex h-7 px-2 items-center justify-center rounded-full border border-emerald-500/70 text-emerald-300 text-[11px] font-medium transition hover:bg-emerald-500/20 disabled:opacity-50"
+                        onClick={() => setGrantUserId(user.id)}
+                        disabled={goldBusy}
+                        title="Aggiungi Oggetto Bazaar (gratis)"
+                      >
+                        Bazaar +
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -199,6 +212,15 @@ const PlayerInfoInventoryRow = ({ users, catalog, itemsDocs, iconEditClass, onEd
           totalQty={deleteVarieTarget.qty}
           onClose={(ok) => {
             setDeleteVarieTarget(null);
+          }}
+        />
+      )}
+      {grantUserId && (
+        <AddBazaarItemOverlay
+          userId={grantUserId}
+          itemsDocs={itemsDocs}
+          onClose={(ok) => {
+            setGrantUserId(null);
           }}
         />
       )}
