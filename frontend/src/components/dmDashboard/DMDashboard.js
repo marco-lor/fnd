@@ -1,7 +1,7 @@
 // file: ./frontend/src/components/dmDashboard/DMDashboard.js
 import React, { useState, useEffect } from "react";
 import { db, app } from "../firebaseConfig";
-import { collection, getDocs, doc, updateDoc, increment } from "firebase/firestore";
+import { collection, doc, updateDoc, increment, onSnapshot } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { useAuth } from "../../AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -32,11 +32,12 @@ const DMDashboard = () => {
     playerInfo: true,
   });
 
-  // Fetch users only once after confirming DM status
+  // Realtime subscription to users collection once DM status is confirmed.
+  // This removes the need for manual refreshes after operations (level ups, token changes, etc.).
+  // If performance becomes an issue with many users, consider adding query constraints
+  // or switching to individual doc listeners based on a selected subset.
   useEffect(() => {
-    if (!userData) {
-      return; // Still loading user data
-    }
+    if (!userData) return; // Still loading user data
 
     if (userData.role !== "dm") {
       console.log("Access denied: User is not a DM");
@@ -44,34 +45,24 @@ const DMDashboard = () => {
       return;
     }
 
-    const fetchUsers = async () => {
-      try {
-        setLoading(true);
-        const usersRef = collection(db, "users");
-        const snapshot = await getDocs(usersRef);
-        const usersData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    setLoading(true);
+    const usersRef = collection(db, "users");
+    const unsubscribe = onSnapshot(
+      usersRef,
+      (snapshot) => {
+        const usersData = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         setUsers(usersData);
         setLoading(false);
-      } catch (err) {
-        console.error("Error fetching users:", err);
-        setError("Failed to load users. Please try again.");
+      },
+      (err) => {
+        console.error("Realtime users listener error:", err);
+        setError("Failed to subscribe to users updates.");
         setLoading(false);
       }
-    };
+    );
 
-    fetchUsers();
+    return () => unsubscribe();
   }, [userData, navigate]);
-
-  const refreshUsers = async () => {
-    try {
-      const usersRef = collection(db, "users");
-      const snapshot = await getDocs(usersRef);
-      const usersData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      setUsers(usersData);
-    } catch (e) {
-      console.error("Refresh users failed", e);
-    }
-  };
 
   // Simple section header with show/hide control
   const SectionHeader = ({ title, sectionKey }) => (
@@ -101,7 +92,7 @@ const DMDashboard = () => {
       const payload = res?.data;
       const updatedCount = Array.isArray(payload?.updated) ? payload.updated.filter((r)=>r.toLevel).length : 0;
       setToast(`Level up done. Updated ${updatedCount} players.`);
-      await refreshUsers();
+  // Realtime listener will update UI automatically
     } catch (e) {
       console.error("Level up all failed", e);
       setError("Level up failed. See console.");
@@ -124,7 +115,7 @@ const DMDashboard = () => {
       setToast(null);
       await levelUpUser({ userId: targetUserId });
       setToast(`Level up done for user.`);
-      await refreshUsers();
+  // Realtime listener will update UI automatically
     } catch (e) {
       console.error("Level up user failed", e);
       setError("Level up failed. See console.");
@@ -159,7 +150,7 @@ const DMDashboard = () => {
         "stats.combatTokensAvailable": increment(amount),
       });
       setToast(`${amount > 0 ? "Added" : "Removed"} ${Math.abs(amount)} combat token${Math.abs(amount) === 1 ? "" : "s"}.`);
-      await refreshUsers();
+  // Realtime listener will update UI automatically
     } catch (e) {
       console.error("Add tokens failed", e);
       setError("Failed to update tokens. See console.");
