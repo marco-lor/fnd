@@ -1,7 +1,7 @@
 // file: ./frontend/src/components/dmDashboard/DMDashboard.js
 import React, { useState, useEffect } from "react";
 import { db, app } from "../firebaseConfig";
-import { collection, getDocs, doc, updateDoc, increment } from "firebase/firestore";
+import { collection, doc, updateDoc, increment, onSnapshot } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { useAuth } from "../../AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -32,11 +32,12 @@ const DMDashboard = () => {
     playerInfo: true,
   });
 
-  // Fetch users only once after confirming DM status
+  // Realtime subscription to users collection once DM status is confirmed.
+  // This removes the need for manual refreshes after operations (level ups, token changes, etc.).
+  // If performance becomes an issue with many users, consider adding query constraints
+  // or switching to individual doc listeners based on a selected subset.
   useEffect(() => {
-    if (!userData) {
-      return; // Still loading user data
-    }
+    if (!userData) return; // Still loading user data
 
     if (userData.role !== "dm") {
       console.log("Access denied: User is not a DM");
@@ -44,34 +45,24 @@ const DMDashboard = () => {
       return;
     }
 
-    const fetchUsers = async () => {
-      try {
-        setLoading(true);
-        const usersRef = collection(db, "users");
-        const snapshot = await getDocs(usersRef);
-        const usersData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    setLoading(true);
+    const usersRef = collection(db, "users");
+    const unsubscribe = onSnapshot(
+      usersRef,
+      (snapshot) => {
+        const usersData = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         setUsers(usersData);
         setLoading(false);
-      } catch (err) {
-        console.error("Error fetching users:", err);
-        setError("Failed to load users. Please try again.");
+      },
+      (err) => {
+        console.error("Realtime users listener error:", err);
+        setError("Failed to subscribe to users updates.");
         setLoading(false);
       }
-    };
+    );
 
-    fetchUsers();
+    return () => unsubscribe();
   }, [userData, navigate]);
-
-  const refreshUsers = async () => {
-    try {
-      const usersRef = collection(db, "users");
-      const snapshot = await getDocs(usersRef);
-      const usersData = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      setUsers(usersData);
-    } catch (e) {
-      console.error("Refresh users failed", e);
-    }
-  };
 
   // Simple section header with show/hide control
   const SectionHeader = ({ title, sectionKey }) => (
@@ -101,7 +92,7 @@ const DMDashboard = () => {
       const payload = res?.data;
       const updatedCount = Array.isArray(payload?.updated) ? payload.updated.filter((r)=>r.toLevel).length : 0;
       setToast(`Level up done. Updated ${updatedCount} players.`);
-      await refreshUsers();
+  // Realtime listener will update UI automatically
     } catch (e) {
       console.error("Level up all failed", e);
       setError("Level up failed. See console.");
@@ -124,7 +115,7 @@ const DMDashboard = () => {
       setToast(null);
       await levelUpUser({ userId: targetUserId });
       setToast(`Level up done for user.`);
-      await refreshUsers();
+  // Realtime listener will update UI automatically
     } catch (e) {
       console.error("Level up user failed", e);
       setError("Level up failed. See console.");
@@ -159,7 +150,7 @@ const DMDashboard = () => {
         "stats.combatTokensAvailable": increment(amount),
       });
       setToast(`${amount > 0 ? "Added" : "Removed"} ${Math.abs(amount)} combat token${Math.abs(amount) === 1 ? "" : "s"}.`);
-      await refreshUsers();
+  // Realtime listener will update UI automatically
     } catch (e) {
       console.error("Add tokens failed", e);
       setError("Failed to update tokens. See console.");
@@ -273,6 +264,81 @@ const DMDashboard = () => {
       </div>
     );
 
+    // Mapping helper for stats fields
+    const vitalFieldMap = {
+      hp: { current: 'stats.hpCurrent', total: 'stats.hpTotal', label: 'HP' },
+      mana: { current: 'stats.manaCurrent', total: 'stats.manaTotal', label: 'Mana' }
+    };
+
+    const promptInteger = (message, defaultVal) => {
+      const input = window.prompt(message, defaultVal != null ? String(defaultVal) : '');
+      if (input === null) return null; // cancelled
+      const n = parseInt(input, 10);
+      if (Number.isNaN(n) || !Number.isFinite(n)) return null;
+      return n;
+    };
+
+    const adjustVitalDelta = async (userId, vital, delta) => {
+      if (userData.role !== 'dm') return;
+      const fields = vitalFieldMap[vital];
+      const u = users.find(x => x.id === userId);
+      if (!u) return;
+      const cur = Number(u?.stats?.[vital + 'Current']) || 0;
+      const newVal = Math.max(0, cur + delta);
+      try {
+        await updateDoc(doc(db, 'users', userId), { [fields.current]: newVal });
+      } catch (e) { console.error('adjustVitalDelta failed', e); }
+    };
+
+    const resetVital = async (userId, vital) => {
+      if (userData.role !== 'dm') return;
+      const fields = vitalFieldMap[vital];
+      const u = users.find(x => x.id === userId);
+      if (!u) return;
+      const tot = Number(u?.stats?.[vital + 'Total']) || 0;
+      try {
+        await updateDoc(doc(db, 'users', userId), { [fields.current]: tot });
+      } catch (e) { console.error('resetVital failed', e); }
+    };
+
+    const setVitalCurrent = async (userId, vital) => {
+      if (userData.role !== 'dm') return;
+      const u = users.find(x => x.id === userId);
+      if (!u) return;
+      const cur = Number(u?.stats?.[vital + 'Current']) || 0;
+      const n = promptInteger(`Set ${vitalFieldMap[vital].label} current value`, cur);
+      if (n === null) return;
+      try {
+        await updateDoc(doc(db, 'users', userId), { [vitalFieldMap[vital].current]: Math.max(0, n) });
+      } catch (e) { console.error('setVitalCurrent failed', e); }
+    };
+
+    const setVitalTotal = async (userId, vital) => {
+      if (userData.role !== 'dm') return;
+      const u = users.find(x => x.id === userId);
+      if (!u) return;
+      const tot = Number(u?.stats?.[vital + 'Total']) || 0;
+      const n = promptInteger(`Set ${vitalFieldMap[vital].label} total value`, tot);
+      if (n === null) return;
+      const cur = Number(u?.stats?.[vital + 'Current']) || 0;
+      const updates = { [vitalFieldMap[vital].total]: Math.max(0, n) };
+      if (cur > n) {
+        if (window.confirm('Current value exceeds new total. Clamp current to new total?')) {
+          updates[vitalFieldMap[vital].current] = Math.max(0, n);
+        }
+      }
+      try {
+        await updateDoc(doc(db, 'users', userId), updates);
+      } catch (e) { console.error('setVitalTotal failed', e); }
+    };
+
+    const customDeltaPrompt = async (userId, vital) => {
+      if (userData.role !== 'dm') return;
+      const delta = promptInteger(`Enter ${vitalFieldMap[vital].label} delta (use negative to subtract)`, '0');
+      if (delta === null || delta === 0) return;
+      await adjustVitalDelta(userId, vital, delta);
+    };
+
     return (
       <div className="mt-8">
         <SectionHeader title="Player Vitals" sectionKey="vitals" />
@@ -299,10 +365,20 @@ const DMDashboard = () => {
                     const tot = Number(u?.stats?.hpTotal) || 0;
                     const pct = tot > 0 ? (cur / tot) * 100 : 0;
                     return (
-                      <td key={`${u.id}-hp`} className="border border-gray-600 px-4 py-2 text-center">
+                      <td key={`${u.id}-hp`} className="border border-gray-600 px-2 py-2 text-center align-top">
                         <div className="flex flex-col items-center gap-1">
                           <VBar pct={pct} track="bg-red-900/30" fill="bg-gradient-to-r from-red-500 to-rose-500" />
-                          <div className="text-xs tabular-nums text-slate-300">{cur}/{tot}</div>
+                          <div className="text-[10px] flex items-center gap-1 text-slate-300">
+                            <button onClick={() => adjustVitalDelta(u.id, 'hp', -1)} className="px-1 rounded bg-slate-700/60 hover:bg-slate-600" title="-1 HP">-</button>
+                            <span onClick={() => setVitalCurrent(u.id, 'hp')} className="cursor-pointer hover:text-white" title="Set current HP">{cur}</span>
+                            /
+                            <span onClick={() => setVitalTotal(u.id, 'hp')} className="cursor-pointer hover:text-white" title="Set total HP">{tot}</span>
+                            <button onClick={() => adjustVitalDelta(u.id, 'hp', 1)} className="px-1 rounded bg-slate-700/60 hover:bg-slate-600" title="+1 HP">+</button>
+                          </div>
+                          <div className="flex gap-1">
+                            <button onClick={() => resetVital(u.id, 'hp')} className="px-1 text-[10px] rounded bg-emerald-700/60 hover:bg-emerald-600" title="Reset current to total">R</button>
+                            <button onClick={() => customDeltaPrompt(u.id, 'hp')} className="px-1 text-[10px] rounded bg-indigo-700/60 hover:bg-indigo-600" title="Custom delta">Δ</button>
+                          </div>
                         </div>
                       </td>
                     );
@@ -316,10 +392,20 @@ const DMDashboard = () => {
                     const tot = Number(u?.stats?.manaTotal) || 0;
                     const pct = tot > 0 ? (cur / tot) * 100 : 0;
                     return (
-                      <td key={`${u.id}-mana`} className="border border-gray-600 px-4 py-2 text-center">
+                      <td key={`${u.id}-mana`} className="border border-gray-600 px-2 py-2 text-center align-top">
                         <div className="flex flex-col items-center gap-1">
                           <VBar pct={pct} track="bg-indigo-900/30" fill="bg-gradient-to-r from-indigo-600 to-fuchsia-600" />
-                          <div className="text-xs tabular-nums text-slate-300">{cur}/{tot}</div>
+                          <div className="text-[10px] flex items-center gap-1 text-slate-300">
+                            <button onClick={() => adjustVitalDelta(u.id, 'mana', -1)} className="px-1 rounded bg-slate-700/60 hover:bg-slate-600" title="-1 Mana">-</button>
+                            <span onClick={() => setVitalCurrent(u.id, 'mana')} className="cursor-pointer hover:text-white" title="Set current Mana">{cur}</span>
+                            /
+                            <span onClick={() => setVitalTotal(u.id, 'mana')} className="cursor-pointer hover:text-white" title="Set total Mana">{tot}</span>
+                            <button onClick={() => adjustVitalDelta(u.id, 'mana', 1)} className="px-1 rounded bg-slate-700/60 hover:bg-slate-600" title="+1 Mana">+</button>
+                          </div>
+                          <div className="flex gap-1">
+                            <button onClick={() => resetVital(u.id, 'mana')} className="px-1 text-[10px] rounded bg-emerald-700/60 hover:bg-emerald-600" title="Reset current to total">R</button>
+                            <button onClick={() => customDeltaPrompt(u.id, 'mana')} className="px-1 text-[10px] rounded bg-indigo-700/60 hover:bg-indigo-600" title="Custom delta">Δ</button>
+                          </div>
                         </div>
                       </td>
                     );
