@@ -5,8 +5,8 @@ import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 import { AuthContext } from '../../../AuthContext';
 import { FaAngleRight, FaAngleLeft, FaAnglesRight, FaAnglesLeft } from 'react-icons/fa6';
-import { FaRedo } from 'react-icons/fa';
-import { GiHearts, GiMagicSwirl } from 'react-icons/gi';
+import { FaRedo, FaBan } from 'react-icons/fa';
+import { GiHearts, GiMagicSwirl, GiShield } from 'react-icons/gi';
 
 const StatsBars = () => {
   const { user } = useContext(AuthContext);
@@ -20,6 +20,12 @@ const StatsBars = () => {
   // Refs for long-press intervals.
   const hpIntervalRef = useRef(null);
   const manaIntervalRef = useRef(null);
+  const barrieraIntervalRef = useRef(null);
+  // Activation overlay state for Barriera
+  const [showBarrieraActivate, setShowBarrieraActivate] = useState(false);
+  const [barrieraActivateValue, setBarrieraActivateValue] = useState('');
+  // Turns for barriera duration
+  const [barrieraActivateTurns, setBarrieraActivateTurns] = useState('');
 
   useEffect(() => {
     let unsubscribeSnapshot = null;
@@ -43,6 +49,27 @@ const StatsBars = () => {
       }
     };
   }, [user]);
+
+  // Migration: if legacy stats.barriera exists but new fields do not, create barrieraCurrent/Total
+  useEffect(() => {
+    const migrateLegacyBarriera = async () => {
+      if (!user) return;
+      const s = userData?.stats;
+      if (!s) return;
+      if (s.barriera !== undefined && s.barrieraCurrent === undefined && s.barrieraTotal === undefined) {
+        try {
+          const userRef = doc(db, 'users', user.uid);
+            await updateDoc(userRef, {
+              'stats.barrieraCurrent': s.barriera || 0,
+              'stats.barrieraTotal': s.barriera || 0,
+            });
+        } catch (e) {
+          console.error('Failed migrating legacy barriera field', e);
+        }
+      }
+    };
+    migrateLegacyBarriera();
+  }, [user, userData?.stats?.barriera, userData?.stats?.barrieraCurrent, userData?.stats?.barrieraTotal]);
 
   // --- HP adjustment functions ---
   const handleResetHP = async () => {
@@ -121,6 +148,11 @@ const StatsBars = () => {
     ? 'Inserisci il valore da sottrarre'
     : 'Inserisci il valore da aggiungere';
 
+  // Helper to check if action is a decrement
+  const isDecrementAction = (action) => (
+    ['hp-decrement', 'mana-decrement', 'barriera-decrement'].includes(action)
+  );
+
   const handleCustomSubmit = async () => {
     const delta = parseInt(customInputValue, 10);
     if (!isNaN(delta) && user && userData?.stats) {
@@ -150,10 +182,26 @@ const StatsBars = () => {
       } else if (customAction === 'mana-increment') {
         field = 'stats.manaCurrent';
         newValue = (userData.stats.manaCurrent || 0) + delta;
+      } else if (customAction === 'barriera-decrement') {
+        field = 'stats.barrieraCurrent';
+        const current = userData.stats.barrieraCurrent || 0;
+        if (delta > current) {
+          actualDelta = current;
+          newValue = 0;
+        } else {
+          newValue = current - delta;
+        }
+      } else if (customAction === 'barriera-increment') {
+        field = 'stats.barrieraCurrent';
+        const current = userData.stats.barrieraCurrent || 0;
+        const total = userData.stats.barrieraTotal || 0;
+        if (total <= 0) return; // cannot increment if not active
+        newValue = current + delta;
+        if (newValue > total) newValue = total;
       }
       try {
         await updateDoc(userRef, { [field]: newValue });
-        if ((customAction === 'hp-decrement' || customAction === 'mana-decrement') && actualDelta !== delta) {
+        if (isDecrementAction(customAction) && actualDelta !== delta) {
           const msg = `Solo ${actualDelta} punti sono stati sottratti; ${delta} superavano il valore attuale. Valore portato a 0.`;
           setCustomFeedbackMessage(msg);
           return;
@@ -231,6 +279,7 @@ const StatsBars = () => {
     icon: Icon,
     colorTrack,
     colorFill,
+    colorFillInactive, // optional neutral color when value is 0 (for singleValue rows)
     current,
     total,
     onReset,
@@ -240,40 +289,65 @@ const StatsBars = () => {
     onIncEnd,
     onOpenDec,
     onOpenInc,
+    singleValue = false,
+    onIconClick,
+    iconActive = false,
+    resetTitle,
+    resetIcon: ResetIcon = FaRedo,
+    resetClassName,
+    resetDisabled = false,
+    decDisabled = false,
+    incDisabled = false,
+    decDisabledTitle,
+    incDisabledTitle,
   }) => {
-    const pct = total ? Math.max(0, (current / total) * 100) : 0;
+    const pct = total ? Math.max(0, (current / total) * 100) : (singleValue ? 100 : 0);
     const overflowPct = total && current > total ? ((current - total) / total) * 100 : 0;
+    const fillClass = ( (singleValue || total === 0) && current === 0 && colorFillInactive) ? colorFillInactive : colorFill;
     return (
       <div className="flex items-center gap-2 w-full">
         <div className="flex items-center gap-2 w-28">
-          <div className="relative inline-flex items-center justify-center h-8 w-8 rounded-xl border border-slate-600/60 bg-slate-800/50 text-slate-300">
-            <Icon className="w-4 h-4" />
-          </div>
+          {onIconClick ? (
+            <button
+              onClick={onIconClick}
+              className={`relative inline-flex items-center justify-center h-8 w-8 rounded-xl border transition-colors ${iconActive ? 'border-amber-400/70 bg-amber-500/20 text-amber-300' : 'border-slate-600/60 bg-slate-800/50 text-slate-300 hover:border-slate-400/70'} focus:outline-none focus:ring-2 focus:ring-amber-400/40`}
+              title={iconActive ? 'Barriera attiva - clic per reimpostare' : 'Attiva Barriera'}
+            >
+              <Icon className="w-4 h-4" />
+            </button>
+          ) : (
+            <div className="relative inline-flex items-center justify-center h-8 w-8 rounded-xl border border-slate-600/60 bg-slate-800/50 text-slate-300">
+              <Icon className="w-4 h-4" />
+            </div>
+          )}
           <span className="text-sm font-medium text-slate-200">{label}</span>
         </div>
         <div className="flex items-center gap-1.5 flex-1">
           <button
             onClick={onReset}
-            className="relative inline-flex items-center justify-center h-7 w-7 rounded-xl bg-gradient-to-br from-emerald-600 to-green-600 text-white shadow-sm hover:scale-105 active:scale-95 transition-transform focus:outline-none focus:ring-2 focus:ring-emerald-400/40"
-            title={`Reset ${label}`}
+            disabled={resetDisabled}
+            className={`relative inline-flex items-center justify-center h-7 w-7 rounded-xl text-white shadow-sm transition-transform focus:outline-none focus:ring-2 disabled:opacity-40 disabled:cursor-not-allowed ${resetClassName || 'bg-gradient-to-br from-emerald-600 to-green-600 hover:scale-105 active:scale-95 focus:ring-emerald-400/40'}`}
+            title={resetTitle || `Reset ${label}`}
           >
-            <FaRedo className="w-3.5 h-3.5" />
+            <ResetIcon className="w-3.5 h-3.5" />
           </button>
           <button
-            onMouseDown={onDecStart}
-            onMouseUp={onDecEnd}
-            onMouseLeave={onDecEnd}
-            onTouchStart={onDecStart}
-            onTouchEnd={onDecEnd}
-            className="inline-flex items-center justify-center h-7 w-7 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white"
-            title={`-1 ${label}`}
+            onMouseDown={decDisabled ? undefined : onDecStart}
+            onMouseUp={decDisabled ? undefined : onDecEnd}
+            onMouseLeave={decDisabled ? undefined : onDecEnd}
+            onTouchStart={decDisabled ? undefined : onDecStart}
+            onTouchEnd={decDisabled ? undefined : onDecEnd}
+            disabled={decDisabled}
+            className={`inline-flex items-center justify-center h-7 w-7 rounded-xl border  ${decDisabled ? 'border-slate-700/50 bg-slate-800/30 text-slate-500 cursor-not-allowed' : 'border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white'}`}
+            title={decDisabled ? (decDisabledTitle || 'Non modificabile') : `-1 ${label}`}
           >
             <FaAngleLeft className="w-3.5 h-3.5" />
           </button>
           <button
-            onClick={onOpenDec}
-            className="inline-flex items-center justify-center h-7 w-7 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white"
-            title={`Sottrai ${label} (valore custom)`}
+            onClick={decDisabled ? undefined : onOpenDec}
+            disabled={decDisabled}
+            className={`inline-flex items-center justify-center h-7 w-7 rounded-xl border ${decDisabled ? 'border-slate-700/50 bg-slate-800/30 text-slate-500 cursor-not-allowed' : 'border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white'}`}
+            title={decDisabled ? (decDisabledTitle || 'Non modificabile') : `Sottrai ${label} (valore custom)`}
           >
             <FaAnglesLeft className="w-3.5 h-3.5" />
           </button>
@@ -281,7 +355,7 @@ const StatsBars = () => {
             {/* fill */}
             <div
               style={{ width: `${Math.min(100, pct)}%` }}
-              className={`h-full rounded-md ${colorFill}`}
+              className={`h-full rounded-md transition-colors duration-200 ${fillClass}`}
             />
             {/* overflow fill */}
             {overflowPct > 0 && (
@@ -294,30 +368,129 @@ const StatsBars = () => {
             <div className="pointer-events-none absolute inset-0 bg-[repeating-linear-gradient(45deg,rgba(255,255,255,0.06)_0px,rgba(255,255,255,0.06)_6px,transparent_6px,transparent_12px)] rounded-lg" />
           </div>
           <button
-            onClick={onOpenInc}
-            className="inline-flex items-center justify-center h-7 w-7 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white"
-            title={`Aggiungi ${label} (valore custom)`}
+            onClick={incDisabled ? undefined : onOpenInc}
+            disabled={incDisabled}
+            className={`inline-flex items-center justify-center h-7 w-7 rounded-xl border ${incDisabled ? 'border-slate-700/50 bg-slate-800/30 text-slate-500 cursor-not-allowed' : 'border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white'}`}
+            title={incDisabled ? (incDisabledTitle || 'Non modificabile') : `Aggiungi ${label} (valore custom)`}
           >
             <FaAnglesRight className="w-3.5 h-3.5" />
           </button>
           <button
-            onMouseDown={onIncStart}
-            onMouseUp={onIncEnd}
-            onMouseLeave={onIncEnd}
-            onTouchStart={onIncStart}
-            onTouchEnd={onIncEnd}
-            className="inline-flex items-center justify-center h-7 w-7 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white"
-            title={`+1 ${label}`}
+            onMouseDown={incDisabled ? undefined : onIncStart}
+            onMouseUp={incDisabled ? undefined : onIncEnd}
+            onMouseLeave={incDisabled ? undefined : onIncEnd}
+            onTouchStart={incDisabled ? undefined : onIncStart}
+            onTouchEnd={incDisabled ? undefined : onIncEnd}
+            disabled={incDisabled}
+            className={`inline-flex items-center justify-center h-7 w-7 rounded-xl border ${incDisabled ? 'border-slate-700/50 bg-slate-800/30 text-slate-500 cursor-not-allowed' : 'border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white'}`}
+            title={incDisabled ? (incDisabledTitle || 'Non modificabile') : `+1 ${label}`}
           >
             <FaAngleRight className="w-3.5 h-3.5" />
           </button>
           <span className="min-w-[72px] text-right text-sm text-slate-200">
-            {current}/{total}
+            {singleValue ? current : `${current}/${total}`}
           </span>
         </div>
       </div>
     );
   };
+
+  // --- Barriera handlers (single value) ---
+  const handleResetBarriera = async () => {
+    if (!user) return;
+    try {
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, { 
+        'stats.barrieraCurrent': 0, 
+        'stats.barrieraTotal': 0,
+        'active_turn_effect.barriera.remainingTurns': 0,
+        'active_turn_effect.barriera.totalTurns': 0,
+      });
+    } catch (e) {
+      console.error('Error resetting Barriera:', e);
+    }
+  };
+
+  const handleDecrementBarriera = async () => {
+    if (user && userData?.stats) {
+      let newVal = (userData.stats.barrieraCurrent || 0) - 1;
+      if (newVal < 0) newVal = 0;
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        await updateDoc(userRef, { 'stats.barrieraCurrent': newVal });
+      } catch (e) {
+        console.error('Error decrementing Barriera:', e);
+      }
+    }
+  };
+
+  const handleIncrementBarriera = async () => {
+    if (user && userData?.stats) {
+      const current = userData.stats.barrieraCurrent || 0;
+      const total = userData.stats.barrieraTotal || 0;
+      if (total <= 0 || current >= total) return; // cannot grow past total
+      const newVal = Math.min(total, current + 1);
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        await updateDoc(userRef, { 'stats.barrieraCurrent': newVal });
+      } catch (e) {
+        console.error('Error incrementing Barriera:', e);
+      }
+    }
+  };
+
+  const handleDecrementBarrieraStart = () => {
+    handleDecrementBarriera();
+    barrieraIntervalRef.current = setInterval(handleDecrementBarriera, 200);
+  };
+  const handleDecrementBarrieraEnd = () => {
+    if (barrieraIntervalRef.current) {
+      clearInterval(barrieraIntervalRef.current);
+      barrieraIntervalRef.current = null;
+    }
+  };
+  const handleIncrementBarrieraStart = () => {
+    handleIncrementBarriera();
+    barrieraIntervalRef.current = setInterval(handleIncrementBarriera, 200);
+  };
+  const handleIncrementBarrieraEnd = () => {
+    if (barrieraIntervalRef.current) {
+      clearInterval(barrieraIntervalRef.current);
+      barrieraIntervalRef.current = null;
+    }
+  };
+
+  // Activate Barriera (sets both current and total)
+  const handleActivateBarriera = async () => {
+    const val = parseInt(barrieraActivateValue, 10);
+    const turns = parseInt(barrieraActivateTurns, 10);
+    if (isNaN(val) || val <= 0 || isNaN(turns) || turns <= 0 || !user) return;
+    try {
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, {
+        'stats.barrieraCurrent': val,
+        'stats.barrieraTotal': val,
+        'active_turn_effect.barriera.totalTurns': turns,
+        'active_turn_effect.barriera.remainingTurns': turns,
+      });
+      setBarrieraActivateValue('');
+      setBarrieraActivateTurns('');
+      setShowBarrieraActivate(false);
+    } catch (e) {
+      console.error('Error activating barriera', e);
+    }
+  };
+
+  const barrierCurrent = userData?.stats?.barrieraCurrent ?? userData?.stats?.barriera ?? 0;
+  const barrierTotal = userData?.stats?.barrieraTotal ?? 0;
+  // Turn effect data for barriera
+  const barrierTurnsTotal = userData?.active_turn_effect?.barriera?.totalTurns || 0;
+  const barrierTurnsRemaining = userData?.active_turn_effect?.barriera?.remainingTurns || 0;
+  const barrierActive = barrierTotal > 0; // active as long as a total is defined (>0)
+  const barrierDepleted = barrierActive && barrierCurrent === 0;
+  const barrierFull = barrierActive && barrierCurrent >= barrierTotal && !barrierDepleted;
+  const barrierIncDisabledTitle = !barrierActive ? 'Barriera non attiva' : (barrierDepleted ? 'Barriera terminata: ri-attiva con lo scudo' : (barrierFull ? 'Barriera al massimo' : ''));
+  const barrierDecDisabledTitle = !barrierActive ? 'Barriera non attiva' : (barrierDepleted ? 'Barriera terminata' : '');
 
   return (
     <div className="relative backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 shadow-lg overflow-hidden">
@@ -364,6 +537,67 @@ const StatsBars = () => {
         document.body
       )}
 
+      {/* Barriera Activation Overlay */}
+      {showBarrieraActivate && createPortal(
+        (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+            <div className="relative w-full max-w-md rounded-2xl border border-amber-500/30 bg-slate-900/95 shadow-2xl overflow-hidden">
+              <div className="absolute -inset-0.5 bg-gradient-to-br from-amber-500/10 via-transparent to-yellow-400/10 pointer-events-none" />
+              <div className="relative px-5 py-4 border-b border-slate-700/60 flex items-center gap-3">
+                <div className="h-9 w-9 rounded-xl flex items-center justify-center bg-amber-500/20 border border-amber-400/40 text-amber-300">
+                  <GiShield className="w-5 h-5" />
+                </div>
+                <h2 className="text-base font-semibold text-amber-200 tracking-wide">Attiva Barriera</h2>
+              </div>
+              <div className="relative p-5 space-y-4">
+                <p className="text-sm text-slate-300">Inserisci il valore totale della nuova barriera e la durata in turni.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-400 mb-1">Valore Barriera</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={barrieraActivateValue}
+                      onChange={(e) => setBarrieraActivateValue(e.target.value)}
+                      onKeyDown={(e)=>{ if(e.key==='Enter') handleActivateBarriera(); }}
+                      className="w-full p-2 rounded-lg bg-slate-800/80 text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500 border border-slate-600/60"
+                      placeholder="0"
+                    />
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {[5,10,15,20].map(v => (
+                        <button key={v} onClick={()=> setBarrieraActivateValue(String(v))} className="px-2.5 py-1 text-xs rounded-lg bg-slate-800/60 border border-slate-600/60 text-slate-200 hover:border-amber-400/60 hover:text-amber-200 transition">{v}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-400 mb-1">Turni</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={barrieraActivateTurns}
+                      onChange={(e) => setBarrieraActivateTurns(e.target.value)}
+                      onKeyDown={(e)=>{ if(e.key==='Enter') handleActivateBarriera(); }}
+                      className="w-full p-2 rounded-lg bg-slate-800/80 text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500 border border-slate-600/60"
+                      placeholder="0"
+                    />
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {[1,2,3,5].map(v => (
+                        <button key={v} onClick={()=> setBarrieraActivateTurns(String(v))} className="px-2.5 py-1 text-xs rounded-lg bg-slate-800/60 border border-slate-600/60 text-slate-200 hover:border-amber-400/60 hover:text-amber-200 transition">{v}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button onClick={()=>{ setShowBarrieraActivate(false); setBarrieraActivateValue(''); setBarrieraActivateTurns(''); }} className="px-4 py-2 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70">Annulla</button>
+                  <button onClick={handleActivateBarriera} disabled={!barrieraActivateValue || !barrieraActivateTurns} className="px-4 py-2 rounded-xl bg-gradient-to-br from-amber-500 to-yellow-500 text-slate-900 font-medium shadow disabled:opacity-40 disabled:cursor-not-allowed">Attiva</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ),
+        document.body
+      )}
+
       <div className="relative flex flex-col gap-4">
         <div className="space-y-4">
           <StatRow
@@ -397,6 +631,49 @@ const StatsBars = () => {
             onOpenDec={() => openCustomInput('mana-decrement')}
             onOpenInc={() => openCustomInput('mana-increment')}
           />
+
+          <StatRow
+            label="Barriera"
+            icon={GiShield}
+            colorTrack="bg-amber-900/30"
+            colorFill="bg-gradient-to-r from-amber-500 to-yellow-500"
+            colorFillInactive="bg-slate-700/40"
+            current={barrierCurrent}
+            total={barrierTotal}
+            onReset={handleResetBarriera}
+            onDecStart={handleDecrementBarrieraStart}
+            onDecEnd={handleDecrementBarrieraEnd}
+            onIncStart={handleIncrementBarrieraStart}
+            onIncEnd={handleIncrementBarrieraEnd}
+            onOpenDec={() => openCustomInput('barriera-decrement')}
+            onOpenInc={() => openCustomInput('barriera-increment')}
+            onIconClick={() => setShowBarrieraActivate(true)}
+            iconActive={barrierActive}
+            resetTitle={barrierActive ? (barrierDepleted ? 'Rimuovi Barriera esaurita' : 'Termina Barriera') : 'Nessuna Barriera attiva'}
+            resetIcon={FaBan}
+            resetClassName={barrierActive ? 'bg-gradient-to-br from-rose-600 to-red-600 hover:scale-105 active:scale-95 focus:ring-red-400/40' : 'bg-slate-700/60'}
+            resetDisabled={!barrierActive}
+            decDisabled={barrierDepleted || !barrierActive}
+            incDisabled={barrierDepleted || !barrierActive || barrierFull}
+            incDisabledTitle={barrierIncDisabledTitle}
+            decDisabledTitle={barrierDecDisabledTitle}
+          />
+          {/* Thin turns bar under barrier when active and turns tracked */}
+          {barrierActive && barrierTurnsTotal > 0 && (
+            <div className="-mt-3 mb-2 px-[4.5rem]">{/* align under main bar content (approx padding to start of bar) */}
+              <div className="h-2 rounded-md bg-slate-700/40 overflow-hidden relative border border-slate-600/40">
+                <div
+                  className="h-full bg-gradient-to-r from-amber-400 via-yellow-400 to-yellow-300 transition-all duration-300"
+                  style={{ width: `${Math.min(100, (barrierTurnsRemaining / barrierTurnsTotal) * 100)}%` }}
+                />
+                <div className="absolute inset-0 text-[10px] leading-4 font-medium text-slate-900/90 flex items-center justify-center pointer-events-none select-none">
+                  <span className="px-1 rounded bg-amber-300/70 text-slate-900 tracking-wide">
+                    {barrierTurnsRemaining}/{barrierTurnsTotal} turni
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

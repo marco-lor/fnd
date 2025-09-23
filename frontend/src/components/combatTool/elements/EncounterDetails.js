@@ -15,6 +15,7 @@ import {
 } from "firebase/firestore";
 import DiceRoller from "../../common/DiceRoller";
 import { Button } from "./ui";
+import { advanceTurn as advanceTurnUtil } from "./buttons/advanceTurn";
 
 const EncounterDetails = ({ encounter, isDM }) => {
     const { user, userData } = useAuth();
@@ -504,42 +505,8 @@ const EncounterDetails = ({ encounter, isDM }) => {
         }
     };
 
-    const advanceTurn = async () => {
-        if (!isDM || !turnState) return;
-        try {
-            const encRef = doc(db, "encounters", encounter.id);
-            let nextState = null;
-            await runTransaction(db, async (tx) => {
-                const snap = await tx.get(encRef);
-                const data = snap.data() || {};
-                const t = data.turn;
-                if (!t?.order || t.order.length === 0) throw new Error("no-turn");
-                const cleanOrder = t.order.filter((k) => participantsMap[k]);
-                if (cleanOrder.length === 0) throw new Error("empty");
-                let idx = (t.index ?? 0) + 1;
-                let round = t.round ?? 1;
-                if (idx >= cleanOrder.length) {
-                    idx = 0;
-                    round += 1;
-                }
-                nextState = { order: cleanOrder, index: idx, round, startedAt: t.startedAt || serverTimestamp(), updatedAt: serverTimestamp() };
-                tx.set(encRef, { turn: nextState }, { merge: true });
-            });
-            if (nextState) {
-                const nextKey = nextState.order[nextState.index];
-                const label = rows.find((r) => r.key === nextKey)?.label || nextKey;
-                await addDoc(collection(db, "encounters", encounter.id, "logs"), {
-                    type: "turn",
-                    by: "DM",
-                    message: `Turn begins: ${label} (Turno ${nextState.round})` ,
-                    createdAt: serverTimestamp(),
-                });
-            }
-        } catch (e) {
-            console.error("advanceTurn failed", e);
-            alert("Impossibile avanzare il turno.");
-        }
-    };
+    // advanceTurn moved to dedicated utility in buttons/advanceTurn.js
+    const advanceTurn = () => advanceTurnUtil({ isDM, turnState, encounter, db, participantsMap, rows });
 
     const rebuildOrder = async () => {
         if (!isDM || !turnState) return;
