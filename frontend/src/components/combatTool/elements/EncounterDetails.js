@@ -92,15 +92,7 @@ const EncounterDetails = ({ encounter, isDM }) => {
         }
     }, [participantsMap, user, userData?.characterId]);
 
-    // Determine if current player has already rolled initiative
-    const myParticipant = useMemo(() => {
-        return (
-            (myDocKey && participantsMap[myDocKey]) ||
-            (user?.uid ? participantsMap[user.uid] : null) ||
-            (userData?.characterId ? participantsMap[userData.characterId] : null) ||
-            null
-        );
-    }, [participantsMap, myDocKey, user?.uid, userData?.characterId]);
+    // (Removed unused myParticipant memo; variable not referenced elsewhere)
 
     const hasRolledInitiative = useMemo(() => {
         const ids = new Set([user?.uid, userData?.characterId].filter(Boolean));
@@ -115,6 +107,29 @@ const EncounterDetails = ({ encounter, isDM }) => {
 
     // Subscribe to user docs for all participants (only when linked to user params)
     // IMPORTANT: Only DMs should subscribe to other users' docs (players/webmasters shouldn't to avoid permission errors).
+    // Stable keys to avoid complex expressions directly inside dependency array (improves lint clarity)
+    const participantUserIdsKey = useMemo(() => {
+        const ids = Array.from(
+            new Set(
+                Object.values(participantsMap)
+                    .map((p) => p?.uid)
+                    .filter(Boolean)
+            )
+        ).sort();
+        return JSON.stringify(ids);
+    }, [participantsMap]);
+    const participantFoeIdsKey = useMemo(() => {
+        const ids = Array.from(
+            new Set(
+                Object.values(participantsMap)
+                    .filter((p) => p?.type === "foe" && p?.foeId)
+                    .map((p) => p.foeId)
+                    .filter(Boolean)
+            )
+        ).sort();
+        return JSON.stringify(ids);
+    }, [participantsMap]);
+
     useEffect(() => {
         // Only allow DM to read other users' docs
         if (!isDM) {
@@ -126,11 +141,8 @@ const EncounterDetails = ({ encounter, isDM }) => {
         const linkMode = encMeta?.linkMode || "live"; // default live
         const unsubs = [];
         if (linkMode !== "detached") {
-            const uids = Object.values(participantsMap)
-                .map((p) => p?.uid)
-                .filter(Boolean);
-            const unique = Array.from(new Set(uids));
-            unique.forEach((uid) => {
+            const uniqueUserIds = JSON.parse(participantUserIdsKey);
+            uniqueUserIds.forEach((uid) => {
                 const uRef = doc(db, "users", uid);
                 const unsub = onSnapshot(
                     uRef,
@@ -149,10 +161,7 @@ const EncounterDetails = ({ encounter, isDM }) => {
             });
 
             // Subscribe to foes for foe participants
-            const foeIds = Object.values(participantsMap)
-                .filter((p) => p?.type === "foe" && p?.foeId)
-                .map((p) => p.foeId);
-            const uniqueFoes = Array.from(new Set(foeIds));
+            const uniqueFoes = JSON.parse(participantFoeIdsKey);
             uniqueFoes.forEach((foeId) => {
                 const fRef = doc(db, "foes", foeId);
                 const unsubF = onSnapshot(
@@ -176,18 +185,7 @@ const EncounterDetails = ({ encounter, isDM }) => {
         return () => {
             unsubs.forEach((u) => u());
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [
-        isDM,
-        encMeta?.linkMode,
-        JSON.stringify(Object.values(participantsMap).map((p) => p?.uid).sort()),
-        JSON.stringify(
-            Object.values(participantsMap)
-                .filter((p) => p?.type === "foe" && p?.foeId)
-                .map((p) => p.foeId)
-                .sort()
-        ),
-    ]);
+    }, [isDM, encMeta?.linkMode, participantUserIdsKey, participantFoeIdsKey]);
 
     // For foe participants, create a snapshot copy in their participant doc if missing
     useEffect(() => {
