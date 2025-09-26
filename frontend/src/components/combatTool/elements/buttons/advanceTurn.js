@@ -24,27 +24,23 @@ export const advanceTurn = async ({ isDM, turnState, encounter, db, participants
     try {
         const encRef = doc(db, "encounters", encounter.id);
         let nextState = null;
+        let rebuiltInfo = null; // {order:[], round:number}
         await runTransaction(db, async (tx) => {
             const snap = await tx.get(encRef);
             const data = snap.data() || {};
             const t = data.turn;
             if (!t?.order || t.order.length === 0) throw new Error("no-turn");
-            const cleanOrder = t.order.filter((k) => participantsMap[k]);
-            if (cleanOrder.length === 0) throw new Error("empty");
+            const cleanOrderExisting = t.order.filter((k) => participantsMap[k]);
+            if (cleanOrderExisting.length === 0) throw new Error("empty");
 
             // -------------------------------------------------------------
-            // Decrement active turn effects (remainingTurns - 1) for the
-            // participant whose turn is FINISHING (current index before
-            // we advance). Only applied to user participants (skip foes).
-            // Firestore structure (user doc): active_turn_effect: {
-            //   barriera: { remainingTurns: Number, totalTurns: Number, ... }
-            // }
+            // Decrement active turn effects for finishing participant
             // -------------------------------------------------------------
             try {
                 const currentIndex = t.index ?? 0;
-                const finishingKey = cleanOrder[currentIndex];
+                const finishingKey = cleanOrderExisting[currentIndex];
                 const finishingParticipant = participantsMap[finishingKey];
-                const isFoe = finishingParticipant?.type === "foe"; // foes shouldn't have user doc effects
+                const isFoe = finishingParticipant?.type === "foe";
                 const userUid = !isFoe ? (finishingParticipant?.uid || finishingKey) : null;
                 if (userUid) {
                     const userRef = doc(db, "users", userUid);
@@ -63,31 +59,39 @@ export const advanceTurn = async ({ isDM, turnState, encounter, db, participants
                                         updated[ek] = { ...ev, remainingTurns: newVal };
                                         if (newVal !== curr) changed = true;
                                     } else {
-                                        updated[ek] = ev; // leave untouched if malformed
+                                        updated[ek] = ev;
                                     }
                                 } else {
                                     updated[ek] = ev;
                                 }
                             }
-                            if (changed) {
-                                tx.set(userRef, { active_turn_effect: updated }, { merge: true });
-                            }
+                            if (changed) tx.set(userRef, { active_turn_effect: updated }, { merge: true });
                         }
                     }
                 }
             } catch (effectErr) {
-                // Non-fatal: log but don't abort advancing turns
                 console.warn("Failed to decrement active_turn_effect", effectErr);
             }
 
             let idx = (t.index ?? 0) + 1;
             let round = t.round ?? 1;
-            if (idx >= cleanOrder.length) {
+            let orderForNext = cleanOrderExisting;
+
+            const wrapped = idx >= cleanOrderExisting.length;
+            if (wrapped) {
+                // Start of a NEW ROUND → auto rebuild order including *any* participants
+                // that have now an initiative but were not in the previous order (joined mid-round).
                 idx = 0;
                 round += 1;
+                const fullInitiativeOrder = rows
+                    .filter((r) => r.initiative != null)
+                    .map((r) => r.key); // rows already sorted desc by initiative
+                orderForNext = fullInitiativeOrder;
+                rebuiltInfo = { order: orderForNext.slice(), round };
             }
+
             nextState = {
-                order: cleanOrder,
+                order: orderForNext,
                 index: idx,
                 round,
                 startedAt: t.startedAt || serverTimestamp(),
@@ -95,7 +99,20 @@ export const advanceTurn = async ({ isDM, turnState, encounter, db, participants
             };
             tx.set(encRef, { turn: nextState }, { merge: true });
         });
+
         if (nextState) {
+            // If we rebuilt, log that first
+            if (rebuiltInfo) {
+                const labelOrder = rebuiltInfo.order
+                    .map((k) => rows.find((r) => r.key === k)?.label || k)
+                    .join(" > ");
+                await addDoc(collection(db, "encounters", encounter.id, "logs"), {
+                    type: "turn",
+                    by: "DM",
+                    message: `Nuovo round iniziato (Turno ${rebuiltInfo.round}) – Ordine ricostruito: ${labelOrder}`,
+                    createdAt: serverTimestamp(),
+                });
+            }
             const nextKey = nextState.order[nextState.index];
             const label = rows.find((r) => r.key === nextKey)?.label || nextKey;
             await addDoc(collection(db, "encounters", encounter.id, "logs"), {
@@ -106,7 +123,6 @@ export const advanceTurn = async ({ isDM, turnState, encounter, db, participants
             });
         }
     } catch (e) {
-        // Keep same UX behavior as original implementation
         console.error("advanceTurn failed", e);
         alert("Impossibile avanzare il turno.");
     }
