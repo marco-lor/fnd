@@ -92,15 +92,7 @@ const EncounterDetails = ({ encounter, isDM }) => {
         }
     }, [participantsMap, user, userData?.characterId]);
 
-    // Determine if current player has already rolled initiative
-    const myParticipant = useMemo(() => {
-        return (
-            (myDocKey && participantsMap[myDocKey]) ||
-            (user?.uid ? participantsMap[user.uid] : null) ||
-            (userData?.characterId ? participantsMap[userData.characterId] : null) ||
-            null
-        );
-    }, [participantsMap, myDocKey, user?.uid, userData?.characterId]);
+    // (Removed unused myParticipant memo; variable not referenced elsewhere)
 
     const hasRolledInitiative = useMemo(() => {
         const ids = new Set([user?.uid, userData?.characterId].filter(Boolean));
@@ -115,6 +107,29 @@ const EncounterDetails = ({ encounter, isDM }) => {
 
     // Subscribe to user docs for all participants (only when linked to user params)
     // IMPORTANT: Only DMs should subscribe to other users' docs (players/webmasters shouldn't to avoid permission errors).
+    // Stable keys to avoid complex expressions directly inside dependency array (improves lint clarity)
+    const participantUserIdsKey = useMemo(() => {
+        const ids = Array.from(
+            new Set(
+                Object.values(participantsMap)
+                    .map((p) => p?.uid)
+                    .filter(Boolean)
+            )
+        ).sort();
+        return JSON.stringify(ids);
+    }, [participantsMap]);
+    const participantFoeIdsKey = useMemo(() => {
+        const ids = Array.from(
+            new Set(
+                Object.values(participantsMap)
+                    .filter((p) => p?.type === "foe" && p?.foeId)
+                    .map((p) => p.foeId)
+                    .filter(Boolean)
+            )
+        ).sort();
+        return JSON.stringify(ids);
+    }, [participantsMap]);
+
     useEffect(() => {
         // Only allow DM to read other users' docs
         if (!isDM) {
@@ -126,11 +141,8 @@ const EncounterDetails = ({ encounter, isDM }) => {
         const linkMode = encMeta?.linkMode || "live"; // default live
         const unsubs = [];
         if (linkMode !== "detached") {
-            const uids = Object.values(participantsMap)
-                .map((p) => p?.uid)
-                .filter(Boolean);
-            const unique = Array.from(new Set(uids));
-            unique.forEach((uid) => {
+            const uniqueUserIds = JSON.parse(participantUserIdsKey);
+            uniqueUserIds.forEach((uid) => {
                 const uRef = doc(db, "users", uid);
                 const unsub = onSnapshot(
                     uRef,
@@ -149,10 +161,7 @@ const EncounterDetails = ({ encounter, isDM }) => {
             });
 
             // Subscribe to foes for foe participants
-            const foeIds = Object.values(participantsMap)
-                .filter((p) => p?.type === "foe" && p?.foeId)
-                .map((p) => p.foeId);
-            const uniqueFoes = Array.from(new Set(foeIds));
+            const uniqueFoes = JSON.parse(participantFoeIdsKey);
             uniqueFoes.forEach((foeId) => {
                 const fRef = doc(db, "foes", foeId);
                 const unsubF = onSnapshot(
@@ -176,18 +185,7 @@ const EncounterDetails = ({ encounter, isDM }) => {
         return () => {
             unsubs.forEach((u) => u());
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [
-        isDM,
-        encMeta?.linkMode,
-        JSON.stringify(Object.values(participantsMap).map((p) => p?.uid).sort()),
-        JSON.stringify(
-            Object.values(participantsMap)
-                .filter((p) => p?.type === "foe" && p?.foeId)
-                .map((p) => p.foeId)
-                .sort()
-        ),
-    ]);
+    }, [isDM, encMeta?.linkMode, participantUserIdsKey, participantFoeIdsKey]);
 
     // For foe participants, create a snapshot copy in their participant doc if missing
     useEffect(() => {
@@ -524,12 +522,72 @@ const EncounterDetails = ({ encounter, isDM }) => {
             await addDoc(collection(db, "encounters", encounter.id, "logs"), {
                 type: "turn",
                 by: "DM",
-                message: `Turn order rebuilt: ${rows.map((r) => r.label).join(" > ")}` ,
+                message: `Turn order rebuilt (manual): ${rows.map((r) => r.label).join(" > ")}` ,
                 createdAt: serverTimestamp(),
             });
         } catch (e) {
             console.error("rebuildOrder failed", e);
             alert("Impossibile ricostruire il turn order.");
+        }
+    };
+
+    // ---------------- MANUAL INITIATIVE (DM) ----------------
+    const setParticipantInitiative = async (pKey) => {
+        if (!isDM) return;
+        const p = participantsMap[pKey];
+        if (!p) return;
+        const existingInit = p?.initiative?.value ?? (typeof p?.initiative === "number" ? p.initiative : null);
+        const valStr = window.prompt("Inserisci nuovo valore iniziativa", existingInit != null ? String(existingInit) : "");
+        if (valStr == null) return; // cancelled
+        const value = parseInt(valStr, 10);
+        if (!Number.isFinite(value)) return alert("Valore non valido");
+        try {
+            const pRef = doc(db, "encounters", encounter.id, "participants", pKey);
+            await setDoc(pRef, { initiative: { value } , updatedAt: serverTimestamp() }, { merge: true });
+            await addDoc(collection(db, "encounters", encounter.id, "logs"), {
+                type: "initiative",
+                by: "DM",
+                message: `${existingInit != null ? "Iniziativa aggiornata" : "Iniziativa impostata manualmente"} per ${(p.characterId || p.email || p.uid || pKey)}: ${value}`,
+                createdAt: serverTimestamp(),
+            });
+        } catch (e) {
+            console.error("setParticipantInitiative failed", e);
+            alert("Impossibile salvare l'iniziativa.");
+        }
+    };
+
+    // ---------------- MID-ROUND INJECTION ----------------
+    // Insert a participant (already has initiative) into current order right after current active index (without reshuffling others).
+    const injectParticipantNow = async (pKey) => {
+        if (!isDM || !turnState) return;
+        const p = participantsMap[pKey];
+        if (!p) return;
+        const initiativeVal = p?.initiative?.value ?? (typeof p?.initiative === "number" ? p.initiative : null);
+        if (initiativeVal == null) return alert("Serve l'iniziativa prima.");
+        try {
+            const encRef = doc(db, "encounters", encounter.id);
+            await runTransaction(db, async (tx) => {
+                const snap = await tx.get(encRef);
+                if (!snap.exists()) throw new Error("missing");
+                const data = snap.data() || {};
+                if (!data.turn) throw new Error("no-turn");
+                const t = data.turn;
+                const existingOrder = (t.order || []).filter((k) => participantsMap[k]);
+                if (existingOrder.includes(pKey)) return; // already there, nothing to do
+                const insertPos = (t.index ?? 0) + 1; // after current active
+                const newOrder = existingOrder.slice();
+                newOrder.splice(insertPos, 0, pKey);
+                tx.set(encRef, { turn: { ...t, order: newOrder, updatedAt: serverTimestamp() } }, { merge: true });
+            });
+            await addDoc(collection(db, "encounters", encounter.id, "logs"), {
+                type: "turn",
+                by: "DM",
+                message: `Partecipante inserito nel turno corrente: ${(p.characterId || p.email || p.uid || pKey)} (dopo quello attivo)` ,
+                createdAt: serverTimestamp(),
+            });
+        } catch (e) {
+            console.error("injectParticipantNow failed", e);
+            alert("Impossibile inserire nel turno corrente.");
         }
     };
 
@@ -682,13 +740,24 @@ const EncounterDetails = ({ encounter, isDM }) => {
                                     </td>
                                     <td className="px-3 py-2 text-center">
                                         {r.initiative !== null ? (
-                                            <span className={
-                                                isFoe
-                                                    ? "inline-flex min-w-[2.25rem] justify-center rounded-md bg-rose-500/10 px-2 py-0.5 text-rose-300 ring-1 ring-inset ring-rose-400/30 tabular-nums"
-                                                    : "inline-flex min-w-[2.25rem] justify-center rounded-md bg-indigo-500/10 px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30 tabular-nums"
-                                            }>
-                                                {r.initiative}
-                                            </span>
+                                            <div className="flex items-center justify-center gap-1">
+                                                <span className={
+                                                    isFoe
+                                                        ? "inline-flex min-w-[2.25rem] justify-center rounded-md bg-rose-500/10 px-2 py-0.5 text-rose-300 ring-1 ring-inset ring-rose-400/30 tabular-nums"
+                                                        : "inline-flex min-w-[2.25rem] justify-center rounded-md bg-indigo-500/10 px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30 tabular-nums"
+                                                }>
+                                                    {r.initiative}
+                                                </span>
+                                                {isDM && (
+                                                    <button
+                                                        onClick={() => setParticipantInitiative(r.key)}
+                                                        className="px-2 py-0.5 rounded-md text-[10px] bg-slate-700/40 text-slate-200 border border-slate-600/60 hover:bg-slate-600/50"
+                                                        title="Modifica iniziativa"
+                                                    >
+                                                        Edit
+                                                    </button>
+                                                )}
+                                            </div>
                                         ) : (
                                             <div className="flex items-center justify-center gap-2">
                                                 <span className="text-slate-500">—</span>
@@ -699,6 +768,15 @@ const EncounterDetails = ({ encounter, isDM }) => {
                                                         title="Tira iniziativa (foe)"
                                                     >
                                                         Roll
+                                                    </button>
+                                                )}
+                                                {isDM && (
+                                                    <button
+                                                        onClick={() => setParticipantInitiative(r.key)}
+                                                        className="px-2 py-0.5 rounded-md text-[11px] bg-indigo-900/30 text-indigo-200 border border-indigo-700/50 hover:bg-indigo-900/50"
+                                                        title="Imposta iniziativa manualmente"
+                                                    >
+                                                        Set
                                                     </button>
                                                 )}
                                             </div>
@@ -787,6 +865,34 @@ const EncounterDetails = ({ encounter, isDM }) => {
                                 </div>
                             );
                         })}
+                    </div>
+                )}
+                {isDM && turnState && (
+                    <div className="mt-3 text-[11px] text-slate-400 space-y-1">
+                        <div className="font-semibold text-slate-300">Gestione nuovi partecipanti</div>
+                        <div>
+                            I nuovi partecipanti con iniziativa verranno aggiunti automaticamente solo all'inizio del prossimo round. Per inserirli subito (dopo il turno attivo) imposta l'iniziativa e poi clicca il pulsante Inserisci.
+                        </div>
+                        <div className="flex flex-wrap gap-2 mt-1">
+                            {rows.filter(r => {
+                                const inOrder = currentOrder.includes(r.key);
+                                const p = participantsMap[r.key];
+                                const init = r.initiative != null;
+                                return init && !inOrder && p; // candidate for injection
+                            }).map(r => (
+                                <button
+                                    key={r.key}
+                                    onClick={() => injectParticipantNow(r.key)}
+                                    className="px-2 py-1 rounded-md bg-amber-700/30 text-amber-200 border border-amber-600/50 text-[11px] hover:bg-amber-700/50"
+                                    title="Inserisci dopo il turno attivo"
+                                >
+                                    Inserisci: {r.label}
+                                </button>
+                            ))}
+                            {rows.filter(r => r.initiative != null && !currentOrder.includes(r.key)).length === 0 && (
+                                <span className="text-slate-500">Nessun nuovo partecipante con iniziativa da inserire.</span>
+                            )}
+                        </div>
                     </div>
                 )}
             </div>

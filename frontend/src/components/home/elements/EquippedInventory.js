@@ -308,7 +308,26 @@ const EquippedInventory = () => {
     const s = slotStr.trim();
     const sl = s.toLowerCase();
     const has = (needle) => sl.includes(needle);
-    const bothHands = (has('mano principale') && has('mano secondaria')) || has('principale/secondaria');
+    // Broader detection of interchangeable main/off-hand wording.
+    // Previous logic required the exact substring "mano secondaria" or "principale/secondaria".
+    // Items coming from the DB can have variants like:
+    //   "Mano Principale o Secondaria"
+    //   "Mano Principale - Secondaria"
+    //   "Mano Principale/Secondaria"
+    //   "Mano Principale oppure Secondaria"
+    // or may omit the second "mano" word ("... o Secondaria").
+    // We treat any string containing the phrase "mano principale" plus an occurrence of "secondaria"
+    // (optionally separated by connectors o|oppure|/|-) as an interchangeable one-hand weapon.
+    let bothHands = false;
+    const containsMainPhrase = /mano\s+principale/.test(sl);
+    const containsFullSecondaryPhrase = /mano\s+secondaria/.test(sl);
+    const containsSecondaryWord = /\bsecondaria\b/.test(sl);
+    const hasConnector = /\b(o|oppure)\b|[/|-]/.test(sl);
+    if ((containsMainPhrase && containsFullSecondaryPhrase) ||
+        (containsMainPhrase && containsSecondaryWord && hasConnector) ||
+        has('principale/secondaria')) {
+      bothHands = true;
+    }
     const isDoppia = (has('doppia') && has('mano')) || (has('due') && (has('mani') || has('mano')));
     if (isDoppia) {
       return { allowed: ['Mano Principale', 'Mano Secondaria'], twoHandedBySlot: true };
