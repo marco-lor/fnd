@@ -7,13 +7,26 @@ import { doc, onSnapshot } from 'firebase/firestore';
 
 // Import the button components
 import AggiungiButton from './buttons/AggiungiButton';
+import AggiungiCategoriaButton from './buttons/AggiungiCategoriaButton';
+import DeleteCategoriaButton from './buttons/DeleteCategoriaButton';
 import EditItemButton from './buttons/EditItemButton';
 import DeleteItemButton from './buttons/DeleteItemButton';
 
-// Helper function to capitalize strings
+// Helper function to capitalize first letter only
 const capitalize = (s) => {
   if (typeof s !== 'string' || !s) return '';
   return s.charAt(0).toUpperCase() + s.slice(1);
+};
+
+// Helper to format category display: convert underscores to spaces, capitalize each word
+const formatCategoryDisplay = (key) => {
+  if (typeof key !== 'string') return '';
+  return key
+    .replace(/_/g, ' ') // underscores to spaces if legacy
+    .split(' ') // split words
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
 };
 
 // Helper function to derive a user-friendly singular name
@@ -175,22 +188,54 @@ function Codex() {
           <h2 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">
             Categorie
           </h2>
+          {/* DM-only: Add new category button */}
+          {isDM && (
+            <div className="mb-4">
+              <AggiungiCategoriaButton
+                existingCategories={sortedSectionKeys}
+                onCategoryCreated={(newKey) => {
+                  // After creating, set it active so user can add items immediately
+                  setActiveSection(newKey);
+                }}
+              />
+            </div>
+          )}
           <nav>
             <ul className="space-y-2">
-              {sortedSectionKeys.map((sectionKey) => (
-                <li key={sectionKey}>
-                  <button
-                    onClick={() => setActiveSection(sectionKey)}
-                    className={`w-full text-left px-3 py-2 rounded transition-colors duration-200 ${
-                      activeSection === sectionKey
-                        ? 'bg-blue-600 text-white font-medium shadow-md'
-                        : 'hover:bg-gray-700 text-gray-300 hover:text-white'
-                    }`}
-                  >
-                    {capitalize(sectionKey)}
-                  </button>
-                </li>
-              ))}
+              {sortedSectionKeys.map((sectionKey) => {
+                const itemCount = typeof codexData[sectionKey] === 'object' && codexData[sectionKey] !== null
+                  ? Object.keys(codexData[sectionKey]).length
+                  : 0;
+                return (
+                  <li key={sectionKey} className="group">
+                    <div className="flex items-center">
+                      <button
+                        onClick={() => setActiveSection(sectionKey)}
+                        className={`flex-grow text-left px-3 py-2 rounded transition-colors duration-200 ${
+                          activeSection === sectionKey
+                            ? 'bg-blue-600 text-white font-medium shadow-md'
+                            : 'hover:bg-gray-700 text-gray-300 hover:text-white'
+                        }`}
+                      >
+                        {formatCategoryDisplay(sectionKey)}
+                      </button>
+                      {isDM && (
+                        <DeleteCategoriaButton
+                          categoryKey={sectionKey}
+                          itemCount={itemCount}
+                          onDeleted={(deletedKey) => {
+                            // Se la categoria attiva viene eliminata, passa alla successiva disponibile
+                            if (activeSection === deletedKey) {
+                              const remaining = sortedSectionKeys.filter(k => k !== deletedKey);
+                              setActiveSection(remaining[0] || null);
+                            }
+                          }}
+                        />
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           </nav>
         </aside>
