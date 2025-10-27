@@ -25,6 +25,7 @@ const SpellCard = ({ spellName, spell, userData }) => {
   const dismissTimeoutRef = useRef(null);
   const hasImage = spell.image_url && spell.image_url.trim() !== "";
   const db = getFirestore();
+  const azione = spell.Azione || spell.azione || "";
 
   // Fetch dadiAnimaByLevel data when component mounts - enhanced with caching
   useEffect(() => {
@@ -394,8 +395,15 @@ const SpellCard = ({ spellName, spell, userData }) => {
                 {spell["Tipo Base"]}
               </span>
             </h3>
+            {azione && (
+              <div className={`flex justify-center ${isExpanded ? 'mt-2' : 'mt-1'} mb-1`}>
+                <span className={`px-2 py-0.5 rounded-full bg-indigo-800/60 text-indigo-200 ${isExpanded ? 'text-xs' : 'text-[10px]'} font-semibold`}>
+                  {azione}
+                </span>
+              </div>
+            )}
             {/* Nuovo campo Turni posizionato sotto il nome dell'incantesimo e la linea */}
-            <div className={`text-center -mt-3 mb-2 ${isExpanded ? 'text-xs' : 'text-[10px]'} text-gray-400`}>
+            <div className={`text-center ${azione ? '' : '-mt-3'} mb-2 ${isExpanded ? 'text-xs' : 'text-[10px]'} text-gray-400`}>
               Turni: {spell.Turni || "---"} | Gittata: {spell.Gittata || "---"}
             </div>
             

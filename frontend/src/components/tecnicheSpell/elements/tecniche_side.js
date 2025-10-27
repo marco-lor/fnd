@@ -19,6 +19,7 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
   const dismissTimeoutRef = useRef(null);
   const hasImage = tecnica.image_url && tecnica.image_url.trim() !== "";
   const db = getFirestore();
+  const azione = tecnica.Azione || tecnica.azione || "";
 
   // --- Mana validation logic with special reduction (ridCostoTec) ---
   const { manaCost, originalCost, costReduction, currentMana, hasSufficientMana } = useMemo(() => {
@@ -332,7 +333,14 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
             <h3 className="text-lg text-white font-bold mb-3 text-center border-b border-gray-600 pb-2">
               {tecnica.Nome || tecnicaName}
             </h3>
-            <div className="grid grid-cols-2 gap-2 mb-2">
+            {azione && (
+              <div className="flex justify-center mt-2 mb-2">
+                <span className="px-2 py-0.5 rounded-full bg-purple-800/60 text-purple-200 text-xs font-semibold">
+                  {azione}
+                </span>
+              </div>
+            )}
+            <div className={`grid grid-cols-1 gap-2 mb-2 ${azione ? 'mt-1' : 'mt-3'}`}>
               <div className="bg-black/50 p-2 rounded">
                 <p className="text-purple-300 font-bold text-sm">Costo</p>
                 <p className="text-gray-200">
@@ -341,10 +349,6 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
                     <span className="text-[10px] text-gray-400 ml-1">(base {originalCost} -{costReduction})</span>
                   )}
                 </p>
-              </div>
-              <div className="bg-black/50 p-2 rounded">
-                <p className="text-purple-300 font-bold text-sm">Azione</p>
-                <p className="text-gray-200">{tecnica.Azione}</p>
               </div>
             </div>
             {originalCost > 0 && costReduction > 0 && (
