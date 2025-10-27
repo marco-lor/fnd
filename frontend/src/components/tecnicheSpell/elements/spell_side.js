@@ -14,6 +14,7 @@ const SpellCard = ({ spellName, spell, userData }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const [isPositioned, setIsPositioned] = useState(false);
+  const [placementSide, setPlacementSide] = useState('right');
   const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [successMessage, setSuccessMessage] = useState(null);
@@ -110,13 +111,33 @@ const SpellCard = ({ spellName, spell, userData }) => {
     }
   }, [isHovered, initialCardRect]);
 
-  // Calculate overlay position when hovered and not expanded.
+  // Calculate overlay position when hovered and not expanded with overflow protection.
   useEffect(() => {
     if (isHovered && !isExpanded && cardRef.current && !overlayDismissed) {
       const cardRect = cardRef.current.getBoundingClientRect();
-      const top = cardRect.top - 75; // Adjust vertically to center
-      const left = cardRect.right + 10; // Gap between card and overlay
-      setPosition({ top, left });
+      const overlayWidth = 320; // non-expanded width
+      const overlayHeight = 350; // non-expanded height
+      const gap = 10;
+      let proposedLeft = cardRect.right + gap;
+      let proposedTop = cardRect.top + (cardRect.height / 2) - (overlayHeight / 2);
+      const margin = 10;
+      if (proposedTop < margin) proposedTop = margin;
+      const maxTop = window.innerHeight - overlayHeight - margin;
+      if (proposedTop > maxTop) proposedTop = maxTop;
+
+      let side = 'right';
+      if (proposedLeft + overlayWidth > window.innerWidth - margin) {
+        const leftPlacement = cardRect.left - overlayWidth - gap;
+        if (leftPlacement >= margin) {
+          proposedLeft = leftPlacement;
+          side = 'left';
+        } else {
+          proposedLeft = Math.max(margin, window.innerWidth - overlayWidth - margin);
+          side = (cardRect.left < window.innerWidth / 2) ? 'right' : 'left';
+        }
+      }
+      setPlacementSide(side);
+      setPosition({ top: proposedTop, left: proposedLeft });
       setIsPositioned(true);
     } else if ((!isHovered || overlayDismissed) && !isExpanded) {
       setIsPositioned(false);
@@ -221,20 +242,19 @@ const SpellCard = ({ spellName, spell, userData }) => {
         boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
         transformOrigin: "center center"
       };
-    } else {
-      return {
-        top: `${position.top}px`,
-        left: `${position.left}px`,
-        transform: "translate(0, 0)",
-        width: "320px",
-        height: "350px",
-        background: "rgba(10,10,20,0.97)",
-        backdropFilter: "blur(4px)",
-        boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
-        transformOrigin: "left center",
-        transition: "all 0.3s ease-out"
-      };
     }
+    return {
+      top: `${position.top}px`,
+      left: `${position.left}px`,
+      transform: "translate(0, 0)",
+      width: "320px",
+      height: "350px",
+      background: "rgba(10,10,20,0.97)",
+      backdropFilter: "blur(4px)",
+      boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+      transformOrigin: placementSide === 'left' ? 'right center' : 'left center',
+      transition: "all 0.3s ease-out"
+    };
   };
 
   // Format and calculate TPC values - memoized for performance

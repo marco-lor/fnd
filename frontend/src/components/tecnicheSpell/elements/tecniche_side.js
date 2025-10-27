@@ -9,6 +9,8 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const [isPositioned, setIsPositioned] = useState(false);
+  // Track whether overlay is placed to the right or left of the card for proper transform origin
+  const [placementSide, setPlacementSide] = useState('right');
   const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [successMessage, setSuccessMessage] = useState(null);
@@ -87,13 +89,42 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
     }
   }, [isHovered, initialCardRect]);
 
-  // Calculate overlay position when hovered and not expanded.
+  // Calculate overlay position when hovered and not expanded with overflow protection.
   useEffect(() => {
     if (isHovered && !isExpanded && cardRef.current && !overlayDismissed) {
       const cardRect = cardRef.current.getBoundingClientRect();
-      const top = cardRect.top - 75; // Adjust vertically to center
-      const left = cardRect.right + 10; // Gap between card and overlay
-      setPosition({ top, left });
+      const overlayWidth = 320; // must match non-expanded overlay width
+      const overlayHeight = 350; // must match non-expanded overlay height
+      const gap = 10;
+
+      // Try positioning to the right first
+      let proposedLeft = cardRect.right + gap;
+      // Vertical centering relative to card
+      let proposedTop = cardRect.top + (cardRect.height / 2) - (overlayHeight / 2);
+
+      // Clamp vertical position within viewport with margin
+      const margin = 10;
+      if (proposedTop < margin) proposedTop = margin;
+      const maxTop = window.innerHeight - overlayHeight - margin;
+      if (proposedTop > maxTop) proposedTop = maxTop;
+
+      let side = 'right';
+      // If overflowing right, attempt left placement
+      if (proposedLeft + overlayWidth > window.innerWidth - margin) {
+        const leftPlacement = cardRect.left - overlayWidth - gap;
+        if (leftPlacement >= margin) {
+          proposedLeft = leftPlacement;
+          side = 'left';
+        } else {
+          // Fallback: clamp inside viewport
+          proposedLeft = Math.max(margin, window.innerWidth - overlayWidth - margin);
+          // Decide side based on relative position of card center
+          side = (cardRect.left < window.innerWidth / 2) ? 'right' : 'left';
+        }
+      }
+
+      setPlacementSide(side);
+      setPosition({ top: proposedTop, left: proposedLeft });
       setIsPositioned(true);
     } else if ((!isHovered || overlayDismissed) && !isExpanded) {
       setIsPositioned(false);
@@ -215,21 +246,20 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
         boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
         transformOrigin: "center center"
       };
-    } else {
-      return {
-        top: `${position.top}px`,
-        left: `${position.left}px`,
-        transform: "translate(0, 0)",
-        width: "320px",
-        height: "350px",
-        background: "rgba(10,10,20,0.97)",
-        backdropFilter: "blur(4px)",
-        boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
-        transformOrigin: "left center",
-        transition: "all 0.3s ease-out"
-      };
     }
-  }, [isExpanded, position.top, position.left]);
+    return {
+      top: `${position.top}px`,
+      left: `${position.left}px`,
+      transform: "translate(0, 0)",
+      width: "320px",
+      height: "350px",
+      background: "rgba(10,10,20,0.97)",
+      backdropFilter: "blur(4px)",
+      boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+      transformOrigin: placementSide === 'left' ? 'right center' : 'left center',
+      transition: "all 0.3s ease-out"
+    };
+  }, [isExpanded, position.top, position.left, placementSide]);
 
   return (
     <div
