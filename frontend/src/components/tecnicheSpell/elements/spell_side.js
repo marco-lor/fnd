@@ -14,6 +14,7 @@ const SpellCard = ({ spellName, spell, userData }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const [isPositioned, setIsPositioned] = useState(false);
+  const [placementSide, setPlacementSide] = useState('right');
   const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [successMessage, setSuccessMessage] = useState(null);
@@ -25,6 +26,7 @@ const SpellCard = ({ spellName, spell, userData }) => {
   const dismissTimeoutRef = useRef(null);
   const hasImage = spell.image_url && spell.image_url.trim() !== "";
   const db = getFirestore();
+  const azione = spell.Azione || spell.azione || "";
 
   // Fetch dadiAnimaByLevel data when component mounts - enhanced with caching
   useEffect(() => {
@@ -109,13 +111,33 @@ const SpellCard = ({ spellName, spell, userData }) => {
     }
   }, [isHovered, initialCardRect]);
 
-  // Calculate overlay position when hovered and not expanded.
+  // Calculate overlay position when hovered and not expanded with overflow protection.
   useEffect(() => {
     if (isHovered && !isExpanded && cardRef.current && !overlayDismissed) {
       const cardRect = cardRef.current.getBoundingClientRect();
-      const top = cardRect.top - 75; // Adjust vertically to center
-      const left = cardRect.right + 10; // Gap between card and overlay
-      setPosition({ top, left });
+      const overlayWidth = 320; // non-expanded width
+      const overlayHeight = 350; // non-expanded height
+      const gap = 10;
+      let proposedLeft = cardRect.right + gap;
+      let proposedTop = cardRect.top + (cardRect.height / 2) - (overlayHeight / 2);
+      const margin = 10;
+      if (proposedTop < margin) proposedTop = margin;
+      const maxTop = window.innerHeight - overlayHeight - margin;
+      if (proposedTop > maxTop) proposedTop = maxTop;
+
+      let side = 'right';
+      if (proposedLeft + overlayWidth > window.innerWidth - margin) {
+        const leftPlacement = cardRect.left - overlayWidth - gap;
+        if (leftPlacement >= margin) {
+          proposedLeft = leftPlacement;
+          side = 'left';
+        } else {
+          proposedLeft = Math.max(margin, window.innerWidth - overlayWidth - margin);
+          side = (cardRect.left < window.innerWidth / 2) ? 'right' : 'left';
+        }
+      }
+      setPlacementSide(side);
+      setPosition({ top: proposedTop, left: proposedLeft });
       setIsPositioned(true);
     } else if ((!isHovered || overlayDismissed) && !isExpanded) {
       setIsPositioned(false);
@@ -220,20 +242,19 @@ const SpellCard = ({ spellName, spell, userData }) => {
         boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
         transformOrigin: "center center"
       };
-    } else {
-      return {
-        top: `${position.top}px`,
-        left: `${position.left}px`,
-        transform: "translate(0, 0)",
-        width: "320px",
-        height: "350px",
-        background: "rgba(10,10,20,0.97)",
-        backdropFilter: "blur(4px)",
-        boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
-        transformOrigin: "left center",
-        transition: "all 0.3s ease-out"
-      };
     }
+    return {
+      top: `${position.top}px`,
+      left: `${position.left}px`,
+      transform: "translate(0, 0)",
+      width: "320px",
+      height: "350px",
+      background: "rgba(10,10,20,0.97)",
+      backdropFilter: "blur(4px)",
+      boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+      transformOrigin: placementSide === 'left' ? 'right center' : 'left center',
+      transition: "all 0.3s ease-out"
+    };
   };
 
   // Format and calculate TPC values - memoized for performance
@@ -394,8 +415,15 @@ const SpellCard = ({ spellName, spell, userData }) => {
                 {spell["Tipo Base"]}
               </span>
             </h3>
+            {azione && (
+              <div className={`flex justify-center ${isExpanded ? 'mt-2' : 'mt-1'} mb-1`}>
+                <span className={`px-2 py-0.5 rounded-full bg-indigo-800/60 text-indigo-200 ${isExpanded ? 'text-xs' : 'text-[10px]'} font-semibold`}>
+                  {azione}
+                </span>
+              </div>
+            )}
             {/* Nuovo campo Turni posizionato sotto il nome dell'incantesimo e la linea */}
-            <div className={`text-center -mt-3 mb-2 ${isExpanded ? 'text-xs' : 'text-[10px]'} text-gray-400`}>
+            <div className={`text-center ${azione ? '' : '-mt-3'} mb-2 ${isExpanded ? 'text-xs' : 'text-[10px]'} text-gray-400`}>
               Turni: {spell.Turni || "---"} | Gittata: {spell.Gittata || "---"}
             </div>
             
@@ -425,7 +453,7 @@ const SpellCard = ({ spellName, spell, userData }) => {
                 </p>
               </div>
             )}
-            <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto mb-2">
+            <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto mb-2 scrollbar-minimal-indigo">
               {spell["Effetti Positivi"] && (
                 <div className="mb-2">
                   <p className={`text-green-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'} mb-1`}>Effetti Positivi</p>

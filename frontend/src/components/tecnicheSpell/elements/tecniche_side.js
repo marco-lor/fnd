@@ -9,6 +9,8 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const [isPositioned, setIsPositioned] = useState(false);
+  // Track whether overlay is placed to the right or left of the card for proper transform origin
+  const [placementSide, setPlacementSide] = useState('right');
   const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [successMessage, setSuccessMessage] = useState(null);
@@ -19,6 +21,7 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
   const dismissTimeoutRef = useRef(null);
   const hasImage = tecnica.image_url && tecnica.image_url.trim() !== "";
   const db = getFirestore();
+  const azione = tecnica.Azione || tecnica.azione || "";
 
   // --- Mana validation logic with special reduction (ridCostoTec) ---
   const { manaCost, originalCost, costReduction, currentMana, hasSufficientMana } = useMemo(() => {
@@ -86,13 +89,42 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
     }
   }, [isHovered, initialCardRect]);
 
-  // Calculate overlay position when hovered and not expanded.
+  // Calculate overlay position when hovered and not expanded with overflow protection.
   useEffect(() => {
     if (isHovered && !isExpanded && cardRef.current && !overlayDismissed) {
       const cardRect = cardRef.current.getBoundingClientRect();
-      const top = cardRect.top - 75; // Adjust vertically to center
-      const left = cardRect.right + 10; // Gap between card and overlay
-      setPosition({ top, left });
+      const overlayWidth = 320; // must match non-expanded overlay width
+      const overlayHeight = 350; // must match non-expanded overlay height
+      const gap = 10;
+
+      // Try positioning to the right first
+      let proposedLeft = cardRect.right + gap;
+      // Vertical centering relative to card
+      let proposedTop = cardRect.top + (cardRect.height / 2) - (overlayHeight / 2);
+
+      // Clamp vertical position within viewport with margin
+      const margin = 10;
+      if (proposedTop < margin) proposedTop = margin;
+      const maxTop = window.innerHeight - overlayHeight - margin;
+      if (proposedTop > maxTop) proposedTop = maxTop;
+
+      let side = 'right';
+      // If overflowing right, attempt left placement
+      if (proposedLeft + overlayWidth > window.innerWidth - margin) {
+        const leftPlacement = cardRect.left - overlayWidth - gap;
+        if (leftPlacement >= margin) {
+          proposedLeft = leftPlacement;
+          side = 'left';
+        } else {
+          // Fallback: clamp inside viewport
+          proposedLeft = Math.max(margin, window.innerWidth - overlayWidth - margin);
+          // Decide side based on relative position of card center
+          side = (cardRect.left < window.innerWidth / 2) ? 'right' : 'left';
+        }
+      }
+
+      setPlacementSide(side);
+      setPosition({ top: proposedTop, left: proposedLeft });
       setIsPositioned(true);
     } else if ((!isHovered || overlayDismissed) && !isExpanded) {
       setIsPositioned(false);
@@ -214,21 +246,20 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
         boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
         transformOrigin: "center center"
       };
-    } else {
-      return {
-        top: `${position.top}px`,
-        left: `${position.left}px`,
-        transform: "translate(0, 0)",
-        width: "320px",
-        height: "350px",
-        background: "rgba(10,10,20,0.97)",
-        backdropFilter: "blur(4px)",
-        boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
-        transformOrigin: "left center",
-        transition: "all 0.3s ease-out"
-      };
     }
-  }, [isExpanded, position.top, position.left]);
+    return {
+      top: `${position.top}px`,
+      left: `${position.left}px`,
+      transform: "translate(0, 0)",
+      width: "320px",
+      height: "350px",
+      background: "rgba(10,10,20,0.97)",
+      backdropFilter: "blur(4px)",
+      boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+      transformOrigin: placementSide === 'left' ? 'right center' : 'left center',
+      transition: "all 0.3s ease-out"
+    };
+  }, [isExpanded, position.top, position.left, placementSide]);
 
   return (
     <div
@@ -332,7 +363,14 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
             <h3 className="text-lg text-white font-bold mb-3 text-center border-b border-gray-600 pb-2">
               {tecnica.Nome || tecnicaName}
             </h3>
-            <div className="grid grid-cols-2 gap-2 mb-2">
+            {azione && (
+              <div className="flex justify-center mt-2 mb-2">
+                <span className="px-2 py-0.5 rounded-full bg-purple-800/60 text-purple-200 text-xs font-semibold">
+                  {azione}
+                </span>
+              </div>
+            )}
+            <div className={`grid grid-cols-1 gap-2 mb-2 ${azione ? 'mt-1' : 'mt-3'}`}>
               <div className="bg-black/50 p-2 rounded">
                 <p className="text-purple-300 font-bold text-sm">Costo</p>
                 <p className="text-gray-200">
@@ -341,10 +379,6 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
                     <span className="text-[10px] text-gray-400 ml-1">(base {originalCost} -{costReduction})</span>
                   )}
                 </p>
-              </div>
-              <div className="bg-black/50 p-2 rounded">
-                <p className="text-purple-300 font-bold text-sm">Azione</p>
-                <p className="text-gray-200">{tecnica.Azione}</p>
               </div>
             </div>
             {originalCost > 0 && costReduction > 0 && (
@@ -358,7 +392,7 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
                 </p>
               </div>
             )}
-            <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto mb-4">
+            <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto mb-4 scrollbar-minimal-purple">
               <p className="text-purple-300 font-bold text-sm mb-1">Effetto</p>
               <p className="text-gray-200 text-sm">{tecnica.Effetto}</p>
             </div>
