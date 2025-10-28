@@ -392,7 +392,7 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
                 </p>
               </div>
             )}
-            <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto mb-4">
+            <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto mb-4 scrollbar-minimal-purple">
               <p className="text-purple-300 font-bold text-sm mb-1">Effetto</p>
               <p className="text-gray-200 text-sm">{tecnica.Effetto}</p>
             </div>

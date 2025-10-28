@@ -84,3 +84,49 @@ h1, h2, h3, h4, h5, h6 {
 .log-scroll::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(to bottom, rgba(148,163,184,0.55), rgba(71,85,105,0.55));
 }
+
+/* Minimal purple-blended scrollbar for tecniche overlays */
+.scrollbar-minimal-purple {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(126, 34, 206, 0.3) transparent; /* purple-700/30 thumb on transparent track */
+}
+
+.scrollbar-minimal-purple::-webkit-scrollbar {
+  width: 5px;
+}
+
+.scrollbar-minimal-purple::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-minimal-purple::-webkit-scrollbar-thumb {
+  background: rgba(126, 34, 206, 0.3); /* purple-700/30 - subtle and blended */
+  border-radius: 9999px;
+}
+
+.scrollbar-minimal-purple::-webkit-scrollbar-thumb:hover {
+  background: rgba(126, 34, 206, 0.5); /* purple-700/50 - slightly more visible on hover */
+}
+
+/* Minimal indigo-blended scrollbar for spell overlays */
+.scrollbar-minimal-indigo {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(67, 56, 202, 0.3) transparent; /* indigo-700/30 thumb on transparent track */
+}
+
+.scrollbar-minimal-indigo::-webkit-scrollbar {
+  width: 5px;
+}
+
+.scrollbar-minimal-indigo::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-minimal-indigo::-webkit-scrollbar-thumb {
+  background: rgba(67, 56, 202, 0.3); /* indigo-700/30 - subtle and blended */
+  border-radius: 9999px;
+}
+
+.scrollbar-minimal-indigo::-webkit-scrollbar-thumb:hover {
+  background: rgba(67, 56, 202, 0.5); /* indigo-700/50 - slightly more visible on hover */
+}

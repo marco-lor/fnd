@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useAuth } from "../../AuthContext";
 import { doc, onSnapshot, getDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 import TecnicheSide from "./elements/tecniche_side";
 import SpellSide from "./elements/spell_side";
+import FilterPanel, { buildFilterPredicate } from './FilterPanel';
 
 // Cache for storing fetched data
 const dataCache = {
@@ -22,10 +23,8 @@ function TecnicheSpell() {
   const [isReady, setIsReady] = useState(false);
   const unsubscribeRef = useRef(null);
 
-  // States for filtering
-  const [searchTerm, setSearchTerm] = useState('');
-  const [maxCosto, setMaxCosto] = useState('');
-  const [selectedAzione, setSelectedAzione] = useState(['All']);
+  // Unified filtering predicate (function(item) => boolean)
+  const [predicate, setPredicate] = useState(() => () => true);
 
   // Fetch and cache common tecniche data
   const fetchCommonTecniche = async () => {
@@ -114,141 +113,34 @@ function TecnicheSpell() {
     };
   }, [user, authUserData, isReady]);
 
-  // Extract unique filter values for Action - using useMemo to optimize
-  const azioneValues = useMemo(() => {
-    return ['All', ...new Set([
-      ...Object.values(personalTecniche).map(t => t.Azione),
-      ...Object.values(commonTecniche).map(t => t.Azione)
-    ].filter(Boolean))];
-  }, [personalTecniche, commonTecniche]);
-
-  // Toggle filter helper function for action
-  const toggleFilter = (currentFilters, setFilters, value) => {
-    if (value === 'All') {
-      setFilters(['All']);
-    } else {
-      if (currentFilters.includes('All')) {
-        setFilters([value]);
-      } else {
-        if (currentFilters.includes(value)) {
-          const newFilters = currentFilters.filter(v => v !== value);
-          setFilters(newFilters.length ? newFilters : ['All']);
-        } else {
-          setFilters([...currentFilters, value]);
-        }
-      }
-    }
-  };
-
-  // Helper function to extract numeric value from cost string - wrapped in useCallback
-  const getCostoNumeric = useCallback((costoStr) => {
-    if (!costoStr) return Infinity;
-    // Extract numeric part from the cost string (assuming format like "5 PM" or just "5")
-    const match = costoStr.toString().match(/\d+/);
-    return match ? parseInt(match[0], 10) : Infinity;
-  }, []);
-
-  // Function to filter tecniche based on search term, max cost and action
-  const filterTecniche = useCallback((tecnicheObj) => {
-    return Object.entries(tecnicheObj).reduce((filtered, [key, tecnica]) => {
-      const matchesSearch = searchTerm === '' ||
-        (tecnica.Nome && tecnica.Nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (tecnica.Effetto && tecnica.Effetto.toLowerCase().includes(searchTerm.toLowerCase()));
-
-      const tecnicaCosto = getCostoNumeric(tecnica.Costo);
-      const matchesCosto = maxCosto === '' || tecnicaCosto <= parseInt(maxCosto, 10);
-
-      const matchesAzione = selectedAzione.includes('All') || selectedAzione.includes(tecnica.Azione);
-
-      if (matchesSearch && matchesCosto && matchesAzione) {
-        filtered[key] = tecnica;
-      }
-      return filtered;
-    }, {});
-  }, [searchTerm, maxCosto, selectedAzione, getCostoNumeric]);
-
-  // Function to filter spells based on search term and max cost
-  const filterSpells = useCallback((spellsObj) => {
-    return Object.entries(spellsObj).reduce((filtered, [key, spell]) => {
-      const matchesSearch = searchTerm === '' ||
-        (spell.Nome && spell.Nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (spell["Effetti Positivi"] && spell["Effetti Positivi"].toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (spell["Effetti Negativi"] && spell["Effetti Negativi"].toLowerCase().includes(searchTerm.toLowerCase()));
-
-      const spellCosto = getCostoNumeric(spell.Costo);
-      const matchesCosto = maxCosto === '' || spellCosto <= parseInt(maxCosto, 10);
-
-      if (matchesSearch && matchesCosto) {
-        filtered[key] = spell;
-      }
-      return filtered;
-    }, {});
-  }, [searchTerm, maxCosto, getCostoNumeric]);
-
-  // Filter tecniche with useMemo to optimize performance
+  // Apply unified predicate to datasets
   const filteredPersonalTecniche = useMemo(() => {
-    return filterTecniche(personalTecniche);
-  }, [personalTecniche, filterTecniche]);
-
+    return Object.entries(personalTecniche).reduce((acc, [k, v]) => {
+      if (predicate(v)) acc[k] = v; return acc;
+    }, {});
+  }, [personalTecniche, predicate]);
   const filteredCommonTecniche = useMemo(() => {
-    return filterTecniche(commonTecniche);
-  }, [commonTecniche, filterTecniche]);
-
+    return Object.entries(commonTecniche).reduce((acc, [k, v]) => {
+      if (predicate(v)) acc[k] = v; return acc;
+    }, {});
+  }, [commonTecniche, predicate]);
   const filteredPersonalSpells = useMemo(() => {
-    return filterSpells(personalSpells);
-  }, [personalSpells, filterSpells]);
+    return Object.entries(personalSpells).reduce((acc, [k, v]) => {
+      if (predicate(v)) acc[k] = v; return acc;
+    }, {});
+  }, [personalSpells, predicate]);
 
   // Render the component only when isReady, prevents flickering
   return (
   <div className="w-full min-h-full relative">
       <div className="relative z-10 w-full min-h-full">
-        {/* Filter Section */}
-        <div className="px-5 pt-4">
-          <div className="max-w-[1600px] mx-auto">
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search tecniche and spells..."
-              className="w-full mb-4 p-2 border border-gray-600 bg-gray-800 text-white rounded"
-            />
-
-            <div className="flex flex-wrap gap-4 mb-4">
-              {/* Max Cost Input */}
-              <div>
-                <p className="text-white font-bold mb-2">Maximum Cost:</p>
-                <input
-                  type="number"
-                  value={maxCosto}
-                  onChange={(e) => setMaxCosto(e.target.value)}
-                  placeholder="Enter max cost"
-                  className="px-3 py-1 rounded-lg border bg-gray-800 text-white"
-                  min="0"
-                />
-              </div>
-
-              {/* Action Filter */}
-              <div>
-                <p className="text-white font-bold mb-2">Filter by Action:</p>
-                <div className="flex flex-wrap gap-2">
-                  {azioneValues.map((azione) => (
-                    <button
-                      key={azione}
-                      onClick={() => toggleFilter(selectedAzione, setSelectedAzione, azione)}
-                      className={`px-3 py-1 rounded-lg border transition-colors ${
-                        selectedAzione.includes(azione)
-                          ? 'bg-[rgba(25,50,128,0.4)] text-white'
-                          : 'bg-white text-[rgba(25,50,128,0.4)]'
-                      }`}
-                    >
-                      {azione}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* Unified Filter Panel */}
+        <FilterPanel
+          personalTecniche={personalTecniche}
+          commonTecniche={commonTecniche}
+          personalSpells={personalSpells}
+          onPredicateChange={(p) => setPredicate(() => p)}
+        />
 
         {/* Main content - only render components when data is ready */}
         <main className="flex flex-col items-center p-5 w-full">

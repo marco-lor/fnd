@@ -453,7 +453,7 @@ const SpellCard = ({ spellName, spell, userData }) => {
                 </p>
               </div>
             )}
-            <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto mb-2">
+            <div className="flex-grow bg-black/50 p-2 rounded overflow-y-auto mb-2 scrollbar-minimal-indigo">
               {spell["Effetti Positivi"] && (
                 <div className="mb-2">
                   <p className={`text-green-300 font-bold ${isExpanded ? 'text-base' : 'text-sm'} mb-1`}>Effetti Positivi</p>
