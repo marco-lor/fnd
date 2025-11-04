@@ -59,19 +59,20 @@ export const applyCapToStat = (current, gain, total) => {
   return cur + g; // no cap when total missing or zero
 };
 
-// Mount a DiceRoller overlay, returning a promise resolved with total result.
-const rollDiceOverlay = ({ faces, count, modifier, description }) => {
+// Mount a DiceRoller overlay, returning a promise resolved with { total, meta }.
+// Pass forced user so DiceRoller internal logger can still function even though this root is outside provider.
+const rollDiceOverlay = ({ faces, count, modifier, description, user }) => {
   return new Promise((resolve) => {
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
-    const handleComplete = (total) => {
+    const handleComplete = (total, meta) => {
       // Cleanup React root
       setTimeout(() => {
         root.unmount();
         host.remove();
       }, 0);
-      resolve(total);
+      resolve({ total, meta });
     };
     root.render(
       <DiceRoller
@@ -80,6 +81,7 @@ const rollDiceOverlay = ({ faces, count, modifier, description }) => {
         modifier={modifier}
         description={description}
         onComplete={handleComplete}
+        user={user}
       />
     );
   });
@@ -164,7 +166,7 @@ export default async function useConsumable({ user, userData, item, slotKey, mod
   // Use DiceRoller modifier so the returned total already includes bonus; display full formula.
   const modifierValue = potentialBonusAdd; // bonusCreazione * diceCount
   const description = `Lancio ${diceCount}d${animaDieFaces}${modifierValue ? `+${modifierValue}` : ''} Anima per ${isHP ? 'HP' : 'Mana'}`;
-  const rawTotal = await rollDiceOverlay({ faces: animaDieFaces, count: diceCount, modifier: modifierValue, description });
+  const { total: rawTotal } = await rollDiceOverlay({ faces: animaDieFaces, count: diceCount, modifier: modifierValue, description, user });
 
   // rawTotal already includes bonus via modifier.
   const finalGain = rawTotal; // already includes bonus modifier
