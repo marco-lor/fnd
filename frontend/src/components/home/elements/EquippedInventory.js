@@ -289,6 +289,21 @@ const EquippedInventory = () => {
     return [...numberedNonVarie, ...availableVarie];
   })();
 
+  // Inventory consumables (for unlimited belt case: slotCintura === 99)
+  const inventoryConsumables = React.useMemo(() => {
+    return (inventory || []).filter(entry => {
+      if (!entry || typeof entry !== 'object') return false;
+      const t = (entry.type || entry.item_type || '').toLowerCase();
+      return t === 'consumabile';
+    }).map(entry => {
+      const id = entry.id || entry.name || entry?.General?.Nome;
+      const name = entry?.General?.Nome || entry.name || id;
+      const qty = typeof entry.qty === 'number' ? Math.max(1, entry.qty) : 1;
+      const imgUrl = entry?.General?.image_url;
+      return { ...entry, id, name, qty, imgUrl };
+    });
+  }, [inventory]);
+
   // Resolve inventory/equipped entry to full item doc if possible
   const resolveItemDoc = (entry) => {
     if (!entry) return null;
@@ -534,6 +549,53 @@ const EquippedInventory = () => {
               <div key={k}>{renderSlot(k)}</div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Unlimited belt: render direct inventory consumables with Use button */}
+      {beltUnlimited && (
+        <div className="mt-5">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs uppercase tracking-wider text-slate-400">Consumabili (Cintura Illimitata)</p>
+            <span className="text-[10px] text-slate-500">{inventoryConsumables.length}</span>
+          </div>
+          {inventoryConsumables.length === 0 ? (
+            <div className="text-[11px] text-slate-500">Nessun consumabile in inventario.</div>
+          ) : (
+            <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))' }}>
+              {inventoryConsumables.map((c) => (
+                <div key={c.id} className="group relative h-28 rounded-xl border border-slate-600/50 bg-slate-800/40 p-2 flex flex-col items-center justify-between">
+                  <div className="flex flex-col items-center gap-1 w-full">
+                    {c.imgUrl ? (
+                      <div className="h-10 w-10 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/40">
+                        <img src={c.imgUrl} alt={c.name} className="h-full w-full object-contain" />
+                      </div>
+                    ) : (
+                      <GiPotionBall className="w-6 h-6 text-slate-400" />
+                    )}
+                    <span className="text-[10px] text-slate-300 font-medium text-center px-1 truncate w-full" title={c.name}>{c.name}</span>
+                    {c.qty > 1 && <span className="text-[9px] text-amber-300">x{c.qty}</span>}
+                  </div>
+                  <div className="flex items-center gap-2 w-full justify-center">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setConfirmUse({ slotKey: null, itemDoc: c }); }}
+                      disabled={usingConsumable}
+                      className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 border transition
+                        ${usingConsumable ? 'border-emerald-800/40 bg-emerald-900/40 text-emerald-700 cursor-not-allowed' : 'border-emerald-400/50 bg-emerald-600/20 text-emerald-200 hover:border-emerald-300/70 hover:bg-emerald-600/30'}`}
+                      title={usingConsumable ? 'In uso…' : 'Usa consumabile'}
+                    >
+                      <GiDrinkMe className="w-3 h-3" /> Usa
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setPreviewItem(c); }}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900/60 border border-slate-600/60 text-slate-300 hover:border-slate-400/60"
+                      title="Dettagli"
+                    >i</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
