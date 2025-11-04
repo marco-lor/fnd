@@ -102,7 +102,8 @@ const ParametriGrid = ({ params, level, userParams }) => {
 
 const SpecificBlock = ({ type, specific }) => {
   if (!specific || typeof specific !== 'object') return null;
-  const entries = Object.entries(specific);
+  // Alphabetically sort specification entries (case-insensitive) for stable presentation
+  const entries = Object.entries(specific).sort((a, b) => a[0].localeCompare(b[0], 'it', { sensitivity: 'base' }));
   if (!entries.length) return null;
   const color = type === 'weapon' ? 'fuchsia' : type === 'armatura' ? 'indigo' : type === 'consumabile' ? 'emerald' : 'sky';
   return (

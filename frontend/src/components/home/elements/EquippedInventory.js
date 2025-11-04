@@ -3,8 +3,11 @@ import { AuthContext } from '../../../AuthContext';
 import { doc, onSnapshot, updateDoc, increment } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 import { FaTimes } from 'react-icons/fa';
-import { GiChestArmor, GiBroadsword, GiShield, GiRing, GiCrackedHelm, GiBlackBelt, GiSteeltoeBoots, GiScabbard, GiPotionBall } from 'react-icons/gi';
+import { GiChestArmor, GiBroadsword, GiShield, GiRing, GiCrackedHelm, GiBlackBelt, GiSteeltoeBoots, GiScabbard, GiPotionBall, GiDrinkMe } from 'react-icons/gi';
 import ItemDetailsModal from './ItemDetailsModal';
+import ConfirmUseConsumableModal from './ConfirmUseConsumableModal';
+// Utility (not a React hook) renamed locally to avoid hook lint rule triggering.
+import consumeConsumable from './useConsumable';
 import { computeValue } from '../../common/computeFormula';
 
 // Slot metadata (icon + label) retained; layout will be Diablo-like around a silhouette
@@ -63,6 +66,8 @@ const EquippedInventory = () => {
   const [loading, setLoading] = useState(false);
   // Full item specifics now come from user's inventory/equipped entries directly
   const [previewItem, setPreviewItem] = useState(null); // item object to show in details modal
+  const [confirmUse, setConfirmUse] = useState(null); // { slotKey, itemDoc }
+  const [usingConsumable, setUsingConsumable] = useState(false);
   const [equipError, setEquipError] = useState('');
 
   useEffect(() => {
@@ -234,13 +239,19 @@ const EquippedInventory = () => {
   const expandedAvailable = (() => {
     const nonVarieInstances = [];
     const varieTotals = {};
+    // Track stable ordinals per duplicate id so numbering does not shift when one is equipped.
+    // This ensures that if you have two "Pozione del Mana" and you equip one, the remaining
+    // instance still shows "Pozione del Mana (2)" instead of losing the suffix.
+    const ordinalByIdCounter = {};
     // Walk raw inventory to preserve per-entry specifics and images
     for (let i = 0; i < inventory.length; i++) {
       const entry = inventory[i];
       if (!entry) continue;
       if (typeof entry === 'string') {
         // Unknown type without global catalog here; treat as non-varie by default
-        nonVarieInstances.push({ id: entry, name: entry, qty: 1, type: 'oggetto', isVarie: false, invIndex: i });
+        const idStr = entry;
+        const ord = (ordinalByIdCounter[idStr] = (ordinalByIdCounter[idStr] || 0) + 1);
+        nonVarieInstances.push({ id: idStr, name: idStr, qty: 1, type: 'oggetto', isVarie: false, invIndex: i, dupOrdinal: ord });
         continue;
       }
       const id = entry.id || entry.name || entry?.General?.Nome;
@@ -252,7 +263,8 @@ const EquippedInventory = () => {
         varieTotals[id].qty += qty;
       } else {
         for (let q = 0; q < qty; q++) {
-          nonVarieInstances.push({ ...entry, id, name, qty: 1, type: t || 'oggetto', isVarie: false, invIndex: i });
+          const ord = (ordinalByIdCounter[id] = (ordinalByIdCounter[id] || 0) + 1);
+          nonVarieInstances.push({ ...entry, id, name, qty: 1, type: t || 'oggetto', isVarie: false, invIndex: i, dupOrdinal: ord });
         }
       }
     }
@@ -273,16 +285,30 @@ const EquippedInventory = () => {
       .filter(v => v.qty > 0)
       .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
 
-    // Number duplicates among non-Varie by id for display only
-    const seen = {};
+    // Use stable original ordinal (dupOrdinal) so numbering does not renumber after equipping
     const numberedNonVarie = availableNonVarie.map(it => {
-      const n = (seen[it.id] = (seen[it.id] || 0) + 1);
       const baseName = it.name || it.id;
-      return { ...it, displayName: n > 1 ? `${baseName} (${n})` : baseName };
+      const ord = it.dupOrdinal;
+      return { ...it, displayName: ord > 1 ? `${baseName} (${ord})` : baseName };
     });
 
     return [...numberedNonVarie, ...availableVarie];
   })();
+
+  // Inventory consumables (for unlimited belt case: slotCintura === 99)
+  const inventoryConsumables = React.useMemo(() => {
+    return (inventory || []).filter(entry => {
+      if (!entry || typeof entry !== 'object') return false;
+      const t = (entry.type || entry.item_type || '').toLowerCase();
+      return t === 'consumabile';
+    }).map(entry => {
+      const id = entry.id || entry.name || entry?.General?.Nome;
+      const name = entry?.General?.Nome || entry.name || id;
+      const qty = typeof entry.qty === 'number' ? Math.max(1, entry.qty) : 1;
+      const imgUrl = entry?.General?.image_url;
+      return { ...entry, id, name, qty, imgUrl };
+    });
+  }, [inventory]);
 
   // Resolve inventory/equipped entry to full item doc if possible
   const resolveItemDoc = (entry) => {
@@ -403,7 +429,7 @@ const EquippedInventory = () => {
     const label = def?.label ?? slotLabelForDynamic(slotKey);
   const Icon = def?.icon ?? GiPotionBall;
     if (!label) return <div />;
-    const item = equipped?.[slotKey];
+  const item = equipped?.[slotKey];
     const itemDoc = resolveItemDoc(item);
     const imgUrl = itemDoc?.General?.image_url || item?.General?.image_url;
     const blocked = isDisabledByTwoH(slotKey) && !item; // disable empty opposite slot if 2H is equipped
@@ -448,6 +474,20 @@ const EquippedInventory = () => {
               title="Dettagli"
             >
               i
+            </button>
+          )}
+          {/* Use consumable button (only for belt consumable slots) */}
+          {item && itemDoc && /^beltC\d+$/.test(slotKey) && (itemDoc.type === 'consumabile' || (itemDoc.item_type || '').toLowerCase() === 'consumabile') && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setConfirmUse({ slotKey, itemDoc }); }}
+              disabled={usingConsumable}
+              className={`absolute bottom-1 right-1 text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1 border transition
+                ${usingConsumable ? 'border-emerald-800/40 bg-emerald-900/40 text-emerald-700 cursor-not-allowed' : 'border-emerald-400/50 bg-emerald-600/20 text-emerald-200 hover:border-emerald-300/70 hover:bg-emerald-600/30'}
+              `}
+              title={usingConsumable ? 'In uso…' : 'Usa consumabile'}
+            >
+              <GiDrinkMe className="w-3 h-3" />
+              Usa
             </button>
           )}
           {item && side === 'left' && (
@@ -518,6 +558,53 @@ const EquippedInventory = () => {
         </div>
       )}
 
+      {/* Unlimited belt: render direct inventory consumables with Use button */}
+      {beltUnlimited && (
+        <div className="mt-5">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs uppercase tracking-wider text-slate-400">Consumabili (Cintura Illimitata)</p>
+            <span className="text-[10px] text-slate-500">{inventoryConsumables.length}</span>
+          </div>
+          {inventoryConsumables.length === 0 ? (
+            <div className="text-[11px] text-slate-500">Nessun consumabile in inventario.</div>
+          ) : (
+            <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))' }}>
+              {inventoryConsumables.map((c) => (
+                <div key={c.id} className="group relative h-28 rounded-xl border border-slate-600/50 bg-slate-800/40 p-2 flex flex-col items-center justify-between">
+                  <div className="flex flex-col items-center gap-1 w-full">
+                    {c.imgUrl ? (
+                      <div className="h-10 w-10 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/40">
+                        <img src={c.imgUrl} alt={c.name} className="h-full w-full object-contain" />
+                      </div>
+                    ) : (
+                      <GiPotionBall className="w-6 h-6 text-slate-400" />
+                    )}
+                    <span className="text-[10px] text-slate-300 font-medium text-center px-1 truncate w-full" title={c.name}>{c.name}</span>
+                    {c.qty > 1 && <span className="text-[9px] text-amber-300">x{c.qty}</span>}
+                  </div>
+                  <div className="flex items-center gap-2 w-full justify-center">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setConfirmUse({ slotKey: null, itemDoc: c }); }}
+                      disabled={usingConsumable}
+                      className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 border transition
+                        ${usingConsumable ? 'border-emerald-800/40 bg-emerald-900/40 text-emerald-700 cursor-not-allowed' : 'border-emerald-400/50 bg-emerald-600/20 text-emerald-200 hover:border-emerald-300/70 hover:bg-emerald-600/30'}`}
+                      title={usingConsumable ? 'In uso…' : 'Usa consumabile'}
+                    >
+                      <GiDrinkMe className="w-3 h-3" /> Usa
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setPreviewItem(c); }}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900/60 border border-slate-600/60 text-slate-300 hover:border-slate-400/60"
+                      title="Dettagli"
+                    >i</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {activeSlot && (
         <Modal title={`Equip ${slotLabelForDynamic(activeSlot) || ''}`} onClose={() => setActiveSlot(null)}>
           {equipError && (
@@ -574,6 +661,32 @@ const EquippedInventory = () => {
 
       {previewItem && (
         <ItemDetailsModal item={previewItem} onClose={() => setPreviewItem(null)} />
+      )}
+      {confirmUse && confirmUse.itemDoc && (
+        <ConfirmUseConsumableModal
+          item={confirmUse.itemDoc}
+          userData={userData}
+          onCancel={() => setConfirmUse(null)}
+          onConfirm={async (mode) => {
+            // mode can be 'hp' or 'mana'
+            if (!user) return;
+            setUsingConsumable(true);
+            try {
+              await consumeConsumable({
+                user,
+                userData,
+                item: confirmUse.itemDoc,
+                slotKey: confirmUse.slotKey,
+                mode, // regen target
+              });
+            } catch (e) {
+              console.error('Errore uso consumabile', e);
+            } finally {
+              setUsingConsumable(false);
+              setConfirmUse(null);
+            }
+          }}
+        />
       )}
     </div>
   );
