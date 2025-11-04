@@ -3,8 +3,11 @@ import { AuthContext } from '../../../AuthContext';
 import { doc, onSnapshot, updateDoc, increment } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 import { FaTimes } from 'react-icons/fa';
-import { GiChestArmor, GiBroadsword, GiShield, GiRing, GiCrackedHelm, GiBlackBelt, GiSteeltoeBoots, GiScabbard, GiPotionBall } from 'react-icons/gi';
+import { GiChestArmor, GiBroadsword, GiShield, GiRing, GiCrackedHelm, GiBlackBelt, GiSteeltoeBoots, GiScabbard, GiPotionBall, GiDrinkMe } from 'react-icons/gi';
 import ItemDetailsModal from './ItemDetailsModal';
+import ConfirmUseConsumableModal from './ConfirmUseConsumableModal';
+// Utility (not a React hook) renamed locally to avoid hook lint rule triggering.
+import consumeConsumable from './useConsumable';
 import { computeValue } from '../../common/computeFormula';
 
 // Slot metadata (icon + label) retained; layout will be Diablo-like around a silhouette
@@ -63,6 +66,8 @@ const EquippedInventory = () => {
   const [loading, setLoading] = useState(false);
   // Full item specifics now come from user's inventory/equipped entries directly
   const [previewItem, setPreviewItem] = useState(null); // item object to show in details modal
+  const [confirmUse, setConfirmUse] = useState(null); // { slotKey, itemDoc }
+  const [usingConsumable, setUsingConsumable] = useState(false);
   const [equipError, setEquipError] = useState('');
 
   useEffect(() => {
@@ -403,7 +408,7 @@ const EquippedInventory = () => {
     const label = def?.label ?? slotLabelForDynamic(slotKey);
   const Icon = def?.icon ?? GiPotionBall;
     if (!label) return <div />;
-    const item = equipped?.[slotKey];
+  const item = equipped?.[slotKey];
     const itemDoc = resolveItemDoc(item);
     const imgUrl = itemDoc?.General?.image_url || item?.General?.image_url;
     const blocked = isDisabledByTwoH(slotKey) && !item; // disable empty opposite slot if 2H is equipped
@@ -448,6 +453,20 @@ const EquippedInventory = () => {
               title="Dettagli"
             >
               i
+            </button>
+          )}
+          {/* Use consumable button (only for belt consumable slots) */}
+          {item && itemDoc && /^beltC\d+$/.test(slotKey) && (itemDoc.type === 'consumabile' || (itemDoc.item_type || '').toLowerCase() === 'consumabile') && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setConfirmUse({ slotKey, itemDoc }); }}
+              disabled={usingConsumable}
+              className={`absolute bottom-1 right-1 text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1 border transition
+                ${usingConsumable ? 'border-emerald-800/40 bg-emerald-900/40 text-emerald-700 cursor-not-allowed' : 'border-emerald-400/50 bg-emerald-600/20 text-emerald-200 hover:border-emerald-300/70 hover:bg-emerald-600/30'}
+              `}
+              title={usingConsumable ? 'In uso…' : 'Usa consumabile'}
+            >
+              <GiDrinkMe className="w-3 h-3" />
+              Usa
             </button>
           )}
           {item && side === 'left' && (
@@ -574,6 +593,32 @@ const EquippedInventory = () => {
 
       {previewItem && (
         <ItemDetailsModal item={previewItem} onClose={() => setPreviewItem(null)} />
+      )}
+      {confirmUse && confirmUse.itemDoc && (
+        <ConfirmUseConsumableModal
+          item={confirmUse.itemDoc}
+          userData={userData}
+          onCancel={() => setConfirmUse(null)}
+          onConfirm={async (mode) => {
+            // mode can be 'hp' or 'mana'
+            if (!user) return;
+            setUsingConsumable(true);
+            try {
+              await consumeConsumable({
+                user,
+                userData,
+                item: confirmUse.itemDoc,
+                slotKey: confirmUse.slotKey,
+                mode, // regen target
+              });
+            } catch (e) {
+              console.error('Errore uso consumabile', e);
+            } finally {
+              setUsingConsumable(false);
+              setConfirmUse(null);
+            }
+          }}
+        />
       )}
     </div>
   );

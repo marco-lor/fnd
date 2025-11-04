@@ -4,11 +4,16 @@ import PropTypes from 'prop-types';
 import { useAuth } from '../../AuthContext';
 import logDiceRoll from './diceLogger';
 
-export default function DiceRoller({ faces, count, modifier, description, onComplete }) {
+// Dice roller overlay. Can be rendered inside or outside AuthContext provider.
+// If rendered outside, it will gracefully skip user-based logging.
+export default function DiceRoller({ faces, count, modifier, description, onComplete, user: forcedUser }) {
   const [currentTotal, setCurrentTotal] = useState(0);
   const [currentRolls, setCurrentRolls] = useState([]);
   const [finished, setFinished] = useState(false);
-  const { user } = useAuth();
+  // Safely access auth context (it may be undefined if mounted outside provider)
+  // Unconditional hook call to satisfy react-hooks rules; if provider missing, authCtx may be undefined.
+  const authCtx = useAuth();
+  const user = forcedUser || (authCtx && authCtx.user);
 
   useEffect(() => {
     let iterations = 0;
@@ -53,10 +58,12 @@ export default function DiceRoller({ faces, count, modifier, description, onComp
             onClick={async () => {
               const meta = { rolls: currentRolls, modifier, faces, count, description };
               // Fire logging first (non-blocking, but we await to reduce race on immediate unmount)
-              try {
-                await logDiceRoll(user?.uid, { total: currentTotal, meta });
-              } catch (e) {
-                // already logged in utility but keep silent here
+              if (user?.uid) {
+                try {
+                  await logDiceRoll(user.uid, { total: currentTotal, meta });
+                } catch (e) {
+                  // Silently ignore logging errors
+                }
               }
               onComplete(currentTotal, meta);
             }}
@@ -77,10 +84,12 @@ DiceRoller.propTypes = {
   modifier: PropTypes.number,
   description: PropTypes.string,
   onComplete: PropTypes.func.isRequired,
+  user: PropTypes.object, // optional user override
 };
 
 DiceRoller.defaultProps = {
   count: 1,
   modifier: 0,
   description: 'Rolling Dice',
+  user: undefined,
 };
