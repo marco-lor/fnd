@@ -239,13 +239,19 @@ const EquippedInventory = () => {
   const expandedAvailable = (() => {
     const nonVarieInstances = [];
     const varieTotals = {};
+    // Track stable ordinals per duplicate id so numbering does not shift when one is equipped.
+    // This ensures that if you have two "Pozione del Mana" and you equip one, the remaining
+    // instance still shows "Pozione del Mana (2)" instead of losing the suffix.
+    const ordinalByIdCounter = {};
     // Walk raw inventory to preserve per-entry specifics and images
     for (let i = 0; i < inventory.length; i++) {
       const entry = inventory[i];
       if (!entry) continue;
       if (typeof entry === 'string') {
         // Unknown type without global catalog here; treat as non-varie by default
-        nonVarieInstances.push({ id: entry, name: entry, qty: 1, type: 'oggetto', isVarie: false, invIndex: i });
+        const idStr = entry;
+        const ord = (ordinalByIdCounter[idStr] = (ordinalByIdCounter[idStr] || 0) + 1);
+        nonVarieInstances.push({ id: idStr, name: idStr, qty: 1, type: 'oggetto', isVarie: false, invIndex: i, dupOrdinal: ord });
         continue;
       }
       const id = entry.id || entry.name || entry?.General?.Nome;
@@ -257,7 +263,8 @@ const EquippedInventory = () => {
         varieTotals[id].qty += qty;
       } else {
         for (let q = 0; q < qty; q++) {
-          nonVarieInstances.push({ ...entry, id, name, qty: 1, type: t || 'oggetto', isVarie: false, invIndex: i });
+          const ord = (ordinalByIdCounter[id] = (ordinalByIdCounter[id] || 0) + 1);
+          nonVarieInstances.push({ ...entry, id, name, qty: 1, type: t || 'oggetto', isVarie: false, invIndex: i, dupOrdinal: ord });
         }
       }
     }
@@ -278,12 +285,11 @@ const EquippedInventory = () => {
       .filter(v => v.qty > 0)
       .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
 
-    // Number duplicates among non-Varie by id for display only
-    const seen = {};
+    // Use stable original ordinal (dupOrdinal) so numbering does not renumber after equipping
     const numberedNonVarie = availableNonVarie.map(it => {
-      const n = (seen[it.id] = (seen[it.id] || 0) + 1);
       const baseName = it.name || it.id;
-      return { ...it, displayName: n > 1 ? `${baseName} (${n})` : baseName };
+      const ord = it.dupOrdinal;
+      return { ...it, displayName: ord > 1 ? `${baseName} (${ord})` : baseName };
     });
 
     return [...numberedNonVarie, ...availableVarie];
