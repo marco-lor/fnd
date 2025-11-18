@@ -6,16 +6,16 @@ import { auth } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
 import { HiMagnifyingGlassPlus } from 'react-icons/hi2';
 import { LuImageUp } from 'react-icons/lu';
+import { GiSpikedDragonHead } from 'react-icons/gi';
 import { storage, db } from '../firebaseConfig';
 import { ref as storageRef, deleteObject, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, updateDoc } from 'firebase/firestore';
-import NavParticleEffect from './effects/NavParticleEffect';
 
 const Navbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, userData } = useAuth();
-  
+
   // Loading state for logout operations
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -162,119 +162,101 @@ const Navbar = () => {
 
         {/* Center Column: Navigation Buttons */}
         <nav className="flex justify-center flex-wrap gap-2 md:gap-4">
-          <NavParticleEffect active={isActive("/home")}>
-            <button
-              onClick={() => navigate("/home")}
-              className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-                isActive("/home")
-                  ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                  : "bg-transparent text-white hover:bg-[#e69500]"
-              }`}
-            >
-              Home
-            </button>
-          </NavParticleEffect>
-          <NavParticleEffect active={isActive("/bazaar")}>
-            <button
-              onClick={() => navigate("/bazaar")}
-              className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-                isActive("/bazaar")
-                  ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                  : "bg-transparent text-white hover:bg-[#e69500]"
-              }`}
-            >
-              Bazaar
-            </button>
-          </NavParticleEffect>
-          <NavParticleEffect active={isActive("/combat")}>
-            <button
-              onClick={() => navigate("/combat")}
-              className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-                isActive("/combat")
-                  ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                  : "bg-transparent text-white hover:bg-[#e69500]"
-              }`}
-            >
-              Combat
-            </button>
-          </NavParticleEffect>
-          <NavParticleEffect active={isActive("/tecniche-spell")}>
-            <button
-              onClick={() => navigate("/tecniche-spell")}
-              className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-                isActive("/tecniche-spell")
-                  ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                  : "bg-transparent text-white hover:bg-[#e69500]"
-              }`}
-            >
-              Tecniche | Spell
-            </button>
-          </NavParticleEffect>
-          <NavParticleEffect active={isActive("/codex")}>
-            <button
-              onClick={() => navigate("/codex")}
-              className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-                isActive("/codex")
-                  ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                  : "bg-transparent text-white hover:bg-[#e69500]"
-              }`}
-            >
-              Codex
-            </button>
-          </NavParticleEffect>
-          <NavParticleEffect active={isActive("/echi-di-viaggio")}>
-            <button
-              onClick={() => navigate("/echi-di-viaggio")}
-              className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-                isActive("/echi-di-viaggio")
-                  ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                  : "bg-transparent text-white hover:bg-[#e69500]"
-              }`}
-            >
-              Echi di Viaggio
-            </button>
-          </NavParticleEffect>
+          <button
+            onClick={() => navigate("/home")}
+            className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
+              isActive("/home")
+                ? "bg-[#FFA500] text-white font-semibold shadow-md"
+                : "bg-transparent text-white hover:bg-[#e69500]"
+            }`}
+          >
+            <GiSpikedDragonHead className="text-2xl" />
+          </button>
+          <button
+            onClick={() => navigate("/bazaar")}
+            className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
+              isActive("/bazaar")
+                ? "bg-[#FFA500] text-white font-semibold shadow-md"
+                : "bg-transparent text-white hover:bg-[#e69500]"
+            }`}
+          >
+            Bazaar
+          </button>
+          <button
+            onClick={() => navigate("/combat")}
+            className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
+              isActive("/combat")
+                ? "bg-[#FFA500] text-white font-semibold shadow-md"
+                : "bg-transparent text-white hover:bg-[#e69500]"
+            }`}
+          >
+            Combat
+          </button>
+          <button
+            onClick={() => navigate("/tecniche-spell")}
+            className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
+              isActive("/tecniche-spell")
+                ? "bg-[#FFA500] text-white font-semibold shadow-md"
+                : "bg-transparent text-white hover:bg-[#e69500]"
+            }`}
+          >
+            Tecniche | Spell
+          </button>
+          <button
+            onClick={() => navigate("/codex")}
+            className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
+              isActive("/codex")
+                ? "bg-[#FFA500] text-white font-semibold shadow-md"
+                : "bg-transparent text-white hover:bg-[#e69500]"
+            }`}
+          >
+            Codex
+          </button>
+          <button
+            onClick={() => navigate("/echi-di-viaggio")}
+            className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
+              isActive("/echi-di-viaggio")
+                ? "bg-[#FFA500] text-white font-semibold shadow-md"
+                : "bg-transparent text-white hover:bg-[#e69500]"
+            }`}
+          >
+            Echi di Viaggio
+          </button>
           {userData?.role === "dm" && (
-            <NavParticleEffect active={isActive("/dm-dashboard")}>
-              <button
-                onClick={() => navigate("/dm-dashboard")}
-                className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-                  isActive("/dm-dashboard")
-                    ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                    : "bg-transparent text-white hover:bg-[#e69500]"
-                }`}
-              >
-                DM Dashboard
-              </button>
-            </NavParticleEffect>
+            <button
+              onClick={() => navigate("/dm-dashboard")}
+              className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
+                isActive("/dm-dashboard")
+                  ? "bg-[#FFA500] text-white font-semibold shadow-md"
+                  : "bg-transparent text-white hover:bg-[#e69500]"
+              }`}
+            >
+              DM Dashboard
+            </button>
           )}
           {userData?.role === "dm" && (
-            <NavParticleEffect active={isActive("/foes-hub")}>
-              <button
-                onClick={() => navigate("/foes-hub")}
-                className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-                  isActive("/foes-hub")
-                    ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                    : "bg-transparent text-white hover:bg-[#e69500]"
-                }`}
-              >
-                Foes Hub
-              </button>
-            </NavParticleEffect>
+            <button
+              onClick={() => navigate("/foes-hub")}
+              className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
+                isActive("/foes-hub")
+                  ? "bg-[#FFA500] text-white font-semibold shadow-md"
+                  : "bg-transparent text-white hover:bg-[#e69500]"
+              }`}
+            >
+              Foes Hub
+            </button>
           )}
           {userData?.role === "webmaster" && (
-            <NavParticleEffect active={isActive("/admin")}>
-              <button
-                onClick={() => navigate("/admin")}
-                className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-                  isActive("/admin")
-                    ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                    : "bg-transparent text-white hover:bg-[#e69500]"
-                }`}
-              >
-                Admin
-              </button>
-            </NavParticleEffect>
+            <button
+              onClick={() => navigate("/admin")}
+              className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
+                isActive("/admin")
+                  ? "bg-[#FFA500] text-white font-semibold shadow-md"
+                  : "bg-transparent text-white hover:bg-[#e69500]"
+              }`}
+            >
+              Admin
+            </button>
           )}
         </nav>
 
