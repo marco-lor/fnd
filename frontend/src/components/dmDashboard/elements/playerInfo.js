@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { faEdit, faTrash, faPlus, faMinus, faCoins } from "@fortawesome/free-solid-svg-icons";
 import { collection, getDocs, doc, getDoc, updateDoc } from "firebase/firestore";
+import { MdKeyboardDoubleArrowDown, MdKeyboardDoubleArrowUp } from "react-icons/md";
 
 import { db } from "../../firebaseConfig";
 
@@ -39,7 +40,17 @@ import AddVarieItemOverlay from "./playerInfo/overlays/AddVarieItemOverlay";
 
 library.add(faEdit, faTrash, faPlus, faMinus, faCoins);
 
-const PlayerInfo = ({ users, loading, error, setUsers }) => {
+const PlayerInfo = ({
+  users,
+  loading,
+  error,
+  setUsers,
+  variant = "table",
+  onLevelUpOne,
+  onAddTokens,
+  busy = false,
+  canEditVitals = false,
+}) => {
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [showEditConoscenzaOverlay, setShowEditConoscenzaOverlay] = useState(false);
   const [showEditProfessioneOverlay, setShowEditProfessioneOverlay] = useState(false);
@@ -77,6 +88,7 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
   const [goldAdjustments, setGoldAdjustments] = useState({});
   const [goldUpdating, setGoldUpdating] = useState({});
   const [goldOverlay, setGoldOverlay] = useState(null);
+  const [cardExpanded, setCardExpanded] = useState({});
 
   const refreshUserData = useCallback(async () => {
     try {
@@ -108,6 +120,10 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
   useEffect(() => {
     fetchItemsCatalog();
   }, [fetchItemsCatalog]);
+
+  const toggleCardExpanded = useCallback((userId) => {
+    setCardExpanded((prev) => ({ ...prev, [userId]: !prev[userId] }));
+  }, []);
 
   const openGoldOverlay = (userId, direction) => {
     if (!userId || goldUpdating[userId]) return;
@@ -289,6 +305,86 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
     }
   };
 
+  const vitalFieldMap = {
+    hp: { current: "stats.hpCurrent", total: "stats.hpTotal", label: "HP" },
+    mana: { current: "stats.manaCurrent", total: "stats.manaTotal", label: "Mana" },
+  };
+
+  const promptInteger = (message, defaultVal) => {
+    const input = window.prompt(message, defaultVal != null ? String(defaultVal) : "");
+    if (input === null) return null; // cancelled
+    const n = parseInt(input, 10);
+    if (Number.isNaN(n) || !Number.isFinite(n)) return null;
+    return n;
+  };
+
+  const adjustVitalDelta = async (userId, vital, delta) => {
+    if (!canEditVitals) return;
+    const fields = vitalFieldMap[vital];
+    const u = users.find((x) => x.id === userId);
+    if (!u) return;
+    const cur = Number(u?.stats?.[`${vital}Current`]) || 0;
+    const newVal = Math.max(0, cur + delta);
+    try {
+      await updateDoc(doc(db, "users", userId), { [fields.current]: newVal });
+    } catch (e) {
+      console.error("adjustVitalDelta failed", e);
+    }
+  };
+
+  const resetVital = async (userId, vital) => {
+    if (!canEditVitals) return;
+    const fields = vitalFieldMap[vital];
+    const u = users.find((x) => x.id === userId);
+    if (!u) return;
+    const tot = Number(u?.stats?.[`${vital}Total`]) || 0;
+    try {
+      await updateDoc(doc(db, "users", userId), { [fields.current]: tot });
+    } catch (e) {
+      console.error("resetVital failed", e);
+    }
+  };
+
+  const setVitalCurrent = async (userId, vital) => {
+    if (!canEditVitals) return;
+    const u = users.find((x) => x.id === userId);
+    if (!u) return;
+    const cur = Number(u?.stats?.[`${vital}Current`]) || 0;
+    const n = promptInteger(`Set ${vitalFieldMap[vital].label} current value`, cur);
+    if (n === null) return;
+    try {
+      await updateDoc(doc(db, "users", userId), { [vitalFieldMap[vital].current]: Math.max(0, n) });
+    } catch (e) {
+      console.error("setVitalCurrent failed", e);
+    }
+  };
+
+  const setVitalTotal = async (userId, vital) => {
+    if (!canEditVitals) return;
+    const u = users.find((x) => x.id === userId);
+    if (!u) return;
+    const tot = Number(u?.stats?.[`${vital}Total`]) || 0;
+    const n = promptInteger(`Set ${vitalFieldMap[vital].label} total value`, tot);
+    if (n === null) return;
+    const cur = Number(u?.stats?.[`${vital}Current`]) || 0;
+    const updates = { [vitalFieldMap[vital].total]: Math.max(0, n) };
+    if (cur > n && window.confirm("Current value exceeds new total. Clamp current to new total?")) {
+      updates[vitalFieldMap[vital].current] = Math.max(0, n);
+    }
+    try {
+      await updateDoc(doc(db, "users", userId), updates);
+    } catch (e) {
+      console.error("setVitalTotal failed", e);
+    }
+  };
+
+  const customDeltaPrompt = async (userId, vital) => {
+    if (!canEditVitals) return;
+    const delta = promptInteger(`Enter ${vitalFieldMap[vital].label} delta (use negative to subtract)`, "0");
+    if (delta === null || delta === 0) return;
+    await adjustVitalDelta(userId, vital, delta);
+  };
+
   if (loading) return <div className="text-white mt-4">Loading user data...</div>;
   if (error) return <div className="text-red-500 mt-4">{error}</div>;
   if (!users.length) return <div className="text-white mt-4">No users found.</div>;
@@ -308,80 +404,295 @@ const PlayerInfo = ({ users, loading, error, setUsers }) => {
     handleGoldInputChange(goldOverlay.userId, value);
   };
 
-  return (
-    <div className="mt-8">
-      <h2 className="mb-3 text-slate-100 text-xl font-semibold tracking-tight">Player Info</h2>
-      <div className="rounded-lg border border-slate-700/60 shadow-sm overflow-x-auto">
-        <table className="min-w-max border-collapse text-white bg-gray-800 text-sm">
-          <thead className="bg-gray-700/80 backdrop-blur supports-[backdrop-filter]:bg-gray-700/70">
-            <tr className="text-slate-100">
-              <th className="sticky left-0 z-20 border border-gray-600 px-4 py-2 text-left bg-gray-700/80">Category</th>
-              {users.map((user) => (
-                <th key={user.id} className="border border-gray-600 px-4 py-2 text-center min-w-[11rem]">
-                  {user.characterId || user.email}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            <PlayerInfoActionsRow
-              users={users}
-              onAddTecnica={handleAddTecnicaClick}
-              onAddSpell={handleAddSpellClick}
-              onAddLingua={handleAddLinguaClick}
-              onAddConoscenza={handleAddConoscenzaClick}
-              onAddProfessione={handleAddProfessioneClick}
-              sleekBtnClass={sleekButtonClass}
-            />
-            <PlayerInfoTecnicheRow
-              users={users}
-              iconEditClass={iconEditClass}
-              iconDeleteClass={iconDeleteClass}
-              onEditTecnica={handleEditTecnicaClick}
-              onDeleteTecnica={handleDeleteTecnicaClick}
-            />
-            <PlayerInfoSpellsRow
-              users={users}
-              iconEditClass={iconEditClass}
-              iconDeleteClass={iconDeleteClass}
-              onEditSpell={handleEditSpellClick}
-              onDeleteSpell={handleDeleteSpellClick}
-            />
-            <PlayerInfoConoscenzeRow
-              users={users}
-              iconEditClass={iconEditClass}
-              iconDeleteClass={iconDeleteClass}
-              onEditConoscenza={handleEditConoscenzaClick}
-              onDeleteConoscenza={handleDeleteConoscenzaClick}
-            />
-            <PlayerInfoProfessioniRow
-              users={users}
-              iconEditClass={iconEditClass}
-              iconDeleteClass={iconDeleteClass}
-              onEditProfessione={handleEditProfessioneClick}
-              onDeleteProfessione={handleDeleteProfessioneClick}
-            />
-            <PlayerInfoLingueRow
-              users={users}
-              iconDeleteClass={iconDeleteClass}
-              onDeleteLingua={handleDeleteLinguaClick}
-            />
-            <PlayerInfoInventoryRow
-              users={users}
-              catalog={catalog}
-              itemsDocs={itemsDocs}
-              iconEditClass={iconEditClass}
-              onEditInventoryItem={handleEditInventoryItem}
-              onOpenGoldOverlay={openGoldOverlay}
-              goldUpdating={goldUpdating}
-              onAddVarie={handleAddVarieForUser}
-            />
-            <PlayerInfoDiceRollsRow
-              users={users}
-            />
-          </tbody>
-        </table>
+  const VBar = ({ pct, track, fill }) => (
+    <div className={`w-full h-2 ${track} rounded overflow-hidden border border-slate-700/50`}>
+      <div className={`${fill} h-full`} style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
+    </div>
+  );
+
+  const renderVitals = (user) => {
+    const stats = user?.stats || {};
+    const vitalItems = [
+      {
+        key: "hp",
+        cur: Number(stats.hpCurrent) || 0,
+        tot: Number(stats.hpTotal) || 0,
+        track: "bg-red-900/30",
+        fill: "bg-gradient-to-r from-red-500 to-rose-500",
+      },
+      {
+        key: "mana",
+        cur: Number(stats.manaCurrent) || 0,
+        tot: Number(stats.manaTotal) || 0,
+        track: "bg-indigo-900/30",
+        fill: "bg-gradient-to-r from-indigo-500 to-cyan-500",
+      },
+    ];
+
+    return (
+      <div className="space-y-3">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Vitals</div>
+        <div className="space-y-3">
+          {vitalItems.map(({ key, cur, tot, track, fill }) => {
+            const pct = tot > 0 ? (cur / tot) * 100 : 0;
+            return (
+              <div key={key} className="rounded border border-slate-700/60 bg-slate-900/50 p-3">
+                <div className="flex items-center justify-between text-xs text-slate-300">
+                  <span className="font-semibold uppercase">{key}</span>
+                  <span className="tabular-nums cursor-pointer hover:text-white" onClick={() => setVitalCurrent(user.id, key)} title="Set current">
+                    {cur}
+                  </span>
+                </div>
+                <div className="mt-2">
+                  <VBar pct={pct} track={track} fill={fill} />
+                </div>
+                <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => adjustVitalDelta(user.id, key, -1)} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700">-</button>
+                    <button onClick={() => adjustVitalDelta(user.id, key, 1)} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700">+</button>
+                    <button onClick={() => customDeltaPrompt(user.id, key)} className="px-2 py-1 rounded bg-indigo-900/70 hover:bg-indigo-800">Δ</button>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-slate-300">/</span>
+                    <span className="cursor-pointer hover:text-white" onClick={() => setVitalTotal(user.id, key)} title="Set total">
+                      {tot}
+                    </span>
+                    <button onClick={() => resetVital(user.id, key)} className="px-2 py-1 rounded bg-emerald-800/70 hover:bg-emerald-700 text-emerald-50">Reset</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
+    );
+  };
+
+  const renderTableLayout = () => (
+    <div className="rounded-lg border border-slate-700/60 shadow-sm overflow-x-auto">
+      <table className="min-w-max border-collapse text-white bg-gray-800 text-sm">
+        <thead className="bg-gray-700/80 backdrop-blur supports-[backdrop-filter]:bg-gray-700/70">
+          <tr className="text-slate-100">
+            <th className="sticky left-0 z-20 border border-gray-600 px-4 py-2 text-left bg-gray-700/80">Category</th>
+            {users.map((user) => (
+              <th
+                key={user.id}
+                className="border border-gray-600 px-4 py-3 text-center min-w-[11rem] text-base font-bold tracking-tight text-slate-50 bg-gray-700/70"
+              >
+                {user.characterId || user.email}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <PlayerInfoActionsRow
+            users={users}
+            onAddTecnica={handleAddTecnicaClick}
+            onAddSpell={handleAddSpellClick}
+            onAddLingua={handleAddLinguaClick}
+            onAddConoscenza={handleAddConoscenzaClick}
+            onAddProfessione={handleAddProfessioneClick}
+            sleekBtnClass={sleekButtonClass}
+          />
+          <PlayerInfoTecnicheRow
+            users={users}
+            iconEditClass={iconEditClass}
+            iconDeleteClass={iconDeleteClass}
+            onEditTecnica={handleEditTecnicaClick}
+            onDeleteTecnica={handleDeleteTecnicaClick}
+          />
+          <PlayerInfoSpellsRow
+            users={users}
+            iconEditClass={iconEditClass}
+            iconDeleteClass={iconDeleteClass}
+            onEditSpell={handleEditSpellClick}
+            onDeleteSpell={handleDeleteSpellClick}
+          />
+          <PlayerInfoConoscenzeRow
+            users={users}
+            iconEditClass={iconEditClass}
+            iconDeleteClass={iconDeleteClass}
+            onEditConoscenza={handleEditConoscenzaClick}
+            onDeleteConoscenza={handleDeleteConoscenzaClick}
+          />
+          <PlayerInfoProfessioniRow
+            users={users}
+            iconEditClass={iconEditClass}
+            iconDeleteClass={iconDeleteClass}
+            onEditProfessione={handleEditProfessioneClick}
+            onDeleteProfessione={handleDeleteProfessioneClick}
+          />
+          <PlayerInfoLingueRow
+            users={users}
+            iconDeleteClass={iconDeleteClass}
+            onDeleteLingua={handleDeleteLinguaClick}
+          />
+          <PlayerInfoInventoryRow
+            users={users}
+            catalog={catalog}
+            itemsDocs={itemsDocs}
+            iconEditClass={iconEditClass}
+            onEditInventoryItem={handleEditInventoryItem}
+            onOpenGoldOverlay={openGoldOverlay}
+            goldUpdating={goldUpdating}
+            onAddVarie={handleAddVarieForUser}
+          />
+          <PlayerInfoDiceRollsRow users={users} />
+        </tbody>
+      </table>
+    </div>
+  );
+
+  const renderCardLayout = () => (
+    <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+      {users.map((user) => {
+        const baseAvail = Number(user?.stats?.basePointsAvailable) || 0;
+        const baseSpent = Number(user?.stats?.basePointsSpent) || 0;
+        const combatAvail = Number(user?.stats?.combatTokensAvailable) || 0;
+        const combatSpent = Number(user?.stats?.combatTokensSpent) || 0;
+        const isExpanded = !!cardExpanded[user.id];
+        return (
+          <div key={user.id} className="rounded-lg border border-slate-700/60 bg-gray-800/90 p-4 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-lg font-bold text-slate-50 tracking-tight">{user.characterId || user.email}</div>
+                <div className="text-xs text-slate-400">Lv {user?.stats?.level || 1}</div>
+              </div>
+              <div className="flex gap-2">
+                {onAddTokens && (
+                  <button
+                    className="px-2 py-1 text-xs rounded-md bg-amber-700 text-white hover:bg-amber-600 disabled:opacity-50"
+                    onClick={() => onAddTokens(user.id)}
+                    disabled={busy}
+                    title="Add or remove combat tokens"
+                  >
+                    Tokens
+                  </button>
+                )}
+                {onLevelUpOne && (
+                  <button
+                    className="px-2 py-1 text-xs rounded-md bg-emerald-700 text-white hover:bg-emerald-600 disabled:opacity-50"
+                    onClick={() => onLevelUpOne(user.id)}
+                    disabled={busy}
+                    title="Level up this player"
+                  >
+                    Level Up
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-300">
+              <div className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 ring-1 ring-emerald-500/30" title="Base points available/spent">
+                <span>Base</span>
+                <span className="text-emerald-300">A {baseAvail}</span>
+                <span className="text-slate-200">S {baseSpent}</span>
+              </div>
+              <div className="flex items-center gap-1 rounded-full bg-indigo-500/10 px-2 py-1 ring-1 ring-indigo-500/30" title="Combat tokens available/spent">
+                <span>Combat</span>
+                <span className="text-indigo-300">A {combatAvail}</span>
+                <span className="text-slate-200">S {combatSpent}</span>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-4">
+              {renderVitals(user)}
+
+              <button
+                type="button"
+                onClick={() => toggleCardExpanded(user.id)}
+                className="inline-flex items-center gap-2 rounded-full bg-indigo-900/50 px-3 py-1 text-xs font-semibold text-indigo-100 transition hover:bg-indigo-800"
+              >
+                {isExpanded ? (
+                  <>
+                    <MdKeyboardDoubleArrowUp className="h-4 w-4" />
+                    <span>Comprimi</span>
+                  </>
+                ) : (
+                  <>
+                    <MdKeyboardDoubleArrowDown className="h-4 w-4" />
+                    <span>Espandi</span>
+                  </>
+                )}
+              </button>
+
+              {isExpanded && (
+                <div className="space-y-5">
+                  <PlayerInfoActionsRow
+                    variant="card"
+                    users={[user]}
+                    onAddTecnica={handleAddTecnicaClick}
+                    onAddSpell={handleAddSpellClick}
+                    onAddLingua={handleAddLinguaClick}
+                    onAddConoscenza={handleAddConoscenzaClick}
+                    onAddProfessione={handleAddProfessioneClick}
+                    sleekBtnClass={sleekButtonClass}
+                  />
+                  <PlayerInfoTecnicheRow
+                    variant="card"
+                    users={[user]}
+                    iconEditClass={iconEditClass}
+                    iconDeleteClass={iconDeleteClass}
+                    onEditTecnica={handleEditTecnicaClick}
+                    onDeleteTecnica={handleDeleteTecnicaClick}
+                  />
+                  <PlayerInfoSpellsRow
+                    variant="card"
+                    users={[user]}
+                    iconEditClass={iconEditClass}
+                    iconDeleteClass={iconDeleteClass}
+                    onEditSpell={handleEditSpellClick}
+                    onDeleteSpell={handleDeleteSpellClick}
+                  />
+                  <PlayerInfoConoscenzeRow
+                    variant="card"
+                    users={[user]}
+                    iconEditClass={iconEditClass}
+                    iconDeleteClass={iconDeleteClass}
+                    onEditConoscenza={handleEditConoscenzaClick}
+                    onDeleteConoscenza={handleDeleteConoscenzaClick}
+                  />
+                  <PlayerInfoProfessioniRow
+                    variant="card"
+                    users={[user]}
+                    iconEditClass={iconEditClass}
+                    iconDeleteClass={iconDeleteClass}
+                    onEditProfessione={handleEditProfessioneClick}
+                    onDeleteProfessione={handleDeleteProfessioneClick}
+                  />
+                  <PlayerInfoLingueRow
+                    variant="card"
+                    users={[user]}
+                    iconDeleteClass={iconDeleteClass}
+                    onDeleteLingua={handleDeleteLinguaClick}
+                  />
+                  <PlayerInfoInventoryRow
+                    variant="card"
+                    users={[user]}
+                    catalog={catalog}
+                    itemsDocs={itemsDocs}
+                    iconEditClass={iconEditClass}
+                    onEditInventoryItem={handleEditInventoryItem}
+                    onOpenGoldOverlay={openGoldOverlay}
+                    goldUpdating={goldUpdating}
+                    onAddVarie={handleAddVarieForUser}
+                  />
+                  <PlayerInfoDiceRollsRow variant="card" users={[user]} />
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const content = variant === "card" ? renderCardLayout() : renderTableLayout();
+
+  return (
+    <div className={variant === "card" ? "mt-4" : "mt-8"}>
+      {variant !== "card" && <h2 className="mb-3 text-slate-100 text-xl font-semibold tracking-tight">Player Info</h2>}
+      {content}
 
       <GoldAdjustmentOverlay
         visible={!!goldOverlay}

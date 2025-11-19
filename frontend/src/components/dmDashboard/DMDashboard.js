@@ -24,12 +24,11 @@ const DMDashboard = () => {
   const levelUpUser = httpsCallable(functions, "levelUpUser");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
+  const [selectedUserIds, setSelectedUserIds] = useState([]);
   // Collapsible sections state
   const [sectionsOpen, setSectionsOpen] = useState({
-    overview: true,
-    vitals: true,
+    players: true,
     locks: true,
-    playerInfo: true,
   });
 
   // Realtime subscription to users collection once DM status is confirmed.
@@ -63,6 +62,26 @@ const DMDashboard = () => {
 
     return () => unsubscribe();
   }, [userData, navigate]);
+
+  // Ensure player selection state stays in sync with the current users list.
+  // New users are auto-selected; removed users are cleaned out.
+  useEffect(() => {
+    if (!users.length) {
+      setSelectedUserIds([]);
+      return;
+    }
+    setSelectedUserIds((prev) => {
+      const stillValid = prev.filter((id) => users.some((u) => u.id === id));
+      const withNew = Array.from(new Set([...stillValid, ...users.map((u) => u.id)]));
+      return withNew;
+    });
+  }, [users]);
+
+  const toggleUserSelection = (userId) => {
+    setSelectedUserIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
+  };
 
   // Simple section header with show/hide control
   const SectionHeader = ({ title, sectionKey }) => (
@@ -162,73 +181,6 @@ const DMDashboard = () => {
 
   // Note: lock toggles handled in LockSettingsTable to avoid whole-page re-renders
 
-  // Player overview cards with quick actions
-  const renderPlayerOverview = () => {
-    if (loading) return null;
-    if (!users.length) return null;
-
-    return (
-      <div className="mt-8">
-        <SectionHeader title="Players Overview" sectionKey="overview" />
-        {sectionsOpen.overview && (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {users.map((user) => {
-              const bAvail = Number(user?.stats?.basePointsAvailable) || 0;
-              const bSpent = Number(user?.stats?.basePointsSpent) || 0;
-              const bTot = bAvail + bSpent;
-              const cAvail = Number(user?.stats?.combatTokensAvailable) || 0;
-              const cSpent = Number(user?.stats?.combatTokensSpent) || 0;
-              const cTot = cAvail + cSpent;
-              return (
-                <div key={user.id} className="rounded-lg border border-slate-700/60 bg-gray-800/90 p-4 shadow-sm">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="text-sm font-medium text-slate-100">
-                        {user.characterId || user.email || "Unknown User"}
-                      </div>
-                      <div className="text-xs text-gray-300">Lv {user?.stats?.level || 1}</div>
-                    </div>
-                  </div>
-                  <div className="mt-3 space-y-1">
-                    <div className="flex items-center gap-2 text-[11px]">
-                      <span className="text-slate-400/80">Base</span>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-emerald-300 ring-1 ring-inset ring-emerald-400/30" title="Base points available">A {bAvail}</span>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-400/10 px-2 py-0.5 text-slate-300 ring-1 ring-inset ring-white/10" title="Base points spent">S {bSpent}</span>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-slate-200 ring-1 ring-inset ring-white/10" title="Base points total">T {bTot}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-[11px]">
-                      <span className="text-slate-400/80">Combat</span>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-indigo-400/10 px-2 py-0.5 text-indigo-300 ring-1 ring-inset ring-indigo-400/30" title="Combat tokens available">A {cAvail}</span>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-400/10 px-2 py-0.5 text-slate-300 ring-1 ring-inset ring-white/10" title="Combat tokens spent">S {cSpent}</span>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-slate-200 ring-1 ring-inset ring-white/10" title="Combat tokens total">T {cTot}</span>
-                    </div>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => handleLevelUpOne(user.id)}
-                      disabled={busy}
-                      className={`px-2 py-1 rounded text-xs ${busy ? 'bg-emerald-400' : 'bg-emerald-600 hover:bg-emerald-500'} text-white shadow-sm`}
-                      title="Increase level by 1 for this player"
-                    >
-                      Level Up
-                    </button>
-                    <button
-                      onClick={() => handleAddCombatTokens(user.id)}
-                      disabled={busy}
-                      className={`px-2 py-1 rounded text-xs ${busy ? 'bg-amber-400' : 'bg-amber-600 hover:bg-amber-500'} text-white shadow-sm`}
-                      title="Add combat tokens to this player"
-                    >
-                      Add Tokens
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    );
-  };
   
 
   // Render the lock settings table (delegates to child to avoid rerendering the whole page)
@@ -248,172 +200,6 @@ const DMDashboard = () => {
         <SectionHeader title="User Lock Settings" sectionKey="locks" />
         {sectionsOpen.locks && (
           <LockSettingsTable users={users} canEdit={userData.role === 'dm'} />
-        )}
-      </div>
-    );
-  };
-
-  // Render player vitals (HP and Mana) for each user
-  const renderVitalsTable = () => {
-    if (loading) return null;
-    if (!users.length) return null;
-
-    const VBar = ({ pct, track, fill }) => (
-      <div className={`w-28 h-2 ${track} rounded overflow-hidden border border-slate-700/50`}>
-        <div className={`${fill} h-full`} style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
-      </div>
-    );
-
-    // Mapping helper for stats fields
-    const vitalFieldMap = {
-      hp: { current: 'stats.hpCurrent', total: 'stats.hpTotal', label: 'HP' },
-      mana: { current: 'stats.manaCurrent', total: 'stats.manaTotal', label: 'Mana' }
-    };
-
-    const promptInteger = (message, defaultVal) => {
-      const input = window.prompt(message, defaultVal != null ? String(defaultVal) : '');
-      if (input === null) return null; // cancelled
-      const n = parseInt(input, 10);
-      if (Number.isNaN(n) || !Number.isFinite(n)) return null;
-      return n;
-    };
-
-    const adjustVitalDelta = async (userId, vital, delta) => {
-      if (userData.role !== 'dm') return;
-      const fields = vitalFieldMap[vital];
-      const u = users.find(x => x.id === userId);
-      if (!u) return;
-      const cur = Number(u?.stats?.[vital + 'Current']) || 0;
-      const newVal = Math.max(0, cur + delta);
-      try {
-        await updateDoc(doc(db, 'users', userId), { [fields.current]: newVal });
-      } catch (e) { console.error('adjustVitalDelta failed', e); }
-    };
-
-    const resetVital = async (userId, vital) => {
-      if (userData.role !== 'dm') return;
-      const fields = vitalFieldMap[vital];
-      const u = users.find(x => x.id === userId);
-      if (!u) return;
-      const tot = Number(u?.stats?.[vital + 'Total']) || 0;
-      try {
-        await updateDoc(doc(db, 'users', userId), { [fields.current]: tot });
-      } catch (e) { console.error('resetVital failed', e); }
-    };
-
-    const setVitalCurrent = async (userId, vital) => {
-      if (userData.role !== 'dm') return;
-      const u = users.find(x => x.id === userId);
-      if (!u) return;
-      const cur = Number(u?.stats?.[vital + 'Current']) || 0;
-      const n = promptInteger(`Set ${vitalFieldMap[vital].label} current value`, cur);
-      if (n === null) return;
-      try {
-        await updateDoc(doc(db, 'users', userId), { [vitalFieldMap[vital].current]: Math.max(0, n) });
-      } catch (e) { console.error('setVitalCurrent failed', e); }
-    };
-
-    const setVitalTotal = async (userId, vital) => {
-      if (userData.role !== 'dm') return;
-      const u = users.find(x => x.id === userId);
-      if (!u) return;
-      const tot = Number(u?.stats?.[vital + 'Total']) || 0;
-      const n = promptInteger(`Set ${vitalFieldMap[vital].label} total value`, tot);
-      if (n === null) return;
-      const cur = Number(u?.stats?.[vital + 'Current']) || 0;
-      const updates = { [vitalFieldMap[vital].total]: Math.max(0, n) };
-      if (cur > n) {
-        if (window.confirm('Current value exceeds new total. Clamp current to new total?')) {
-          updates[vitalFieldMap[vital].current] = Math.max(0, n);
-        }
-      }
-      try {
-        await updateDoc(doc(db, 'users', userId), updates);
-      } catch (e) { console.error('setVitalTotal failed', e); }
-    };
-
-    const customDeltaPrompt = async (userId, vital) => {
-      if (userData.role !== 'dm') return;
-      const delta = promptInteger(`Enter ${vitalFieldMap[vital].label} delta (use negative to subtract)`, '0');
-      if (delta === null || delta === 0) return;
-      await adjustVitalDelta(userId, vital, delta);
-    };
-
-    return (
-      <div className="mt-8">
-        <SectionHeader title="Player Vitals" sectionKey="vitals" />
-        {sectionsOpen.vitals && (
-          <div className="overflow-x-auto rounded-lg border border-slate-700/60 shadow-sm">
-            <table className="min-w-max border-collapse text-white bg-gray-800 text-sm">
-              <thead className="bg-gray-700/80 backdrop-blur supports-[backdrop-filter]:bg-gray-700/70">
-                <tr className="text-slate-100">
-                  <th className="sticky left-0 z-20 border border-gray-600 px-4 py-2 text-left bg-gray-700/80">Stat</th>
-                  {users.map((u) => (
-                    <th key={u.id} className="border border-gray-600 px-3 py-2 text-center min-w-[10rem] align-top">
-                      <div className="text-sm font-medium">{u.characterId || u.email || 'Unknown User'}</div>
-                      <div className="text-xs text-gray-300">Lv {u?.stats?.level || 1}</div>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {/* HP row */}
-                <tr className="bg-gray-800 hover:bg-gray-700/60">
-                  <td className="sticky left-0 z-10 border border-gray-600 px-4 py-2 bg-gray-800 font-medium">HP</td>
-                  {users.map((u) => {
-                    const cur = Number(u?.stats?.hpCurrent) || 0;
-                    const tot = Number(u?.stats?.hpTotal) || 0;
-                    const pct = tot > 0 ? (cur / tot) * 100 : 0;
-                    return (
-                      <td key={`${u.id}-hp`} className="border border-gray-600 px-2 py-2 text-center align-top">
-                        <div className="flex flex-col items-center gap-1">
-                          <VBar pct={pct} track="bg-red-900/30" fill="bg-gradient-to-r from-red-500 to-rose-500" />
-                          <div className="text-[10px] flex items-center gap-1 text-slate-300">
-                            <button onClick={() => adjustVitalDelta(u.id, 'hp', -1)} className="px-1 rounded bg-slate-700/60 hover:bg-slate-600" title="-1 HP">-</button>
-                            <span onClick={() => setVitalCurrent(u.id, 'hp')} className="cursor-pointer hover:text-white" title="Set current HP">{cur}</span>
-                            /
-                            <span onClick={() => setVitalTotal(u.id, 'hp')} className="cursor-pointer hover:text-white" title="Set total HP">{tot}</span>
-                            <button onClick={() => adjustVitalDelta(u.id, 'hp', 1)} className="px-1 rounded bg-slate-700/60 hover:bg-slate-600" title="+1 HP">+</button>
-                          </div>
-                          <div className="flex gap-1">
-                            <button onClick={() => resetVital(u.id, 'hp')} className="px-1 text-[10px] rounded bg-emerald-700/60 hover:bg-emerald-600" title="Reset current to total">R</button>
-                            <button onClick={() => customDeltaPrompt(u.id, 'hp')} className="px-1 text-[10px] rounded bg-indigo-700/60 hover:bg-indigo-600" title="Custom delta">Δ</button>
-                          </div>
-                        </div>
-                      </td>
-                    );
-                  })}
-                </tr>
-                {/* Mana row */}
-                <tr className="bg-gray-800 hover:bg-gray-700/60">
-                  <td className="sticky left-0 z-10 border border-gray-600 px-4 py-2 bg-gray-800 font-medium">Mana</td>
-                  {users.map((u) => {
-                    const cur = Number(u?.stats?.manaCurrent) || 0;
-                    const tot = Number(u?.stats?.manaTotal) || 0;
-                    const pct = tot > 0 ? (cur / tot) * 100 : 0;
-                    return (
-                      <td key={`${u.id}-mana`} className="border border-gray-600 px-2 py-2 text-center align-top">
-                        <div className="flex flex-col items-center gap-1">
-                          <VBar pct={pct} track="bg-indigo-900/30" fill="bg-gradient-to-r from-indigo-600 to-fuchsia-600" />
-                          <div className="text-[10px] flex items-center gap-1 text-slate-300">
-                            <button onClick={() => adjustVitalDelta(u.id, 'mana', -1)} className="px-1 rounded bg-slate-700/60 hover:bg-slate-600" title="-1 Mana">-</button>
-                            <span onClick={() => setVitalCurrent(u.id, 'mana')} className="cursor-pointer hover:text-white" title="Set current Mana">{cur}</span>
-                            /
-                            <span onClick={() => setVitalTotal(u.id, 'mana')} className="cursor-pointer hover:text-white" title="Set total Mana">{tot}</span>
-                            <button onClick={() => adjustVitalDelta(u.id, 'mana', 1)} className="px-1 rounded bg-slate-700/60 hover:bg-slate-600" title="+1 Mana">+</button>
-                          </div>
-                          <div className="flex gap-1">
-                            <button onClick={() => resetVital(u.id, 'mana')} className="px-1 text-[10px] rounded bg-emerald-700/60 hover:bg-emerald-600" title="Reset current to total">R</button>
-                            <button onClick={() => customDeltaPrompt(u.id, 'mana')} className="px-1 text-[10px] rounded bg-indigo-700/60 hover:bg-indigo-600" title="Custom delta">Δ</button>
-                          </div>
-                        </div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              </tbody>
-            </table>
-          </div>
         )}
       </div>
     );
@@ -470,27 +256,74 @@ const DMDashboard = () => {
           </p>
         </div>
 
-        {renderPlayerOverview()}
-        {renderVitalsTable()}
-        {renderLockSettingsTable()}
-
-        {/* Player info table */}
         <div className="mt-8">
-          <SectionHeader title="Player Info" sectionKey="playerInfo" />
-          {sectionsOpen.playerInfo && (
-            <div className="overflow-x-auto">
-              <PlayerInfo 
-                users={users}
-                loading={loading}
-                error={error}
-                setUsers={setUsers}
-              />
-            </div>
+          <SectionHeader title="Players" sectionKey="players" />
+          {sectionsOpen.players && (
+            <>
+              <div className="mb-4">
+                <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-2">Seleziona giocatori da mostrare</div>
+                <div className="flex flex-wrap gap-2 items-center">
+                  <button
+                    onClick={() => setSelectedUserIds(users.map((u) => u.id))}
+                    className="rounded-full border border-emerald-400/70 bg-emerald-800/60 px-3 py-1 text-[11px] font-semibold text-emerald-50 transition hover:bg-emerald-700/70"
+                  >
+                    Seleziona tutti
+                  </button>
+                  <button
+                    onClick={() => setSelectedUserIds([])}
+                    className="rounded-full border border-rose-400/70 bg-rose-800/60 px-3 py-1 text-[11px] font-semibold text-rose-50 transition hover:bg-rose-700/70"
+                  >
+                    Deseleziona tutti
+                  </button>
+                  <span className="mx-2 h-5 w-px bg-slate-700/70" />
+                  {users.map((user) => {
+                    const isSelected = selectedUserIds.includes(user.id);
+                    const label = user.characterId || user.email;
+                    return (
+                      <button
+                        key={user.id}
+                        onClick={() => toggleUserSelection(user.id)}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                          isSelected
+                            ? "border-indigo-400 bg-indigo-700/80 text-white shadow"
+                            : "border-slate-700/70 bg-slate-800/70 text-slate-200 hover:bg-slate-700/70"
+                        }`}
+                        title={isSelected ? "Nascondi tile" : "Mostra tile"}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                  {!users.length && <span className="text-sm text-slate-400">Nessun giocatore disponibile</span>}
+                </div>
+              </div>
+
+              {selectedUserIds.length > 0 ? (
+                <PlayerInfo 
+                  users={users.filter((u) => selectedUserIds.includes(u.id))}
+                  loading={loading}
+                  error={error}
+                  setUsers={setUsers}
+                  variant="card"
+                  onLevelUpOne={handleLevelUpOne}
+                  onAddTokens={handleAddCombatTokens}
+                  busy={busy}
+                  canEditVitals={userData.role === 'dm'}
+                />
+              ) : (
+                <div className="rounded-lg border border-slate-700/60 bg-gray-800/60 p-4 text-sm text-slate-300">
+                  Nessun giocatore selezionato. Scegli un nome sopra per mostrare il relativo tile.
+                </div>
+              )}
+            </>
           )}
         </div>
+
+        {renderLockSettingsTable()}
       </div>
     </div>
   );
 };
 
 export default DMDashboard;
+
