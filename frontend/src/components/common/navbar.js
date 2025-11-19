@@ -6,6 +6,7 @@ import { auth } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
 import { HiMagnifyingGlassPlus } from 'react-icons/hi2';
 import { LuImageUp } from 'react-icons/lu';
+import { GiSpikedDragonHead } from 'react-icons/gi';
 import { storage, db } from '../firebaseConfig';
 import { ref as storageRef, deleteObject, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, updateDoc } from 'firebase/firestore';
@@ -14,7 +15,7 @@ const Navbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, userData } = useAuth();
-  
+
   // Loading state for logout operations
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -169,7 +170,7 @@ const Navbar = () => {
                 : "bg-transparent text-white hover:bg-[#e69500]"
             }`}
           >
-            Home
+            <GiSpikedDragonHead className="text-2xl" />
           </button>
           <button
             onClick={() => navigate("/bazaar")}
