@@ -34,7 +34,8 @@ service cloud.firestore {
     function isPlayer() {
       return isSignedIn()
         && exists(userDocPath(request.auth.uid))
-        && get(userDocPath(request.auth.uid)).data.role == "player";
+        && (get(userDocPath(request.auth.uid)).data.role == "player"
+            || get(userDocPath(request.auth.uid)).data.role == "players");
     }
 
     // Encounter helpers
@@ -81,6 +82,11 @@ service cloud.firestore {
       // Dice roll logs subcollection: each user can manage ONLY their own dice rolls
       match /diceRolls/{rollId} {
         // Owner full access (DM already globally allowed). Webmaster may access via parent rule if desired, but keep explicit owner rule.
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+
+      // Private map markers per user
+      match /map_markers_private/{markerId} {
         allow read, write: if isSignedIn() && request.auth.uid == userId;
       }
     }
@@ -130,6 +136,12 @@ service cloud.firestore {
         // Read & Write for any authenticated user; DM still has global allow.
         allow read, write: if isSignedIn();
       }
+    }
+
+    // Map Markers
+    match /map_markers/{markerId} {
+      allow read: if isSignedIn();
+      allow write: if isDM() || isWebmaster() || isPlayer();
     }
   }
 }
