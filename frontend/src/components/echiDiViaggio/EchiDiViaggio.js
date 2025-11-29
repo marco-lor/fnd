@@ -142,7 +142,7 @@ function EchiDiViaggio() {
                     <img 
                         src={mappaArt} 
                         alt="Mappa Artistica" 
-                        className={`w-full h-auto object-cover transition-transform duration-500 ease-out ${selectedIcon ? 'cursor-crosshair' : 'hover:scale-[1.02]'}`}
+                        className={`w-full h-auto object-cover transition-transform duration-500 ease-out ${selectedIcon ? 'cursor-crosshair' : 'hover:scale-[1.01]'}`}
                         onClick={(e) => handleMapClick(e, 'art')}
                     />
                     {/* Markers Layer */}
@@ -170,7 +170,7 @@ function EchiDiViaggio() {
                     <img 
                         src={mappaPrecisa} 
                         alt="Mappa Dettagliata" 
-                        className={`w-full h-auto object-cover transition-transform duration-500 ease-out ${selectedIcon ? 'cursor-crosshair' : 'hover:scale-[1.02]'}`}
+                        className={`w-full h-auto object-cover transition-transform duration-500 ease-out ${selectedIcon ? 'cursor-crosshair' : 'hover:scale-[1.01]'}`}
                         onClick={(e) => handleMapClick(e, 'precisa')}
                     />
                     {/* Markers Layer */}
