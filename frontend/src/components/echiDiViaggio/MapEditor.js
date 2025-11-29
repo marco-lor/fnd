@@ -37,13 +37,18 @@ export const renderMarkerIcon = (type, colorOverride) => {
 
 export const useMapEditing = ({ user, canEdit, collectionPath }) => {
     const [markers, setMarkers] = useState([]);
-    const [editMode, setEditMode] = useState(false);
+    const [editMode, setEditMode] = useState(!!canEdit); // Default to true if can edit
     const [selectedIcon, setSelectedIcon] = useState(null);
     const [showModal, setShowModal] = useState(false);
     const [newMarkerData, setNewMarkerData] = useState(null);
     const [markerText, setMarkerText] = useState('');
 
     const collectionKey = collectionPath ? collectionPath.join('/') : null;
+
+    // Update editMode if canEdit changes
+    useEffect(() => {
+        setEditMode(!!canEdit);
+    }, [canEdit]);
 
     // Fetch markers
     useEffect(() => {
@@ -96,7 +101,7 @@ export const useMapEditing = ({ user, canEdit, collectionPath }) => {
 
     const handleDeleteMarker = async (e, markerId) => {
         e.stopPropagation(); // Prevent map click
-        if (!window.confirm("Eliminare questo punto di interesse?")) return;
+        // Confirmation is handled by UI component now
         if (!collectionKey) return;
 
         try {
@@ -124,57 +129,41 @@ export const useMapEditing = ({ user, canEdit, collectionPath }) => {
     };
 };
 
-export const MapEditorControls = ({ title, canEdit, editMode, setEditMode, selectedIcon, setSelectedIcon }) => {
+export const MapEditorControls = ({ title, canEdit, selectedIcon, setSelectedIcon, markerColor }) => {
     if (!canEdit) return null;
 
     return (
-        <div className="bg-gray-900/70 p-3 rounded-xl border border-gray-700 shadow-xl backdrop-blur-md w-72">
-            <div className="flex items-center justify-between gap-2 mb-3">
-                <p className="text-sm font-semibold text-gray-200">{title}</p>
-                <button
-                    onClick={() => {
-                        setEditMode(!editMode);
-                        setSelectedIcon(null);
-                    }}
-                    className={`px-3 py-2 rounded-lg text-xs font-bold shadow-lg transition-all ${
-                        editMode
-                        ? 'bg-red-600 hover:bg-red-700 text-white'
-                        : 'bg-blue-600 hover:bg-blue-700 text-white'
-                    }`}
-                >
-                    {editMode ? 'Chiudi' : 'Modifica'}
-                </button>
+        <div className="bg-gray-900/80 p-2 rounded-xl border border-gray-700 shadow-xl backdrop-blur-md flex flex-col gap-2">
+            <div className="flex items-center justify-between px-2">
+                <p className="text-xs font-bold uppercase tracking-wider" style={{ color: markerColor || '#ccc' }}>{title}</p>
             </div>
             
-            {editMode && (
-                <div>
-                    <p className="text-xs text-gray-300 mb-3 text-center border-b border-gray-600 pb-2">
-                        Seleziona un'icona e clicca sulla mappa
-                    </p>
-                    <div className="grid grid-cols-4 gap-2">
-                        {Object.entries(MARKER_ICONS).map(([key, config]) => (
-                            <button
-                                key={key}
-                                onClick={() => setSelectedIcon(selectedIcon === key ? null : key)}
-                                className={`p-2 rounded-lg flex items-center justify-center transition-all ${
-                                    selectedIcon === key 
-                                    ? 'bg-white/20 ring-2 ring-[#FFA500] scale-110' 
-                                    : 'hover:bg-white/10 hover:scale-105'
-                                }`}
-                                title={config.label}
-                            >
-                                <config.icon 
-                                    className="text-2xl" 
-                                    style={{ color: config.color }} 
-                                />
-                            </button>
-                        ))}
-                    </div>
-                    {selectedIcon && (
-                        <div className="mt-3 text-center text-xs text-[#FFA500] animate-pulse">
-                            Modalita inserimento attiva: {MARKER_ICONS[selectedIcon].label}
-                        </div>
-                    )}
+            <div className="flex flex-row gap-2 overflow-x-auto pb-1 px-1 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent">
+                {Object.entries(MARKER_ICONS).map(([key, config]) => (
+                    <button
+                        key={key}
+                        onClick={() => setSelectedIcon(selectedIcon === key ? null : key)}
+                        className={`p-2 rounded-lg flex items-center justify-center transition-all flex-shrink-0 ${
+                            selectedIcon === key 
+                            ? 'bg-white/20 ring-2 scale-110' 
+                            : 'hover:bg-white/10 hover:scale-105'
+                        }`}
+                        style={{ 
+                            borderColor: selectedIcon === key ? (markerColor || '#FFA500') : 'transparent',
+                            boxShadow: selectedIcon === key ? `0 0 10px ${markerColor || '#FFA500'}` : 'none'
+                        }}
+                        title={config.label}
+                    >
+                        <config.icon 
+                            className="text-2xl" 
+                            style={{ color: markerColor || config.color }} 
+                        />
+                    </button>
+                ))}
+            </div>
+            {selectedIcon && (
+                <div className="text-center text-[10px] font-bold animate-pulse" style={{ color: markerColor || '#FFA500' }}>
+                    SELEZIONATO: {MARKER_ICONS[selectedIcon].label.toUpperCase()}
                 </div>
             )}
         </div>
