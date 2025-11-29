@@ -1,10 +1,78 @@
 // file: ./frontend/src/components/echiDiViaggio/EchiDiViaggio.js
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useAuth } from '../../AuthContext';
 import mappaArt from '../../assets/images/maps/mappa_art.png';
 import mappaPrecisa from '../../assets/images/maps/mappa_precisa.png';
 import GlobalAuroraBackground from '../backgrounds/GlobalAuroraBackground';
 import { useMapEditing, MapEditorControls, MapMarkerModal, renderMarkerIcon } from './MapEditor';
+
+const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, markerColor }) => {
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    const handleDeleteClick = (e) => {
+        e.stopPropagation();
+        setIsDeleting(true);
+    };
+
+    const handleCancelDelete = (e) => {
+        e.stopPropagation();
+        setIsDeleting(false);
+    };
+
+    const handleConfirmDelete = (e) => {
+        e.stopPropagation();
+        onDelete(e, marker.id);
+    };
+
+    return (
+        <div
+          className="absolute w-8 h-8 -ml-4 -mt-4 z-20 group/marker"
+          style={{ left: `${marker.x}%`, top: `${marker.y}%` }}
+        >
+          <div className="w-full h-full cursor-pointer hover:scale-125 transition-transform duration-200 relative">
+            {renderMarkerIcon(marker.iconType, markerColor)}
+            {scopeLabel === 'private' && (
+              <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[10px] px-2 py-0.5 rounded-full bg-purple-600 text-white font-semibold shadow whitespace-nowrap z-40">
+                Privato
+              </span>
+            )}
+          </div>
+          
+          {editMode && canEdit && (
+            <>
+                {/* Delete Button (X) - Slides right when deleting */}
+                <button 
+                  onClick={isDeleting ? handleCancelDelete : handleDeleteClick}
+                  className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-red-700 z-30 shadow-md border border-white/20 transition-all duration-200 ${
+                      isDeleting ? 'translate-x-6 opacity-100' : 'opacity-0 group-hover/marker:opacity-100'
+                  }`}
+                  title={isDeleting ? "Annulla" : "Elimina"}
+                >
+                  X
+                </button>
+
+                {/* Confirm Button (Check) - Appears when deleting */}
+                <button 
+                  onClick={handleConfirmDelete}
+                  className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-green-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-green-600 z-30 shadow-md border border-white/20 transition-all duration-200 ${
+                      isDeleting ? 'opacity-100 scale-100' : 'opacity-0 scale-0 pointer-events-none'
+                  }`}
+                  title="Conferma"
+                >
+                  ✓
+                </button>
+            </>
+          )}
+
+          <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 transition-opacity duration-300 pointer-events-none z-30 ${isDeleting ? 'opacity-0' : 'opacity-0 group-hover/marker:opacity-100'}`}>
+            <div className={`bg-black/90 text-white p-3 rounded-lg border shadow-xl text-sm font-serif leading-relaxed relative`} style={{ borderColor: markerColor }}>
+              {marker.text}
+              <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-black/90"></div>
+            </div>
+          </div>
+        </div>
+    );
+};
 
 function EchiDiViaggio() {
   const { user, userData, loading } = useAuth();
@@ -12,6 +80,9 @@ function EchiDiViaggio() {
   // Check permissions
   const canEditPublic = ['webmaster', 'dm', 'players', 'player'].includes(userData?.role);
   const canEditPrivate = !!user;
+
+  const PUBLIC_COLOR = '#00BFFF';
+  const PRIVATE_COLOR = '#a855f7';
 
   const publicCollectionPath = useMemo(() => ['map_markers'], []);
   const privateCollectionPath = useMemo(
@@ -52,6 +123,16 @@ function EchiDiViaggio() {
     handleDeleteMarker: handlePrivateDeleteMarker
   } = useMapEditing({ user, canEdit: canEditPrivate, collectionPath: privateCollectionPath });
 
+  const handleSetPublicIcon = (icon) => {
+      setPublicSelectedIcon(icon);
+      if (icon) setPrivateSelectedIcon(null);
+  };
+
+  const handleSetPrivateIcon = (icon) => {
+      setPrivateSelectedIcon(icon);
+      if (icon) setPublicSelectedIcon(null);
+  };
+
   const selectedIcon = publicSelectedIcon || privateSelectedIcon;
 
   const handleMapClick = (e, mapId) => {
@@ -64,41 +145,19 @@ function EchiDiViaggio() {
     }
   };
 
-  const renderMarkersForMap = (markersList, { mapId, editMode, canEdit, handleDelete, scopeLabel }) =>
+  const renderMarkersForMap = (markersList, { mapId, editMode, canEdit, handleDelete, scopeLabel, markerColor }) =>
     markersList
       .filter(m => m.mapId === mapId)
       .map(marker => (
-        <div
-          key={`${scopeLabel}-${marker.id}`}
-          className="absolute w-8 h-8 -ml-4 -mt-4 z-20 group/marker"
-          style={{ left: `${marker.x}%`, top: `${marker.y}%` }}
-        >
-          <div className="w-full h-full cursor-pointer hover:scale-125 transition-transform duration-200 relative">
-            {renderMarkerIcon(marker.iconType)}
-            {scopeLabel === 'private' && (
-              <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[10px] px-2 py-0.5 rounded-full bg-blue-500 text-black font-semibold shadow">
-                Privato
-              </span>
-            )}
-          </div>
-          
-          {editMode && canEdit && (
-            <button 
-              onClick={(e) => handleDelete(e, marker.id)}
-              className="absolute -top-4 -right-4 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-red-700 z-30 shadow-md border border-white/20"
-              title="Elimina"
-            >
-              X
-            </button>
-          )}
-
-          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 opacity-0 group-hover/marker:opacity-100 transition-opacity duration-300 pointer-events-none z-30">
-            <div className={`bg-black/90 text-white p-3 rounded-lg border ${mapId === 'precisa' ? 'border-[#00BFFF]' : 'border-[#FFA500]'} shadow-xl text-sm font-serif leading-relaxed relative`}>
-              {marker.text}
-              <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-black/90"></div>
-            </div>
-          </div>
-        </div>
+        <MapMarkerItem
+            key={`${scopeLabel}-${marker.id}`}
+            marker={marker}
+            editMode={editMode}
+            canEdit={canEdit}
+            onDelete={handleDelete}
+            scopeLabel={scopeLabel}
+            markerColor={markerColor}
+        />
       ));
 
   // Optional: Show loading state or handle case where user is not logged in
@@ -116,22 +175,20 @@ function EchiDiViaggio() {
         <div className="space-y-12 w-full">
             
             {/* Editors */}
-            <div className="w-full flex flex-wrap justify-end gap-4 px-4 items-start">
+            <div className="w-full flex flex-col gap-4 px-4">
                 <MapEditorControls 
                     title="Public Editor"
                     canEdit={canEditPublic}
-                    editMode={publicEditMode}
-                    setEditMode={setPublicEditMode}
                     selectedIcon={publicSelectedIcon}
-                    setSelectedIcon={setPublicSelectedIcon}
+                    setSelectedIcon={handleSetPublicIcon}
+                    markerColor={PUBLIC_COLOR}
                 />
                 <MapEditorControls 
                     title="Private Editor"
                     canEdit={canEditPrivate}
-                    editMode={privateEditMode}
-                    setEditMode={setPrivateEditMode}
                     selectedIcon={privateSelectedIcon}
-                    setSelectedIcon={setPrivateSelectedIcon}
+                    setSelectedIcon={handleSetPrivateIcon}
+                    markerColor={PRIVATE_COLOR}
                 />
             </div>
 
@@ -142,7 +199,7 @@ function EchiDiViaggio() {
                     <img 
                         src={mappaArt} 
                         alt="Mappa Artistica" 
-                        className={`w-full h-auto object-cover transition-transform duration-500 ease-out ${selectedIcon ? 'cursor-crosshair' : 'hover:scale-[1.02]'}`}
+                        className={`w-full h-auto object-cover transition-transform duration-500 ease-out ${selectedIcon ? 'cursor-crosshair' : 'hover:scale-[1.01]'}`}
                         onClick={(e) => handleMapClick(e, 'art')}
                     />
                     {/* Markers Layer */}
@@ -151,14 +208,16 @@ function EchiDiViaggio() {
                         editMode: publicEditMode,
                         canEdit: canEditPublic,
                         handleDelete: handlePublicDeleteMarker,
-                        scopeLabel: 'public'
+                        scopeLabel: 'public',
+                        markerColor: PUBLIC_COLOR
                     })}
                     {renderMarkersForMap(privateMarkers, {
                         mapId: 'art',
                         editMode: privateEditMode,
                         canEdit: canEditPrivate,
                         handleDelete: handlePrivateDeleteMarker,
-                        scopeLabel: 'private'
+                        scopeLabel: 'private',
+                        markerColor: PRIVATE_COLOR
                     })}
                 </div>
             </div>
@@ -170,7 +229,7 @@ function EchiDiViaggio() {
                     <img 
                         src={mappaPrecisa} 
                         alt="Mappa Dettagliata" 
-                        className={`w-full h-auto object-cover transition-transform duration-500 ease-out ${selectedIcon ? 'cursor-crosshair' : 'hover:scale-[1.02]'}`}
+                        className={`w-full h-auto object-cover transition-transform duration-500 ease-out ${selectedIcon ? 'cursor-crosshair' : 'hover:scale-[1.01]'}`}
                         onClick={(e) => handleMapClick(e, 'precisa')}
                     />
                     {/* Markers Layer */}
@@ -179,14 +238,16 @@ function EchiDiViaggio() {
                         editMode: publicEditMode,
                         canEdit: canEditPublic,
                         handleDelete: handlePublicDeleteMarker,
-                        scopeLabel: 'public'
+                        scopeLabel: 'public',
+                        markerColor: PUBLIC_COLOR
                     })}
                     {renderMarkersForMap(privateMarkers, {
                         mapId: 'precisa',
                         editMode: privateEditMode,
                         canEdit: canEditPrivate,
                         handleDelete: handlePrivateDeleteMarker,
-                        scopeLabel: 'private'
+                        scopeLabel: 'private',
+                        markerColor: PRIVATE_COLOR
                     })}
                 </div>
             </div>
