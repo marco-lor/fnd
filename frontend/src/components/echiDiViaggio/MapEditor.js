@@ -32,7 +32,23 @@ export const MARKER_ICONS = {
 export const renderMarkerIcon = (type, colorOverride) => {
     const iconConfig = MARKER_ICONS[type] || MARKER_ICONS.default;
     const IconComponent = iconConfig.icon;
-    return <IconComponent className="w-full h-full drop-shadow-md" style={{ color: colorOverride || iconConfig.color }} />;
+
+    const iconColor = colorOverride || iconConfig.color;
+
+    // Improve contrast on busy map backgrounds by drawing a subtle outline layer
+    // behind the colored icon. This avoids relying on SVG stroke support.
+    return (
+        <span className="relative block w-full h-full">
+            <IconComponent
+                aria-hidden="true"
+                className="absolute inset-0 w-full h-full text-black/90 drop-shadow-lg scale-110"
+            />
+            <IconComponent
+                className="absolute inset-0 w-full h-full drop-shadow-md"
+                style={{ color: iconColor }}
+            />
+        </span>
+    );
 };
 
 export const useMapEditing = ({ user, canEdit, collectionPath }) => {
