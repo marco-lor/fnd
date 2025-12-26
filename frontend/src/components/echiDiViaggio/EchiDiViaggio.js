@@ -175,21 +175,21 @@ function EchiDiViaggio() {
         <div className="space-y-12 w-full">
             
             {/* Editors */}
-            <div className="w-full flex flex-col gap-4 px-4">
-                <MapEditorControls 
-                    title="Public Editor"
-                    canEdit={canEditPublic}
-                    selectedIcon={publicSelectedIcon}
-                    setSelectedIcon={handleSetPublicIcon}
-                    markerColor={PUBLIC_COLOR}
-                />
-                <MapEditorControls 
-                    title="Private Editor"
-                    canEdit={canEditPrivate}
-                    selectedIcon={privateSelectedIcon}
-                    setSelectedIcon={handleSetPrivateIcon}
-                    markerColor={PRIVATE_COLOR}
-                />
+            <div className="w-full grid grid-cols-2 gap-4 px-4">
+              <MapEditorControls 
+                title="Private Editor"
+                canEdit={canEditPrivate}
+                selectedIcon={privateSelectedIcon}
+                setSelectedIcon={handleSetPrivateIcon}
+                markerColor={PRIVATE_COLOR}
+              />
+              <MapEditorControls 
+                title="Public Editor"
+                canEdit={canEditPublic}
+                selectedIcon={publicSelectedIcon}
+                setSelectedIcon={handleSetPublicIcon}
+                markerColor={PUBLIC_COLOR}
+              />
             </div>
 
             {/* Map 1 Container */}
