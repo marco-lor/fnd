@@ -1,5 +1,5 @@
 // file: ./frontend/src/components/echiDiViaggio/EchiDiViaggio.js
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../AuthContext';
 import mappaArt from '../../assets/images/maps/mappa_art.png';
 import mappaPrecisa from '../../assets/images/maps/mappa_precisa.png';
@@ -76,6 +76,28 @@ const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, marker
 
 function EchiDiViaggio() {
   const { user, userData, loading } = useAuth();
+  const [navbarOffset, setNavbarOffset] = useState(0);
+
+  useEffect(() => {
+    const navbar = document.querySelector('[data-navbar]');
+    if (!navbar) return undefined;
+
+    const updateOffset = () => {
+      const { height } = navbar.getBoundingClientRect();
+      setNavbarOffset(Math.ceil(height));
+    };
+
+    updateOffset();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(updateOffset);
+      observer.observe(navbar);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener('resize', updateOffset);
+    return () => window.removeEventListener('resize', updateOffset);
+  }, []);
   
   // Check permissions
   const canEditPublic = ['webmaster', 'dm', 'players', 'player'].includes(userData?.role);
@@ -134,6 +156,7 @@ function EchiDiViaggio() {
   };
 
   const selectedIcon = publicSelectedIcon || privateSelectedIcon;
+  const stickyOffset = navbarOffset ? navbarOffset + 8 : 0;
 
   const handleMapClick = (e, mapId) => {
     if (privateEditMode && privateSelectedIcon) {
@@ -169,27 +192,29 @@ function EchiDiViaggio() {
   }
 
   return (
-    <div className="echi-di-viaggio-page-container relative min-h-screen text-white overflow-hidden">
+    <div className="echi-di-viaggio-page-container relative min-h-screen text-white">
       <GlobalAuroraBackground />
       <main className="relative z-10 p-2 w-full">
         <div className="space-y-12 w-full">
             
             {/* Editors */}
-            <div className="w-full grid grid-cols-2 gap-4 px-4">
-              <MapEditorControls 
-                title="Private Editor"
-                canEdit={canEditPrivate}
-                selectedIcon={privateSelectedIcon}
-                setSelectedIcon={handleSetPrivateIcon}
-                markerColor={PRIVATE_COLOR}
-              />
-              <MapEditorControls 
-                title="Public Editor"
-                canEdit={canEditPublic}
-                selectedIcon={publicSelectedIcon}
-                setSelectedIcon={handleSetPublicIcon}
-                markerColor={PUBLIC_COLOR}
-              />
+            <div className="sticky z-40" style={{ top: stickyOffset }}>
+              <div className="w-full grid grid-cols-2 gap-4 px-4">
+                <MapEditorControls 
+                  title="Private Pin"
+                  canEdit={canEditPrivate}
+                  selectedIcon={privateSelectedIcon}
+                  setSelectedIcon={handleSetPrivateIcon}
+                  markerColor={PRIVATE_COLOR}
+                />
+                <MapEditorControls 
+                  title="Public Pin"
+                  canEdit={canEditPublic}
+                  selectedIcon={publicSelectedIcon}
+                  setSelectedIcon={handleSetPublicIcon}
+                  markerColor={PUBLIC_COLOR}
+                />
+              </div>
             </div>
 
             {/* Map 1 Container */}

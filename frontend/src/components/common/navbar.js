@@ -211,7 +211,7 @@ const Navbar = () => {
 
   return (
     <>
-      <header className="w-full bg-[rgba(40,40,60,0.8)] p-3 grid grid-cols-1 md:grid-cols-3 items-center sticky top-0 z-50 backdrop-blur-sm">
+      <header data-navbar className="w-full bg-[rgba(40,40,60,0.8)] p-3 grid grid-cols-1 md:grid-cols-3 items-center sticky top-0 z-50 backdrop-blur-sm">
         {/* Left Column: Profile Picture and Character Name */}
         <div className="flex items-center justify-center md:justify-start mb-4 md:mb-0">
           {renderProfileInfo()}
