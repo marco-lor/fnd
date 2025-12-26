@@ -24,12 +24,14 @@ The component renders a `<nav>` element with a 3-column grid layout:
 -   **Visuals:** Uses a semi-transparent background (`bg-[rgba(40,40,60,0.8)]`) with `backdrop-blur-sm` to create a glass-morphism effect over the scrolling content.
 
 ### Logic & Behavior
--   **Routing:** Uses `useNavigate` for page transitions.
--   **Active State:** Uses `useLocation` to detect the current path. The active button is highlighted (e.g., `bg-[#FFA500]`), while inactive buttons remain transparent.
+-   **Routing:** Uses `NavLink` for route navigation and active state styling. `useNavigate` is still used for logout redirects.
+-   **Active State:** `NavLink` applies the active styles when its route matches the current path.
 -   **Role-Based Rendering:**
     -   **DMs:** See additional buttons for "DM Dashboard" and "Foes Hub".
     -   **Webmasters:** See an "Admin" button.
     -   **Standard Users:** See the standard set of player tools.
+
+The navigation items are driven by a single configuration list in the Navbar, which keeps the markup consistent and reduces duplication.
 
 ## 3. Layout Component
 

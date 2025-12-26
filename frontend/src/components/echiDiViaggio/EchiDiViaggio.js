@@ -1,5 +1,5 @@
 // file: ./frontend/src/components/echiDiViaggio/EchiDiViaggio.js
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../AuthContext';
 import mappaArt from '../../assets/images/maps/mappa_art.png';
 import mappaPrecisa from '../../assets/images/maps/mappa_precisa.png';
@@ -76,6 +76,29 @@ const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, marker
 
 function EchiDiViaggio() {
   const { user, userData, loading } = useAuth();
+  const [navbarOffset, setNavbarOffset] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+
+  useEffect(() => {
+    const navbar = document.querySelector('[data-navbar]');
+    if (!navbar) return undefined;
+
+    const updateOffset = () => {
+      const { height } = navbar.getBoundingClientRect();
+      setNavbarOffset(Math.ceil(height));
+    };
+
+    updateOffset();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(updateOffset);
+      observer.observe(navbar);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener('resize', updateOffset);
+    return () => window.removeEventListener('resize', updateOffset);
+  }, []);
   
   // Check permissions
   const canEditPublic = ['webmaster', 'dm', 'players', 'player'].includes(userData?.role);
@@ -95,14 +118,12 @@ function EchiDiViaggio() {
     markers: publicMarkers,
     editMode: publicEditMode,
     setEditMode: setPublicEditMode,
-    selectedIcon: publicSelectedIcon,
-    setSelectedIcon: setPublicSelectedIcon,
     showModal: showPublicModal,
     setShowModal: setShowPublicModal,
     markerText: publicMarkerText,
     setMarkerText: setPublicMarkerText,
     setNewMarkerData: setPublicNewMarkerData,
-    handleMapClick: handlePublicMapClick,
+    handleMapDrop: handlePublicMapDrop,
     handleSaveMarker: handlePublicSaveMarker,
     handleDeleteMarker: handlePublicDeleteMarker
   } = useMapEditing({ user, canEdit: canEditPublic, collectionPath: publicCollectionPath });
@@ -111,37 +132,50 @@ function EchiDiViaggio() {
     markers: privateMarkers,
     editMode: privateEditMode,
     setEditMode: setPrivateEditMode,
-    selectedIcon: privateSelectedIcon,
-    setSelectedIcon: setPrivateSelectedIcon,
     showModal: showPrivateModal,
     setShowModal: setShowPrivateModal,
     markerText: privateMarkerText,
     setMarkerText: setPrivateMarkerText,
     setNewMarkerData: setPrivateNewMarkerData,
-    handleMapClick: handlePrivateMapClick,
+    handleMapDrop: handlePrivateMapDrop,
     handleSaveMarker: handlePrivateSaveMarker,
     handleDeleteMarker: handlePrivateDeleteMarker
   } = useMapEditing({ user, canEdit: canEditPrivate, collectionPath: privateCollectionPath });
 
-  const handleSetPublicIcon = (icon) => {
-      setPublicSelectedIcon(icon);
-      if (icon) setPrivateSelectedIcon(null);
+  const stickyOffset = navbarOffset ? navbarOffset + 8 : 0;
+
+  const handlePinDragStart = () => setIsDragging(true);
+  const handlePinDragEnd = () => setIsDragging(false);
+
+  const handleMapDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
   };
 
-  const handleSetPrivateIcon = (icon) => {
-      setPrivateSelectedIcon(icon);
-      if (icon) setPublicSelectedIcon(null);
-  };
+  const handleMapDrop = (e, mapId) => {
+    e.preventDefault();
+    setIsDragging(false);
 
-  const selectedIcon = publicSelectedIcon || privateSelectedIcon;
+    const rawPayload = e.dataTransfer.getData('text/plain');
+    if (!rawPayload) return;
 
-  const handleMapClick = (e, mapId) => {
-    if (privateEditMode && privateSelectedIcon) {
-      handlePrivateMapClick(e, mapId);
+    let payload;
+    try {
+      payload = JSON.parse(rawPayload);
+    } catch {
       return;
     }
-    if (publicEditMode && publicSelectedIcon) {
-      handlePublicMapClick(e, mapId);
+
+    const { iconType, scope } = payload || {};
+    if (!iconType || !scope) return;
+
+    if (scope === 'private') {
+      handlePrivateMapDrop(e, mapId, iconType);
+      return;
+    }
+
+    if (scope === 'public') {
+      handlePublicMapDrop(e, mapId, iconType);
     }
   };
 
@@ -169,38 +203,45 @@ function EchiDiViaggio() {
   }
 
   return (
-    <div className="echi-di-viaggio-page-container relative min-h-screen text-white overflow-hidden">
+    <div className="echi-di-viaggio-page-container relative min-h-screen text-white">
       <GlobalAuroraBackground />
       <main className="relative z-10 p-2 w-full">
         <div className="space-y-12 w-full">
             
             {/* Editors */}
-            <div className="w-full flex flex-col gap-4 px-4">
+            <div className="sticky z-40" style={{ top: stickyOffset }}>
+              <div className="w-full grid grid-cols-2 gap-4 px-4">
                 <MapEditorControls 
-                    title="Public Editor"
-                    canEdit={canEditPublic}
-                    selectedIcon={publicSelectedIcon}
-                    setSelectedIcon={handleSetPublicIcon}
-                    markerColor={PUBLIC_COLOR}
+                  title="Private Pin"
+                  canEdit={canEditPrivate}
+                  markerColor={PRIVATE_COLOR}
+                  dragScope="private"
+                  onPinDragStart={handlePinDragStart}
+                  onPinDragEnd={handlePinDragEnd}
                 />
                 <MapEditorControls 
-                    title="Private Editor"
-                    canEdit={canEditPrivate}
-                    selectedIcon={privateSelectedIcon}
-                    setSelectedIcon={handleSetPrivateIcon}
-                    markerColor={PRIVATE_COLOR}
+                  title="Public Pin"
+                  canEdit={canEditPublic}
+                  markerColor={PUBLIC_COLOR}
+                  dragScope="public"
+                  onPinDragStart={handlePinDragStart}
+                  onPinDragEnd={handlePinDragEnd}
                 />
+              </div>
             </div>
 
             {/* Map 1 Container */}
             <div className="bg-gray-800/80 p-2 rounded-2xl border border-gray-700 shadow-2xl backdrop-blur-sm">
                 <h2 className="text-2xl font-serif text-[#FFA500] mb-6 border-b border-gray-600 pb-2">Mappa Artistica</h2>
-                <div className="relative rounded-xl overflow-hidden shadow-black/50 shadow-lg ring-1 ring-white/10 group">
+                <div
+                    className="relative rounded-xl overflow-hidden shadow-black/50 shadow-lg ring-1 ring-white/10 group"
+                    onDragOver={handleMapDragOver}
+                    onDrop={(e) => handleMapDrop(e, 'art')}
+                >
                     <img 
                         src={mappaArt} 
                         alt="Mappa Artistica" 
-                        className={`w-full h-auto object-cover transition-transform duration-500 ease-out ${selectedIcon ? 'cursor-crosshair' : 'hover:scale-[1.01]'}`}
-                        onClick={(e) => handleMapClick(e, 'art')}
+                        className={`w-full h-auto object-cover transition-transform duration-500 ease-out ${isDragging ? 'cursor-crosshair' : 'hover:scale-[1.01]'}`}
                     />
                     {/* Markers Layer */}
                     {renderMarkersForMap(publicMarkers, {
@@ -225,12 +266,15 @@ function EchiDiViaggio() {
             {/* Map 2 Container */}
             <div className="bg-gray-800/80 p-2 rounded-2xl border border-gray-700 shadow-2xl backdrop-blur-sm">
                 <h2 className="text-2xl font-serif text-[#FFA500] mb-6 border-b border-gray-600 pb-2">Mappa Dettagliata</h2>
-                <div className="relative rounded-xl overflow-hidden shadow-black/50 shadow-lg ring-1 ring-white/10 group">
+                <div
+                    className="relative rounded-xl overflow-hidden shadow-black/50 shadow-lg ring-1 ring-white/10 group"
+                    onDragOver={handleMapDragOver}
+                    onDrop={(e) => handleMapDrop(e, 'precisa')}
+                >
                     <img 
                         src={mappaPrecisa} 
                         alt="Mappa Dettagliata" 
-                        className={`w-full h-auto object-cover transition-transform duration-500 ease-out ${selectedIcon ? 'cursor-crosshair' : 'hover:scale-[1.01]'}`}
-                        onClick={(e) => handleMapClick(e, 'precisa')}
+                        className={`w-full h-auto object-cover transition-transform duration-500 ease-out ${isDragging ? 'cursor-crosshair' : 'hover:scale-[1.01]'}`}
                     />
                     {/* Markers Layer */}
                     {renderMarkersForMap(publicMarkers, {

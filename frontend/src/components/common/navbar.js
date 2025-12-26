@@ -1,6 +1,6 @@
 // file: ./frontend/src/components/common/navbar.js
 import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
@@ -11,9 +11,66 @@ import { storage, db } from '../firebaseConfig';
 import { ref as storageRef, deleteObject, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, updateDoc } from 'firebase/firestore';
 
+const NAV_ITEMS = [
+  {
+    label: 'Home',
+    path: '/home',
+    icon: GiSpikedDragonHead,
+    iconOnly: true,
+    end: true,
+  },
+  {
+    label: 'Bazaar',
+    path: '/bazaar',
+    end: true,
+  },
+  {
+    label: 'Combat',
+    path: '/combat',
+    end: true,
+  },
+  {
+    label: 'Tecniche | Spell',
+    path: '/tecniche-spell',
+    end: true,
+  },
+  {
+    label: 'Codex',
+    path: '/codex',
+    end: true,
+  },
+  {
+    label: 'Echi di Viaggio',
+    path: '/echi-di-viaggio',
+    end: true,
+  },
+  {
+    label: 'DM Dashboard',
+    path: '/dm-dashboard',
+    roles: ['dm'],
+    end: true,
+  },
+  {
+    label: 'Foes Hub',
+    path: '/foes-hub',
+    roles: ['dm'],
+    end: true,
+  },
+  {
+    label: 'Admin',
+    path: '/admin',
+    roles: ['webmaster'],
+    end: true,
+  },
+];
+
+const BASE_NAV_ITEM_CLASS =
+  'inline-flex items-center justify-center gap-2 px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base';
+const ACTIVE_NAV_ITEM_CLASS = 'bg-[#FFA500] text-white font-semibold shadow-md';
+const INACTIVE_NAV_ITEM_CLASS = 'bg-transparent text-white hover:bg-[#e69500]';
+
 const Navbar = () => {
   const navigate = useNavigate();
-  const location = useLocation();
   const { user, userData } = useAuth();
 
   // Loading state for logout operations
@@ -23,8 +80,8 @@ const Navbar = () => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
-
-  const isActive = (path) => location.pathname === path;
+  const role = userData?.role;
+  const navItems = NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(role));
 
   const handleLogout = async () => {
     try {
@@ -154,110 +211,37 @@ const Navbar = () => {
 
   return (
     <>
-      <header className="w-full bg-[rgba(40,40,60,0.8)] p-3 grid grid-cols-1 md:grid-cols-3 items-center sticky top-0 z-50 backdrop-blur-sm">
+      <header data-navbar className="w-full bg-[rgba(40,40,60,0.8)] p-3 grid grid-cols-1 md:grid-cols-3 items-center sticky top-0 z-50 backdrop-blur-sm">
         {/* Left Column: Profile Picture and Character Name */}
         <div className="flex items-center justify-center md:justify-start mb-4 md:mb-0">
           {renderProfileInfo()}
         </div>
 
         {/* Center Column: Navigation Buttons */}
-        <nav className="flex justify-center flex-wrap gap-2 md:gap-4">
-          <button
-            onClick={() => navigate("/home")}
-            className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-              isActive("/home")
-                ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                : "bg-transparent text-white hover:bg-[#e69500]"
-            }`}
-          >
-            <GiSpikedDragonHead className="text-2xl" />
-          </button>
-          <button
-            onClick={() => navigate("/bazaar")}
-            className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-              isActive("/bazaar")
-                ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                : "bg-transparent text-white hover:bg-[#e69500]"
-            }`}
-          >
-            Bazaar
-          </button>
-          <button
-            onClick={() => navigate("/combat")}
-            className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-              isActive("/combat")
-                ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                : "bg-transparent text-white hover:bg-[#e69500]"
-            }`}
-          >
-            Combat
-          </button>
-          <button
-            onClick={() => navigate("/tecniche-spell")}
-            className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-              isActive("/tecniche-spell")
-                ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                : "bg-transparent text-white hover:bg-[#e69500]"
-            }`}
-          >
-            Tecniche | Spell
-          </button>
-          <button
-            onClick={() => navigate("/codex")}
-            className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-              isActive("/codex")
-                ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                : "bg-transparent text-white hover:bg-[#e69500]"
-            }`}
-          >
-            Codex
-          </button>
-          <button
-            onClick={() => navigate("/echi-di-viaggio")}
-            className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-              isActive("/echi-di-viaggio")
-                ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                : "bg-transparent text-white hover:bg-[#e69500]"
-            }`}
-          >
-            Echi di Viaggio
-          </button>
-          {userData?.role === "dm" && (
-            <button
-              onClick={() => navigate("/dm-dashboard")}
-              className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-                isActive("/dm-dashboard")
-                  ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                  : "bg-transparent text-white hover:bg-[#e69500]"
-              }`}
-            >
-              DM Dashboard
-            </button>
-          )}
-          {userData?.role === "dm" && (
-            <button
-              onClick={() => navigate("/foes-hub")}
-              className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-                isActive("/foes-hub")
-                  ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                  : "bg-transparent text-white hover:bg-[#e69500]"
-              }`}
-            >
-              Foes Hub
-            </button>
-          )}
-          {userData?.role === "webmaster" && (
-            <button
-              onClick={() => navigate("/admin")}
-              className={`px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base ${
-                isActive("/admin")
-                  ? "bg-[#FFA500] text-white font-semibold shadow-md"
-                  : "bg-transparent text-white hover:bg-[#e69500]"
-              }`}
-            >
-              Admin
-            </button>
-          )}
+        <nav className="flex justify-center" aria-label="Primary">
+          <ul className="flex flex-wrap justify-center gap-2 md:gap-4">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <li key={item.path}>
+                  <NavLink
+                    to={item.path}
+                    end={item.end}
+                    className={({ isActive }) =>
+                      `${BASE_NAV_ITEM_CLASS} ${
+                        isActive ? ACTIVE_NAV_ITEM_CLASS : INACTIVE_NAV_ITEM_CLASS
+                      }`
+                    }
+                    aria-label={item.iconOnly ? item.label : undefined}
+                    title={item.iconOnly ? item.label : undefined}
+                  >
+                    {Icon ? <Icon className="text-2xl" aria-hidden="true" /> : null}
+                    <span className={item.iconOnly ? 'sr-only' : undefined}>{item.label}</span>
+                  </NavLink>
+                </li>
+              );
+            })}
+          </ul>
         </nav>
 
         {/* Right Column: Logout Button */}

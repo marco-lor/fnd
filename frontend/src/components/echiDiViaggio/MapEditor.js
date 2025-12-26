@@ -32,13 +32,28 @@ export const MARKER_ICONS = {
 export const renderMarkerIcon = (type, colorOverride) => {
     const iconConfig = MARKER_ICONS[type] || MARKER_ICONS.default;
     const IconComponent = iconConfig.icon;
-    return <IconComponent className="w-full h-full drop-shadow-md" style={{ color: colorOverride || iconConfig.color }} />;
+
+    const iconColor = colorOverride || iconConfig.color;
+
+    // Improve contrast on busy map backgrounds by drawing a subtle outline layer
+    // behind the colored icon. This avoids relying on SVG stroke support.
+    return (
+        <span className="relative block w-full h-full">
+            <IconComponent
+                aria-hidden="true"
+                className="absolute inset-0 w-full h-full text-black/90 drop-shadow-lg scale-110"
+            />
+            <IconComponent
+                className="absolute inset-0 w-full h-full drop-shadow-md"
+                style={{ color: iconColor }}
+            />
+        </span>
+    );
 };
 
 export const useMapEditing = ({ user, canEdit, collectionPath }) => {
     const [markers, setMarkers] = useState([]);
     const [editMode, setEditMode] = useState(!!canEdit); // Default to true if can edit
-    const [selectedIcon, setSelectedIcon] = useState(null);
     const [showModal, setShowModal] = useState(false);
     const [newMarkerData, setNewMarkerData] = useState(null);
     const [markerText, setMarkerText] = useState('');
@@ -68,14 +83,14 @@ export const useMapEditing = ({ user, canEdit, collectionPath }) => {
         return () => unsubscribe();
     }, [collectionKey]);
 
-    const handleMapClick = (e, mapId) => {
-        if (!editMode || !canEdit || !selectedIcon) return;
+    const handleMapDrop = (e, mapId, iconType) => {
+        if (!editMode || !canEdit || !iconType) return;
 
-        const rect = e.target.getBoundingClientRect();
+        const rect = e.currentTarget.getBoundingClientRect();
         const x = ((e.clientX - rect.left) / rect.width) * 100;
         const y = ((e.clientY - rect.top) / rect.height) * 100;
 
-        setNewMarkerData({ x, y, mapId, iconType: selectedIcon });
+        setNewMarkerData({ x, y, mapId, iconType });
         setMarkerText('');
         setShowModal(true);
     };
@@ -115,22 +130,35 @@ export const useMapEditing = ({ user, canEdit, collectionPath }) => {
         markers,
         editMode,
         setEditMode,
-        selectedIcon,
-        setSelectedIcon,
         showModal,
         setShowModal,
         markerText,
         setMarkerText,
         newMarkerData,
         setNewMarkerData,
-        handleMapClick,
+        handleMapDrop,
         handleSaveMarker,
         handleDeleteMarker
     };
 };
 
-export const MapEditorControls = ({ title, canEdit, selectedIcon, setSelectedIcon, markerColor }) => {
+export const MapEditorControls = ({ title, canEdit, markerColor, dragScope, onPinDragStart, onPinDragEnd }) => {
     if (!canEdit) return null;
+
+    const handleDragStart = (event, iconType) => {
+        if (!dragScope) return;
+        event.dataTransfer.setData('text/plain', JSON.stringify({ iconType, scope: dragScope }));
+        event.dataTransfer.effectAllowed = 'copy';
+        if (onPinDragStart) {
+            onPinDragStart({ iconType, scope: dragScope });
+        }
+    };
+
+    const handleDragEnd = () => {
+        if (onPinDragEnd) {
+            onPinDragEnd();
+        }
+    };
 
     return (
         <div className="bg-gray-900/80 p-2 rounded-xl border border-gray-700 shadow-xl backdrop-blur-md flex flex-col gap-2">
@@ -142,17 +170,12 @@ export const MapEditorControls = ({ title, canEdit, selectedIcon, setSelectedIco
                 {Object.entries(MARKER_ICONS).map(([key, config]) => (
                     <button
                         key={key}
-                        onClick={() => setSelectedIcon(selectedIcon === key ? null : key)}
-                        className={`p-2 rounded-lg flex items-center justify-center transition-all flex-shrink-0 ${
-                            selectedIcon === key 
-                            ? 'bg-white/20 ring-2 scale-110' 
-                            : 'hover:bg-white/10 hover:scale-105'
-                        }`}
-                        style={{ 
-                            borderColor: selectedIcon === key ? (markerColor || '#FFA500') : 'transparent',
-                            boxShadow: selectedIcon === key ? `0 0 10px ${markerColor || '#FFA500'}` : 'none'
-                        }}
-                        title={config.label}
+                        type="button"
+                        draggable
+                        onDragStart={(event) => handleDragStart(event, key)}
+                        onDragEnd={handleDragEnd}
+                        className="p-2 rounded-lg flex items-center justify-center transition-all flex-shrink-0 hover:bg-white/10 hover:scale-105 cursor-grab"
+                        title={`Trascina: ${config.label}`}
                     >
                         <config.icon 
                             className="text-2xl" 
@@ -161,11 +184,9 @@ export const MapEditorControls = ({ title, canEdit, selectedIcon, setSelectedIco
                     </button>
                 ))}
             </div>
-            {selectedIcon && (
-                <div className="text-center text-[10px] font-bold animate-pulse" style={{ color: markerColor || '#FFA500' }}>
-                    SELEZIONATO: {MARKER_ICONS[selectedIcon].label.toUpperCase()}
-                </div>
-            )}
+            <div className="text-center text-[10px] font-bold uppercase tracking-wider" style={{ color: markerColor || '#FFA500' }}>
+                Trascina sulla mappa
+            </div>
         </div>
     );
 };
