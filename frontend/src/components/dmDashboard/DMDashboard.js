@@ -231,7 +231,7 @@ const DMDashboard = () => {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
-      {/* Full-width, left-aligned wrapper (no centered container) */}
+      {/* Full-width, left-aligned wrapper (no centered container)  */}
       <div className="w-full max-w-none mx-0 p-4">
         {/* Sticky top bar with global actions */}
         <div className="sticky top-0 z-20 -mx-4 mb-6 border-b border-slate-800/60 bg-gray-900/80 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-gray-900/60">
