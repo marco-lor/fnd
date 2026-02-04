@@ -96,6 +96,12 @@ const Navbar = () => {
     }
   };
 
+  const openUploadModal = () => {
+    setUploadError('');
+    setSelectedFile(null);
+    setIsUploadOpen(true);
+  };
+
   // Rendering profile info based on userData from AuthContext
   const renderProfileInfo = () => {
     if (!userData) {
@@ -134,7 +140,7 @@ const Navbar = () => {
                   <HiMagnifyingGlassPlus className="text-white text-2xl" />
                 </div>
                 <div
-                  onClick={() => setIsUploadOpen(true)}
+                  onClick={openUploadModal}
                   className="w-1/2 flex justify-center items-center cursor-pointer"
                 >
                   <LuImageUp className="text-white text-2xl" />
@@ -144,15 +150,23 @@ const Navbar = () => {
           </div>
         ) : (
           <div className="relative mr-3 group">
+            {userData?.stats?.level && (
+              <div className="absolute bottom-0 left-0 bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm border-2 border-white">
+                {userData.stats.level}
+              </div>
+            )}
             <div className="overflow-hidden rounded-full">
               <div className="w-20 h-20 rounded-full bg-gray-500 flex items-center justify-center text-white text-xs border-2 border-white">
                 No Img
               </div>
               <div className="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition-opacity flex rounded-full">
-                <div className="w-1/2 flex justify-center items-center">
+                <div className="w-1/2 flex justify-center items-center cursor-not-allowed opacity-60" title="No image to preview">
                   <HiMagnifyingGlassPlus className="text-white text-2xl" />
                 </div>
-                <div className="w-1/2 flex justify-center items-center">
+                <div
+                  onClick={openUploadModal}
+                  className="w-1/2 flex justify-center items-center cursor-pointer"
+                >
                   <LuImageUp className="text-white text-2xl" />
                 </div>
               </div>
