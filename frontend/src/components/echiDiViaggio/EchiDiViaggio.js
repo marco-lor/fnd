@@ -355,12 +355,16 @@ const NpcEditModal = ({
   open,
   onClose,
   onSubmit,
+  canEditNpcImage,
   editNome,
   setEditNome,
   editDescription,
   setEditDescription,
   editNotes,
   setEditNotes,
+  editImagePreviewUrl,
+  editImageFileName,
+  onEditImageChange,
   error,
   busy
 }) => {
@@ -372,6 +376,26 @@ const NpcEditModal = ({
         <h3 className="text-xl font-semibold text-sky-300 mb-4">Edit NPC</h3>
 
         <div className="space-y-3">
+          {canEditNpcImage && (
+            <div>
+              <label className="block text-sm text-slate-200 mb-1">Replace Profile Picture (optional)</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={onEditImageChange}
+                className="w-full text-sm text-slate-200"
+              />
+              {editImageFileName && (
+                <p className="text-[11px] text-slate-400 mt-1 truncate">{editImageFileName}</p>
+              )}
+              {editImagePreviewUrl && (
+                <div className="mt-2 w-20 h-20 rounded-md overflow-hidden border border-slate-700/60 bg-slate-800/60">
+                  <img src={editImagePreviewUrl} alt="NPC edit preview" className="w-full h-full object-cover" />
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <label className="block text-sm text-slate-200 mb-1">Nome (required)</label>
             <input
@@ -458,6 +482,8 @@ function EchiDiViaggio() {
   const [editNome, setEditNome] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editNotes, setEditNotes] = useState('');
+  const [editImageFile, setEditImageFile] = useState(null);
+  const [editImagePreviewUrl, setEditImagePreviewUrl] = useState('');
   const [editFormError, setEditFormError] = useState('');
   const [isSavingEditNpc, setIsSavingEditNpc] = useState(false);
 
@@ -522,6 +548,14 @@ function EchiDiViaggio() {
   }, [createImagePreviewUrl]);
 
   useEffect(() => {
+    return () => {
+      if (editImagePreviewUrl) {
+        URL.revokeObjectURL(editImagePreviewUrl);
+      }
+    };
+  }, [editImagePreviewUrl]);
+
+  useEffect(() => {
     setNpcHover((prev) => {
       if (!prev?.npc?.id) return prev;
       const updatedNpc = npcs.find((n) => n.id === prev.npc.id);
@@ -574,6 +608,7 @@ function EchiDiViaggio() {
   const canCreateNpc = isDmOrWebmaster;
   const canDeleteNpc = isDmOrWebmaster;
   const canEditNpc = !!user;
+  const canEditNpcImage = isDmOrWebmaster;
 
   const PUBLIC_COLOR = '#00BFFF';
   const PRIVATE_COLOR = '#a855f7';
@@ -673,6 +708,11 @@ function EchiDiViaggio() {
     setEditNome('');
     setEditDescription('');
     setEditNotes('');
+    setEditImageFile(null);
+    if (editImagePreviewUrl) {
+      URL.revokeObjectURL(editImagePreviewUrl);
+    }
+    setEditImagePreviewUrl('');
     setEditFormError('');
   };
 
@@ -685,6 +725,17 @@ function EchiDiViaggio() {
       URL.revokeObjectURL(createImagePreviewUrl);
     }
     setCreateImagePreviewUrl(file ? URL.createObjectURL(file) : '');
+  };
+
+  const handleEditImageChange = (e) => {
+    const file = e.target.files?.[0] || null;
+    setEditImageFile(file);
+    setEditFormError('');
+
+    if (editImagePreviewUrl) {
+      URL.revokeObjectURL(editImagePreviewUrl);
+    }
+    setEditImagePreviewUrl(file ? URL.createObjectURL(file) : '');
   };
 
   const handleCreateNpc = async () => {
@@ -771,6 +822,11 @@ function EchiDiViaggio() {
     setEditNome(getNpcNome(npc));
     setEditDescription(npc.description || '');
     setEditNotes(npc.notes || '');
+    setEditImageFile(null);
+    if (editImagePreviewUrl) {
+      URL.revokeObjectURL(editImagePreviewUrl);
+    }
+    setEditImagePreviewUrl('');
     setEditFormError('');
     setShowEditNpcModal(true);
   };
@@ -797,17 +853,64 @@ function EchiDiViaggio() {
       return;
     }
 
+    const isReplacingImage = canEditNpcImage && !!editImageFile;
+    if (isReplacingImage) {
+      if (!editImageFile.type?.startsWith('image/')) {
+        setEditFormError('Selected file must be an image.');
+        return;
+      }
+      if (editImageFile.size > MAX_NPC_IMAGE_BYTES) {
+        setEditFormError('Image must be 5 MB or smaller.');
+        return;
+      }
+    }
+
     setIsSavingEditNpc(true);
+    let uploadedNewPath = '';
     try {
-      await updateDoc(doc(db, 'echi_npcs', editingNpc.id), {
+      const payload = {
         nome,
         description,
         notes,
         updatedAt: serverTimestamp()
-      });
+      };
+
+      if (isReplacingImage) {
+        const fileExt = editImageFile.name?.includes('.') ? editImageFile.name.split('.').pop() : '';
+        const safeExt = fileExt ? `.${fileExt.replace(/[^a-zA-Z0-9]/g, '')}` : '';
+        const safeNome = nome.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'npc';
+        uploadedNewPath = `echi_npcs/${user?.uid || 'unknown'}/${safeNome}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${safeExt}`;
+        const imageRef = storageRef(storage, uploadedNewPath);
+        await uploadBytes(imageRef, editImageFile);
+        const imageUrl = await getDownloadURL(imageRef);
+        payload.imageUrl = imageUrl;
+        payload.imagePath = uploadedNewPath;
+      }
+
+      await updateDoc(doc(db, 'echi_npcs', editingNpc.id), payload);
+
+      if (isReplacingImage) {
+        const oldPath = getNpcStoragePath(editingNpc);
+        if (oldPath && oldPath !== uploadedNewPath) {
+          try {
+            await deleteObject(storageRef(storage, oldPath));
+          } catch (cleanupError) {
+            console.warn('Old NPC image deletion failed after replacement:', cleanupError);
+            setNpcError('NPC image updated, but old image cleanup failed.');
+          }
+        }
+      }
+
       closeEditNpcModal();
     } catch (error) {
       console.error('Edit NPC failed:', error);
+      if (uploadedNewPath) {
+        try {
+          await deleteObject(storageRef(storage, uploadedNewPath));
+        } catch (rollbackError) {
+          console.warn('Rollback deletion failed for newly uploaded NPC image:', rollbackError);
+        }
+      }
       setEditFormError('Failed to save NPC changes.');
     } finally {
       setIsSavingEditNpc(false);
@@ -1085,12 +1188,16 @@ function EchiDiViaggio() {
           open={showEditNpcModal}
           onClose={closeEditNpcModal}
           onSubmit={handleSaveNpcEdit}
+          canEditNpcImage={canEditNpcImage}
           editNome={editNome}
           setEditNome={setEditNome}
           editDescription={editDescription}
           setEditDescription={setEditDescription}
           editNotes={editNotes}
           setEditNotes={setEditNotes}
+          editImagePreviewUrl={editImagePreviewUrl}
+          editImageFileName={editImageFile?.name || ''}
+          onEditImageChange={handleEditImageChange}
           error={editFormError}
           busy={isSavingEditNpc}
         />
