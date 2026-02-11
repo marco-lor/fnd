@@ -84,6 +84,7 @@ function EchiDiViaggio() {
   const { user, userData, loading } = useAuth();
   const [navbarOffset, setNavbarOffset] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+  const [isNpcListHovered, setIsNpcListHovered] = useState(false);
 
   useEffect(() => {
     const navbar = document.querySelector('[data-navbar]');
@@ -213,9 +214,18 @@ function EchiDiViaggio() {
       <GlobalAuroraBackground />
       <main className="relative z-10 p-2 w-full">
         <div className="grid grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)] gap-4 items-start">
-          <NpcSidebar user={user} userData={userData} stickyOffset={stickyOffset} />
+          <NpcSidebar
+            user={user}
+            userData={userData}
+            stickyOffset={stickyOffset}
+            onHoverStateChange={setIsNpcListHovered}
+          />
 
-          <div className="space-y-12 w-full">
+          <div
+            className={`space-y-12 w-full transition-opacity duration-300 ease-out motion-reduce:transition-none ${
+              isNpcListHovered ? 'opacity-90' : 'opacity-100'
+            }`}
+          >
             <div className="sticky z-30" style={{ top: stickyOffset }}>
               <div className="w-full grid grid-cols-2 gap-4 px-4">
                 <MapEditorControls

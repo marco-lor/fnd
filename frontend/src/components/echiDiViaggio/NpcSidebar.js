@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { db, storage } from '../firebaseConfig';
 import {
   addDoc,
@@ -15,8 +16,8 @@ import {
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 
 const MAX_NPC_IMAGE_BYTES = 5 * 1024 * 1024;
-const HOVER_CARD_WIDTH = 320;
-const HOVER_CARD_MIN_HEIGHT = 220;
+const HOVER_CARD_WIDTH = 344;
+const HOVER_CARD_MIN_HEIGHT = 236;
 const HOVER_GAP = 12;
 const HOVER_VIEWPORT_PADDING = 8;
 const HOVER_CLOSE_DELAY_MS = 120;
@@ -63,19 +64,32 @@ const computeHoverPosition = (anchorRect) => {
   return { left, top, direction };
 };
 
-const NpcTile = ({ npc, isActive, onHoverStart, onHoverEnd }) => {
+const NpcTile = ({ npc, isActive, isDimmed, onHoverStart, onHoverEnd, onTileEnter }) => {
   const nome = getNpcNome(npc);
   const shortDescription = (npc?.description || '').trim().split('\n')[0] || 'NPC';
+  const emphasisClasses = isActive
+    ? 'opacity-100 -translate-y-0.5 border-amber-300/80 bg-slate-800/85 shadow-lg shadow-amber-400/20'
+    : isDimmed
+      ? 'opacity-60 border-slate-700/70 bg-slate-900/60'
+      : 'opacity-100 border-slate-700/70 bg-slate-900/60 hover:border-slate-500/70';
 
   return (
-    <div className={`rounded-lg border transition-colors ${isActive ? 'border-amber-300/70 bg-slate-800/80' : 'border-slate-700/70 bg-slate-900/60 hover:border-slate-500/70'}`}>
+    <div
+      className={`rounded-lg border transform-gpu transition-all duration-300 ease-out motion-reduce:transition-none ${emphasisClasses}`}
+    >
       <button
         type="button"
-        onMouseEnter={(e) => onHoverStart(npc, e.currentTarget)}
+        onMouseEnter={(e) => {
+          onTileEnter(npc.id);
+          onHoverStart(npc, e.currentTarget);
+        }}
         onMouseLeave={onHoverEnd}
-        onFocus={(e) => onHoverStart(npc, e.currentTarget)}
+        onFocus={(e) => {
+          onTileEnter(npc.id);
+          onHoverStart(npc, e.currentTarget);
+        }}
         onBlur={onHoverEnd}
-        className="w-full px-2 py-2 flex items-center gap-2 text-left"
+        className="w-full px-2 py-2 flex items-center gap-2 text-left transition-opacity duration-300 ease-out motion-reduce:transition-none"
       >
         <div className="w-14 h-14 rounded-lg overflow-hidden border border-amber-500/40 bg-slate-900/70 shadow-md shrink-0">
           {npc?.imageUrl ? (
@@ -107,72 +121,81 @@ const NpcHoverPortal = ({
   onMouseEnter,
   onMouseLeave
 }) => {
-  if (!open || !npc || !position) return null;
+  const prefersReducedMotion = useReducedMotion();
+  if (typeof document === 'undefined') return null;
 
-  const nome = getNpcNome(npc);
-  const description = (npc?.description || '').trim();
-  const notes = (npc?.notes || '').trim();
-  const sideLabel = direction === 'left' ? 'left' : 'right';
+  const hoverOffsetX = direction === 'left' ? 10 : -10;
 
   return createPortal(
-    <div
-      className="fixed z-[140]"
-      style={{ left: `${position.left}px`, top: `${position.top}px`, width: `${HOVER_CARD_WIDTH}px` }}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-    >
-      <div className="rounded-xl border border-amber-400/50 bg-gradient-to-b from-slate-900 to-slate-950 shadow-2xl p-3 max-h-[70vh] overflow-y-auto">
-        <div className="flex items-start gap-3">
-          <div className="w-14 h-14 rounded-md overflow-hidden border border-slate-600/60 bg-slate-800/60 shrink-0">
-            {npc?.imageUrl ? (
-              <img src={npc.imageUrl} alt={`${nome} portrait`} className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-400">No Img</div>
-            )}
+    <AnimatePresence>
+      {open && npc && position && (
+        <motion.div
+          key={`${npc.id}-${direction}`}
+          className="fixed z-[140]"
+          style={{ left: `${position.left}px`, top: `${position.top}px`, width: `${HOVER_CARD_WIDTH}px` }}
+          onMouseEnter={onMouseEnter}
+          onMouseLeave={onMouseLeave}
+          initial={prefersReducedMotion ? { opacity: 1, x: 0, y: 0, scale: 1 } : { opacity: 0, x: hoverOffsetX, y: 6, scale: 0.97 }}
+          animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
+          exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: hoverOffsetX * -0.5, y: 4, scale: 0.985 }}
+          transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+        >
+          <div className="rounded-xl border border-amber-400/50 bg-gradient-to-b from-slate-900 to-slate-950 shadow-2xl p-4 max-h-[72vh] overflow-y-auto">
+            <div className="flex items-start gap-3">
+              <div className="w-16 h-16 rounded-md overflow-hidden border border-slate-600/60 bg-slate-800/60 shrink-0">
+                {npc?.imageUrl ? (
+                  <img src={npc.imageUrl} alt={`${getNpcNome(npc)} portrait`} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-400">No Img</div>
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="text-[16px] text-amber-300 font-bold leading-tight break-words">{getNpcNome(npc)}</p>
+                <p className="text-[10px] uppercase tracking-wider text-slate-400 mt-1">
+                  NPC | {direction === 'left' ? 'left' : 'right'}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 pt-2 border-t border-slate-700/60">
+              <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">Description</p>
+              <p className="text-[12px] text-slate-200 whitespace-pre-wrap break-words leading-relaxed">
+                {(npc?.description || '').trim() || '-'}
+              </p>
+            </div>
+
+            <div className="mt-3 pt-2 border-t border-slate-700/60">
+              <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">Notes</p>
+              <p className="text-[12px] text-slate-300 whitespace-pre-wrap break-words leading-relaxed">
+                {(npc?.notes || '').trim() || '-'}
+              </p>
+            </div>
+
+            <div className="mt-3 flex items-center justify-end gap-2">
+              {canEditNpc && (
+                <button
+                  type="button"
+                  onClick={() => onEdit(npc)}
+                  className="px-2 py-1 rounded-md border border-sky-400/50 text-sky-200 text-[11px] hover:bg-sky-500/10 transition-colors"
+                >
+                  Edit
+                </button>
+              )}
+              {canDeleteNpc && (
+                <button
+                  type="button"
+                  onClick={() => onDelete(npc)}
+                  disabled={isDeleting}
+                  className="px-2 py-1 rounded-md border border-red-400/50 text-red-200 text-[11px] hover:bg-red-500/10 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {isDeleting ? 'Deleting...' : 'Delete'}
+                </button>
+              )}
+            </div>
           </div>
-          <div className="min-w-0">
-            <p className="text-[15px] text-amber-300 font-bold leading-tight break-words">{nome}</p>
-            <p className="text-[10px] uppercase tracking-wider text-slate-400 mt-1">NPC | {sideLabel}</p>
-          </div>
-        </div>
-
-        <div className="mt-3 pt-2 border-t border-slate-700/60">
-          <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">Description</p>
-          <p className="text-[12px] text-slate-200 whitespace-pre-wrap break-words leading-relaxed">
-            {description || '-'}
-          </p>
-        </div>
-
-        <div className="mt-3 pt-2 border-t border-slate-700/60">
-          <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">Notes</p>
-          <p className="text-[12px] text-slate-300 whitespace-pre-wrap break-words leading-relaxed">
-            {notes || '-'}
-          </p>
-        </div>
-
-        <div className="mt-3 flex items-center justify-end gap-2">
-          {canEditNpc && (
-            <button
-              type="button"
-              onClick={() => onEdit(npc)}
-              className="px-2 py-1 rounded-md border border-sky-400/50 text-sky-200 text-[11px] hover:bg-sky-500/10 transition-colors"
-            >
-              Edit
-            </button>
-          )}
-          {canDeleteNpc && (
-            <button
-              type="button"
-              onClick={() => onDelete(npc)}
-              disabled={isDeleting}
-              className="px-2 py-1 rounded-md border border-red-400/50 text-red-200 text-[11px] hover:bg-red-500/10 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {isDeleting ? 'Deleting...' : 'Delete'}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>,
+        </motion.div>
+      )}
+    </AnimatePresence>,
     document.body
   );
 };
@@ -386,7 +409,7 @@ const NpcEditModal = ({
   );
 };
 
-export default function NpcSidebar({ user, userData, stickyOffset }) {
+export default function NpcSidebar({ user, userData, stickyOffset, onHoverStateChange }) {
   const [npcs, setNpcs] = useState([]);
   const [npcLoading, setNpcLoading] = useState(true);
   const [npcError, setNpcError] = useState('');
@@ -413,6 +436,8 @@ export default function NpcSidebar({ user, userData, stickyOffset }) {
   const [isSavingEditNpc, setIsSavingEditNpc] = useState(false);
 
   const [npcHover, setNpcHover] = useState(null);
+  const [hoveredNpcId, setHoveredNpcId] = useState('');
+  const [isListHovered, setIsListHovered] = useState(false);
   const hoverCloseTimerRef = useRef(null);
 
   useEffect(() => {
@@ -476,6 +501,8 @@ export default function NpcSidebar({ user, userData, stickyOffset }) {
     };
   }, []);
 
+  useEffect(() => () => onHoverStateChange?.(false), [onHoverStateChange]);
+
   useEffect(() => {
     if (!npcHover?.anchorEl) return undefined;
 
@@ -514,6 +541,14 @@ export default function NpcSidebar({ user, userData, stickyOffset }) {
   const sidebarTop = stickyOffset || 0;
   const sidebarOffset = `${sidebarTop + SIDEBAR_BOTTOM_GAP}px`;
 
+  const setListHoverState = (nextState) => {
+    setIsListHovered((prevState) => {
+      if (prevState === nextState) return prevState;
+      onHoverStateChange?.(nextState);
+      return nextState;
+    });
+  };
+
   const clearHoverCloseTimer = () => {
     if (hoverCloseTimerRef.current) {
       clearTimeout(hoverCloseTimerRef.current);
@@ -524,12 +559,14 @@ export default function NpcSidebar({ user, userData, stickyOffset }) {
   const closeNpcHover = () => {
     clearHoverCloseTimer();
     setNpcHover(null);
+    setHoveredNpcId('');
   };
 
   const scheduleNpcHoverClose = () => {
     clearHoverCloseTimer();
     hoverCloseTimerRef.current = setTimeout(() => {
       setNpcHover(null);
+      setHoveredNpcId('');
       hoverCloseTimerRef.current = null;
     }, HOVER_CLOSE_DELAY_MS);
   };
@@ -538,6 +575,7 @@ export default function NpcSidebar({ user, userData, stickyOffset }) {
     if (!npc || !anchorEl) return;
 
     clearHoverCloseTimer();
+    setHoveredNpcId(npc.id);
     const anchorRect = anchorEl.getBoundingClientRect();
     const { left, top, direction } = computeHoverPosition(anchorRect);
     setNpcHover({
@@ -546,6 +584,25 @@ export default function NpcSidebar({ user, userData, stickyOffset }) {
       position: { left, top },
       direction
     });
+  };
+
+  const handleNpcListMouseEnter = () => {
+    setListHoverState(true);
+  };
+
+  const handleNpcListMouseLeave = () => {
+    setListHoverState(false);
+    scheduleNpcHoverClose();
+  };
+
+  const handleNpcListFocusCapture = () => {
+    setListHoverState(true);
+  };
+
+  const handleNpcListBlurCapture = (event) => {
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+    setListHoverState(false);
+    scheduleNpcHoverClose();
   };
 
   const resetCreateNpcForm = () => {
@@ -847,7 +904,15 @@ export default function NpcSidebar({ user, userData, stickyOffset }) {
           )}
 
           <div className="relative p-3 flex-1 min-h-0">
-            <div className="h-full overflow-y-auto overflow-x-hidden pr-2 pb-10">
+            <div
+              className={`h-full overflow-y-auto overflow-x-hidden pr-2 pb-10 transition-opacity duration-300 ease-out motion-reduce:transition-none ${
+                isListHovered ? 'opacity-100' : 'opacity-95'
+              }`}
+              onMouseEnter={handleNpcListMouseEnter}
+              onMouseLeave={handleNpcListMouseLeave}
+              onFocusCapture={handleNpcListFocusCapture}
+              onBlurCapture={handleNpcListBlurCapture}
+            >
               {npcLoading ? (
                 <p className="text-sm text-slate-300">Loading NPCs...</p>
               ) : npcs.length === 0 ? (
@@ -858,9 +923,11 @@ export default function NpcSidebar({ user, userData, stickyOffset }) {
                     <NpcTile
                       key={npc.id}
                       npc={npc}
-                      isActive={npcHover?.npc?.id === npc.id}
+                      isActive={hoveredNpcId === npc.id}
+                      isDimmed={!!hoveredNpcId && hoveredNpcId !== npc.id}
                       onHoverStart={openNpcHover}
                       onHoverEnd={scheduleNpcHoverClose}
+                      onTileEnter={setHoveredNpcId}
                     />
                   ))}
                 </div>
