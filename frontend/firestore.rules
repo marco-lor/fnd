@@ -38,6 +38,11 @@ service cloud.firestore {
             || get(userDocPath(request.auth.uid)).data.role == "players");
     }
 
+    function isNpcTextOnlyUpdate() {
+      return request.resource.data.imageUrl == resource.data.imageUrl
+        && request.resource.data.imagePath == resource.data.imagePath;
+    }
+
     // Encounter helpers
     function encounterPath(encounterId) {
       return /databases/$(database)/documents/encounters/$(encounterId);
@@ -190,6 +195,7 @@ service cloud.firestore {
         && request.resource.data.createdBy == resource.data.createdBy
         && request.resource.data.createdByRole == resource.data.createdByRole
         && request.resource.data.createdAt == resource.data.createdAt
+        && (isNpcTextOnlyUpdate() || isDM() || isWebmaster())
         && request.resource.data.keys().hasOnly([
           "nome",
           "imageUrl",
