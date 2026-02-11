@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { HiMagnifyingGlassPlus } from 'react-icons/hi2';
 import { db, storage } from '../firebaseConfig';
 import {
   addDoc,
@@ -118,6 +119,7 @@ const NpcHoverPortal = ({
   isDeleting,
   onEdit,
   onDelete,
+  onOpenImageZoom,
   onMouseEnter,
   onMouseLeave
 }) => {
@@ -142,9 +144,29 @@ const NpcHoverPortal = ({
         >
           <div className="rounded-xl border border-amber-400/50 bg-gradient-to-b from-slate-900 to-slate-950 shadow-2xl p-4 max-h-[72vh] overflow-y-auto">
             <div className="flex items-start gap-3">
-              <div className="w-16 h-16 rounded-md overflow-hidden border border-slate-600/60 bg-slate-800/60 shrink-0">
+              <div className="group/portrait relative w-16 h-16 rounded-md overflow-hidden border border-slate-600/60 bg-slate-800/60 shrink-0">
                 {npc?.imageUrl ? (
-                  <img src={npc.imageUrl} alt={`${getNpcNome(npc)} portrait`} className="w-full h-full object-cover" />
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => onOpenImageZoom(npc)}
+                      className="w-full h-full cursor-zoom-in focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80 focus-visible:ring-offset-1 focus-visible:ring-offset-slate-900"
+                      aria-label={`Zoom image for ${getNpcNome(npc)}`}
+                    >
+                      <img src={npc.imageUrl} alt={`${getNpcNome(npc)} portrait`} className="w-full h-full object-cover" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenImageZoom(npc);
+                      }}
+                      className="absolute bottom-1 right-1 inline-flex items-center justify-center w-7 h-7 rounded-full border border-amber-300/60 bg-slate-900/80 text-amber-200 opacity-0 group-hover/portrait:opacity-100 group-focus-within/portrait:opacity-100 transition-opacity duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80"
+                      aria-label="Zoom NPC image"
+                    >
+                      <HiMagnifyingGlassPlus className="text-sm" />
+                    </button>
+                  </>
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-400">No Img</div>
                 )}
@@ -193,6 +215,54 @@ const NpcHoverPortal = ({
               )}
             </div>
           </div>
+        </motion.div>
+      )}
+    </AnimatePresence>,
+    document.body
+  );
+};
+
+const NpcImageZoomModal = ({ imageData, onClose }) => {
+  const prefersReducedMotion = useReducedMotion();
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <AnimatePresence>
+      {imageData?.url && (
+        <motion.div
+          className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-label={imageData.nome ? `Zoomed image for ${imageData.nome}` : 'Zoomed NPC image'}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) onClose();
+          }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.2 }}
+        >
+          <motion.div
+            className="relative max-w-[92vw] max-h-[88vh] rounded-xl border border-slate-500/60 bg-slate-950/95 shadow-2xl p-2"
+            initial={prefersReducedMotion ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.96, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.98, y: 6 }}
+            transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <button
+              type="button"
+              onClick={onClose}
+              className="absolute top-2 right-2 z-10 inline-flex items-center justify-center w-8 h-8 rounded-full border border-slate-300/50 bg-black/60 text-white text-lg leading-none hover:bg-black/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+              aria-label="Close zoomed NPC image"
+            >
+              X
+            </button>
+            <img
+              src={imageData.url}
+              alt={imageData.nome ? `${imageData.nome} portrait zoomed` : 'NPC portrait zoomed'}
+              className="max-w-[92vw] max-h-[88vh] object-contain rounded-lg"
+            />
+          </motion.div>
         </motion.div>
       )}
     </AnimatePresence>,
@@ -438,6 +508,7 @@ export default function NpcSidebar({ user, userData, stickyOffset, onHoverStateC
   const [npcHover, setNpcHover] = useState(null);
   const [hoveredNpcId, setHoveredNpcId] = useState('');
   const [isListHovered, setIsListHovered] = useState(false);
+  const [zoomedNpcImage, setZoomedNpcImage] = useState(null);
   const hoverCloseTimerRef = useRef(null);
 
   useEffect(() => {
@@ -502,6 +573,18 @@ export default function NpcSidebar({ user, userData, stickyOffset, onHoverStateC
   }, []);
 
   useEffect(() => () => onHoverStateChange?.(false), [onHoverStateChange]);
+
+  useEffect(() => {
+    if (!zoomedNpcImage) return undefined;
+    const handleEscClose = (event) => {
+      if (event.key === 'Escape') {
+        setZoomedNpcImage(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleEscClose);
+    return () => window.removeEventListener('keydown', handleEscClose);
+  }, [zoomedNpcImage]);
 
   useEffect(() => {
     if (!npcHover?.anchorEl) return undefined;
@@ -603,6 +686,18 @@ export default function NpcSidebar({ user, userData, stickyOffset, onHoverStateC
     if (event.currentTarget.contains(event.relatedTarget)) return;
     setListHoverState(false);
     scheduleNpcHoverClose();
+  };
+
+  const openNpcImageZoom = (npc) => {
+    if (!npc?.imageUrl) return;
+    setZoomedNpcImage({
+      url: npc.imageUrl,
+      nome: getNpcNome(npc)
+    });
+  };
+
+  const closeNpcImageZoom = () => {
+    setZoomedNpcImage(null);
   };
 
   const resetCreateNpcForm = () => {
@@ -986,9 +1081,12 @@ export default function NpcSidebar({ user, userData, stickyOffset, onHoverStateC
         isDeleting={deletingNpcId === npcHover?.npc?.id}
         onEdit={handleOpenNpcEdit}
         onDelete={handleDeleteNpc}
+        onOpenImageZoom={openNpcImageZoom}
         onMouseEnter={clearHoverCloseTimer}
         onMouseLeave={scheduleNpcHoverClose}
       />
+
+      <NpcImageZoomModal imageData={zoomedNpcImage} onClose={closeNpcImageZoom} />
     </div>
   );
 }
