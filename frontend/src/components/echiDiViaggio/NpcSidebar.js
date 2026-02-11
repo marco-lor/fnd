@@ -21,6 +21,7 @@ const HOVER_GAP = 12;
 const HOVER_VIEWPORT_PADDING = 8;
 const HOVER_CLOSE_DELAY_MS = 120;
 const SIDEBAR_BOTTOM_GAP = 8;
+const SIDEBAR_FADE_HEIGHT = 56;
 
 const normalizeNome = (value) => (typeof value === 'string' ? value.trim() : '');
 const getNpcNome = (npc) => normalizeNome(npc?.nome) || 'NPC';
@@ -511,7 +512,7 @@ export default function NpcSidebar({ user, userData, stickyOffset }) {
   const canEditNpcImage = isDmOrWebmaster;
 
   const sidebarTop = stickyOffset || 0;
-  const sidebarHeight = `calc(100vh - ${sidebarTop + SIDEBAR_BOTTOM_GAP}px)`;
+  const sidebarOffset = `${sidebarTop + SIDEBAR_BOTTOM_GAP}px`;
 
   const clearHoverCloseTimer = () => {
     if (hoverCloseTimerRef.current) {
@@ -816,8 +817,11 @@ export default function NpcSidebar({ user, userData, stickyOffset }) {
   };
 
   return (
-    <div>
-      <aside className="lg:sticky self-start z-40" style={{ top: sidebarTop, height: sidebarHeight }}>
+    <div className="self-stretch">
+      <aside
+        className="z-40 h-auto lg:sticky lg:h-[calc(100vh-var(--npc-offset))]"
+        style={{ top: sidebarTop, '--npc-offset': sidebarOffset }}
+      >
         <div className="bg-slate-900/85 border border-slate-700 rounded-2xl shadow-2xl backdrop-blur-sm flex flex-col overflow-hidden h-full">
           <div className="px-4 py-3 border-b border-slate-700/70 flex items-center justify-between">
             <h2 className="text-sm font-bold tracking-wide text-amber-300 uppercase">NPC</h2>
@@ -842,24 +846,30 @@ export default function NpcSidebar({ user, userData, stickyOffset }) {
             </div>
           )}
 
-          <div className="p-3 flex-1 min-h-0 overflow-y-auto overflow-x-hidden pr-2">
-            {npcLoading ? (
-              <p className="text-sm text-slate-300">Loading NPCs...</p>
-            ) : npcs.length === 0 ? (
-              <p className="text-sm text-slate-400">No NPCs yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {npcs.map((npc) => (
-                  <NpcTile
-                    key={npc.id}
-                    npc={npc}
-                    isActive={npcHover?.npc?.id === npc.id}
-                    onHoverStart={openNpcHover}
-                    onHoverEnd={scheduleNpcHoverClose}
-                  />
-                ))}
-              </div>
-            )}
+          <div className="relative p-3 flex-1 min-h-0">
+            <div className="h-full overflow-y-auto overflow-x-hidden pr-2 pb-10">
+              {npcLoading ? (
+                <p className="text-sm text-slate-300">Loading NPCs...</p>
+              ) : npcs.length === 0 ? (
+                <p className="text-sm text-slate-400">No NPCs yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {npcs.map((npc) => (
+                    <NpcTile
+                      key={npc.id}
+                      npc={npc}
+                      isActive={npcHover?.npc?.id === npc.id}
+                      onHoverStart={openNpcHover}
+                      onHoverEnd={scheduleNpcHoverClose}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+            <div
+              className="pointer-events-none absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-slate-900/95 via-slate-900/55 to-transparent"
+              style={{ height: `${SIDEBAR_FADE_HEIGHT}px` }}
+            ></div>
           </div>
         </div>
       </aside>
