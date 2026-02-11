@@ -38,6 +38,11 @@ service cloud.firestore {
             || get(userDocPath(request.auth.uid)).data.role == "players");
     }
 
+    function isNpcTextOnlyUpdate() {
+      return request.resource.data.imageUrl == resource.data.imageUrl
+        && request.resource.data.imagePath == resource.data.imagePath;
+    }
+
     // Encounter helpers
     function encounterPath(encounterId) {
       return /databases/$(database)/documents/encounters/$(encounterId);
@@ -142,6 +147,68 @@ service cloud.firestore {
     match /map_markers/{markerId} {
       allow read: if isSignedIn();
       allow write: if isDM() || isWebmaster() || isPlayer();
+    }
+
+    // Echi NPCs
+    match /echi_npcs/{npcId} {
+      allow read: if isSignedIn();
+
+      allow create: if (isDM() || isWebmaster())
+        && request.resource.data.keys().hasAll([
+          "nome",
+          "imageUrl",
+          "imagePath",
+          "description",
+          "notes",
+          "createdBy",
+          "createdByRole",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.keys().hasOnly([
+          "nome",
+          "imageUrl",
+          "imagePath",
+          "description",
+          "notes",
+          "createdBy",
+          "createdByRole",
+          "createdAt",
+          "updatedAt"
+        ]);
+
+      // Text-only updates: immutable image + creator metadata
+      allow update: if isSignedIn()
+        && request.resource.data.keys().hasAll([
+          "nome",
+          "imageUrl",
+          "imagePath",
+          "description",
+          "notes",
+          "createdBy",
+          "createdByRole",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.imageUrl == resource.data.imageUrl
+        && request.resource.data.imagePath == resource.data.imagePath
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdByRole == resource.data.createdByRole
+        && request.resource.data.createdAt == resource.data.createdAt
+        && (isNpcTextOnlyUpdate() || isDM() || isWebmaster())
+        && request.resource.data.keys().hasOnly([
+          "nome",
+          "imageUrl",
+          "imagePath",
+          "description",
+          "notes",
+          "createdBy",
+          "createdByRole",
+          "createdAt",
+          "updatedAt"
+        ]);
+
+      allow delete: if isDM() || isWebmaster();
     }
   }
 }
