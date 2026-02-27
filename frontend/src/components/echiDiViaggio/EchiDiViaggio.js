@@ -1,5 +1,5 @@
 // file: ./frontend/src/components/echiDiViaggio/EchiDiViaggio.js
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { useAuth } from '../../AuthContext';
 import mappaArt from '../../assets/images/maps/mappa_art.png';
@@ -9,21 +9,66 @@ import { useMapEditing, MapEditorControls, MapMarkerModal, renderMarkerIcon } fr
 import NpcSidebar from './NpcSidebar';
 import { db } from '../firebaseConfig';
 
-const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, markerColor, npcImageUrl }) => {
+const getNormalizedText = (value, fallback) => {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  return trimmed || fallback;
+};
+
+const NPC_HOVER_CLOSE_DELAY_MS = 180;
+
+const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, markerColor, npcData }) => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isNpcImageBroken, setIsNpcImageBroken] = useState(false);
+  const [isNpcHoverOpen, setIsNpcHoverOpen] = useState(false);
+  const hoverCloseTimerRef = useRef(null);
 
   const isNpcMarker = marker?.markerType === 'npc' || marker?.iconType === 'npc';
+  const hasNpcInfo = isNpcMarker && !!npcData;
+  const npcImageUrl = getNormalizedText(npcData?.imageUrl, '');
+  const npcNome = getNormalizedText(npcData?.nome, marker?.npcNome || marker?.text || 'NPC');
+  const npcDescription = getNormalizedText(npcData?.description, '-');
+  const npcNotes = getNormalizedText(npcData?.notes, '-');
+
   const hasNpcImage = !!(
-    isNpcMarker
-    && typeof npcImageUrl === 'string'
-    && npcImageUrl.trim()
+    hasNpcInfo
+    && npcImageUrl
     && !isNpcImageBroken
   );
 
   useEffect(() => {
     setIsNpcImageBroken(false);
-  }, [npcImageUrl]);
+  }, [npcImageUrl, marker?.id]);
+
+  const clearNpcHoverClose = () => {
+    if (hoverCloseTimerRef.current) {
+      clearTimeout(hoverCloseTimerRef.current);
+      hoverCloseTimerRef.current = null;
+    }
+  };
+
+  const openNpcHoverCard = () => {
+    if (!hasNpcInfo || isDeleting) return;
+    clearNpcHoverClose();
+    setIsNpcHoverOpen(true);
+  };
+
+  const scheduleNpcHoverClose = () => {
+    if (!hasNpcInfo) return;
+    clearNpcHoverClose();
+    hoverCloseTimerRef.current = setTimeout(() => {
+      setIsNpcHoverOpen(false);
+      hoverCloseTimerRef.current = null;
+    }, NPC_HOVER_CLOSE_DELAY_MS);
+  };
+
+  useEffect(() => {
+    if (isDeleting || !hasNpcInfo) {
+      clearNpcHoverClose();
+      setIsNpcHoverOpen(false);
+    }
+  }, [isDeleting, hasNpcInfo]);
+
+  useEffect(() => () => clearNpcHoverClose(), []);
 
   const handleDeleteClick = (e) => {
     e.stopPropagation();
@@ -44,6 +89,8 @@ const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, marker
     <div
       className={`absolute z-20 group/marker ${hasNpcImage ? 'w-10 h-10 -ml-5 -mt-5' : 'w-8 h-8 -ml-4 -mt-4'}`}
       style={{ left: `${marker.x}%`, top: `${marker.y}%` }}
+      onMouseEnter={openNpcHoverCard}
+      onMouseLeave={scheduleNpcHoverClose}
     >
       <div className="w-full h-full cursor-pointer hover:scale-125 transition-transform duration-200 relative">
         {hasNpcImage ? (
@@ -53,7 +100,7 @@ const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, marker
               <span className="block w-full h-full rounded-full overflow-hidden border border-black/30 bg-slate-900/70">
                 <img
                   src={npcImageUrl}
-                  alt={marker?.npcNome || marker?.text || 'NPC marker'}
+                  alt={npcNome}
                   className="w-full h-full object-cover"
                   onError={() => setIsNpcImageBroken(true)}
                 />
@@ -95,17 +142,57 @@ const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, marker
       )}
 
       <div
-        className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 transition-opacity duration-300 pointer-events-none z-30 ${
-          isDeleting ? 'opacity-0' : 'opacity-0 group-hover/marker:opacity-100'
+        className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 transition-opacity duration-300 pointer-events-none z-30 ${
+          hasNpcInfo ? 'w-72' : 'w-64'
+        } ${
+          isDeleting
+            ? 'opacity-0'
+            : hasNpcInfo
+              ? (isNpcHoverOpen ? 'opacity-100' : 'opacity-0')
+              : 'opacity-0 group-hover/marker:opacity-100'
         }`}
       >
-        <div
-          className="bg-black/90 text-white p-3 rounded-lg border shadow-xl text-sm font-serif leading-relaxed relative"
-          style={{ borderColor: markerColor }}
-        >
-          {marker.text}
-          <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-black/90"></div>
-        </div>
+        {hasNpcInfo ? (
+          <div
+            className="w-72 max-h-56 overflow-y-auto pointer-events-auto bg-slate-950/95 text-white p-3 rounded-lg border border-slate-600/70 shadow-xl text-xs leading-relaxed relative"
+            style={{ borderColor: markerColor }}
+            onMouseEnter={openNpcHoverCard}
+            onMouseLeave={scheduleNpcHoverClose}
+          >
+            <div className="flex items-start gap-2 pb-2 border-b border-slate-700/70">
+              <div className="w-10 h-10 rounded-full overflow-hidden border border-slate-500/70 bg-slate-800/80 shrink-0">
+                {hasNpcImage ? (
+                  <img src={npcImageUrl} alt={`${npcNome} portrait`} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-[9px] text-slate-400">No Img</div>
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-amber-200 break-words leading-tight">{npcNome}</p>
+                <p className="text-[10px] uppercase tracking-wide text-slate-400 mt-1">NPC</p>
+              </div>
+            </div>
+
+            <div className="mt-2">
+              <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">Description</p>
+              <p className="text-[12px] text-slate-200 whitespace-pre-wrap break-words">{npcDescription}</p>
+            </div>
+
+            <div className="mt-2">
+              <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">Notes</p>
+              <p className="text-[12px] text-slate-300 whitespace-pre-wrap break-words">{npcNotes}</p>
+            </div>
+            <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-slate-950/95"></div>
+          </div>
+        ) : (
+          <div
+            className="bg-black/90 text-white p-3 rounded-lg border shadow-xl text-sm font-serif leading-relaxed relative"
+            style={{ borderColor: markerColor }}
+          >
+            {marker.text}
+            <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-black/90"></div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -116,7 +203,7 @@ function EchiDiViaggio() {
   const [navbarOffset, setNavbarOffset] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [isNpcListHovered, setIsNpcListHovered] = useState(false);
-  const [npcImageById, setNpcImageById] = useState({});
+  const [npcById, setNpcById] = useState({});
 
   useEffect(() => {
     const navbar = document.querySelector('[data-navbar]');
@@ -141,26 +228,28 @@ function EchiDiViaggio() {
 
   useEffect(() => {
     if (!user?.uid) {
-      setNpcImageById({});
+      setNpcById({});
       return () => {};
     }
 
     const unsubscribe = onSnapshot(
       collection(db, 'echi_npcs'),
       (snapshot) => {
-        const nextNpcImageById = {};
+        const nextNpcById = {};
         snapshot.docs.forEach((docSnap) => {
           const data = docSnap.data();
-          const imageUrl = typeof data?.imageUrl === 'string' ? data.imageUrl.trim() : '';
-          if (imageUrl) {
-            nextNpcImageById[docSnap.id] = imageUrl;
-          }
+          nextNpcById[docSnap.id] = {
+            nome: getNormalizedText(data?.nome, 'NPC'),
+            imageUrl: getNormalizedText(data?.imageUrl, ''),
+            description: getNormalizedText(data?.description, '-'),
+            notes: getNormalizedText(data?.notes, '-')
+          };
         });
-        setNpcImageById(nextNpcImageById);
+        setNpcById(nextNpcById);
       },
       (error) => {
-        console.error('NPC image lookup snapshot error:', error);
-        setNpcImageById({});
+        console.error('NPC lookup snapshot error:', error);
+        setNpcById({});
       }
     );
 
@@ -284,7 +373,7 @@ function EchiDiViaggio() {
           onDelete={handleDelete}
           scopeLabel={scopeLabel}
           markerColor={markerColor}
-          npcImageUrl={marker.npcId ? npcImageById[marker.npcId] : ''}
+          npcData={marker.npcId ? npcById[marker.npcId] || null : null}
         />
       ));
 
