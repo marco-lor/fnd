@@ -95,6 +95,47 @@ export const useMapEditing = ({ user, canEdit, collectionPath }) => {
         setShowModal(true);
     };
 
+    const handleAddMarkerAtDrop = async (e, mapId, markerData = {}) => {
+        if (!editMode || !canEdit || !collectionKey || !mapId) {
+            return { success: false, reason: 'forbidden' };
+        }
+
+        const iconType = typeof markerData.iconType === 'string' ? markerData.iconType : '';
+        if (!iconType) {
+            return { success: false, reason: 'invalid-icon' };
+        }
+
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = ((e.clientX - rect.left) / rect.width) * 100;
+        const y = ((e.clientY - rect.top) / rect.height) * 100;
+
+        const markerTextValue = typeof markerData.text === 'string' ? markerData.text.trim() : '';
+        const extraFields = Object.fromEntries(
+            Object.entries(markerData).filter(([key, value]) => (
+                key !== 'iconType'
+                && key !== 'text'
+                && value !== undefined
+            ))
+        );
+
+        try {
+            await addDoc(collection(db, ...collectionPath), {
+                x,
+                y,
+                mapId,
+                iconType,
+                text: markerTextValue,
+                ...extraFields,
+                createdBy: user?.uid || null,
+                createdAt: new Date().toISOString()
+            });
+            return { success: true };
+        } catch (error) {
+            console.error("Error adding marker instantly: ", error);
+            return { success: false, reason: 'save-failed' };
+        }
+    };
+
     const handleSaveMarker = async () => {
         if (!markerText.trim() || !newMarkerData || !collectionKey) return;
 
@@ -137,6 +178,7 @@ export const useMapEditing = ({ user, canEdit, collectionPath }) => {
         newMarkerData,
         setNewMarkerData,
         handleMapDrop,
+        handleAddMarkerAtDrop,
         handleSaveMarker,
         handleDeleteMarker
     };

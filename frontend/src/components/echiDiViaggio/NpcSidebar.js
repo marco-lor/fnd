@@ -8,10 +8,13 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
+  where,
+  writeBatch,
   updateDoc
 } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
@@ -65,7 +68,17 @@ const computeHoverPosition = (anchorRect) => {
   return { left, top, direction };
 };
 
-const NpcTile = ({ npc, isActive, isDimmed, onHoverStart, onHoverEnd, onTileEnter }) => {
+const NpcTile = ({
+  npc,
+  isActive,
+  isDimmed,
+  onHoverStart,
+  onHoverEnd,
+  onTileEnter,
+  canDragToMap,
+  onNpcDragStart,
+  onNpcDragEnd
+}) => {
   const nome = getNpcNome(npc);
   const shortDescription = (npc?.description || '').trim().split('\n')[0] || 'NPC';
   const emphasisClasses = isActive
@@ -74,12 +87,35 @@ const NpcTile = ({ npc, isActive, isDimmed, onHoverStart, onHoverEnd, onTileEnte
       ? 'opacity-60 border-slate-700/70 bg-slate-900/60'
       : 'opacity-100 border-slate-700/70 bg-slate-900/60 hover:border-slate-500/70';
 
+  const handleDragStart = (event) => {
+    if (!canDragToMap) return;
+
+    const payload = {
+      dragType: 'npc',
+      scope: 'public',
+      iconType: 'npc',
+      npcId: npc.id,
+      npcNome: nome
+    };
+
+    event.dataTransfer.setData('text/plain', JSON.stringify(payload));
+    event.dataTransfer.effectAllowed = 'copy';
+    onNpcDragStart?.(payload);
+  };
+
+  const handleDragEnd = () => {
+    onNpcDragEnd?.();
+  };
+
   return (
     <div
       className={`rounded-lg border transform-gpu transition-all duration-300 ease-out motion-reduce:transition-none ${emphasisClasses}`}
     >
       <button
         type="button"
+        draggable={canDragToMap}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
         onMouseEnter={(e) => {
           onTileEnter(npc.id);
           onHoverStart(npc, e.currentTarget);
@@ -90,7 +126,9 @@ const NpcTile = ({ npc, isActive, isDimmed, onHoverStart, onHoverEnd, onTileEnte
           onHoverStart(npc, e.currentTarget);
         }}
         onBlur={onHoverEnd}
-        className="w-full px-2 py-2 flex items-center gap-2 text-left transition-opacity duration-300 ease-out motion-reduce:transition-none"
+        className={`w-full px-2 py-2 flex items-center gap-2 text-left transition-opacity duration-300 ease-out motion-reduce:transition-none ${
+          canDragToMap ? 'cursor-grab active:cursor-grabbing' : ''
+        }`}
       >
         <div className="w-14 h-14 rounded-lg overflow-hidden border border-amber-500/40 bg-slate-900/70 shadow-md shrink-0">
           {npc?.imageUrl ? (
@@ -479,7 +517,15 @@ const NpcEditModal = ({
   );
 };
 
-export default function NpcSidebar({ user, userData, stickyOffset, onHoverStateChange }) {
+export default function NpcSidebar({
+  user,
+  userData,
+  stickyOffset,
+  onHoverStateChange,
+  canDragToMap = false,
+  onNpcDragStart,
+  onNpcDragEnd
+}) {
   const [npcs, setNpcs] = useState([]);
   const [npcLoading, setNpcLoading] = useState(true);
   const [npcError, setNpcError] = useState('');
@@ -959,10 +1005,31 @@ export default function NpcSidebar({ user, userData, stickyOffset, onHoverStateC
     }
 
     try {
+      const linkedMarkersQuery = query(
+        collection(db, 'map_markers'),
+        where('npcId', '==', npc.id)
+      );
+      const linkedMarkersSnapshot = await getDocs(linkedMarkersQuery);
+
+      if (!linkedMarkersSnapshot.empty) {
+        const batch = writeBatch(db);
+        linkedMarkersSnapshot.forEach((markerDoc) => {
+          batch.delete(markerDoc.ref);
+        });
+        await batch.commit();
+      }
+    } catch (error) {
+      console.error('Delete linked NPC markers failed after image deletion:', error);
+      setNpcError('NPC image deleted, but linked map marker cleanup failed. NPC document was not deleted.');
+      setDeletingNpcId('');
+      return;
+    }
+
+    try {
       await deleteDoc(doc(db, 'echi_npcs', npc.id));
     } catch (error) {
       console.error('Delete NPC document failed after image deletion:', error);
-      setNpcError('Image deleted, but NPC document deletion failed.');
+      setNpcError('Image and linked map markers deleted, but NPC document deletion failed.');
     } finally {
       setDeletingNpcId('');
     }
@@ -1023,6 +1090,9 @@ export default function NpcSidebar({ user, userData, stickyOffset, onHoverStateC
                       onHoverStart={openNpcHover}
                       onHoverEnd={scheduleNpcHoverClose}
                       onTileEnter={setHoveredNpcId}
+                      canDragToMap={canDragToMap}
+                      onNpcDragStart={onNpcDragStart}
+                      onNpcDragEnd={onNpcDragEnd}
                     />
                   ))}
                 </div>

@@ -130,6 +130,7 @@ function EchiDiViaggio() {
     setMarkerText: setPublicMarkerText,
     setNewMarkerData: setPublicNewMarkerData,
     handleMapDrop: handlePublicMapDrop,
+    handleAddMarkerAtDrop: handlePublicAddMarkerAtDrop,
     handleSaveMarker: handlePublicSaveMarker,
     handleDeleteMarker: handlePublicDeleteMarker
   } = useMapEditing({ user, canEdit: canEditPublic, collectionPath: publicCollectionPath });
@@ -151,13 +152,15 @@ function EchiDiViaggio() {
 
   const handlePinDragStart = () => setIsDragging(true);
   const handlePinDragEnd = () => setIsDragging(false);
+  const handleNpcDragStart = () => setIsDragging(true);
+  const handleNpcDragEnd = () => setIsDragging(false);
 
   const handleMapDragOver = (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
   };
 
-  const handleMapDrop = (e, mapId) => {
+  const handleMapDrop = async (e, mapId) => {
     e.preventDefault();
     setIsDragging(false);
 
@@ -171,8 +174,30 @@ function EchiDiViaggio() {
       return;
     }
 
-    const { iconType, scope } = payload || {};
+    const { dragType, iconType, scope } = payload || {};
     if (!iconType || !scope) return;
+
+    if (dragType === 'npc') {
+      if (scope !== 'public' || iconType !== 'npc' || !canEditPublic) return;
+
+      const npcId = typeof payload.npcId === 'string' ? payload.npcId.trim() : '';
+      const npcNomeValue = typeof payload.npcNome === 'string' ? payload.npcNome.trim() : '';
+      if (!npcId) return;
+
+      const alreadyPlaced = publicMarkers.some(
+        (marker) => marker.mapId === mapId && marker.npcId === npcId
+      );
+      if (alreadyPlaced) return;
+
+      await handlePublicAddMarkerAtDrop(e, mapId, {
+        iconType: 'npc',
+        text: npcNomeValue || 'NPC',
+        markerType: 'npc',
+        npcId,
+        npcNome: npcNomeValue || 'NPC'
+      });
+      return;
+    }
 
     if (scope === 'private') {
       handlePrivateMapDrop(e, mapId, iconType);
@@ -219,6 +244,9 @@ function EchiDiViaggio() {
             userData={userData}
             stickyOffset={stickyOffset}
             onHoverStateChange={setIsNpcListHovered}
+            canDragToMap={canEditPublic}
+            onNpcDragStart={handleNpcDragStart}
+            onNpcDragEnd={handleNpcDragEnd}
           />
 
           <div
