@@ -1,14 +1,29 @@
 // file: ./frontend/src/components/echiDiViaggio/EchiDiViaggio.js
 import React, { useEffect, useMemo, useState } from 'react';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { useAuth } from '../../AuthContext';
 import mappaArt from '../../assets/images/maps/mappa_art.png';
 import mappaPrecisa from '../../assets/images/maps/mappa_precisa.png';
 import GlobalAuroraBackground from '../backgrounds/GlobalAuroraBackground';
 import { useMapEditing, MapEditorControls, MapMarkerModal, renderMarkerIcon } from './MapEditor';
 import NpcSidebar from './NpcSidebar';
+import { db } from '../firebaseConfig';
 
-const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, markerColor }) => {
+const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, markerColor, npcImageUrl }) => {
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isNpcImageBroken, setIsNpcImageBroken] = useState(false);
+
+  const isNpcMarker = marker?.markerType === 'npc' || marker?.iconType === 'npc';
+  const hasNpcImage = !!(
+    isNpcMarker
+    && typeof npcImageUrl === 'string'
+    && npcImageUrl.trim()
+    && !isNpcImageBroken
+  );
+
+  useEffect(() => {
+    setIsNpcImageBroken(false);
+  }, [npcImageUrl]);
 
   const handleDeleteClick = (e) => {
     e.stopPropagation();
@@ -27,11 +42,27 @@ const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, marker
 
   return (
     <div
-      className="absolute w-8 h-8 -ml-4 -mt-4 z-20 group/marker"
+      className={`absolute z-20 group/marker ${hasNpcImage ? 'w-10 h-10 -ml-5 -mt-5' : 'w-8 h-8 -ml-4 -mt-4'}`}
       style={{ left: `${marker.x}%`, top: `${marker.y}%` }}
     >
       <div className="w-full h-full cursor-pointer hover:scale-125 transition-transform duration-200 relative">
-        {renderMarkerIcon(marker.iconType, markerColor)}
+        {hasNpcImage ? (
+          <span className="relative block w-full h-full" aria-hidden="true">
+            <span className="absolute inset-0 rounded-full bg-black/70 shadow-xl shadow-black/70 scale-110"></span>
+            <span className="absolute inset-0 rounded-full p-[2px] bg-gradient-to-b from-amber-100/90 via-sky-100/70 to-slate-300/80">
+              <span className="block w-full h-full rounded-full overflow-hidden border border-black/30 bg-slate-900/70">
+                <img
+                  src={npcImageUrl}
+                  alt={marker?.npcNome || marker?.text || 'NPC marker'}
+                  className="w-full h-full object-cover"
+                  onError={() => setIsNpcImageBroken(true)}
+                />
+              </span>
+            </span>
+          </span>
+        ) : (
+          renderMarkerIcon(marker.iconType, markerColor)
+        )}
         {scopeLabel === 'private' && (
           <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[10px] px-2 py-0.5 rounded-full bg-purple-600 text-white font-semibold shadow whitespace-nowrap z-40">
             Privato
@@ -85,6 +116,7 @@ function EchiDiViaggio() {
   const [navbarOffset, setNavbarOffset] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [isNpcListHovered, setIsNpcListHovered] = useState(false);
+  const [npcImageById, setNpcImageById] = useState({});
 
   useEffect(() => {
     const navbar = document.querySelector('[data-navbar]');
@@ -106,6 +138,34 @@ function EchiDiViaggio() {
     window.addEventListener('resize', updateOffset);
     return () => window.removeEventListener('resize', updateOffset);
   }, []);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setNpcImageById({});
+      return () => {};
+    }
+
+    const unsubscribe = onSnapshot(
+      collection(db, 'echi_npcs'),
+      (snapshot) => {
+        const nextNpcImageById = {};
+        snapshot.docs.forEach((docSnap) => {
+          const data = docSnap.data();
+          const imageUrl = typeof data?.imageUrl === 'string' ? data.imageUrl.trim() : '';
+          if (imageUrl) {
+            nextNpcImageById[docSnap.id] = imageUrl;
+          }
+        });
+        setNpcImageById(nextNpcImageById);
+      },
+      (error) => {
+        console.error('NPC image lookup snapshot error:', error);
+        setNpcImageById({});
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user?.uid]);
 
   // Check permissions
   const canEditPublic = ['webmaster', 'dm', 'players', 'player'].includes(userData?.role);
@@ -224,6 +284,7 @@ function EchiDiViaggio() {
           onDelete={handleDelete}
           scopeLabel={scopeLabel}
           markerColor={markerColor}
+          npcImageUrl={marker.npcId ? npcImageById[marker.npcId] : ''}
         />
       ));
 
