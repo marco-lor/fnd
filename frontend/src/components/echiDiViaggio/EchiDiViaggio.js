@@ -1,14 +1,74 @@
 // file: ./frontend/src/components/echiDiViaggio/EchiDiViaggio.js
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { useAuth } from '../../AuthContext';
 import mappaArt from '../../assets/images/maps/mappa_art.png';
 import mappaPrecisa from '../../assets/images/maps/mappa_precisa.png';
 import GlobalAuroraBackground from '../backgrounds/GlobalAuroraBackground';
 import { useMapEditing, MapEditorControls, MapMarkerModal, renderMarkerIcon } from './MapEditor';
 import NpcSidebar from './NpcSidebar';
+import { db } from '../firebaseConfig';
 
-const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, markerColor }) => {
+const getNormalizedText = (value, fallback) => {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  return trimmed || fallback;
+};
+
+const NPC_HOVER_CLOSE_DELAY_MS = 180;
+
+const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, markerColor, npcData }) => {
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isNpcImageBroken, setIsNpcImageBroken] = useState(false);
+  const [isNpcHoverOpen, setIsNpcHoverOpen] = useState(false);
+  const hoverCloseTimerRef = useRef(null);
+
+  const isNpcMarker = marker?.markerType === 'npc' || marker?.iconType === 'npc';
+  const hasNpcInfo = isNpcMarker && !!npcData;
+  const npcImageUrl = getNormalizedText(npcData?.imageUrl, '');
+  const npcNome = getNormalizedText(npcData?.nome, marker?.npcNome || marker?.text || 'NPC');
+  const npcDescription = getNormalizedText(npcData?.description, '-');
+  const npcNotes = getNormalizedText(npcData?.notes, '-');
+
+  const hasNpcImage = !!(
+    hasNpcInfo
+    && npcImageUrl
+    && !isNpcImageBroken
+  );
+
+  useEffect(() => {
+    setIsNpcImageBroken(false);
+  }, [npcImageUrl, marker?.id]);
+
+  const clearNpcHoverClose = () => {
+    if (hoverCloseTimerRef.current) {
+      clearTimeout(hoverCloseTimerRef.current);
+      hoverCloseTimerRef.current = null;
+    }
+  };
+
+  const openNpcHoverCard = () => {
+    if (!hasNpcInfo || isDeleting) return;
+    clearNpcHoverClose();
+    setIsNpcHoverOpen(true);
+  };
+
+  const scheduleNpcHoverClose = () => {
+    if (!hasNpcInfo) return;
+    clearNpcHoverClose();
+    hoverCloseTimerRef.current = setTimeout(() => {
+      setIsNpcHoverOpen(false);
+      hoverCloseTimerRef.current = null;
+    }, NPC_HOVER_CLOSE_DELAY_MS);
+  };
+
+  useEffect(() => {
+    if (isDeleting || !hasNpcInfo) {
+      clearNpcHoverClose();
+      setIsNpcHoverOpen(false);
+    }
+  }, [isDeleting, hasNpcInfo]);
+
+  useEffect(() => () => clearNpcHoverClose(), []);
 
   const handleDeleteClick = (e) => {
     e.stopPropagation();
@@ -27,11 +87,29 @@ const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, marker
 
   return (
     <div
-      className="absolute w-8 h-8 -ml-4 -mt-4 z-20 group/marker"
+      className={`absolute z-20 group/marker ${hasNpcImage ? 'w-10 h-10 -ml-5 -mt-5' : 'w-8 h-8 -ml-4 -mt-4'}`}
       style={{ left: `${marker.x}%`, top: `${marker.y}%` }}
+      onMouseEnter={openNpcHoverCard}
+      onMouseLeave={scheduleNpcHoverClose}
     >
       <div className="w-full h-full cursor-pointer hover:scale-125 transition-transform duration-200 relative">
-        {renderMarkerIcon(marker.iconType, markerColor)}
+        {hasNpcImage ? (
+          <span className="relative block w-full h-full" aria-hidden="true">
+            <span className="absolute inset-0 rounded-full bg-black/70 shadow-xl shadow-black/70 scale-110"></span>
+            <span className="absolute inset-0 rounded-full p-[2px] bg-gradient-to-b from-amber-100/90 via-sky-100/70 to-slate-300/80">
+              <span className="block w-full h-full rounded-full overflow-hidden border border-black/30 bg-slate-900/70">
+                <img
+                  src={npcImageUrl}
+                  alt={npcNome}
+                  className="w-full h-full object-cover"
+                  onError={() => setIsNpcImageBroken(true)}
+                />
+              </span>
+            </span>
+          </span>
+        ) : (
+          renderMarkerIcon(marker.iconType, markerColor)
+        )}
         {scopeLabel === 'private' && (
           <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[10px] px-2 py-0.5 rounded-full bg-purple-600 text-white font-semibold shadow whitespace-nowrap z-40">
             Privato
@@ -64,17 +142,57 @@ const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, marker
       )}
 
       <div
-        className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 transition-opacity duration-300 pointer-events-none z-30 ${
-          isDeleting ? 'opacity-0' : 'opacity-0 group-hover/marker:opacity-100'
+        className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 transition-opacity duration-300 pointer-events-none z-30 ${
+          hasNpcInfo ? 'w-72' : 'w-64'
+        } ${
+          isDeleting
+            ? 'opacity-0'
+            : hasNpcInfo
+              ? (isNpcHoverOpen ? 'opacity-100' : 'opacity-0')
+              : 'opacity-0 group-hover/marker:opacity-100'
         }`}
       >
-        <div
-          className="bg-black/90 text-white p-3 rounded-lg border shadow-xl text-sm font-serif leading-relaxed relative"
-          style={{ borderColor: markerColor }}
-        >
-          {marker.text}
-          <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-black/90"></div>
-        </div>
+        {hasNpcInfo ? (
+          <div
+            className="w-72 max-h-56 overflow-y-auto pointer-events-auto bg-slate-950/95 text-white p-3 rounded-lg border border-slate-600/70 shadow-xl text-xs leading-relaxed relative"
+            style={{ borderColor: markerColor }}
+            onMouseEnter={openNpcHoverCard}
+            onMouseLeave={scheduleNpcHoverClose}
+          >
+            <div className="flex items-start gap-2 pb-2 border-b border-slate-700/70">
+              <div className="w-10 h-10 rounded-full overflow-hidden border border-slate-500/70 bg-slate-800/80 shrink-0">
+                {hasNpcImage ? (
+                  <img src={npcImageUrl} alt={`${npcNome} portrait`} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-[9px] text-slate-400">No Img</div>
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-amber-200 break-words leading-tight">{npcNome}</p>
+                <p className="text-[10px] uppercase tracking-wide text-slate-400 mt-1">NPC</p>
+              </div>
+            </div>
+
+            <div className="mt-2">
+              <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">Description</p>
+              <p className="text-[12px] text-slate-200 whitespace-pre-wrap break-words">{npcDescription}</p>
+            </div>
+
+            <div className="mt-2">
+              <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">Notes</p>
+              <p className="text-[12px] text-slate-300 whitespace-pre-wrap break-words">{npcNotes}</p>
+            </div>
+            <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-slate-950/95"></div>
+          </div>
+        ) : (
+          <div
+            className="bg-black/90 text-white p-3 rounded-lg border shadow-xl text-sm font-serif leading-relaxed relative"
+            style={{ borderColor: markerColor }}
+          >
+            {marker.text}
+            <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-black/90"></div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -85,6 +203,7 @@ function EchiDiViaggio() {
   const [navbarOffset, setNavbarOffset] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [isNpcListHovered, setIsNpcListHovered] = useState(false);
+  const [npcById, setNpcById] = useState({});
 
   useEffect(() => {
     const navbar = document.querySelector('[data-navbar]');
@@ -106,6 +225,36 @@ function EchiDiViaggio() {
     window.addEventListener('resize', updateOffset);
     return () => window.removeEventListener('resize', updateOffset);
   }, []);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setNpcById({});
+      return () => {};
+    }
+
+    const unsubscribe = onSnapshot(
+      collection(db, 'echi_npcs'),
+      (snapshot) => {
+        const nextNpcById = {};
+        snapshot.docs.forEach((docSnap) => {
+          const data = docSnap.data();
+          nextNpcById[docSnap.id] = {
+            nome: getNormalizedText(data?.nome, 'NPC'),
+            imageUrl: getNormalizedText(data?.imageUrl, ''),
+            description: getNormalizedText(data?.description, '-'),
+            notes: getNormalizedText(data?.notes, '-')
+          };
+        });
+        setNpcById(nextNpcById);
+      },
+      (error) => {
+        console.error('NPC lookup snapshot error:', error);
+        setNpcById({});
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user?.uid]);
 
   // Check permissions
   const canEditPublic = ['webmaster', 'dm', 'players', 'player'].includes(userData?.role);
@@ -130,6 +279,7 @@ function EchiDiViaggio() {
     setMarkerText: setPublicMarkerText,
     setNewMarkerData: setPublicNewMarkerData,
     handleMapDrop: handlePublicMapDrop,
+    handleAddMarkerAtDrop: handlePublicAddMarkerAtDrop,
     handleSaveMarker: handlePublicSaveMarker,
     handleDeleteMarker: handlePublicDeleteMarker
   } = useMapEditing({ user, canEdit: canEditPublic, collectionPath: publicCollectionPath });
@@ -151,13 +301,15 @@ function EchiDiViaggio() {
 
   const handlePinDragStart = () => setIsDragging(true);
   const handlePinDragEnd = () => setIsDragging(false);
+  const handleNpcDragStart = () => setIsDragging(true);
+  const handleNpcDragEnd = () => setIsDragging(false);
 
   const handleMapDragOver = (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
   };
 
-  const handleMapDrop = (e, mapId) => {
+  const handleMapDrop = async (e, mapId) => {
     e.preventDefault();
     setIsDragging(false);
 
@@ -171,8 +323,30 @@ function EchiDiViaggio() {
       return;
     }
 
-    const { iconType, scope } = payload || {};
+    const { dragType, iconType, scope } = payload || {};
     if (!iconType || !scope) return;
+
+    if (dragType === 'npc') {
+      if (scope !== 'public' || iconType !== 'npc' || !canEditPublic) return;
+
+      const npcId = typeof payload.npcId === 'string' ? payload.npcId.trim() : '';
+      const npcNomeValue = typeof payload.npcNome === 'string' ? payload.npcNome.trim() : '';
+      if (!npcId) return;
+
+      const alreadyPlaced = publicMarkers.some(
+        (marker) => marker.mapId === mapId && marker.npcId === npcId
+      );
+      if (alreadyPlaced) return;
+
+      await handlePublicAddMarkerAtDrop(e, mapId, {
+        iconType: 'npc',
+        text: npcNomeValue || 'NPC',
+        markerType: 'npc',
+        npcId,
+        npcNome: npcNomeValue || 'NPC'
+      });
+      return;
+    }
 
     if (scope === 'private') {
       handlePrivateMapDrop(e, mapId, iconType);
@@ -199,6 +373,7 @@ function EchiDiViaggio() {
           onDelete={handleDelete}
           scopeLabel={scopeLabel}
           markerColor={markerColor}
+          npcData={marker.npcId ? npcById[marker.npcId] || null : null}
         />
       ));
 
@@ -219,6 +394,9 @@ function EchiDiViaggio() {
             userData={userData}
             stickyOffset={stickyOffset}
             onHoverStateChange={setIsNpcListHovered}
+            canDragToMap={canEditPublic}
+            onNpcDragStart={handleNpcDragStart}
+            onNpcDragEnd={handleNpcDragEnd}
           />
 
           <div
