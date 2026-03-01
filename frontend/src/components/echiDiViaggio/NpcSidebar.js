@@ -362,7 +362,7 @@ const NpcCreateModal = ({
           </div>
 
           <div>
-            <label className="block text-sm text-slate-200 mb-1">Description (required)</label>
+            <label className="block text-sm text-slate-200 mb-1">Description (optional)</label>
             <textarea
               value={createDescription}
               onChange={(e) => setCreateDescription(e.target.value)}
@@ -372,7 +372,7 @@ const NpcCreateModal = ({
           </div>
 
           <div>
-            <label className="block text-sm text-slate-200 mb-1">Notes (required)</label>
+            <label className="block text-sm text-slate-200 mb-1">Notes (optional)</label>
             <textarea
               value={createNotes}
               onChange={(e) => setCreateNotes(e.target.value)}
@@ -468,7 +468,7 @@ const NpcEditModal = ({
           </div>
 
           <div>
-            <label className="block text-sm text-slate-200 mb-1">Description (required)</label>
+            <label className="block text-sm text-slate-200 mb-1">Description (optional)</label>
             <textarea
               value={editDescription}
               onChange={(e) => setEditDescription(e.target.value)}
@@ -478,7 +478,7 @@ const NpcEditModal = ({
           </div>
 
           <div>
-            <label className="block text-sm text-slate-200 mb-1">Notes (required)</label>
+            <label className="block text-sm text-slate-200 mb-1">Notes (optional)</label>
             <textarea
               value={editNotes}
               onChange={(e) => setEditNotes(e.target.value)}
@@ -826,15 +826,6 @@ export default function NpcSidebar({
       setCreateFormError('Image must be 5 MB or smaller.');
       return;
     }
-    if (!description) {
-      setCreateFormError('Description is required.');
-      return;
-    }
-    if (!notes) {
-      setCreateFormError('Notes are required.');
-      return;
-    }
-
     const fileExt = createImageFile.name?.includes('.') ? createImageFile.name.split('.').pop() : '';
     const safeExt = fileExt ? `.${fileExt.replace(/[^a-zA-Z0-9]/g, '')}` : '';
     const safeNome = nome.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'npc';
@@ -907,15 +898,6 @@ export default function NpcSidebar({
       setEditFormError('Nome is required.');
       return;
     }
-    if (!description) {
-      setEditFormError('Description is required.');
-      return;
-    }
-    if (!notes) {
-      setEditFormError('Notes are required.');
-      return;
-    }
-
     const isReplacingImage = canEditNpcImage && !!editImageFile;
     if (isReplacingImage) {
       if (!editImageFile.type?.startsWith('image/')) {
