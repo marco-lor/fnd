@@ -15,8 +15,77 @@ const getNormalizedText = (value, fallback) => {
 };
 
 const NPC_HOVER_CLOSE_DELAY_MS = 180;
+const NPC_MOVE_NOOP_DELTA = 0.1;
+const MAP_LABEL_BY_ID = {
+  art: 'Mappa Artistica',
+  precisa: 'Mappa Dettagliata'
+};
 
-const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, markerColor, npcData }) => {
+const clampPercentage = (value) => Math.max(0, Math.min(100, value));
+
+const NpcMoveConfirmModal = ({
+  open,
+  busy,
+  error,
+  npcName,
+  mapLabel,
+  onCancel,
+  onConfirm
+}) => {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[120] p-4">
+      <div className="w-full max-w-md rounded-xl border border-slate-600 bg-slate-900 shadow-2xl p-5">
+        <h3 className="text-xl font-semibold text-amber-300 mb-3">Conferma Spostamento NPC</h3>
+        <p className="text-sm text-slate-200 leading-relaxed">
+          Vuoi spostare{' '}
+          <span className="font-semibold text-amber-200">{npcName || 'NPC'}</span>
+          {' '}nella{' '}
+          <span className="font-semibold text-sky-300">{mapLabel}</span>
+          {' '}in questa nuova posizione?
+        </p>
+
+        {error && (
+          <div className="mt-4 text-sm text-red-300 bg-red-900/20 border border-red-500/30 rounded-md px-3 py-2">
+            {error}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 mt-5">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="px-4 py-2 rounded-md bg-slate-700 text-slate-100 hover:bg-slate-600 transition-colors disabled:opacity-60"
+          >
+            Annulla
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className="px-4 py-2 rounded-md bg-amber-500 text-black font-semibold hover:bg-amber-400 transition-colors disabled:opacity-60"
+          >
+            {busy ? 'Salvataggio...' : 'Conferma'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const MapMarkerItem = ({
+  marker,
+  editMode,
+  canEdit,
+  onDelete,
+  scopeLabel,
+  markerColor,
+  npcData,
+  onNpcMoveDragStart,
+  onNpcMoveDragEnd
+}) => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isNpcImageBroken, setIsNpcImageBroken] = useState(false);
   const [isNpcHoverOpen, setIsNpcHoverOpen] = useState(false);
@@ -34,6 +103,7 @@ const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, marker
     && npcImageUrl
     && !isNpcImageBroken
   );
+  const isNpcMovable = isNpcMarker && editMode && canEdit && !isDeleting;
 
   useEffect(() => {
     setIsNpcImageBroken(false);
@@ -85,14 +155,43 @@ const MapMarkerItem = ({ marker, editMode, canEdit, onDelete, scopeLabel, marker
     onDelete(e, marker.id);
   };
 
+  const handleNpcMarkerDragStart = (e) => {
+    if (!isNpcMovable) {
+      e.preventDefault();
+      return;
+    }
+
+    clearNpcHoverClose();
+    setIsNpcHoverOpen(false);
+
+    const payload = {
+      dragType: 'npc-marker-move',
+      markerId: marker?.id || '',
+      npcId: marker?.npcId || '',
+      npcNome,
+      scope: scopeLabel,
+      originMapId: marker?.mapId || ''
+    };
+    e.dataTransfer.setData('text/plain', JSON.stringify(payload));
+    e.dataTransfer.effectAllowed = 'move';
+    onNpcMoveDragStart?.(payload);
+  };
+
+  const handleNpcMarkerDragEnd = () => {
+    onNpcMoveDragEnd?.();
+  };
+
   return (
     <div
       className={`absolute z-20 group/marker ${hasNpcImage ? 'w-10 h-10 -ml-5 -mt-5' : 'w-8 h-8 -ml-4 -mt-4'}`}
       style={{ left: `${marker.x}%`, top: `${marker.y}%` }}
       onMouseEnter={openNpcHoverCard}
       onMouseLeave={scheduleNpcHoverClose}
+      draggable={isNpcMovable}
+      onDragStart={handleNpcMarkerDragStart}
+      onDragEnd={handleNpcMarkerDragEnd}
     >
-      <div className="w-full h-full cursor-pointer hover:scale-125 transition-transform duration-200 relative">
+      <div className={`w-full h-full hover:scale-125 transition-transform duration-200 relative ${isNpcMovable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}`}>
         {hasNpcImage ? (
           <span className="relative block w-full h-full" aria-hidden="true">
             <span className="absolute inset-0 rounded-full bg-black/70 shadow-xl shadow-black/70 scale-110"></span>
@@ -204,6 +303,9 @@ function EchiDiViaggio() {
   const [isDragging, setIsDragging] = useState(false);
   const [isNpcListHovered, setIsNpcListHovered] = useState(false);
   const [npcById, setNpcById] = useState({});
+  const [pendingNpcMove, setPendingNpcMove] = useState(null);
+  const [npcMoveError, setNpcMoveError] = useState('');
+  const [isSavingNpcMove, setIsSavingNpcMove] = useState(false);
 
   useEffect(() => {
     const navbar = document.querySelector('[data-navbar]');
@@ -281,7 +383,8 @@ function EchiDiViaggio() {
     handleMapDrop: handlePublicMapDrop,
     handleAddMarkerAtDrop: handlePublicAddMarkerAtDrop,
     handleSaveMarker: handlePublicSaveMarker,
-    handleDeleteMarker: handlePublicDeleteMarker
+    handleDeleteMarker: handlePublicDeleteMarker,
+    handleMoveMarker: handlePublicMoveMarker
   } = useMapEditing({ user, canEdit: canEditPublic, collectionPath: publicCollectionPath });
 
   const {
@@ -294,7 +397,8 @@ function EchiDiViaggio() {
     setNewMarkerData: setPrivateNewMarkerData,
     handleMapDrop: handlePrivateMapDrop,
     handleSaveMarker: handlePrivateSaveMarker,
-    handleDeleteMarker: handlePrivateDeleteMarker
+    handleDeleteMarker: handlePrivateDeleteMarker,
+    handleMoveMarker: handlePrivateMoveMarker
   } = useMapEditing({ user, canEdit: canEditPrivate, collectionPath: privateCollectionPath });
 
   const stickyOffset = navbarOffset ? navbarOffset + 8 : 0;
@@ -303,10 +407,37 @@ function EchiDiViaggio() {
   const handlePinDragEnd = () => setIsDragging(false);
   const handleNpcDragStart = () => setIsDragging(true);
   const handleNpcDragEnd = () => setIsDragging(false);
+  const handleNpcMoveDragStart = () => {
+    setIsDragging(true);
+    setNpcMoveError('');
+    setPendingNpcMove(null);
+  };
+  const handleNpcMoveDragEnd = () => setIsDragging(false);
+
+  const getMapLabel = (mapId) => MAP_LABEL_BY_ID[mapId] || mapId;
 
   const handleMapDragOver = (e) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+    let dropEffect = 'copy';
+    const effectAllowed = (e.dataTransfer.effectAllowed || '').toLowerCase();
+
+    if (effectAllowed === 'move') {
+      dropEffect = 'move';
+    }
+
+    const rawPayload = e.dataTransfer.getData('text/plain');
+    if (rawPayload) {
+      try {
+        const payload = JSON.parse(rawPayload);
+        if (payload?.dragType === 'npc-marker-move') {
+          dropEffect = 'move';
+        }
+      } catch {
+        // ignore malformed drag payloads and keep fallback effect
+      }
+    }
+
+    e.dataTransfer.dropEffect = dropEffect;
   };
 
   const handleMapDrop = async (e, mapId) => {
@@ -324,6 +455,59 @@ function EchiDiViaggio() {
     }
 
     const { dragType, iconType, scope } = payload || {};
+
+    if (dragType === 'npc-marker-move') {
+      const markerId = typeof payload.markerId === 'string' ? payload.markerId.trim() : '';
+      const originMapId = typeof payload.originMapId === 'string' ? payload.originMapId.trim() : '';
+      if (!markerId || !originMapId || originMapId !== mapId) return;
+
+      const moveScope = scope === 'public' || scope === 'private' ? scope : '';
+      if (!moveScope) return;
+      if ((moveScope === 'public' && !canEditPublic) || (moveScope === 'private' && !canEditPrivate)) return;
+
+      const scopeMarkers = moveScope === 'public' ? publicMarkers : privateMarkers;
+      const marker = scopeMarkers.find((entry) => entry.id === markerId);
+      if (!marker || marker.mapId !== mapId) return;
+
+      const rect = e.currentTarget.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+
+      const nextXRaw = ((e.clientX - rect.left) / rect.width) * 100;
+      const nextYRaw = ((e.clientY - rect.top) / rect.height) * 100;
+      if (!Number.isFinite(nextXRaw) || !Number.isFinite(nextYRaw)) return;
+
+      const nextX = clampPercentage(nextXRaw);
+      const nextY = clampPercentage(nextYRaw);
+      const currentX = Number(marker.x);
+      const currentY = Number(marker.y);
+      if (
+        Number.isFinite(currentX)
+        && Number.isFinite(currentY)
+        && Math.abs(currentX - nextX) < NPC_MOVE_NOOP_DELTA
+        && Math.abs(currentY - nextY) < NPC_MOVE_NOOP_DELTA
+      ) {
+        return;
+      }
+
+      const npcData = marker.npcId ? npcById[marker.npcId] : null;
+      const npcNomeValue = getNormalizedText(
+        payload.npcNome,
+        getNormalizedText(npcData?.nome, marker.npcNome || marker.text || 'NPC')
+      );
+
+      setNpcMoveError('');
+      setPendingNpcMove({
+        markerId,
+        npcId: typeof marker.npcId === 'string' ? marker.npcId : '',
+        scope: moveScope,
+        mapId,
+        nextX,
+        nextY,
+        npcName: npcNomeValue
+      });
+      return;
+    }
+
     if (!iconType || !scope) return;
 
     if (dragType === 'npc') {
@@ -358,9 +542,43 @@ function EchiDiViaggio() {
     }
   };
 
+  const handleCancelNpcMove = () => {
+    if (isSavingNpcMove) return;
+    setPendingNpcMove(null);
+    setNpcMoveError('');
+  };
+
+  const handleConfirmNpcMove = async () => {
+    if (!pendingNpcMove) return;
+
+    const moveHandler = pendingNpcMove.scope === 'public'
+      ? handlePublicMoveMarker
+      : handlePrivateMoveMarker;
+    if (typeof moveHandler !== 'function') return;
+
+    setNpcMoveError('');
+    setIsSavingNpcMove(true);
+    try {
+      const result = await moveHandler(pendingNpcMove.markerId, {
+        x: pendingNpcMove.nextX,
+        y: pendingNpcMove.nextY
+      });
+      if (result?.success) {
+        setPendingNpcMove(null);
+        return;
+      }
+      setNpcMoveError('Impossibile spostare questo NPC. Riprova.');
+    } catch (error) {
+      console.error('NPC move confirm failed:', error);
+      setNpcMoveError('Impossibile spostare questo NPC. Riprova.');
+    } finally {
+      setIsSavingNpcMove(false);
+    }
+  };
+
   const renderMarkersForMap = (
     markersList,
-    { mapId, editMode, canEdit, handleDelete, scopeLabel, markerColor }
+    { mapId, editMode, canEdit, handleDelete, scopeLabel, markerColor, onNpcMoveDragStart, onNpcMoveDragEnd }
   ) =>
     markersList
       .filter((m) => m.mapId === mapId)
@@ -374,6 +592,8 @@ function EchiDiViaggio() {
           scopeLabel={scopeLabel}
           markerColor={markerColor}
           npcData={marker.npcId ? npcById[marker.npcId] || null : null}
+          onNpcMoveDragStart={onNpcMoveDragStart}
+          onNpcMoveDragEnd={onNpcMoveDragEnd}
         />
       ));
 
@@ -447,7 +667,9 @@ function EchiDiViaggio() {
                   canEdit: canEditPublic,
                   handleDelete: handlePublicDeleteMarker,
                   scopeLabel: 'public',
-                  markerColor: PUBLIC_COLOR
+                  markerColor: PUBLIC_COLOR,
+                  onNpcMoveDragStart: handleNpcMoveDragStart,
+                  onNpcMoveDragEnd: handleNpcMoveDragEnd
                 })}
                 {renderMarkersForMap(privateMarkers, {
                   mapId: 'art',
@@ -455,7 +677,9 @@ function EchiDiViaggio() {
                   canEdit: canEditPrivate,
                   handleDelete: handlePrivateDeleteMarker,
                   scopeLabel: 'private',
-                  markerColor: PRIVATE_COLOR
+                  markerColor: PRIVATE_COLOR,
+                  onNpcMoveDragStart: handleNpcMoveDragStart,
+                  onNpcMoveDragEnd: handleNpcMoveDragEnd
                 })}
               </div>
             </div>
@@ -482,7 +706,9 @@ function EchiDiViaggio() {
                   canEdit: canEditPublic,
                   handleDelete: handlePublicDeleteMarker,
                   scopeLabel: 'public',
-                  markerColor: PUBLIC_COLOR
+                  markerColor: PUBLIC_COLOR,
+                  onNpcMoveDragStart: handleNpcMoveDragStart,
+                  onNpcMoveDragEnd: handleNpcMoveDragEnd
                 })}
                 {renderMarkersForMap(privateMarkers, {
                   mapId: 'precisa',
@@ -490,7 +716,9 @@ function EchiDiViaggio() {
                   canEdit: canEditPrivate,
                   handleDelete: handlePrivateDeleteMarker,
                   scopeLabel: 'private',
-                  markerColor: PRIVATE_COLOR
+                  markerColor: PRIVATE_COLOR,
+                  onNpcMoveDragStart: handleNpcMoveDragStart,
+                  onNpcMoveDragEnd: handleNpcMoveDragEnd
                 })}
               </div>
             </div>
@@ -515,6 +743,16 @@ function EchiDiViaggio() {
           setMarkerText={setPrivateMarkerText}
           handleSaveMarker={handlePrivateSaveMarker}
           setNewMarkerData={setPrivateNewMarkerData}
+        />
+
+        <NpcMoveConfirmModal
+          open={!!pendingNpcMove}
+          busy={isSavingNpcMove}
+          error={npcMoveError}
+          npcName={pendingNpcMove?.npcName || 'NPC'}
+          mapLabel={getMapLabel(pendingNpcMove?.mapId || '')}
+          onCancel={handleCancelNpcMove}
+          onConfirm={handleConfirmNpcMove}
         />
       </main>
     </div>
