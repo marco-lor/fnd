@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebaseConfig';
-import { collection, addDoc, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import {
     GiCastle,
     GiSkullCrossedBones,
@@ -167,6 +167,39 @@ export const useMapEditing = ({ user, canEdit, collectionPath }) => {
         }
     };
 
+    const handleMoveMarker = async (markerId, nextPosition = {}) => {
+        if (!editMode || !canEdit || !collectionKey) {
+            return { success: false, reason: 'forbidden' };
+        }
+
+        const markerIdValue = typeof markerId === 'string' ? markerId.trim() : '';
+        if (!markerIdValue) {
+            return { success: false, reason: 'invalid-marker' };
+        }
+
+        const rawX = Number(nextPosition?.x);
+        const rawY = Number(nextPosition?.y);
+        if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) {
+            return { success: false, reason: 'invalid-position' };
+        }
+
+        const x = Math.max(0, Math.min(100, rawX));
+        const y = Math.max(0, Math.min(100, rawY));
+
+        try {
+            await updateDoc(doc(db, ...collectionPath, markerIdValue), {
+                x,
+                y,
+                updatedAt: new Date().toISOString(),
+                updatedBy: user?.uid || null
+            });
+            return { success: true };
+        } catch (error) {
+            console.error('Error moving marker: ', error);
+            return { success: false, reason: 'save-failed' };
+        }
+    };
+
     return {
         markers,
         editMode,
@@ -180,7 +213,8 @@ export const useMapEditing = ({ user, canEdit, collectionPath }) => {
         handleMapDrop,
         handleAddMarkerAtDrop,
         handleSaveMarker,
-        handleDeleteMarker
+        handleDeleteMarker,
+        handleMoveMarker
     };
 };
 
