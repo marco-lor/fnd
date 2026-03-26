@@ -6,15 +6,11 @@ import { db } from "../../firebaseConfig";
 import { useAuth } from "../../../AuthContext";
 import { FaDiceD20 } from 'react-icons/fa';
 import DiceRoller from '../../common/DiceRoller';
+import { getParamDisplayName, SPECIAL_PARAM_SCHEMA_IDS } from '../../common/paramMetadata';
 
 const functions = getFunctions();
 const spendCharacterPoint = httpsCallable(functions, "spendCharacterPoint");
-
-// Readable label overrides for specific parameter keys
-const NAME_OVERRIDES = {
-  RiduzioneDanni: 'Riduz Danni',
-};
-const displayName = (k) => NAME_OVERRIDES[k] || k;
+const displayName = (k) => getParamDisplayName(k);
 
 const StatButton = ({ onClick, disabled, children, className = "" }) => (
   <button
@@ -178,8 +174,7 @@ export function MergedStatsTable() {
   useEffect(() => {
     (async () => {
       try {
-        const ids = ['schema_weapon','schema_armatura','schema_accessorio','schema_consumabile'];
-        const docs = await Promise.all(ids.map(id => getDoc(doc(db, 'utils', id))));
+        const docs = await Promise.all(SPECIAL_PARAM_SCHEMA_IDS.map(id => getDoc(doc(db, 'utils', id))));
         const allKeys = new Set();
         docs.forEach(snap => {
           if (!snap.exists()) return;
