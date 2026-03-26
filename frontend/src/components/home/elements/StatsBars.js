@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 import { AuthContext } from '../../../AuthContext';
-import { FaAngleRight, FaAngleLeft, FaAnglesRight, FaAnglesLeft } from 'react-icons/fa6';
+import { FaAngleRight, FaAngleLeft, FaAnglesRight, FaAnglesLeft, FaDroplet } from 'react-icons/fa6';
 import { FaRedo, FaBan } from 'react-icons/fa';
 import { GiHearts, GiMagicSwirl, GiShield } from 'react-icons/gi';
 
@@ -20,6 +20,7 @@ const StatsBars = () => {
   // Refs for long-press intervals.
   const hpIntervalRef = useRef(null);
   const manaIntervalRef = useRef(null);
+  const essenzaIntervalRef = useRef(null);
   const barrieraIntervalRef = useRef(null);
   // Activation overlay state for Barriera
   const [showBarrieraActivate, setShowBarrieraActivate] = useState(false);
@@ -69,7 +70,7 @@ const StatsBars = () => {
       }
     };
     migrateLegacyBarriera();
-  }, [user, userData?.stats?.barriera, userData?.stats?.barrieraCurrent, userData?.stats?.barrieraTotal]);
+  }, [user, userData?.stats, userData?.stats?.barriera, userData?.stats?.barrieraCurrent, userData?.stats?.barrieraTotal]);
 
   // --- HP adjustment functions ---
   const handleResetHP = async () => {
@@ -150,7 +151,7 @@ const StatsBars = () => {
 
   // Helper to check if action is a decrement
   const isDecrementAction = (action) => (
-    ['hp-decrement', 'mana-decrement', 'barriera-decrement'].includes(action)
+    ['hp-decrement', 'mana-decrement', 'essenza-decrement', 'barriera-decrement'].includes(action)
   );
 
   const handleCustomSubmit = async () => {
@@ -182,6 +183,18 @@ const StatsBars = () => {
       } else if (customAction === 'mana-increment') {
         field = 'stats.manaCurrent';
         newValue = (userData.stats.manaCurrent || 0) + delta;
+      } else if (customAction === 'essenza-decrement') {
+        field = 'stats.essenzaCurrent';
+        const current = userData.stats.essenzaCurrent || 0;
+        if (delta > current) {
+          actualDelta = current;
+          newValue = 0;
+        } else {
+          newValue = current - delta;
+        }
+      } else if (customAction === 'essenza-increment') {
+        field = 'stats.essenzaCurrent';
+        newValue = (userData.stats.essenzaCurrent || 0) + delta;
       } else if (customAction === 'barriera-decrement') {
         field = 'stats.barrieraCurrent';
         const current = userData.stats.barrieraCurrent || 0;
@@ -270,6 +283,66 @@ const StatsBars = () => {
     if (manaIntervalRef.current) {
       clearInterval(manaIntervalRef.current);
       manaIntervalRef.current = null;
+    }
+  };
+
+  // --- Essenza adjustment functions ---
+  const handleResetEssenza = async () => {
+    if (user && userData?.stats) {
+      try {
+        const userRef = doc(db, "users", user.uid);
+        await updateDoc(userRef, { "stats.essenzaCurrent": userData.stats.essenzaTotal || 0 });
+      } catch (error) {
+        console.error("Error resetting Essenza:", error);
+      }
+    }
+  };
+
+  const handleDecrementEssenza = async () => {
+    if (user && userData?.stats) {
+      const newEssenza = (userData.stats.essenzaCurrent || 0) - 1;
+      try {
+        const userRef = doc(db, "users", user.uid);
+        await updateDoc(userRef, { "stats.essenzaCurrent": newEssenza });
+      } catch (error) {
+        console.error("Error decrementing Essenza:", error);
+      }
+    }
+  };
+
+  const handleIncrementEssenza = async () => {
+    if (user && userData?.stats) {
+      const newEssenza = (userData.stats.essenzaCurrent || 0) + 1;
+      try {
+        const userRef = doc(db, "users", user.uid);
+        await updateDoc(userRef, { "stats.essenzaCurrent": newEssenza });
+      } catch (error) {
+        console.error("Error incrementing Essenza:", error);
+      }
+    }
+  };
+
+  const handleDecrementEssenzaStart = () => {
+    handleDecrementEssenza();
+    essenzaIntervalRef.current = setInterval(handleDecrementEssenza, 200);
+  };
+
+  const handleDecrementEssenzaEnd = () => {
+    if (essenzaIntervalRef.current) {
+      clearInterval(essenzaIntervalRef.current);
+      essenzaIntervalRef.current = null;
+    }
+  };
+
+  const handleIncrementEssenzaStart = () => {
+    handleIncrementEssenza();
+    essenzaIntervalRef.current = setInterval(handleIncrementEssenza, 200);
+  };
+
+  const handleIncrementEssenzaEnd = () => {
+    if (essenzaIntervalRef.current) {
+      clearInterval(essenzaIntervalRef.current);
+      essenzaIntervalRef.current = null;
     }
   };
 
@@ -630,6 +703,22 @@ const StatsBars = () => {
             onIncEnd={handleIncrementManaEnd}
             onOpenDec={() => openCustomInput('mana-decrement')}
             onOpenInc={() => openCustomInput('mana-increment')}
+          />
+
+          <StatRow
+            label="Essenza"
+            icon={FaDroplet}
+            colorTrack="bg-teal-900/30"
+            colorFill="bg-gradient-to-r from-teal-500 to-emerald-400"
+            current={userData?.stats?.essenzaCurrent || 0}
+            total={userData?.stats?.essenzaTotal || 0}
+            onReset={handleResetEssenza}
+            onDecStart={handleDecrementEssenzaStart}
+            onDecEnd={handleDecrementEssenzaEnd}
+            onIncStart={handleIncrementEssenzaStart}
+            onIncEnd={handleIncrementEssenzaEnd}
+            onOpenDec={() => openCustomInput('essenza-decrement')}
+            onOpenInc={() => openCustomInput('essenza-increment')}
           />
 
           <StatRow

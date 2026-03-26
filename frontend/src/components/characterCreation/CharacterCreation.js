@@ -1,7 +1,7 @@
 // file: ./frontend/src/components/characterCreation/CharacterCreation.js
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { auth, db, storage } from "../firebaseConfig"; 
+import { db, storage } from "../firebaseConfig"; 
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { doc, getDoc, updateDoc, setDoc } from "firebase/firestore";
 import { useAuth } from "../../AuthContext";
@@ -262,7 +262,7 @@ function CharacterCreation() {
             // Fallback minimal data
             characterInitialData = {
                 Parametri: { Base: {}, Combattimento: {} },
-                stats: { level: 1, hpTotal: 10, hpCurrent: 10, manaTotal: 10, manaCurrent: 10, basePointsAvailable: 4, basePointsSpent: 0, combatTokensAvailable: 50, combatTokensSpent: 0 },
+            stats: { level: 1, hpTotal: 10, hpCurrent: 10, manaTotal: 10, manaCurrent: 10, essenzaTotal: 0, essenzaCurrent: 0, basePointsAvailable: 4, basePointsSpent: 0, combatTokensAvailable: 50, combatTokensSpent: 0 },
                 inventory: [], tecniche: {}, spells: {}, conoscenze: {}, professioni: {}, lingue: {}, settings: { theme: 'dark', notifications: true }, flags: {}
             };
         }
@@ -279,7 +279,11 @@ function CharacterCreation() {
 
         // Ensure essential structures
         characterInitialData.Parametri = characterInitialData.Parametri || { Base: {}, Combattimento: {} };
-        characterInitialData.stats = characterInitialData.stats || {};
+        characterInitialData.stats = {
+          ...(characterInitialData.stats || {}),
+          essenzaTotal: Number(characterInitialData.stats?.essenzaTotal) || 0,
+          essenzaCurrent: Number(characterInitialData.stats?.essenzaCurrent) || 0,
+        };
         characterInitialData.flags = characterInitialData.flags || {};
         characterInitialData.flags.characterCreationDone = true;
 
