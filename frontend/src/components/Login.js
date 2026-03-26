@@ -1,5 +1,5 @@
 // file: ./frontend/src/components/Login.js
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, fetchSignInMethodsForEmail } from "firebase/auth";
 import { auth, db } from "./firebaseConfig";
 import { useNavigate } from "react-router-dom";
@@ -122,6 +122,12 @@ function Login() {
           }
         });
       }
+
+      initialSchemaData.stats = {
+        ...(initialSchemaData.stats || {}),
+        essenzaTotal: Number(initialSchemaData.stats?.essenzaTotal) || 0,
+        essenzaCurrent: Number(initialSchemaData.stats?.essenzaCurrent) || 0,
+      };
 
       // Prepare basic user data including schema defaults
       const basicUserData = {

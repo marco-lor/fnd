@@ -308,6 +308,7 @@ const PlayerInfo = ({
   const vitalFieldMap = {
     hp: { current: "stats.hpCurrent", total: "stats.hpTotal", label: "HP" },
     mana: { current: "stats.manaCurrent", total: "stats.manaTotal", label: "Mana" },
+    essenza: { current: "stats.essenzaCurrent", total: "stats.essenzaTotal", label: "Essenza" },
   };
 
   const promptInteger = (message, defaultVal) => {
@@ -427,6 +428,13 @@ const PlayerInfo = ({
         track: "bg-indigo-900/30",
         fill: "bg-gradient-to-r from-indigo-500 to-cyan-500",
       },
+      {
+        key: "essenza",
+        cur: Number(stats.essenzaCurrent) || 0,
+        tot: Number(stats.essenzaTotal) || 0,
+        track: "bg-teal-900/30",
+        fill: "bg-gradient-to-r from-teal-500 to-emerald-400",
+      },
     ];
 
     return (
@@ -439,9 +447,16 @@ const PlayerInfo = ({
               <div key={key} className="rounded border border-slate-700/60 bg-slate-900/50 p-3">
                 <div className="flex items-center justify-between text-xs text-slate-300">
                   <span className="font-semibold uppercase">{key}</span>
-                  <span className="tabular-nums cursor-pointer hover:text-white" onClick={() => setVitalCurrent(user.id, key)} title="Set current">
-                    {cur}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="tabular-nums text-slate-100">{cur}</span>
+                    <button
+                      onClick={() => setVitalCurrent(user.id, key)}
+                      className="rounded bg-slate-800 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-200 hover:bg-slate-700"
+                      title="Set current"
+                    >
+                      Set cur
+                    </button>
+                  </div>
                 </div>
                 <div className="mt-2">
                   <VBar pct={pct} track={track} fill={fill} />
@@ -452,11 +467,16 @@ const PlayerInfo = ({
                     <button onClick={() => adjustVitalDelta(user.id, key, 1)} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700">+</button>
                     <button onClick={() => customDeltaPrompt(user.id, key)} className="px-2 py-1 rounded bg-indigo-900/70 hover:bg-indigo-800">Δ</button>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5">
                     <span className="text-slate-300">/</span>
-                    <span className="cursor-pointer hover:text-white" onClick={() => setVitalTotal(user.id, key)} title="Set total">
-                      {tot}
-                    </span>
+                    <span className="tabular-nums text-slate-100">{tot}</span>
+                    <button
+                      onClick={() => setVitalTotal(user.id, key)}
+                      className="rounded bg-cyan-900/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-50 hover:bg-cyan-800"
+                      title="Set total"
+                    >
+                      Set max
+                    </button>
                     <button onClick={() => resetVital(user.id, key)} className="px-2 py-1 rounded bg-emerald-800/70 hover:bg-emerald-700 text-emerald-50">Reset</button>
                   </div>
                 </div>
