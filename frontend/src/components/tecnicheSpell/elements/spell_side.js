@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { GiSpellBook, GiMagicSwirl } from "react-icons/gi";
+import { FaPen } from "react-icons/fa";
 import { doc, updateDoc, getFirestore, getDoc } from "firebase/firestore";
 
 // Cache for dadi anima data to prevent repeated fetches
@@ -10,7 +11,7 @@ const dadiAnimaCache = {
   expirationTime: 30 * 60 * 1000
 };
 
-const SpellCard = ({ spellName, spell, userData }) => {
+const SpellCard = ({ spellName, spell, userData, onEdit }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const [isPositioned, setIsPositioned] = useState(false);
@@ -190,6 +191,15 @@ const SpellCard = ({ spellName, spell, userData }) => {
     setOverlayDismissed(true);
     setIsHovered(false);
     setShowConfirmation(true);
+  };
+
+  const handleEditSpell = (e) => {
+    e.stopPropagation();
+    setShowConfirmation(false);
+    setIsExpanded(false);
+    setOverlayDismissed(true);
+    setIsHovered(false);
+    onEdit?.(spellName, spell);
   };
 
   // Auto-hide success message.
@@ -541,12 +551,22 @@ const SpellCard = ({ spellName, spell, userData }) => {
             
             {/* Add Cast Spell button in expanded view */}
             {isExpanded && (
-              <button
-                onClick={handleUseSpell}
-                className="w-full py-3 bg-indigo-700 hover:bg-indigo-600 text-white rounded-md transition-colors flex items-center justify-center text-lg"
-              >
-                <GiMagicSwirl className="mr-2" /> Lancia Incantesimo
-              </button>
+              <div className={`grid gap-2 ${onEdit ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                <button
+                  onClick={handleUseSpell}
+                  className="w-full py-3 bg-indigo-700 hover:bg-indigo-600 text-white rounded-md transition-colors flex items-center justify-center text-lg"
+                >
+                  <GiMagicSwirl className="mr-2" /> Lancia Incantesimo
+                </button>
+                {onEdit && (
+                  <button
+                    onClick={handleEditSpell}
+                    className="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors flex items-center justify-center"
+                  >
+                    <FaPen className="mr-2" /> Modifica Media
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -623,7 +643,7 @@ const SpellCard = ({ spellName, spell, userData }) => {
   );
 };
 
-const SpellSide = ({ personalSpells = {}, userData = {} }) => {
+const SpellSide = ({ personalSpells = {}, userData = {}, onEditPersonalSpell }) => {
   return (
     <div className="md:w-3/5 bg-[rgba(40,40,60,0.8)] p-5 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.4)]">
       <h1 className="text-2xl text-white font-bold mb-4">Spellbook</h1>
@@ -642,6 +662,7 @@ const SpellSide = ({ personalSpells = {}, userData = {} }) => {
                 spellName={spellName}
                 spell={spell}
                 userData={userData}
+                onEdit={onEditPersonalSpell}
               />
             ))}
         </div>

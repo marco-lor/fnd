@@ -4,7 +4,8 @@ import { doc, onSnapshot, getDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 import TecnicheSide from "./elements/tecniche_side";
 import SpellSide from "./elements/spell_side";
-import FilterPanel, { buildFilterPredicate } from './FilterPanel';
+import PersonalMediaEditor from "./elements/personalMediaEditor";
+import FilterPanel from './FilterPanel';
 
 // Cache for storing fetched data
 const dataCache = {
@@ -20,6 +21,8 @@ function TecnicheSpell() {
   const [personalTecniche, setPersonalTecniche] = useState({});
   const [commonTecniche, setCommonTecniche] = useState({});
   const [personalSpells, setPersonalSpells] = useState({});
+  const [selectedTecnica, setSelectedTecnica] = useState(null);
+  const [selectedSpell, setSelectedSpell] = useState(null);
   const [isReady, setIsReady] = useState(false);
   const unsubscribeRef = useRef(null);
 
@@ -149,16 +152,44 @@ function TecnicheSpell() {
               personalTecniche={filteredPersonalTecniche}
               commonTecniche={filteredCommonTecniche}
               userData={userData}
+              onEditPersonalTecnica={(tecnicaName, tecnicaData) =>
+                setSelectedTecnica({ name: tecnicaName, data: tecnicaData })
+              }
             />
 
             <SpellSide
               personalSpells={filteredPersonalSpells}
               userData={userData}
+              onEditPersonalSpell={(spellName, spellData) =>
+                setSelectedSpell({ name: spellName, data: spellData })
+              }
             />
           </div>
           {/* Spacer for overlays to extend into */}
           <div className="w-full h-20 mt-6"></div>
         </main>
+
+        {selectedTecnica && userData?.uid && (
+          <PersonalMediaEditor
+            userId={userData.uid}
+            userLabel={userData?.characterId || userData?.email || user?.email}
+            itemType="tecnica"
+            itemName={selectedTecnica.name}
+            itemData={selectedTecnica.data}
+            onClose={() => setSelectedTecnica(null)}
+          />
+        )}
+
+        {selectedSpell && userData?.uid && (
+          <PersonalMediaEditor
+            userId={userData.uid}
+            userLabel={userData?.characterId || userData?.email || user?.email}
+            itemType="spell"
+            itemName={selectedSpell.name}
+            itemData={selectedSpell.data}
+            onClose={() => setSelectedSpell(null)}
+          />
+        )}
       </div>
     </div>
   );

@@ -1,9 +1,9 @@
 // frontend/src/components/dmDashboard/elements/buttons/delTecnicaPersonale.js
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { db, storage } from '../../../firebaseConfig';
-import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { ref, deleteObject } from "firebase/storage";
+import { db } from '../../../firebaseConfig';
+import { doc, getDoc } from "firebase/firestore";
+import { deleteTecnicaForUser } from '../../../common/userOwnedMedia';
 
 export function DelTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose }) {
   const [userName, setUserName] = useState("");
@@ -22,28 +22,25 @@ export function DelTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose 
 
   const handleDelete = async () => {
     setIsDeleting(true);
-    if (tecnicaData.image_url) {
-      try {
-        const p = decodeURIComponent(tecnicaData.image_url.split('/o/')[1].split('?')[0]);
-        await deleteObject(ref(storage, p));
-      } catch {}
-    }
-    if (tecnicaData.video_url) {
-      try {
-        const p = decodeURIComponent(tecnicaData.video_url.split('/o/')[1].split('?')[0]);
-        await deleteObject(ref(storage, p));
-      } catch {}
-    }
-    const userRef = doc(db, "users", userId);
-    const snap = await getDoc(userRef);
-    if (snap.exists()) {
-      const data = { ...(snap.data().tecniche || {}) };
-      delete data[tecnicaName];
-      await updateDoc(userRef, { tecniche: data });
-      onClose(true);
-    } else {
-      alert("Utente non trovato");
+    try {
+      const deleted = await deleteTecnicaForUser({
+        userId,
+        itemName: tecnicaName,
+        itemData: tecnicaData,
+      });
+
+      if (deleted) {
+        onClose(true);
+      } else {
+        alert("Tecnica non trovata");
+        onClose(false);
+      }
+    } catch (error) {
+      console.error("Error deleting tecnica:", error);
+      alert("Errore durante l'eliminazione della tecnica");
       onClose(false);
+    } finally {
+      setIsDeleting(false);
     }
   };
 

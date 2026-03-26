@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { GiCrossedSwords, GiMinotaur } from "react-icons/gi";
+import { FaPen } from "react-icons/fa";
 import { doc, updateDoc, getFirestore } from "firebase/firestore";
 
 // Cache dismissal timeouts to prevent flickering
 const timeoutCache = new Map();
 
-const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
+const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData, onEdit }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const [isPositioned, setIsPositioned] = useState(false);
@@ -192,6 +193,15 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
     setOverlayDismissed(true);
     setIsHovered(false);
     setShowConfirmation(true);
+  };
+
+  const handleEditTecnica = (e) => {
+    e.stopPropagation();
+    setShowConfirmation(false);
+    setIsExpanded(false);
+    setOverlayDismissed(true);
+    setIsHovered(false);
+    onEdit?.(tecnicaName, tecnica);
   };
 
   // Auto-hide success message.
@@ -399,12 +409,22 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
             
             {/* Add Use Tecnica button in expanded view */}
             {isExpanded && (
-              <button
-                onClick={handleUseTecnica}
-                className="w-full py-3 bg-purple-700 hover:bg-purple-600 text-white rounded-md transition-colors flex items-center justify-center"
-              >
-                <GiCrossedSwords className="mr-2" /> Usa Tecnica
-              </button>
+              <div className={`grid gap-2 ${isPersonal && onEdit ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                <button
+                  onClick={handleUseTecnica}
+                  className="w-full py-3 bg-purple-700 hover:bg-purple-600 text-white rounded-md transition-colors flex items-center justify-center"
+                >
+                  <GiCrossedSwords className="mr-2" /> Usa Tecnica
+                </button>
+                {isPersonal && onEdit && (
+                  <button
+                    onClick={handleEditTecnica}
+                    className="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors flex items-center justify-center"
+                  >
+                    <FaPen className="mr-2" /> Modifica Media
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -484,7 +504,7 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData }) => {
 // Memoized TecnicaCard for better performance
 const MemoizedTecnicaCard = React.memo(TecnicaCard);
 
-const TecnicheSide = ({ personalTecniche = {}, commonTecniche = {}, userData = {} }) => {
+const TecnicheSide = ({ personalTecniche = {}, commonTecniche = {}, userData = {}, onEditPersonalTecnica }) => {
   return (
     <div className="md:w-3/5 bg-[rgba(40,40,60,0.8)] p-5 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.4)]">
       <h1 className="text-2xl text-white font-bold mb-4">Tecniche</h1>
@@ -508,6 +528,7 @@ const TecnicheSide = ({ personalTecniche = {}, commonTecniche = {}, userData = {
                   tecnica={tecnica}
                   isPersonal={true}
                   userData={userData}
+                  onEdit={onEditPersonalTecnica}
                 />
               ))}
           </div>
@@ -535,6 +556,7 @@ const TecnicheSide = ({ personalTecniche = {}, commonTecniche = {}, userData = {
                   tecnica={tecnica}
                   isPersonal={false}
                   userData={userData}
+                  onEdit={null}
                 />
               ))}
           </div>

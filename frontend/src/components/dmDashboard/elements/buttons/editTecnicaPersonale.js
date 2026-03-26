@@ -1,9 +1,9 @@
 // file: frontend/src/components/dmDashboard/elements/editTecnicaPersonale.js
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { db, storage } from '../../../firebaseConfig';
-import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db } from '../../../firebaseConfig';
+import { doc, getDoc } from "firebase/firestore";
+import { saveTecnicaForUser } from '../../../common/userOwnedMedia';
 
 export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose }) {
   const [schema, setSchema] = useState(null);
@@ -12,6 +12,8 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
   const [videoFile, setVideoFile] = useState(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
+  const [imageRemoved, setImageRemoved] = useState(false);
+  const [videoRemoved, setVideoRemoved] = useState(false);
   const [userName, setUserName] = useState("");
   const [showConfirmation, setShowConfirmation] = useState(false);
 
@@ -42,6 +44,8 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
           if (tecnicaData.video_url) {
             setVideoPreviewUrl(tecnicaData.video_url);
           }
+          setImageRemoved(false);
+          setVideoRemoved(false);
         } else {
           console.error("Schema not found at /utils/schema_tecnica");
         }
@@ -62,20 +66,57 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
     fetchData();
   }, [userId, tecnicaName, tecnicaData]);
 
+  useEffect(() => {
+    return () => {
+      if (imagePreviewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(imagePreviewUrl);
+      }
+      if (videoPreviewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(videoPreviewUrl);
+      }
+    };
+  }, [imagePreviewUrl, videoPreviewUrl]);
+
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
+      if (imagePreviewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(imagePreviewUrl);
+      }
       setImageFile(file);
       setImagePreviewUrl(URL.createObjectURL(file));
+      setImageRemoved(false);
     }
   };
 
   const handleVideoChange = (e) => {
     const file = e.target.files[0];
     if (file) {
+      if (videoPreviewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(videoPreviewUrl);
+      }
       setVideoFile(file);
       setVideoPreviewUrl(URL.createObjectURL(file));
+      setVideoRemoved(false);
     }
+  };
+
+  const clearImage = () => {
+    if (imagePreviewUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(imagePreviewUrl);
+    }
+    setImageFile(null);
+    setImagePreviewUrl(null);
+    setImageRemoved(true);
+  };
+
+  const clearVideo = () => {
+    if (videoPreviewUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(videoPreviewUrl);
+    }
+    setVideoFile(null);
+    setVideoPreviewUrl(null);
+    setVideoRemoved(true);
   };
 
   const handleUpdateTecnica = async () => {
@@ -89,54 +130,21 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
       // Convert Costo to an integer before saving
       let updatedTecnicaData = {
         ...tecnicaFormData,
+        Nome: newTecnicaName,
         Costo: parseInt(tecnicaFormData.Costo) || 0
       };
 
-      // Upload image if a new image is selected
-      if (imageFile) {
-        const safeFileName = `tecnica_${userId}_${newTecnicaName.replace(/\s+/g, "_")}_${Date.now()}`;
-        const imageRef = ref(storage, 'tecnicas/' + safeFileName);
-        await uploadBytes(imageRef, imageFile);
-        const downloadURL = await getDownloadURL(imageRef);
-        updatedTecnicaData.image_url = downloadURL;
-      } else if (tecnicaData.image_url) {
-        // Keep the existing image URL if no new image selected
-        updatedTecnicaData.image_url = tecnicaData.image_url;
-      }
+      await saveTecnicaForUser({
+        userId,
+        originalName: tecnicaName,
+        entryData: updatedTecnicaData,
+        imageFile,
+        videoFile,
+        removeImage: imageRemoved,
+        removeVideo: videoRemoved,
+      });
 
-      // Upload video if a new video is selected
-      if (videoFile) {
-        const safeVideoFileName = `tecnica_${userId}_${newTecnicaName.replace(/\s+/g, "_")}_${Date.now()}_video`;
-        const videoRef = ref(storage, 'tecnicas/videos/' + safeVideoFileName);
-        await uploadBytes(videoRef, videoFile);
-        const videoDownloadURL = await getDownloadURL(videoRef);
-        updatedTecnicaData.video_url = videoDownloadURL;
-      } else if (tecnicaData.video_url) {
-        // Keep the existing video URL if no new video selected
-        updatedTecnicaData.video_url = tecnicaData.video_url;
-      }
-
-      // Update the user's tecniche field
-      const userRef = doc(db, "users", userId);
-      const userDoc = await getDoc(userRef);
-
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        const updatedTecniche = { ...(userData.tecniche || {}) };
-
-        // Remove old tecnica if name changed
-        if (newTecnicaName !== tecnicaName) {
-          delete updatedTecniche[tecnicaName];
-        }
-
-        // Add or replace the tecnica
-        updatedTecniche[newTecnicaName] = updatedTecnicaData;
-
-        await updateDoc(userRef, { tecniche: updatedTecniche });
-        onClose(true);
-      } else {
-        alert("User not found");
-      }
+      onClose(true);
     } catch (error) {
       console.error("Error updating tecnica:", error);
       alert("Error updating tecnica");
@@ -232,7 +240,21 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
                       className="w-full text-white"
                     />
                     {imagePreviewUrl && (
-                      <img src={imagePreviewUrl} alt="Preview" className="mt-2 w-24 h-auto rounded" />
+                      <div className="mt-2 relative w-24 h-24">
+                        <img src={imagePreviewUrl} alt="Preview" className="w-full h-full object-cover rounded" />
+                        <button
+                          type="button"
+                          onClick={clearImage}
+                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center"
+                        >
+                          &times;
+                        </button>
+                      </div>
+                    )}
+                    {!imagePreviewUrl && (
+                      <div className="mt-2 w-24 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">
+                        No Image
+                      </div>
                     )}
                   </div>
 
@@ -245,11 +267,25 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
                       className="w-full text-white"
                     />
                     {videoPreviewUrl && (
-                      <video
-                        src={videoPreviewUrl}
-                        controls
-                        className="mt-2 w-full max-h-48 rounded"
-                      />
+                      <div className="mt-2 relative">
+                        <video
+                          src={videoPreviewUrl}
+                          controls
+                          className="w-full max-h-48 rounded"
+                        />
+                        <button
+                          type="button"
+                          onClick={clearVideo}
+                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center"
+                        >
+                          &times;
+                        </button>
+                      </div>
+                    )}
+                    {!videoPreviewUrl && (
+                      <div className="mt-2 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">
+                        No Video
+                      </div>
                     )}
                     <p className="text-gray-400 text-sm mt-1">
                       Consigliato: video breve (max 30s) di dimensioni ridotte
