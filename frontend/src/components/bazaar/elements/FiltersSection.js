@@ -1,6 +1,7 @@
 // file: ./frontend/src/components/bazaar/elements/FiltersSection.js
 import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { getParamDisplayName } from '../../common/paramMetadata';
 
 // Encapsulates all filter UI/logic (dropdown open state) separate from Bazaar core logic
 export default function FiltersSection({
@@ -8,18 +9,21 @@ export default function FiltersSection({
   hands,
   tipos,
   itemTypes,
+  specialParams,
   combatParams,
   baseParams,
   selectedSlot,
   selectedHands,
   selectedTipo,
   selectedItemType,
+  selectedSpecialParams,
   selectedCombatParams,
   selectedBaseParams,
   onToggleSlot,
   onToggleHands,
   onToggleTipo,
   onToggleItemType,
+  onToggleSpecialParam,
   onToggleCombatParam,
   onToggleBaseParam,
   onlyAffordable,
@@ -31,12 +35,13 @@ export default function FiltersSection({
     slot: false,
     hands: false,
     tipo: false,
+    specialParams: false,
     combatParams: false,
     baseParams: false,
   });
 
   const toggleDropdown = (key) => setDropdownOpen(prev => ({ ...prev, [key]: !prev[key] }));
-  const closeAllDropdowns = () => setDropdownOpen({ itemType: false, slot: false, hands: false, tipo: false, combatParams: false, baseParams: false });
+  const closeAllDropdowns = () => setDropdownOpen({ itemType: false, slot: false, hands: false, tipo: false, specialParams: false, combatParams: false, baseParams: false });
 
   useEffect(() => {
     const handleClickOutside = () => {
@@ -46,7 +51,7 @@ export default function FiltersSection({
     return () => document.removeEventListener('click', handleClickOutside);
   }, [dropdownOpen]);
 
-  const FilterDropdown = ({ label, options, selectedOptions, onToggle, dropdownKey, icon = null, colorScheme = 'blue', isSmall = false }) => {
+  const FilterDropdown = ({ label, options, selectedOptions, onToggle, dropdownKey, icon = null, colorScheme = 'blue', isSmall = false, formatOptionLabel = (option) => option }) => {
     const selectedFilters = selectedOptions.filter(opt => opt !== 'All');
     const unselectedOptions = options.filter(opt => !selectedOptions.includes(opt) && opt !== 'All');
     const isOpen = dropdownOpen[dropdownKey];
@@ -81,7 +86,7 @@ export default function FiltersSection({
                 onClick={() => onToggle(filter)}
                 className={`${padding} ${textSize} rounded-md border transition-all duration-200 ${colors.selected} hover:opacity-80`}
               >
-                {filter} ✕
+                {formatOptionLabel(filter)} ✕
               </button>
             ))}
           </div>
@@ -110,7 +115,7 @@ export default function FiltersSection({
                       onClick={() => { onToggle(option); closeAllDropdowns(); }}
                       className={`w-full ${padding} ${textSize} text-left hover:bg-gray-700 text-gray-300 hover:text-white transition-colors border-b border-gray-700 last:border-b-0`}
                     >
-                      {option}
+                      {formatOptionLabel(option)}
                     </button>
                   ))}
                 </motion.div>
@@ -174,10 +179,29 @@ export default function FiltersSection({
           <div>
             <FilterDropdown label="Mani" options={hands} selectedOptions={selectedHands} onToggle={onToggleHands} dropdownKey="hands" colorScheme="blue" isSmall />
           </div>
-            <div>
+          <div>
             <FilterDropdown label="Tipo" options={tipos} selectedOptions={selectedTipo} onToggle={onToggleTipo} dropdownKey="tipo" colorScheme="blue" isSmall />
           </div>
         </div>
+      </div>
+      <div className="mb-6 bg-gray-800/50 rounded-lg p-4 border border-gray-600/30">
+        <h3 className="text-lg font-semibold text-cyan-300 mb-4 flex items-center gap-2">
+          <span className="w-2 h-2 bg-cyan-400 rounded-full"></span>
+          Parametri Speciali
+        </h3>
+        <p className="text-xs text-gray-400 mb-3">
+          Mostra solo gli oggetti che possiedono almeno uno dei parametri selezionati.
+        </p>
+        <FilterDropdown
+          label="Parametri Speciali"
+          options={specialParams}
+          selectedOptions={selectedSpecialParams}
+          onToggle={onToggleSpecialParam}
+          dropdownKey="specialParams"
+          icon="✦"
+          colorScheme="green"
+          formatOptionLabel={getParamDisplayName}
+        />
       </div>
       <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-600/30">
         <h3 className="text-lg font-semibold text-orange-300 mb-4 flex items-center gap-2">

@@ -1,9 +1,9 @@
 // frontend/src/components/dmDashboard/elements/buttons/delSpell.js
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { db, storage } from '../../../firebaseConfig';
-import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { ref, deleteObject } from "firebase/storage";
+import { db } from '../../../firebaseConfig';
+import { doc, getDoc } from "firebase/firestore";
+import { deleteSpellForUser } from '../../../common/userOwnedMedia';
 
 export function DelSpellOverlay({ userId, spellName, spellData, onClose }) {
   const [userName, setUserName] = useState("");
@@ -22,30 +22,25 @@ export function DelSpellOverlay({ userId, spellName, spellData, onClose }) {
 
   const handleDelete = async () => {
     setIsDeleting(true);
-    // remove media
-    if (spellData.image_url) {
-      try {
-        const path = decodeURIComponent(spellData.image_url.split('/o/')[1].split('?')[0]);
-        await deleteObject(ref(storage, path));
-      } catch {}
-    }
-    if (spellData.video_url) {
-      try {
-        const path = decodeURIComponent(spellData.video_url.split('/o/')[1].split('?')[0]);
-        await deleteObject(ref(storage, path));
-      } catch {}
-    }
-    // remove from Firestore
-    const userRef = doc(db, "users", userId);
-    const snap = await getDoc(userRef);
-    if (snap.exists()) {
-      const data = { ...(snap.data().spells || {}) };
-      delete data[spellName];
-      await updateDoc(userRef, { spells: data });
-      onClose(true);
-    } else {
-      alert("Utente non trovato");
+    try {
+      const deleted = await deleteSpellForUser({
+        userId,
+        itemName: spellName,
+        itemData: spellData,
+      });
+
+      if (deleted) {
+        onClose(true);
+      } else {
+        alert("Spell non trovato");
+        onClose(false);
+      }
+    } catch (error) {
+      console.error("Error deleting spell:", error);
+      alert("Errore durante l'eliminazione dello spell");
       onClose(false);
+    } finally {
+      setIsDeleting(false);
     }
   };
 

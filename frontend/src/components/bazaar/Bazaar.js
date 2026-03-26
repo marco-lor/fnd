@@ -1,7 +1,7 @@
 // file: ./frontend/src/components/bazaar/Bazaar.js
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { collection, onSnapshot, query, where, or, and } from "firebase/firestore";
+import { collection, onSnapshot, query, where, or, and, doc, getDoc } from "firebase/firestore";
 import { db } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
 import { AddWeaponOverlay } from './elements/addWeapon';
@@ -12,6 +12,7 @@ import ComparisonPanel from './elements/comparisonComponent';
 import { acquireItem } from './elements/acquireItem';
 import PurchaseConfirmModal from './elements/PurchaseConfirmModal';
 import FiltersSection from './elements/FiltersSection';
+import { SPECIAL_PARAM_SCHEMA_IDS } from '../common/paramMetadata';
 
 function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purchasing, userGold }) {
   const [imageError, setImageError] = useState(false);
@@ -94,17 +95,108 @@ function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purch
   );
 }
 
+const BAZAAR_FILTERS_STORAGE_KEY = 'bazaar.filters';
 
-export default function Bazaar() {  const [items, setItems] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedSlot, setSelectedSlot] = useState(['All']);
-  const [selectedHands, setSelectedHands] = useState(['All']);
-  const [selectedTipo, setSelectedTipo] = useState(['All']);
-  const [selectedItemType, setSelectedItemType] = useState(['All']);  const [selectedCombatParams, setSelectedCombatParams] = useState(['All']);
-  const [selectedBaseParams, setSelectedBaseParams] = useState(['All']);
+const normalizeFilterArray = (value) => {
+  if (!Array.isArray(value)) {
+    return ['All'];
+  }
+
+  const normalized = Array.from(
+    new Set(
+      value
+        .filter((entry) => entry != null)
+        .map((entry) => String(entry).trim())
+        .filter(Boolean)
+    )
+  );
+
+  if (normalized.length === 0 || normalized.includes('All')) {
+    return ['All'];
+  }
+
+  return normalized;
+};
+
+const createDefaultBazaarFilters = () => ({
+  searchTerm: '',
+  selectedSlot: ['All'],
+  selectedHands: ['All'],
+  selectedTipo: ['All'],
+  selectedItemType: ['All'],
+  selectedSpecialParams: ['All'],
+  selectedCombatParams: ['All'],
+  selectedBaseParams: ['All'],
+  onlyAffordable: false,
+});
+
+const isMeaningfulSpecialValue = (value) => {
+  if (Array.isArray(value)) {
+    return value.some(isMeaningfulSpecialValue);
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.values(value).some(isMeaningfulSpecialValue);
+  }
+
+  if (typeof value === 'number') {
+    return !Number.isNaN(value);
+  }
+
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  return value != null && String(value).trim() !== '';
+};
+
+const getAvailableSpecialKeys = (item) => Object.entries(item?.Parametri?.Special || {})
+  .filter(([, value]) => isMeaningfulSpecialValue(value))
+  .map(([key]) => key);
+
+const loadBazaarFilters = () => {
+  const defaultFilters = createDefaultBazaarFilters();
+
+  try {
+    const savedFilters = localStorage.getItem(BAZAAR_FILTERS_STORAGE_KEY);
+    if (!savedFilters) {
+      return defaultFilters;
+    }
+
+    const parsedFilters = JSON.parse(savedFilters);
+    return {
+      searchTerm: typeof parsedFilters?.searchTerm === 'string' ? parsedFilters.searchTerm : defaultFilters.searchTerm,
+      selectedSlot: normalizeFilterArray(parsedFilters?.selectedSlot),
+      selectedHands: normalizeFilterArray(parsedFilters?.selectedHands),
+      selectedTipo: normalizeFilterArray(parsedFilters?.selectedTipo),
+      selectedItemType: normalizeFilterArray(parsedFilters?.selectedItemType),
+      selectedSpecialParams: normalizeFilterArray(parsedFilters?.selectedSpecialParams),
+      selectedCombatParams: normalizeFilterArray(parsedFilters?.selectedCombatParams),
+      selectedBaseParams: normalizeFilterArray(parsedFilters?.selectedBaseParams),
+      onlyAffordable: parsedFilters?.onlyAffordable === true,
+    };
+  } catch (error) {
+    console.error('Failed to load Bazaar filters:', error);
+    return defaultFilters;
+  }
+};
+
+
+export default function Bazaar() {
+  const [items, setItems] = useState([]);
+  const [savedFilters] = useState(() => loadBazaarFilters());
+  const [searchTerm, setSearchTerm] = useState(savedFilters.searchTerm);
+  const [selectedSlot, setSelectedSlot] = useState(savedFilters.selectedSlot);
+  const [selectedHands, setSelectedHands] = useState(savedFilters.selectedHands);
+  const [selectedTipo, setSelectedTipo] = useState(savedFilters.selectedTipo);
+  const [selectedItemType, setSelectedItemType] = useState(savedFilters.selectedItemType);
+  const [selectedSpecialParams, setSelectedSpecialParams] = useState(savedFilters.selectedSpecialParams);
+  const [selectedCombatParams, setSelectedCombatParams] = useState(savedFilters.selectedCombatParams);
+  const [selectedBaseParams, setSelectedBaseParams] = useState(savedFilters.selectedBaseParams);
   const [hoveredItem, setHoveredItem] = useState(null);
   const [lockedItem, setLockedItem] = useState(null);
-  const [onlyAffordable, setOnlyAffordable] = useState(false);
+  const [onlyAffordable, setOnlyAffordable] = useState(savedFilters.onlyAffordable);
+  const [specialSchemaKeys, setSpecialSchemaKeys] = useState([]);
 
   const [showOverlay, setShowOverlay] = useState(false);
   const [showArmaturaOverlay, setShowArmaturaOverlay] = useState(false);
@@ -194,10 +286,83 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
       }
     }
   }, [items, lockedItem?.id, hoveredItem]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    (async () => {
+      try {
+        const docs = await Promise.all(SPECIAL_PARAM_SCHEMA_IDS.map((id) => getDoc(doc(db, 'utils', id))));
+        if (!isMounted) {
+          return;
+        }
+
+        const keys = new Set();
+        docs.forEach((snapshot) => {
+          if (!snapshot.exists()) {
+            return;
+          }
+
+          Object.keys(snapshot.data()?.Parametri?.Special || {}).forEach((key) => keys.add(key));
+        });
+
+        setSpecialSchemaKeys(Array.from(keys).sort());
+      } catch (error) {
+        console.warn('Failed to load special parameter schema keys:', error);
+        if (isMounted) {
+          setSpecialSchemaKeys([]);
+        }
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        BAZAAR_FILTERS_STORAGE_KEY,
+        JSON.stringify({
+          searchTerm,
+          selectedSlot,
+          selectedHands,
+          selectedTipo,
+          selectedItemType,
+          selectedSpecialParams,
+          selectedCombatParams,
+          selectedBaseParams,
+          onlyAffordable,
+        })
+      );
+    } catch (error) {
+      console.error('Failed to save Bazaar filters:', error);
+    }
+  }, [
+    searchTerm,
+    selectedSlot,
+    selectedHands,
+    selectedTipo,
+    selectedItemType,
+    selectedSpecialParams,
+    selectedCombatParams,
+    selectedBaseParams,
+    onlyAffordable,
+  ]);
+
   const slots = ['All', ...Array.from(new Set(items.map(item => item.General?.Slot).filter(Boolean)))];
   const hands = ['All', ...Array.from(new Set(items.map(item => item.Specific?.Hands).filter(h => h != null))).sort((a, b) => a - b).map(String)];
   const tipos = ['All', ...Array.from(new Set(items.map(item => item.Specific?.Tipo).filter(Boolean)))];
-  const itemTypes = ['All', ...Array.from(new Set(items.map(item => item.item_type).filter(Boolean)))];  const combatParams = ['All', ...Array.from(new Set(items.flatMap(item => 
+  const itemTypes = ['All', ...Array.from(new Set(items.map(item => item.item_type).filter(Boolean)))];
+  const populatedSpecialKeys = new Set(items.flatMap((item) => getAvailableSpecialKeys(item)));
+  const orderedSpecialParams = specialSchemaKeys
+    .filter((key) => populatedSpecialKeys.has(key));
+  const extraSpecialParams = Array.from(populatedSpecialKeys)
+    .filter((key) => !specialSchemaKeys.includes(key))
+    .sort((a, b) => a.localeCompare(b));
+  const specialParams = ['All', ...orderedSpecialParams, ...extraSpecialParams];
+  const combatParams = ['All', ...Array.from(new Set(items.flatMap(item => 
     item.Parametri?.Combattimento ? Object.keys(item.Parametri.Combattimento) : []
   )))];
   
@@ -243,9 +408,30 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   const handleToggleHands = (hand) => toggleFilter(selectedHands, setSelectedHands, hand);
   const handleToggleTipo = (tipo) => toggleFilter(selectedTipo, setSelectedTipo, tipo);
   const handleToggleItemType = (itemType) => toggleFilter(selectedItemType, setSelectedItemType, itemType);
+  const handleToggleSpecialParam = (param) => toggleFilter(selectedSpecialParams, setSelectedSpecialParams, param);
   const handleToggleCombatParam = (param) => toggleFilter(selectedCombatParams, setSelectedCombatParams, param);
   const handleToggleBaseParam = (param) => toggleFilter(selectedBaseParams, setSelectedBaseParams, param);
   const handleSearchChange = (e) => setSearchTerm(e.target.value);
+
+  const handleResetFilters = useCallback(() => {
+    const defaultFilters = createDefaultBazaarFilters();
+
+    setSelectedSlot(defaultFilters.selectedSlot);
+    setSelectedHands(defaultFilters.selectedHands);
+    setSelectedTipo(defaultFilters.selectedTipo);
+    setSelectedItemType(defaultFilters.selectedItemType);
+    setSelectedSpecialParams(defaultFilters.selectedSpecialParams);
+    setSelectedCombatParams(defaultFilters.selectedCombatParams);
+    setSelectedBaseParams(defaultFilters.selectedBaseParams);
+    setSearchTerm(defaultFilters.searchTerm);
+    setOnlyAffordable(defaultFilters.onlyAffordable);
+
+    try {
+      localStorage.removeItem(BAZAAR_FILTERS_STORAGE_KEY);
+    } catch (error) {
+      console.error('Failed to clear Bazaar filters:', error);
+    }
+  }, []);
 
   const handleHoverItem = (item) => {
     if (!lockedItem) {
@@ -268,12 +454,14 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
     const matchesSlot = selectedSlot.includes('All') || selectedSlot.includes(item.General?.Slot);
     const matchesHands = selectedHands.includes('All') || selectedHands.includes(String(item.Specific?.Hands));
     const matchesTipo = selectedTipo.includes('All') || selectedTipo.includes(item.Specific?.Tipo);
-    const matchesItemType = selectedItemType.includes('All') || selectedItemType.includes(item.item_type);    
+    const matchesItemType = selectedItemType.includes('All') || selectedItemType.includes(item.item_type);
+    const matchesSpecialParams = selectedSpecialParams.includes('All') || selectedSpecialParams.some((param) => isMeaningfulSpecialValue(item.Parametri?.Special?.[param]));
     const userGold = userData?.stats?.gold ?? 0;
     const rawPrice = item?.General?.prezzo ?? 0;
     const price = typeof rawPrice === 'number' ? rawPrice : parseInt(rawPrice, 10) || 0;
     const matchesAffordable = !onlyAffordable || price <= userGold;
-    return matchesSearch && matchesSlot && matchesHands && matchesTipo && matchesItemType && matchesAffordable;}).sort((a, b) => {
+    return matchesSearch && matchesSlot && matchesHands && matchesTipo && matchesItemType && matchesSpecialParams && matchesAffordable;
+  }).sort((a, b) => {
     // Debug: Log when sorting is triggered
     const shouldSortCombat = !selectedCombatParams.includes('All') && selectedCombatParams.length > 0;
     const shouldSortBase = !selectedBaseParams.includes('All') && selectedBaseParams.length > 0;
@@ -445,32 +633,26 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
           hands={hands}
           tipos={tipos}
           itemTypes={itemTypes}
+          specialParams={specialParams}
           combatParams={combatParams}
           baseParams={baseParams}
           selectedSlot={selectedSlot}
           selectedHands={selectedHands}
           selectedTipo={selectedTipo}
           selectedItemType={selectedItemType}
+          selectedSpecialParams={selectedSpecialParams}
           selectedCombatParams={selectedCombatParams}
           selectedBaseParams={selectedBaseParams}
           onToggleSlot={handleToggleSlot}
           onToggleHands={handleToggleHands}
           onToggleTipo={handleToggleTipo}
           onToggleItemType={handleToggleItemType}
+          onToggleSpecialParam={handleToggleSpecialParam}
           onToggleCombatParam={handleToggleCombatParam}
           onToggleBaseParam={handleToggleBaseParam}
           onlyAffordable={onlyAffordable}
           setOnlyAffordable={setOnlyAffordable}
-          onResetFilters={() => {
-            setSelectedSlot(['All']);
-            setSelectedHands(['All']);
-            setSelectedTipo(['All']);
-            setSelectedItemType(['All']);
-            setSelectedCombatParams(['All']);
-            setSelectedBaseParams(['All']);
-            setSearchTerm('');
-            setOnlyAffordable(false);
-          }}
+          onResetFilters={handleResetFilters}
         />
         {/* Items List Panel (Column 2) */}
         {/* Width (700px) is controlled by grid-cols. Removed flex-grow, mr-*, and transition classes for width. */}
