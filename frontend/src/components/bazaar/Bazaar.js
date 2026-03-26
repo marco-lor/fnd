@@ -94,17 +94,80 @@ function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purch
   );
 }
 
+const BAZAAR_FILTERS_STORAGE_KEY = 'bazaar.filters';
 
-export default function Bazaar() {  const [items, setItems] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedSlot, setSelectedSlot] = useState(['All']);
-  const [selectedHands, setSelectedHands] = useState(['All']);
-  const [selectedTipo, setSelectedTipo] = useState(['All']);
-  const [selectedItemType, setSelectedItemType] = useState(['All']);  const [selectedCombatParams, setSelectedCombatParams] = useState(['All']);
-  const [selectedBaseParams, setSelectedBaseParams] = useState(['All']);
+const normalizeFilterArray = (value) => {
+  if (!Array.isArray(value)) {
+    return ['All'];
+  }
+
+  const normalized = Array.from(
+    new Set(
+      value
+        .filter((entry) => entry != null)
+        .map((entry) => String(entry).trim())
+        .filter(Boolean)
+    )
+  );
+
+  if (normalized.length === 0 || normalized.includes('All')) {
+    return ['All'];
+  }
+
+  return normalized;
+};
+
+const createDefaultBazaarFilters = () => ({
+  searchTerm: '',
+  selectedSlot: ['All'],
+  selectedHands: ['All'],
+  selectedTipo: ['All'],
+  selectedItemType: ['All'],
+  selectedCombatParams: ['All'],
+  selectedBaseParams: ['All'],
+  onlyAffordable: false,
+});
+
+const loadBazaarFilters = () => {
+  const defaultFilters = createDefaultBazaarFilters();
+
+  try {
+    const savedFilters = localStorage.getItem(BAZAAR_FILTERS_STORAGE_KEY);
+    if (!savedFilters) {
+      return defaultFilters;
+    }
+
+    const parsedFilters = JSON.parse(savedFilters);
+    return {
+      searchTerm: typeof parsedFilters?.searchTerm === 'string' ? parsedFilters.searchTerm : defaultFilters.searchTerm,
+      selectedSlot: normalizeFilterArray(parsedFilters?.selectedSlot),
+      selectedHands: normalizeFilterArray(parsedFilters?.selectedHands),
+      selectedTipo: normalizeFilterArray(parsedFilters?.selectedTipo),
+      selectedItemType: normalizeFilterArray(parsedFilters?.selectedItemType),
+      selectedCombatParams: normalizeFilterArray(parsedFilters?.selectedCombatParams),
+      selectedBaseParams: normalizeFilterArray(parsedFilters?.selectedBaseParams),
+      onlyAffordable: parsedFilters?.onlyAffordable === true,
+    };
+  } catch (error) {
+    console.error('Failed to load Bazaar filters:', error);
+    return defaultFilters;
+  }
+};
+
+
+export default function Bazaar() {
+  const [items, setItems] = useState([]);
+  const [savedFilters] = useState(() => loadBazaarFilters());
+  const [searchTerm, setSearchTerm] = useState(savedFilters.searchTerm);
+  const [selectedSlot, setSelectedSlot] = useState(savedFilters.selectedSlot);
+  const [selectedHands, setSelectedHands] = useState(savedFilters.selectedHands);
+  const [selectedTipo, setSelectedTipo] = useState(savedFilters.selectedTipo);
+  const [selectedItemType, setSelectedItemType] = useState(savedFilters.selectedItemType);
+  const [selectedCombatParams, setSelectedCombatParams] = useState(savedFilters.selectedCombatParams);
+  const [selectedBaseParams, setSelectedBaseParams] = useState(savedFilters.selectedBaseParams);
   const [hoveredItem, setHoveredItem] = useState(null);
   const [lockedItem, setLockedItem] = useState(null);
-  const [onlyAffordable, setOnlyAffordable] = useState(false);
+  const [onlyAffordable, setOnlyAffordable] = useState(savedFilters.onlyAffordable);
 
   const [showOverlay, setShowOverlay] = useState(false);
   const [showArmaturaOverlay, setShowArmaturaOverlay] = useState(false);
@@ -194,6 +257,36 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
       }
     }
   }, [items, lockedItem?.id, hoveredItem]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        BAZAAR_FILTERS_STORAGE_KEY,
+        JSON.stringify({
+          searchTerm,
+          selectedSlot,
+          selectedHands,
+          selectedTipo,
+          selectedItemType,
+          selectedCombatParams,
+          selectedBaseParams,
+          onlyAffordable,
+        })
+      );
+    } catch (error) {
+      console.error('Failed to save Bazaar filters:', error);
+    }
+  }, [
+    searchTerm,
+    selectedSlot,
+    selectedHands,
+    selectedTipo,
+    selectedItemType,
+    selectedCombatParams,
+    selectedBaseParams,
+    onlyAffordable,
+  ]);
+
   const slots = ['All', ...Array.from(new Set(items.map(item => item.General?.Slot).filter(Boolean)))];
   const hands = ['All', ...Array.from(new Set(items.map(item => item.Specific?.Hands).filter(h => h != null))).sort((a, b) => a - b).map(String)];
   const tipos = ['All', ...Array.from(new Set(items.map(item => item.Specific?.Tipo).filter(Boolean)))];
@@ -246,6 +339,25 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
   const handleToggleCombatParam = (param) => toggleFilter(selectedCombatParams, setSelectedCombatParams, param);
   const handleToggleBaseParam = (param) => toggleFilter(selectedBaseParams, setSelectedBaseParams, param);
   const handleSearchChange = (e) => setSearchTerm(e.target.value);
+
+  const handleResetFilters = useCallback(() => {
+    const defaultFilters = createDefaultBazaarFilters();
+
+    setSelectedSlot(defaultFilters.selectedSlot);
+    setSelectedHands(defaultFilters.selectedHands);
+    setSelectedTipo(defaultFilters.selectedTipo);
+    setSelectedItemType(defaultFilters.selectedItemType);
+    setSelectedCombatParams(defaultFilters.selectedCombatParams);
+    setSelectedBaseParams(defaultFilters.selectedBaseParams);
+    setSearchTerm(defaultFilters.searchTerm);
+    setOnlyAffordable(defaultFilters.onlyAffordable);
+
+    try {
+      localStorage.removeItem(BAZAAR_FILTERS_STORAGE_KEY);
+    } catch (error) {
+      console.error('Failed to clear Bazaar filters:', error);
+    }
+  }, []);
 
   const handleHoverItem = (item) => {
     if (!lockedItem) {
@@ -461,16 +573,7 @@ export default function Bazaar() {  const [items, setItems] = useState([]);
           onToggleBaseParam={handleToggleBaseParam}
           onlyAffordable={onlyAffordable}
           setOnlyAffordable={setOnlyAffordable}
-          onResetFilters={() => {
-            setSelectedSlot(['All']);
-            setSelectedHands(['All']);
-            setSelectedTipo(['All']);
-            setSelectedItemType(['All']);
-            setSelectedCombatParams(['All']);
-            setSelectedBaseParams(['All']);
-            setSearchTerm('');
-            setOnlyAffordable(false);
-          }}
+          onResetFilters={handleResetFilters}
         />
         {/* Items List Panel (Column 2) */}
         {/* Width (700px) is controlled by grid-cols. Removed flex-grow, mr-*, and transition classes for width. */}
