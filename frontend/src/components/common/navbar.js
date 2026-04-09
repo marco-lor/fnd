@@ -45,6 +45,11 @@ const NAV_ITEMS = [
     end: true,
   },
   {
+    label: 'Grigliata',
+    path: '/grigliata',
+    end: true,
+  },
+  {
     label: 'DM Dashboard',
     path: '/dm-dashboard',
     roles: ['dm'],

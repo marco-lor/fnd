@@ -38,6 +38,10 @@ service cloud.firestore {
             || get(userDocPath(request.auth.uid)).data.role == "players");
     }
 
+    function isGrigliataManager() {
+      return isDM();
+    }
+
     function isNpcTextOnlyUpdate() {
       return request.resource.data.imageUrl == resource.data.imageUrl
         && request.resource.data.imagePath == resource.data.imagePath;
@@ -147,6 +151,31 @@ service cloud.firestore {
     match /map_markers/{markerId} {
       allow read: if isSignedIn();
       allow write: if isDM() || isWebmaster() || isPlayer();
+    }
+
+    match /grigliata_state/{stateId} {
+      allow read: if isSignedIn();
+      allow write: if isGrigliataManager();
+    }
+
+    match /grigliata_backgrounds/{backgroundId} {
+      allow read: if isSignedIn();
+      allow write: if isGrigliataManager();
+    }
+
+    match /grigliata_tokens/{tokenId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.ownerUid == tokenId
+        && (request.auth.uid == tokenId || isGrigliataManager());
+
+      allow update: if isSignedIn()
+        && resource.data.ownerUid == tokenId
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && (request.auth.uid == tokenId || isGrigliataManager());
+
+      allow delete: if isGrigliataManager();
     }
 
     // Echi NPCs
