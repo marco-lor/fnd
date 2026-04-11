@@ -20,33 +20,80 @@ import {
 } from './boardUtils';
 import useImageAsset from './useImageAsset';
 
-const TokenNode = ({ token, grid, canMove, onMoveToken }) => {
+const POINTER_DRAG_THRESHOLD_PX = 4;
+
+const isPrimaryMouseButton = (nativeEvent) => nativeEvent?.button === 0;
+const isSecondaryMouseButton = (nativeEvent) => nativeEvent?.button === 2;
+
+const normalizeSelectionRect = (selectionBox) => {
+  if (!selectionBox?.start || !selectionBox?.end) return null;
+
+  const minX = Math.min(selectionBox.start.x, selectionBox.end.x);
+  const minY = Math.min(selectionBox.start.y, selectionBox.end.y);
+  const maxX = Math.max(selectionBox.start.x, selectionBox.end.x);
+  const maxY = Math.max(selectionBox.start.y, selectionBox.end.y);
+
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY,
+  };
+};
+
+const rectsIntersect = (left, right) => (
+  left.x <= (right.x + right.width)
+  && (left.x + left.width) >= right.x
+  && left.y <= (right.y + right.height)
+  && (left.y + left.height) >= right.y
+);
+
+const isEditableElementFocused = () => {
+  const activeElement = document.activeElement;
+  if (!activeElement) return false;
+
+  const tagName = activeElement.tagName?.toLowerCase() || '';
+  return activeElement.isContentEditable
+    || tagName === 'input'
+    || tagName === 'textarea'
+    || tagName === 'select';
+};
+
+const TokenNode = ({
+  token,
+  position,
+  canMove,
+  isSelected,
+  onMouseDown,
+}) => {
   const image = useImageAsset(token?.imageUrl || '');
-  const position = useMemo(() => getTokenPositionPx(token, grid), [token, grid]);
   const size = position.size;
   const label = token?.label || token?.characterId || token?.ownerUid || 'Player';
   const initials = getInitials(label);
-
-  const handleDragStart = (event) => {
-    event.cancelBubble = true;
-  };
-
-  const handleDragEnd = (event) => {
-    event.cancelBubble = true;
-    const snapped = snapBoardPointToGrid({ x: event.target.x(), y: event.target.y() }, grid, 'top-left');
-    event.target.position({ x: snapped.x, y: snapped.y });
-    event.target.getLayer()?.batchDraw();
-    onMoveToken?.(token, snapped);
-  };
 
   return (
     <Group
       x={position.x}
       y={position.y}
-      draggable={canMove}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
+      onMouseDown={(event) => onMouseDown?.(token, event)}
     >
+      {isSelected && (
+        <Rect
+          x={-6}
+          y={-6}
+          width={size + 12}
+          height={size + 12}
+          cornerRadius={10}
+          stroke="#38bdf8"
+          strokeWidth={2}
+          dash={[7, 4]}
+          shadowColor="#38bdf8"
+          shadowBlur={10}
+          shadowOpacity={0.35}
+          listening={false}
+        />
+      )}
+
       <Circle
         x={size / 2}
         y={size / 2}
@@ -74,8 +121,8 @@ const TokenNode = ({ token, grid, canMove, onMoveToken }) => {
         x={size / 2}
         y={size / 2}
         radius={(size / 2) - 1}
-        stroke={canMove ? '#fbbf24' : '#cbd5e1'}
-        strokeWidth={2}
+        stroke={isSelected ? '#38bdf8' : (canMove ? '#fbbf24' : '#cbd5e1')}
+        strokeWidth={isSelected ? 3 : 2}
       />
 
       {!image && (
@@ -98,7 +145,7 @@ const TokenNode = ({ token, grid, canMove, onMoveToken }) => {
         width={Math.round(size * 1.6)}
         align="center"
         fontSize={Math.max(10, Math.round(size * 0.18))}
-        fill="#e2e8f0"
+        fill={isSelected ? '#bae6fd' : '#e2e8f0'}
         text={label}
         ellipsis
         listening={false}
@@ -153,14 +200,19 @@ export default function GrigliataBoard({
   isManager,
   isTokenDragActive,
   boardHeight,
-  onMoveToken,
+  onMoveTokens,
+  onDeleteTokens,
   onDropCurrentToken,
 }) {
   const containerRef = useRef(null);
   const stageRef = useRef(null);
+  const interactionRef = useRef(null);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
   const [isDropActive, setIsDropActive] = useState(false);
+  const [selectedTokenIds, setSelectedTokenIds] = useState([]);
+  const [selectionBox, setSelectionBox] = useState(null);
+  const [tokenDragState, setTokenDragState] = useState(null);
   const backgroundImage = useImageAsset(activeBackground?.imageUrl || '');
   const lastFitKeyRef = useRef('');
 
@@ -179,6 +231,62 @@ export default function GrigliataBoard({
   const placedTokens = useMemo(
     () => (tokens || []).filter((token) => token?.placed),
     [tokens]
+  );
+
+  const tokenItems = useMemo(
+    () => placedTokens.map((token) => {
+      const tokenId = token.id || token.ownerUid;
+      const canMove = !!tokenId && (isManager || token.ownerUid === currentUserId || tokenId === currentUserId);
+      return {
+        ...token,
+        tokenId,
+        canMove,
+        position: getTokenPositionPx(token, normalizedGrid),
+      };
+    }),
+    [placedTokens, isManager, currentUserId, normalizedGrid]
+  );
+
+  const tokenItemsById = useMemo(() => {
+    const nextMap = new Map();
+    tokenItems.forEach((token) => {
+      nextMap.set(token.tokenId, token);
+    });
+    return nextMap;
+  }, [tokenItems]);
+
+  const movableTokenIds = useMemo(
+    () => new Set(tokenItems.filter((token) => token.canMove).map((token) => token.tokenId)),
+    [tokenItems]
+  );
+
+  const selectedTokenIdSet = useMemo(
+    () => new Set(selectedTokenIds),
+    [selectedTokenIds]
+  );
+
+  const dragPositionOverrides = useMemo(() => {
+    const nextMap = new Map();
+    if (!tokenDragState) return nextMap;
+
+    tokenDragState.originTokens.forEach((originToken) => {
+      nextMap.set(originToken.tokenId, {
+        x: originToken.x + tokenDragState.deltaWorld.x,
+        y: originToken.y + tokenDragState.deltaWorld.y,
+        size: originToken.size,
+      });
+    });
+
+    return nextMap;
+  }, [tokenDragState]);
+
+  const renderedTokens = useMemo(
+    () => tokenItems.map((token) => ({
+      ...token,
+      renderPosition: dragPositionOverrides.get(token.tokenId) || token.position,
+      isSelected: selectedTokenIdSet.has(token.tokenId),
+    })),
+    [tokenItems, dragPositionOverrides, selectedTokenIdSet]
   );
 
   const boardBounds = useMemo(
@@ -231,6 +339,30 @@ export default function GrigliataBoard({
     if (lastFitKeyRef.current === fitKey) return;
     fitToBoard();
   }, [fitKey, fitToBoard, stageSize.width, stageSize.height]);
+
+  useEffect(() => {
+    interactionRef.current = null;
+    setSelectedTokenIds([]);
+    setSelectionBox(null);
+    setTokenDragState(null);
+  }, [fitKey]);
+
+  useEffect(() => {
+    setSelectedTokenIds((currentSelectedTokenIds) => (
+      currentSelectedTokenIds.filter((tokenId) => movableTokenIds.has(tokenId))
+    ));
+  }, [movableTokenIds]);
+
+  const getWorldPointFromClient = useCallback((clientX, clientY) => {
+    const container = containerRef.current;
+    if (!container) return null;
+
+    const rect = container.getBoundingClientRect();
+    return {
+      x: (clientX - rect.left - viewport.x) / viewport.scale,
+      y: (clientY - rect.top - viewport.y) / viewport.scale,
+    };
+  }, [viewport.x, viewport.y, viewport.scale]);
 
   const applyScale = (nextScale, pointer) => {
     const safeScale = Math.min(4, Math.max(0.2, nextScale));
@@ -291,11 +423,8 @@ export default function GrigliataBoard({
     if (!containerRef.current) return;
     if (!canAcceptCurrentTrayDrop && (!payload || payload.uid !== currentUserId)) return;
 
-    const rect = containerRef.current.getBoundingClientRect();
-    const worldPoint = {
-      x: (event.clientX - rect.left - viewport.x) / viewport.scale,
-      y: (event.clientY - rect.top - viewport.y) / viewport.scale,
-    };
+    const worldPoint = getWorldPointFromClient(event.clientX, event.clientY);
+    if (!worldPoint) return;
 
     onDropCurrentToken?.(worldPoint);
   };
@@ -313,6 +442,307 @@ export default function GrigliataBoard({
     if (event.currentTarget.contains(event.relatedTarget)) return;
     setIsDropActive(false);
   };
+
+  const finalizeInteraction = useCallback(async ({ clientX = null, clientY = null } = {}) => {
+    const activeInteraction = interactionRef.current;
+    if (!activeInteraction) return;
+
+    interactionRef.current = null;
+
+    const pointerWorld = (
+      Number.isFinite(clientX) && Number.isFinite(clientY)
+        ? getWorldPointFromClient(clientX, clientY)
+        : null
+    );
+
+    if (activeInteraction.type === 'selection-candidate') {
+      setSelectionBox(null);
+      setSelectedTokenIds([]);
+      return;
+    }
+
+    if (activeInteraction.type === 'selection-box') {
+      const finalSelectionBox = pointerWorld
+        ? { start: activeInteraction.startWorld, end: pointerWorld }
+        : selectionBox;
+      const normalizedSelectionRect = normalizeSelectionRect(finalSelectionBox);
+
+      if (!normalizedSelectionRect) {
+        setSelectedTokenIds([]);
+        setSelectionBox(null);
+        return;
+      }
+
+      const nextSelectedTokenIds = tokenItems
+        .filter((token) => token.canMove)
+        .filter((token) => rectsIntersect(normalizedSelectionRect, {
+          x: token.position.x,
+          y: token.position.y,
+          width: token.position.size,
+          height: token.position.size,
+        }))
+        .map((token) => token.tokenId);
+
+      setSelectedTokenIds(nextSelectedTokenIds);
+      setSelectionBox(null);
+      return;
+    }
+
+    if (activeInteraction.type === 'pan') {
+      return;
+    }
+
+    if (activeInteraction.type === 'token-candidate') {
+      return;
+    }
+
+    if (activeInteraction.type === 'token-drag') {
+      const currentDragState = tokenDragState;
+      const dragDeltaWorld = pointerWorld
+        ? {
+          x: pointerWorld.x - activeInteraction.startWorld.x,
+          y: pointerWorld.y - activeInteraction.startWorld.y,
+        }
+        : (currentDragState?.deltaWorld || { x: 0, y: 0 });
+
+      const draggedOriginToken = activeInteraction.originTokens.find(
+        (originToken) => originToken.tokenId === activeInteraction.draggedTokenId
+      );
+
+      if (!draggedOriginToken) {
+        setTokenDragState(null);
+        return;
+      }
+
+      const snappedDraggedPosition = snapBoardPointToGrid({
+        x: draggedOriginToken.x + dragDeltaWorld.x,
+        y: draggedOriginToken.y + dragDeltaWorld.y,
+      }, normalizedGrid, 'top-left');
+
+      const colDelta = snappedDraggedPosition.col - draggedOriginToken.col;
+      const rowDelta = snappedDraggedPosition.row - draggedOriginToken.row;
+
+      try {
+        if ((colDelta !== 0 || rowDelta !== 0) && activeInteraction.originTokens.length > 0) {
+          await Promise.resolve(onMoveTokens?.(
+            activeInteraction.originTokens.map((originToken) => ({
+              ownerUid: originToken.ownerUid,
+              backgroundId: originToken.backgroundId,
+              col: originToken.col + colDelta,
+              row: originToken.row + rowDelta,
+            }))
+          ));
+        }
+      } finally {
+        setTokenDragState(null);
+      }
+    }
+  }, [
+    getWorldPointFromClient,
+    normalizedGrid,
+    onMoveTokens,
+    selectionBox,
+    tokenDragState,
+    tokenItems,
+  ]);
+
+  useEffect(() => {
+    const handleWindowMouseMove = (event) => {
+      const activeInteraction = interactionRef.current;
+      if (!activeInteraction) return;
+
+      if (activeInteraction.type === 'pan') {
+        setViewport({
+          ...activeInteraction.startViewport,
+          x: activeInteraction.startViewport.x + (event.clientX - activeInteraction.startClient.x),
+          y: activeInteraction.startViewport.y + (event.clientY - activeInteraction.startClient.y),
+        });
+        return;
+      }
+
+      const pointerWorld = getWorldPointFromClient(event.clientX, event.clientY);
+      if (!pointerWorld) return;
+
+      const hasMovedBeyondThreshold = (
+        Math.abs(event.clientX - activeInteraction.startClient.x) >= POINTER_DRAG_THRESHOLD_PX
+        || Math.abs(event.clientY - activeInteraction.startClient.y) >= POINTER_DRAG_THRESHOLD_PX
+      );
+
+      if (activeInteraction.type === 'selection-candidate') {
+        if (!hasMovedBeyondThreshold) return;
+
+        interactionRef.current = {
+          ...activeInteraction,
+          type: 'selection-box',
+        };
+        setSelectionBox({
+          start: activeInteraction.startWorld,
+          end: pointerWorld,
+        });
+        return;
+      }
+
+      if (activeInteraction.type === 'selection-box') {
+        setSelectionBox({
+          start: activeInteraction.startWorld,
+          end: pointerWorld,
+        });
+        return;
+      }
+
+      if (activeInteraction.type === 'token-candidate') {
+        if (!hasMovedBeyondThreshold) return;
+
+        interactionRef.current = {
+          ...activeInteraction,
+          type: 'token-drag',
+        };
+      }
+
+      if (interactionRef.current?.type === 'token-drag') {
+        setTokenDragState({
+          draggedTokenId: activeInteraction.draggedTokenId,
+          tokenIds: activeInteraction.selectedIds,
+          originTokens: activeInteraction.originTokens,
+          deltaWorld: {
+            x: pointerWorld.x - activeInteraction.startWorld.x,
+            y: pointerWorld.y - activeInteraction.startWorld.y,
+          },
+        });
+      }
+    };
+
+    const handleWindowMouseUp = (event) => {
+      void finalizeInteraction({
+        clientX: event.clientX,
+        clientY: event.clientY,
+      });
+    };
+
+    const handleWindowBlur = () => {
+      void finalizeInteraction();
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', handleWindowMouseUp);
+    window.addEventListener('blur', handleWindowBlur);
+
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, [finalizeInteraction, getWorldPointFromClient]);
+
+  useEffect(() => {
+    const handleKeyDown = async (event) => {
+      if (!selectedTokenIds.length) return;
+      if (isEditableElementFocused()) return;
+
+      if (event.key !== 'Delete' && event.code !== 'Delete') return;
+
+      event.preventDefault();
+
+      try {
+        await Promise.resolve(onDeleteTokens?.(selectedTokenIds));
+        setSelectedTokenIds([]);
+      } catch {
+        // preserve selection if deletion fails
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onDeleteTokens, selectedTokenIds]);
+
+  const handleStageMouseDown = (event) => {
+    if (isTokenDragActive) return;
+    if (event.target !== stageRef.current) return;
+
+    const nativeEvent = event.evt;
+
+    if (isSecondaryMouseButton(nativeEvent)) {
+      nativeEvent.preventDefault();
+      interactionRef.current = {
+        type: 'pan',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startViewport: viewport,
+      };
+      return;
+    }
+
+    if (!isPrimaryMouseButton(nativeEvent)) return;
+
+    const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
+    if (!pointerWorld) return;
+
+    interactionRef.current = {
+      type: 'selection-candidate',
+      startClient: {
+        x: nativeEvent.clientX,
+        y: nativeEvent.clientY,
+      },
+      startWorld: pointerWorld,
+    };
+  };
+
+  const handleTokenMouseDown = (token, event) => {
+    const nativeEvent = event.evt;
+    event.cancelBubble = true;
+
+    if (isSecondaryMouseButton(nativeEvent)) {
+      nativeEvent.preventDefault();
+      return;
+    }
+
+    if (!isPrimaryMouseButton(nativeEvent)) return;
+
+    if (!token?.canMove) {
+      setSelectedTokenIds([]);
+      return;
+    }
+
+    const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
+    if (!pointerWorld) return;
+
+    const nextSelectedTokenIds = selectedTokenIdSet.has(token.tokenId)
+      ? selectedTokenIds
+      : [token.tokenId];
+
+    setSelectedTokenIds(nextSelectedTokenIds);
+
+    interactionRef.current = {
+      type: 'token-candidate',
+      draggedTokenId: token.tokenId,
+      selectedIds: nextSelectedTokenIds,
+      startClient: {
+        x: nativeEvent.clientX,
+        y: nativeEvent.clientY,
+      },
+      startWorld: pointerWorld,
+      originTokens: nextSelectedTokenIds
+        .map((selectedTokenId) => tokenItemsById.get(selectedTokenId))
+        .filter(Boolean)
+        .map((selectedToken) => ({
+          tokenId: selectedToken.tokenId,
+          ownerUid: selectedToken.ownerUid,
+          backgroundId: selectedToken.backgroundId,
+          col: selectedToken.col,
+          row: selectedToken.row,
+          x: selectedToken.position.x,
+          y: selectedToken.position.y,
+          size: selectedToken.position.size,
+        })),
+    };
+  };
+
+  const normalizedSelectionRect = useMemo(
+    () => normalizeSelectionRect(selectionBox),
+    [selectionBox]
+  );
 
   return (
     <div className="relative rounded-3xl border border-slate-700 bg-slate-950/80 shadow-2xl overflow-hidden">
@@ -358,6 +788,7 @@ export default function GrigliataBoard({
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
+        onContextMenu={(event) => event.preventDefault()}
       >
         {isTokenDragActive && (
           <div
@@ -365,11 +796,12 @@ export default function GrigliataBoard({
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
+            onContextMenu={(event) => event.preventDefault()}
           />
         )}
 
         <div className="absolute left-4 top-4 z-10 rounded-lg border border-slate-700/70 bg-slate-950/80 px-3 py-2 text-xs text-slate-300 shadow-lg">
-          Drag the empty board to pan. Use the mouse wheel or buttons to zoom.
+          Right-drag empty space to pan. Left-drag to select. Press Delete to remove selected tokens from this map.
         </div>
 
         {stageSize.width > 0 && stageSize.height > 0 && (
@@ -377,19 +809,13 @@ export default function GrigliataBoard({
             ref={stageRef}
             width={stageSize.width}
             height={stageSize.height}
-            draggable
             x={viewport.x}
             y={viewport.y}
             scaleX={viewport.scale}
             scaleY={viewport.scale}
-            onDragEnd={(event) => {
-              setViewport((currentViewport) => ({
-                ...currentViewport,
-                x: event.target.x(),
-                y: event.target.y(),
-              }));
-            }}
+            onMouseDown={handleStageMouseDown}
             onWheel={handleWheel}
+            onContextMenu={(event) => event.evt.preventDefault()}
           >
             <Layer>
               <Rect
@@ -398,6 +824,7 @@ export default function GrigliataBoard({
                 width={boardBounds.width + (normalizedGrid.cellSizePx * 2)}
                 height={boardBounds.height + (normalizedGrid.cellSizePx * 2)}
                 fill="#0f172a"
+                listening={false}
               />
 
               {backgroundImage && resolvedBackground?.imageWidth > 0 && resolvedBackground?.imageHeight > 0 && (
@@ -407,6 +834,7 @@ export default function GrigliataBoard({
                   y={0}
                   width={resolvedBackground.imageWidth}
                   height={resolvedBackground.imageHeight}
+                  listening={false}
                 />
               )}
 
@@ -416,24 +844,35 @@ export default function GrigliataBoard({
                 width={boardBounds.width + (normalizedGrid.cellSizePx * 2)}
                 height={boardBounds.height + (normalizedGrid.cellSizePx * 2)}
                 fill="rgba(15, 23, 42, 0.12)"
+                listening={false}
               />
 
               <GridLayer bounds={boardBounds} grid={normalizedGrid} />
 
-              {placedTokens.map((token) => {
-                const tokenId = token.id || token.ownerUid;
-                const canMove = isManager || token.ownerUid === currentUserId || tokenId === currentUserId;
+              {normalizedSelectionRect && (
+                <Rect
+                  x={normalizedSelectionRect.x}
+                  y={normalizedSelectionRect.y}
+                  width={normalizedSelectionRect.width}
+                  height={normalizedSelectionRect.height}
+                  fill="rgba(56, 189, 248, 0.16)"
+                  stroke="#38bdf8"
+                  strokeWidth={1.5}
+                  dash={[8, 6]}
+                  listening={false}
+                />
+              )}
 
-                return (
-                  <TokenNode
-                    key={tokenId}
-                    token={token}
-                    grid={normalizedGrid}
-                    canMove={canMove}
-                    onMoveToken={onMoveToken}
-                  />
-                );
-              })}
+              {renderedTokens.map((token) => (
+                <TokenNode
+                  key={token.tokenId}
+                  token={token}
+                  position={token.renderPosition}
+                  canMove={token.canMove}
+                  isSelected={token.isSelected}
+                  onMouseDown={handleTokenMouseDown}
+                />
+              ))}
             </Layer>
           </Stage>
         )}

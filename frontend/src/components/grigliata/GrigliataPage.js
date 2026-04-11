@@ -466,6 +466,42 @@ export default function GrigliataPage() {
     }, { merge: true });
   };
 
+  const commitPlacementMoves = async (moves) => {
+    const normalizedMoves = [...new Map(
+      (moves || [])
+        .filter((move) => move?.backgroundId && move?.ownerUid)
+        .map((move) => [buildPlacementDocId(move.backgroundId, move.ownerUid), move])
+    ).values()];
+
+    for (let index = 0; index < normalizedMoves.length; index += FIRESTORE_BATCH_SIZE) {
+      const batch = writeBatch(db);
+      normalizedMoves.slice(index, index + FIRESTORE_BATCH_SIZE).forEach((move) => {
+        batch.set(doc(db, 'grigliata_token_placements', buildPlacementDocId(move.backgroundId, move.ownerUid)), {
+          backgroundId: move.backgroundId,
+          ownerUid: move.ownerUid,
+          col: move.col,
+          row: move.row,
+          updatedAt: serverTimestamp(),
+          updatedBy: currentUserId || null,
+        }, { merge: true });
+      });
+      await batch.commit();
+    }
+  };
+
+  const deleteActiveMapPlacements = async (ownerUids) => {
+    const normalizedOwnerUids = [...new Set((ownerUids || []).filter(Boolean))];
+    if (!activeBackgroundId || !normalizedOwnerUids.length) return;
+
+    for (let index = 0; index < normalizedOwnerUids.length; index += FIRESTORE_BATCH_SIZE) {
+      const batch = writeBatch(db);
+      normalizedOwnerUids.slice(index, index + FIRESTORE_BATCH_SIZE).forEach((ownerUid) => {
+        batch.delete(doc(db, 'grigliata_token_placements', buildPlacementDocId(activeBackgroundId, ownerUid)));
+      });
+      await batch.commit();
+    }
+  };
+
   const handleUploadBackground = async () => {
     if (!isManager || !user?.uid) return;
 
@@ -655,25 +691,29 @@ export default function GrigliataPage() {
     }
   };
 
-  const handleMoveToken = async (token, snapped) => {
-    const tokenId = token?.id || token?.ownerUid || '';
-    const tokenOwnerUid = token?.ownerUid || tokenId;
-    const tokenBackgroundId = token?.backgroundId || activeBackgroundId;
-    const canMove = !!tokenId && (isManager || tokenOwnerUid === user?.uid || tokenId === user?.uid);
-
-    if (!user?.uid || !canMove || !tokenBackgroundId) return;
+  const handleMoveTokens = async (moves) => {
+    if (!user?.uid || !moves?.length) return;
 
     setBoardError('');
     try {
-      await upsertTokenPlacement({
-        backgroundId: tokenBackgroundId,
-        ownerUid: tokenOwnerUid,
-        col: snapped.col,
-        row: snapped.row,
-      });
+      await commitPlacementMoves(moves);
     } catch (error) {
-      console.error('Failed to move token:', error);
-      setBoardError('Unable to move that token right now.');
+      console.error('Failed to move selected token placements:', error);
+      setBoardError('Unable to move the selected token(s) right now.');
+      throw error;
+    }
+  };
+
+  const handleDeleteTokens = async (tokenIds) => {
+    if (!user?.uid || !tokenIds?.length || !activeBackgroundId) return;
+
+    setBoardError('');
+    try {
+      await deleteActiveMapPlacements(tokenIds);
+    } catch (error) {
+      console.error('Failed to delete selected token placements:', error);
+      setBoardError('Unable to delete the selected token(s) right now.');
+      throw error;
     }
   };
 
@@ -767,6 +807,7 @@ export default function GrigliataPage() {
 
           <div className={`min-w-0 ${isTrayDragging ? 'ring-2 ring-amber-400/20 rounded-3xl' : ''}`}>
             <GrigliataBoard
+              key={activeBackgroundId || '__grid__'}
               activeBackground={activeBackground}
               grid={grid}
               tokens={boardTokens}
@@ -774,7 +815,8 @@ export default function GrigliataPage() {
               isManager={isManager}
               isTokenDragActive={isTrayDragging}
               boardHeight={boardHeight}
-              onMoveToken={handleMoveToken}
+              onMoveTokens={handleMoveTokens}
+              onDeleteTokens={handleDeleteTokens}
               onDropCurrentToken={(worldPoint) => {
                 setIsTrayDragging(false);
                 handlePlaceCurrentToken(worldPoint);
