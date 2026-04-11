@@ -32,12 +32,17 @@ import {
   snapBoardPointToGrid,
   sortBackgrounds,
 } from './boardUtils';
-import { DEFAULT_GRID } from './constants';
+import {
+  DEFAULT_GRID,
+  getGrigliataDrawTheme,
+  resolveGrigliataDrawColorKey,
+} from './constants';
 import GrigliataBoard from './GrigliataBoard';
 import MyTokenTray from './MyTokenTray';
 
 const MAX_BACKGROUND_FILE_BYTES = 15 * 1024 * 1024;
 const FIRESTORE_BATCH_SIZE = 450;
+const DRAW_COLOR_AUTOSAVE_DEBOUNCE_MS = 300;
 const GRID_SIZE_AUTOSAVE_DEBOUNCE_MS = 300;
 const LEGACY_TOKEN_CLEANUP_FIELD = 'legacyTokenPlacementCleanupCompletedAt';
 
@@ -51,6 +56,7 @@ export default function GrigliataPage() {
   const currentImageUrl = typeof userData?.imageUrl === 'string' ? userData.imageUrl.trim() : '';
   const currentImagePath = typeof userData?.imagePath === 'string' ? userData.imagePath.trim() : '';
   const currentTokenLabel = currentCharacterId || currentUserEmail.split('@')[0] || 'Player';
+  const persistedDrawColorKey = resolveGrigliataDrawColorKey(userData?.settings?.grigliata_draw_color);
   const [navbarOffset, setNavbarOffset] = useState(0);
   const [backgrounds, setBackgrounds] = useState([]);
   const [boardState, setBoardState] = useState({});
@@ -72,14 +78,37 @@ export default function GrigliataPage() {
   const [boardError, setBoardError] = useState('');
   const [isTrayDragging, setIsTrayDragging] = useState(false);
   const [isRulerEnabled, setIsRulerEnabled] = useState(false);
+  const [drawColorKey, setDrawColorKey] = useState(persistedDrawColorKey);
   const [activeGridSizeOverride, setActiveGridSizeOverride] = useState(null);
   const legacyCleanupStartedRef = useRef(false);
   const calibrationSelectionRef = useRef('');
+  const drawColorAutosaveTimeoutRef = useRef(null);
+  const pendingDrawColorAutosaveRef = useRef(null);
+  const activeDrawColorAutosaveRef = useRef(null);
+  const latestDrawColorRequestIdRef = useRef(0);
+  const latestRequestedDrawColorKeyRef = useRef(persistedDrawColorKey);
+  const persistedDrawColorKeyRef = useRef(persistedDrawColorKey);
   const gridSizeAutosaveTimeoutRef = useRef(null);
   const pendingGridSizeAutosaveRef = useRef(null);
 
   const role = (userData?.role || '').toLowerCase();
   const isManager = isManagerRole(role);
+  const drawTheme = useMemo(
+    () => getGrigliataDrawTheme(drawColorKey),
+    [drawColorKey]
+  );
+
+  useEffect(() => {
+    persistedDrawColorKeyRef.current = persistedDrawColorKey;
+
+    const hasPendingDrawColorSave = !!pendingDrawColorAutosaveRef.current || !!activeDrawColorAutosaveRef.current;
+    if (hasPendingDrawColorSave && persistedDrawColorKey !== latestRequestedDrawColorKeyRef.current) {
+      return;
+    }
+
+    latestRequestedDrawColorKeyRef.current = persistedDrawColorKey;
+    setDrawColorKey(persistedDrawColorKey);
+  }, [persistedDrawColorKey]);
 
   useEffect(() => {
     const navbar = document.querySelector('[data-navbar]');
@@ -453,6 +482,64 @@ export default function GrigliataPage() {
     ? `calc(100vh - ${navbarOffset + 32}px)`
     : '72vh';
 
+  const clearDrawColorAutosaveTimer = useCallback(() => {
+    if (!drawColorAutosaveTimeoutRef.current) return;
+
+    window.clearTimeout(drawColorAutosaveTimeoutRef.current);
+    drawColorAutosaveTimeoutRef.current = null;
+  }, []);
+
+  const persistPendingDrawColorAutosave = useCallback(async () => {
+    if (activeDrawColorAutosaveRef.current || !currentUserId) return;
+
+    const saveRequest = pendingDrawColorAutosaveRef.current;
+    if (!saveRequest?.colorKey) return;
+
+    pendingDrawColorAutosaveRef.current = null;
+    activeDrawColorAutosaveRef.current = saveRequest;
+
+    try {
+      await updateDoc(doc(db, 'users', currentUserId), {
+        'settings.grigliata_draw_color': saveRequest.colorKey,
+      });
+    } catch (error) {
+      console.error('Failed to save Grigliata draw color preference:', error);
+
+      const hasNewerPendingRequest = pendingDrawColorAutosaveRef.current?.requestId > saveRequest.requestId;
+      const hasNewerRequestedColor = latestRequestedDrawColorKeyRef.current !== saveRequest.colorKey;
+
+      if (!hasNewerPendingRequest && !hasNewerRequestedColor) {
+        const fallbackColorKey = persistedDrawColorKeyRef.current;
+        latestRequestedDrawColorKeyRef.current = fallbackColorKey;
+        setDrawColorKey(fallbackColorKey);
+        setBoardError('Unable to save your Grigliata color preference right now.');
+      }
+    } finally {
+      if (activeDrawColorAutosaveRef.current?.requestId === saveRequest.requestId) {
+        activeDrawColorAutosaveRef.current = null;
+      }
+
+      if (!drawColorAutosaveTimeoutRef.current && pendingDrawColorAutosaveRef.current) {
+        void persistPendingDrawColorAutosave();
+      }
+    }
+  }, [currentUserId]);
+
+  const flushPendingDrawColorAutosave = useCallback(async () => {
+    clearDrawColorAutosaveTimer();
+    await persistPendingDrawColorAutosave();
+  }, [clearDrawColorAutosaveTimer, persistPendingDrawColorAutosave]);
+
+  const scheduleDrawColorAutosave = useCallback((saveRequest) => {
+    pendingDrawColorAutosaveRef.current = saveRequest;
+    clearDrawColorAutosaveTimer();
+
+    drawColorAutosaveTimeoutRef.current = window.setTimeout(() => {
+      drawColorAutosaveTimeoutRef.current = null;
+      void persistPendingDrawColorAutosave();
+    }, DRAW_COLOR_AUTOSAVE_DEBOUNCE_MS);
+  }, [clearDrawColorAutosaveTimer, persistPendingDrawColorAutosave]);
+
   const clearGridSizeAutosaveTimer = useCallback(() => {
     if (!gridSizeAutosaveTimeoutRef.current) return;
 
@@ -557,9 +644,10 @@ export default function GrigliataPage() {
 
   useEffect(() => (
     () => {
+      void flushPendingDrawColorAutosave();
       void flushPendingGridSizeAutosave();
     }
-  ), [activeBackgroundId, flushPendingGridSizeAutosave]);
+  ), [activeBackgroundId, flushPendingDrawColorAutosave, flushPendingGridSizeAutosave]);
 
   const upsertTokenPlacement = async ({ backgroundId, ownerUid, col, row }) => {
     const placementId = buildPlacementDocId(backgroundId, ownerUid);
@@ -846,6 +934,23 @@ export default function GrigliataPage() {
     }
   };
 
+  const handleDrawColorChange = useCallback((nextColorKey) => {
+    if (!currentUserId) return;
+
+    const resolvedColorKey = resolveGrigliataDrawColorKey(nextColorKey);
+    if (resolvedColorKey === latestRequestedDrawColorKeyRef.current) return;
+
+    latestDrawColorRequestIdRef.current += 1;
+    latestRequestedDrawColorKeyRef.current = resolvedColorKey;
+    setBoardError('');
+    setDrawColorKey(resolvedColorKey);
+
+    scheduleDrawColorAutosave({
+      colorKey: resolvedColorKey,
+      requestId: latestDrawColorRequestIdRef.current,
+    });
+  }, [currentUserId, scheduleDrawColorAutosave]);
+
   const handleAdjustActiveGridSize = useCallback((delta) => {
     if (!isManager || !user?.uid || !activeBackgroundId || !Number.isFinite(delta)) return;
 
@@ -983,7 +1088,9 @@ export default function GrigliataPage() {
               isManager={isManager}
               isTokenDragActive={isTrayDragging}
               isRulerEnabled={isRulerEnabled}
+              drawTheme={drawTheme}
               onToggleRuler={() => setIsRulerEnabled((currentValue) => !currentValue)}
+              onChangeDrawColor={handleDrawColorChange}
               onAdjustGridSize={isManager ? handleAdjustActiveGridSize : null}
               isGridSizeAdjustmentDisabled={!activeBackgroundId}
               boardHeight={boardHeight}

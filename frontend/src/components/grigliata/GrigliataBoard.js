@@ -9,7 +9,13 @@ import {
   Stage,
   Text,
 } from 'react-konva';
-import { BOARD_FIT_PADDING, TRAY_DRAG_MIME } from './constants';
+import {
+  BOARD_FIT_PADDING,
+  DEFAULT_GRIGLIATA_DRAW_COLOR_KEY,
+  getGrigliataDrawTheme,
+  GRIGLIATA_DRAW_THEMES,
+  TRAY_DRAG_MIME,
+} from './constants';
 import {
   buildGridMeasurement,
   buildGridMeasurementFromPoints,
@@ -24,6 +30,10 @@ import useImageAsset from './useImageAsset';
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
 const RULER_LABEL_MIN_WIDTH = 90;
+const DEFAULT_DRAW_THEME = getGrigliataDrawTheme(DEFAULT_GRIGLIATA_DRAW_COLOR_KEY);
+const MEASUREMENT_OUTLINE_STROKE_WIDTH = 7;
+const SHAPE_OUTLINE_STROKE_WIDTH = 4;
+const TOKEN_RING_OUTLINE_STROKE_WIDTH = 6;
 
 const isPrimaryMouseButton = (nativeEvent) => nativeEvent?.button === 0;
 const isSecondaryMouseButton = (nativeEvent) => nativeEvent?.button === 2;
@@ -67,6 +77,7 @@ const TokenNode = ({
   position,
   canMove,
   isSelected,
+  drawTheme = DEFAULT_DRAW_THEME,
   onMouseDown,
 }) => {
   const image = useImageAsset(token?.imageUrl || '');
@@ -81,20 +92,33 @@ const TokenNode = ({
       onMouseDown={(event) => onMouseDown?.(token, event)}
     >
       {isSelected && (
-        <Rect
-          x={-6}
-          y={-6}
-          width={size + 12}
-          height={size + 12}
-          cornerRadius={10}
-          stroke="#38bdf8"
-          strokeWidth={2}
-          dash={[7, 4]}
-          shadowColor="#38bdf8"
-          shadowBlur={10}
-          shadowOpacity={0.35}
-          listening={false}
-        />
+        <>
+          <Rect
+            x={-6}
+            y={-6}
+            width={size + 12}
+            height={size + 12}
+            cornerRadius={10}
+            stroke={drawTheme.outlineStroke}
+            strokeWidth={SHAPE_OUTLINE_STROKE_WIDTH}
+            dash={[7, 4]}
+            listening={false}
+          />
+          <Rect
+            x={-6}
+            y={-6}
+            width={size + 12}
+            height={size + 12}
+            cornerRadius={10}
+            stroke={drawTheme.stroke}
+            strokeWidth={2}
+            dash={[7, 4]}
+            shadowColor={drawTheme.glow}
+            shadowBlur={10}
+            shadowOpacity={0.35}
+            listening={false}
+          />
+        </>
       )}
 
       <Circle
@@ -120,13 +144,32 @@ const TokenNode = ({
         )}
       </Group>
 
-      <Circle
-        x={size / 2}
-        y={size / 2}
-        radius={(size / 2) - 1}
-        stroke={isSelected ? '#38bdf8' : (canMove ? '#fbbf24' : '#cbd5e1')}
-        strokeWidth={isSelected ? 3 : 2}
-      />
+      {isSelected ? (
+        <>
+          <Circle
+            x={size / 2}
+            y={size / 2}
+            radius={(size / 2) - 1}
+            stroke={drawTheme.outlineStroke}
+            strokeWidth={TOKEN_RING_OUTLINE_STROKE_WIDTH}
+          />
+          <Circle
+            x={size / 2}
+            y={size / 2}
+            radius={(size / 2) - 1}
+            stroke={drawTheme.stroke}
+            strokeWidth={3}
+          />
+        </>
+      ) : (
+        <Circle
+          x={size / 2}
+          y={size / 2}
+          radius={(size / 2) - 1}
+          stroke={canMove ? '#fbbf24' : '#cbd5e1'}
+          strokeWidth={2}
+        />
+      )}
 
       {!image && (
         <Text
@@ -148,7 +191,7 @@ const TokenNode = ({
         width={Math.round(size * 1.6)}
         align="center"
         fontSize={Math.max(10, Math.round(size * 0.18))}
-        fill={isSelected ? '#bae6fd' : '#e2e8f0'}
+        fill={isSelected ? drawTheme.tokenLabelText : '#e2e8f0'}
         text={label}
         ellipsis
         listening={false}
@@ -195,7 +238,7 @@ const GridLayer = ({ bounds, grid }) => {
   return lines;
 };
 
-const MeasurementOverlay = ({ measurement }) => {
+const MeasurementOverlay = ({ measurement, drawTheme = DEFAULT_DRAW_THEME }) => {
   if (!measurement?.startPoint || !measurement?.endPoint || !measurement?.label) return null;
 
   const labelWidth = Math.max(
@@ -215,10 +258,25 @@ const MeasurementOverlay = ({ measurement }) => {
           measurement.endPoint.x,
           measurement.endPoint.y,
         ]}
-        stroke="#38bdf8"
+        stroke={drawTheme.outlineStroke}
+        strokeWidth={MEASUREMENT_OUTLINE_STROKE_WIDTH}
+        dash={[10, 6]}
+        lineCap="round"
+        lineJoin="round"
+      />
+      <Line
+        points={[
+          measurement.startPoint.x,
+          measurement.startPoint.y,
+          measurement.endPoint.x,
+          measurement.endPoint.y,
+        ]}
+        stroke={drawTheme.stroke}
         strokeWidth={3}
         dash={[10, 6]}
-        shadowColor="#38bdf8"
+        lineCap="round"
+        lineJoin="round"
+        shadowColor={drawTheme.glow}
         shadowBlur={10}
         shadowOpacity={0.28}
       />
@@ -228,7 +286,15 @@ const MeasurementOverlay = ({ measurement }) => {
         y={measurement.startPoint.y}
         radius={6}
         fill="#0f172a"
-        stroke="#38bdf8"
+        stroke={drawTheme.outlineStroke}
+        strokeWidth={TOKEN_RING_OUTLINE_STROKE_WIDTH}
+      />
+      <Circle
+        x={measurement.startPoint.x}
+        y={measurement.startPoint.y}
+        radius={6}
+        fill="#0f172a"
+        stroke={drawTheme.stroke}
         strokeWidth={2}
       />
 
@@ -237,7 +303,15 @@ const MeasurementOverlay = ({ measurement }) => {
         y={measurement.endPoint.y}
         radius={6}
         fill="#0f172a"
-        stroke="#38bdf8"
+        stroke={drawTheme.outlineStroke}
+        strokeWidth={TOKEN_RING_OUTLINE_STROKE_WIDTH}
+      />
+      <Circle
+        x={measurement.endPoint.x}
+        y={measurement.endPoint.y}
+        radius={6}
+        fill="#0f172a"
+        stroke={drawTheme.stroke}
         strokeWidth={2}
       />
 
@@ -246,10 +320,17 @@ const MeasurementOverlay = ({ measurement }) => {
           width={labelWidth}
           height={labelHeight}
           cornerRadius={9}
+          stroke={drawTheme.outlineStroke}
+          strokeWidth={SHAPE_OUTLINE_STROKE_WIDTH}
+        />
+        <Rect
+          width={labelWidth}
+          height={labelHeight}
+          cornerRadius={9}
           fill="rgba(2, 6, 23, 0.92)"
-          stroke="rgba(56, 189, 248, 0.8)"
+          stroke={drawTheme.labelBorder}
           strokeWidth={1.5}
-          shadowColor="#38bdf8"
+          shadowColor={drawTheme.glow}
           shadowBlur={8}
           shadowOpacity={0.2}
         />
@@ -260,13 +341,63 @@ const MeasurementOverlay = ({ measurement }) => {
           align="center"
           fontSize={13}
           fontStyle="bold"
-          fill="#e0f2fe"
+          fill={drawTheme.labelText}
           text={measurement.label}
         />
       </Group>
     </Group>
   );
 };
+
+const DrawColorPicker = ({ activeColorKey, onChange }) => (
+  <fieldset className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/70 px-2.5 py-1.5">
+    <legend className="sr-only">Drawing color</legend>
+    <span aria-hidden="true" className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+      Draw
+    </span>
+    <div className="flex items-center gap-1.5">
+      {GRIGLIATA_DRAW_THEMES.map((theme) => {
+        const isActive = theme.key === activeColorKey;
+
+        return (
+          <label
+            key={theme.key}
+            title={`Use ${theme.label} for grid drawings`}
+            className="group relative block cursor-pointer"
+          >
+            <input
+              type="radio"
+              name="grigliata-draw-color"
+              value={theme.key}
+              checked={isActive}
+              onChange={() => onChange?.(theme.key)}
+              className="peer sr-only"
+            />
+            <span className="sr-only">{theme.label}</span>
+            <span
+              aria-hidden="true"
+              className="relative flex h-7 w-7 items-center justify-center rounded-full border transition-transform duration-150 group-hover:scale-105 peer-focus-visible:ring-2 peer-focus-visible:ring-slate-200/70 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-slate-950"
+              style={{
+                background: theme.swatchBackground,
+                borderColor: isActive ? theme.swatchBorder : 'rgba(71, 85, 105, 0.9)',
+                boxShadow: isActive
+                  ? `0 0 0 2px rgba(2, 6, 23, 0.92), 0 0 0 4px ${theme.swatchBorder}, ${theme.swatchGlow}`
+                  : `inset 0 0 0 1px rgba(255, 255, 255, 0.08), ${theme.swatchGlow}`,
+              }}
+            >
+              {isActive && (
+                <span
+                  className="pointer-events-none absolute inset-[7px] rounded-full bg-slate-950/85"
+                  style={{ boxShadow: `0 0 10px ${theme.stroke}` }}
+                />
+              )}
+            </span>
+          </label>
+        );
+      })}
+    </div>
+  </fieldset>
+);
 
 export default function GrigliataBoard({
   activeBackground,
@@ -276,7 +407,9 @@ export default function GrigliataBoard({
   isManager,
   isTokenDragActive,
   isRulerEnabled,
+  drawTheme,
   onToggleRuler,
+  onChangeDrawColor,
   onAdjustGridSize,
   isGridSizeAdjustmentDisabled,
   boardHeight,
@@ -296,6 +429,7 @@ export default function GrigliataBoard({
   const [measurementState, setMeasurementState] = useState(null);
   const backgroundImage = useImageAsset(activeBackground?.imageUrl || '');
   const lastFitKeyRef = useRef('');
+  const resolvedDrawTheme = drawTheme || DEFAULT_DRAW_THEME;
 
   const normalizedGrid = useMemo(() => normalizeGridConfig(grid), [grid]);
 
@@ -920,8 +1054,8 @@ export default function GrigliataBoard({
   );
 
   return (
-    <div className="relative rounded-3xl border border-slate-700 bg-slate-950/80 shadow-2xl overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
+    <div className="relative overflow-hidden rounded-3xl border border-slate-700 bg-slate-950/80 shadow-2xl">
+      <div className="flex flex-col gap-3 border-b border-slate-800 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-lg font-semibold text-slate-100">Grigliata</h2>
           <p className="text-xs text-slate-400">
@@ -929,7 +1063,11 @@ export default function GrigliataBoard({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <DrawColorPicker
+            activeColorKey={resolvedDrawTheme.key}
+            onChange={onChangeDrawColor}
+          />
           <button
             type="button"
             onClick={onToggleRuler}
@@ -1046,17 +1184,32 @@ export default function GrigliataBoard({
               <GridLayer bounds={boardBounds} grid={normalizedGrid} />
 
               {normalizedSelectionRect && (
-                <Rect
-                  x={normalizedSelectionRect.x}
-                  y={normalizedSelectionRect.y}
-                  width={normalizedSelectionRect.width}
-                  height={normalizedSelectionRect.height}
-                  fill="rgba(56, 189, 248, 0.16)"
-                  stroke="#38bdf8"
-                  strokeWidth={1.5}
-                  dash={[8, 6]}
-                  listening={false}
-                />
+                <>
+                  <Rect
+                    x={normalizedSelectionRect.x}
+                    y={normalizedSelectionRect.y}
+                    width={normalizedSelectionRect.width}
+                    height={normalizedSelectionRect.height}
+                    stroke={resolvedDrawTheme.outlineStroke}
+                    strokeWidth={SHAPE_OUTLINE_STROKE_WIDTH}
+                    dash={[8, 6]}
+                    listening={false}
+                  />
+                  <Rect
+                    x={normalizedSelectionRect.x}
+                    y={normalizedSelectionRect.y}
+                    width={normalizedSelectionRect.width}
+                    height={normalizedSelectionRect.height}
+                    fill={resolvedDrawTheme.fill}
+                    stroke={resolvedDrawTheme.stroke}
+                    strokeWidth={1.5}
+                    dash={[8, 6]}
+                    shadowColor={resolvedDrawTheme.glow}
+                    shadowBlur={10}
+                    shadowOpacity={0.18}
+                    listening={false}
+                  />
+                </>
               )}
 
               {renderedTokens.map((token) => (
@@ -1066,12 +1219,13 @@ export default function GrigliataBoard({
                   position={token.renderPosition}
                   canMove={token.canMove}
                   isSelected={token.isSelected}
+                  drawTheme={resolvedDrawTheme}
                   onMouseDown={handleTokenMouseDown}
                 />
               ))}
 
               {measurementState && (
-                <MeasurementOverlay measurement={measurementState} />
+                <MeasurementOverlay measurement={measurementState} drawTheme={resolvedDrawTheme} />
               )}
             </Layer>
           </Stage>
