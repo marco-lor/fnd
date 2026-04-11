@@ -11,6 +11,8 @@ import {
 } from 'react-konva';
 import { BOARD_FIT_PADDING, TRAY_DRAG_MIME } from './constants';
 import {
+  buildGridMeasurement,
+  buildGridMeasurementFromPoints,
   fitViewportToBounds,
   getBoardBounds,
   getInitials,
@@ -21,6 +23,7 @@ import {
 import useImageAsset from './useImageAsset';
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
+const RULER_LABEL_MIN_WIDTH = 90;
 
 const isPrimaryMouseButton = (nativeEvent) => nativeEvent?.button === 0;
 const isSecondaryMouseButton = (nativeEvent) => nativeEvent?.button === 2;
@@ -192,6 +195,79 @@ const GridLayer = ({ bounds, grid }) => {
   return lines;
 };
 
+const MeasurementOverlay = ({ measurement }) => {
+  if (!measurement?.startPoint || !measurement?.endPoint || !measurement?.label) return null;
+
+  const labelWidth = Math.max(
+    RULER_LABEL_MIN_WIDTH,
+    Math.round((measurement.label.length * 7.2) + 16)
+  );
+  const labelHeight = 28;
+  const labelX = measurement.endPoint.x + 12;
+  const labelY = measurement.endPoint.y - 14;
+
+  return (
+    <Group listening={false}>
+      <Line
+        points={[
+          measurement.startPoint.x,
+          measurement.startPoint.y,
+          measurement.endPoint.x,
+          measurement.endPoint.y,
+        ]}
+        stroke="#38bdf8"
+        strokeWidth={3}
+        dash={[10, 6]}
+        shadowColor="#38bdf8"
+        shadowBlur={10}
+        shadowOpacity={0.28}
+      />
+
+      <Circle
+        x={measurement.startPoint.x}
+        y={measurement.startPoint.y}
+        radius={6}
+        fill="#0f172a"
+        stroke="#38bdf8"
+        strokeWidth={2}
+      />
+
+      <Circle
+        x={measurement.endPoint.x}
+        y={measurement.endPoint.y}
+        radius={6}
+        fill="#0f172a"
+        stroke="#38bdf8"
+        strokeWidth={2}
+      />
+
+      <Group x={labelX} y={labelY}>
+        <Rect
+          width={labelWidth}
+          height={labelHeight}
+          cornerRadius={9}
+          fill="rgba(2, 6, 23, 0.92)"
+          stroke="rgba(56, 189, 248, 0.8)"
+          strokeWidth={1.5}
+          shadowColor="#38bdf8"
+          shadowBlur={8}
+          shadowOpacity={0.2}
+        />
+        <Text
+          x={0}
+          y={6}
+          width={labelWidth}
+          align="center"
+          fontSize={13}
+          fontStyle="bold"
+          fill="#e0f2fe"
+          text={measurement.label}
+        />
+      </Group>
+    </Group>
+  );
+};
+
 export default function GrigliataBoard({
   activeBackground,
   grid,
@@ -199,6 +275,8 @@ export default function GrigliataBoard({
   currentUserId,
   isManager,
   isTokenDragActive,
+  isRulerEnabled,
+  onToggleRuler,
   boardHeight,
   onMoveTokens,
   onDeleteTokens,
@@ -213,6 +291,7 @@ export default function GrigliataBoard({
   const [selectedTokenIds, setSelectedTokenIds] = useState([]);
   const [selectionBox, setSelectionBox] = useState(null);
   const [tokenDragState, setTokenDragState] = useState(null);
+  const [measurementState, setMeasurementState] = useState(null);
   const backgroundImage = useImageAsset(activeBackground?.imageUrl || '');
   const lastFitKeyRef = useRef('');
 
@@ -345,7 +424,14 @@ export default function GrigliataBoard({
     setSelectedTokenIds([]);
     setSelectionBox(null);
     setTokenDragState(null);
+    setMeasurementState(null);
   }, [fitKey]);
+
+  useEffect(() => {
+    if (!isRulerEnabled) {
+      setMeasurementState(null);
+    }
+  }, [isRulerEnabled]);
 
   useEffect(() => {
     setSelectedTokenIds((currentSelectedTokenIds) => (
@@ -461,6 +547,11 @@ export default function GrigliataBoard({
       return;
     }
 
+    if (activeInteraction.type === 'measure-candidate') {
+      setMeasurementState(null);
+      return;
+    }
+
     if (activeInteraction.type === 'selection-box') {
       const finalSelectionBox = pointerWorld
         ? { start: activeInteraction.startWorld, end: pointerWorld }
@@ -485,6 +576,11 @@ export default function GrigliataBoard({
 
       setSelectedTokenIds(nextSelectedTokenIds);
       setSelectionBox(null);
+      return;
+    }
+
+    if (activeInteraction.type === 'measure') {
+      setMeasurementState(null);
       return;
     }
 
@@ -535,6 +631,7 @@ export default function GrigliataBoard({
         }
       } finally {
         setTokenDragState(null);
+        setMeasurementState(null);
       }
     }
   }, [
@@ -571,6 +668,19 @@ export default function GrigliataBoard({
       if (activeInteraction.type === 'selection-candidate') {
         if (!hasMovedBeyondThreshold) return;
 
+        if (isRulerEnabled) {
+          interactionRef.current = {
+            ...activeInteraction,
+            type: 'measure',
+          };
+          setMeasurementState(buildGridMeasurementFromPoints({
+            startPoint: activeInteraction.startWorld,
+            endPoint: pointerWorld,
+            grid: normalizedGrid,
+          }));
+          return;
+        }
+
         interactionRef.current = {
           ...activeInteraction,
           type: 'selection-box',
@@ -582,11 +692,35 @@ export default function GrigliataBoard({
         return;
       }
 
+      if (activeInteraction.type === 'measure-candidate') {
+        if (!hasMovedBeyondThreshold) return;
+
+        interactionRef.current = {
+          ...activeInteraction,
+          type: 'measure',
+        };
+        setMeasurementState(buildGridMeasurementFromPoints({
+          startPoint: activeInteraction.startWorld,
+          endPoint: pointerWorld,
+          grid: normalizedGrid,
+        }));
+        return;
+      }
+
       if (activeInteraction.type === 'selection-box') {
         setSelectionBox({
           start: activeInteraction.startWorld,
           end: pointerWorld,
         });
+        return;
+      }
+
+      if (activeInteraction.type === 'measure') {
+        setMeasurementState(buildGridMeasurementFromPoints({
+          startPoint: activeInteraction.startWorld,
+          endPoint: pointerWorld,
+          grid: normalizedGrid,
+        }));
         return;
       }
 
@@ -600,15 +734,36 @@ export default function GrigliataBoard({
       }
 
       if (interactionRef.current?.type === 'token-drag') {
+        const nextDeltaWorld = {
+          x: pointerWorld.x - activeInteraction.startWorld.x,
+          y: pointerWorld.y - activeInteraction.startWorld.y,
+        };
+
         setTokenDragState({
           draggedTokenId: activeInteraction.draggedTokenId,
           tokenIds: activeInteraction.selectedIds,
           originTokens: activeInteraction.originTokens,
-          deltaWorld: {
-            x: pointerWorld.x - activeInteraction.startWorld.x,
-            y: pointerWorld.y - activeInteraction.startWorld.y,
-          },
+          deltaWorld: nextDeltaWorld,
         });
+
+        if (isRulerEnabled) {
+          const draggedOriginToken = activeInteraction.originTokens.find(
+            (originToken) => originToken.tokenId === activeInteraction.draggedTokenId
+          );
+
+          if (draggedOriginToken) {
+            const snappedDraggedPosition = snapBoardPointToGrid({
+              x: draggedOriginToken.x + nextDeltaWorld.x,
+              y: draggedOriginToken.y + nextDeltaWorld.y,
+            }, normalizedGrid, 'top-left');
+
+            setMeasurementState(buildGridMeasurement({
+              startCell: draggedOriginToken,
+              endCell: snappedDraggedPosition,
+              grid: normalizedGrid,
+            }));
+          }
+        }
       }
     };
 
@@ -632,7 +787,7 @@ export default function GrigliataBoard({
       window.removeEventListener('mouseup', handleWindowMouseUp);
       window.removeEventListener('blur', handleWindowBlur);
     };
-  }, [finalizeInteraction, getWorldPointFromClient]);
+  }, [finalizeInteraction, getWorldPointFromClient, isRulerEnabled, normalizedGrid]);
 
   useEffect(() => {
     const handleKeyDown = async (event) => {
@@ -679,6 +834,22 @@ export default function GrigliataBoard({
     const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
     if (!pointerWorld) return;
 
+    setMeasurementState(null);
+
+    if (isRulerEnabled) {
+      setSelectedTokenIds([]);
+      setSelectionBox(null);
+      interactionRef.current = {
+        type: 'measure-candidate',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startWorld: pointerWorld,
+      };
+      return;
+    }
+
     interactionRef.current = {
       type: 'selection-candidate',
       startClient: {
@@ -699,6 +870,8 @@ export default function GrigliataBoard({
     }
 
     if (!isPrimaryMouseButton(nativeEvent)) return;
+
+    setMeasurementState(null);
 
     if (!token?.canMove) {
       setSelectedTokenIds([]);
@@ -750,11 +923,22 @@ export default function GrigliataBoard({
         <div>
           <h2 className="text-lg font-semibold text-slate-100">Grigliata</h2>
           <p className="text-xs text-slate-400">
-            {resolvedBackground?.name || 'Grid only'} | {normalizedGrid.cellSizePx}px squares
+            {resolvedBackground?.name || 'Grid only'} | {normalizedGrid.cellSizePx}px squares | 5 ft per square
           </p>
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onToggleRuler}
+            className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+              isRulerEnabled
+                ? 'border-sky-400/60 bg-sky-500/15 text-sky-100 hover:bg-sky-500/20'
+                : 'border-slate-700 text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            {isRulerEnabled ? 'Ruler On' : 'Ruler Off'}
+          </button>
           <button
             type="button"
             onClick={() => applyScale(viewport.scale * 1.12)}
@@ -801,7 +985,9 @@ export default function GrigliataBoard({
         )}
 
         <div className="absolute left-4 top-4 z-10 rounded-lg border border-slate-700/70 bg-slate-950/80 px-3 py-2 text-xs text-slate-300 shadow-lg">
-          Right-drag empty space to pan. Left-drag to select. Press Delete to remove selected tokens from this map.
+          {isRulerEnabled
+            ? 'Right-drag empty space to pan. Left-drag empty space to measure. Drag tokens to move with visible feet count.'
+            : 'Right-drag empty space to pan. Left-drag to select. Press Delete to remove selected tokens from this map.'}
         </div>
 
         {stageSize.width > 0 && stageSize.height > 0 && (
@@ -873,6 +1059,10 @@ export default function GrigliataBoard({
                   onMouseDown={handleTokenMouseDown}
                 />
               ))}
+
+              {measurementState && (
+                <MeasurementOverlay measurement={measurementState} />
+              )}
             </Layer>
           </Stage>
         )}

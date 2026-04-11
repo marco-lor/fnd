@@ -2,6 +2,7 @@ import {
   BOARD_FIT_PADDING,
   DEFAULT_BOARD_CELLS,
   DEFAULT_GRID,
+  FEET_PER_GRID_SQUARE,
   MAX_GRID_CELL_SIZE,
   MIN_GRID_CELL_SIZE,
 } from './constants';
@@ -114,6 +115,17 @@ export const getTokenPositionPx = (token, grid) => {
   };
 };
 
+export const getGridCellPositionPx = (cell, grid, anchor = 'top-left') => {
+  const position = getTokenPositionPx(cell, grid);
+  if (anchor !== 'center') return position;
+
+  return {
+    ...position,
+    x: position.x + (position.size / 2),
+    y: position.y + (position.size / 2),
+  };
+};
+
 export const snapBoardPointToGrid = (point, grid, anchor = 'top-left') => {
   const normalizedGrid = normalizeGridConfig(grid);
   const shift = anchor === 'center' ? normalizedGrid.cellSizePx / 2 : 0;
@@ -129,6 +141,69 @@ export const snapBoardPointToGrid = (point, grid, anchor = 'top-left') => {
     y: normalizedGrid.offsetYPx + (row * normalizedGrid.cellSizePx),
   };
 };
+
+export const getGridDistanceMeasurement = (
+  startCell,
+  endCell,
+  feetPerSquare = FEET_PER_GRID_SQUARE
+) => {
+  const normalizedStartCell = {
+    col: asFiniteNumber(startCell?.col, 0),
+    row: asFiniteNumber(startCell?.row, 0),
+  };
+  const normalizedEndCell = {
+    col: asFiniteNumber(endCell?.col, 0),
+    row: asFiniteNumber(endCell?.row, 0),
+  };
+  const deltaCols = Math.abs(normalizedEndCell.col - normalizedStartCell.col);
+  const deltaRows = Math.abs(normalizedEndCell.row - normalizedStartCell.row);
+  const squares = Math.max(deltaCols, deltaRows);
+
+  return {
+    startCell: normalizedStartCell,
+    endCell: normalizedEndCell,
+    deltaCols,
+    deltaRows,
+    squares,
+    feet: squares * feetPerSquare,
+  };
+};
+
+export const formatGridDistanceMeasurement = (measurement) => {
+  const squares = asFiniteNumber(measurement?.squares, 0);
+  const feet = asFiniteNumber(measurement?.feet, 0);
+  return `${feet} ft (${squares} ${squares === 1 ? 'square' : 'squares'})`;
+};
+
+export const buildGridMeasurement = ({
+  startCell,
+  endCell,
+  grid,
+  feetPerSquare = FEET_PER_GRID_SQUARE,
+}) => {
+  const distance = getGridDistanceMeasurement(startCell, endCell, feetPerSquare);
+  const startPoint = getGridCellPositionPx(distance.startCell, grid, 'center');
+  const endPoint = getGridCellPositionPx(distance.endCell, grid, 'center');
+
+  return {
+    ...distance,
+    startPoint,
+    endPoint,
+    label: formatGridDistanceMeasurement(distance),
+  };
+};
+
+export const buildGridMeasurementFromPoints = ({
+  startPoint,
+  endPoint,
+  grid,
+  feetPerSquare = FEET_PER_GRID_SQUARE,
+}) => buildGridMeasurement({
+  startCell: snapBoardPointToGrid(startPoint, grid, 'center'),
+  endCell: snapBoardPointToGrid(endPoint, grid, 'center'),
+  grid,
+  feetPerSquare,
+});
 
 export const getBoardBounds = ({ background, grid, tokens }) => {
   const normalizedGrid = normalizeGridConfig(grid);

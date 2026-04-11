@@ -70,6 +70,7 @@ export default function GrigliataPage() {
   const [isSavingCalibration, setIsSavingCalibration] = useState(false);
   const [boardError, setBoardError] = useState('');
   const [isTrayDragging, setIsTrayDragging] = useState(false);
+  const [isRulerEnabled, setIsRulerEnabled] = useState(false);
   const legacyCleanupStartedRef = useRef(false);
 
   const role = (userData?.role || '').toLowerCase();
@@ -814,6 +815,8 @@ export default function GrigliataPage() {
               currentUserId={user.uid}
               isManager={isManager}
               isTokenDragActive={isTrayDragging}
+              isRulerEnabled={isRulerEnabled}
+              onToggleRuler={() => setIsRulerEnabled((currentValue) => !currentValue)}
               boardHeight={boardHeight}
               onMoveTokens={handleMoveTokens}
               onDeleteTokens={handleDeleteTokens}
