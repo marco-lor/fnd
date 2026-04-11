@@ -175,21 +175,98 @@ export const formatGridDistanceMeasurement = (measurement) => {
   return `${feet} ft (${squares} ${squares === 1 ? 'square' : 'squares'})`;
 };
 
+const normalizeGridCell = (cell) => ({
+  col: asFiniteNumber(cell?.col, 0),
+  row: asFiniteNumber(cell?.row, 0),
+});
+
+export const buildGridMeasurementPath = ({
+  anchorCells,
+  liveEndCell,
+  grid,
+  feetPerSquare = FEET_PER_GRID_SQUARE,
+}) => {
+  const normalizedAnchorCells = (anchorCells || [])
+    .filter(Boolean)
+    .map((cell) => normalizeGridCell(cell));
+  if (!normalizedAnchorCells.length || !liveEndCell) return null;
+
+  const normalizedLiveEndCell = normalizeGridCell(liveEndCell);
+  const pathCells = [...normalizedAnchorCells, normalizedLiveEndCell];
+  const pathPoints = pathCells.map((cell, index) => ({
+    ...getGridCellPositionPx(cell, grid, 'center'),
+    key: `${cell.col}:${cell.row}:${index}`,
+  }));
+
+  const segments = [];
+  let totalSquares = 0;
+  let totalFeet = 0;
+
+  for (let index = 0; index < pathCells.length - 1; index += 1) {
+    const segment = getGridDistanceMeasurement(pathCells[index], pathCells[index + 1], feetPerSquare);
+    segments.push({
+      ...segment,
+      startPoint: pathPoints[index],
+      endPoint: pathPoints[index + 1],
+    });
+    totalSquares += segment.squares;
+    totalFeet += segment.feet;
+  }
+
+  return {
+    anchorCells: normalizedAnchorCells,
+    liveEndCell: normalizedLiveEndCell,
+    pathCells,
+    pathPoints,
+    markerPoints: pathPoints,
+    segments,
+    squares: totalSquares,
+    feet: totalFeet,
+    startPoint: pathPoints[0],
+    endPoint: pathPoints[pathPoints.length - 1],
+    label: formatGridDistanceMeasurement({
+      squares: totalSquares,
+      feet: totalFeet,
+    }),
+  };
+};
+
+export const buildGridMeasurementPathFromPoints = ({
+  anchorPoints,
+  liveEndPoint,
+  grid,
+  feetPerSquare = FEET_PER_GRID_SQUARE,
+}) => {
+  const normalizedAnchorPoints = (anchorPoints || []).filter(Boolean);
+  if (!normalizedAnchorPoints.length || !liveEndPoint) return null;
+
+  return buildGridMeasurementPath({
+    anchorCells: normalizedAnchorPoints.map((point) => snapBoardPointToGrid(point, grid, 'center')),
+    liveEndCell: snapBoardPointToGrid(liveEndPoint, grid, 'center'),
+    grid,
+    feetPerSquare,
+  });
+};
+
 export const buildGridMeasurement = ({
   startCell,
   endCell,
   grid,
   feetPerSquare = FEET_PER_GRID_SQUARE,
 }) => {
-  const distance = getGridDistanceMeasurement(startCell, endCell, feetPerSquare);
-  const startPoint = getGridCellPositionPx(distance.startCell, grid, 'center');
-  const endPoint = getGridCellPositionPx(distance.endCell, grid, 'center');
+  const measurementPath = buildGridMeasurementPath({
+    anchorCells: [startCell],
+    liveEndCell: endCell,
+    grid,
+    feetPerSquare,
+  });
+  if (!measurementPath) return null;
 
   return {
-    ...distance,
-    startPoint,
-    endPoint,
-    label: formatGridDistanceMeasurement(distance),
+    ...getGridDistanceMeasurement(startCell, endCell, feetPerSquare),
+    startPoint: measurementPath.startPoint,
+    endPoint: measurementPath.endPoint,
+    label: measurementPath.label,
   };
 };
 
@@ -198,12 +275,26 @@ export const buildGridMeasurementFromPoints = ({
   endPoint,
   grid,
   feetPerSquare = FEET_PER_GRID_SQUARE,
-}) => buildGridMeasurement({
-  startCell: snapBoardPointToGrid(startPoint, grid, 'center'),
-  endCell: snapBoardPointToGrid(endPoint, grid, 'center'),
-  grid,
-  feetPerSquare,
-});
+}) => {
+  const measurementPath = buildGridMeasurementPathFromPoints({
+    anchorPoints: [startPoint],
+    liveEndPoint: endPoint,
+    grid,
+    feetPerSquare,
+  });
+  if (!measurementPath) return null;
+
+  return {
+    ...getGridDistanceMeasurement(
+      measurementPath.pathCells[0],
+      measurementPath.pathCells[measurementPath.pathCells.length - 1],
+      feetPerSquare
+    ),
+    startPoint: measurementPath.startPoint,
+    endPoint: measurementPath.endPoint,
+    label: measurementPath.label,
+  };
+};
 
 export const getBoardBounds = ({ background, grid, tokens }) => {
   const normalizedGrid = normalizeGridConfig(grid);

@@ -17,8 +17,7 @@ import {
   TRAY_DRAG_MIME,
 } from './constants';
 import {
-  buildGridMeasurement,
-  buildGridMeasurementFromPoints,
+  buildGridMeasurementPath,
   fitViewportToBounds,
   getBoardBounds,
   getInitials,
@@ -37,6 +36,21 @@ const TOKEN_RING_OUTLINE_STROKE_WIDTH = 6;
 
 const isPrimaryMouseButton = (nativeEvent) => nativeEvent?.button === 0;
 const isSecondaryMouseButton = (nativeEvent) => nativeEvent?.button === 2;
+const hasPrimaryMouseButtonPressed = (nativeEvent) => (nativeEvent?.buttons & 1) === 1;
+
+const isSameGridCell = (left, right) => (
+  !!left
+  && !!right
+  && left.col === right.col
+  && left.row === right.row
+);
+
+const isWaypointEligibleInteraction = (interaction) => (
+  !!interaction
+  && (interaction.type === 'measure' || interaction.type === 'token-drag')
+  && Array.isArray(interaction.anchorCells)
+  && interaction.anchorCells.length > 0
+);
 
 const normalizeSelectionRect = (selectionBox) => {
   if (!selectionBox?.start || !selectionBox?.end) return null;
@@ -239,7 +253,12 @@ const GridLayer = ({ bounds, grid }) => {
 };
 
 const MeasurementOverlay = ({ measurement, drawTheme = DEFAULT_DRAW_THEME }) => {
-  if (!measurement?.startPoint || !measurement?.endPoint || !measurement?.label) return null;
+  if (!measurement?.pathPoints?.length || measurement.pathPoints.length < 2 || !measurement?.endPoint || !measurement?.label) {
+    return null;
+  }
+
+  const linePoints = measurement.pathPoints.flatMap((point) => [point.x, point.y]);
+  const markerPoints = measurement.markerPoints || measurement.pathPoints;
 
   const labelWidth = Math.max(
     RULER_LABEL_MIN_WIDTH,
@@ -252,12 +271,7 @@ const MeasurementOverlay = ({ measurement, drawTheme = DEFAULT_DRAW_THEME }) => 
   return (
     <Group listening={false}>
       <Line
-        points={[
-          measurement.startPoint.x,
-          measurement.startPoint.y,
-          measurement.endPoint.x,
-          measurement.endPoint.y,
-        ]}
+        points={linePoints}
         stroke={drawTheme.outlineStroke}
         strokeWidth={MEASUREMENT_OUTLINE_STROKE_WIDTH}
         dash={[10, 6]}
@@ -265,12 +279,7 @@ const MeasurementOverlay = ({ measurement, drawTheme = DEFAULT_DRAW_THEME }) => 
         lineJoin="round"
       />
       <Line
-        points={[
-          measurement.startPoint.x,
-          measurement.startPoint.y,
-          measurement.endPoint.x,
-          measurement.endPoint.y,
-        ]}
+        points={linePoints}
         stroke={drawTheme.stroke}
         strokeWidth={3}
         dash={[10, 6]}
@@ -281,39 +290,26 @@ const MeasurementOverlay = ({ measurement, drawTheme = DEFAULT_DRAW_THEME }) => 
         shadowOpacity={0.28}
       />
 
-      <Circle
-        x={measurement.startPoint.x}
-        y={measurement.startPoint.y}
-        radius={6}
-        fill="#0f172a"
-        stroke={drawTheme.outlineStroke}
-        strokeWidth={TOKEN_RING_OUTLINE_STROKE_WIDTH}
-      />
-      <Circle
-        x={measurement.startPoint.x}
-        y={measurement.startPoint.y}
-        radius={6}
-        fill="#0f172a"
-        stroke={drawTheme.stroke}
-        strokeWidth={2}
-      />
-
-      <Circle
-        x={measurement.endPoint.x}
-        y={measurement.endPoint.y}
-        radius={6}
-        fill="#0f172a"
-        stroke={drawTheme.outlineStroke}
-        strokeWidth={TOKEN_RING_OUTLINE_STROKE_WIDTH}
-      />
-      <Circle
-        x={measurement.endPoint.x}
-        y={measurement.endPoint.y}
-        radius={6}
-        fill="#0f172a"
-        stroke={drawTheme.stroke}
-        strokeWidth={2}
-      />
+      {markerPoints.map((point) => (
+        <React.Fragment key={point.key || `${point.x}:${point.y}`}>
+          <Circle
+            x={point.x}
+            y={point.y}
+            radius={6}
+            fill="#0f172a"
+            stroke={drawTheme.outlineStroke}
+            strokeWidth={TOKEN_RING_OUTLINE_STROKE_WIDTH}
+          />
+          <Circle
+            x={point.x}
+            y={point.y}
+            radius={6}
+            fill="#0f172a"
+            stroke={drawTheme.stroke}
+            strokeWidth={2}
+          />
+        </React.Fragment>
+      ))}
 
       <Group x={labelX} y={labelY}>
         <Rect
@@ -586,6 +582,81 @@ export default function GrigliataBoard({
     };
   }, [viewport.x, viewport.y, viewport.scale]);
 
+  const buildMeasurementForCells = useCallback((anchorCells, liveEndCell) => (
+    buildGridMeasurementPath({
+      anchorCells,
+      liveEndCell,
+      grid: normalizedGrid,
+    })
+  ), [normalizedGrid]);
+
+  const getDraggedTokenMeasurement = useCallback((interaction, pointerWorld) => {
+    if (!pointerWorld) return null;
+
+    const draggedOriginToken = interaction?.originTokens?.find(
+      (originToken) => originToken.tokenId === interaction?.draggedTokenId
+    );
+    if (!draggedOriginToken) return null;
+
+    const deltaWorld = {
+      x: pointerWorld.x - interaction.startWorld.x,
+      y: pointerWorld.y - interaction.startWorld.y,
+    };
+    const liveEndCell = snapBoardPointToGrid({
+      x: draggedOriginToken.x + deltaWorld.x,
+      y: draggedOriginToken.y + deltaWorld.y,
+    }, normalizedGrid, 'top-left');
+
+    return {
+      draggedOriginToken,
+      deltaWorld,
+      liveEndCell,
+    };
+  }, [normalizedGrid]);
+
+  const commitMeasurementWaypoint = useCallback((clientX, clientY) => {
+    const activeInteraction = interactionRef.current;
+    if (!isWaypointEligibleInteraction(activeInteraction)) return false;
+
+    const pointerWorld = getWorldPointFromClient(clientX, clientY);
+    if (!pointerWorld) return true;
+
+    let liveEndCell = null;
+
+    if (activeInteraction.type === 'token-drag') {
+      const dragMeasurement = getDraggedTokenMeasurement(activeInteraction, pointerWorld);
+      if (!dragMeasurement) return true;
+
+      liveEndCell = dragMeasurement.liveEndCell;
+      setTokenDragState({
+        draggedTokenId: activeInteraction.draggedTokenId,
+        tokenIds: activeInteraction.selectedIds,
+        originTokens: activeInteraction.originTokens,
+        deltaWorld: dragMeasurement.deltaWorld,
+      });
+    } else {
+      liveEndCell = snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center');
+    }
+
+    const lastAnchorCell = activeInteraction.anchorCells[activeInteraction.anchorCells.length - 1];
+    if (isSameGridCell(lastAnchorCell, liveEndCell)) {
+      setMeasurementState(buildMeasurementForCells(activeInteraction.anchorCells, liveEndCell));
+      return true;
+    }
+
+    const nextAnchorCells = [...activeInteraction.anchorCells, {
+      col: liveEndCell.col,
+      row: liveEndCell.row,
+    }];
+
+    interactionRef.current = {
+      ...activeInteraction,
+      anchorCells: nextAnchorCells,
+    };
+    setMeasurementState(buildMeasurementForCells(nextAnchorCells, liveEndCell));
+    return true;
+  }, [buildMeasurementForCells, getDraggedTokenMeasurement, getWorldPointFromClient, normalizedGrid]);
+
   const applyScale = (nextScale, pointer) => {
     const safeScale = Math.min(4, Math.max(0.2, nextScale));
     const referencePoint = pointer || {
@@ -730,14 +801,11 @@ export default function GrigliataBoard({
 
     if (activeInteraction.type === 'token-drag') {
       const currentDragState = tokenDragState;
-      const dragDeltaWorld = pointerWorld
-        ? {
-          x: pointerWorld.x - activeInteraction.startWorld.x,
-          y: pointerWorld.y - activeInteraction.startWorld.y,
-        }
-        : (currentDragState?.deltaWorld || { x: 0, y: 0 });
-
-      const draggedOriginToken = activeInteraction.originTokens.find(
+      const dragMeasurement = pointerWorld
+        ? getDraggedTokenMeasurement(activeInteraction, pointerWorld)
+        : null;
+      const dragDeltaWorld = dragMeasurement?.deltaWorld || currentDragState?.deltaWorld || { x: 0, y: 0 };
+      const draggedOriginToken = dragMeasurement?.draggedOriginToken || activeInteraction.originTokens.find(
         (originToken) => originToken.tokenId === activeInteraction.draggedTokenId
       );
 
@@ -746,7 +814,7 @@ export default function GrigliataBoard({
         return;
       }
 
-      const snappedDraggedPosition = snapBoardPointToGrid({
+      const snappedDraggedPosition = dragMeasurement?.liveEndCell || snapBoardPointToGrid({
         x: draggedOriginToken.x + dragDeltaWorld.x,
         y: draggedOriginToken.y + dragDeltaWorld.y,
       }, normalizedGrid, 'top-left');
@@ -771,6 +839,7 @@ export default function GrigliataBoard({
       }
     }
   }, [
+    getDraggedTokenMeasurement,
     getWorldPointFromClient,
     normalizedGrid,
     onMoveTokens,
@@ -805,15 +874,18 @@ export default function GrigliataBoard({
         if (!hasMovedBeyondThreshold) return;
 
         if (isRulerEnabled) {
-          interactionRef.current = {
+          const nextInteraction = {
             ...activeInteraction,
             type: 'measure',
+            anchorCells: [
+              snapBoardPointToGrid(activeInteraction.startWorld, normalizedGrid, 'center'),
+            ],
           };
-          setMeasurementState(buildGridMeasurementFromPoints({
-            startPoint: activeInteraction.startWorld,
-            endPoint: pointerWorld,
-            grid: normalizedGrid,
-          }));
+          interactionRef.current = nextInteraction;
+          setMeasurementState(buildMeasurementForCells(
+            nextInteraction.anchorCells,
+            snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center')
+          ));
           return;
         }
 
@@ -831,15 +903,18 @@ export default function GrigliataBoard({
       if (activeInteraction.type === 'measure-candidate') {
         if (!hasMovedBeyondThreshold) return;
 
-        interactionRef.current = {
+        const nextInteraction = {
           ...activeInteraction,
           type: 'measure',
+          anchorCells: activeInteraction.anchorCells || [
+            snapBoardPointToGrid(activeInteraction.startWorld, normalizedGrid, 'center'),
+          ],
         };
-        setMeasurementState(buildGridMeasurementFromPoints({
-          startPoint: activeInteraction.startWorld,
-          endPoint: pointerWorld,
-          grid: normalizedGrid,
-        }));
+        interactionRef.current = nextInteraction;
+        setMeasurementState(buildMeasurementForCells(
+          nextInteraction.anchorCells,
+          snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center')
+        ));
         return;
       }
 
@@ -852,58 +927,66 @@ export default function GrigliataBoard({
       }
 
       if (activeInteraction.type === 'measure') {
-        setMeasurementState(buildGridMeasurementFromPoints({
-          startPoint: activeInteraction.startWorld,
-          endPoint: pointerWorld,
-          grid: normalizedGrid,
-        }));
+        setMeasurementState(buildMeasurementForCells(
+          activeInteraction.anchorCells,
+          snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center')
+        ));
         return;
       }
+
+      let currentInteraction = activeInteraction;
 
       if (activeInteraction.type === 'token-candidate') {
         if (!hasMovedBeyondThreshold) return;
 
-        interactionRef.current = {
+        const nextInteraction = {
           ...activeInteraction,
           type: 'token-drag',
+          anchorCells: isRulerEnabled
+            ? [{
+              col: activeInteraction.originTokens.find(
+                (originToken) => originToken.tokenId === activeInteraction.draggedTokenId
+              )?.col ?? 0,
+              row: activeInteraction.originTokens.find(
+                (originToken) => originToken.tokenId === activeInteraction.draggedTokenId
+              )?.row ?? 0,
+            }]
+            : null,
         };
+        interactionRef.current = nextInteraction;
+        currentInteraction = nextInteraction;
       }
 
-      if (interactionRef.current?.type === 'token-drag') {
-        const nextDeltaWorld = {
-          x: pointerWorld.x - activeInteraction.startWorld.x,
-          y: pointerWorld.y - activeInteraction.startWorld.y,
-        };
+      if (currentInteraction?.type === 'token-drag') {
+        const dragMeasurement = getDraggedTokenMeasurement(currentInteraction, pointerWorld);
+        if (!dragMeasurement) return;
 
         setTokenDragState({
-          draggedTokenId: activeInteraction.draggedTokenId,
-          tokenIds: activeInteraction.selectedIds,
-          originTokens: activeInteraction.originTokens,
-          deltaWorld: nextDeltaWorld,
+          draggedTokenId: currentInteraction.draggedTokenId,
+          tokenIds: currentInteraction.selectedIds,
+          originTokens: currentInteraction.originTokens,
+          deltaWorld: dragMeasurement.deltaWorld,
         });
 
-        if (isRulerEnabled) {
-          const draggedOriginToken = activeInteraction.originTokens.find(
-            (originToken) => originToken.tokenId === activeInteraction.draggedTokenId
-          );
-
-          if (draggedOriginToken) {
-            const snappedDraggedPosition = snapBoardPointToGrid({
-              x: draggedOriginToken.x + nextDeltaWorld.x,
-              y: draggedOriginToken.y + nextDeltaWorld.y,
-            }, normalizedGrid, 'top-left');
-
-            setMeasurementState(buildGridMeasurement({
-              startCell: draggedOriginToken,
-              endCell: snappedDraggedPosition,
-              grid: normalizedGrid,
-            }));
-          }
+        if (isRulerEnabled && Array.isArray(currentInteraction.anchorCells)) {
+          setMeasurementState(buildMeasurementForCells(
+            currentInteraction.anchorCells,
+            dragMeasurement.liveEndCell
+          ));
         }
       }
     };
 
     const handleWindowMouseUp = (event) => {
+      const activeInteraction = interactionRef.current;
+      if (!activeInteraction) return;
+
+      if (activeInteraction.type === 'pan') {
+        if (!isSecondaryMouseButton(event)) return;
+      } else if (!isPrimaryMouseButton(event)) {
+        return;
+      }
+
       void finalizeInteraction({
         clientX: event.clientX,
         clientY: event.clientY,
@@ -923,7 +1006,14 @@ export default function GrigliataBoard({
       window.removeEventListener('mouseup', handleWindowMouseUp);
       window.removeEventListener('blur', handleWindowBlur);
     };
-  }, [finalizeInteraction, getWorldPointFromClient, isRulerEnabled, normalizedGrid]);
+  }, [
+    buildMeasurementForCells,
+    finalizeInteraction,
+    getDraggedTokenMeasurement,
+    getWorldPointFromClient,
+    isRulerEnabled,
+    normalizedGrid,
+  ]);
 
   useEffect(() => {
     const handleKeyDown = async (event) => {
@@ -954,6 +1044,15 @@ export default function GrigliataBoard({
 
     if (isSecondaryMouseButton(nativeEvent)) {
       nativeEvent.preventDefault();
+      if (hasPrimaryMouseButtonPressed(nativeEvent) && commitMeasurementWaypoint(nativeEvent.clientX, nativeEvent.clientY)) {
+        return;
+      }
+      if (
+        hasPrimaryMouseButtonPressed(nativeEvent)
+        && (interactionRef.current?.type === 'measure-candidate' || interactionRef.current?.type === 'token-candidate')
+      ) {
+        return;
+      }
       interactionRef.current = {
         type: 'pan',
         startClient: {
@@ -975,6 +1074,7 @@ export default function GrigliataBoard({
     if (isRulerEnabled) {
       setSelectedTokenIds([]);
       setSelectionBox(null);
+      const startCell = snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center');
       interactionRef.current = {
         type: 'measure-candidate',
         startClient: {
@@ -982,6 +1082,8 @@ export default function GrigliataBoard({
           y: nativeEvent.clientY,
         },
         startWorld: pointerWorld,
+        anchorCells: [startCell],
+        measurementSource: 'free',
       };
       return;
     }
@@ -1002,6 +1104,9 @@ export default function GrigliataBoard({
 
     if (isSecondaryMouseButton(nativeEvent)) {
       nativeEvent.preventDefault();
+      if (hasPrimaryMouseButtonPressed(nativeEvent)) {
+        commitMeasurementWaypoint(nativeEvent.clientX, nativeEvent.clientY);
+      }
       return;
     }
 
@@ -1134,7 +1239,7 @@ export default function GrigliataBoard({
 
         <div className="absolute left-4 top-4 z-10 rounded-lg border border-slate-700/70 bg-slate-950/80 px-3 py-2 text-xs text-slate-300 shadow-lg">
           {isRulerEnabled
-            ? `Right-drag empty space to pan. Left-drag empty space to measure. Drag tokens to move with visible feet count.${isManager ? ' Use +/- to calibrate square size.' : ''}`
+            ? `Right-drag empty space to pan. Left-drag empty space to measure. Right-click while holding left to add ruler corners. Drag tokens to move with visible feet count.${isManager ? ' Use +/- to calibrate square size.' : ''}`
             : `Right-drag empty space to pan. Left-drag to select. Press Delete to remove selected tokens from this map.${isManager ? ' Use +/- to calibrate square size.' : ''}`}
         </div>
 
