@@ -3,6 +3,7 @@ import { TRAY_DRAG_MIME } from './constants';
 
 export default function MyTokenTray({
   currentUserToken,
+  activeMapName,
   onDragStart,
   onDragEnd,
 }) {
@@ -27,9 +28,13 @@ export default function MyTokenTray({
     onDragStart?.();
   };
 
-  const statusLabel = currentUserToken?.placed
-    ? `On board at ${currentUserToken.col}, ${currentUserToken.row}`
-    : 'Not placed on the board yet';
+  const statusLabel = activeMapName
+    ? (
+      currentUserToken?.placed
+        ? `On ${activeMapName} at ${currentUserToken.col}, ${currentUserToken.row}`
+        : `Not placed on ${activeMapName} yet`
+    )
+    : 'Select a map to place your token';
 
   return (
     <section className="rounded-2xl border border-slate-700 bg-slate-950/75 backdrop-blur-sm shadow-2xl overflow-hidden">
@@ -70,9 +75,11 @@ export default function MyTokenTray({
           </div>
 
           <p className="mt-3 text-xs leading-relaxed text-slate-300">
-            {canDrag
-              ? 'Drag this portrait onto the board to place or reposition your round token.'
-              : 'Upload a profile image from the navbar first. Without it, your token tray stays disabled.'}
+            {!canDrag
+              ? 'Upload a profile image from the navbar first. Without it, your token tray stays disabled.'
+              : activeMapName
+                ? 'Drag this portrait onto the active map to place or reposition your round token.'
+                : 'Select a map first. Token positions are saved independently for each map.'}
           </p>
         </div>
 
@@ -86,4 +93,3 @@ export default function MyTokenTray({
     </section>
   );
 }
-

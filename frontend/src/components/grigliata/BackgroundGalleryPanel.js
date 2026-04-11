@@ -10,6 +10,7 @@ export default function BackgroundGalleryPanel({
   isUploading,
   activatingBackgroundId,
   deletingBackgroundId,
+  clearingTokensBackgroundId,
   calibrationDraft,
   calibrationError,
   isSavingCalibration,
@@ -18,6 +19,7 @@ export default function BackgroundGalleryPanel({
   onUploadBackground,
   onSelectBackground,
   onUseBackground,
+  onClearTokensForBackground,
   onDeleteBackground,
   onCalibrationDraftChange,
   onSaveCalibration,
@@ -125,11 +127,11 @@ export default function BackgroundGalleryPanel({
                       </div>
                     </button>
 
-                    <div className="mt-3 flex gap-2">
+                    <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
                         onClick={() => onUseBackground(background)}
-                        disabled={activatingBackgroundId === background.id}
+                        disabled={activatingBackgroundId === background.id || deletingBackgroundId === background.id}
                         className="rounded-md border border-emerald-500/40 px-3 py-1.5 text-xs font-semibold text-emerald-200 transition-colors hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {activatingBackgroundId === background.id ? 'Using...' : 'Use'}
@@ -145,8 +147,17 @@ export default function BackgroundGalleryPanel({
 
                       <button
                         type="button"
+                        onClick={() => onClearTokensForBackground(background)}
+                        disabled={clearingTokensBackgroundId === background.id || deletingBackgroundId === background.id}
+                        className="rounded-md border border-amber-500/40 px-3 py-1.5 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {clearingTokensBackgroundId === background.id ? 'Clearing...' : 'Clear Tokens'}
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={() => onDeleteBackground(background)}
-                        disabled={deletingBackgroundId === background.id}
+                        disabled={deletingBackgroundId === background.id || clearingTokensBackgroundId === background.id}
                         className="rounded-md border border-red-500/40 px-3 py-1.5 text-xs font-semibold text-red-200 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {deletingBackgroundId === background.id ? 'Deleting...' : 'Delete'}

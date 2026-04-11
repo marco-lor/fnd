@@ -42,6 +42,37 @@ service cloud.firestore {
       return isDM();
     }
 
+    function isGrigliataPlacementId(backgroundId, ownerUid, placementId) {
+      return backgroundId is string
+        && ownerUid is string
+        && placementId == backgroundId + "__" + ownerUid;
+    }
+
+    function isValidGrigliataPlacement(data, placementId) {
+      return data.keys().hasAll([
+          "backgroundId",
+          "ownerUid",
+          "col",
+          "row",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.keys().hasOnly([
+          "backgroundId",
+          "ownerUid",
+          "col",
+          "row",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.backgroundId is string
+        && data.ownerUid is string
+        && data.col is int
+        && data.row is int
+        && (data.updatedBy == null || data.updatedBy is string)
+        && isGrigliataPlacementId(data.backgroundId, data.ownerUid, placementId);
+    }
+
     function isNpcTextOnlyUpdate() {
       return request.resource.data.imageUrl == resource.data.imageUrl
         && request.resource.data.imagePath == resource.data.imagePath;
@@ -176,6 +207,24 @@ service cloud.firestore {
         && (request.auth.uid == tokenId || isGrigliataManager());
 
       allow delete: if isGrigliataManager();
+    }
+
+    match /grigliata_token_placements/{placementId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && isValidGrigliataPlacement(request.resource.data, placementId)
+        && (request.auth.uid == request.resource.data.ownerUid || isGrigliataManager());
+
+      allow update: if isSignedIn()
+        && isValidGrigliataPlacement(request.resource.data, placementId)
+        && request.resource.data.backgroundId == resource.data.backgroundId
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && (request.auth.uid == resource.data.ownerUid || isGrigliataManager());
+
+      allow delete: if isSignedIn()
+        && isValidGrigliataPlacement(resource.data, placementId)
+        && (request.auth.uid == resource.data.ownerUid || isGrigliataManager());
     }
 
     // Echi NPCs

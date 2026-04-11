@@ -1,14 +1,22 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   addDoc,
   collection,
   deleteDoc,
+  deleteField,
   doc,
-  getDoc,
+  documentId,
+  getDocs,
+  limit,
   onSnapshot,
+  orderBy,
+  query,
   serverTimestamp,
   setDoc,
+  startAfter,
   updateDoc,
+  where,
+  writeBatch,
 } from 'firebase/firestore';
 import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
 import { useAuth } from '../../AuthContext';
@@ -29,6 +37,10 @@ import GrigliataBoard from './GrigliataBoard';
 import MyTokenTray from './MyTokenTray';
 
 const MAX_BACKGROUND_FILE_BYTES = 15 * 1024 * 1024;
+const FIRESTORE_BATCH_SIZE = 450;
+const LEGACY_TOKEN_CLEANUP_FIELD = 'legacyTokenPlacementCleanupCompletedAt';
+
+const buildPlacementDocId = (backgroundId, ownerUid) => `${backgroundId}__${ownerUid}`;
 
 export default function GrigliataPage() {
   const { user, userData, loading } = useAuth();
@@ -41,7 +53,8 @@ export default function GrigliataPage() {
   const [navbarOffset, setNavbarOffset] = useState(0);
   const [backgrounds, setBackgrounds] = useState([]);
   const [boardState, setBoardState] = useState({});
-  const [tokens, setTokens] = useState([]);
+  const [tokenProfiles, setTokenProfiles] = useState([]);
+  const [activePlacements, setActivePlacements] = useState([]);
 
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploadName, setUploadName] = useState('');
@@ -51,11 +64,13 @@ export default function GrigliataPage() {
   const [selectedBackgroundId, setSelectedBackgroundId] = useState('');
   const [activatingBackgroundId, setActivatingBackgroundId] = useState('');
   const [deletingBackgroundId, setDeletingBackgroundId] = useState('');
+  const [clearingTokensBackgroundId, setClearingTokensBackgroundId] = useState('');
   const [calibrationDraft, setCalibrationDraft] = useState(DEFAULT_GRID);
   const [calibrationError, setCalibrationError] = useState('');
   const [isSavingCalibration, setIsSavingCalibration] = useState(false);
   const [boardError, setBoardError] = useState('');
   const [isTrayDragging, setIsTrayDragging] = useState(false);
+  const legacyCleanupStartedRef = useRef(false);
 
   const role = (userData?.role || '').toLowerCase();
   const isManager = isManagerRole(role);
@@ -85,7 +100,7 @@ export default function GrigliataPage() {
     if (!currentUserId) {
       setBackgrounds([]);
       setBoardState({});
-      setTokens([]);
+      setTokenProfiles([]);
       return undefined;
     }
 
@@ -113,30 +128,56 @@ export default function GrigliataPage() {
       }
     );
 
-    const unsubscribeTokens = onSnapshot(
+    const unsubscribeTokenProfiles = onSnapshot(
       collection(db, 'grigliata_tokens'),
       (snapshot) => {
         const nextTokens = snapshot.docs.map((docSnap) => ({
           id: docSnap.id,
           ...docSnap.data(),
         }));
-        setTokens(nextTokens);
+        setTokenProfiles(nextTokens);
       },
       (error) => {
-        console.error('Failed to load Grigliata tokens:', error);
+        console.error('Failed to load Grigliata token profiles:', error);
       }
     );
 
     return () => {
       unsubscribeBackgrounds();
       unsubscribeState();
-      unsubscribeTokens();
+      unsubscribeTokenProfiles();
     };
   }, [currentUserId]);
 
   const activeBackgroundId = typeof boardState?.activeBackgroundId === 'string'
     ? boardState.activeBackgroundId
     : '';
+
+  useEffect(() => {
+    if (!currentUserId || !activeBackgroundId) {
+      setActivePlacements([]);
+      return undefined;
+    }
+
+    const unsubscribePlacements = onSnapshot(
+      query(
+        collection(db, 'grigliata_token_placements'),
+        where('backgroundId', '==', activeBackgroundId)
+      ),
+      (snapshot) => {
+        const nextPlacements = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
+        setActivePlacements(nextPlacements);
+      },
+      (error) => {
+        console.error('Failed to load Grigliata token placements:', error);
+      }
+    );
+
+    return () => unsubscribePlacements();
+  }, [activeBackgroundId, currentUserId]);
 
   const activeBackground = useMemo(
     () => backgrounds.find((background) => background.id === activeBackgroundId) || null,
@@ -166,100 +207,216 @@ export default function GrigliataPage() {
     setCalibrationError('');
   }, [backgrounds, selectedBackgroundId]);
 
+  const currentUserTokenProfileDoc = useMemo(
+    () => tokenProfiles.find((token) => token.id === currentUserId || token.ownerUid === currentUserId) || null,
+    [currentUserId, tokenProfiles]
+  );
+
   useEffect(() => {
     if (!currentUserId) return undefined;
 
-    let active = true;
+    let isActive = true;
 
-    const syncCurrentUserToken = async () => {
-      const tokenRef = doc(db, 'grigliata_tokens', currentUserId);
-      const label = currentTokenLabel;
-      const imageUrl = currentImageUrl;
-      const imagePath = currentImagePath;
-      const characterId = currentCharacterId;
+    const syncCurrentUserTokenProfile = async () => {
+      const existingToken = currentUserTokenProfileDoc;
+      const hasLegacyPlacementFields = !!(
+        existingToken
+        && (
+          Object.prototype.hasOwnProperty.call(existingToken, 'placed')
+          || Object.prototype.hasOwnProperty.call(existingToken, 'col')
+          || Object.prototype.hasOwnProperty.call(existingToken, 'row')
+        )
+      );
+
+      if (!currentImageUrl && !existingToken) {
+        return;
+      }
+
+      const needsSync = !existingToken
+        || existingToken.ownerUid !== currentUserId
+        || existingToken.characterId !== currentCharacterId
+        || existingToken.label !== currentTokenLabel
+        || existingToken.imageUrl !== currentImageUrl
+        || existingToken.imagePath !== currentImagePath
+        || hasLegacyPlacementFields;
+
+      if (!needsSync || !isActive) return;
 
       try {
-        const tokenSnapshot = await getDoc(tokenRef);
-        if (!active) return;
+        const tokenProfilePayload = {
+          ownerUid: currentUserId,
+          characterId: currentCharacterId,
+          label: currentTokenLabel,
+          imageUrl: currentImageUrl,
+          imagePath: currentImagePath,
+          updatedAt: serverTimestamp(),
+          updatedBy: currentUserId,
+        };
 
-        const existingToken = tokenSnapshot.exists() ? tokenSnapshot.data() : null;
-
-        if (!imageUrl) {
-          if (existingToken && (existingToken.imageUrl || existingToken.placed)) {
-            await setDoc(tokenRef, {
-              ownerUid: currentUserId,
-              characterId,
-              label,
-              imageUrl: '',
-              imagePath: '',
-              placed: false,
-              updatedAt: serverTimestamp(),
-              updatedBy: currentUserId,
-            }, { merge: true });
-          }
-          return;
+        if (existingToken || hasLegacyPlacementFields) {
+          tokenProfilePayload.placed = deleteField();
+          tokenProfilePayload.col = deleteField();
+          tokenProfilePayload.row = deleteField();
         }
 
-        const needsSync = (
-          !existingToken
-          || existingToken.ownerUid !== currentUserId
-          || existingToken.characterId !== characterId
-          || existingToken.label !== label
-          || existingToken.imageUrl !== imageUrl
-          || existingToken.imagePath !== imagePath
-        );
+        await setDoc(doc(db, 'grigliata_tokens', currentUserId), tokenProfilePayload, { merge: true });
+      } catch (error) {
+        console.error('Failed to sync current user token profile:', error);
+      }
+    };
 
-        if (!needsSync) return;
+    syncCurrentUserTokenProfile();
 
-        await setDoc(tokenRef, {
-          ownerUid: currentUserId,
-          characterId,
-          label,
-          imageUrl,
-          imagePath,
-          placed: !!existingToken?.placed,
-          col: Number.isFinite(existingToken?.col) ? existingToken.col : 0,
-          row: Number.isFinite(existingToken?.row) ? existingToken.row : 0,
+    return () => {
+      isActive = false;
+    };
+  }, [
+    currentCharacterId,
+    currentImagePath,
+    currentImageUrl,
+    currentTokenLabel,
+    currentUserId,
+    currentUserTokenProfileDoc,
+  ]);
+
+  const legacyCleanupCompletedAt = boardState?.[LEGACY_TOKEN_CLEANUP_FIELD];
+
+  useEffect(() => {
+    if (!currentUserId || !isManager) return undefined;
+    if (legacyCleanupCompletedAt || legacyCleanupStartedRef.current) return undefined;
+
+    let cancelled = false;
+    legacyCleanupStartedRef.current = true;
+
+    const runLegacyCleanup = async () => {
+      try {
+        let cursor = null;
+
+        while (true) {
+          const baseConstraints = [
+            orderBy(documentId()),
+            limit(FIRESTORE_BATCH_SIZE),
+          ];
+
+          const pageQuery = cursor
+            ? query(collection(db, 'grigliata_tokens'), ...baseConstraints, startAfter(cursor))
+            : query(collection(db, 'grigliata_tokens'), ...baseConstraints);
+
+          const snapshot = await getDocs(pageQuery);
+          if (snapshot.empty) break;
+
+          const batch = writeBatch(db);
+          for (const docSnap of snapshot.docs) {
+            batch.set(docSnap.ref, {
+              placed: deleteField(),
+              col: deleteField(),
+              row: deleteField(),
+              updatedAt: serverTimestamp(),
+              updatedBy: currentUserId || null,
+            }, { merge: true });
+          }
+          await batch.commit();
+
+          if (snapshot.size < FIRESTORE_BATCH_SIZE) {
+            break;
+          }
+
+          cursor = snapshot.docs[snapshot.docs.length - 1];
+        }
+
+        if (cancelled) return;
+
+        await setDoc(doc(db, 'grigliata_state', 'current'), {
+          [LEGACY_TOKEN_CLEANUP_FIELD]: serverTimestamp(),
           updatedAt: serverTimestamp(),
           updatedBy: currentUserId,
         }, { merge: true });
       } catch (error) {
-        console.error('Failed to sync current user token:', error);
+        console.error('Failed to scrub legacy Grigliata token fields:', error);
+        if (!cancelled) {
+          setBoardError('Unable to finish the legacy token cleanup.');
+          legacyCleanupStartedRef.current = false;
+        }
       }
     };
 
-    syncCurrentUserToken();
+    runLegacyCleanup();
 
     return () => {
-      active = false;
+      cancelled = true;
     };
-  }, [
-    currentCharacterId,
-    currentImagePath,
-    currentImageUrl,
-    currentUserId,
-    currentTokenLabel,
-  ]);
+  }, [currentUserId, isManager, legacyCleanupCompletedAt]);
 
-  const currentUserToken = useMemo(() => {
-    const tokenDoc = tokens.find((token) => token.id === currentUserId || token.ownerUid === currentUserId);
-    return {
-      ownerUid: currentUserId,
-      characterId: currentCharacterId,
-      label: currentTokenLabel,
-      imageUrl: tokenDoc?.imageUrl || currentImageUrl,
-      imagePath: tokenDoc?.imagePath || currentImagePath,
-      placed: !!tokenDoc?.placed,
-      col: Number.isFinite(tokenDoc?.col) ? tokenDoc.col : 0,
-      row: Number.isFinite(tokenDoc?.row) ? tokenDoc.row : 0,
-    };
-  }, [
+  const tokenProfilesByOwnerUid = useMemo(() => {
+    const nextMap = new Map();
+    tokenProfiles.forEach((token) => {
+      const ownerUid = token?.ownerUid || token?.id;
+      if (ownerUid) {
+        nextMap.set(ownerUid, token);
+      }
+    });
+    return nextMap;
+  }, [tokenProfiles]);
+
+  const boardTokens = useMemo(
+    () => activePlacements
+      .filter((placement) => placement?.ownerUid)
+      .map((placement) => {
+        const profile = tokenProfilesByOwnerUid.get(placement.ownerUid)
+          || (placement.ownerUid === currentUserId ? {
+            ownerUid: currentUserId,
+            characterId: currentCharacterId,
+            label: currentTokenLabel,
+            imageUrl: currentImageUrl,
+            imagePath: currentImagePath,
+          } : null);
+
+        return {
+          id: placement.ownerUid,
+          backgroundId: placement.backgroundId,
+          ownerUid: placement.ownerUid,
+          characterId: profile?.characterId || '',
+          label: profile?.label || placement.ownerUid || 'Player',
+          imageUrl: profile?.imageUrl || '',
+          imagePath: profile?.imagePath || '',
+          col: Number.isFinite(placement?.col) ? placement.col : 0,
+          row: Number.isFinite(placement?.row) ? placement.row : 0,
+          placed: true,
+        };
+      }),
+    [
+      activePlacements,
+      currentCharacterId,
+      currentImagePath,
+      currentImageUrl,
+      currentTokenLabel,
+      currentUserId,
+      tokenProfilesByOwnerUid,
+    ]
+  );
+
+  const currentUserPlacement = useMemo(
+    () => activePlacements.find((placement) => placement.ownerUid === currentUserId) || null,
+    [activePlacements, currentUserId]
+  );
+
+  const currentUserToken = useMemo(() => ({
+    ownerUid: currentUserId,
+    characterId: currentCharacterId,
+    label: currentTokenLabel,
+    imageUrl: currentUserTokenProfileDoc?.imageUrl || currentImageUrl,
+    imagePath: currentUserTokenProfileDoc?.imagePath || currentImagePath,
+    placed: !!currentUserPlacement,
+    col: Number.isFinite(currentUserPlacement?.col) ? currentUserPlacement.col : 0,
+    row: Number.isFinite(currentUserPlacement?.row) ? currentUserPlacement.row : 0,
+  }), [
     currentCharacterId,
     currentImagePath,
     currentImageUrl,
-    currentUserId,
     currentTokenLabel,
-    tokens,
+    currentUserId,
+    currentUserPlacement,
+    currentUserTokenProfileDoc,
   ]);
 
   const grid = useMemo(
@@ -270,6 +427,44 @@ export default function GrigliataPage() {
   const boardHeight = navbarOffset
     ? `calc(100vh - ${navbarOffset + 32}px)`
     : '72vh';
+
+  const clearPlacementsForBackground = async (backgroundId) => {
+    if (!backgroundId) return 0;
+
+    let deletedCount = 0;
+
+    while (true) {
+      const snapshot = await getDocs(query(
+        collection(db, 'grigliata_token_placements'),
+        where('backgroundId', '==', backgroundId),
+        limit(FIRESTORE_BATCH_SIZE)
+      ));
+
+      if (snapshot.empty) return deletedCount;
+
+      const batch = writeBatch(db);
+      for (const docSnap of snapshot.docs) {
+        batch.delete(docSnap.ref);
+        deletedCount += 1;
+      }
+      await batch.commit();
+
+      if (snapshot.size < FIRESTORE_BATCH_SIZE) return deletedCount;
+    }
+  };
+
+  const upsertTokenPlacement = async ({ backgroundId, ownerUid, col, row }) => {
+    const placementId = buildPlacementDocId(backgroundId, ownerUid);
+
+    await setDoc(doc(db, 'grigliata_token_placements', placementId), {
+      backgroundId,
+      ownerUid,
+      col,
+      row,
+      updatedAt: serverTimestamp(),
+      updatedBy: currentUserId || null,
+    }, { merge: true });
+  };
 
   const handleUploadBackground = async () => {
     if (!isManager || !user?.uid) return;
@@ -341,6 +536,7 @@ export default function GrigliataPage() {
   const handleUseBackground = async (background) => {
     if (!isManager || !user?.uid || !background?.id) return;
 
+    setBoardError('');
     setActivatingBackgroundId(background.id);
     try {
       await setDoc(doc(db, 'grigliata_state', 'current'), {
@@ -356,6 +552,24 @@ export default function GrigliataPage() {
     }
   };
 
+  const handleClearTokensForBackground = async (background) => {
+    if (!isManager || !user?.uid || !background?.id) return;
+
+    const confirmed = window.confirm(`Delete all token placements for "${background.name || 'Untitled Map'}"?`);
+    if (!confirmed) return;
+
+    setBoardError('');
+    setClearingTokensBackgroundId(background.id);
+    try {
+      await clearPlacementsForBackground(background.id);
+    } catch (error) {
+      console.error('Failed to clear token placements:', error);
+      setBoardError('Unable to clear that map\'s token placements.');
+    } finally {
+      setClearingTokensBackgroundId('');
+    }
+  };
+
   const handleDeleteBackground = async (background) => {
     if (!isManager || !user?.uid || !background?.id) return;
 
@@ -365,6 +579,8 @@ export default function GrigliataPage() {
     setDeletingBackgroundId(background.id);
     setBoardError('');
     try {
+      await clearPlacementsForBackground(background.id);
+
       if (background.imagePath) {
         try {
           await deleteObject(storageRef(storage, background.imagePath));
@@ -411,29 +627,27 @@ export default function GrigliataPage() {
     }
   };
 
-  const upsertToken = async (ownerUid, payload) => {
-    await setDoc(doc(db, 'grigliata_tokens', ownerUid), {
-      ...payload,
-      updatedAt: serverTimestamp(),
-      updatedBy: currentUserId || null,
-    }, { merge: true });
-  };
-
   const handlePlaceCurrentToken = async (worldPoint) => {
-    if (!user?.uid || !currentUserToken.imageUrl) return;
+    if (!user?.uid) return;
+
+    if (!activeBackgroundId) {
+      setBoardError('Select a map before placing your token.');
+      return;
+    }
+
+    if (!currentUserToken.imageUrl) {
+      setBoardError('Upload a profile image before placing your token.');
+      return;
+    }
 
     setBoardError('');
     const snapped = snapBoardPointToGrid(worldPoint, grid, 'center');
     try {
-      await upsertToken(user.uid, {
+      await upsertTokenPlacement({
+        backgroundId: activeBackgroundId,
         ownerUid: user.uid,
-        characterId: currentUserToken.characterId || '',
-        label: currentUserToken.label || currentTokenLabel,
-        imageUrl: currentUserToken.imageUrl,
-        imagePath: currentUserToken.imagePath || '',
         col: snapped.col,
         row: snapped.row,
-        placed: true,
       });
     } catch (error) {
       console.error('Failed to place current user token:', error);
@@ -444,21 +658,18 @@ export default function GrigliataPage() {
   const handleMoveToken = async (token, snapped) => {
     const tokenId = token?.id || token?.ownerUid || '';
     const tokenOwnerUid = token?.ownerUid || tokenId;
+    const tokenBackgroundId = token?.backgroundId || activeBackgroundId;
     const canMove = !!tokenId && (isManager || tokenOwnerUid === user?.uid || tokenId === user?.uid);
 
-    if (!user?.uid || !canMove) return;
+    if (!user?.uid || !canMove || !tokenBackgroundId) return;
 
     setBoardError('');
     try {
-      await upsertToken(tokenId, {
+      await upsertTokenPlacement({
+        backgroundId: tokenBackgroundId,
         ownerUid: tokenOwnerUid,
-        characterId: token?.characterId || '',
-        label: token?.label || 'Player',
-        imageUrl: token?.imageUrl || '',
-        imagePath: token?.imagePath || '',
         col: snapped.col,
         row: snapped.row,
-        placed: true,
       });
     } catch (error) {
       console.error('Failed to move token:', error);
@@ -483,12 +694,12 @@ export default function GrigliataPage() {
             <div>
               <h1 className="text-3xl font-semibold text-amber-300">Grigliata</h1>
               <p className="mt-1 max-w-3xl text-sm leading-relaxed text-slate-300">
-                Shared Roll20-style grid with DM-managed background images and public player tokens.
+                Shared Roll20-style grid with DM-managed background images and per-map public token placements.
               </p>
             </div>
 
             <div className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-300">
-              <span className="font-semibold text-slate-100">{tokens.filter((token) => token?.placed && token?.imageUrl).length}</span> tokens on the board
+              <span className="font-semibold text-slate-100">{boardTokens.length}</span> tokens on this map
               {' '}| Active background:{' '}
               <span className="font-semibold text-slate-100">{activeBackground?.name || 'Grid only'}</span>
             </div>
@@ -508,6 +719,7 @@ export default function GrigliataPage() {
           >
             <MyTokenTray
               currentUserToken={currentUserToken}
+              activeMapName={activeBackground?.name || ''}
               onDragStart={() => setIsTrayDragging(true)}
               onDragEnd={() => setIsTrayDragging(false)}
             />
@@ -523,6 +735,7 @@ export default function GrigliataPage() {
                 isUploading={isUploading}
                 activatingBackgroundId={activatingBackgroundId}
                 deletingBackgroundId={deletingBackgroundId}
+                clearingTokensBackgroundId={clearingTokensBackgroundId}
                 calibrationDraft={calibrationDraft}
                 calibrationError={calibrationError}
                 isSavingCalibration={isSavingCalibration}
@@ -538,6 +751,7 @@ export default function GrigliataPage() {
                 onUploadBackground={handleUploadBackground}
                 onSelectBackground={setSelectedBackgroundId}
                 onUseBackground={handleUseBackground}
+                onClearTokensForBackground={handleClearTokensForBackground}
                 onDeleteBackground={handleDeleteBackground}
                 onCalibrationDraftChange={(field, value) => {
                   setCalibrationDraft((currentDraft) => ({
@@ -555,7 +769,7 @@ export default function GrigliataPage() {
             <GrigliataBoard
               activeBackground={activeBackground}
               grid={grid}
-              tokens={tokens}
+              tokens={boardTokens}
               currentUserId={user.uid}
               isManager={isManager}
               isTokenDragActive={isTrayDragging}
