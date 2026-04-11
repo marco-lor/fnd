@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 export default function BackgroundGalleryPanel({
   backgrounds,
@@ -26,6 +26,7 @@ export default function BackgroundGalleryPanel({
   onResetCalibration,
 }) {
   const selectedBackground = backgrounds.find((background) => background.id === selectedBackgroundId) || null;
+  const [isCalibrationExpanded, setIsCalibrationExpanded] = useState(false);
 
   return (
     <section className="rounded-2xl border border-slate-700 bg-slate-950/75 backdrop-blur-sm shadow-2xl overflow-hidden">
@@ -139,7 +140,10 @@ export default function BackgroundGalleryPanel({
 
                       <button
                         type="button"
-                        onClick={() => onSelectBackground(background.id)}
+                        onClick={() => {
+                          onSelectBackground(background.id);
+                          setIsCalibrationExpanded(true);
+                        }}
                         className="rounded-md border border-sky-500/40 px-3 py-1.5 text-xs font-semibold text-sky-200 transition-colors hover:bg-sky-500/10"
                       >
                         Calibrate
@@ -171,78 +175,96 @@ export default function BackgroundGalleryPanel({
         </div>
 
         <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-3">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Calibration</p>
-
-          {selectedBackground ? (
-            <div className="mt-3 space-y-3">
-              <div>
-                <p className="text-sm font-semibold text-slate-100">{selectedBackground.name || 'Untitled Map'}</p>
-                <p className="text-xs text-slate-400">Grid values are stored in native image pixels.</p>
-              </div>
-
-              <label className="block">
-                <span className="text-xs text-slate-300">Square Size</span>
-                <input
-                  type="number"
-                  min="24"
-                  max="240"
-                  step="1"
-                  value={calibrationDraft.cellSizePx}
-                  onChange={(event) => onCalibrationDraftChange('cellSizePx', event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-sky-400 focus:outline-none"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-xs text-slate-300">Offset X</span>
-                <input
-                  type="number"
-                  step="1"
-                  value={calibrationDraft.offsetXPx}
-                  onChange={(event) => onCalibrationDraftChange('offsetXPx', event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-sky-400 focus:outline-none"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-xs text-slate-300">Offset Y</span>
-                <input
-                  type="number"
-                  step="1"
-                  value={calibrationDraft.offsetYPx}
-                  onChange={(event) => onCalibrationDraftChange('offsetYPx', event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-sky-400 focus:outline-none"
-                />
-              </label>
-
-              {calibrationError && (
-                <div className="rounded-lg border border-red-500/30 bg-red-900/20 px-3 py-2 text-xs text-red-200">
-                  {calibrationError}
-                </div>
-              )}
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={onResetCalibration}
-                  className="rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 transition-colors hover:bg-slate-800"
-                >
-                  Reset
-                </button>
-                <button
-                  type="button"
-                  onClick={onSaveCalibration}
-                  disabled={isSavingCalibration}
-                  className="flex-1 rounded-lg bg-amber-400 px-4 py-2 text-xs font-semibold text-black transition-colors hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isSavingCalibration ? 'Saving...' : 'Save Calibration'}
-                </button>
-              </div>
+          <button
+            type="button"
+            onClick={() => setIsCalibrationExpanded((currentValue) => !currentValue)}
+            className="flex w-full items-center justify-between gap-3 text-left"
+          >
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Calibration</p>
+              <p className="mt-1 text-xs text-slate-400">
+                {isCalibrationExpanded
+                  ? 'Manual offsets and square-size form'
+                  : 'Collapsed. Open to edit offsets manually.'}
+              </p>
             </div>
-          ) : (
-            <p className="mt-3 text-sm text-slate-400">
-              Select a background from the gallery to edit its grid calibration.
-            </p>
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300">
+              {isCalibrationExpanded ? 'Hide' : 'Show'}
+            </span>
+          </button>
+
+          {isCalibrationExpanded && (
+            selectedBackground ? (
+              <div className="mt-3 space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-100">{selectedBackground.name || 'Untitled Map'}</p>
+                  <p className="text-xs text-slate-400">Grid values are stored in native image pixels.</p>
+                </div>
+
+                <label className="block">
+                  <span className="text-xs text-slate-300">Square Size</span>
+                  <input
+                    type="number"
+                    min="24"
+                    max="240"
+                    step="1"
+                    value={calibrationDraft.cellSizePx}
+                    onChange={(event) => onCalibrationDraftChange('cellSizePx', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-sky-400 focus:outline-none"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-xs text-slate-300">Offset X</span>
+                  <input
+                    type="number"
+                    step="1"
+                    value={calibrationDraft.offsetXPx}
+                    onChange={(event) => onCalibrationDraftChange('offsetXPx', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-sky-400 focus:outline-none"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-xs text-slate-300">Offset Y</span>
+                  <input
+                    type="number"
+                    step="1"
+                    value={calibrationDraft.offsetYPx}
+                    onChange={(event) => onCalibrationDraftChange('offsetYPx', event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-sky-400 focus:outline-none"
+                  />
+                </label>
+
+                {calibrationError && (
+                  <div className="rounded-lg border border-red-500/30 bg-red-900/20 px-3 py-2 text-xs text-red-200">
+                    {calibrationError}
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={onResetCalibration}
+                    className="rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 transition-colors hover:bg-slate-800"
+                  >
+                    Reset
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onSaveCalibration}
+                    disabled={isSavingCalibration}
+                    className="flex-1 rounded-lg bg-amber-400 px-4 py-2 text-xs font-semibold text-black transition-colors hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isSavingCalibration ? 'Saving...' : 'Save Calibration'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-slate-400">
+                Select a background from the gallery to edit its grid calibration.
+              </p>
+            )
           )}
         </div>
       </div>

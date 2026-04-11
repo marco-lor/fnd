@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addDoc,
   collection,
@@ -38,6 +38,7 @@ import MyTokenTray from './MyTokenTray';
 
 const MAX_BACKGROUND_FILE_BYTES = 15 * 1024 * 1024;
 const FIRESTORE_BATCH_SIZE = 450;
+const GRID_SIZE_AUTOSAVE_DEBOUNCE_MS = 300;
 const LEGACY_TOKEN_CLEANUP_FIELD = 'legacyTokenPlacementCleanupCompletedAt';
 
 const buildPlacementDocId = (backgroundId, ownerUid) => `${backgroundId}__${ownerUid}`;
@@ -71,7 +72,11 @@ export default function GrigliataPage() {
   const [boardError, setBoardError] = useState('');
   const [isTrayDragging, setIsTrayDragging] = useState(false);
   const [isRulerEnabled, setIsRulerEnabled] = useState(false);
+  const [activeGridSizeOverride, setActiveGridSizeOverride] = useState(null);
   const legacyCleanupStartedRef = useRef(false);
+  const calibrationSelectionRef = useRef('');
+  const gridSizeAutosaveTimeoutRef = useRef(null);
+  const pendingGridSizeAutosaveRef = useRef(null);
 
   const role = (userData?.role || '').toLowerCase();
   const isManager = isManagerRole(role);
@@ -185,6 +190,11 @@ export default function GrigliataPage() {
     [backgrounds, activeBackgroundId]
   );
 
+  const selectedBackground = useMemo(
+    () => backgrounds.find((background) => background.id === selectedBackgroundId) || null,
+    [backgrounds, selectedBackgroundId]
+  );
+
   useEffect(() => {
     if (!backgrounds.length) {
       setSelectedBackgroundId('');
@@ -203,10 +213,13 @@ export default function GrigliataPage() {
   }, [backgrounds, activeBackgroundId]);
 
   useEffect(() => {
-    const selectedBackground = backgrounds.find((background) => background.id === selectedBackgroundId);
+    const nextCalibrationBackgroundId = selectedBackground?.id || '';
+    if (calibrationSelectionRef.current === nextCalibrationBackgroundId) return;
+
+    calibrationSelectionRef.current = nextCalibrationBackgroundId;
     setCalibrationDraft(normalizeGridConfig(selectedBackground?.grid));
     setCalibrationError('');
-  }, [backgrounds, selectedBackgroundId]);
+  }, [selectedBackground?.grid, selectedBackground?.id]);
 
   const currentUserTokenProfileDoc = useMemo(
     () => tokenProfiles.find((token) => token.id === currentUserId || token.ownerUid === currentUserId) || null,
@@ -420,14 +433,89 @@ export default function GrigliataPage() {
     currentUserTokenProfileDoc,
   ]);
 
-  const grid = useMemo(
+  const persistedActiveGrid = useMemo(
     () => normalizeGridConfig(activeBackground?.grid),
     [activeBackground]
   );
 
+  const grid = useMemo(() => {
+    if (!activeBackgroundId || activeGridSizeOverride?.backgroundId !== activeBackgroundId) {
+      return persistedActiveGrid;
+    }
+
+    return normalizeGridConfig({
+      ...persistedActiveGrid,
+      cellSizePx: activeGridSizeOverride.cellSizePx,
+    });
+  }, [activeBackgroundId, activeGridSizeOverride, persistedActiveGrid]);
+
   const boardHeight = navbarOffset
     ? `calc(100vh - ${navbarOffset + 32}px)`
     : '72vh';
+
+  const clearGridSizeAutosaveTimer = useCallback(() => {
+    if (!gridSizeAutosaveTimeoutRef.current) return;
+
+    window.clearTimeout(gridSizeAutosaveTimeoutRef.current);
+    gridSizeAutosaveTimeoutRef.current = null;
+  }, []);
+
+  const cancelPendingGridSizeAutosave = useCallback((backgroundId = '') => {
+    const pendingSave = pendingGridSizeAutosaveRef.current;
+    if (!pendingSave) return;
+    if (backgroundId && pendingSave.backgroundId !== backgroundId) return;
+
+    pendingGridSizeAutosaveRef.current = null;
+    clearGridSizeAutosaveTimer();
+  }, [clearGridSizeAutosaveTimer]);
+
+  const persistPendingGridSizeAutosave = useCallback(async (saveRequest) => {
+    if (!saveRequest?.backgroundId || !Number.isFinite(saveRequest?.cellSizePx)) return;
+
+    try {
+      await updateDoc(doc(db, 'grigliata_backgrounds', saveRequest.backgroundId), {
+        'grid.cellSizePx': saveRequest.cellSizePx,
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUserId || null,
+      });
+    } catch (error) {
+      console.error('Failed to auto-save the active map square size:', error);
+      setBoardError('Unable to auto-save the square size.');
+
+      if (selectedBackgroundId === saveRequest.backgroundId) {
+        setCalibrationError('Unable to auto-save the square size.');
+        setCalibrationDraft((currentDraft) => normalizeGridConfig({
+          ...currentDraft,
+          cellSizePx: saveRequest.fallbackCellSizePx,
+        }));
+      }
+
+      if (activeBackgroundId === saveRequest.backgroundId) {
+        setActiveGridSizeOverride(null);
+      }
+    }
+  }, [activeBackgroundId, currentUserId, selectedBackgroundId]);
+
+  const flushPendingGridSizeAutosave = useCallback(async () => {
+    clearGridSizeAutosaveTimer();
+
+    const pendingSave = pendingGridSizeAutosaveRef.current;
+    pendingGridSizeAutosaveRef.current = null;
+
+    await persistPendingGridSizeAutosave(pendingSave);
+  }, [clearGridSizeAutosaveTimer, persistPendingGridSizeAutosave]);
+
+  const scheduleGridSizeAutosave = useCallback((saveRequest) => {
+    pendingGridSizeAutosaveRef.current = saveRequest;
+    clearGridSizeAutosaveTimer();
+
+    gridSizeAutosaveTimeoutRef.current = window.setTimeout(() => {
+      gridSizeAutosaveTimeoutRef.current = null;
+      const nextSave = pendingGridSizeAutosaveRef.current;
+      pendingGridSizeAutosaveRef.current = null;
+      void persistPendingGridSizeAutosave(nextSave);
+    }, GRID_SIZE_AUTOSAVE_DEBOUNCE_MS);
+  }, [clearGridSizeAutosaveTimer, persistPendingGridSizeAutosave]);
 
   const clearPlacementsForBackground = async (backgroundId) => {
     if (!backgroundId) return 0;
@@ -453,6 +541,25 @@ export default function GrigliataPage() {
       if (snapshot.size < FIRESTORE_BATCH_SIZE) return deletedCount;
     }
   };
+
+  useEffect(() => {
+    if (!activeGridSizeOverride) return;
+
+    if (activeGridSizeOverride.backgroundId !== activeBackgroundId) {
+      setActiveGridSizeOverride(null);
+      return;
+    }
+
+    if (persistedActiveGrid.cellSizePx === activeGridSizeOverride.cellSizePx) {
+      setActiveGridSizeOverride(null);
+    }
+  }, [activeBackgroundId, activeGridSizeOverride, persistedActiveGrid.cellSizePx]);
+
+  useEffect(() => (
+    () => {
+      void flushPendingGridSizeAutosave();
+    }
+  ), [activeBackgroundId, flushPendingGridSizeAutosave]);
 
   const upsertTokenPlacement = async ({ backgroundId, ownerUid, col, row }) => {
     const placementId = buildPlacementDocId(backgroundId, ownerUid);
@@ -616,6 +723,11 @@ export default function GrigliataPage() {
     setDeletingBackgroundId(background.id);
     setBoardError('');
     try {
+      if (background.id === activeBackgroundId) {
+        cancelPendingGridSizeAutosave(background.id);
+        setActiveGridSizeOverride(null);
+      }
+
       await clearPlacementsForBackground(background.id);
 
       if (background.imagePath) {
@@ -649,13 +761,29 @@ export default function GrigliataPage() {
     if (!isManager || !user?.uid || !selectedBackgroundId) return;
 
     setCalibrationError('');
+    setBoardError('');
     setIsSavingCalibration(true);
     try {
+      const normalizedCalibration = normalizeGridConfig(calibrationDraft);
+
+      if (selectedBackgroundId === activeBackgroundId) {
+        await flushPendingGridSizeAutosave();
+      }
+
       await updateDoc(doc(db, 'grigliata_backgrounds', selectedBackgroundId), {
-        grid: normalizeGridConfig(calibrationDraft),
+        grid: normalizedCalibration,
         updatedAt: serverTimestamp(),
         updatedBy: user.uid,
       });
+
+      setCalibrationDraft(normalizedCalibration);
+
+      if (selectedBackgroundId === activeBackgroundId) {
+        setActiveGridSizeOverride({
+          backgroundId: selectedBackgroundId,
+          cellSizePx: normalizedCalibration.cellSizePx,
+        });
+      }
     } catch (error) {
       console.error('Failed to save calibration:', error);
       setCalibrationError('Unable to save calibration changes.');
@@ -717,6 +845,45 @@ export default function GrigliataPage() {
       throw error;
     }
   };
+
+  const handleAdjustActiveGridSize = useCallback((delta) => {
+    if (!isManager || !user?.uid || !activeBackgroundId || !Number.isFinite(delta)) return;
+
+    const nextGrid = normalizeGridConfig({
+      ...grid,
+      cellSizePx: grid.cellSizePx + delta,
+    });
+
+    if (nextGrid.cellSizePx === grid.cellSizePx) return;
+
+    setBoardError('');
+    if (selectedBackgroundId === activeBackgroundId) {
+      setCalibrationError('');
+      setCalibrationDraft((currentDraft) => normalizeGridConfig({
+        ...currentDraft,
+        cellSizePx: nextGrid.cellSizePx,
+      }));
+    }
+
+    setActiveGridSizeOverride({
+      backgroundId: activeBackgroundId,
+      cellSizePx: nextGrid.cellSizePx,
+    });
+
+    scheduleGridSizeAutosave({
+      backgroundId: activeBackgroundId,
+      cellSizePx: nextGrid.cellSizePx,
+      fallbackCellSizePx: persistedActiveGrid.cellSizePx,
+    });
+  }, [
+    activeBackgroundId,
+    grid,
+    isManager,
+    persistedActiveGrid.cellSizePx,
+    scheduleGridSizeAutosave,
+    selectedBackgroundId,
+    user?.uid,
+  ]);
 
   if (loading) {
     return <div className="px-6 py-8 text-white">Loading Grigliata...</div>;
@@ -817,6 +984,8 @@ export default function GrigliataPage() {
               isTokenDragActive={isTrayDragging}
               isRulerEnabled={isRulerEnabled}
               onToggleRuler={() => setIsRulerEnabled((currentValue) => !currentValue)}
+              onAdjustGridSize={isManager ? handleAdjustActiveGridSize : null}
+              isGridSizeAdjustmentDisabled={!activeBackgroundId}
               boardHeight={boardHeight}
               onMoveTokens={handleMoveTokens}
               onDeleteTokens={handleDeleteTokens}
