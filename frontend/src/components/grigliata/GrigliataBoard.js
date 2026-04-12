@@ -10,6 +10,7 @@ import {
   Text,
 } from 'react-konva';
 import { FiEye, FiEyeOff } from 'react-icons/fi';
+import { GiDeathSkull } from 'react-icons/gi';
 import {
   BOARD_FIT_PADDING,
   DEFAULT_GRIGLIATA_DRAW_COLOR_KEY,
@@ -37,16 +38,11 @@ const TOKEN_RING_OUTLINE_STROKE_WIDTH = 6;
 const HIDDEN_TOKEN_PRIMARY = 'rgba(226, 232, 240, 0.96)';
 const HIDDEN_TOKEN_SECONDARY = 'rgba(148, 163, 184, 0.94)';
 const HIDDEN_TOKEN_SCRIM = 'rgba(15, 23, 42, 0.6)';
-const TOKEN_ACTION_SLOT_DEFINITIONS = [
-  { key: 'N', x: 0.5, y: 0 },
-  { key: 'NE', x: 1, y: 0 },
-  { key: 'E', x: 1, y: 0.5 },
-  { key: 'SE', x: 1, y: 1 },
-  { key: 'S', x: 0.5, y: 1 },
-  { key: 'SW', x: 0, y: 1 },
-  { key: 'W', x: 0, y: 0.5 },
-  { key: 'NW', x: 0, y: 0 },
-];
+const DEAD_TOKEN_PRIMARY = 'rgba(254, 226, 226, 0.96)';
+const DEAD_TOKEN_SECONDARY = 'rgba(248, 113, 113, 0.95)';
+const DEAD_TOKEN_SCRIM = 'rgba(15, 23, 42, 0.34)';
+const DEAD_TOKEN_BANNER_FILL = 'rgba(127, 29, 29, 0.88)';
+const DEAD_TOKEN_LABEL = '#fecaca';
 
 const isPrimaryMouseButton = (nativeEvent) => nativeEvent?.button === 0;
 const isSecondaryMouseButton = (nativeEvent) => nativeEvent?.button === 2;
@@ -100,24 +96,10 @@ const isEditableElementFocused = () => {
     || tagName === 'select';
 };
 
-const buildTokenActionSlotPositions = ({ left, top, size, buttonSize, gap }) => {
-  const xPositions = {
-    0: left - gap - (buttonSize / 2),
-    0.5: left + (size / 2),
-    1: left + size + gap + (buttonSize / 2),
-  };
-  const yPositions = {
-    0: top - gap - (buttonSize / 2),
-    0.5: top + (size / 2),
-    1: top + size + gap + (buttonSize / 2),
-  };
-
-  return new Map(TOKEN_ACTION_SLOT_DEFINITIONS.map((slot) => {
-    const x = xPositions[slot.x];
-    const y = yPositions[slot.y];
-    return [slot.key, { x, y }];
-  }));
-};
+const buildSelectionActionToolbarPosition = ({ left, top, width, buttonSize, gap }) => ({
+  left: left + width + gap,
+  top: top - gap - buttonSize,
+});
 
 const HiddenEyeBadge = ({ x, y, size }) => {
   const half = size / 2;
@@ -187,17 +169,24 @@ const TokenNode = ({
   const label = token?.label || token?.characterId || token?.ownerUid || 'Player';
   const initials = getInitials(label);
   const isHiddenFromPlayers = token?.isVisibleToPlayers === false;
-  const selectedStroke = isHiddenFromPlayers ? HIDDEN_TOKEN_SECONDARY : drawTheme.stroke;
-  const selectedGlow = isHiddenFromPlayers ? 'rgba(148, 163, 184, 0.45)' : drawTheme.glow;
+  const isDead = token?.isDead === true;
+  const selectedStroke = isHiddenFromPlayers
+    ? HIDDEN_TOKEN_SECONDARY
+    : (isDead ? DEAD_TOKEN_SECONDARY : drawTheme.stroke);
+  const selectedGlow = isHiddenFromPlayers
+    ? 'rgba(148, 163, 184, 0.45)'
+    : (isDead ? 'rgba(248, 113, 113, 0.35)' : drawTheme.glow);
   const idleRingStroke = isHiddenFromPlayers
     ? HIDDEN_TOKEN_SECONDARY
-    : (canMove ? '#fbbf24' : '#cbd5e1');
+    : (isDead ? DEAD_TOKEN_SECONDARY : (canMove ? '#fbbf24' : '#cbd5e1'));
   const labelFill = isHiddenFromPlayers
     ? '#cbd5e1'
-    : (isSelected ? drawTheme.tokenLabelText : '#e2e8f0');
+    : (isDead ? DEAD_TOKEN_LABEL : (isSelected ? drawTheme.tokenLabelText : '#e2e8f0'));
   const hiddenBadgeSize = Math.max(18, Math.round(size * 0.28));
   const hiddenSlashInset = Math.max(8, Math.round(size * 0.18));
   const hiddenSlashStroke = Math.max(5, Math.round(size * 0.1));
+  const deadBannerHeight = Math.max(15, Math.round(size * 0.24));
+  const deadBannerY = size - deadBannerHeight - Math.max(6, Math.round(size * 0.1));
 
   return (
     <Group
@@ -255,6 +244,9 @@ const TokenNode = ({
           <KonvaImage image={image} width={size} height={size} />
         ) : (
           <Rect width={size} height={size} fill="#475569" />
+        )}
+        {isDead && (
+          <Rect width={size} height={size} fill={DEAD_TOKEN_SCRIM} />
         )}
         {isHiddenFromPlayers && (
           <Rect width={size} height={size} fill={HIDDEN_TOKEN_SCRIM} />
@@ -320,6 +312,34 @@ const TokenNode = ({
             size={hiddenBadgeSize}
           />
         </>
+      )}
+
+      {isDead && (
+        <Group
+          clipFunc={(context) => {
+            context.beginPath();
+            context.arc(size / 2, size / 2, (size / 2) - 2, 0, Math.PI * 2, false);
+          }}
+          listening={false}
+        >
+          <Rect
+            x={0}
+            y={deadBannerY}
+            width={size}
+            height={deadBannerHeight}
+            fill={DEAD_TOKEN_BANNER_FILL}
+          />
+          <Text
+            x={0}
+            y={deadBannerY + Math.max(1, Math.round(deadBannerHeight * 0.1))}
+            width={size}
+            align="center"
+            fontSize={Math.max(10, Math.round(size * 0.18))}
+            fontStyle="bold"
+            fill={DEAD_TOKEN_PRIMARY}
+            text="DEAD"
+          />
+        </Group>
       )}
 
       {!image && (
@@ -550,8 +570,10 @@ export default function GrigliataBoard({
   isGridSizeAdjustmentDisabled,
   onMoveTokens,
   onDeleteTokens,
-  onToggleTokenVisibility,
-  tokenVisibilityUpdateOwnerUid,
+  onSetSelectedTokensVisibility,
+  isTokenVisibilityActionPending,
+  onSetSelectedTokensDeadState,
+  isTokenDeadActionPending,
   onDropCurrentToken,
 }) {
   const containerRef = useRef(null);
@@ -972,6 +994,7 @@ export default function GrigliataBoard({
               col: originToken.col + colDelta,
               row: originToken.row + rowDelta,
               isVisibleToPlayers: originToken.isVisibleToPlayers,
+              isDead: originToken.isDead,
             }))
           ));
         }
@@ -1289,6 +1312,7 @@ export default function GrigliataBoard({
           col: selectedToken.col,
           row: selectedToken.row,
           isVisibleToPlayers: selectedToken.isVisibleToPlayers,
+          isDead: selectedToken.isDead,
           x: selectedToken.position.x,
           y: selectedToken.position.y,
           size: selectedToken.position.size,
@@ -1300,38 +1324,95 @@ export default function GrigliataBoard({
     () => normalizeSelectionRect(selectionBox),
     [selectionBox]
   );
+  const selectedTokens = useMemo(
+    () => renderedTokens.filter((token) => selectedTokenIdSet.has(token.tokenId)),
+    [renderedTokens, selectedTokenIdSet]
+  );
   const selectedTokenActionState = useMemo(() => {
-    if (!isManager || selectedTokenIds.length !== 1 || selectionBox || tokenDragState || isTokenDragActive) {
+    if (!isManager || !selectedTokens.length || selectionBox || tokenDragState || isTokenDragActive) {
       return null;
     }
 
-    const selectedToken = renderedTokens.find((token) => token.tokenId === selectedTokenIds[0]);
-    if (!selectedToken) return null;
+    const selectionBounds = selectedTokens.reduce((accumulator, token) => {
+      const left = token.renderPosition.x;
+      const top = token.renderPosition.y;
+      const right = token.renderPosition.x + token.renderPosition.size;
+      const bottom = token.renderPosition.y + token.renderPosition.size;
 
-    const screenSize = selectedToken.renderPosition.size * viewport.scale;
-    const screenBox = {
-      left: viewport.x + (selectedToken.renderPosition.x * viewport.scale),
-      top: viewport.y + (selectedToken.renderPosition.y * viewport.scale),
-      size: screenSize,
-    };
-    const buttonSize = Math.max(36, Math.min(84, Math.round(screenSize)));
+      return {
+        minX: Math.min(accumulator.minX, left),
+        minY: Math.min(accumulator.minY, top),
+        maxX: Math.max(accumulator.maxX, right),
+        maxY: Math.max(accumulator.maxY, bottom),
+      };
+    }, {
+      minX: Number.POSITIVE_INFINITY,
+      minY: Number.POSITIVE_INFINITY,
+      maxX: Number.NEGATIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY,
+    });
+
+    if (!Number.isFinite(selectionBounds.minX) || !Number.isFinite(selectionBounds.minY)) {
+      return null;
+    }
+
+    const screenWidth = (selectionBounds.maxX - selectionBounds.minX) * viewport.scale;
+    const referenceScreenSize = Math.max(
+      ...selectedTokens.map((token) => token.renderPosition.size * viewport.scale),
+      36
+    );
+    const buttonSize = Math.max(36, Math.min(84, Math.round(referenceScreenSize)));
     const gap = Math.max(14, Math.round(buttonSize * 0.22));
+    const toolbarWidth = (buttonSize * 2) + 24;
+    const toolbarHeight = buttonSize + 16;
+    const normalizedOwnerUids = [...new Set(
+      selectedTokens
+        .map((token) => token.ownerUid)
+        .filter(Boolean)
+    )];
+    if (!normalizedOwnerUids.length) {
+      return null;
+    }
+    const allSelectedTokensHidden = selectedTokens.every((token) => token.isVisibleToPlayers === false);
+    const allSelectedTokensDead = selectedTokens.every((token) => token.isDead === true);
+    const selectionLabel = normalizedOwnerUids.length === 1 ? 'token' : 'tokens';
+    const rawToolbarPosition = buildSelectionActionToolbarPosition({
+      left: viewport.x + (selectionBounds.minX * viewport.scale),
+      top: viewport.y + (selectionBounds.minY * viewport.scale),
+      width: screenWidth,
+      buttonSize,
+      gap,
+    });
 
     return {
-      token: selectedToken,
+      ownerUids: normalizedOwnerUids,
       buttonSize,
-      slotPositions: buildTokenActionSlotPositions({
-        ...screenBox,
-        buttonSize,
-        gap,
-      }),
+      nextIsVisibleToPlayers: allSelectedTokensHidden,
+      nextIsDead: !allSelectedTokensDead,
+      visibilityTitle: allSelectedTokensHidden
+        ? `Show selected ${selectionLabel} to players`
+        : `Hide selected ${selectionLabel} from players`,
+      deadStateTitle: allSelectedTokensDead
+        ? `Mark selected ${selectionLabel} as alive`
+        : `Mark selected ${selectionLabel} as dead`,
+      toolbarPosition: {
+        left: Math.min(
+          Math.max(12, rawToolbarPosition.left),
+          Math.max(12, stageSize.width - toolbarWidth - 12)
+        ),
+        top: Math.min(
+          Math.max(12, rawToolbarPosition.top),
+          Math.max(12, stageSize.height - toolbarHeight - 12)
+        ),
+      },
     };
   }, [
     isManager,
     isTokenDragActive,
-    renderedTokens,
-    selectedTokenIds,
+    selectedTokens,
     selectionBox,
+    stageSize.height,
+    stageSize.width,
     tokenDragState,
     viewport.scale,
     viewport.x,
@@ -1532,40 +1613,68 @@ export default function GrigliataBoard({
         )}
 
         {selectedTokenActionState && (() => {
-          const visibilitySlotPosition = selectedTokenActionState.slotPositions.get('NE');
-          if (!visibilitySlotPosition) return null;
-
-          const isHiddenFromPlayers = selectedTokenActionState.token.isVisibleToPlayers === false;
-          const isUpdatingVisibility = tokenVisibilityUpdateOwnerUid === selectedTokenActionState.token.ownerUid;
-          const Icon = isHiddenFromPlayers ? FiEye : FiEyeOff;
+          const VisibilityIcon = selectedTokenActionState.nextIsVisibleToPlayers ? FiEye : FiEyeOff;
 
           return (
             <div className="pointer-events-none absolute inset-0 z-20">
-              <button
-                type="button"
-                aria-label={isHiddenFromPlayers ? 'Show token to players' : 'Hide token from players'}
-                title={isHiddenFromPlayers ? 'Show token to players' : 'Hide token from players'}
-                disabled={isUpdatingVisibility}
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onToggleTokenVisibility?.(selectedTokenActionState.token.ownerUid);
-                }}
-                className={`pointer-events-auto absolute flex items-center justify-center rounded-[1.25rem] border text-slate-50 shadow-2xl backdrop-blur-sm transition-transform duration-150 hover:scale-[1.03] disabled:cursor-not-allowed disabled:opacity-60 ${
-                  isHiddenFromPlayers
-                    ? 'border-emerald-300/60 bg-emerald-500/30'
-                    : 'border-slate-200/30 bg-slate-950/75'
-                }`}
+              <div
+                className="pointer-events-auto absolute flex items-center gap-2 rounded-[1.4rem] border border-slate-700/80 bg-slate-950/88 p-2 shadow-2xl backdrop-blur-sm"
                 style={{
-                  left: visibilitySlotPosition.x,
-                  top: visibilitySlotPosition.y,
-                  width: selectedTokenActionState.buttonSize,
-                  height: selectedTokenActionState.buttonSize,
-                  transform: 'translate(-50%, -50%)',
+                  left: selectedTokenActionState.toolbarPosition.left,
+                  top: selectedTokenActionState.toolbarPosition.top,
                 }}
               >
-                <Icon className="h-[42%] w-[42%]" />
-              </button>
+                <button
+                  type="button"
+                  aria-label={selectedTokenActionState.visibilityTitle}
+                  title={selectedTokenActionState.visibilityTitle}
+                  disabled={isTokenVisibilityActionPending}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSetSelectedTokensVisibility?.(
+                      selectedTokenActionState.ownerUids,
+                      selectedTokenActionState.nextIsVisibleToPlayers
+                    );
+                  }}
+                  className={`flex items-center justify-center rounded-[1.15rem] border text-slate-50 shadow-lg transition-transform duration-150 hover:scale-[1.03] disabled:cursor-not-allowed disabled:opacity-60 ${
+                    selectedTokenActionState.nextIsVisibleToPlayers
+                      ? 'border-emerald-300/60 bg-emerald-500/30'
+                      : 'border-slate-200/30 bg-slate-900/90'
+                  }`}
+                  style={{
+                    width: selectedTokenActionState.buttonSize,
+                    height: selectedTokenActionState.buttonSize,
+                  }}
+                >
+                  <VisibilityIcon className="h-[42%] w-[42%]" />
+                </button>
+                <button
+                  type="button"
+                  aria-label={selectedTokenActionState.deadStateTitle}
+                  title={selectedTokenActionState.deadStateTitle}
+                  disabled={isTokenDeadActionPending}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSetSelectedTokensDeadState?.(
+                      selectedTokenActionState.ownerUids,
+                      selectedTokenActionState.nextIsDead
+                    );
+                  }}
+                  className={`flex items-center justify-center rounded-[1.15rem] border text-slate-50 shadow-lg transition-transform duration-150 hover:scale-[1.03] disabled:cursor-not-allowed disabled:opacity-60 ${
+                    selectedTokenActionState.nextIsDead
+                      ? 'border-rose-300/60 bg-rose-600/35'
+                      : 'border-emerald-300/55 bg-emerald-600/25'
+                  }`}
+                  style={{
+                    width: selectedTokenActionState.buttonSize,
+                    height: selectedTokenActionState.buttonSize,
+                  }}
+                >
+                  <GiDeathSkull className="h-[48%] w-[48%]" />
+                </button>
+              </div>
             </div>
           );
         })()}

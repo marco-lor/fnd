@@ -54,6 +54,7 @@ service cloud.firestore {
           "ownerUid",
           "col",
           "row",
+          "isDead",
           "updatedAt",
           "updatedBy"
         ])
@@ -63,6 +64,7 @@ service cloud.firestore {
           "col",
           "row",
           "isVisibleToPlayers",
+          "isDead",
           "updatedAt",
           "updatedBy"
         ])
@@ -74,6 +76,7 @@ service cloud.firestore {
           !data.keys().hasAny(["isVisibleToPlayers"])
           || data.isVisibleToPlayers is bool
         )
+        && data.isDead is bool
         && (data.updatedBy == null || data.updatedBy is string)
         && isGrigliataPlacementId(data.backgroundId, data.ownerUid, placementId);
     }
@@ -81,6 +84,11 @@ service cloud.firestore {
     function isGrigliataPlacementVisibleToPlayers(data) {
       return !data.keys().hasAny(["isVisibleToPlayers"])
         || data.isVisibleToPlayers == true;
+    }
+
+    function isGrigliataPlacementDead(data) {
+      return data.keys().hasAny(["isDead"])
+        && data.isDead == true;
     }
 
     function isNpcTextOnlyUpdate() {
@@ -230,6 +238,7 @@ service cloud.firestore {
           || (
             request.auth.uid == request.resource.data.ownerUid
             && isGrigliataPlacementVisibleToPlayers(request.resource.data)
+            && !isGrigliataPlacementDead(request.resource.data)
           )
         );
 
@@ -243,6 +252,7 @@ service cloud.firestore {
             request.auth.uid == resource.data.ownerUid
             && isGrigliataPlacementVisibleToPlayers(resource.data)
             && isGrigliataPlacementVisibleToPlayers(request.resource.data)
+            && isGrigliataPlacementDead(request.resource.data) == isGrigliataPlacementDead(resource.data)
           )
         );
 
