@@ -13,10 +13,12 @@ The application uses a centralized `Layout` component to ensure a consistent loo
 The Navbar is the primary navigation element. It is designed to be always visible (sticky) and adapts based on the user's role and current route.
 
 ### Structure
-The component renders a `<nav>` element with a 3-column grid layout:
+The component renders a responsive 3-area header layout:
 1.  **Left (User Profile):** Displays the user's avatar, name, race, and level. It includes functionality for uploading and previewing the profile image.
 2.  **Center (Navigation):** Contains navigation buttons (Home, Bazaar, Combat, etc.).
 3.  **Right (Actions):** Contains the Logout button.
+
+On smaller screens, the header stacks into a single column so each section can wrap cleanly. On desktop, the left and right areas size to their content while the center navigation expands to fill the remaining width.
 
 ### Styling & Positioning
 -   **Sticky Positioning:** Uses `sticky top-0` to remain at the top of the viewport during scrolling.
