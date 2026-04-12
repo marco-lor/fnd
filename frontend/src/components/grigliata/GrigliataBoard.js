@@ -9,6 +9,7 @@ import {
   Stage,
   Text,
 } from 'react-konva';
+import { FaRulerHorizontal } from 'react-icons/fa';
 import { FiEye, FiEyeOff } from 'react-icons/fi';
 import {
   BOARD_FIT_PADDING,
@@ -1688,13 +1689,16 @@ export default function GrigliataBoard({
           <button
             type="button"
             onClick={onToggleRuler}
-            className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+            title={isRulerEnabled ? 'Disable ruler mode' : 'Enable ruler mode'}
+            aria-label={isRulerEnabled ? 'Disable ruler mode' : 'Enable ruler mode'}
+            aria-pressed={isRulerEnabled}
+            className={`inline-flex items-center justify-center rounded-md border p-2 text-sm font-medium transition-colors ${
               isRulerEnabled
                 ? 'border-sky-400/60 bg-sky-500/15 text-sky-100 hover:bg-sky-500/20'
                 : 'border-slate-700 text-slate-200 hover:bg-slate-800'
             }`}
           >
-            {isRulerEnabled ? 'Ruler On' : 'Ruler Off'}
+            <FaRulerHorizontal className="h-4 w-4" />
           </button>
           {isManager && (
             <button
