@@ -1764,12 +1764,6 @@ export default function GrigliataBoard({
           />
         )}
 
-        <div className="absolute left-4 top-4 z-10 rounded-lg border border-slate-700/70 bg-slate-950/80 px-3 py-2 text-xs text-slate-300 shadow-lg">
-          {isRulerEnabled
-            ? `Right-drag empty space to pan. Left-drag empty space to measure. Right-click while holding left to add ruler corners. Drag tokens to move with visible feet count.${isManager ? ' Use +/- to calibrate square size.' : ''}`
-            : `Right-drag empty space to pan. Left-drag to select. Press Delete to remove selected tokens from this map.${isManager ? ' Use +/- to calibrate square size.' : ''}`}
-        </div>
-
         {stageSize.width > 0 && stageSize.height > 0 && (
           <Stage
             ref={stageRef}
