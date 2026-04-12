@@ -102,6 +102,20 @@ export const isManagerRole = (role) => {
   return safeRole === 'dm';
 };
 
+export const isCurrentUserTokenHiddenForViewer = ({
+  activeBackgroundId,
+  currentUserHiddenBackgroundIds,
+  currentUserPlacement,
+  isManager,
+}) => (
+  !isManager
+  && !currentUserPlacement
+  && typeof activeBackgroundId === 'string'
+  && !!activeBackgroundId
+  && Array.isArray(currentUserHiddenBackgroundIds)
+  && currentUserHiddenBackgroundIds.includes(activeBackgroundId)
+);
+
 export const getTokenPositionPx = (token, grid) => {
   const normalizedGrid = normalizeGridConfig(grid);
   const col = asFiniteNumber(token?.col, 0);

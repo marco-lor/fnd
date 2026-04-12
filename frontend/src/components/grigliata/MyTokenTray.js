@@ -9,7 +9,8 @@ export default function MyTokenTray({
 }) {
   const imageUrl = currentUserToken?.imageUrl || '';
   const ownerUid = currentUserToken?.ownerUid || '';
-  const canDrag = !!(imageUrl && ownerUid);
+  const isHiddenByManager = currentUserToken?.isHiddenByManager === true;
+  const canDrag = !!(imageUrl && ownerUid && !isHiddenByManager);
 
   const handleDragStart = (event) => {
     if (!canDrag) {
@@ -30,7 +31,9 @@ export default function MyTokenTray({
 
   const statusLabel = activeMapName
     ? (
-      currentUserToken?.placed
+      isHiddenByManager
+        ? `Hidden on ${activeMapName} by the DM`
+        : currentUserToken?.placed
         ? `On ${activeMapName} at ${currentUserToken.col}, ${currentUserToken.row}`
         : `Not placed on ${activeMapName} yet`
     )
@@ -48,7 +51,9 @@ export default function MyTokenTray({
           onDragStart={handleDragStart}
           onDragEnd={onDragEnd}
           className={`rounded-2xl border px-4 py-4 transition-colors ${
-            canDrag
+            isHiddenByManager
+              ? 'border-rose-500/45 bg-rose-950/20 cursor-not-allowed'
+              : canDrag
               ? 'border-amber-400/50 bg-slate-900/85 cursor-grab active:cursor-grabbing hover:border-amber-300'
               : 'border-slate-700 bg-slate-900/60 cursor-not-allowed opacity-75'
           }`}
@@ -68,14 +73,16 @@ export default function MyTokenTray({
               <p className="text-base font-semibold text-slate-100 truncate">
                 {currentUserToken?.label || 'Player'}
               </p>
-              <p className="text-xs text-slate-400 truncate">
+              <p className={`text-xs truncate ${isHiddenByManager ? 'text-rose-200' : 'text-slate-400'}`}>
                 {statusLabel}
               </p>
             </div>
           </div>
 
           <p className="mt-3 text-xs leading-relaxed text-slate-300">
-            {!canDrag
+            {isHiddenByManager
+              ? 'The DM is currently hiding or controlling your token on this map. You will be able to drag it again once it is shown.'
+              : !canDrag
               ? 'Upload a profile image from the navbar first. Without it, your token tray stays disabled.'
               : activeMapName
                 ? 'Drag this portrait onto the active map to place or reposition your round token.'

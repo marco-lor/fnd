@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addDoc,
+  arrayRemove,
+  arrayUnion,
   collection,
   deleteDoc,
   deleteField,
@@ -26,6 +28,7 @@ import {
   buildStorageSafeName,
   getDisplayNameFromFileName,
   getFileExtension,
+  isCurrentUserTokenHiddenForViewer,
   isManagerRole,
   normalizeGridConfig,
   readFileImageDimensions,
@@ -46,8 +49,21 @@ const FIRESTORE_BATCH_SIZE = 450;
 const DRAW_COLOR_AUTOSAVE_DEBOUNCE_MS = 300;
 const GRID_SIZE_AUTOSAVE_DEBOUNCE_MS = 300;
 const LEGACY_TOKEN_CLEANUP_FIELD = 'legacyTokenPlacementCleanupCompletedAt';
+const LEGACY_PLACEMENT_VISIBILITY_CLEANUP_FIELD = 'legacyPlacementVisibilityCleanupCompletedAt';
+const GRIGLIATA_HIDDEN_BACKGROUND_IDS_FIELD = 'grigliata_hidden_background_ids';
 
 const buildPlacementDocId = (backgroundId, ownerUid) => `${backgroundId}__${ownerUid}`;
+const buildHiddenPlacementSettingsPayload = (backgroundId, isHidden) => ({
+  settings: {
+    [GRIGLIATA_HIDDEN_BACKGROUND_IDS_FIELD]: isHidden
+      ? arrayUnion(backgroundId)
+      : arrayRemove(backgroundId),
+  },
+});
+const isPermissionDeniedError = (error) => (
+  error?.code === 'permission-denied'
+  || error?.code === 'firestore/permission-denied'
+);
 const SIDEBAR_TAB_GRID_CLASS_NAMES = {
   1: 'grid grid-cols-1 gap-2',
   2: 'grid grid-cols-2 gap-2',
@@ -89,6 +105,7 @@ export default function GrigliataPage() {
   const [activeGridSizeOverride, setActiveGridSizeOverride] = useState(null);
   const [activeSidebarTab, setActiveSidebarTab] = useState('tokens');
   const legacyCleanupStartedRef = useRef(false);
+  const legacyPlacementVisibilityCleanupStartedRef = useRef(false);
   const calibrationSelectionRef = useRef('');
   const drawColorAutosaveTimeoutRef = useRef(null);
   const pendingDrawColorAutosaveRef = useRef(null);
@@ -98,9 +115,17 @@ export default function GrigliataPage() {
   const persistedDrawColorKeyRef = useRef(persistedDrawColorKey);
   const gridSizeAutosaveTimeoutRef = useRef(null);
   const pendingGridSizeAutosaveRef = useRef(null);
+  const [gridVisibilityUpdateBackgroundId, setGridVisibilityUpdateBackgroundId] = useState('');
+  const [tokenVisibilityUpdateOwnerUid, setTokenVisibilityUpdateOwnerUid] = useState('');
 
   const role = (userData?.role || '').toLowerCase();
   const isManager = isManagerRole(role);
+  const currentUserHiddenBackgroundIdsSetting = userData?.settings?.[GRIGLIATA_HIDDEN_BACKGROUND_IDS_FIELD];
+  const currentUserHiddenBackgroundIds = useMemo(() => {
+    return Array.isArray(currentUserHiddenBackgroundIdsSetting)
+      ? currentUserHiddenBackgroundIdsSetting.filter((backgroundId) => typeof backgroundId === 'string' && backgroundId)
+      : [];
+  }, [currentUserHiddenBackgroundIdsSetting]);
   const drawTheme = useMemo(
     () => getGrigliataDrawTheme(drawColorKey),
     [drawColorKey]
@@ -218,11 +243,19 @@ export default function GrigliataPage() {
       return undefined;
     }
 
-    const unsubscribePlacements = onSnapshot(
-      query(
+    const placementsQuery = isManager
+      ? query(
         collection(db, 'grigliata_token_placements'),
         where('backgroundId', '==', activeBackgroundId)
-      ),
+      )
+      : query(
+        collection(db, 'grigliata_token_placements'),
+        where('backgroundId', '==', activeBackgroundId),
+        where('isVisibleToPlayers', '==', true)
+      );
+
+    const unsubscribePlacements = onSnapshot(
+      placementsQuery,
       (snapshot) => {
         const nextPlacements = snapshot.docs.map((docSnap) => ({
           id: docSnap.id,
@@ -232,11 +265,12 @@ export default function GrigliataPage() {
       },
       (error) => {
         console.error('Failed to load Grigliata token placements:', error);
+        setActivePlacements([]);
       }
     );
 
     return () => unsubscribePlacements();
-  }, [activeBackgroundId, currentUserId]);
+  }, [activeBackgroundId, currentUserId, isManager]);
 
   const activeBackground = useMemo(
     () => backgrounds.find((background) => background.id === activeBackgroundId) || null,
@@ -347,6 +381,7 @@ export default function GrigliataPage() {
   ]);
 
   const legacyCleanupCompletedAt = boardState?.[LEGACY_TOKEN_CLEANUP_FIELD];
+  const legacyPlacementVisibilityCleanupCompletedAt = boardState?.[LEGACY_PLACEMENT_VISIBILITY_CLEANUP_FIELD];
 
   useEffect(() => {
     if (!currentUserId || !isManager) return undefined;
@@ -414,6 +449,83 @@ export default function GrigliataPage() {
     };
   }, [currentUserId, isManager, legacyCleanupCompletedAt]);
 
+  useEffect(() => {
+    if (!currentUserId || !isManager) return undefined;
+    if (legacyPlacementVisibilityCleanupCompletedAt || legacyPlacementVisibilityCleanupStartedRef.current) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    legacyPlacementVisibilityCleanupStartedRef.current = true;
+
+    const runPlacementVisibilityCleanup = async () => {
+      try {
+        let cursor = null;
+
+        while (true) {
+          const baseConstraints = [
+            orderBy(documentId()),
+            limit(FIRESTORE_BATCH_SIZE),
+          ];
+
+          const pageQuery = cursor
+            ? query(collection(db, 'grigliata_token_placements'), ...baseConstraints, startAfter(cursor))
+            : query(collection(db, 'grigliata_token_placements'), ...baseConstraints);
+
+          const snapshot = await getDocs(pageQuery);
+          if (snapshot.empty) break;
+
+          const batch = writeBatch(db);
+          let shouldCommitBatch = false;
+
+          for (const docSnap of snapshot.docs) {
+            const placement = docSnap.data();
+            if (placement?.isVisibleToPlayers === true || placement?.isVisibleToPlayers === false) {
+              continue;
+            }
+
+            batch.set(docSnap.ref, {
+              isVisibleToPlayers: true,
+              updatedAt: serverTimestamp(),
+              updatedBy: currentUserId || null,
+            }, { merge: true });
+            shouldCommitBatch = true;
+          }
+
+          if (shouldCommitBatch) {
+            await batch.commit();
+          }
+
+          if (snapshot.size < FIRESTORE_BATCH_SIZE) {
+            break;
+          }
+
+          cursor = snapshot.docs[snapshot.docs.length - 1];
+        }
+
+        if (cancelled) return;
+
+        await setDoc(doc(db, 'grigliata_state', 'current'), {
+          [LEGACY_PLACEMENT_VISIBILITY_CLEANUP_FIELD]: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          updatedBy: currentUserId,
+        }, { merge: true });
+      } catch (error) {
+        console.error('Failed to backfill Grigliata placement visibility:', error);
+        if (!cancelled) {
+          setBoardError('Unable to finish the Grigliata visibility cleanup.');
+          legacyPlacementVisibilityCleanupStartedRef.current = false;
+        }
+      }
+    };
+
+    runPlacementVisibilityCleanup();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUserId, isManager, legacyPlacementVisibilityCleanupCompletedAt]);
+
   const tokenProfilesByOwnerUid = useMemo(() => {
     const nextMap = new Map();
     tokenProfiles.forEach((token) => {
@@ -448,6 +560,7 @@ export default function GrigliataPage() {
           imagePath: profile?.imagePath || '',
           col: Number.isFinite(placement?.col) ? placement.col : 0,
           row: Number.isFinite(placement?.row) ? placement.row : 0,
+          isVisibleToPlayers: placement?.isVisibleToPlayers !== false,
           placed: true,
         };
       }),
@@ -467,6 +580,16 @@ export default function GrigliataPage() {
     [activePlacements, currentUserId]
   );
 
+  const isCurrentUserTokenHiddenOnActiveMap = useMemo(
+    () => isCurrentUserTokenHiddenForViewer({
+      activeBackgroundId,
+      currentUserHiddenBackgroundIds,
+      currentUserPlacement,
+      isManager,
+    }),
+    [activeBackgroundId, currentUserHiddenBackgroundIds, currentUserPlacement, isManager]
+  );
+
   const currentUserToken = useMemo(() => ({
     ownerUid: currentUserId,
     characterId: currentCharacterId,
@@ -476,11 +599,13 @@ export default function GrigliataPage() {
     placed: !!currentUserPlacement,
     col: Number.isFinite(currentUserPlacement?.col) ? currentUserPlacement.col : 0,
     row: Number.isFinite(currentUserPlacement?.row) ? currentUserPlacement.row : 0,
+    isHiddenByManager: isCurrentUserTokenHiddenOnActiveMap,
   }), [
     currentCharacterId,
     currentImagePath,
     currentImageUrl,
     currentTokenLabel,
+    isCurrentUserTokenHiddenOnActiveMap,
     currentUserId,
     currentUserPlacement,
     currentUserTokenProfileDoc,
@@ -490,6 +615,7 @@ export default function GrigliataPage() {
     () => normalizeGridConfig(activeBackground?.grid),
     [activeBackground]
   );
+  const isGridVisible = activeBackground?.isGridVisible !== false;
 
   const grid = useMemo(() => {
     if (!activeBackgroundId || activeGridSizeOverride?.backgroundId !== activeBackgroundId) {
@@ -644,7 +770,15 @@ export default function GrigliataPage() {
 
       const batch = writeBatch(db);
       for (const docSnap of snapshot.docs) {
+        const ownerUid = docSnap.data()?.ownerUid;
         batch.delete(docSnap.ref);
+        if (typeof ownerUid === 'string' && ownerUid) {
+          batch.set(
+            doc(db, 'users', ownerUid),
+            buildHiddenPlacementSettingsPayload(backgroundId, false),
+            { merge: true }
+          );
+        }
         deletedCount += 1;
       }
       await batch.commit();
@@ -673,17 +807,27 @@ export default function GrigliataPage() {
     }
   ), [activeBackgroundId, flushPendingDrawColorAutosave, flushPendingGridSizeAutosave]);
 
-  const upsertTokenPlacement = async ({ backgroundId, ownerUid, col, row }) => {
+  const upsertTokenPlacement = async ({ backgroundId, ownerUid, col, row, isVisibleToPlayers = true }) => {
     const placementId = buildPlacementDocId(backgroundId, ownerUid);
+    const isHidden = isVisibleToPlayers === false;
+    const batch = writeBatch(db);
 
-    await setDoc(doc(db, 'grigliata_token_placements', placementId), {
+    batch.set(doc(db, 'grigliata_token_placements', placementId), {
       backgroundId,
       ownerUid,
       col,
       row,
+      isVisibleToPlayers: !isHidden,
       updatedAt: serverTimestamp(),
       updatedBy: currentUserId || null,
     }, { merge: true });
+    batch.set(
+      doc(db, 'users', ownerUid),
+      buildHiddenPlacementSettingsPayload(backgroundId, isHidden),
+      { merge: true }
+    );
+
+    await batch.commit();
   };
 
   const commitPlacementMoves = async (moves) => {
@@ -696,14 +840,21 @@ export default function GrigliataPage() {
     for (let index = 0; index < normalizedMoves.length; index += FIRESTORE_BATCH_SIZE) {
       const batch = writeBatch(db);
       normalizedMoves.slice(index, index + FIRESTORE_BATCH_SIZE).forEach((move) => {
+        const isHidden = move.isVisibleToPlayers === false;
         batch.set(doc(db, 'grigliata_token_placements', buildPlacementDocId(move.backgroundId, move.ownerUid)), {
           backgroundId: move.backgroundId,
           ownerUid: move.ownerUid,
           col: move.col,
           row: move.row,
+          isVisibleToPlayers: !isHidden,
           updatedAt: serverTimestamp(),
           updatedBy: currentUserId || null,
         }, { merge: true });
+        batch.set(
+          doc(db, 'users', move.ownerUid),
+          buildHiddenPlacementSettingsPayload(move.backgroundId, isHidden),
+          { merge: true }
+        );
       });
       await batch.commit();
     }
@@ -717,6 +868,11 @@ export default function GrigliataPage() {
       const batch = writeBatch(db);
       normalizedOwnerUids.slice(index, index + FIRESTORE_BATCH_SIZE).forEach((ownerUid) => {
         batch.delete(doc(db, 'grigliata_token_placements', buildPlacementDocId(activeBackgroundId, ownerUid)));
+        batch.set(
+          doc(db, 'users', ownerUid),
+          buildHiddenPlacementSettingsPayload(activeBackgroundId, false),
+          { merge: true }
+        );
       });
       await batch.commit();
     }
@@ -764,6 +920,7 @@ export default function GrigliataPage() {
         imageWidth: width,
         imageHeight: height,
         grid: normalizeGridConfig(DEFAULT_GRID),
+        isGridVisible: true,
         createdAt: serverTimestamp(),
         createdBy: user.uid,
         updatedAt: serverTimestamp(),
@@ -805,6 +962,58 @@ export default function GrigliataPage() {
       setBoardError('Unable to activate that background.');
     } finally {
       setActivatingBackgroundId('');
+    }
+  };
+
+  const handleToggleGridVisibility = async (backgroundId) => {
+    if (!isManager || !user?.uid || !backgroundId) return;
+
+    const background = backgrounds.find((entry) => entry.id === backgroundId);
+    if (!background) return;
+
+    setBoardError('');
+    setGridVisibilityUpdateBackgroundId(backgroundId);
+    try {
+      await updateDoc(doc(db, 'grigliata_backgrounds', backgroundId), {
+        isGridVisible: !(background.isGridVisible !== false),
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+    } catch (error) {
+      console.error('Failed to toggle grid visibility:', error);
+      setBoardError('Unable to update the shared grid visibility.');
+    } finally {
+      setGridVisibilityUpdateBackgroundId('');
+    }
+  };
+
+  const handleToggleTokenVisibility = async (ownerUid) => {
+    if (!isManager || !user?.uid || !activeBackgroundId || !ownerUid) return;
+
+    const targetPlacement = activePlacements.find((placement) => placement.ownerUid === ownerUid);
+    if (!targetPlacement) return;
+    const nextIsVisibleToPlayers = targetPlacement?.isVisibleToPlayers === false;
+
+    setBoardError('');
+    setTokenVisibilityUpdateOwnerUid(ownerUid);
+    try {
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'grigliata_token_placements', buildPlacementDocId(activeBackgroundId, ownerUid)), {
+        isVisibleToPlayers: nextIsVisibleToPlayers,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+      batch.set(
+        doc(db, 'users', ownerUid),
+        buildHiddenPlacementSettingsPayload(activeBackgroundId, !nextIsVisibleToPlayers),
+        { merge: true }
+      );
+      await batch.commit();
+    } catch (error) {
+      console.error('Failed to toggle token visibility:', error);
+      setBoardError('Unable to update that token visibility.');
+    } finally {
+      setTokenVisibilityUpdateOwnerUid('');
     }
   };
 
@@ -912,6 +1121,11 @@ export default function GrigliataPage() {
       return;
     }
 
+    if (isCurrentUserTokenHiddenOnActiveMap) {
+      setBoardError('The DM is currently hiding or controlling that token.');
+      return;
+    }
+
     if (!currentUserToken.imageUrl) {
       setBoardError('Upload a profile image before placing your token.');
       return;
@@ -925,10 +1139,15 @@ export default function GrigliataPage() {
         ownerUid: user.uid,
         col: snapped.col,
         row: snapped.row,
+        isVisibleToPlayers: true,
       });
     } catch (error) {
       console.error('Failed to place current user token:', error);
-      setBoardError('Unable to place your token right now.');
+      setBoardError(
+        isPermissionDeniedError(error)
+          ? 'The DM is currently hiding or controlling that token.'
+          : 'Unable to place your token right now.'
+      );
     }
   };
 
@@ -940,7 +1159,11 @@ export default function GrigliataPage() {
       await commitPlacementMoves(moves);
     } catch (error) {
       console.error('Failed to move selected token placements:', error);
-      setBoardError('Unable to move the selected token(s) right now.');
+      setBoardError(
+        isPermissionDeniedError(error)
+          ? 'The DM is currently hiding or controlling that token.'
+          : 'Unable to move the selected token(s) right now.'
+      );
       throw error;
     }
   };
@@ -953,7 +1176,11 @@ export default function GrigliataPage() {
       await deleteActiveMapPlacements(tokenIds);
     } catch (error) {
       console.error('Failed to delete selected token placements:', error);
-      setBoardError('Unable to delete the selected token(s) right now.');
+      setBoardError(
+        isPermissionDeniedError(error)
+          ? 'The DM is currently hiding or controlling that token.'
+          : 'Unable to delete the selected token(s) right now.'
+      );
       throw error;
     }
   };
@@ -1077,6 +1304,7 @@ export default function GrigliataPage() {
                 key={activeBackgroundId || '__grid__'}
                 activeBackground={activeBackground}
                 grid={grid}
+                isGridVisible={isGridVisible}
                 tokens={boardTokens}
                 currentUserId={user.uid}
                 isManager={isManager}
@@ -1085,10 +1313,14 @@ export default function GrigliataPage() {
                 drawTheme={drawTheme}
                 onToggleRuler={() => setIsRulerEnabled((currentValue) => !currentValue)}
                 onChangeDrawColor={handleDrawColorChange}
+                onToggleGridVisibility={isManager ? handleToggleGridVisibility : null}
+                isGridVisibilityToggleDisabled={!activeBackgroundId || gridVisibilityUpdateBackgroundId === activeBackgroundId}
                 onAdjustGridSize={isManager ? handleAdjustActiveGridSize : null}
                 isGridSizeAdjustmentDisabled={!activeBackgroundId}
                 onMoveTokens={handleMoveTokens}
                 onDeleteTokens={handleDeleteTokens}
+                onToggleTokenVisibility={isManager ? handleToggleTokenVisibility : null}
+                tokenVisibilityUpdateOwnerUid={tokenVisibilityUpdateOwnerUid}
                 onDropCurrentToken={(worldPoint) => {
                   setIsTrayDragging(false);
                   handlePlaceCurrentToken(worldPoint);

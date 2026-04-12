@@ -9,6 +9,7 @@ import {
   Stage,
   Text,
 } from 'react-konva';
+import { FiEye, FiEyeOff } from 'react-icons/fi';
 import {
   BOARD_FIT_PADDING,
   DEFAULT_GRIGLIATA_DRAW_COLOR_KEY,
@@ -33,6 +34,19 @@ const DEFAULT_DRAW_THEME = getGrigliataDrawTheme(DEFAULT_GRIGLIATA_DRAW_COLOR_KE
 const MEASUREMENT_OUTLINE_STROKE_WIDTH = 7;
 const SHAPE_OUTLINE_STROKE_WIDTH = 4;
 const TOKEN_RING_OUTLINE_STROKE_WIDTH = 6;
+const HIDDEN_TOKEN_PRIMARY = 'rgba(226, 232, 240, 0.96)';
+const HIDDEN_TOKEN_SECONDARY = 'rgba(148, 163, 184, 0.94)';
+const HIDDEN_TOKEN_SCRIM = 'rgba(15, 23, 42, 0.6)';
+const TOKEN_ACTION_SLOT_DEFINITIONS = [
+  { key: 'N', x: 0.5, y: 0 },
+  { key: 'NE', x: 1, y: 0 },
+  { key: 'E', x: 1, y: 0.5 },
+  { key: 'SE', x: 1, y: 1 },
+  { key: 'S', x: 0.5, y: 1 },
+  { key: 'SW', x: 0, y: 1 },
+  { key: 'W', x: 0, y: 0.5 },
+  { key: 'NW', x: 0, y: 0 },
+];
 
 const isPrimaryMouseButton = (nativeEvent) => nativeEvent?.button === 0;
 const isSecondaryMouseButton = (nativeEvent) => nativeEvent?.button === 2;
@@ -86,6 +100,80 @@ const isEditableElementFocused = () => {
     || tagName === 'select';
 };
 
+const buildTokenActionSlotPositions = ({ left, top, size, buttonSize, gap }) => {
+  const xPositions = {
+    0: left - gap - (buttonSize / 2),
+    0.5: left + (size / 2),
+    1: left + size + gap + (buttonSize / 2),
+  };
+  const yPositions = {
+    0: top - gap - (buttonSize / 2),
+    0.5: top + (size / 2),
+    1: top + size + gap + (buttonSize / 2),
+  };
+
+  return new Map(TOKEN_ACTION_SLOT_DEFINITIONS.map((slot) => {
+    const x = xPositions[slot.x];
+    const y = yPositions[slot.y];
+    return [slot.key, { x, y }];
+  }));
+};
+
+const HiddenEyeBadge = ({ x, y, size }) => {
+  const half = size / 2;
+  const padding = size * 0.2;
+  const eyeTop = size * 0.38;
+  const eyeBottom = size * 0.62;
+
+  return (
+    <Group x={x} y={y} listening={false}>
+      <Circle
+        x={half}
+        y={half}
+        radius={half}
+        fill="rgba(15, 23, 42, 0.92)"
+        stroke={HIDDEN_TOKEN_PRIMARY}
+        strokeWidth={Math.max(1.5, size * 0.07)}
+      />
+      <Line
+        points={[
+          padding,
+          half,
+          half,
+          eyeTop,
+          size - padding,
+          half,
+          half,
+          eyeBottom,
+          padding,
+          half,
+        ]}
+        stroke={HIDDEN_TOKEN_PRIMARY}
+        strokeWidth={Math.max(1.3, size * 0.06)}
+        lineCap="round"
+        lineJoin="round"
+      />
+      <Circle
+        x={half}
+        y={half}
+        radius={Math.max(1.5, size * 0.1)}
+        fill={HIDDEN_TOKEN_PRIMARY}
+      />
+      <Line
+        points={[
+          padding * 0.85,
+          size - (padding * 0.85),
+          size - (padding * 0.85),
+          padding * 0.85,
+        ]}
+        stroke="#f87171"
+        strokeWidth={Math.max(1.6, size * 0.08)}
+        lineCap="round"
+      />
+    </Group>
+  );
+};
+
 const TokenNode = ({
   token,
   position,
@@ -98,6 +186,18 @@ const TokenNode = ({
   const size = position.size;
   const label = token?.label || token?.characterId || token?.ownerUid || 'Player';
   const initials = getInitials(label);
+  const isHiddenFromPlayers = token?.isVisibleToPlayers === false;
+  const selectedStroke = isHiddenFromPlayers ? HIDDEN_TOKEN_SECONDARY : drawTheme.stroke;
+  const selectedGlow = isHiddenFromPlayers ? 'rgba(148, 163, 184, 0.45)' : drawTheme.glow;
+  const idleRingStroke = isHiddenFromPlayers
+    ? HIDDEN_TOKEN_SECONDARY
+    : (canMove ? '#fbbf24' : '#cbd5e1');
+  const labelFill = isHiddenFromPlayers
+    ? '#cbd5e1'
+    : (isSelected ? drawTheme.tokenLabelText : '#e2e8f0');
+  const hiddenBadgeSize = Math.max(18, Math.round(size * 0.28));
+  const hiddenSlashInset = Math.max(8, Math.round(size * 0.18));
+  const hiddenSlashStroke = Math.max(5, Math.round(size * 0.1));
 
   return (
     <Group
@@ -124,10 +224,10 @@ const TokenNode = ({
             width={size + 12}
             height={size + 12}
             cornerRadius={10}
-            stroke={drawTheme.stroke}
+            stroke={selectedStroke}
             strokeWidth={2}
             dash={[7, 4]}
-            shadowColor={drawTheme.glow}
+            shadowColor={selectedGlow}
             shadowBlur={10}
             shadowOpacity={0.35}
             listening={false}
@@ -156,6 +256,9 @@ const TokenNode = ({
         ) : (
           <Rect width={size} height={size} fill="#475569" />
         )}
+        {isHiddenFromPlayers && (
+          <Rect width={size} height={size} fill={HIDDEN_TOKEN_SCRIM} />
+        )}
       </Group>
 
       {isSelected ? (
@@ -171,7 +274,7 @@ const TokenNode = ({
             x={size / 2}
             y={size / 2}
             radius={(size / 2) - 1}
-            stroke={drawTheme.stroke}
+            stroke={selectedStroke}
             strokeWidth={3}
           />
         </>
@@ -180,9 +283,43 @@ const TokenNode = ({
           x={size / 2}
           y={size / 2}
           radius={(size / 2) - 1}
-          stroke={canMove ? '#fbbf24' : '#cbd5e1'}
+          stroke={idleRingStroke}
           strokeWidth={2}
         />
+      )}
+
+      {isHiddenFromPlayers && (
+        <>
+          <Line
+            points={[
+              hiddenSlashInset,
+              size - hiddenSlashInset,
+              size - hiddenSlashInset,
+              hiddenSlashInset,
+            ]}
+            stroke="rgba(15, 23, 42, 0.92)"
+            strokeWidth={hiddenSlashStroke + 3}
+            lineCap="round"
+            listening={false}
+          />
+          <Line
+            points={[
+              hiddenSlashInset,
+              size - hiddenSlashInset,
+              size - hiddenSlashInset,
+              hiddenSlashInset,
+            ]}
+            stroke={HIDDEN_TOKEN_PRIMARY}
+            strokeWidth={hiddenSlashStroke}
+            lineCap="round"
+            listening={false}
+          />
+          <HiddenEyeBadge
+            x={size - hiddenBadgeSize - 2}
+            y={2}
+            size={hiddenBadgeSize}
+          />
+        </>
       )}
 
       {!image && (
@@ -205,7 +342,7 @@ const TokenNode = ({
         width={Math.round(size * 1.6)}
         align="center"
         fontSize={Math.max(10, Math.round(size * 0.18))}
-        fill={isSelected ? drawTheme.tokenLabelText : '#e2e8f0'}
+        fill={labelFill}
         text={label}
         ellipsis
         listening={false}
@@ -398,6 +535,7 @@ const DrawColorPicker = ({ activeColorKey, onChange }) => (
 export default function GrigliataBoard({
   activeBackground,
   grid,
+  isGridVisible = true,
   tokens,
   currentUserId,
   isManager,
@@ -406,10 +544,14 @@ export default function GrigliataBoard({
   drawTheme,
   onToggleRuler,
   onChangeDrawColor,
+  onToggleGridVisibility,
+  isGridVisibilityToggleDisabled,
   onAdjustGridSize,
   isGridSizeAdjustmentDisabled,
   onMoveTokens,
   onDeleteTokens,
+  onToggleTokenVisibility,
+  tokenVisibilityUpdateOwnerUid,
   onDropCurrentToken,
 }) {
   const containerRef = useRef(null);
@@ -829,6 +971,7 @@ export default function GrigliataBoard({
               backgroundId: originToken.backgroundId,
               col: originToken.col + colDelta,
               row: originToken.row + rowDelta,
+              isVisibleToPlayers: originToken.isVisibleToPlayers,
             }))
           ));
         }
@@ -1145,6 +1288,7 @@ export default function GrigliataBoard({
           backgroundId: selectedToken.backgroundId,
           col: selectedToken.col,
           row: selectedToken.row,
+          isVisibleToPlayers: selectedToken.isVisibleToPlayers,
           x: selectedToken.position.x,
           y: selectedToken.position.y,
           size: selectedToken.position.size,
@@ -1156,6 +1300,43 @@ export default function GrigliataBoard({
     () => normalizeSelectionRect(selectionBox),
     [selectionBox]
   );
+  const selectedTokenActionState = useMemo(() => {
+    if (!isManager || selectedTokenIds.length !== 1 || selectionBox || tokenDragState || isTokenDragActive) {
+      return null;
+    }
+
+    const selectedToken = renderedTokens.find((token) => token.tokenId === selectedTokenIds[0]);
+    if (!selectedToken) return null;
+
+    const screenSize = selectedToken.renderPosition.size * viewport.scale;
+    const screenBox = {
+      left: viewport.x + (selectedToken.renderPosition.x * viewport.scale),
+      top: viewport.y + (selectedToken.renderPosition.y * viewport.scale),
+      size: screenSize,
+    };
+    const buttonSize = Math.max(36, Math.min(84, Math.round(screenSize)));
+    const gap = Math.max(14, Math.round(buttonSize * 0.22));
+
+    return {
+      token: selectedToken,
+      buttonSize,
+      slotPositions: buildTokenActionSlotPositions({
+        ...screenBox,
+        buttonSize,
+        gap,
+      }),
+    };
+  }, [
+    isManager,
+    isTokenDragActive,
+    renderedTokens,
+    selectedTokenIds,
+    selectionBox,
+    tokenDragState,
+    viewport.scale,
+    viewport.x,
+    viewport.y,
+  ]);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-700 bg-slate-950/80 shadow-2xl">
@@ -1183,6 +1364,22 @@ export default function GrigliataBoard({
           >
             {isRulerEnabled ? 'Ruler On' : 'Ruler Off'}
           </button>
+          {isManager && (
+            <button
+              type="button"
+              onClick={() => onToggleGridVisibility?.(activeBackground?.id || '')}
+              disabled={isGridVisibilityToggleDisabled}
+              className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+                isGridVisible
+                  ? 'border-emerald-500/40 text-emerald-100 hover:bg-emerald-500/10'
+                  : 'border-slate-700 text-slate-200 hover:bg-slate-800'
+              } disabled:cursor-not-allowed disabled:opacity-50`}
+              title={isGridVisible ? 'Hide the shared grid for everyone' : 'Show the shared grid for everyone'}
+            >
+              {isGridVisible ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
+              <span>{isGridVisible ? 'Hide Grid' : 'Show Grid'}</span>
+            </button>
+          )}
           {isManager && (
             <>
               <button
@@ -1284,7 +1481,7 @@ export default function GrigliataBoard({
                 listening={false}
               />
 
-              <GridLayer bounds={boardBounds} grid={normalizedGrid} />
+              {isGridVisible && <GridLayer bounds={boardBounds} grid={normalizedGrid} />}
 
               {normalizedSelectionRect && (
                 <>
@@ -1333,6 +1530,45 @@ export default function GrigliataBoard({
             </Layer>
           </Stage>
         )}
+
+        {selectedTokenActionState && (() => {
+          const visibilitySlotPosition = selectedTokenActionState.slotPositions.get('NE');
+          if (!visibilitySlotPosition) return null;
+
+          const isHiddenFromPlayers = selectedTokenActionState.token.isVisibleToPlayers === false;
+          const isUpdatingVisibility = tokenVisibilityUpdateOwnerUid === selectedTokenActionState.token.ownerUid;
+          const Icon = isHiddenFromPlayers ? FiEye : FiEyeOff;
+
+          return (
+            <div className="pointer-events-none absolute inset-0 z-20">
+              <button
+                type="button"
+                aria-label={isHiddenFromPlayers ? 'Show token to players' : 'Hide token from players'}
+                title={isHiddenFromPlayers ? 'Show token to players' : 'Hide token from players'}
+                disabled={isUpdatingVisibility}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onToggleTokenVisibility?.(selectedTokenActionState.token.ownerUid);
+                }}
+                className={`pointer-events-auto absolute flex items-center justify-center rounded-[1.25rem] border text-slate-50 shadow-2xl backdrop-blur-sm transition-transform duration-150 hover:scale-[1.03] disabled:cursor-not-allowed disabled:opacity-60 ${
+                  isHiddenFromPlayers
+                    ? 'border-emerald-300/60 bg-emerald-500/30'
+                    : 'border-slate-200/30 bg-slate-950/75'
+                }`}
+                style={{
+                  left: visibilitySlotPosition.x,
+                  top: visibilitySlotPosition.y,
+                  width: selectedTokenActionState.buttonSize,
+                  height: selectedTokenActionState.buttonSize,
+                  transform: 'translate(-50%, -50%)',
+                }}
+              >
+                <Icon className="h-[42%] w-[42%]" />
+              </button>
+            </div>
+          );
+        })()}
 
         {!resolvedBackground && (
           <div className="pointer-events-none absolute bottom-4 left-4 max-w-sm rounded-lg border border-slate-700/70 bg-slate-950/85 px-3 py-2 text-xs leading-relaxed text-slate-300 shadow-lg">

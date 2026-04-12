@@ -62,6 +62,7 @@ service cloud.firestore {
           "ownerUid",
           "col",
           "row",
+          "isVisibleToPlayers",
           "updatedAt",
           "updatedBy"
         ])
@@ -69,8 +70,17 @@ service cloud.firestore {
         && data.ownerUid is string
         && data.col is int
         && data.row is int
+        && (
+          !data.keys().hasAny(["isVisibleToPlayers"])
+          || data.isVisibleToPlayers is bool
+        )
         && (data.updatedBy == null || data.updatedBy is string)
         && isGrigliataPlacementId(data.backgroundId, data.ownerUid, placementId);
+    }
+
+    function isGrigliataPlacementVisibleToPlayers(data) {
+      return !data.keys().hasAny(["isVisibleToPlayers"])
+        || data.isVisibleToPlayers == true;
     }
 
     function isNpcTextOnlyUpdate() {
@@ -210,21 +220,41 @@ service cloud.firestore {
     }
 
     match /grigliata_token_placements/{placementId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn()
+        && (isGrigliataManager() || isGrigliataPlacementVisibleToPlayers(resource.data));
 
       allow create: if isSignedIn()
         && isValidGrigliataPlacement(request.resource.data, placementId)
-        && (request.auth.uid == request.resource.data.ownerUid || isGrigliataManager());
+        && (
+          isGrigliataManager()
+          || (
+            request.auth.uid == request.resource.data.ownerUid
+            && isGrigliataPlacementVisibleToPlayers(request.resource.data)
+          )
+        );
 
       allow update: if isSignedIn()
         && isValidGrigliataPlacement(request.resource.data, placementId)
         && request.resource.data.backgroundId == resource.data.backgroundId
         && request.resource.data.ownerUid == resource.data.ownerUid
-        && (request.auth.uid == resource.data.ownerUid || isGrigliataManager());
+        && (
+          isGrigliataManager()
+          || (
+            request.auth.uid == resource.data.ownerUid
+            && isGrigliataPlacementVisibleToPlayers(resource.data)
+            && isGrigliataPlacementVisibleToPlayers(request.resource.data)
+          )
+        );
 
       allow delete: if isSignedIn()
         && isValidGrigliataPlacement(resource.data, placementId)
-        && (request.auth.uid == resource.data.ownerUid || isGrigliataManager());
+        && (
+          isGrigliataManager()
+          || (
+            request.auth.uid == resource.data.ownerUid
+            && isGrigliataPlacementVisibleToPlayers(resource.data)
+          )
+        );
     }
 
     // Echi NPCs
