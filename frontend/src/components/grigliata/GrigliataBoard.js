@@ -10,7 +10,6 @@ import {
   Text,
 } from 'react-konva';
 import { FiEye, FiEyeOff } from 'react-icons/fi';
-import { GiDeathSkull } from 'react-icons/gi';
 import {
   BOARD_FIT_PADDING,
   DEFAULT_GRIGLIATA_DRAW_COLOR_KEY,
@@ -27,6 +26,12 @@ import {
   normalizeGridConfig,
   snapBoardPointToGrid,
 } from './boardUtils';
+import GrigliataTokenActions, { TokenStatusSummaryCard } from './GrigliataTokenActions';
+import {
+  getTokenStatusDefinition,
+  splitTokenStatusesForDisplay,
+  useTokenStatusIconImages,
+} from './tokenStatuses';
 import useImageAsset from './useImageAsset';
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
@@ -35,6 +40,7 @@ const DEFAULT_DRAW_THEME = getGrigliataDrawTheme(DEFAULT_GRIGLIATA_DRAW_COLOR_KE
 const MEASUREMENT_OUTLINE_STROKE_WIDTH = 7;
 const SHAPE_OUTLINE_STROKE_WIDTH = 4;
 const TOKEN_RING_OUTLINE_STROKE_WIDTH = 6;
+const TOKEN_STATUS_VISIBLE_BADGE_COUNT = 3;
 const HIDDEN_TOKEN_PRIMARY = 'rgba(226, 232, 240, 0.96)';
 const HIDDEN_TOKEN_SECONDARY = 'rgba(148, 163, 184, 0.94)';
 const HIDDEN_TOKEN_SCRIM = 'rgba(15, 23, 42, 0.6)';
@@ -101,6 +107,8 @@ const buildSelectionActionToolbarPosition = ({ left, top, width, buttonSize, gap
   top: top - gap - buttonSize,
 });
 
+const clampToRange = (value, min, max) => Math.min(max, Math.max(min, value));
+
 const HiddenEyeBadge = ({ x, y, size }) => {
   const half = size / 2;
   const padding = size * 0.2;
@@ -156,13 +164,127 @@ const HiddenEyeBadge = ({ x, y, size }) => {
   );
 };
 
+const TokenStatusBadges = ({
+  token,
+  size,
+  badgeImages,
+  onOverflowMouseEnter,
+  onOverflowMouseLeave,
+  onOverflowToggle,
+}) => {
+  const { visibleStatuses, overflowCount } = splitTokenStatusesForDisplay(
+    token?.statuses,
+    TOKEN_STATUS_VISIBLE_BADGE_COUNT
+  );
+  if (!visibleStatuses.length && overflowCount < 1) {
+    return null;
+  }
+
+  const badgeSize = Math.max(18, Math.round(size * 0.24));
+  const badgeRadius = badgeSize / 2;
+  const iconSize = Math.max(10, Math.round(badgeSize * 0.56));
+  const inset = Math.max(3, Math.round(size * 0.04));
+  const badgePositions = [
+    { x: inset + badgeRadius, y: inset + badgeRadius },
+    { x: size - inset - badgeRadius, y: inset + badgeRadius },
+    { x: size - inset - badgeRadius, y: size - inset - badgeRadius },
+  ];
+  const overflowPosition = {
+    x: inset + badgeRadius,
+    y: size - inset - badgeRadius,
+  };
+
+  return (
+    <>
+      {visibleStatuses.map((statusId, index) => {
+        const status = getTokenStatusDefinition(statusId);
+        const position = badgePositions[index];
+        if (!status || !position) {
+          return null;
+        }
+
+        return (
+          <Group key={`${token?.tokenId || token?.ownerUid || 'token'}-status-${statusId}`} listening={false}>
+            <Circle
+              x={position.x}
+              y={position.y}
+              radius={badgeRadius}
+              fill={status.badgeFill}
+              stroke={status.badgeStroke}
+              strokeWidth={Math.max(1.4, badgeSize * 0.08)}
+              shadowColor="#020617"
+              shadowBlur={6}
+              shadowOpacity={0.45}
+            />
+            {badgeImages?.[statusId] && (
+              <KonvaImage
+                image={badgeImages[statusId]}
+                x={position.x - (iconSize / 2)}
+                y={position.y - (iconSize / 2)}
+                width={iconSize}
+                height={iconSize}
+                listening={false}
+              />
+            )}
+          </Group>
+        );
+      })}
+
+      {overflowCount > 0 && (
+        <Group
+          onMouseDown={(event) => {
+            event.cancelBubble = true;
+          }}
+          onMouseEnter={() => onOverflowMouseEnter?.(token?.tokenId)}
+          onMouseLeave={() => onOverflowMouseLeave?.(token?.tokenId)}
+          onClick={(event) => {
+            event.cancelBubble = true;
+            onOverflowToggle?.(token?.tokenId);
+          }}
+          onTap={(event) => {
+            event.cancelBubble = true;
+            onOverflowToggle?.(token?.tokenId);
+          }}
+        >
+          <Circle
+            x={overflowPosition.x}
+            y={overflowPosition.y}
+            radius={badgeRadius}
+            fill="rgba(2, 6, 23, 0.94)"
+            stroke="rgba(251, 191, 36, 0.92)"
+            strokeWidth={Math.max(1.5, badgeSize * 0.08)}
+            shadowColor="#020617"
+            shadowBlur={6}
+            shadowOpacity={0.45}
+          />
+          <Text
+            x={overflowPosition.x - badgeRadius}
+            y={overflowPosition.y - (badgeRadius * 0.68)}
+            width={badgeSize}
+            align="center"
+            fontSize={Math.max(9, Math.round(badgeSize * 0.48))}
+            fontStyle="bold"
+            fill="#fef3c7"
+            text={`+${overflowCount}`}
+            listening={false}
+          />
+        </Group>
+      )}
+    </>
+  );
+};
+
 const TokenNode = ({
   token,
   position,
   canMove,
   isSelected,
+  badgeImages,
   drawTheme = DEFAULT_DRAW_THEME,
   onMouseDown,
+  onOverflowMouseEnter,
+  onOverflowMouseLeave,
+  onOverflowToggle,
 }) => {
   const image = useImageAsset(token?.imageUrl || '');
   const size = position.size;
@@ -341,6 +463,15 @@ const TokenNode = ({
           />
         </Group>
       )}
+
+      <TokenStatusBadges
+        token={token}
+        size={size}
+        badgeImages={badgeImages}
+        onOverflowMouseEnter={onOverflowMouseEnter}
+        onOverflowMouseLeave={onOverflowMouseLeave}
+        onOverflowToggle={onOverflowToggle}
+      />
 
       {!image && (
         <Text
@@ -574,6 +705,8 @@ export default function GrigliataBoard({
   isTokenVisibilityActionPending,
   onSetSelectedTokensDeadState,
   isTokenDeadActionPending,
+  onUpdateTokenStatuses,
+  isTokenStatusActionPending,
   onDropCurrentToken,
 }) {
   const containerRef = useRef(null);
@@ -586,6 +719,8 @@ export default function GrigliataBoard({
   const [selectionBox, setSelectionBox] = useState(null);
   const [tokenDragState, setTokenDragState] = useState(null);
   const [measurementState, setMeasurementState] = useState(null);
+  const [hoveredOverflowTokenId, setHoveredOverflowTokenId] = useState('');
+  const [pinnedOverflowTokenId, setPinnedOverflowTokenId] = useState('');
   const backgroundImage = useImageAsset(activeBackground?.imageUrl || '');
   const lastFitKeyRef = useRef('');
   const resolvedDrawTheme = drawTheme || DEFAULT_DRAW_THEME;
@@ -662,6 +797,31 @@ export default function GrigliataBoard({
     })),
     [tokenItems, dragPositionOverrides, selectedTokenIdSet]
   );
+  const tokenStatusDisplayById = useMemo(() => {
+    const nextMap = new Map();
+
+    renderedTokens.forEach((token) => {
+      nextMap.set(
+        token.tokenId,
+        splitTokenStatusesForDisplay(token.statuses, TOKEN_STATUS_VISIBLE_BADGE_COUNT)
+      );
+    });
+
+    return nextMap;
+  }, [renderedTokens]);
+  const badgeStatusIds = useMemo(() => {
+    const nextStatusIds = new Set();
+
+    renderedTokens.forEach((token) => {
+      const statusDisplay = tokenStatusDisplayById.get(token.tokenId);
+      statusDisplay?.visibleStatuses?.forEach((statusId) => {
+        nextStatusIds.add(statusId);
+      });
+    });
+
+    return [...nextStatusIds];
+  }, [renderedTokens, tokenStatusDisplayById]);
+  const tokenStatusBadgeImages = useTokenStatusIconImages(badgeStatusIds);
 
   const boardBounds = useMemo(
     () => getBoardBounds({ background: resolvedBackground, grid: normalizedGrid, tokens: placedTokens }),
@@ -720,6 +880,8 @@ export default function GrigliataBoard({
     setSelectionBox(null);
     setTokenDragState(null);
     setMeasurementState(null);
+    setHoveredOverflowTokenId('');
+    setPinnedOverflowTokenId('');
   }, [fitKey]);
 
   useEffect(() => {
@@ -733,6 +895,27 @@ export default function GrigliataBoard({
       currentSelectedTokenIds.filter((tokenId) => movableTokenIds.has(tokenId))
     ));
   }, [movableTokenIds]);
+
+  useEffect(() => {
+    const tokenIdsWithOverflow = new Set(
+      renderedTokens
+        .filter((token) => (tokenStatusDisplayById.get(token.tokenId)?.overflowCount || 0) > 0)
+        .map((token) => token.tokenId)
+    );
+
+    setHoveredOverflowTokenId((currentTokenId) => (
+      tokenIdsWithOverflow.has(currentTokenId) ? currentTokenId : ''
+    ));
+    setPinnedOverflowTokenId((currentTokenId) => (
+      tokenIdsWithOverflow.has(currentTokenId) ? currentTokenId : ''
+    ));
+  }, [renderedTokens, tokenStatusDisplayById]);
+
+  useEffect(() => {
+    if (!selectionBox && !tokenDragState && !isTokenDragActive) return;
+    setHoveredOverflowTokenId('');
+    setPinnedOverflowTokenId('');
+  }, [isTokenDragActive, selectionBox, tokenDragState]);
 
   const getWorldPointFromClient = useCallback((clientX, clientY) => {
     const container = containerRef.current;
@@ -995,6 +1178,7 @@ export default function GrigliataBoard({
               row: originToken.row + rowDelta,
               isVisibleToPlayers: originToken.isVisibleToPlayers,
               isDead: originToken.isDead,
+              statuses: originToken.statuses,
             }))
           ));
         }
@@ -1206,6 +1390,8 @@ export default function GrigliataBoard({
     if (event.target !== stageRef.current) return;
 
     const nativeEvent = event.evt;
+    setHoveredOverflowTokenId('');
+    setPinnedOverflowTokenId('');
 
     if (isSecondaryMouseButton(nativeEvent)) {
       nativeEvent.preventDefault();
@@ -1266,6 +1452,8 @@ export default function GrigliataBoard({
   const handleTokenMouseDown = (token, event) => {
     const nativeEvent = event.evt;
     event.cancelBubble = true;
+    setHoveredOverflowTokenId('');
+    setPinnedOverflowTokenId('');
 
     if (isSecondaryMouseButton(nativeEvent)) {
       nativeEvent.preventDefault();
@@ -1313,6 +1501,7 @@ export default function GrigliataBoard({
           row: selectedToken.row,
           isVisibleToPlayers: selectedToken.isVisibleToPlayers,
           isDead: selectedToken.isDead,
+          statuses: selectedToken.statuses,
           x: selectedToken.position.x,
           y: selectedToken.position.y,
           size: selectedToken.position.size,
@@ -1329,7 +1518,7 @@ export default function GrigliataBoard({
     [renderedTokens, selectedTokenIdSet]
   );
   const selectedTokenActionState = useMemo(() => {
-    if (!isManager || !selectedTokens.length || selectionBox || tokenDragState || isTokenDragActive) {
+    if (!selectedTokens.length || selectionBox || tokenDragState || isTokenDragActive || isRulerEnabled) {
       return null;
     }
 
@@ -1363,8 +1552,6 @@ export default function GrigliataBoard({
     );
     const buttonSize = Math.max(36, Math.min(84, Math.round(referenceScreenSize)));
     const gap = Math.max(14, Math.round(buttonSize * 0.22));
-    const toolbarWidth = (buttonSize * 2) + 24;
-    const toolbarHeight = buttonSize + 16;
     const normalizedOwnerUids = [...new Set(
       selectedTokens
         .map((token) => token.ownerUid)
@@ -1373,6 +1560,21 @@ export default function GrigliataBoard({
     if (!normalizedOwnerUids.length) {
       return null;
     }
+
+    const statusToken = selectedTokens.length === 1
+      ? {
+        ownerUid: selectedTokens[0].ownerUid,
+        label: selectedTokens[0].label || 'token',
+        statuses: selectedTokens[0].statuses || [],
+      }
+      : null;
+    const actionCount = (isManager ? 2 : 0) + (statusToken ? 1 : 0);
+    if (actionCount < 1) {
+      return null;
+    }
+
+    const toolbarWidth = (buttonSize * actionCount) + (Math.max(0, actionCount - 1) * 8) + 16;
+    const toolbarHeight = buttonSize + 16;
     const allSelectedTokensHidden = selectedTokens.every((token) => token.isVisibleToPlayers === false);
     const allSelectedTokensDead = selectedTokens.every((token) => token.isDead === true);
     const selectionLabel = normalizedOwnerUids.length === 1 ? 'token' : 'tokens';
@@ -1387,6 +1589,11 @@ export default function GrigliataBoard({
     return {
       ownerUids: normalizedOwnerUids,
       buttonSize,
+      toolbarWidth,
+      toolbarHeight,
+      showVisibilityAction: isManager,
+      showDeadAction: isManager,
+      statusToken,
       nextIsVisibleToPlayers: allSelectedTokensHidden,
       nextIsDead: !allSelectedTokensDead,
       visibilityTitle: allSelectedTokensHidden
@@ -1409,6 +1616,7 @@ export default function GrigliataBoard({
   }, [
     isManager,
     isTokenDragActive,
+    isRulerEnabled,
     selectedTokens,
     selectionBox,
     stageSize.height,
@@ -1418,6 +1626,49 @@ export default function GrigliataBoard({
     viewport.x,
     viewport.y,
   ]);
+  const activeOverflowTokenId = pinnedOverflowTokenId || hoveredOverflowTokenId;
+  const activeOverflowToken = useMemo(() => {
+    if (!activeOverflowTokenId) {
+      return null;
+    }
+
+    const token = renderedTokens.find((entry) => entry.tokenId === activeOverflowTokenId);
+    const overflowCount = tokenStatusDisplayById.get(activeOverflowTokenId)?.overflowCount || 0;
+    if (!token || overflowCount < 1) {
+      return null;
+    }
+
+    return token;
+  }, [activeOverflowTokenId, renderedTokens, tokenStatusDisplayById]);
+  const activeOverflowCardStyle = useMemo(() => {
+    if (!activeOverflowToken) {
+      return null;
+    }
+
+    const screenSize = activeOverflowToken.renderPosition.size * viewport.scale;
+    const maxCardWidth = Math.max(160, stageSize.width - 24);
+    const cardWidth = Math.min(Math.max(220, Math.round(stageSize.width * 0.24)), maxCardWidth);
+    const cardHeight = Math.min(
+      Math.max(124, 56 + (activeOverflowToken.statuses.length * 42)),
+      Math.max(124, stageSize.height - 24)
+    );
+    const preferredLeft = viewport.x + ((activeOverflowToken.renderPosition.x + activeOverflowToken.renderPosition.size) * viewport.scale) + 14;
+    const fallbackLeft = viewport.x + (activeOverflowToken.renderPosition.x * viewport.scale) - cardWidth - 14;
+    const preferredTop = viewport.y + (activeOverflowToken.renderPosition.y * viewport.scale) - 8;
+
+    return {
+      left: preferredLeft + cardWidth + 12 <= stageSize.width
+        ? preferredLeft
+        : clampToRange(fallbackLeft, 12, Math.max(12, stageSize.width - cardWidth - 12)),
+      top: clampToRange(
+        preferredTop,
+        12,
+        Math.max(12, stageSize.height - cardHeight - 12)
+      ),
+      width: cardWidth,
+      minWidth: Math.min(cardWidth, Math.max(160, Math.round(screenSize * 2.2))),
+    };
+  }, [activeOverflowToken, stageSize.height, stageSize.width, viewport.scale, viewport.x, viewport.y]);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-700 bg-slate-950/80 shadow-2xl">
@@ -1600,8 +1851,23 @@ export default function GrigliataBoard({
                   position={token.renderPosition}
                   canMove={token.canMove}
                   isSelected={token.isSelected}
+                  badgeImages={tokenStatusBadgeImages}
                   drawTheme={resolvedDrawTheme}
                   onMouseDown={handleTokenMouseDown}
+                  onOverflowMouseEnter={(tokenId) => setHoveredOverflowTokenId(tokenId || '')}
+                  onOverflowMouseLeave={(tokenId) => {
+                    setHoveredOverflowTokenId((currentTokenId) => (
+                      currentTokenId === tokenId ? '' : currentTokenId
+                    ));
+                  }}
+                  onOverflowToggle={(tokenId) => {
+                    if (!tokenId) return;
+
+                    setHoveredOverflowTokenId(tokenId);
+                    setPinnedOverflowTokenId((currentTokenId) => (
+                      currentTokenId === tokenId ? '' : tokenId
+                    ));
+                  }}
                 />
               ))}
 
@@ -1612,72 +1878,32 @@ export default function GrigliataBoard({
           </Stage>
         )}
 
-        {selectedTokenActionState && (() => {
-          const VisibilityIcon = selectedTokenActionState.nextIsVisibleToPlayers ? FiEye : FiEyeOff;
+        {activeOverflowToken && activeOverflowCardStyle && (
+          <div className="pointer-events-none absolute inset-0 z-[18]">
+            <TokenStatusSummaryCard
+              statuses={activeOverflowToken.statuses}
+              className="pointer-events-auto absolute"
+              style={activeOverflowCardStyle}
+              onMouseEnter={() => setHoveredOverflowTokenId(activeOverflowToken.tokenId)}
+              onMouseLeave={() => {
+                if (!pinnedOverflowTokenId) {
+                  setHoveredOverflowTokenId('');
+                }
+              }}
+            />
+          </div>
+        )}
 
-          return (
-            <div className="pointer-events-none absolute inset-0 z-20">
-              <div
-                className="pointer-events-auto absolute flex items-center gap-2 rounded-[1.4rem] border border-slate-700/80 bg-slate-950/88 p-2 shadow-2xl backdrop-blur-sm"
-                style={{
-                  left: selectedTokenActionState.toolbarPosition.left,
-                  top: selectedTokenActionState.toolbarPosition.top,
-                }}
-              >
-                <button
-                  type="button"
-                  aria-label={selectedTokenActionState.visibilityTitle}
-                  title={selectedTokenActionState.visibilityTitle}
-                  disabled={isTokenVisibilityActionPending}
-                  onMouseDown={(event) => event.stopPropagation()}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onSetSelectedTokensVisibility?.(
-                      selectedTokenActionState.ownerUids,
-                      selectedTokenActionState.nextIsVisibleToPlayers
-                    );
-                  }}
-                  className={`flex items-center justify-center rounded-[1.15rem] border text-slate-50 shadow-lg transition-transform duration-150 hover:scale-[1.03] disabled:cursor-not-allowed disabled:opacity-60 ${
-                    selectedTokenActionState.nextIsVisibleToPlayers
-                      ? 'border-emerald-300/60 bg-emerald-500/30'
-                      : 'border-slate-200/30 bg-slate-900/90'
-                  }`}
-                  style={{
-                    width: selectedTokenActionState.buttonSize,
-                    height: selectedTokenActionState.buttonSize,
-                  }}
-                >
-                  <VisibilityIcon className="h-[42%] w-[42%]" />
-                </button>
-                <button
-                  type="button"
-                  aria-label={selectedTokenActionState.deadStateTitle}
-                  title={selectedTokenActionState.deadStateTitle}
-                  disabled={isTokenDeadActionPending}
-                  onMouseDown={(event) => event.stopPropagation()}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onSetSelectedTokensDeadState?.(
-                      selectedTokenActionState.ownerUids,
-                      selectedTokenActionState.nextIsDead
-                    );
-                  }}
-                  className={`flex items-center justify-center rounded-[1.15rem] border text-slate-50 shadow-lg transition-transform duration-150 hover:scale-[1.03] disabled:cursor-not-allowed disabled:opacity-60 ${
-                    selectedTokenActionState.nextIsDead
-                      ? 'border-rose-300/60 bg-rose-600/35'
-                      : 'border-emerald-300/55 bg-emerald-600/25'
-                  }`}
-                  style={{
-                    width: selectedTokenActionState.buttonSize,
-                    height: selectedTokenActionState.buttonSize,
-                  }}
-                >
-                  <GiDeathSkull className="h-[48%] w-[48%]" />
-                </button>
-              </div>
-            </div>
-          );
-        })()}
+        <GrigliataTokenActions
+          actionState={selectedTokenActionState}
+          viewportSize={stageSize}
+          isTokenVisibilityActionPending={isTokenVisibilityActionPending}
+          isTokenDeadActionPending={isTokenDeadActionPending}
+          isTokenStatusActionPending={isTokenStatusActionPending}
+          onSetSelectedTokensVisibility={onSetSelectedTokensVisibility}
+          onSetSelectedTokensDeadState={onSetSelectedTokensDeadState}
+          onUpdateTokenStatuses={onUpdateTokenStatuses}
+        />
 
         {!resolvedBackground && (
           <div className="pointer-events-none absolute bottom-4 left-4 max-w-sm rounded-lg border border-slate-700/70 bg-slate-950/85 px-3 py-2 text-xs leading-relaxed text-slate-300 shadow-lg">

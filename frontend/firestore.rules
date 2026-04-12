@@ -65,6 +65,7 @@ service cloud.firestore {
           "row",
           "isVisibleToPlayers",
           "isDead",
+          "statuses",
           "updatedAt",
           "updatedBy"
         ])
@@ -77,6 +78,36 @@ service cloud.firestore {
           || data.isVisibleToPlayers is bool
         )
         && data.isDead is bool
+        && (
+          !data.keys().hasAny(["statuses"])
+          || (
+            data.statuses is list
+            && data.statuses.size() <= 21
+            && data.statuses.hasOnly([
+              "bleeding",
+              "blinded",
+              "burning",
+              "charmed",
+              "concentrating",
+              "crippled",
+              "flying",
+              "frightened",
+              "frozen",
+              "grappled",
+              "hastened",
+              "marked",
+              "petrified",
+              "poisoned",
+              "prone",
+              "restrained",
+              "shielded",
+              "silenced",
+              "sleeping",
+              "slowed",
+              "stunned"
+            ])
+          )
+        )
         && (data.updatedBy == null || data.updatedBy is string)
         && isGrigliataPlacementId(data.backgroundId, data.ownerUid, placementId);
     }

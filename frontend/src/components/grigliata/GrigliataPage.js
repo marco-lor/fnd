@@ -43,6 +43,7 @@ import {
 import GrigliataBoard from './GrigliataBoard';
 import MapCalibrationPanel from './MapCalibrationPanel';
 import MyTokenTray from './MyTokenTray';
+import { normalizeTokenStatuses } from './tokenStatuses';
 
 const MAX_BACKGROUND_FILE_BYTES = 15 * 1024 * 1024;
 const FIRESTORE_BATCH_SIZE = 450;
@@ -61,6 +62,10 @@ const buildHiddenPlacementSettingsPayload = (backgroundId, isHidden) => ({
       : arrayRemove(backgroundId),
   },
 });
+const buildPlacementStatusesFieldValue = (statuses) => {
+  const normalizedStatuses = normalizeTokenStatuses(statuses);
+  return normalizedStatuses.length ? normalizedStatuses : deleteField();
+};
 const isPermissionDeniedError = (error) => (
   error?.code === 'permission-denied'
   || error?.code === 'firestore/permission-denied'
@@ -120,6 +125,7 @@ export default function GrigliataPage() {
   const [gridVisibilityUpdateBackgroundId, setGridVisibilityUpdateBackgroundId] = useState('');
   const [isTokenVisibilityActionPending, setIsTokenVisibilityActionPending] = useState(false);
   const [isTokenDeadActionPending, setIsTokenDeadActionPending] = useState(false);
+  const [isTokenStatusActionPending, setIsTokenStatusActionPending] = useState(false);
 
   const role = (userData?.role || '').toLowerCase();
   const isManager = isManagerRole(role);
@@ -643,6 +649,7 @@ export default function GrigliataPage() {
           row: Number.isFinite(placement?.row) ? placement.row : 0,
           isVisibleToPlayers: placement?.isVisibleToPlayers !== false,
           isDead: placement?.isDead === true,
+          statuses: normalizeTokenStatuses(placement?.statuses),
           placed: true,
         };
       }),
@@ -682,6 +689,7 @@ export default function GrigliataPage() {
     col: Number.isFinite(currentUserPlacement?.col) ? currentUserPlacement.col : 0,
     row: Number.isFinite(currentUserPlacement?.row) ? currentUserPlacement.row : 0,
     isDead: currentUserPlacement?.isDead === true,
+    statuses: normalizeTokenStatuses(currentUserPlacement?.statuses),
     isHiddenByManager: isCurrentUserTokenHiddenOnActiveMap,
   }), [
     currentCharacterId,
@@ -897,6 +905,7 @@ export default function GrigliataPage() {
     row,
     isVisibleToPlayers = true,
     isDead = false,
+    statuses = [],
   }) => {
     const placementId = buildPlacementDocId(backgroundId, ownerUid);
     const isHidden = isVisibleToPlayers === false;
@@ -908,6 +917,7 @@ export default function GrigliataPage() {
       row,
       isVisibleToPlayers: !isHidden,
       isDead: isDead === true,
+      statuses: buildPlacementStatusesFieldValue(statuses),
       updatedAt: serverTimestamp(),
       updatedBy: currentUserId || null,
     };
@@ -940,6 +950,7 @@ export default function GrigliataPage() {
           row: move.row,
           isVisibleToPlayers: !isHidden,
           isDead: move.isDead === true,
+          statuses: buildPlacementStatusesFieldValue(move.statuses),
           updatedAt: serverTimestamp(),
           updatedBy: currentUserId || null,
         };
@@ -1157,6 +1168,33 @@ export default function GrigliataPage() {
     }
   };
 
+  const handleUpdateTokenStatuses = async (ownerUid, nextStatuses) => {
+    if (!user?.uid || !activeBackgroundId || !ownerUid) return;
+
+    const placement = activePlacements.find((entry) => entry?.ownerUid === ownerUid);
+    if (!placement) return;
+
+    setBoardError('');
+    setIsTokenStatusActionPending(true);
+    try {
+      await updateDoc(doc(db, 'grigliata_token_placements', buildPlacementDocId(activeBackgroundId, ownerUid)), {
+        statuses: buildPlacementStatusesFieldValue(nextStatuses),
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+    } catch (error) {
+      console.error('Failed to update token statuses:', error);
+      setBoardError(
+        isPermissionDeniedError(error)
+          ? 'The DM is currently hiding or controlling that token.'
+          : 'Unable to update that token status right now.'
+      );
+      throw error;
+    } finally {
+      setIsTokenStatusActionPending(false);
+    }
+  };
+
   const handleClearTokensForBackground = async (background) => {
     if (!isManager || !user?.uid || !background?.id) return;
 
@@ -1281,6 +1319,7 @@ export default function GrigliataPage() {
         row: snapped.row,
         isVisibleToPlayers: true,
         isDead: currentUserPlacement?.isDead === true,
+        statuses: currentUserPlacement?.statuses || [],
       });
     } catch (error) {
       console.error('Failed to place current user token:', error);
@@ -1464,6 +1503,8 @@ export default function GrigliataPage() {
                 isTokenVisibilityActionPending={isTokenVisibilityActionPending}
                 onSetSelectedTokensDeadState={isManager ? handleSetTokenDeadState : null}
                 isTokenDeadActionPending={isTokenDeadActionPending}
+                onUpdateTokenStatuses={handleUpdateTokenStatuses}
+                isTokenStatusActionPending={isTokenStatusActionPending}
                 onDropCurrentToken={(worldPoint) => {
                   setIsTrayDragging(false);
                   handlePlaceCurrentToken(worldPoint);
