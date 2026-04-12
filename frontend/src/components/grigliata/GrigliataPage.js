@@ -38,6 +38,7 @@ import {
   resolveGrigliataDrawColorKey,
 } from './constants';
 import GrigliataBoard from './GrigliataBoard';
+import MapCalibrationPanel from './MapCalibrationPanel';
 import MyTokenTray from './MyTokenTray';
 
 const MAX_BACKGROUND_FILE_BYTES = 15 * 1024 * 1024;
@@ -47,6 +48,12 @@ const GRID_SIZE_AUTOSAVE_DEBOUNCE_MS = 300;
 const LEGACY_TOKEN_CLEANUP_FIELD = 'legacyTokenPlacementCleanupCompletedAt';
 
 const buildPlacementDocId = (backgroundId, ownerUid) => `${backgroundId}__${ownerUid}`;
+const SIDEBAR_TAB_GRID_CLASS_NAMES = {
+  1: 'grid grid-cols-1 gap-2',
+  2: 'grid grid-cols-2 gap-2',
+  3: 'grid grid-cols-3 gap-2',
+};
+const DEFAULT_SIDEBAR_TAB_GRID_CLASS_NAME = SIDEBAR_TAB_GRID_CLASS_NAMES[3];
 
 export default function GrigliataPage() {
   const { user, userData, loading } = useAuth();
@@ -80,6 +87,7 @@ export default function GrigliataPage() {
   const [isRulerEnabled, setIsRulerEnabled] = useState(false);
   const [drawColorKey, setDrawColorKey] = useState(persistedDrawColorKey);
   const [activeGridSizeOverride, setActiveGridSizeOverride] = useState(null);
+  const [activeSidebarTab, setActiveSidebarTab] = useState('tokens');
   const legacyCleanupStartedRef = useRef(false);
   const calibrationSelectionRef = useRef('');
   const drawColorAutosaveTimeoutRef = useRef(null);
@@ -97,6 +105,17 @@ export default function GrigliataPage() {
     () => getGrigliataDrawTheme(drawColorKey),
     [drawColorKey]
   );
+  const sidebarTabs = useMemo(() => (
+    isManager
+      ? [
+        { key: 'tokens', label: 'Tokens' },
+        { key: 'gallery', label: 'DM Gallery' },
+        { key: 'calibration', label: 'Map Calibration' },
+      ]
+      : [{ key: 'tokens', label: 'Tokens' }]
+  ), [isManager]);
+  const sidebarTabListClassName = SIDEBAR_TAB_GRID_CLASS_NAMES[sidebarTabs.length]
+    || DEFAULT_SIDEBAR_TAB_GRID_CLASS_NAME;
 
   useEffect(() => {
     persistedDrawColorKeyRef.current = persistedDrawColorKey;
@@ -109,6 +128,11 @@ export default function GrigliataPage() {
     latestRequestedDrawColorKeyRef.current = persistedDrawColorKey;
     setDrawColorKey(persistedDrawColorKey);
   }, [persistedDrawColorKey]);
+
+  useEffect(() => {
+    if (sidebarTabs.some((tab) => tab.key === activeSidebarTab)) return;
+    setActiveSidebarTab(sidebarTabs[0].key);
+  }, [activeSidebarTab, sidebarTabs]);
 
   useEffect(() => {
     const navbar = document.querySelector('[data-navbar]');
@@ -478,9 +502,9 @@ export default function GrigliataPage() {
     });
   }, [activeBackgroundId, activeGridSizeOverride, persistedActiveGrid]);
 
-  const boardHeight = navbarOffset
-    ? `calc(100vh - ${navbarOffset + 32}px)`
-    : '72vh';
+  const workspaceHeight = navbarOffset
+    ? `calc(100vh - ${navbarOffset}px)`
+    : '100vh';
 
   const clearDrawColorAutosaveTimer = useCallback(() => {
     if (!drawColorAutosaveTimeoutRef.current) return;
@@ -990,6 +1014,16 @@ export default function GrigliataPage() {
     user?.uid,
   ]);
 
+  const handleOpenCalibration = useCallback((backgroundId) => {
+    if (backgroundId) {
+      setSelectedBackgroundId(backgroundId);
+    }
+
+    if (isManager) {
+      setActiveSidebarTab('calibration');
+    }
+  }, [isManager]);
+
   if (loading) {
     return <div className="px-6 py-8 text-white">Loading Grigliata...</div>;
   }
@@ -999,109 +1033,165 @@ export default function GrigliataPage() {
   }
 
   return (
-    <div className="px-4 py-4 md:px-5 md:py-5 text-white">
-      <div className="mx-auto max-w-[1800px] space-y-4">
-        <header className="rounded-3xl border border-slate-700 bg-slate-950/70 px-5 py-4 shadow-2xl backdrop-blur-sm">
-          <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Shared Battlemat</p>
-          <div className="mt-2 flex flex-col gap-2 xl:flex-row xl:items-end xl:justify-between">
-            <div>
-              <h1 className="text-3xl font-semibold text-amber-300">Grigliata</h1>
-              <p className="mt-1 max-w-3xl text-sm leading-relaxed text-slate-300">
-                Shared Roll20-style grid with DM-managed background images and per-map public token placements.
-              </p>
+    <div
+      className="px-3 py-3 text-white md:px-4 md:py-4 xl:h-[var(--grigliata-workspace-height)] xl:min-h-[var(--grigliata-workspace-height)] xl:overflow-hidden"
+      style={{ '--grigliata-workspace-height': workspaceHeight }}
+    >
+      <div className="flex h-full min-h-0 flex-col gap-3">
+        <header className="rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 shadow-2xl backdrop-blur-sm">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Shared Battlemat</p>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                <h1 className="text-2xl font-semibold text-amber-300">Grigliata</h1>
+                {isManager && (
+                  <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-sky-200">
+                    DM View
+                  </span>
+                )}
+              </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-300">
-              <span className="font-semibold text-slate-100">{boardTokens.length}</span> tokens on this map
-              {' '}| Active background:{' '}
-              <span className="font-semibold text-slate-100">{activeBackground?.name || 'Grid only'}</span>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300 sm:text-sm">
+              <div className="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-1.5">
+                Active background:{' '}
+                <span className="font-semibold text-slate-100">{activeBackground?.name || 'Grid only'}</span>
+              </div>
+              <div className="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-1.5">
+                <span className="font-semibold text-slate-100">{boardTokens.length}</span> tokens on this map
+              </div>
             </div>
           </div>
         </header>
 
         {boardError && (
-          <div className="rounded-2xl border border-red-500/30 bg-red-900/20 px-4 py-3 text-sm text-red-200">
+          <div className="rounded-2xl border border-red-500/30 bg-red-900/20 px-4 py-2.5 text-sm text-red-200">
             {boardError}
           </div>
         )}
 
-        <div className={`grid gap-4 ${isManager ? 'xl:grid-cols-[22rem_minmax(0,1fr)]' : 'xl:grid-cols-[18rem_minmax(0,1fr)]'}`}>
-          <aside
-            className="space-y-4 self-start xl:sticky"
-            style={{ top: navbarOffset ? navbarOffset + 12 : 12 }}
-          >
-            <MyTokenTray
-              currentUserToken={currentUserToken}
-              activeMapName={activeBackground?.name || ''}
-              onDragStart={() => setIsTrayDragging(true)}
-              onDragEnd={() => setIsTrayDragging(false)}
-            />
-
-            {isManager && (
-              <BackgroundGalleryPanel
-                backgrounds={backgrounds}
-                activeBackgroundId={activeBackgroundId}
-                selectedBackgroundId={selectedBackgroundId}
-                uploadName={uploadName}
-                selectedFileName={selectedFile?.name || ''}
-                uploadError={uploadError}
-                isUploading={isUploading}
-                activatingBackgroundId={activatingBackgroundId}
-                deletingBackgroundId={deletingBackgroundId}
-                clearingTokensBackgroundId={clearingTokensBackgroundId}
-                calibrationDraft={calibrationDraft}
-                calibrationError={calibrationError}
-                isSavingCalibration={isSavingCalibration}
-                onUploadNameChange={setUploadName}
-                onUploadFileChange={(event) => {
-                  const file = event.target.files?.[0] || null;
-                  setSelectedFile(file);
-                  setUploadError('');
-                  if (file && !uploadName.trim()) {
-                    setUploadName(getDisplayNameFromFileName(file.name));
-                  }
+        <div className="grid flex-1 min-h-0 gap-3 xl:grid-cols-[minmax(0,1fr)_22rem]">
+          <div className={`min-w-0 xl:min-h-0 ${isTrayDragging ? 'rounded-3xl ring-2 ring-amber-400/20' : ''}`}>
+            <div className="h-full min-h-[480px] xl:min-h-0">
+              <GrigliataBoard
+                key={activeBackgroundId || '__grid__'}
+                activeBackground={activeBackground}
+                grid={grid}
+                tokens={boardTokens}
+                currentUserId={user.uid}
+                isManager={isManager}
+                isTokenDragActive={isTrayDragging}
+                isRulerEnabled={isRulerEnabled}
+                drawTheme={drawTheme}
+                onToggleRuler={() => setIsRulerEnabled((currentValue) => !currentValue)}
+                onChangeDrawColor={handleDrawColorChange}
+                onAdjustGridSize={isManager ? handleAdjustActiveGridSize : null}
+                isGridSizeAdjustmentDisabled={!activeBackgroundId}
+                onMoveTokens={handleMoveTokens}
+                onDeleteTokens={handleDeleteTokens}
+                onDropCurrentToken={(worldPoint) => {
+                  setIsTrayDragging(false);
+                  handlePlaceCurrentToken(worldPoint);
                 }}
-                onUploadBackground={handleUploadBackground}
-                onSelectBackground={setSelectedBackgroundId}
-                onUseBackground={handleUseBackground}
-                onClearTokensForBackground={handleClearTokensForBackground}
-                onDeleteBackground={handleDeleteBackground}
-                onCalibrationDraftChange={(field, value) => {
-                  setCalibrationDraft((currentDraft) => ({
-                    ...currentDraft,
-                    [field]: value,
-                  }));
-                }}
-                onSaveCalibration={handleSaveCalibration}
-                onResetCalibration={() => setCalibrationDraft(DEFAULT_GRID)}
               />
-            )}
-          </aside>
-
-          <div className={`min-w-0 ${isTrayDragging ? 'ring-2 ring-amber-400/20 rounded-3xl' : ''}`}>
-            <GrigliataBoard
-              key={activeBackgroundId || '__grid__'}
-              activeBackground={activeBackground}
-              grid={grid}
-              tokens={boardTokens}
-              currentUserId={user.uid}
-              isManager={isManager}
-              isTokenDragActive={isTrayDragging}
-              isRulerEnabled={isRulerEnabled}
-              drawTheme={drawTheme}
-              onToggleRuler={() => setIsRulerEnabled((currentValue) => !currentValue)}
-              onChangeDrawColor={handleDrawColorChange}
-              onAdjustGridSize={isManager ? handleAdjustActiveGridSize : null}
-              isGridSizeAdjustmentDisabled={!activeBackgroundId}
-              boardHeight={boardHeight}
-              onMoveTokens={handleMoveTokens}
-              onDeleteTokens={handleDeleteTokens}
-              onDropCurrentToken={(worldPoint) => {
-                setIsTrayDragging(false);
-                handlePlaceCurrentToken(worldPoint);
-              }}
-            />
+            </div>
           </div>
+
+          <aside className="flex flex-col gap-3 xl:h-full xl:min-h-0">
+            <div className="rounded-2xl border border-slate-700 bg-slate-950/75 p-2 shadow-2xl backdrop-blur-sm">
+              <div
+                className={sidebarTabListClassName}
+                role="tablist"
+                aria-label="Grigliata sidebar tabs"
+              >
+                {sidebarTabs.map((tab) => {
+                  const isActive = activeSidebarTab === tab.key;
+
+                  return (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      aria-controls={`grigliata-sidebar-panel-${tab.key}`}
+                      onClick={() => setActiveSidebarTab(tab.key)}
+                      className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition-colors ${
+                        isActive
+                          ? 'bg-amber-400 text-black shadow-lg'
+                          : 'border border-slate-700 bg-slate-900/70 text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="min-h-0 xl:flex-1 xl:overflow-y-auto xl:pr-1 custom-scroll">
+              <div
+                id={`grigliata-sidebar-panel-${activeSidebarTab}`}
+                role="tabpanel"
+                className="space-y-3"
+              >
+                {activeSidebarTab === 'tokens' && (
+                  <MyTokenTray
+                    currentUserToken={currentUserToken}
+                    activeMapName={activeBackground?.name || ''}
+                    onDragStart={() => setIsTrayDragging(true)}
+                    onDragEnd={() => setIsTrayDragging(false)}
+                  />
+                )}
+
+                {isManager && activeSidebarTab === 'gallery' && (
+                  <BackgroundGalleryPanel
+                    backgrounds={backgrounds}
+                    activeBackgroundId={activeBackgroundId}
+                    selectedBackgroundId={selectedBackgroundId}
+                    uploadName={uploadName}
+                    selectedFileName={selectedFile?.name || ''}
+                    uploadError={uploadError}
+                    isUploading={isUploading}
+                    activatingBackgroundId={activatingBackgroundId}
+                    deletingBackgroundId={deletingBackgroundId}
+                    clearingTokensBackgroundId={clearingTokensBackgroundId}
+                    onUploadNameChange={setUploadName}
+                    onUploadFileChange={(event) => {
+                      const file = event.target.files?.[0] || null;
+                      setSelectedFile(file);
+                      setUploadError('');
+                      if (file && !uploadName.trim()) {
+                        setUploadName(getDisplayNameFromFileName(file.name));
+                      }
+                    }}
+                    onUploadBackground={handleUploadBackground}
+                    onSelectBackground={setSelectedBackgroundId}
+                    onUseBackground={handleUseBackground}
+                    onClearTokensForBackground={handleClearTokensForBackground}
+                    onDeleteBackground={handleDeleteBackground}
+                    onCalibrateBackground={handleOpenCalibration}
+                  />
+                )}
+
+                {isManager && activeSidebarTab === 'calibration' && (
+                  <MapCalibrationPanel
+                    selectedBackground={selectedBackground}
+                    calibrationDraft={calibrationDraft}
+                    calibrationError={calibrationError}
+                    isSavingCalibration={isSavingCalibration}
+                    onCalibrationDraftChange={(field, value) => {
+                      setCalibrationDraft((currentDraft) => ({
+                        ...currentDraft,
+                        [field]: value,
+                      }));
+                    }}
+                    onSaveCalibration={handleSaveCalibration}
+                    onResetCalibration={() => setCalibrationDraft(DEFAULT_GRID)}
+                  />
+                )}
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
     </div>

@@ -408,7 +408,6 @@ export default function GrigliataBoard({
   onChangeDrawColor,
   onAdjustGridSize,
   isGridSizeAdjustmentDisabled,
-  boardHeight,
   onMoveTokens,
   onDeleteTokens,
   onDropCurrentToken,
@@ -1159,7 +1158,7 @@ export default function GrigliataBoard({
   );
 
   return (
-    <div className="relative overflow-hidden rounded-3xl border border-slate-700 bg-slate-950/80 shadow-2xl">
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-700 bg-slate-950/80 shadow-2xl">
       <div className="flex flex-col gap-3 border-b border-slate-800 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-lg font-semibold text-slate-100">Grigliata</h2>
@@ -1218,10 +1217,9 @@ export default function GrigliataBoard({
 
       <div
         ref={containerRef}
-        className={`relative w-full min-h-[520px] transition-colors ${
+        className={`relative w-full flex-1 min-h-[480px] transition-colors ${
           isDropActive ? 'bg-amber-500/10' : 'bg-slate-950/40'
         }`}
-        style={{ height: boardHeight }}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
