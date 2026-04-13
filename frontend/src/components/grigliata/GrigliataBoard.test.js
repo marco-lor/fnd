@@ -206,6 +206,12 @@ describe('GrigliataBoard', () => {
     expect(buttons[3]).toHaveAttribute('aria-label', 'Reset View');
   });
 
+  test('does not render the manager controls stack for non-managers', () => {
+    render(<GrigliataBoard {...buildProps()} />);
+
+    expect(screen.queryByTestId('grigliata-manager-controls')).not.toBeInTheDocument();
+  });
+
   test('keeps draw colors collapsed until the trigger is opened and emits the selected color', () => {
     const onChangeDrawColor = jest.fn();
 
@@ -256,7 +262,7 @@ describe('GrigliataBoard', () => {
     });
   });
 
-  test('keeps manager grid controls in the header actions area', () => {
+  test('renders the manager controls stack on the right in the expected order', () => {
     render(
       <GrigliataBoard
         {...buildProps({
@@ -267,12 +273,55 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    const headerActions = screen.getByTestId('grigliata-header-actions');
+    const managerControls = screen.getByTestId('grigliata-manager-controls');
+    const buttons = within(managerControls).getAllByRole('button');
 
-    expect(within(headerActions).getByRole('button', { name: /hide grid/i })).toBeInTheDocument();
-    expect(within(headerActions).getByTitle('Increase square size')).toBeInTheDocument();
-    expect(within(headerActions).getByTitle('Decrease square size')).toBeInTheDocument();
-    expect(within(headerActions).queryByRole('button', { name: /reset view/i })).not.toBeInTheDocument();
+    expect(buttons).toHaveLength(3);
+    expect(buttons[0]).toHaveAttribute('aria-label', 'Hide Grid');
+    expect(buttons[0]).toHaveAttribute('aria-pressed', 'true');
+    expect(buttons[1]).toHaveAttribute('title', 'Increase square size');
+    expect(buttons[2]).toHaveAttribute('title', 'Decrease square size');
+  });
+
+  test('updates the manager grid control labels and disabled states', () => {
+    const onToggleGridVisibility = jest.fn();
+    const onAdjustGridSize = jest.fn();
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          isGridVisible: true,
+          onToggleGridVisibility,
+          onAdjustGridSize,
+        })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /hide grid/i }));
+    expect(onToggleGridVisibility).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: /increase square size/i }));
+    fireEvent.click(screen.getByRole('button', { name: /decrease square size/i }));
+    expect(onAdjustGridSize).toHaveBeenNthCalledWith(1, 1);
+    expect(onAdjustGridSize).toHaveBeenNthCalledWith(2, -1);
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          isGridVisible: false,
+          isGridVisibilityToggleDisabled: true,
+          isGridSizeAdjustmentDisabled: true,
+          onToggleGridVisibility,
+          onAdjustGridSize,
+        })}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /show grid/i })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: /show grid/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /increase square size/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /decrease square size/i })).toBeDisabled();
   });
 
   test('renders a remote shared ruler with the broadcaster color', () => {

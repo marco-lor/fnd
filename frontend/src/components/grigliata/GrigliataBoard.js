@@ -1890,50 +1890,13 @@ export default function GrigliataBoard({
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-700 bg-slate-950/80 shadow-2xl">
-      <div className={`flex flex-col gap-3 border-b border-slate-800 px-4 py-3 ${isManager ? 'lg:flex-row lg:items-center lg:justify-between' : ''}`}>
+      <div className="flex flex-col gap-3 border-b border-slate-800 px-4 py-3">
         <div>
           <h2 className="text-lg font-semibold text-slate-100">Grigliata</h2>
           <p className="text-xs text-slate-400">
             {resolvedBackground?.name || 'Grid only'} | {normalizedGrid.cellSizePx}px squares | 5 ft per square
           </p>
         </div>
-
-        {isManager && (
-          <div data-testid="grigliata-header-actions" className="flex flex-wrap items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => onToggleGridVisibility?.(activeBackground?.id || '')}
-              disabled={isGridVisibilityToggleDisabled}
-              className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
-                isGridVisible
-                  ? 'border-emerald-500/40 text-emerald-100 hover:bg-emerald-500/10'
-                  : 'border-slate-700 text-slate-200 hover:bg-slate-800'
-              } disabled:cursor-not-allowed disabled:opacity-50`}
-              title={isGridVisible ? 'Hide the shared grid for everyone' : 'Show the shared grid for everyone'}
-            >
-              {isGridVisible ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
-              <span>{isGridVisible ? 'Hide Grid' : 'Show Grid'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onAdjustGridSize?.(1)}
-              disabled={isGridSizeAdjustmentDisabled}
-              title="Increase square size"
-              className="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              +
-            </button>
-            <button
-              type="button"
-              onClick={() => onAdjustGridSize?.(-1)}
-              disabled={isGridSizeAdjustmentDisabled}
-              title="Decrease square size"
-              className="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              -
-            </button>
-          </div>
-        )}
       </div>
 
       <div
@@ -2004,6 +1967,49 @@ export default function GrigliataBoard({
             <MdCenterFocusStrong className="h-4 w-4" />
           </button>
         </div>
+
+        {isManager && (
+          <div
+            data-testid="grigliata-manager-controls"
+            className="pointer-events-none absolute right-4 top-4 z-30 flex flex-col items-end gap-2"
+          >
+            <button
+              type="button"
+              onClick={() => onToggleGridVisibility?.(activeBackground?.id || '')}
+              disabled={isGridVisibilityToggleDisabled}
+              title={isGridVisible ? 'Hide the shared grid for everyone' : 'Show the shared grid for everyone'}
+              aria-label={isGridVisible ? 'Hide Grid' : 'Show Grid'}
+              aria-pressed={isGridVisible}
+              className={`pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-md border p-2 text-sm font-medium transition-colors ${
+                isGridVisible
+                  ? 'border-emerald-400/60 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/20'
+                  : 'border-slate-700 bg-slate-950/92 text-slate-200 hover:bg-slate-800'
+              } disabled:cursor-not-allowed disabled:opacity-50`}
+            >
+              {isGridVisible ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => onAdjustGridSize?.(1)}
+              disabled={isGridSizeAdjustmentDisabled}
+              title="Increase square size"
+              aria-label="Increase square size"
+              className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-700 bg-slate-950/92 p-2 text-sm font-medium text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              onClick={() => onAdjustGridSize?.(-1)}
+              disabled={isGridSizeAdjustmentDisabled}
+              title="Decrease square size"
+              aria-label="Decrease square size"
+              className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-700 bg-slate-950/92 p-2 text-sm font-medium text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              -
+            </button>
+          </div>
+        )}
 
         {stageSize.width > 0 && stageSize.height > 0 && (
           <Stage
