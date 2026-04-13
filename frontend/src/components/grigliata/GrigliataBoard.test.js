@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import GrigliataBoard from './GrigliataBoard';
 import { getGrigliataDrawTheme } from './constants';
 
@@ -193,6 +193,19 @@ describe('GrigliataBoard', () => {
     expect(screen.getByRole('button', { name: /stop sharing live interactions/i })).toHaveAttribute('aria-pressed', 'true');
   });
 
+  test('renders the quick controls stack in the expected order and keeps reset view available', () => {
+    render(<GrigliataBoard {...buildProps()} />);
+
+    const quickControls = screen.getByTestId('grigliata-quick-controls');
+    const buttons = within(quickControls).getAllByRole('button');
+
+    expect(buttons).toHaveLength(4);
+    expect(buttons[0]).toBe(screen.getByTestId('draw-color-trigger'));
+    expect(buttons[1]).toHaveAttribute('aria-label', 'Enable ruler mode');
+    expect(buttons[2]).toHaveAttribute('aria-label', 'Share live interactions');
+    expect(buttons[3]).toHaveAttribute('aria-label', 'Reset View');
+  });
+
   test('keeps draw colors collapsed until the trigger is opened and emits the selected color', () => {
     const onChangeDrawColor = jest.fn();
 
@@ -241,6 +254,25 @@ describe('GrigliataBoard', () => {
     await waitFor(() => {
       expect(screen.getByTestId('draw-color-drawer')).toHaveStyle({ width: '0px', opacity: '0' });
     });
+  });
+
+  test('keeps manager grid controls in the header actions area', () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          onToggleGridVisibility: jest.fn(),
+          onAdjustGridSize: jest.fn(),
+        })}
+      />
+    );
+
+    const headerActions = screen.getByTestId('grigliata-header-actions');
+
+    expect(within(headerActions).getByRole('button', { name: /hide grid/i })).toBeInTheDocument();
+    expect(within(headerActions).getByTitle('Increase square size')).toBeInTheDocument();
+    expect(within(headerActions).getByTitle('Decrease square size')).toBeInTheDocument();
+    expect(within(headerActions).queryByRole('button', { name: /reset view/i })).not.toBeInTheDocument();
   });
 
   test('renders a remote shared ruler with the broadcaster color', () => {

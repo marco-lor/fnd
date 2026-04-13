@@ -12,6 +12,7 @@ import {
 } from 'react-konva';
 import { FaRulerHorizontal } from 'react-icons/fa';
 import { FiEye, FiEyeOff, FiUser, FiUsers } from 'react-icons/fi';
+import { MdCenterFocusStrong } from 'react-icons/md';
 import {
   BOARD_FIT_PADDING,
   DEFAULT_GRIGLIATA_DRAW_COLOR_KEY,
@@ -708,8 +709,41 @@ const DrawColorPicker = ({ activeColorKey, onChange }) => {
               ? '0 22px 48px -22px rgba(2, 6, 23, 0.96)'
               : '0 14px 32px -24px rgba(2, 6, 23, 0.9)',
           }}
-        className="absolute right-0 top-0 z-20 flex min-h-10 items-center justify-end rounded-2xl border border-slate-800/90 bg-slate-950/92 p-1 backdrop-blur-md"
+        className="absolute left-0 top-0 z-20 flex min-h-10 items-center justify-start rounded-2xl border border-slate-800/90 bg-slate-950/92 p-1 backdrop-blur-md"
       >
+        <button
+          ref={triggerRef}
+          type="button"
+          title={isOpen
+            ? `Close drawing color choices. Current color: ${activeTheme.label}`
+            : `Choose drawing color. Current color: ${activeTheme.label}`}
+          aria-label={isOpen
+            ? `Close drawing color choices. Current color: ${activeTheme.label}`
+            : `Choose drawing color. Current color: ${activeTheme.label}`}
+          aria-haspopup="true"
+          aria-expanded={isOpen}
+          aria-controls={drawerId}
+          data-testid="draw-color-trigger"
+          onClick={() => setIsOpen((currentOpen) => !currentOpen)}
+          className="group relative flex h-8 w-8 items-center justify-center rounded-full border transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+          style={getDrawSwatchStyle(activeTheme, true)}
+        >
+          <span className="sr-only">{activeTheme.label}</span>
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-[8px] rounded-full bg-slate-950/85"
+            style={{ boxShadow: `0 0 12px ${activeTheme.stroke}` }}
+          />
+          <span
+            aria-hidden="true"
+            className={`pointer-events-none absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-slate-900/95 bg-slate-100/95 text-[10px] font-black leading-none text-slate-950 shadow-sm transition-transform duration-200 ${
+              isOpen ? 'rotate-45' : 'rotate-0'
+            }`}
+          >
+            +
+          </span>
+        </button>
+
         <AnimatePresence initial={false}>
           {isOpen && (
             <motion.div
@@ -758,39 +792,6 @@ const DrawColorPicker = ({ activeColorKey, onChange }) => {
             </motion.div>
           )}
         </AnimatePresence>
-
-        <button
-          ref={triggerRef}
-          type="button"
-          title={isOpen
-            ? `Close drawing color choices. Current color: ${activeTheme.label}`
-            : `Choose drawing color. Current color: ${activeTheme.label}`}
-          aria-label={isOpen
-            ? `Close drawing color choices. Current color: ${activeTheme.label}`
-            : `Choose drawing color. Current color: ${activeTheme.label}`}
-          aria-haspopup="true"
-          aria-expanded={isOpen}
-          aria-controls={drawerId}
-          data-testid="draw-color-trigger"
-          onClick={() => setIsOpen((currentOpen) => !currentOpen)}
-          className="group relative flex h-8 w-8 items-center justify-center rounded-full border transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-          style={getDrawSwatchStyle(activeTheme, true)}
-        >
-          <span className="sr-only">{activeTheme.label}</span>
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-[8px] rounded-full bg-slate-950/85"
-            style={{ boxShadow: `0 0 12px ${activeTheme.stroke}` }}
-          />
-          <span
-            aria-hidden="true"
-            className={`pointer-events-none absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-slate-900/95 bg-slate-100/95 text-[10px] font-black leading-none text-slate-950 shadow-sm transition-transform duration-200 ${
-              isOpen ? 'rotate-45' : 'rotate-0'
-            }`}
-          >
-            +
-          </span>
-        </button>
       </motion.div>
     </div>
   );
@@ -1889,7 +1890,7 @@ export default function GrigliataBoard({
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-700 bg-slate-950/80 shadow-2xl">
-      <div className="flex flex-col gap-3 border-b border-slate-800 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className={`flex flex-col gap-3 border-b border-slate-800 px-4 py-3 ${isManager ? 'lg:flex-row lg:items-center lg:justify-between' : ''}`}>
         <div>
           <h2 className="text-lg font-semibold text-slate-100">Grigliata</h2>
           <p className="text-xs text-slate-400">
@@ -1897,40 +1898,8 @@ export default function GrigliataBoard({
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <DrawColorPicker
-            activeColorKey={resolvedDrawTheme.key}
-            onChange={onChangeDrawColor}
-          />
-          <button
-            type="button"
-            onClick={onToggleRuler}
-            title={isRulerEnabled ? 'Disable ruler mode' : 'Enable ruler mode'}
-            aria-label={isRulerEnabled ? 'Disable ruler mode' : 'Enable ruler mode'}
-            aria-pressed={isRulerEnabled}
-            className={`inline-flex items-center justify-center rounded-md border p-2 text-sm font-medium transition-colors ${
-              isRulerEnabled
-                ? 'border-sky-400/60 bg-sky-500/15 text-sky-100 hover:bg-sky-500/20'
-                : 'border-slate-700 text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            <FaRulerHorizontal className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={onToggleInteractionSharing}
-            title={isInteractionSharingEnabled ? 'Stop sharing live interactions' : 'Share live interactions'}
-            aria-label={isInteractionSharingEnabled ? 'Stop sharing live interactions' : 'Share live interactions'}
-            aria-pressed={isInteractionSharingEnabled}
-            className={`inline-flex items-center justify-center rounded-md border p-2 text-sm font-medium transition-colors ${
-              isInteractionSharingEnabled
-                ? 'border-emerald-400/60 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/20'
-                : 'border-slate-700 text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            {isInteractionSharingEnabled ? <FiUsers className="h-4 w-4" /> : <FiUser className="h-4 w-4" />}
-          </button>
-          {isManager && (
+        {isManager && (
+          <div data-testid="grigliata-header-actions" className="flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
               onClick={() => onToggleGridVisibility?.(activeBackground?.id || '')}
@@ -1945,37 +1914,26 @@ export default function GrigliataBoard({
               {isGridVisible ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
               <span>{isGridVisible ? 'Hide Grid' : 'Show Grid'}</span>
             </button>
-          )}
-          {isManager && (
-            <>
-              <button
-                type="button"
-                onClick={() => onAdjustGridSize?.(1)}
-                disabled={isGridSizeAdjustmentDisabled}
-                title="Increase square size"
-                className="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                +
-              </button>
-              <button
-                type="button"
-                onClick={() => onAdjustGridSize?.(-1)}
-                disabled={isGridSizeAdjustmentDisabled}
-                title="Decrease square size"
-                className="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                -
-              </button>
-            </>
-          )}
-          <button
-            type="button"
-            onClick={fitToBoard}
-            className="rounded-md border border-amber-500/40 px-3 py-1.5 text-sm font-medium text-amber-200 transition-colors hover:bg-amber-500/10"
-          >
-            Reset View
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={() => onAdjustGridSize?.(1)}
+              disabled={isGridSizeAdjustmentDisabled}
+              title="Increase square size"
+              className="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              onClick={() => onAdjustGridSize?.(-1)}
+              disabled={isGridSizeAdjustmentDisabled}
+              title="Decrease square size"
+              className="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              -
+            </button>
+          </div>
+        )}
       </div>
 
       <div
@@ -1997,6 +1955,55 @@ export default function GrigliataBoard({
             onContextMenu={(event) => event.preventDefault()}
           />
         )}
+
+        <div
+          data-testid="grigliata-quick-controls"
+          className="pointer-events-none absolute left-4 top-4 z-30 flex flex-col items-start gap-2"
+        >
+          <div className="pointer-events-auto">
+            <DrawColorPicker
+              activeColorKey={resolvedDrawTheme.key}
+              onChange={onChangeDrawColor}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={onToggleRuler}
+            title={isRulerEnabled ? 'Disable ruler mode' : 'Enable ruler mode'}
+            aria-label={isRulerEnabled ? 'Disable ruler mode' : 'Enable ruler mode'}
+            aria-pressed={isRulerEnabled}
+            className={`pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-md border p-2 text-sm font-medium transition-colors ${
+              isRulerEnabled
+                ? 'border-sky-400/60 bg-sky-500/15 text-sky-100 hover:bg-sky-500/20'
+                : 'border-slate-700 bg-slate-950/92 text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            <FaRulerHorizontal className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onToggleInteractionSharing}
+            title={isInteractionSharingEnabled ? 'Stop sharing live interactions' : 'Share live interactions'}
+            aria-label={isInteractionSharingEnabled ? 'Stop sharing live interactions' : 'Share live interactions'}
+            aria-pressed={isInteractionSharingEnabled}
+            className={`pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-md border p-2 text-sm font-medium transition-colors ${
+              isInteractionSharingEnabled
+                ? 'border-emerald-400/60 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/20'
+                : 'border-slate-700 bg-slate-950/92 text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            {isInteractionSharingEnabled ? <FiUsers className="h-4 w-4" /> : <FiUser className="h-4 w-4" />}
+          </button>
+          <button
+            type="button"
+            onClick={fitToBoard}
+            title="Reset View"
+            aria-label="Reset View"
+            className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-md border border-amber-500/40 bg-slate-950/92 p-2 text-sm font-medium text-amber-200 transition-colors hover:bg-amber-500/10"
+          >
+            <MdCenterFocusStrong className="h-4 w-4" />
+          </button>
+        </div>
 
         {stageSize.width > 0 && stageSize.height > 0 && (
           <Stage
