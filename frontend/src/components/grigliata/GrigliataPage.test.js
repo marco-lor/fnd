@@ -151,8 +151,15 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="grigliata-board">
         <div data-testid="board-sharing-state">{String(props.isInteractionSharingEnabled)}</div>
         <div data-testid="board-shared-count">{String(props.sharedInteractions?.length || 0)}</div>
+        <div data-testid="board-draw-color">{props.drawTheme?.key || ''}</div>
         <button type="button" onClick={() => props.onToggleInteractionSharing?.()}>
           toggle interaction sharing
+        </button>
+        <button type="button" onClick={() => props.onChangeDrawColor?.('nova-teal')}>
+          emit draw color nova teal
+        </button>
+        <button type="button" onClick={() => props.onChangeDrawColor?.('solar-amber')}>
+          emit draw color solar amber
         </button>
         <button
           type="button"
@@ -184,7 +191,7 @@ jest.mock('./GrigliataBoard', () => {
   };
 });
 
-describe('GrigliataPage live interactions', () => {
+describe('GrigliataPage', () => {
   let firestore;
 
   beforeEach(() => {
@@ -411,6 +418,55 @@ describe('GrigliataPage live interactions', () => {
         expect.objectContaining({ path: 'grigliata_live_interactions/map-1__user-1' })
       );
     });
+  });
+
+  test('updates the local draw color immediately and persists it after the debounce window', async () => {
+    render(<GrigliataPage />);
+
+    expect(screen.getByTestId('board-draw-color')).toHaveTextContent('ion-cyan');
+
+    fireEvent.click(screen.getByRole('button', { name: /emit draw color nova teal/i }));
+
+    expect(screen.getByTestId('board-draw-color')).toHaveTextContent('nova-teal');
+    expect(firestore.updateDoc).not.toHaveBeenCalled();
+
+    await act(async () => {
+      jest.advanceTimersByTime(299);
+    });
+    expect(firestore.updateDoc).not.toHaveBeenCalled();
+
+    await act(async () => {
+      jest.advanceTimersByTime(1);
+    });
+
+    await waitFor(() => {
+      expect(firestore.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'users/user-1' }),
+        { 'settings.grigliata_draw_color': 'nova-teal' }
+      );
+    });
+  });
+
+  test('keeps only the latest pending draw color preference when selections change quickly', async () => {
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: /emit draw color nova teal/i }));
+    fireEvent.click(screen.getByRole('button', { name: /emit draw color solar amber/i }));
+
+    expect(screen.getByTestId('board-draw-color')).toHaveTextContent('solar-amber');
+
+    await act(async () => {
+      jest.advanceTimersByTime(300);
+    });
+
+    await waitFor(() => {
+      expect(firestore.updateDoc).toHaveBeenCalledTimes(1);
+    });
+
+    expect(firestore.updateDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'users/user-1' }),
+      { 'settings.grigliata_draw_color': 'solar-amber' }
+    );
   });
 
   test('ignores stale remote interactions before passing them to the board', async () => {

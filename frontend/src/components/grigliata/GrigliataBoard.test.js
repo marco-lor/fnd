@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import GrigliataBoard from './GrigliataBoard';
 import { getGrigliataDrawTheme } from './constants';
 
@@ -191,6 +191,56 @@ describe('GrigliataBoard', () => {
     );
 
     expect(screen.getByRole('button', { name: /stop sharing live interactions/i })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('keeps draw colors collapsed until the trigger is opened and emits the selected color', () => {
+    const onChangeDrawColor = jest.fn();
+
+    render(
+      <GrigliataBoard
+        {...buildProps({ onChangeDrawColor })}
+      />
+    );
+
+    const trigger = screen.getByTestId('draw-color-trigger');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('draw-color-drawer')).not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('draw-color-drawer')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('draw-color-option-ion-cyan'));
+
+    expect(onChangeDrawColor).toHaveBeenCalledWith('ion-cyan');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    return waitFor(() => {
+      expect(screen.getByTestId('draw-color-drawer')).toHaveStyle({ width: '0px', opacity: '0' });
+    });
+  });
+
+  test('closes the draw color drawer on escape and outside pointer down', async () => {
+    render(<GrigliataBoard {...buildProps()} />);
+
+    const trigger = screen.getByTestId('draw-color-trigger');
+    fireEvent.click(trigger);
+    expect(screen.getByTestId('draw-color-drawer')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(trigger).toHaveFocus();
+    await waitFor(() => {
+      expect(screen.getByTestId('draw-color-drawer')).toHaveStyle({ width: '0px', opacity: '0' });
+    });
+
+    fireEvent.click(trigger);
+    expect(screen.getByTestId('draw-color-drawer')).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    await waitFor(() => {
+      expect(screen.getByTestId('draw-color-drawer')).toHaveStyle({ width: '0px', opacity: '0' });
+    });
   });
 
   test('renders a remote shared ruler with the broadcaster color', () => {

@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   Circle,
   Group,
@@ -54,6 +55,7 @@ const DEAD_TOKEN_SECONDARY = 'rgba(248, 113, 113, 0.95)';
 const DEAD_TOKEN_SCRIM = 'rgba(15, 23, 42, 0.34)';
 const DEAD_TOKEN_BANNER_FILL = 'rgba(127, 29, 29, 0.88)';
 const DEAD_TOKEN_LABEL = '#fecaca';
+const DRAW_PICKER_EASE = [0.22, 1, 0.36, 1];
 
 const isPrimaryMouseButton = (nativeEvent) => nativeEvent?.button === 0;
 const isSecondaryMouseButton = (nativeEvent) => nativeEvent?.button === 2;
@@ -642,55 +644,157 @@ const MeasurementOverlay = ({
   );
 };
 
-const DrawColorPicker = ({ activeColorKey, onChange }) => (
-  <fieldset className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/70 px-2.5 py-1.5">
-    <legend className="sr-only">Drawing color</legend>
-    <span aria-hidden="true" className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-      Draw
-    </span>
-    <div className="flex items-center gap-1.5">
-      {GRIGLIATA_DRAW_THEMES.map((theme) => {
-        const isActive = theme.key === activeColorKey;
+const getDrawSwatchStyle = (theme, isActive = false) => ({
+  background: theme.swatchBackground,
+  borderColor: isActive ? theme.swatchBorder : 'rgba(71, 85, 105, 0.9)',
+  boxShadow: isActive
+    ? `0 0 0 2px rgba(2, 6, 23, 0.92), 0 0 0 4px ${theme.swatchBorder}, ${theme.swatchGlow}`
+    : `inset 0 0 0 1px rgba(255, 255, 255, 0.08), ${theme.swatchGlow}`,
+});
 
-        return (
-          <label
-            key={theme.key}
-            title={`Use ${theme.label} for grid drawings`}
-            className="group relative block cursor-pointer"
-          >
-            <input
-              type="radio"
-              name="grigliata-draw-color"
-              value={theme.key}
-              checked={isActive}
-              onChange={() => onChange?.(theme.key)}
-              className="peer sr-only"
-            />
-            <span className="sr-only">{theme.label}</span>
-            <span
-              aria-hidden="true"
-              className="relative flex h-7 w-7 items-center justify-center rounded-full border transition-transform duration-150 group-hover:scale-105 peer-focus-visible:ring-2 peer-focus-visible:ring-slate-200/70 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-slate-950"
-              style={{
-                background: theme.swatchBackground,
-                borderColor: isActive ? theme.swatchBorder : 'rgba(71, 85, 105, 0.9)',
-                boxShadow: isActive
-                  ? `0 0 0 2px rgba(2, 6, 23, 0.92), 0 0 0 4px ${theme.swatchBorder}, ${theme.swatchGlow}`
-                  : `inset 0 0 0 1px rgba(255, 255, 255, 0.08), ${theme.swatchGlow}`,
-              }}
+const DrawColorPicker = ({ activeColorKey, onChange }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const pickerRef = useRef(null);
+  const triggerRef = useRef(null);
+  const prefersReducedMotion = useReducedMotion();
+  const drawerId = useId();
+  const activeTheme = useMemo(
+    () => getGrigliataDrawTheme(activeColorKey),
+    [activeColorKey]
+  );
+  const alternativeThemes = useMemo(
+    () => GRIGLIATA_DRAW_THEMES.filter((theme) => theme.key !== activeTheme.key),
+    [activeTheme.key]
+  );
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (pickerRef.current?.contains(event.target)) return;
+      setIsOpen(false);
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setIsOpen(false);
+      triggerRef.current?.focus();
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
+
+  const handleSelectColor = (nextColorKey) => {
+    onChange?.(nextColorKey);
+    setIsOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  return (
+    <div ref={pickerRef} className="relative z-10 h-10 w-10 shrink-0" data-testid="draw-color-picker">
+      <motion.div
+        initial={false}
+        animate={prefersReducedMotion
+          ? undefined
+          : {
+            boxShadow: isOpen
+              ? '0 22px 48px -22px rgba(2, 6, 23, 0.96)'
+              : '0 14px 32px -24px rgba(2, 6, 23, 0.9)',
+          }}
+        className="absolute right-0 top-0 z-20 flex min-h-10 items-center justify-end rounded-2xl border border-slate-800/90 bg-slate-950/92 p-1 backdrop-blur-md"
+      >
+        <AnimatePresence initial={false}>
+          {isOpen && (
+            <motion.div
+              key="draw-color-drawer"
+              id={drawerId}
+              data-testid="draw-color-drawer"
+              className="flex items-center gap-2 overflow-hidden pl-2 pr-2"
+              initial={prefersReducedMotion ? { opacity: 1, width: 'auto' } : { opacity: 0, width: 0 }}
+              animate={{ opacity: 1, width: 'auto' }}
+              exit={prefersReducedMotion ? { opacity: 0, width: 0 } : { opacity: 0, width: 0 }}
+              transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.26, ease: DRAW_PICKER_EASE }}
             >
-              {isActive && (
-                <span
-                  className="pointer-events-none absolute inset-[7px] rounded-full bg-slate-950/85"
-                  style={{ boxShadow: `0 0 10px ${theme.stroke}` }}
-                />
-              )}
-            </span>
-          </label>
-        );
-      })}
+              <motion.span
+                aria-hidden="true"
+                initial={prefersReducedMotion ? false : { opacity: 0, x: 8 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: 8 }}
+                transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.16, ease: DRAW_PICKER_EASE }}
+                className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400"
+              >
+                Draw
+              </motion.span>
+
+              <div className="flex items-center gap-1.5" role="group" aria-label="Choose a different drawing color">
+                {alternativeThemes.map((theme, index) => (
+                  <motion.button
+                    key={theme.key}
+                    type="button"
+                    title={`Use ${theme.label} for grid drawings`}
+                    aria-label={`Use ${theme.label} for grid drawings`}
+                    data-testid={`draw-color-option-${theme.key}`}
+                    onClick={() => handleSelectColor(theme.key)}
+                    initial={prefersReducedMotion ? false : { opacity: 0, x: 12, scale: 0.74 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                    exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: 12, scale: 0.82 }}
+                    transition={prefersReducedMotion
+                      ? { duration: 0.01 }
+                      : { duration: 0.18, delay: index * 0.03, ease: DRAW_PICKER_EASE }}
+                    className="group relative flex h-7 w-7 items-center justify-center rounded-full border transition-transform duration-150 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                    style={getDrawSwatchStyle(theme)}
+                  >
+                    <span className="sr-only">{theme.label}</span>
+                  </motion.button>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <button
+          ref={triggerRef}
+          type="button"
+          title={isOpen
+            ? `Close drawing color choices. Current color: ${activeTheme.label}`
+            : `Choose drawing color. Current color: ${activeTheme.label}`}
+          aria-label={isOpen
+            ? `Close drawing color choices. Current color: ${activeTheme.label}`
+            : `Choose drawing color. Current color: ${activeTheme.label}`}
+          aria-haspopup="true"
+          aria-expanded={isOpen}
+          aria-controls={drawerId}
+          data-testid="draw-color-trigger"
+          onClick={() => setIsOpen((currentOpen) => !currentOpen)}
+          className="group relative flex h-8 w-8 items-center justify-center rounded-full border transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+          style={getDrawSwatchStyle(activeTheme, true)}
+        >
+          <span className="sr-only">{activeTheme.label}</span>
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-[8px] rounded-full bg-slate-950/85"
+            style={{ boxShadow: `0 0 12px ${activeTheme.stroke}` }}
+          />
+          <span
+            aria-hidden="true"
+            className={`pointer-events-none absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-slate-900/95 bg-slate-100/95 text-[10px] font-black leading-none text-slate-950 shadow-sm transition-transform duration-200 ${
+              isOpen ? 'rotate-45' : 'rotate-0'
+            }`}
+          >
+            +
+          </span>
+        </button>
+      </motion.div>
     </div>
-  </fieldset>
-);
+  );
+};
 
 export default function GrigliataBoard({
   activeBackground,
