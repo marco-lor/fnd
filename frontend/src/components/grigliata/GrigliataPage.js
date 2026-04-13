@@ -1482,32 +1482,6 @@ export default function GrigliataPage() {
       style={{ '--grigliata-workspace-height': workspaceHeight }}
     >
       <div className="flex h-full min-h-0 flex-col gap-3">
-        <header className="rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 shadow-2xl backdrop-blur-sm">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="min-w-0">
-              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Shared Battlemat</p>
-              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                <h1 className="text-2xl font-semibold text-amber-300">Grigliata</h1>
-                {isManager && (
-                  <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-sky-200">
-                    DM View
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300 sm:text-sm">
-              <div className="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-1.5">
-                Active background:{' '}
-                <span className="font-semibold text-slate-100">{activeBackground?.name || 'Grid only'}</span>
-              </div>
-              <div className="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-1.5">
-                <span className="font-semibold text-slate-100">{boardTokens.length}</span> tokens on this map
-              </div>
-            </div>
-          </div>
-        </header>
-
         {boardError && (
           <div className="rounded-2xl border border-red-500/30 bg-red-900/20 px-4 py-2.5 text-sm text-red-200">
             {boardError}
