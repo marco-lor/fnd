@@ -206,6 +206,13 @@ describe('GrigliataBoard', () => {
     expect(buttons[3]).toHaveAttribute('aria-label', 'Reset View');
   });
 
+  test('shows only the map metadata in the top board header', () => {
+    render(<GrigliataBoard {...buildProps()} />);
+
+    expect(screen.queryByRole('heading', { name: /grigliata/i })).not.toBeInTheDocument();
+    expect(screen.getByText('Sunken Ruins | 70px squares | 5 ft per square')).toBeInTheDocument();
+  });
+
   test('does not render the manager controls stack for non-managers', () => {
     render(<GrigliataBoard {...buildProps()} />);
 

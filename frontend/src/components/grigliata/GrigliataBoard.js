@@ -1892,7 +1892,6 @@ export default function GrigliataBoard({
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-700 bg-slate-950/80 shadow-2xl">
       <div className="flex flex-col gap-3 border-b border-slate-800 px-4 py-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-100">Grigliata</h2>
           <p className="text-xs text-slate-400">
             {resolvedBackground?.name || 'Grid only'} | {normalizedGrid.cellSizePx}px squares | 5 ft per square
           </p>
