@@ -112,6 +112,82 @@ service cloud.firestore {
         && isGrigliataPlacementId(data.backgroundId, data.ownerUid, placementId);
     }
 
+    function isGrigliataDrawColorKey(colorKey) {
+      return colorKey in [
+        "aurora-fuchsia",
+        "ion-cyan",
+        "nova-teal",
+        "volt-lime",
+        "solar-amber",
+        "warp-violet"
+      ];
+    }
+
+    function isValidGrigliataGridCell(cell) {
+      return cell is map
+        && cell.keys().hasAll(["col", "row"])
+        && cell.keys().hasOnly(["col", "row"])
+        && cell.col is int
+        && cell.row is int;
+    }
+
+    function hasValidGrigliataAnchorCells(cells) {
+      return cells is list
+        && cells.size() > 0
+        && cells.size() <= 16
+        && (cells.size() < 1 || isValidGrigliataGridCell(cells[0]))
+        && (cells.size() < 2 || isValidGrigliataGridCell(cells[1]))
+        && (cells.size() < 3 || isValidGrigliataGridCell(cells[2]))
+        && (cells.size() < 4 || isValidGrigliataGridCell(cells[3]))
+        && (cells.size() < 5 || isValidGrigliataGridCell(cells[4]))
+        && (cells.size() < 6 || isValidGrigliataGridCell(cells[5]))
+        && (cells.size() < 7 || isValidGrigliataGridCell(cells[6]))
+        && (cells.size() < 8 || isValidGrigliataGridCell(cells[7]))
+        && (cells.size() < 9 || isValidGrigliataGridCell(cells[8]))
+        && (cells.size() < 10 || isValidGrigliataGridCell(cells[9]))
+        && (cells.size() < 11 || isValidGrigliataGridCell(cells[10]))
+        && (cells.size() < 12 || isValidGrigliataGridCell(cells[11]))
+        && (cells.size() < 13 || isValidGrigliataGridCell(cells[12]))
+        && (cells.size() < 14 || isValidGrigliataGridCell(cells[13]))
+        && (cells.size() < 15 || isValidGrigliataGridCell(cells[14]))
+        && (cells.size() < 16 || isValidGrigliataGridCell(cells[15]));
+    }
+
+    function isValidGrigliataLiveInteraction(data, interactionId) {
+      return data.keys().hasAll([
+          "backgroundId",
+          "ownerUid",
+          "type",
+          "source",
+          "colorKey",
+          "anchorCells",
+          "liveEndCell",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.keys().hasOnly([
+          "backgroundId",
+          "ownerUid",
+          "type",
+          "source",
+          "colorKey",
+          "anchorCells",
+          "liveEndCell",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.backgroundId is string
+        && data.ownerUid is string
+        && data.type == "measure"
+        && data.source in ["free", "token-drag"]
+        && data.colorKey is string
+        && isGrigliataDrawColorKey(data.colorKey)
+        && hasValidGrigliataAnchorCells(data.anchorCells)
+        && isValidGrigliataGridCell(data.liveEndCell)
+        && (data.updatedBy == null || data.updatedBy is string)
+        && isGrigliataPlacementId(data.backgroundId, data.ownerUid, interactionId);
+    }
+
     function isGrigliataPlacementVisibleToPlayers(data) {
       return !data.keys().hasAny(["isVisibleToPlayers"])
         || data.isVisibleToPlayers == true;
@@ -295,6 +371,45 @@ service cloud.firestore {
             request.auth.uid == resource.data.ownerUid
             && isGrigliataPlacementVisibleToPlayers(resource.data)
           )
+        );
+    }
+
+    match /grigliata_live_interactions/{interactionId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && isValidGrigliataLiveInteraction(request.resource.data, interactionId)
+        && (
+          isGrigliataManager()
+          || (
+            request.auth.uid == request.resource.data.ownerUid
+            && (
+              request.resource.data.updatedBy == null
+              || request.resource.data.updatedBy == request.auth.uid
+            )
+          )
+        );
+
+      allow update: if isSignedIn()
+        && isValidGrigliataLiveInteraction(request.resource.data, interactionId)
+        && request.resource.data.backgroundId == resource.data.backgroundId
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && (
+          isGrigliataManager()
+          || (
+            request.auth.uid == resource.data.ownerUid
+            && (
+              request.resource.data.updatedBy == null
+              || request.resource.data.updatedBy == request.auth.uid
+            )
+          )
+        );
+
+      allow delete: if isSignedIn()
+        && isValidGrigliataLiveInteraction(resource.data, interactionId)
+        && (
+          isGrigliataManager()
+          || request.auth.uid == resource.data.ownerUid
         );
     }
 

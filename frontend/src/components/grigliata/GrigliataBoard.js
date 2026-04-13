@@ -10,7 +10,7 @@ import {
   Text,
 } from 'react-konva';
 import { FaRulerHorizontal } from 'react-icons/fa';
-import { FiEye, FiEyeOff } from 'react-icons/fi';
+import { FiEye, FiEyeOff, FiUser, FiUsers } from 'react-icons/fi';
 import {
   BOARD_FIT_PADDING,
   DEFAULT_GRIGLIATA_DRAW_COLOR_KEY,
@@ -34,6 +34,10 @@ import {
   useTokenStatusIconImages,
 } from './tokenStatuses';
 import useImageAsset from './useImageAsset';
+import {
+  buildMeasurementFromGrigliataLiveInteraction,
+  normalizeGrigliataLiveInteractionDraft,
+} from './liveInteractions';
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
 const RULER_LABEL_MIN_WIDTH = 90;
@@ -541,7 +545,11 @@ const GridLayer = ({ bounds, grid }) => {
   return lines;
 };
 
-const MeasurementOverlay = ({ measurement, drawTheme = DEFAULT_DRAW_THEME }) => {
+const MeasurementOverlay = ({
+  measurement,
+  drawTheme = DEFAULT_DRAW_THEME,
+  overlayId = '',
+}) => {
   if (!measurement?.pathPoints?.length || measurement.pathPoints.length < 2 || !measurement?.endPoint || !measurement?.label) {
     return null;
   }
@@ -558,7 +566,7 @@ const MeasurementOverlay = ({ measurement, drawTheme = DEFAULT_DRAW_THEME }) => 
   const labelY = measurement.endPoint.y - 14;
 
   return (
-    <Group listening={false}>
+    <Group listening={false} data-testid={overlayId ? `measurement-overlay-${overlayId}` : undefined}>
       <Line
         points={linePoints}
         stroke={drawTheme.outlineStroke}
@@ -693,8 +701,10 @@ export default function GrigliataBoard({
   isManager,
   isTokenDragActive,
   isRulerEnabled,
+  isInteractionSharingEnabled = false,
   drawTheme,
   onToggleRuler,
+  onToggleInteractionSharing,
   onChangeDrawColor,
   onToggleGridVisibility,
   isGridVisibilityToggleDisabled,
@@ -709,6 +719,8 @@ export default function GrigliataBoard({
   onUpdateTokenStatuses,
   isTokenStatusActionPending,
   onDropCurrentToken,
+  sharedInteractions = [],
+  onSharedInteractionChange,
 }) {
   const containerRef = useRef(null);
   const stageRef = useRef(null);
@@ -720,6 +732,7 @@ export default function GrigliataBoard({
   const [selectionBox, setSelectionBox] = useState(null);
   const [tokenDragState, setTokenDragState] = useState(null);
   const [measurementState, setMeasurementState] = useState(null);
+  const [activeSharedInteraction, setActiveSharedInteraction] = useState(null);
   const [hoveredOverflowTokenId, setHoveredOverflowTokenId] = useState('');
   const [pinnedOverflowTokenId, setPinnedOverflowTokenId] = useState('');
   const backgroundImage = useImageAsset(activeBackground?.imageUrl || '');
@@ -828,6 +841,36 @@ export default function GrigliataBoard({
     () => getBoardBounds({ background: resolvedBackground, grid: normalizedGrid, tokens: placedTokens }),
     [resolvedBackground, normalizedGrid, placedTokens]
   );
+  const renderedSharedMeasurements = useMemo(
+    () => (sharedInteractions || [])
+      .filter((interaction) => interaction?.ownerUid && interaction.ownerUid !== currentUserId)
+      .map((interaction) => {
+        const measurement = buildMeasurementFromGrigliataLiveInteraction({
+          interaction,
+          grid: normalizedGrid,
+        });
+
+        if (!measurement) {
+          return null;
+        }
+
+        return {
+          ownerUid: interaction.ownerUid,
+          drawTheme: getGrigliataDrawTheme(interaction.colorKey),
+          measurement,
+        };
+      })
+      .filter(Boolean),
+    [currentUserId, normalizedGrid, sharedInteractions]
+  );
+
+  const clearActiveSharedInteraction = useCallback(() => {
+    setActiveSharedInteraction(null);
+  }, []);
+
+  const updateActiveSharedInteraction = useCallback((draft) => {
+    setActiveSharedInteraction(normalizeGrigliataLiveInteractionDraft(draft));
+  }, []);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -881,15 +924,27 @@ export default function GrigliataBoard({
     setSelectionBox(null);
     setTokenDragState(null);
     setMeasurementState(null);
+    clearActiveSharedInteraction();
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
-  }, [fitKey]);
+  }, [clearActiveSharedInteraction, fitKey]);
 
   useEffect(() => {
     if (!isRulerEnabled) {
       setMeasurementState(null);
+      clearActiveSharedInteraction();
     }
-  }, [isRulerEnabled]);
+  }, [clearActiveSharedInteraction, isRulerEnabled]);
+
+  useEffect(() => {
+    onSharedInteractionChange?.(activeSharedInteraction);
+  }, [activeSharedInteraction, onSharedInteractionChange]);
+
+  useEffect(() => (
+    () => {
+      onSharedInteractionChange?.(null);
+    }
+  ), [onSharedInteractionChange]);
 
   useEffect(() => {
     setSelectedTokenIds((currentSelectedTokenIds) => (
@@ -961,6 +1016,26 @@ export default function GrigliataBoard({
     };
   }, [normalizedGrid]);
 
+  const syncSharedMeasureInteraction = useCallback((interaction, liveEndCell) => {
+    if (!Array.isArray(interaction?.anchorCells) || !interaction.anchorCells.length || !liveEndCell) {
+      clearActiveSharedInteraction();
+      return;
+    }
+
+    updateActiveSharedInteraction({
+      type: 'measure',
+      source: interaction.measurementSource === 'token-drag' ? 'token-drag' : 'free',
+      anchorCells: interaction.anchorCells.map((cell) => ({
+        col: cell.col,
+        row: cell.row,
+      })),
+      liveEndCell: {
+        col: liveEndCell.col,
+        row: liveEndCell.row,
+      },
+    });
+  }, [clearActiveSharedInteraction, updateActiveSharedInteraction]);
+
   const commitMeasurementWaypoint = useCallback((clientX, clientY) => {
     const activeInteraction = interactionRef.current;
     if (!isWaypointEligibleInteraction(activeInteraction)) return false;
@@ -988,6 +1063,7 @@ export default function GrigliataBoard({
     const lastAnchorCell = activeInteraction.anchorCells[activeInteraction.anchorCells.length - 1];
     if (isSameGridCell(lastAnchorCell, liveEndCell)) {
       setMeasurementState(buildMeasurementForCells(activeInteraction.anchorCells, liveEndCell));
+      syncSharedMeasureInteraction(activeInteraction, liveEndCell);
       return true;
     }
 
@@ -1001,8 +1077,18 @@ export default function GrigliataBoard({
       anchorCells: nextAnchorCells,
     };
     setMeasurementState(buildMeasurementForCells(nextAnchorCells, liveEndCell));
+    syncSharedMeasureInteraction({
+      ...activeInteraction,
+      anchorCells: nextAnchorCells,
+    }, liveEndCell);
     return true;
-  }, [buildMeasurementForCells, getDraggedTokenMeasurement, getWorldPointFromClient, normalizedGrid]);
+  }, [
+    buildMeasurementForCells,
+    getDraggedTokenMeasurement,
+    getWorldPointFromClient,
+    normalizedGrid,
+    syncSharedMeasureInteraction,
+  ]);
 
   const applyScale = (nextScale, pointer) => {
     const safeScale = Math.min(4, Math.max(0.2, nextScale));
@@ -1098,11 +1184,13 @@ export default function GrigliataBoard({
     if (activeInteraction.type === 'selection-candidate') {
       setSelectionBox(null);
       setSelectedTokenIds([]);
+      clearActiveSharedInteraction();
       return;
     }
 
     if (activeInteraction.type === 'measure-candidate') {
       setMeasurementState(null);
+      clearActiveSharedInteraction();
       return;
     }
 
@@ -1115,6 +1203,7 @@ export default function GrigliataBoard({
       if (!normalizedSelectionRect) {
         setSelectedTokenIds([]);
         setSelectionBox(null);
+        clearActiveSharedInteraction();
         return;
       }
 
@@ -1130,11 +1219,13 @@ export default function GrigliataBoard({
 
       setSelectedTokenIds(nextSelectedTokenIds);
       setSelectionBox(null);
+      clearActiveSharedInteraction();
       return;
     }
 
     if (activeInteraction.type === 'measure') {
       setMeasurementState(null);
+      clearActiveSharedInteraction();
       return;
     }
 
@@ -1143,6 +1234,7 @@ export default function GrigliataBoard({
     }
 
     if (activeInteraction.type === 'token-candidate') {
+      clearActiveSharedInteraction();
       return;
     }
 
@@ -1158,6 +1250,7 @@ export default function GrigliataBoard({
 
       if (!draggedOriginToken) {
         setTokenDragState(null);
+        clearActiveSharedInteraction();
         return;
       }
 
@@ -1186,9 +1279,11 @@ export default function GrigliataBoard({
       } finally {
         setTokenDragState(null);
         setMeasurementState(null);
+        clearActiveSharedInteraction();
       }
     }
   }, [
+    clearActiveSharedInteraction,
     getDraggedTokenMeasurement,
     getWorldPointFromClient,
     normalizedGrid,
@@ -1230,12 +1325,15 @@ export default function GrigliataBoard({
             anchorCells: [
               snapBoardPointToGrid(activeInteraction.startWorld, normalizedGrid, 'center'),
             ],
+            measurementSource: 'free',
           };
+          const liveEndCell = snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center');
           interactionRef.current = nextInteraction;
           setMeasurementState(buildMeasurementForCells(
             nextInteraction.anchorCells,
-            snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center')
+            liveEndCell
           ));
+          syncSharedMeasureInteraction(nextInteraction, liveEndCell);
           return;
         }
 
@@ -1247,6 +1345,7 @@ export default function GrigliataBoard({
           start: activeInteraction.startWorld,
           end: pointerWorld,
         });
+        clearActiveSharedInteraction();
         return;
       }
 
@@ -1260,11 +1359,13 @@ export default function GrigliataBoard({
             snapBoardPointToGrid(activeInteraction.startWorld, normalizedGrid, 'center'),
           ],
         };
+        const liveEndCell = snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center');
         interactionRef.current = nextInteraction;
         setMeasurementState(buildMeasurementForCells(
           nextInteraction.anchorCells,
-          snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center')
+          liveEndCell
         ));
+        syncSharedMeasureInteraction(nextInteraction, liveEndCell);
         return;
       }
 
@@ -1273,14 +1374,17 @@ export default function GrigliataBoard({
           start: activeInteraction.startWorld,
           end: pointerWorld,
         });
+        clearActiveSharedInteraction();
         return;
       }
 
       if (activeInteraction.type === 'measure') {
+        const liveEndCell = snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center');
         setMeasurementState(buildMeasurementForCells(
           activeInteraction.anchorCells,
-          snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center')
+          liveEndCell
         ));
+        syncSharedMeasureInteraction(activeInteraction, liveEndCell);
         return;
       }
 
@@ -1302,6 +1406,7 @@ export default function GrigliataBoard({
               )?.row ?? 0,
             }]
             : null,
+          measurementSource: isRulerEnabled ? 'token-drag' : null,
         };
         interactionRef.current = nextInteraction;
         currentInteraction = nextInteraction;
@@ -1323,6 +1428,9 @@ export default function GrigliataBoard({
             currentInteraction.anchorCells,
             dragMeasurement.liveEndCell
           ));
+          syncSharedMeasureInteraction(currentInteraction, dragMeasurement.liveEndCell);
+        } else {
+          clearActiveSharedInteraction();
         }
       }
     };
@@ -1358,11 +1466,13 @@ export default function GrigliataBoard({
     };
   }, [
     buildMeasurementForCells,
+    clearActiveSharedInteraction,
     finalizeInteraction,
     getDraggedTokenMeasurement,
     getWorldPointFromClient,
     isRulerEnabled,
     normalizedGrid,
+    syncSharedMeasureInteraction,
   ]);
 
   useEffect(() => {
@@ -1422,6 +1532,7 @@ export default function GrigliataBoard({
     if (!pointerWorld) return;
 
     setMeasurementState(null);
+    clearActiveSharedInteraction();
 
     if (isRulerEnabled) {
       setSelectedTokenIds([]);
@@ -1467,6 +1578,7 @@ export default function GrigliataBoard({
     if (!isPrimaryMouseButton(nativeEvent)) return;
 
     setMeasurementState(null);
+    clearActiveSharedInteraction();
 
     if (!token?.canMove) {
       setSelectedTokenIds([]);
@@ -1700,6 +1812,20 @@ export default function GrigliataBoard({
           >
             <FaRulerHorizontal className="h-4 w-4" />
           </button>
+          <button
+            type="button"
+            onClick={onToggleInteractionSharing}
+            title={isInteractionSharingEnabled ? 'Stop sharing live interactions' : 'Share live interactions'}
+            aria-label={isInteractionSharingEnabled ? 'Stop sharing live interactions' : 'Share live interactions'}
+            aria-pressed={isInteractionSharingEnabled}
+            className={`inline-flex items-center justify-center rounded-md border p-2 text-sm font-medium transition-colors ${
+              isInteractionSharingEnabled
+                ? 'border-emerald-400/60 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/20'
+                : 'border-slate-700 text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            {isInteractionSharingEnabled ? <FiUsers className="h-4 w-4" /> : <FiUser className="h-4 w-4" />}
+          </button>
           {isManager && (
             <button
               type="button"
@@ -1869,8 +1995,21 @@ export default function GrigliataBoard({
                 />
               ))}
 
+              {renderedSharedMeasurements.map((sharedMeasurement) => (
+                <MeasurementOverlay
+                  key={`shared-measurement-${sharedMeasurement.ownerUid}`}
+                  measurement={sharedMeasurement.measurement}
+                  drawTheme={sharedMeasurement.drawTheme}
+                  overlayId={`shared-${sharedMeasurement.ownerUid}`}
+                />
+              ))}
+
               {measurementState && (
-                <MeasurementOverlay measurement={measurementState} drawTheme={resolvedDrawTheme} />
+                <MeasurementOverlay
+                  measurement={measurementState}
+                  drawTheme={resolvedDrawTheme}
+                  overlayId="local"
+                />
               )}
             </Layer>
           </Stage>
