@@ -1,12 +1,17 @@
 import { buildGridMeasurementPath } from './boardUtils';
 import { resolveGrigliataDrawColorKey } from './constants';
+import {
+  buildRenderableGrigliataAoEFigure,
+  GRIGLIATA_AOE_FIGURE_TYPES,
+  normalizeGrigliataAoEFigureDraft,
+} from './aoeFigures';
 
 export const GRIGLIATA_LIVE_INTERACTION_COLLECTION = 'grigliata_live_interactions';
 export const GRIGLIATA_LIVE_INTERACTION_THROTTLE_MS = 100;
 export const GRIGLIATA_LIVE_INTERACTION_STALE_MS = 2 * 60 * 1000;
 export const MAX_GRIGLIATA_LIVE_INTERACTION_ANCHOR_CELLS = 16;
-export const GRIGLIATA_LIVE_INTERACTION_TYPES = ['measure'];
-export const GRIGLIATA_LIVE_INTERACTION_SOURCES = ['free', 'token-drag'];
+export const GRIGLIATA_LIVE_INTERACTION_TYPES = ['measure', 'aoe'];
+export const GRIGLIATA_LIVE_INTERACTION_SOURCES = ['free', 'token-drag', 'aoe-create', 'aoe-move'];
 
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0;
 
@@ -59,6 +64,21 @@ export const normalizeGrigliataLiveInteractionDraft = (draft) => {
     return null;
   }
 
+  if (draft.type === 'aoe') {
+    const figureDraft = normalizeGrigliataAoEFigureDraft(draft);
+    if (!figureDraft) {
+      return null;
+    }
+
+    return {
+      type: 'aoe',
+      source: draft.source,
+      figureType: figureDraft.figureType,
+      originCell: figureDraft.originCell,
+      targetCell: figureDraft.targetCell,
+    };
+  }
+
   const anchorCells = Array.isArray(draft.anchorCells)
     ? draft.anchorCells.map(normalizeGridCell).filter(Boolean)
     : [];
@@ -89,11 +109,9 @@ export const normalizeGrigliataLiveInteraction = (interaction) => {
   return {
     backgroundId: interaction.backgroundId.trim(),
     ownerUid: interaction.ownerUid.trim(),
-    type: draft.type,
+    ...draft,
     source: draft.source,
     colorKey: resolveGrigliataDrawColorKey(interaction?.colorKey),
-    anchorCells: draft.anchorCells,
-    liveEndCell: draft.liveEndCell,
     updatedAt: interaction?.updatedAt || null,
     updatedBy: isNonEmptyString(interaction?.updatedBy) ? interaction.updatedBy.trim() : '',
   };
@@ -115,11 +133,8 @@ export const buildGrigliataLiveInteractionDoc = ({
   return {
     backgroundId: backgroundId.trim(),
     ownerUid: ownerUid.trim(),
-    type: normalizedDraft.type,
-    source: normalizedDraft.source,
     colorKey: resolveGrigliataDrawColorKey(colorKey),
-    anchorCells: normalizedDraft.anchorCells,
-    liveEndCell: normalizedDraft.liveEndCell,
+    ...normalizedDraft,
     updatedAt: updatedAt || null,
     updatedBy: isNonEmptyString(updatedBy) ? updatedBy.trim() : '',
   };
@@ -158,6 +173,26 @@ export const buildMeasurementFromGrigliataLiveInteraction = ({ interaction, grid
   return buildGridMeasurementPath({
     anchorCells: normalizedInteraction.anchorCells,
     liveEndCell: normalizedInteraction.liveEndCell,
+    grid,
+  });
+};
+
+export const buildAoEFigureFromGrigliataLiveInteraction = ({ interaction, grid }) => {
+  const normalizedInteraction = normalizeGrigliataLiveInteraction(interaction);
+  if (
+    !normalizedInteraction
+    || normalizedInteraction.type !== 'aoe'
+    || !GRIGLIATA_AOE_FIGURE_TYPES.includes(normalizedInteraction.figureType)
+  ) {
+    return null;
+  }
+
+  return buildRenderableGrigliataAoEFigure({
+    figure: {
+      figureType: normalizedInteraction.figureType,
+      originCell: normalizedInteraction.originCell,
+      targetCell: normalizedInteraction.targetCell,
+    },
     grid,
   });
 };

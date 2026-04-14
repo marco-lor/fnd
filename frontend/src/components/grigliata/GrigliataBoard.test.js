@@ -28,7 +28,16 @@ jest.mock('react-konva', () => {
       const domProps = {};
 
       Object.entries(props).forEach(([key, value]) => {
-        if (typeof value === 'function' || value == null) {
+        if (value == null) {
+          return;
+        }
+
+        if (typeof value === 'function' && key.startsWith('on')) {
+          domProps[key] = (event) => value(buildKonvaEvent(event));
+          return;
+        }
+
+        if (typeof value === 'function') {
           return;
         }
 
@@ -52,10 +61,20 @@ jest.mock('react-konva', () => {
   };
 
   const Stage = React.forwardRef(({ children, ...props }, ref) => {
+    const elementRef = React.useRef(null);
     const domProps = {};
 
     Object.entries(props).forEach(([key, value]) => {
-      if (typeof value === 'function' || value == null) {
+      if (value == null) {
+        return;
+      }
+
+      if (typeof value === 'function' && key.startsWith('on')) {
+        domProps[key] = (event) => value(buildKonvaEvent(event));
+        return;
+      }
+
+      if (typeof value === 'function') {
         return;
       }
 
@@ -63,12 +82,19 @@ jest.mock('react-konva', () => {
       domProps[domKey] = serializeProp(value);
     });
 
-    React.useImperativeHandle(ref, () => ({
-      getPointerPosition: () => ({ x: 0, y: 0 }),
-    }));
+    React.useImperativeHandle(ref, () => {
+      if (elementRef.current) {
+        elementRef.current.getPointerPosition = () => ({ x: 0, y: 0 });
+        return elementRef.current;
+      }
+
+      return {
+        getPointerPosition: () => ({ x: 0, y: 0 }),
+      };
+    });
 
     return (
-      <div {...domProps} data-konva-type="Stage" ref={ref}>
+      <div {...domProps} data-konva-type="Stage" ref={elementRef}>
         {children}
       </div>
     );
@@ -105,13 +131,17 @@ const buildProps = (overrides = {}) => ({
   grid,
   isGridVisible: true,
   tokens: [],
+  aoeFigures: [],
   currentUserId: 'current-user',
   isManager: false,
   isTokenDragActive: false,
   isRulerEnabled: false,
+  activeAoeFigureType: '',
   isInteractionSharingEnabled: false,
   drawTheme: getGrigliataDrawTheme('aurora-fuchsia'),
+  onSelectMouseTool: jest.fn(),
   onToggleRuler: jest.fn(),
+  onChangeAoeFigureType: jest.fn(),
   onToggleInteractionSharing: jest.fn(),
   onChangeDrawColor: jest.fn(),
   onToggleGridVisibility: null,
@@ -120,6 +150,9 @@ const buildProps = (overrides = {}) => ({
   isGridSizeAdjustmentDisabled: false,
   onMoveTokens: jest.fn(),
   onDeleteTokens: jest.fn(),
+  onCreateAoEFigure: jest.fn(),
+  onMoveAoEFigure: jest.fn(),
+  onDeleteAoEFigures: jest.fn(),
   onSetSelectedTokensVisibility: null,
   isTokenVisibilityActionPending: false,
   onSetSelectedTokensDeadState: null,
@@ -131,6 +164,24 @@ const buildProps = (overrides = {}) => ({
   onSharedInteractionChange: jest.fn(),
   ...overrides,
 });
+
+const buildKonvaEvent = (event) => {
+  const konvaEvent = {
+    evt: event,
+    target: event.currentTarget,
+  };
+
+  Object.defineProperty(konvaEvent, 'cancelBubble', {
+    get: () => false,
+    set: (value) => {
+      if (value) {
+        event.stopPropagation();
+      }
+    },
+  });
+
+  return konvaEvent;
+};
 
 describe('GrigliataBoard', () => {
   let resizeObserverInstance;
@@ -193,17 +244,43 @@ describe('GrigliataBoard', () => {
     expect(screen.getByRole('button', { name: /stop sharing live interactions/i })).toHaveAttribute('aria-pressed', 'true');
   });
 
+  test('renders the mouse selection control and updates its pressed state', () => {
+    const onSelectMouseTool = jest.fn();
+    const { rerender } = render(
+      <GrigliataBoard {...buildProps({ onSelectMouseTool })} />
+    );
+
+    const mouseSelectionButton = screen.getByTestId('mouse-selection-trigger');
+    expect(mouseSelectionButton).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(mouseSelectionButton);
+    expect(onSelectMouseTool).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isRulerEnabled: true,
+          onSelectMouseTool,
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('mouse-selection-trigger')).toHaveAttribute('aria-pressed', 'false');
+  });
+
   test('renders the quick controls stack in the expected order and keeps reset view available', () => {
     render(<GrigliataBoard {...buildProps()} />);
 
     const quickControls = screen.getByTestId('grigliata-quick-controls');
     const buttons = within(quickControls).getAllByRole('button');
 
-    expect(buttons).toHaveLength(4);
-    expect(buttons[0]).toBe(screen.getByTestId('draw-color-trigger'));
-    expect(buttons[1]).toHaveAttribute('aria-label', 'Enable ruler mode');
-    expect(buttons[2]).toHaveAttribute('aria-label', 'Share live interactions');
-    expect(buttons[3]).toHaveAttribute('aria-label', 'Reset View');
+    expect(buttons).toHaveLength(6);
+    expect(buttons[0]).toBe(screen.getByTestId('mouse-selection-trigger'));
+    expect(buttons[1]).toBe(screen.getByTestId('draw-color-trigger'));
+    expect(buttons[2]).toHaveAttribute('aria-label', 'Enable ruler mode');
+    expect(buttons[3]).toHaveAttribute('aria-label', 'Choose an area template');
+    expect(buttons[4]).toHaveAttribute('aria-label', 'Share live interactions');
+    expect(buttons[5]).toHaveAttribute('aria-label', 'Reset View');
   });
 
   test('shows only the map metadata in the top board header', () => {
@@ -376,5 +453,292 @@ describe('GrigliataBoard', () => {
 
     expect(screen.queryByTestId('measurement-overlay-shared-current-user')).not.toBeInTheDocument();
     expect(screen.queryByText('10 ft (2 squares)')).not.toBeInTheDocument();
+  });
+
+  test('opens the AoE template drawer and emits the selected template type', () => {
+    const onChangeAoeFigureType = jest.fn();
+
+    render(
+      <GrigliataBoard
+        {...buildProps({ onChangeAoeFigureType })}
+      />
+    );
+
+    const trigger = screen.getByTestId('aoe-template-trigger');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('aoe-template-drawer')).not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+    expect(screen.getByTestId('aoe-template-drawer')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('aoe-template-option-circle'));
+    expect(onChangeAoeFigureType).toHaveBeenCalledWith('circle');
+  });
+
+  test('renders a local AoE preview and creates the figure on mouseup', async () => {
+    const onCreateAoEFigure = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          activeAoeFigureType: 'circle',
+          onCreateAoEFigure,
+        })}
+      />
+    );
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+
+    expect(screen.getByTestId('aoe-figure-overlay-local')).toBeInTheDocument();
+
+    fireEvent.mouseMove(window, { clientX: 280, clientY: 140, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 280, clientY: 140, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onCreateAoEFigure).toHaveBeenCalledWith(expect.objectContaining({
+        figureType: 'circle',
+        originCell: expect.objectContaining({
+          col: expect.any(Number),
+          row: expect.any(Number),
+        }),
+        targetCell: expect.objectContaining({
+          col: expect.any(Number),
+          row: expect.any(Number),
+        }),
+      }));
+    });
+  });
+
+  test('returns to mouse selection after a successful AoE placement', async () => {
+    const onCreateAoEFigure = jest.fn(() => Promise.resolve(true));
+    const onSelectMouseTool = jest.fn();
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          activeAoeFigureType: 'circle',
+          onCreateAoEFigure,
+          onSelectMouseTool,
+        })}
+      />
+    );
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+    fireEvent.mouseMove(window, { clientX: 280, clientY: 140, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 280, clientY: 140, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onCreateAoEFigure).toHaveBeenCalledTimes(1);
+    });
+
+    await waitFor(() => {
+      expect(onSelectMouseTool).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  test('keeps the AoE tool active after an unsuccessful AoE placement', async () => {
+    const onCreateAoEFigure = jest.fn(() => Promise.resolve(false));
+    const onSelectMouseTool = jest.fn();
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          activeAoeFigureType: 'circle',
+          onCreateAoEFigure,
+          onSelectMouseTool,
+        })}
+      />
+    );
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+    fireEvent.mouseMove(window, { clientX: 280, clientY: 140, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 280, clientY: 140, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onCreateAoEFigure).toHaveBeenCalledTimes(1);
+    });
+
+    expect(onSelectMouseTool).not.toHaveBeenCalled();
+  });
+
+  test('renders a remote shared AoE preview with the broadcaster color', () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          sharedInteractions: [{
+            backgroundId: 'map-1',
+            ownerUid: 'other-user',
+            type: 'aoe',
+            source: 'aoe-create',
+            colorKey: 'volt-lime',
+            figureType: 'square',
+            originCell: { col: 1, row: 1 },
+            targetCell: { col: 2, row: 2 },
+            updatedAt: { toMillis: () => Date.now() },
+            updatedBy: 'other-user',
+          }],
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('aoe-figure-overlay-shared-other-user')).toBeInTheDocument();
+    expect(document.querySelector('[data-stroke="#a3e635"]')).not.toBeNull();
+  });
+
+  test('selects an editable AoE figure and deletes it from the red bin action', async () => {
+    const onDeleteAoEFigures = jest.fn(() => Promise.resolve());
+    const figureId = 'map-1__current-user__circle__1';
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          aoeFigures: [{
+            id: figureId,
+            backgroundId: 'map-1',
+            ownerUid: 'current-user',
+            figureType: 'circle',
+            slot: 1,
+            originCell: { col: 2, row: 2 },
+            targetCell: { col: 3, row: 2 },
+            colorKey: 'ion-cyan',
+            isVisibleToPlayers: true,
+          }],
+          onDeleteAoEFigures,
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+      button: 0,
+      clientX: 175,
+      clientY: 175,
+      buttons: 1,
+    });
+    fireEvent.mouseUp(window, { button: 0, clientX: 175, clientY: 175, buttons: 0 });
+
+    fireEvent.click(screen.getByRole('button', { name: /delete selected aoe figure/i }));
+
+    await waitFor(() => {
+      expect(onDeleteAoEFigures).toHaveBeenCalledWith([figureId]);
+    });
+  });
+
+  test('moves an editable AoE figure when dragged', async () => {
+    const onMoveAoEFigure = jest.fn(() => Promise.resolve());
+    const figureId = 'map-1__current-user__square__1';
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          aoeFigures: [{
+            id: figureId,
+            backgroundId: 'map-1',
+            ownerUid: 'current-user',
+            figureType: 'square',
+            slot: 1,
+            originCell: { col: 2, row: 2 },
+            targetCell: { col: 3, row: 3 },
+            colorKey: 'nova-teal',
+            isVisibleToPlayers: true,
+          }],
+          onMoveAoEFigure,
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+      button: 0,
+      clientX: 175,
+      clientY: 175,
+      buttons: 1,
+    });
+    fireEvent.mouseMove(window, { clientX: 245, clientY: 175, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 245, clientY: 175, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onMoveAoEFigure).toHaveBeenCalledWith(figureId, expect.objectContaining({
+        figureType: 'square',
+        originCell: expect.objectContaining({
+          col: expect.any(Number),
+          row: expect.any(Number),
+        }),
+        targetCell: expect.objectContaining({
+          col: expect.any(Number),
+          row: expect.any(Number),
+        }),
+      }));
+    });
+  });
+
+  test('deletes a selected AoE figure when Delete is pressed', async () => {
+    const onDeleteAoEFigures = jest.fn(() => Promise.resolve());
+    const figureId = 'map-1__current-user__cone__1';
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          aoeFigures: [{
+            id: figureId,
+            backgroundId: 'map-1',
+            ownerUid: 'current-user',
+            figureType: 'cone',
+            slot: 1,
+            originCell: { col: 2, row: 2 },
+            targetCell: { col: 4, row: 2 },
+            colorKey: 'solar-amber',
+            isVisibleToPlayers: true,
+          }],
+          onDeleteAoEFigures,
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+      button: 0,
+      clientX: 175,
+      clientY: 175,
+      buttons: 1,
+    });
+    fireEvent.mouseUp(window, { button: 0, clientX: 175, clientY: 175, buttons: 0 });
+    fireEvent.keyDown(window, { key: 'Delete', code: 'Delete' });
+
+    await waitFor(() => {
+      expect(onDeleteAoEFigures).toHaveBeenCalledWith([figureId]);
+    });
+  });
+
+  test('does not expose the delete action for a non-editable visible AoE figure', () => {
+    const figureId = 'map-1__other-user__circle__1';
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          aoeFigures: [{
+            id: figureId,
+            backgroundId: 'map-1',
+            ownerUid: 'other-user',
+            figureType: 'circle',
+            slot: 1,
+            originCell: { col: 2, row: 2 },
+            targetCell: { col: 3, row: 2 },
+            colorKey: 'ion-cyan',
+            isVisibleToPlayers: true,
+          }],
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+      button: 0,
+      clientX: 175,
+      clientY: 175,
+      buttons: 1,
+    });
+    fireEvent.mouseUp(window, { button: 0, clientX: 175, clientY: 175, buttons: 0 });
+
+    expect(screen.queryByRole('button', { name: /delete selected aoe figure/i })).not.toBeInTheDocument();
   });
 });

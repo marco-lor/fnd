@@ -1,4 +1,5 @@
 import {
+  buildAoEFigureFromGrigliataLiveInteraction,
   buildGrigliataLiveInteractionDocId,
   buildMeasurementFromGrigliataLiveInteraction,
   filterActiveGrigliataLiveInteractions,
@@ -74,6 +75,30 @@ describe('liveInteractions', () => {
     }));
   });
 
+  test('builds a renderable AoE preview from a shared template interaction', () => {
+    const figure = buildAoEFigureFromGrigliataLiveInteraction({
+      interaction: {
+        backgroundId: 'map-1',
+        ownerUid: 'user-1',
+        type: 'aoe',
+        source: 'aoe-create',
+        colorKey: 'nova-teal',
+        figureType: 'circle',
+        originCell: { col: 2, row: 3 },
+        targetCell: { col: 4, row: 3 },
+        updatedAt: { toMillis: () => Date.now() },
+        updatedBy: 'user-1',
+      },
+      grid,
+    });
+
+    expect(figure).toEqual(expect.objectContaining({
+      figureType: 'circle',
+      sizeSquares: 3,
+      radius: 210,
+    }));
+  });
+
   test('returns null for invalid live interaction payloads', () => {
     expect(normalizeGrigliataLiveInteractionDraft({
       type: 'measure',
@@ -91,6 +116,22 @@ describe('liveInteractions', () => {
         colorKey: 'ion-cyan',
         anchorCells: [],
         liveEndCell: { col: 4, row: 0 },
+        updatedAt: { toMillis: () => Date.now() },
+        updatedBy: 'user-1',
+      },
+      grid,
+    })).toBeNull();
+
+    expect(buildAoEFigureFromGrigliataLiveInteraction({
+      interaction: {
+        backgroundId: 'map-1',
+        ownerUid: 'user-1',
+        type: 'aoe',
+        source: 'aoe-create',
+        colorKey: 'ion-cyan',
+        figureType: 'circle',
+        originCell: { col: 2.5, row: 0 },
+        targetCell: { col: 4, row: 0 },
         updatedAt: { toMillis: () => Date.now() },
         updatedBy: 'user-1',
       },

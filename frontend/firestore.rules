@@ -48,6 +48,36 @@ service cloud.firestore {
         && placementId == backgroundId + "__" + ownerUid;
     }
 
+    function isValidGrigliataAoEFigureType(figureType) {
+      return figureType in ["circle", "square", "cone"];
+    }
+
+    function isValidGrigliataAoEFigureSlot(slot) {
+      return slot is int
+        && slot >= 1
+        && slot <= 5;
+    }
+
+    function isGrigliataAoEFigureId(backgroundId, ownerUid, figureType, slot, figureId) {
+      return backgroundId is string
+        && ownerUid is string
+        && isValidGrigliataAoEFigureType(figureType)
+        && isValidGrigliataAoEFigureSlot(slot)
+        && (
+          (slot == 1 && figureId == backgroundId + "__" + ownerUid + "__" + figureType + "__1")
+          || (slot == 2 && figureId == backgroundId + "__" + ownerUid + "__" + figureType + "__2")
+          || (slot == 3 && figureId == backgroundId + "__" + ownerUid + "__" + figureType + "__3")
+          || (slot == 4 && figureId == backgroundId + "__" + ownerUid + "__" + figureType + "__4")
+          || (slot == 5 && figureId == backgroundId + "__" + ownerUid + "__" + figureType + "__5")
+        );
+    }
+
+    function isOwnGrigliataAoEFigureProbeId(figureId) {
+      return isSignedIn()
+        && figureId is string
+        && figureId.matches('^.+__' + request.auth.uid + '__(circle|square|cone)__(1|2|3|4|5)$');
+    }
+
     function isValidGrigliataPlacement(data, placementId) {
       return data.keys().hasAll([
           "backgroundId",
@@ -131,6 +161,49 @@ service cloud.firestore {
         && cell.row is int;
     }
 
+    function isValidGrigliataAoEFigure(data, figureId) {
+      return data.keys().hasAll([
+          "backgroundId",
+          "ownerUid",
+          "figureType",
+          "slot",
+          "originCell",
+          "targetCell",
+          "colorKey",
+          "isVisibleToPlayers",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.keys().hasOnly([
+          "backgroundId",
+          "ownerUid",
+          "figureType",
+          "slot",
+          "originCell",
+          "targetCell",
+          "colorKey",
+          "isVisibleToPlayers",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.backgroundId is string
+        && data.ownerUid is string
+        && isValidGrigliataAoEFigureType(data.figureType)
+        && isValidGrigliataAoEFigureSlot(data.slot)
+        && isValidGrigliataGridCell(data.originCell)
+        && isValidGrigliataGridCell(data.targetCell)
+        && data.colorKey is string
+        && isGrigliataDrawColorKey(data.colorKey)
+        && data.isVisibleToPlayers is bool
+        && (data.createdBy == null || data.createdBy is string)
+        && (data.updatedBy == null || data.updatedBy is string)
+        && isGrigliataAoEFigureId(data.backgroundId, data.ownerUid, data.figureType, data.slot, figureId);
+    }
+
     function hasValidGrigliataAnchorCells(cells) {
       return cells is list
         && cells.size() > 0
@@ -160,32 +233,55 @@ service cloud.firestore {
           "type",
           "source",
           "colorKey",
-          "anchorCells",
-          "liveEndCell",
-          "updatedAt",
-          "updatedBy"
-        ])
-        && data.keys().hasOnly([
-          "backgroundId",
-          "ownerUid",
-          "type",
-          "source",
-          "colorKey",
-          "anchorCells",
-          "liveEndCell",
           "updatedAt",
           "updatedBy"
         ])
         && data.backgroundId is string
         && data.ownerUid is string
-        && data.type == "measure"
-        && data.source in ["free", "token-drag"]
         && data.colorKey is string
         && isGrigliataDrawColorKey(data.colorKey)
-        && hasValidGrigliataAnchorCells(data.anchorCells)
-        && isValidGrigliataGridCell(data.liveEndCell)
         && (data.updatedBy == null || data.updatedBy is string)
-        && isGrigliataPlacementId(data.backgroundId, data.ownerUid, interactionId);
+        && isGrigliataPlacementId(data.backgroundId, data.ownerUid, interactionId)
+        && (
+          (
+            data.type == "measure"
+            && data.keys().hasAll(["anchorCells", "liveEndCell"])
+            && data.keys().hasOnly([
+              "backgroundId",
+              "ownerUid",
+              "type",
+              "source",
+              "colorKey",
+              "anchorCells",
+              "liveEndCell",
+              "updatedAt",
+              "updatedBy"
+            ])
+            && data.source in ["free", "token-drag"]
+            && hasValidGrigliataAnchorCells(data.anchorCells)
+            && isValidGrigliataGridCell(data.liveEndCell)
+          )
+          || (
+            data.type == "aoe"
+            && data.keys().hasAll(["figureType", "originCell", "targetCell"])
+            && data.keys().hasOnly([
+              "backgroundId",
+              "ownerUid",
+              "type",
+              "source",
+              "colorKey",
+              "figureType",
+              "originCell",
+              "targetCell",
+              "updatedAt",
+              "updatedBy"
+            ])
+            && data.source in ["aoe-create", "aoe-move"]
+            && isValidGrigliataAoEFigureType(data.figureType)
+            && isValidGrigliataGridCell(data.originCell)
+            && isValidGrigliataGridCell(data.targetCell)
+          )
+        );
     }
 
     function isGrigliataPlacementVisibleToPlayers(data) {
@@ -407,6 +503,49 @@ service cloud.firestore {
 
       allow delete: if isSignedIn()
         && isValidGrigliataLiveInteraction(resource.data, interactionId)
+        && (
+          isGrigliataManager()
+          || request.auth.uid == resource.data.ownerUid
+        );
+    }
+
+    match /grigliata_aoe_figures/{figureId} {
+      allow read: if isSignedIn()
+        && (
+          isGrigliataManager()
+          || (
+            resource == null
+            && isOwnGrigliataAoEFigureProbeId(figureId)
+          )
+          || (
+            resource != null
+            && (
+              request.auth.uid == resource.data.ownerUid
+              || resource.data.isVisibleToPlayers == true
+            )
+          )
+        );
+
+      allow create: if isSignedIn()
+        && isValidGrigliataAoEFigure(request.resource.data, figureId)
+        && (
+          isGrigliataManager()
+          || request.auth.uid == request.resource.data.ownerUid
+        );
+
+      allow update: if isSignedIn()
+        && isValidGrigliataAoEFigure(request.resource.data, figureId)
+        && request.resource.data.backgroundId == resource.data.backgroundId
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.figureType == resource.data.figureType
+        && request.resource.data.slot == resource.data.slot
+        && (
+          isGrigliataManager()
+          || request.auth.uid == resource.data.ownerUid
+        );
+
+      allow delete: if isSignedIn()
+        && isValidGrigliataAoEFigure(resource.data, figureId)
         && (
           isGrigliataManager()
           || request.auth.uid == resource.data.ownerUid

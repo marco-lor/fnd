@@ -39,6 +39,15 @@ import {
   getGrigliataDrawTheme,
   resolveGrigliataDrawColorKey,
 } from './constants';
+import {
+  buildGrigliataAoEFigureDoc,
+  buildGrigliataAoEFigureDocId,
+  findNextGrigliataAoEFigureSlot,
+  GRIGLIATA_AOE_FIGURE_COLLECTION,
+  GRIGLIATA_AOE_FIGURE_TYPES,
+  MAX_GRIGLIATA_AOE_FIGURES_PER_TYPE,
+  normalizeGrigliataAoEFigureDraft,
+} from './aoeFigures';
 import GrigliataBoard from './GrigliataBoard';
 import {
   buildGrigliataLiveInteractionDoc,
@@ -60,6 +69,7 @@ const LIVE_INTERACTION_CLOCK_INTERVAL_MS = 15 * 1000;
 const LEGACY_TOKEN_CLEANUP_FIELD = 'legacyTokenPlacementCleanupCompletedAt';
 const LEGACY_PLACEMENT_VISIBILITY_CLEANUP_FIELD = 'legacyPlacementVisibilityCleanupCompletedAt';
 const GRIGLIATA_HIDDEN_BACKGROUND_IDS_FIELD = 'grigliata_hidden_background_ids';
+const GRIGLIATA_SHARE_INTERACTIONS_FIELD = 'grigliata_share_interactions';
 
 const buildPlacementDocId = (backgroundId, ownerUid) => `${backgroundId}__${ownerUid}`;
 const buildHiddenPlacementSettingsPayload = (backgroundId, isHidden) => ({
@@ -89,14 +99,16 @@ export default function GrigliataPage() {
   const currentImagePath = typeof userData?.imagePath === 'string' ? userData.imagePath.trim() : '';
   const currentTokenLabel = currentCharacterId || currentUserEmail.split('@')[0] || 'Player';
   const persistedDrawColorKey = resolveGrigliataDrawColorKey(userData?.settings?.grigliata_draw_color);
+  const persistedInteractionSharingEnabled = userData?.settings?.[GRIGLIATA_SHARE_INTERACTIONS_FIELD] === true;
   const [navbarOffset, setNavbarOffset] = useState(0);
   const [backgrounds, setBackgrounds] = useState([]);
   const [boardState, setBoardState] = useState({});
   const [tokenProfiles, setTokenProfiles] = useState([]);
   const [activePlacements, setActivePlacements] = useState([]);
+  const [aoeFigureSnapshots, setAoEFigureSnapshots] = useState([]);
   const [liveInteractionSnapshots, setLiveInteractionSnapshots] = useState([]);
   const [localLiveInteraction, setLocalLiveInteraction] = useState(null);
-  const [isInteractionSharingEnabled, setIsInteractionSharingEnabled] = useState(false);
+  const [isInteractionSharingEnabled, setIsInteractionSharingEnabled] = useState(persistedInteractionSharingEnabled);
   const [liveInteractionClock, setLiveInteractionClock] = useState(() => Date.now());
 
   const [selectedFile, setSelectedFile] = useState(null);
@@ -114,6 +126,7 @@ export default function GrigliataPage() {
   const [boardError, setBoardError] = useState('');
   const [isTrayDragging, setIsTrayDragging] = useState(false);
   const [isRulerEnabled, setIsRulerEnabled] = useState(false);
+  const [activeAoeFigureType, setActiveAoeFigureType] = useState('');
   const [drawColorKey, setDrawColorKey] = useState(persistedDrawColorKey);
   const [activeGridSizeOverride, setActiveGridSizeOverride] = useState(null);
   const [activeSidebarTab, setActiveSidebarTab] = useState('tokens');
@@ -126,6 +139,9 @@ export default function GrigliataPage() {
   const latestDrawColorRequestIdRef = useRef(0);
   const latestRequestedDrawColorKeyRef = useRef(persistedDrawColorKey);
   const persistedDrawColorKeyRef = useRef(persistedDrawColorKey);
+  const persistedInteractionSharingEnabledRef = useRef(persistedInteractionSharingEnabled);
+  const latestRequestedInteractionSharingEnabledRef = useRef(persistedInteractionSharingEnabled);
+  const interactionSharingMutationPendingRef = useRef(false);
   const gridSizeAutosaveTimeoutRef = useRef(null);
   const pendingGridSizeAutosaveRef = useRef(null);
   const liveInteractionPublishTimeoutRef = useRef(null);
@@ -170,6 +186,20 @@ export default function GrigliataPage() {
     latestRequestedDrawColorKeyRef.current = persistedDrawColorKey;
     setDrawColorKey(persistedDrawColorKey);
   }, [persistedDrawColorKey]);
+
+  useEffect(() => {
+    persistedInteractionSharingEnabledRef.current = persistedInteractionSharingEnabled;
+
+    if (
+      interactionSharingMutationPendingRef.current
+      && persistedInteractionSharingEnabled !== latestRequestedInteractionSharingEnabledRef.current
+    ) {
+      return;
+    }
+
+    latestRequestedInteractionSharingEnabledRef.current = persistedInteractionSharingEnabled;
+    setIsInteractionSharingEnabled(persistedInteractionSharingEnabled);
+  }, [persistedInteractionSharingEnabled]);
 
   useEffect(() => {
     if (sidebarTabs.some((tab) => tab.key === activeSidebarTab)) return;
@@ -287,6 +317,108 @@ export default function GrigliataPage() {
     );
 
     return () => unsubscribePlacements();
+  }, [activeBackgroundId, currentUserId, isManager]);
+
+  useEffect(() => {
+    if (!currentUserId || !activeBackgroundId) {
+      setAoEFigureSnapshots([]);
+      return undefined;
+    }
+
+    const mergeFigureCollections = (visibleFigures, ownFigures) => {
+      const nextMap = new Map();
+
+      [...visibleFigures, ...ownFigures].forEach((figure) => {
+        if (figure?.id) {
+          nextMap.set(figure.id, figure);
+        }
+      });
+
+      setAoEFigureSnapshots([...nextMap.values()]);
+    };
+
+    if (isManager) {
+      const figuresQuery = query(
+        collection(db, GRIGLIATA_AOE_FIGURE_COLLECTION),
+        where('backgroundId', '==', activeBackgroundId)
+      );
+
+      const unsubscribeFigures = onSnapshot(
+        figuresQuery,
+        (snapshot) => {
+          const nextFigures = snapshot.docs.map((docSnap) => ({
+            id: docSnap.id,
+            ...docSnap.data(),
+          }));
+          setAoEFigureSnapshots(nextFigures);
+        },
+        (error) => {
+          console.error('Failed to load Grigliata AoE figures:', error);
+          setAoEFigureSnapshots([]);
+        }
+      );
+
+      return () => unsubscribeFigures();
+    }
+
+    let visibleFigures = [];
+    const ownFiguresById = new Map();
+
+    const publishMergedFigures = () => {
+      mergeFigureCollections(visibleFigures, [...ownFiguresById.values()]);
+    };
+
+    const visibleFiguresQuery = query(
+      collection(db, GRIGLIATA_AOE_FIGURE_COLLECTION),
+      where('backgroundId', '==', activeBackgroundId),
+      where('isVisibleToPlayers', '==', true)
+    );
+    const unsubscribeVisibleFigures = onSnapshot(
+      visibleFiguresQuery,
+      (snapshot) => {
+        visibleFigures = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
+        publishMergedFigures();
+      },
+      (error) => {
+        console.error('Failed to load visible Grigliata AoE figures:', error);
+        visibleFigures = [];
+        publishMergedFigures();
+      }
+    );
+    const ownFigureDocIds = GRIGLIATA_AOE_FIGURE_TYPES.flatMap((figureType) => (
+      Array.from({ length: MAX_GRIGLIATA_AOE_FIGURES_PER_TYPE }, (_, index) => (
+        buildGrigliataAoEFigureDocId(activeBackgroundId, currentUserId, figureType, index + 1)
+      ))
+    )).filter(Boolean);
+    const unsubscribeOwnFigures = ownFigureDocIds.map((figureId) => (
+      onSnapshot(
+        doc(db, GRIGLIATA_AOE_FIGURE_COLLECTION, figureId),
+        (snapshot) => {
+          if (snapshot.exists()) {
+            ownFiguresById.set(figureId, {
+              id: snapshot.id,
+              ...snapshot.data(),
+            });
+          } else {
+            ownFiguresById.delete(figureId);
+          }
+          publishMergedFigures();
+        },
+        (error) => {
+          console.error(`Failed to load owned Grigliata AoE figure ${figureId}:`, error);
+          ownFiguresById.delete(figureId);
+          publishMergedFigures();
+        }
+      )
+    ));
+
+    return () => {
+      unsubscribeVisibleFigures();
+      unsubscribeOwnFigures.forEach((unsubscribe) => unsubscribe());
+    };
   }, [activeBackgroundId, currentUserId, isManager]);
 
   useEffect(() => {
@@ -821,6 +953,62 @@ export default function GrigliataPage() {
       void persistPendingGridSizeAutosave(nextSave);
     }, GRID_SIZE_AUTOSAVE_DEBOUNCE_MS);
   }, [clearGridSizeAutosaveTimer, persistPendingGridSizeAutosave]);
+
+  const syncOwnedAoEFigureVisibility = useCallback(async (nextIsVisibleToPlayers) => {
+    if (!currentUserId) return;
+
+    let cursor = null;
+
+    while (true) {
+      const baseConstraints = [
+        where('ownerUid', '==', currentUserId),
+        orderBy(documentId()),
+        limit(FIRESTORE_BATCH_SIZE),
+      ];
+      const pageQuery = cursor
+        ? query(collection(db, GRIGLIATA_AOE_FIGURE_COLLECTION), ...baseConstraints, startAfter(cursor))
+        : query(collection(db, GRIGLIATA_AOE_FIGURE_COLLECTION), ...baseConstraints);
+      const snapshot = await getDocs(pageQuery);
+
+      if (snapshot.empty) {
+        return;
+      }
+
+      const batch = writeBatch(db);
+      let shouldCommitBatch = false;
+
+      snapshot.docs.forEach((docSnap) => {
+        if (docSnap.data()?.isVisibleToPlayers === nextIsVisibleToPlayers) {
+          return;
+        }
+
+        batch.set(docSnap.ref, {
+          isVisibleToPlayers: nextIsVisibleToPlayers,
+          updatedAt: serverTimestamp(),
+          updatedBy: currentUserId || null,
+        }, { merge: true });
+        shouldCommitBatch = true;
+      });
+
+      if (shouldCommitBatch) {
+        await batch.commit();
+      }
+
+      if (snapshot.size < FIRESTORE_BATCH_SIZE) {
+        return;
+      }
+
+      cursor = snapshot.docs[snapshot.docs.length - 1];
+    }
+  }, [currentUserId]);
+
+  const persistInteractionSharingPreference = useCallback(async (nextIsEnabled) => {
+    if (!currentUserId) return;
+
+    await updateDoc(doc(db, 'users', currentUserId), {
+      [`settings.${GRIGLIATA_SHARE_INTERACTIONS_FIELD}`]: nextIsEnabled,
+    });
+  }, [currentUserId]);
 
   const clearLiveInteractionPublishTimer = useCallback(() => {
     if (!liveInteractionPublishTimeoutRef.current) return;
@@ -1402,6 +1590,169 @@ export default function GrigliataPage() {
     }
   };
 
+  const handleSelectMouseTool = useCallback(() => {
+    setBoardError('');
+    setActiveAoeFigureType('');
+    setIsRulerEnabled(false);
+  }, []);
+
+  const handleToggleRuler = useCallback(() => {
+    setBoardError('');
+    setActiveAoeFigureType('');
+    setIsRulerEnabled((currentValue) => !currentValue);
+  }, []);
+
+  const handleChangeAoeFigureType = useCallback((nextFigureType) => {
+    setBoardError('');
+    setActiveAoeFigureType(nextFigureType || '');
+    if (nextFigureType) {
+      setIsRulerEnabled(false);
+    }
+  }, []);
+
+  const handleCreateAoEFigure = useCallback(async (draft) => {
+    if (!currentUserId || !activeBackgroundId) return false;
+
+    const normalizedDraft = normalizeGrigliataAoEFigureDraft(draft);
+    if (!normalizedDraft) return false;
+
+    const slot = findNextGrigliataAoEFigureSlot(aoeFigureSnapshots, {
+      backgroundId: activeBackgroundId,
+      ownerUid: currentUserId,
+      figureType: normalizedDraft.figureType,
+    });
+
+    if (!slot) {
+      setBoardError(`You can place at most 5 ${normalizedDraft.figureType} templates on this map.`);
+      return false;
+    }
+
+    const docId = buildGrigliataAoEFigureDocId(
+      activeBackgroundId,
+      currentUserId,
+      normalizedDraft.figureType,
+      slot
+    );
+    const payload = buildGrigliataAoEFigureDoc({
+      backgroundId: activeBackgroundId,
+      ownerUid: currentUserId,
+      slot,
+      colorKey: drawColorKey,
+      isVisibleToPlayers: isInteractionSharingEnabled,
+      draft: normalizedDraft,
+      createdAt: serverTimestamp(),
+      createdBy: currentUserId,
+      updatedAt: serverTimestamp(),
+      updatedBy: currentUserId,
+    });
+
+    if (!docId || !payload) {
+      return false;
+    }
+
+    setBoardError('');
+    try {
+      await setDoc(doc(db, GRIGLIATA_AOE_FIGURE_COLLECTION, docId), payload);
+      return true;
+    } catch (error) {
+      console.error('Failed to create Grigliata AoE figure:', error);
+      setBoardError('Unable to place that AoE template right now.');
+      throw error;
+    }
+  }, [
+    activeBackgroundId,
+    aoeFigureSnapshots,
+    currentUserId,
+    drawColorKey,
+    isInteractionSharingEnabled,
+  ]);
+
+  const handleMoveAoEFigure = useCallback(async (figureId, draft) => {
+    if (!currentUserId || !figureId) return;
+
+    const normalizedDraft = normalizeGrigliataAoEFigureDraft(draft);
+    if (!normalizedDraft) return;
+
+    const existingFigure = aoeFigureSnapshots.find((figure) => figure.id === figureId);
+    if (!existingFigure) return;
+
+    const payload = {
+      originCell: normalizedDraft.originCell,
+      targetCell: normalizedDraft.targetCell,
+      updatedAt: serverTimestamp(),
+      updatedBy: currentUserId || null,
+    };
+
+    if (existingFigure.ownerUid === currentUserId) {
+      payload.isVisibleToPlayers = isInteractionSharingEnabled;
+    }
+
+    setBoardError('');
+    try {
+      await updateDoc(doc(db, GRIGLIATA_AOE_FIGURE_COLLECTION, figureId), payload);
+    } catch (error) {
+      console.error('Failed to move Grigliata AoE figure:', error);
+      setBoardError(
+        isPermissionDeniedError(error)
+          ? 'That AoE template is controlled by another player.'
+          : 'Unable to move that AoE template right now.'
+      );
+      throw error;
+    }
+  }, [aoeFigureSnapshots, currentUserId, isInteractionSharingEnabled]);
+
+  const handleDeleteAoEFigures = useCallback(async (figureIds) => {
+    const normalizedFigureIds = [...new Set((figureIds || []).filter(Boolean))];
+    if (!normalizedFigureIds.length) return;
+
+    setBoardError('');
+    try {
+      for (let index = 0; index < normalizedFigureIds.length; index += FIRESTORE_BATCH_SIZE) {
+        const batch = writeBatch(db);
+        normalizedFigureIds.slice(index, index + FIRESTORE_BATCH_SIZE).forEach((figureId) => {
+          batch.delete(doc(db, GRIGLIATA_AOE_FIGURE_COLLECTION, figureId));
+        });
+        await batch.commit();
+      }
+    } catch (error) {
+      console.error('Failed to delete Grigliata AoE figures:', error);
+      setBoardError(
+        isPermissionDeniedError(error)
+          ? 'That AoE template is controlled by another player.'
+          : 'Unable to delete the selected AoE template right now.'
+      );
+      throw error;
+    }
+  }, []);
+
+  const handleToggleInteractionSharing = useCallback(async () => {
+    if (!currentUserId) return;
+
+    const nextIsEnabled = !isInteractionSharingEnabled;
+    latestRequestedInteractionSharingEnabledRef.current = nextIsEnabled;
+    interactionSharingMutationPendingRef.current = true;
+    setBoardError('');
+    setIsInteractionSharingEnabled(nextIsEnabled);
+
+    try {
+      await persistInteractionSharingPreference(nextIsEnabled);
+      await syncOwnedAoEFigureVisibility(nextIsEnabled);
+    } catch (error) {
+      console.error('Failed to update Grigliata interaction sharing preference:', error);
+      const fallbackValue = persistedInteractionSharingEnabledRef.current;
+      latestRequestedInteractionSharingEnabledRef.current = fallbackValue;
+      setIsInteractionSharingEnabled(fallbackValue);
+      setBoardError('Unable to update interaction sharing right now.');
+    } finally {
+      interactionSharingMutationPendingRef.current = false;
+    }
+  }, [
+    currentUserId,
+    isInteractionSharingEnabled,
+    persistInteractionSharingPreference,
+    syncOwnedAoEFigureVisibility,
+  ]);
+
   const handleDrawColorChange = useCallback((nextColorKey) => {
     if (!currentUserId) return;
 
@@ -1497,17 +1848,18 @@ export default function GrigliataPage() {
                 grid={grid}
                 isGridVisible={isGridVisible}
                 tokens={boardTokens}
+                aoeFigures={aoeFigureSnapshots}
                 currentUserId={user.uid}
                 isManager={isManager}
                 isTokenDragActive={isTrayDragging}
                 isRulerEnabled={isRulerEnabled}
+                activeAoeFigureType={activeAoeFigureType}
                 isInteractionSharingEnabled={isInteractionSharingEnabled}
                 drawTheme={drawTheme}
-                onToggleRuler={() => setIsRulerEnabled((currentValue) => !currentValue)}
-                onToggleInteractionSharing={() => {
-                  setBoardError('');
-                  setIsInteractionSharingEnabled((currentValue) => !currentValue);
-                }}
+                onSelectMouseTool={handleSelectMouseTool}
+                onToggleRuler={handleToggleRuler}
+                onChangeAoeFigureType={handleChangeAoeFigureType}
+                onToggleInteractionSharing={handleToggleInteractionSharing}
                 onChangeDrawColor={handleDrawColorChange}
                 onToggleGridVisibility={isManager ? handleToggleGridVisibility : null}
                 isGridVisibilityToggleDisabled={!activeBackgroundId || gridVisibilityUpdateBackgroundId === activeBackgroundId}
@@ -1515,6 +1867,9 @@ export default function GrigliataPage() {
                 isGridSizeAdjustmentDisabled={!activeBackgroundId}
                 onMoveTokens={handleMoveTokens}
                 onDeleteTokens={handleDeleteTokens}
+                onCreateAoEFigure={handleCreateAoEFigure}
+                onMoveAoEFigure={handleMoveAoEFigure}
+                onDeleteAoEFigures={handleDeleteAoEFigures}
                 onToggleTokenVisibility={isManager ? handleToggleTokenVisibility : null}
                 tokenVisibilityUpdateOwnerUid={tokenVisibilityUpdateOwnerUid}
                 sharedInteractions={sharedInteractions}

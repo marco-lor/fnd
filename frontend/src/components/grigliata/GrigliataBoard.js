@@ -10,8 +10,8 @@ import {
   Stage,
   Text,
 } from 'react-konva';
-import { FaRulerHorizontal } from 'react-icons/fa';
-import { FiEye, FiEyeOff, FiUser, FiUsers } from 'react-icons/fi';
+import { FaHandPointer, FaRulerHorizontal } from 'react-icons/fa';
+import { FiEye, FiEyeOff, FiTrash2, FiUser, FiUsers } from 'react-icons/fi';
 import { MdCenterFocusStrong } from 'react-icons/md';
 import {
   BOARD_FIT_PADDING,
@@ -37,9 +37,17 @@ import {
 } from './tokenStatuses';
 import useImageAsset from './useImageAsset';
 import {
+  buildAoEFigureFromGrigliataLiveInteraction,
   buildMeasurementFromGrigliataLiveInteraction,
   normalizeGrigliataLiveInteractionDraft,
 } from './liveInteractions';
+import {
+  buildRenderableGrigliataAoEFigure,
+  GRIGLIATA_AOE_FIGURE_TYPES,
+  normalizeGrigliataAoEFigure,
+  normalizeGrigliataAoEFigureDraft,
+  shiftGrigliataAoEFigureCells,
+} from './aoeFigures';
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
 const RULER_LABEL_MIN_WIDTH = 90;
@@ -74,6 +82,12 @@ const isWaypointEligibleInteraction = (interaction) => (
   && (interaction.type === 'measure' || interaction.type === 'token-drag')
   && Array.isArray(interaction.anchorCells)
   && interaction.anchorCells.length > 0
+);
+
+const isAoECreateInteraction = (interaction) => interaction?.type === 'aoe-create';
+const isAoEDragInteraction = (interaction) => (
+  interaction?.type === 'aoe-drag-candidate'
+  || interaction?.type === 'aoe-drag'
 );
 
 const normalizeSelectionRect = (selectionBox) => {
@@ -645,6 +659,109 @@ const MeasurementOverlay = ({
   );
 };
 
+const AoEFigureOverlay = ({
+  figure,
+  drawTheme = DEFAULT_DRAW_THEME,
+  overlayId = '',
+  isSelected = false,
+  onMouseDown,
+  listening = true,
+}) => {
+  if (!figure?.figureType) {
+    return null;
+  }
+
+  const overlayProps = {
+    listening,
+    onMouseDown,
+    'data-testid': overlayId ? `aoe-figure-overlay-${overlayId}` : undefined,
+  };
+  const outlineStroke = isSelected ? 'rgba(248, 250, 252, 0.96)' : drawTheme.outlineStroke;
+  const accentStroke = isSelected ? '#ffffff' : drawTheme.stroke;
+  const outlineStrokeWidth = isSelected ? SHAPE_OUTLINE_STROKE_WIDTH + 1 : SHAPE_OUTLINE_STROKE_WIDTH;
+  const accentStrokeWidth = isSelected ? 2.6 : 1.75;
+  const shadowBlur = isSelected ? 16 : 10;
+
+  if (figure.figureType === 'circle') {
+    return (
+      <Group {...overlayProps}>
+        <Circle
+          x={figure.centerPoint.x}
+          y={figure.centerPoint.y}
+          radius={figure.radius}
+          stroke={outlineStroke}
+          strokeWidth={outlineStrokeWidth}
+        />
+        <Circle
+          x={figure.centerPoint.x}
+          y={figure.centerPoint.y}
+          radius={figure.radius}
+          fill={drawTheme.fill}
+          stroke={accentStroke}
+          strokeWidth={accentStrokeWidth}
+          shadowColor={drawTheme.glow}
+          shadowBlur={shadowBlur}
+          shadowOpacity={0.24}
+        />
+      </Group>
+    );
+  }
+
+  if (figure.figureType === 'square') {
+    return (
+      <Group {...overlayProps}>
+        <Rect
+          x={figure.x}
+          y={figure.y}
+          width={figure.width}
+          height={figure.height}
+          stroke={outlineStroke}
+          strokeWidth={outlineStrokeWidth}
+        />
+        <Rect
+          x={figure.x}
+          y={figure.y}
+          width={figure.width}
+          height={figure.height}
+          fill={drawTheme.fill}
+          stroke={accentStroke}
+          strokeWidth={accentStrokeWidth}
+          shadowColor={drawTheme.glow}
+          shadowBlur={shadowBlur}
+          shadowOpacity={0.24}
+        />
+      </Group>
+    );
+  }
+
+  if (figure.figureType === 'cone') {
+    return (
+      <Group {...overlayProps}>
+        <Line
+          points={figure.flatPoints}
+          closed
+          stroke={outlineStroke}
+          strokeWidth={outlineStrokeWidth}
+          lineJoin="round"
+        />
+        <Line
+          points={figure.flatPoints}
+          closed
+          fill={drawTheme.fill}
+          stroke={accentStroke}
+          strokeWidth={accentStrokeWidth}
+          lineJoin="round"
+          shadowColor={drawTheme.glow}
+          shadowBlur={shadowBlur}
+          shadowOpacity={0.24}
+        />
+      </Group>
+    );
+  }
+
+  return null;
+};
+
 const getDrawSwatchStyle = (theme, isActive = false) => ({
   background: theme.swatchBackground,
   borderColor: isActive ? theme.swatchBorder : 'rgba(71, 85, 105, 0.9)',
@@ -797,18 +914,164 @@ const DrawColorPicker = ({ activeColorKey, onChange }) => {
   );
 };
 
+const AOE_TEMPLATE_LABELS = {
+  circle: 'Circle',
+  square: 'Square',
+  cone: 'Cone',
+};
+
+const AoETemplatePicker = ({ activeFigureType = '', onChange }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const pickerRef = useRef(null);
+  const triggerRef = useRef(null);
+  const prefersReducedMotion = useReducedMotion();
+  const drawerId = useId();
+  const activeLabel = activeFigureType ? AOE_TEMPLATE_LABELS[activeFigureType] || 'AoE' : 'AoE';
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (pickerRef.current?.contains(event.target)) return;
+      setIsOpen(false);
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setIsOpen(false);
+      triggerRef.current?.focus();
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
+
+  const handleSelectTemplate = (figureType) => {
+    onChange?.(figureType === activeFigureType ? '' : figureType);
+    setIsOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  return (
+    <div ref={pickerRef} className="relative z-10 h-10 w-10 shrink-0" data-testid="aoe-template-picker">
+      <motion.div
+        initial={false}
+        animate={prefersReducedMotion
+          ? undefined
+          : {
+            boxShadow: isOpen
+              ? '0 22px 48px -22px rgba(2, 6, 23, 0.96)'
+              : '0 14px 32px -24px rgba(2, 6, 23, 0.9)',
+          }}
+        className="absolute left-0 top-0 z-20 flex min-h-10 items-center justify-start rounded-2xl border border-slate-800/90 bg-slate-950/92 p-1 backdrop-blur-md"
+      >
+        <button
+          ref={triggerRef}
+          type="button"
+          title={activeFigureType
+            ? `Change area template. Current template: ${activeLabel}`
+            : 'Choose an area template'}
+          aria-label={activeFigureType
+            ? `Change area template. Current template: ${activeLabel}`
+            : 'Choose an area template'}
+          aria-haspopup="true"
+          aria-expanded={isOpen}
+          aria-controls={drawerId}
+          data-testid="aoe-template-trigger"
+          onClick={() => setIsOpen((currentOpen) => !currentOpen)}
+          className={`group relative flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-black uppercase tracking-[0.18em] transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
+            activeFigureType
+              ? 'border-rose-300/70 bg-rose-500/22 text-rose-50'
+              : 'border-slate-600/90 bg-slate-900/96 text-slate-200'
+          }`}
+        >
+          AoE
+        </button>
+
+        <AnimatePresence initial={false}>
+          {isOpen && (
+            <motion.div
+              key="aoe-template-drawer"
+              id={drawerId}
+              data-testid="aoe-template-drawer"
+              className="flex items-center gap-2 overflow-hidden pl-2 pr-2"
+              initial={prefersReducedMotion ? { opacity: 1, width: 'auto' } : { opacity: 0, width: 0 }}
+              animate={{ opacity: 1, width: 'auto' }}
+              exit={prefersReducedMotion ? { opacity: 0, width: 0 } : { opacity: 0, width: 0 }}
+              transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.26, ease: DRAW_PICKER_EASE }}
+            >
+              <motion.span
+                aria-hidden="true"
+                initial={prefersReducedMotion ? false : { opacity: 0, x: 8 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: 8 }}
+                transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.16, ease: DRAW_PICKER_EASE }}
+                className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400"
+              >
+                Templates
+              </motion.span>
+
+              <div className="flex items-center gap-1.5" role="group" aria-label="Choose an area template">
+                {GRIGLIATA_AOE_FIGURE_TYPES.map((figureType, index) => {
+                  const isActive = figureType === activeFigureType;
+                  const label = AOE_TEMPLATE_LABELS[figureType] || figureType;
+
+                  return (
+                    <motion.button
+                      key={figureType}
+                      type="button"
+                      title={`Use the ${label.toLowerCase()} area template`}
+                      aria-label={`Use the ${label.toLowerCase()} area template`}
+                      aria-pressed={isActive}
+                      data-testid={`aoe-template-option-${figureType}`}
+                      onClick={() => handleSelectTemplate(figureType)}
+                      initial={prefersReducedMotion ? false : { opacity: 0, x: 12, scale: 0.74 }}
+                      animate={{ opacity: 1, x: 0, scale: 1 }}
+                      exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: 12, scale: 0.82 }}
+                      transition={prefersReducedMotion
+                        ? { duration: 0.01 }
+                        : { duration: 0.18, delay: index * 0.03, ease: DRAW_PICKER_EASE }}
+                      className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] transition-transform duration-150 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
+                        isActive
+                          ? 'border-rose-300/70 bg-rose-500/28 text-rose-50'
+                          : 'border-slate-700 bg-slate-900/96 text-slate-200'
+                      }`}
+                    >
+                      {label}
+                    </motion.button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
+    </div>
+  );
+};
+
 export default function GrigliataBoard({
   activeBackground,
   grid,
   isGridVisible = true,
   tokens,
+  aoeFigures = [],
   currentUserId,
   isManager,
   isTokenDragActive,
   isRulerEnabled,
+  activeAoeFigureType = '',
   isInteractionSharingEnabled = false,
   drawTheme,
+  onSelectMouseTool,
   onToggleRuler,
+  onChangeAoeFigureType,
   onToggleInteractionSharing,
   onChangeDrawColor,
   onToggleGridVisibility,
@@ -817,6 +1080,9 @@ export default function GrigliataBoard({
   isGridSizeAdjustmentDisabled,
   onMoveTokens,
   onDeleteTokens,
+  onCreateAoEFigure,
+  onMoveAoEFigure,
+  onDeleteAoEFigures,
   onSetSelectedTokensVisibility,
   isTokenVisibilityActionPending,
   onSetSelectedTokensDeadState,
@@ -837,12 +1103,16 @@ export default function GrigliataBoard({
   const [selectionBox, setSelectionBox] = useState(null);
   const [tokenDragState, setTokenDragState] = useState(null);
   const [measurementState, setMeasurementState] = useState(null);
+  const [aoePreviewState, setAoEPreviewState] = useState(null);
+  const [selectedAoEFigureId, setSelectedAoEFigureId] = useState('');
+  const [aoeFigureDragState, setAoEFigureDragState] = useState(null);
   const [activeSharedInteraction, setActiveSharedInteraction] = useState(null);
   const [hoveredOverflowTokenId, setHoveredOverflowTokenId] = useState('');
   const [pinnedOverflowTokenId, setPinnedOverflowTokenId] = useState('');
   const backgroundImage = useImageAsset(activeBackground?.imageUrl || '');
   const lastFitKeyRef = useRef('');
   const resolvedDrawTheme = drawTheme || DEFAULT_DRAW_THEME;
+  const isMouseSelectionActive = !isRulerEnabled && !activeAoeFigureType;
 
   const normalizedGrid = useMemo(() => normalizeGridConfig(grid), [grid]);
 
@@ -888,6 +1158,30 @@ export default function GrigliataBoard({
     [tokenItems]
   );
 
+  const figureItems = useMemo(
+    () => (aoeFigures || [])
+      .map((figure) => normalizeGrigliataAoEFigure(figure))
+      .filter(Boolean)
+      .map((figure) => ({
+        ...figure,
+        canEdit: isManager || figure.ownerUid === currentUserId,
+        renderable: buildRenderableGrigliataAoEFigure({
+          figure,
+          grid: normalizedGrid,
+        }),
+      }))
+      .filter((figure) => !!figure.renderable),
+    [aoeFigures, currentUserId, isManager, normalizedGrid]
+  );
+
+  const figureItemsById = useMemo(() => {
+    const nextMap = new Map();
+    figureItems.forEach((figure) => {
+      nextMap.set(figure.id, figure);
+    });
+    return nextMap;
+  }, [figureItems]);
+
   const selectedTokenIdSet = useMemo(
     () => new Set(selectedTokenIds),
     [selectedTokenIds]
@@ -915,6 +1209,26 @@ export default function GrigliataBoard({
       isSelected: selectedTokenIdSet.has(token.tokenId),
     })),
     [tokenItems, dragPositionOverrides, selectedTokenIdSet]
+  );
+  const renderedAoEFigures = useMemo(
+    () => figureItems.map((figure) => {
+      const dragDraft = aoeFigureDragState?.figureId === figure.id
+        ? normalizeGrigliataAoEFigureDraft(aoeFigureDragState.draft)
+        : null;
+      const renderable = dragDraft
+        ? buildRenderableGrigliataAoEFigure({
+          figure: dragDraft,
+          grid: normalizedGrid,
+        })
+        : figure.renderable;
+
+      return {
+        ...figure,
+        renderable,
+        isSelected: selectedAoEFigureId === figure.id,
+      };
+    }).filter((figure) => !!figure.renderable),
+    [aoeFigureDragState, figureItems, normalizedGrid, selectedAoEFigureId]
   );
   const tokenStatusDisplayById = useMemo(() => {
     const nextMap = new Map();
@@ -946,24 +1260,47 @@ export default function GrigliataBoard({
     () => getBoardBounds({ background: resolvedBackground, grid: normalizedGrid, tokens: placedTokens }),
     [resolvedBackground, normalizedGrid, placedTokens]
   );
-  const renderedSharedMeasurements = useMemo(
+  const renderedSharedInteractions = useMemo(
     () => (sharedInteractions || [])
       .filter((interaction) => interaction?.ownerUid && interaction.ownerUid !== currentUserId)
       .map((interaction) => {
-        const measurement = buildMeasurementFromGrigliataLiveInteraction({
-          interaction,
-          grid: normalizedGrid,
-        });
+        if (interaction.type === 'measure') {
+          const measurement = buildMeasurementFromGrigliataLiveInteraction({
+            interaction,
+            grid: normalizedGrid,
+          });
 
-        if (!measurement) {
-          return null;
+          if (!measurement) {
+            return null;
+          }
+
+          return {
+            kind: 'measure',
+            ownerUid: interaction.ownerUid,
+            drawTheme: getGrigliataDrawTheme(interaction.colorKey),
+            measurement,
+          };
         }
 
-        return {
-          ownerUid: interaction.ownerUid,
-          drawTheme: getGrigliataDrawTheme(interaction.colorKey),
-          measurement,
-        };
+        if (interaction.type === 'aoe') {
+          const figure = buildAoEFigureFromGrigliataLiveInteraction({
+            interaction,
+            grid: normalizedGrid,
+          });
+
+          if (!figure) {
+            return null;
+          }
+
+          return {
+            kind: 'aoe',
+            ownerUid: interaction.ownerUid,
+            drawTheme: getGrigliataDrawTheme(interaction.colorKey),
+            figure,
+          };
+        }
+
+        return null;
       })
       .filter(Boolean),
     [currentUserId, normalizedGrid, sharedInteractions]
@@ -1029,6 +1366,9 @@ export default function GrigliataBoard({
     setSelectionBox(null);
     setTokenDragState(null);
     setMeasurementState(null);
+    setAoEPreviewState(null);
+    setSelectedAoEFigureId('');
+    setAoEFigureDragState(null);
     clearActiveSharedInteraction();
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
@@ -1037,9 +1377,14 @@ export default function GrigliataBoard({
   useEffect(() => {
     if (!isRulerEnabled) {
       setMeasurementState(null);
+    }
+    if (!activeAoeFigureType) {
+      setAoEPreviewState(null);
+    }
+    if (!isRulerEnabled && !activeAoeFigureType) {
       clearActiveSharedInteraction();
     }
-  }, [clearActiveSharedInteraction, isRulerEnabled]);
+  }, [activeAoeFigureType, clearActiveSharedInteraction, isRulerEnabled]);
 
   useEffect(() => {
     onSharedInteractionChange?.(activeSharedInteraction);
@@ -1056,6 +1401,15 @@ export default function GrigliataBoard({
       currentSelectedTokenIds.filter((tokenId) => movableTokenIds.has(tokenId))
     ));
   }, [movableTokenIds]);
+
+  useEffect(() => {
+    if (!selectedAoEFigureId) return;
+
+    const selectedFigure = figureItemsById.get(selectedAoEFigureId);
+    if (!selectedFigure || !selectedFigure.canEdit) {
+      setSelectedAoEFigureId('');
+    }
+  }, [figureItemsById, selectedAoEFigureId]);
 
   useEffect(() => {
     const tokenIdsWithOverflow = new Set(
@@ -1097,6 +1451,13 @@ export default function GrigliataBoard({
     })
   ), [normalizedGrid]);
 
+  const buildAoEFigureForDraft = useCallback((draft) => (
+    buildRenderableGrigliataAoEFigure({
+      figure: draft,
+      grid: normalizedGrid,
+    })
+  ), [normalizedGrid]);
+
   const getDraggedTokenMeasurement = useCallback((interaction, pointerWorld) => {
     if (!pointerWorld) return null;
 
@@ -1121,6 +1482,28 @@ export default function GrigliataBoard({
     };
   }, [normalizedGrid]);
 
+  const getDraggedAoEFigureDraft = useCallback((interaction, pointerWorld) => {
+    if (!pointerWorld || !interaction?.originFigure || !interaction?.startWorld) {
+      return null;
+    }
+
+    const startCell = snapBoardPointToGrid(interaction.startWorld, normalizedGrid, 'center');
+    const pointerCell = snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center');
+    const colDelta = pointerCell.col - startCell.col;
+    const rowDelta = pointerCell.row - startCell.row;
+    const draft = shiftGrigliataAoEFigureCells(interaction.originFigure, colDelta, rowDelta);
+
+    if (!draft) {
+      return null;
+    }
+
+    return {
+      colDelta,
+      rowDelta,
+      draft,
+    };
+  }, [normalizedGrid]);
+
   const syncSharedMeasureInteraction = useCallback((interaction, liveEndCell) => {
     if (!Array.isArray(interaction?.anchorCells) || !interaction.anchorCells.length || !liveEndCell) {
       clearActiveSharedInteraction();
@@ -1138,6 +1521,22 @@ export default function GrigliataBoard({
         col: liveEndCell.col,
         row: liveEndCell.row,
       },
+    });
+  }, [clearActiveSharedInteraction, updateActiveSharedInteraction]);
+
+  const syncSharedAoEInteraction = useCallback((draft, source = 'aoe-create') => {
+    const normalizedDraft = normalizeGrigliataAoEFigureDraft(draft);
+    if (!normalizedDraft) {
+      clearActiveSharedInteraction();
+      return;
+    }
+
+    updateActiveSharedInteraction({
+      type: 'aoe',
+      source,
+      figureType: normalizedDraft.figureType,
+      originCell: normalizedDraft.originCell,
+      targetCell: normalizedDraft.targetCell,
     });
   }, [clearActiveSharedInteraction, updateActiveSharedInteraction]);
 
@@ -1289,6 +1688,7 @@ export default function GrigliataBoard({
     if (activeInteraction.type === 'selection-candidate') {
       setSelectionBox(null);
       setSelectedTokenIds([]);
+      setSelectedAoEFigureId('');
       clearActiveSharedInteraction();
       return;
     }
@@ -1296,6 +1696,21 @@ export default function GrigliataBoard({
     if (activeInteraction.type === 'measure-candidate') {
       setMeasurementState(null);
       clearActiveSharedInteraction();
+      return;
+    }
+
+    if (isAoECreateInteraction(activeInteraction)) {
+      let didCreateFigure = false;
+      try {
+        didCreateFigure = !!(await Promise.resolve(onCreateAoEFigure?.(activeInteraction.draft)));
+      } finally {
+        setAoEPreviewState(null);
+        clearActiveSharedInteraction();
+      }
+
+      if (didCreateFigure) {
+        onSelectMouseTool?.();
+      }
       return;
     }
 
@@ -1323,6 +1738,7 @@ export default function GrigliataBoard({
         .map((token) => token.tokenId);
 
       setSelectedTokenIds(nextSelectedTokenIds);
+      setSelectedAoEFigureId('');
       setSelectionBox(null);
       clearActiveSharedInteraction();
       return;
@@ -1335,6 +1751,41 @@ export default function GrigliataBoard({
     }
 
     if (activeInteraction.type === 'pan') {
+      return;
+    }
+
+    if (activeInteraction.type === 'aoe-drag-candidate') {
+      setAoEFigureDragState(null);
+      clearActiveSharedInteraction();
+      return;
+    }
+
+    if (activeInteraction.type === 'aoe-drag') {
+      const dragDraft = pointerWorld
+        ? getDraggedAoEFigureDraft(activeInteraction, pointerWorld)
+        : null;
+      const nextDraft = dragDraft?.draft || aoeFigureDragState?.draft || activeInteraction.originFigure;
+      const normalizedDraft = normalizeGrigliataAoEFigureDraft(nextDraft);
+      const originDraft = normalizeGrigliataAoEFigureDraft(activeInteraction.originFigure);
+      const hasMoved = !!(
+        normalizedDraft
+        && originDraft
+        && (
+          normalizedDraft.originCell.col !== originDraft.originCell.col
+          || normalizedDraft.originCell.row !== originDraft.originCell.row
+          || normalizedDraft.targetCell.col !== originDraft.targetCell.col
+          || normalizedDraft.targetCell.row !== originDraft.targetCell.row
+        )
+      );
+
+      try {
+        if (hasMoved && activeInteraction.figureId && normalizedDraft) {
+          await Promise.resolve(onMoveAoEFigure?.(activeInteraction.figureId, normalizedDraft));
+        }
+      } finally {
+        setAoEFigureDragState(null);
+        clearActiveSharedInteraction();
+      }
       return;
     }
 
@@ -1388,10 +1839,14 @@ export default function GrigliataBoard({
       }
     }
   }, [
+    aoeFigureDragState,
     clearActiveSharedInteraction,
+    getDraggedAoEFigureDraft,
     getDraggedTokenMeasurement,
     getWorldPointFromClient,
     normalizedGrid,
+    onCreateAoEFigure,
+    onMoveAoEFigure,
     onMoveTokens,
     selectionBox,
     tokenDragState,
@@ -1474,6 +1929,25 @@ export default function GrigliataBoard({
         return;
       }
 
+      if (isAoECreateInteraction(activeInteraction)) {
+        const liveCell = snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center');
+        const nextDraft = {
+          ...activeInteraction.draft,
+          targetCell: {
+            col: liveCell.col,
+            row: liveCell.row,
+          },
+        };
+
+        interactionRef.current = {
+          ...activeInteraction,
+          draft: nextDraft,
+        };
+        setAoEPreviewState(buildAoEFigureForDraft(nextDraft));
+        syncSharedAoEInteraction(nextDraft, activeInteraction.source || 'aoe-create');
+        return;
+      }
+
       if (activeInteraction.type === 'selection-box') {
         setSelectionBox({
           start: activeInteraction.startWorld,
@@ -1490,6 +1964,36 @@ export default function GrigliataBoard({
           liveEndCell
         ));
         syncSharedMeasureInteraction(activeInteraction, liveEndCell);
+        return;
+      }
+
+      if (activeInteraction.type === 'aoe-drag-candidate') {
+        if (!hasMovedBeyondThreshold) return;
+
+        const dragDraft = getDraggedAoEFigureDraft(activeInteraction, pointerWorld);
+        if (!dragDraft) return;
+
+        interactionRef.current = {
+          ...activeInteraction,
+          type: 'aoe-drag',
+        };
+        setAoEFigureDragState({
+          figureId: activeInteraction.figureId,
+          draft: dragDraft.draft,
+        });
+        syncSharedAoEInteraction(dragDraft.draft, 'aoe-move');
+        return;
+      }
+
+      if (activeInteraction.type === 'aoe-drag') {
+        const dragDraft = getDraggedAoEFigureDraft(activeInteraction, pointerWorld);
+        if (!dragDraft) return;
+
+        setAoEFigureDragState({
+          figureId: activeInteraction.figureId,
+          draft: dragDraft.draft,
+        });
+        syncSharedAoEInteraction(dragDraft.draft, 'aoe-move');
         return;
       }
 
@@ -1570,8 +2074,12 @@ export default function GrigliataBoard({
       window.removeEventListener('blur', handleWindowBlur);
     };
   }, [
+    activeAoeFigureType,
+    buildAoEFigureForDraft,
     buildMeasurementForCells,
+    getDraggedAoEFigureDraft,
     clearActiveSharedInteraction,
+    syncSharedAoEInteraction,
     finalizeInteraction,
     getDraggedTokenMeasurement,
     getWorldPointFromClient,
@@ -1582,24 +2090,37 @@ export default function GrigliataBoard({
 
   useEffect(() => {
     const handleKeyDown = async (event) => {
-      if (!selectedTokenIds.length) return;
       if (isEditableElementFocused()) return;
 
       if (event.key !== 'Delete' && event.code !== 'Delete') return;
 
+      if (!selectedAoEFigureId && !selectedTokenIds.length) return;
+
       event.preventDefault();
 
-      try {
-        await Promise.resolve(onDeleteTokens?.(selectedTokenIds));
-        setSelectedTokenIds([]);
-      } catch {
-        // preserve selection if deletion fails
+      if (selectedAoEFigureId) {
+        try {
+          await Promise.resolve(onDeleteAoEFigures?.([selectedAoEFigureId]));
+          setSelectedAoEFigureId('');
+        } catch {
+          // preserve selection if deletion fails
+        }
+        return;
+      }
+
+      if (selectedTokenIds.length) {
+        try {
+          await Promise.resolve(onDeleteTokens?.(selectedTokenIds));
+          setSelectedTokenIds([]);
+        } catch {
+          // preserve selection if deletion fails
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onDeleteTokens, selectedTokenIds]);
+  }, [onDeleteAoEFigures, onDeleteTokens, selectedAoEFigureId, selectedTokenIds]);
 
   const handleStageMouseDown = (event) => {
     if (isTokenDragActive) return;
@@ -1637,7 +2158,39 @@ export default function GrigliataBoard({
     if (!pointerWorld) return;
 
     setMeasurementState(null);
+    setAoEPreviewState(null);
+    setSelectedAoEFigureId('');
     clearActiveSharedInteraction();
+
+    if (activeAoeFigureType) {
+      setSelectedTokenIds([]);
+      setSelectionBox(null);
+      const startCell = snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center');
+      const draft = {
+        figureType: activeAoeFigureType,
+        originCell: {
+          col: startCell.col,
+          row: startCell.row,
+        },
+        targetCell: {
+          col: startCell.col,
+          row: startCell.row,
+        },
+      };
+      interactionRef.current = {
+        type: 'aoe-create',
+        source: 'aoe-create',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startWorld: pointerWorld,
+        draft,
+      };
+      setAoEPreviewState(buildAoEFigureForDraft(draft));
+      syncSharedAoEInteraction(draft, 'aoe-create');
+      return;
+    }
 
     if (isRulerEnabled) {
       setSelectedTokenIds([]);
@@ -1672,6 +2225,10 @@ export default function GrigliataBoard({
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
 
+    if (activeAoeFigureType) {
+      return;
+    }
+
     if (isSecondaryMouseButton(nativeEvent)) {
       nativeEvent.preventDefault();
       if (hasPrimaryMouseButtonPressed(nativeEvent)) {
@@ -1683,6 +2240,8 @@ export default function GrigliataBoard({
     if (!isPrimaryMouseButton(nativeEvent)) return;
 
     setMeasurementState(null);
+    setAoEPreviewState(null);
+    setSelectedAoEFigureId('');
     clearActiveSharedInteraction();
 
     if (!token?.canMove) {
@@ -1727,16 +2286,74 @@ export default function GrigliataBoard({
     };
   };
 
+  const handleAoEFigureMouseDown = (figure, event) => {
+    const nativeEvent = event.evt;
+    event.cancelBubble = true;
+    setHoveredOverflowTokenId('');
+    setPinnedOverflowTokenId('');
+
+    if (activeAoeFigureType || isRulerEnabled) {
+      return;
+    }
+
+    if (!isPrimaryMouseButton(nativeEvent)) {
+      return;
+    }
+
+    setMeasurementState(null);
+    setAoEPreviewState(null);
+    clearActiveSharedInteraction();
+    setSelectedTokenIds([]);
+    setSelectionBox(null);
+
+    if (!figure?.canEdit) {
+      setSelectedAoEFigureId('');
+      return;
+    }
+
+    const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
+    if (!pointerWorld) return;
+
+    setSelectedAoEFigureId(figure.id);
+
+    interactionRef.current = {
+      type: 'aoe-drag-candidate',
+      figureId: figure.id,
+      startClient: {
+        x: nativeEvent.clientX,
+        y: nativeEvent.clientY,
+      },
+      startWorld: pointerWorld,
+      originFigure: {
+        figureType: figure.figureType,
+        originCell: figure.originCell,
+        targetCell: figure.targetCell,
+      },
+    };
+  };
+
   const normalizedSelectionRect = useMemo(
     () => normalizeSelectionRect(selectionBox),
     [selectionBox]
+  );
+  const selectedAoEFigure = useMemo(
+    () => renderedAoEFigures.find((figure) => figure.id === selectedAoEFigureId) || null,
+    [renderedAoEFigures, selectedAoEFigureId]
   );
   const selectedTokens = useMemo(
     () => renderedTokens.filter((token) => selectedTokenIdSet.has(token.tokenId)),
     [renderedTokens, selectedTokenIdSet]
   );
   const selectedTokenActionState = useMemo(() => {
-    if (!selectedTokens.length || selectionBox || tokenDragState || isTokenDragActive || isRulerEnabled) {
+    if (
+      !selectedTokens.length
+      || selectionBox
+      || tokenDragState
+      || isTokenDragActive
+      || isRulerEnabled
+      || !!activeAoeFigureType
+      || !!selectedAoEFigureId
+    ) {
       return null;
     }
 
@@ -1832,10 +2449,76 @@ export default function GrigliataBoard({
       },
     };
   }, [
+    activeAoeFigureType,
     isManager,
     isTokenDragActive,
     isRulerEnabled,
+    selectedAoEFigureId,
     selectedTokens,
+    selectionBox,
+    stageSize.height,
+    stageSize.width,
+    tokenDragState,
+    viewport.scale,
+    viewport.x,
+    viewport.y,
+  ]);
+  const selectedAoEFigureActionState = useMemo(() => {
+    if (
+      !selectedAoEFigure
+      || aoeFigureDragState
+      || isTokenDragActive
+      || isRulerEnabled
+      || !!activeAoeFigureType
+      || selectionBox
+      || tokenDragState
+    ) {
+      return null;
+    }
+
+    const figureBounds = selectedAoEFigure.renderable?.bounds;
+    if (!figureBounds) {
+      return null;
+    }
+
+    const screenWidth = figureBounds.width * viewport.scale;
+    const referenceScreenSize = Math.max(
+      figureBounds.width * viewport.scale,
+      figureBounds.height * viewport.scale,
+      36
+    );
+    const buttonSize = Math.max(36, Math.min(72, Math.round(referenceScreenSize * 0.28)));
+    const gap = Math.max(14, Math.round(buttonSize * 0.22));
+    const toolbarWidth = buttonSize + 16;
+    const toolbarHeight = buttonSize + 16;
+    const rawToolbarPosition = buildSelectionActionToolbarPosition({
+      left: viewport.x + (figureBounds.minX * viewport.scale),
+      top: viewport.y + (figureBounds.minY * viewport.scale),
+      width: screenWidth,
+      buttonSize,
+      gap,
+    });
+
+    return {
+      figureId: selectedAoEFigure.id,
+      buttonSize,
+      toolbarPosition: {
+        left: Math.min(
+          Math.max(12, rawToolbarPosition.left),
+          Math.max(12, stageSize.width - toolbarWidth - 12)
+        ),
+        top: Math.min(
+          Math.max(12, rawToolbarPosition.top),
+          Math.max(12, stageSize.height - toolbarHeight - 12)
+        ),
+      },
+    };
+  }, [
+    activeAoeFigureType,
+    aoeFigureDragState,
+    isRulerEnabled,
+    isTokenDragActive,
+    selectedAoEFigure,
     selectionBox,
     stageSize.height,
     stageSize.width,
@@ -1922,6 +2605,21 @@ export default function GrigliataBoard({
           data-testid="grigliata-quick-controls"
           className="pointer-events-none absolute left-4 top-4 z-30 flex flex-col items-start gap-2"
         >
+          <button
+            type="button"
+            onClick={onSelectMouseTool}
+            title={isMouseSelectionActive ? 'Mouse selection mode is active' : 'Return to mouse selection'}
+            aria-label="Return to mouse selection"
+            aria-pressed={isMouseSelectionActive}
+            data-testid="mouse-selection-trigger"
+            className={`pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-md border p-2 text-sm font-medium transition-colors ${
+              isMouseSelectionActive
+                ? 'border-slate-200/70 bg-slate-100/12 text-slate-50 hover:bg-slate-100/18'
+                : 'border-slate-700 bg-slate-950/92 text-slate-200 hover:bg-slate-800'
+            }`}
+          >
+            <FaHandPointer className="h-4 w-4" />
+          </button>
           <div className="pointer-events-auto">
             <DrawColorPicker
               activeColorKey={resolvedDrawTheme.key}
@@ -1942,6 +2640,12 @@ export default function GrigliataBoard({
           >
             <FaRulerHorizontal className="h-4 w-4" />
           </button>
+          <div className="pointer-events-auto">
+            <AoETemplatePicker
+              activeFigureType={activeAoeFigureType}
+              onChange={onChangeAoeFigureType}
+            />
+          </div>
           <button
             type="button"
             onClick={onToggleInteractionSharing}
@@ -2084,6 +2788,17 @@ export default function GrigliataBoard({
                 </>
               )}
 
+              {renderedAoEFigures.map((figure) => (
+                <AoEFigureOverlay
+                  key={figure.id}
+                  figure={figure.renderable}
+                  drawTheme={getGrigliataDrawTheme(figure.colorKey)}
+                  overlayId={figure.id}
+                  isSelected={figure.isSelected}
+                  onMouseDown={(event) => handleAoEFigureMouseDown(figure, event)}
+                />
+              ))}
+
               {renderedTokens.map((token) => (
                 <TokenNode
                   key={token.tokenId}
@@ -2111,13 +2826,25 @@ export default function GrigliataBoard({
                 />
               ))}
 
-              {renderedSharedMeasurements.map((sharedMeasurement) => (
-                <MeasurementOverlay
-                  key={`shared-measurement-${sharedMeasurement.ownerUid}`}
-                  measurement={sharedMeasurement.measurement}
-                  drawTheme={sharedMeasurement.drawTheme}
-                  overlayId={`shared-${sharedMeasurement.ownerUid}`}
-                />
+              {renderedSharedInteractions.map((sharedInteraction) => (
+                sharedInteraction.kind === 'measure'
+                  ? (
+                    <MeasurementOverlay
+                      key={`shared-measurement-${sharedInteraction.ownerUid}`}
+                      measurement={sharedInteraction.measurement}
+                      drawTheme={sharedInteraction.drawTheme}
+                      overlayId={`shared-${sharedInteraction.ownerUid}`}
+                    />
+                  )
+                  : (
+                    <AoEFigureOverlay
+                      key={`shared-aoe-${sharedInteraction.ownerUid}`}
+                      figure={sharedInteraction.figure}
+                      drawTheme={sharedInteraction.drawTheme}
+                      overlayId={`shared-${sharedInteraction.ownerUid}`}
+                      listening={false}
+                    />
+                  )
               ))}
 
               {measurementState && (
@@ -2125,6 +2852,15 @@ export default function GrigliataBoard({
                   measurement={measurementState}
                   drawTheme={resolvedDrawTheme}
                   overlayId="local"
+                />
+              )}
+
+              {aoePreviewState && (
+                <AoEFigureOverlay
+                  figure={aoePreviewState}
+                  drawTheme={resolvedDrawTheme}
+                  overlayId="local"
+                  listening={false}
                 />
               )}
             </Layer>
@@ -2157,6 +2893,44 @@ export default function GrigliataBoard({
           onSetSelectedTokensDeadState={onSetSelectedTokensDeadState}
           onUpdateTokenStatuses={onUpdateTokenStatuses}
         />
+
+        {selectedAoEFigureActionState && (
+          <div className="pointer-events-none absolute inset-0 z-20">
+            <div
+              className="pointer-events-auto absolute"
+              style={{
+                left: selectedAoEFigureActionState.toolbarPosition.left,
+                top: selectedAoEFigureActionState.toolbarPosition.top,
+              }}
+            >
+              <div className="rounded-[1.4rem] border border-rose-300/40 bg-slate-950/88 p-2 shadow-2xl backdrop-blur-sm">
+                <button
+                  type="button"
+                  aria-label="Delete selected AoE figure"
+                  title="Delete selected AoE figure"
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={async (event) => {
+                    event.stopPropagation();
+
+                    try {
+                      await Promise.resolve(onDeleteAoEFigures?.([selectedAoEFigureActionState.figureId]));
+                      setSelectedAoEFigureId('');
+                    } catch {
+                      // preserve selection if deletion fails
+                    }
+                  }}
+                  className="flex items-center justify-center rounded-[1.15rem] border border-rose-300/60 bg-rose-600/35 text-slate-50 shadow-lg transition-transform duration-150 hover:scale-[1.03]"
+                  style={{
+                    width: selectedAoEFigureActionState.buttonSize,
+                    height: selectedAoEFigureActionState.buttonSize,
+                  }}
+                >
+                  <FiTrash2 className="h-[42%] w-[42%]" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {!resolvedBackground && (
           <div className="pointer-events-none absolute bottom-4 left-4 max-w-sm rounded-lg border border-slate-700/70 bg-slate-950/85 px-3 py-2 text-xs leading-relaxed text-slate-300 shadow-lg">
