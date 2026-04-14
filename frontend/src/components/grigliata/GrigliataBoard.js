@@ -51,6 +51,13 @@ import {
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
 const RULER_LABEL_MIN_WIDTH = 90;
+const AOE_LABEL_MIN_WIDTH = 112;
+const AOE_LABEL_MAX_WIDTH = 220;
+const AOE_LABEL_SIDE_PADDING = 12;
+const AOE_LABEL_TOP_PADDING = 8;
+const AOE_LABEL_LINE_HEIGHT = 17;
+const AOE_LABEL_GAP_PX = 12;
+const AOE_LABEL_EDGE_PADDING = 8;
 const DEFAULT_DRAW_THEME = getGrigliataDrawTheme(DEFAULT_GRIGLIATA_DRAW_COLOR_KEY);
 const MEASUREMENT_OUTLINE_STROKE_WIDTH = 7;
 const SHAPE_OUTLINE_STROKE_WIDTH = 4;
@@ -668,6 +675,63 @@ const MeasurementOverlay = ({
   );
 };
 
+const estimateAoELabelWidth = (line) => (
+  Math.round((String(line || '').length * 7.4) + (AOE_LABEL_SIDE_PADDING * 2))
+);
+
+const splitAoEFigureMeasurementLines = (figure, maxWidth) => {
+  const measurement = figure?.measurement;
+  const label = measurement?.label;
+  if (!label) {
+    return [];
+  }
+
+  if (figure.figureType !== 'cone' || estimateAoELabelWidth(label) <= maxWidth) {
+    return [label];
+  }
+
+  return [
+    `L ${measurement.lengthFeet} ft • W ${measurement.widthFeet} ft`,
+    `${measurement.angleDegrees}°`,
+  ];
+};
+
+const buildAoEFigureMeasurementBadgeLayout = ({ figure, boardBounds }) => {
+  if (!figure?.measurement?.label || !figure?.bounds) {
+    return null;
+  }
+
+  const boundedWidth = Math.max(
+    AOE_LABEL_MIN_WIDTH,
+    Math.min(AOE_LABEL_MAX_WIDTH, Math.max(0, boardBounds?.width || 0) - (AOE_LABEL_EDGE_PADDING * 2))
+  );
+  const lines = splitAoEFigureMeasurementLines(figure, boundedWidth);
+  if (!lines.length) {
+    return null;
+  }
+
+  const width = Math.min(
+    boundedWidth,
+    Math.max(AOE_LABEL_MIN_WIDTH, ...lines.map((line) => estimateAoELabelWidth(line)))
+  );
+  const textHeight = lines.length * AOE_LABEL_LINE_HEIGHT;
+  const height = textHeight + (AOE_LABEL_TOP_PADDING * 2);
+  const unclampedX = figure.bounds.maxX + AOE_LABEL_GAP_PX;
+  const unclampedY = figure.bounds.minY;
+  const minX = (boardBounds?.minX ?? figure.bounds.minX) + AOE_LABEL_EDGE_PADDING;
+  const maxX = (boardBounds?.maxX ?? (figure.bounds.maxX + width + AOE_LABEL_EDGE_PADDING)) - width - AOE_LABEL_EDGE_PADDING;
+  const minY = (boardBounds?.minY ?? figure.bounds.minY) + AOE_LABEL_EDGE_PADDING;
+  const maxY = (boardBounds?.maxY ?? (figure.bounds.maxY + height + AOE_LABEL_EDGE_PADDING)) - height - AOE_LABEL_EDGE_PADDING;
+
+  return {
+    lines,
+    width,
+    height,
+    x: clampToRange(unclampedX, minX, Math.max(minX, maxX)),
+    y: clampToRange(unclampedY, minY, Math.max(minY, maxY)),
+  };
+};
+
 const AoEFigureOverlay = ({
   figure,
   drawTheme = DEFAULT_DRAW_THEME,
@@ -675,6 +739,7 @@ const AoEFigureOverlay = ({
   isSelected = false,
   onMouseDown,
   listening = true,
+  boardBounds = null,
 }) => {
   if (!figure?.figureType) {
     return null;
@@ -690,6 +755,48 @@ const AoEFigureOverlay = ({
   const outlineStrokeWidth = isSelected ? SHAPE_OUTLINE_STROKE_WIDTH + 1 : SHAPE_OUTLINE_STROKE_WIDTH;
   const accentStrokeWidth = isSelected ? 2.6 : 1.75;
   const shadowBlur = isSelected ? 16 : 10;
+  const measurementLayout = buildAoEFigureMeasurementBadgeLayout({ figure, boardBounds });
+
+  const measurementBadge = measurementLayout ? (
+    <Group
+      x={measurementLayout.x}
+      y={measurementLayout.y}
+      listening={false}
+      data-testid={overlayId ? `aoe-figure-measurement-${overlayId}` : undefined}
+    >
+      <Rect
+        width={measurementLayout.width}
+        height={measurementLayout.height}
+        cornerRadius={10}
+        stroke={outlineStroke}
+        strokeWidth={SHAPE_OUTLINE_STROKE_WIDTH}
+      />
+      <Rect
+        width={measurementLayout.width}
+        height={measurementLayout.height}
+        cornerRadius={10}
+        fill="rgba(2, 6, 23, 0.94)"
+        stroke={drawTheme.labelBorder}
+        strokeWidth={1.5}
+        shadowColor={drawTheme.glow}
+        shadowBlur={10}
+        shadowOpacity={0.24}
+      />
+      <Text
+        x={AOE_LABEL_SIDE_PADDING}
+        y={AOE_LABEL_TOP_PADDING}
+        width={measurementLayout.width - (AOE_LABEL_SIDE_PADDING * 2)}
+        height={measurementLayout.height - (AOE_LABEL_TOP_PADDING * 2)}
+        align="center"
+        verticalAlign="middle"
+        fontSize={15}
+        fontStyle="bold"
+        lineHeight={1.15}
+        fill={drawTheme.labelText}
+        text={measurementLayout.lines.join('\n')}
+      />
+    </Group>
+  ) : null;
 
   if (figure.figureType === 'circle') {
     return (
@@ -712,6 +819,7 @@ const AoEFigureOverlay = ({
           shadowBlur={shadowBlur}
           shadowOpacity={0.24}
         />
+        {measurementBadge}
       </Group>
     );
   }
@@ -739,6 +847,7 @@ const AoEFigureOverlay = ({
           shadowBlur={shadowBlur}
           shadowOpacity={0.24}
         />
+        {measurementBadge}
       </Group>
     );
   }
@@ -764,6 +873,7 @@ const AoEFigureOverlay = ({
           shadowBlur={shadowBlur}
           shadowOpacity={0.24}
         />
+        {measurementBadge}
       </Group>
     );
   }
@@ -2776,6 +2886,7 @@ export default function GrigliataBoard({
                   drawTheme={getGrigliataDrawTheme(figure.colorKey)}
                   overlayId={figure.id}
                   isSelected={figure.isSelected}
+                  boardBounds={boardBounds}
                   onMouseDown={(event) => handleAoEFigureMouseDown(figure, event)}
                 />
               ))}
@@ -2823,6 +2934,7 @@ export default function GrigliataBoard({
                       figure={sharedInteraction.figure}
                       drawTheme={sharedInteraction.drawTheme}
                       overlayId={`shared-${sharedInteraction.ownerUid}`}
+                      boardBounds={boardBounds}
                       listening={false}
                     />
                   )
@@ -2841,6 +2953,7 @@ export default function GrigliataBoard({
                   figure={aoePreviewState}
                   drawTheme={resolvedDrawTheme}
                   overlayId="local"
+                  boardBounds={boardBounds}
                   listening={false}
                 />
               )}

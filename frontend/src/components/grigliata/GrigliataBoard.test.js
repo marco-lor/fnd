@@ -527,10 +527,11 @@ describe('GrigliataBoard', () => {
 
     const stage = document.querySelector('[data-konva-type="Stage"]');
     fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+    fireEvent.mouseMove(window, { clientX: 280, clientY: 140, buttons: 1 });
 
     expect(screen.getByTestId('aoe-figure-overlay-local')).toBeInTheDocument();
+    expect(screen.getByTestId('aoe-figure-measurement-local')).toHaveTextContent(/R \d+ ft • D \d+ ft/);
 
-    fireEvent.mouseMove(window, { clientX: 280, clientY: 140, buttons: 1 });
     fireEvent.mouseUp(window, { button: 0, clientX: 280, clientY: 140, buttons: 0 });
 
     await waitFor(() => {
@@ -602,6 +603,51 @@ describe('GrigliataBoard', () => {
     expect(onSelectMouseTool).not.toHaveBeenCalled();
   });
 
+  test('renders measurement badges for placed AoE figures', () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          aoeFigures: [{
+            id: 'map-1__current-user__circle__1',
+            backgroundId: 'map-1',
+            ownerUid: 'current-user',
+            figureType: 'circle',
+            slot: 1,
+            originCell: { col: 2, row: 2 },
+            targetCell: { col: 5, row: 2 },
+            colorKey: 'ion-cyan',
+            isVisibleToPlayers: true,
+          }, {
+            id: 'map-1__current-user__square__1',
+            backgroundId: 'map-1',
+            ownerUid: 'current-user',
+            figureType: 'square',
+            slot: 1,
+            originCell: { col: 4, row: 4 },
+            targetCell: { col: 6, row: 6 },
+            colorKey: 'nova-teal',
+            isVisibleToPlayers: true,
+          }, {
+            id: 'map-1__current-user__cone__1',
+            backgroundId: 'map-1',
+            ownerUid: 'current-user',
+            figureType: 'cone',
+            slot: 1,
+            originCell: { col: 8, row: 3 },
+            targetCell: { col: 11, row: 3 },
+            colorKey: 'solar-amber',
+            isVisibleToPlayers: true,
+          }],
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('aoe-figure-measurement-map-1__current-user__circle__1')).toBeInTheDocument();
+    expect(screen.getByText('R 20 ft • D 40 ft')).toBeInTheDocument();
+    expect(screen.getByText('15 ft side')).toBeInTheDocument();
+    expect(screen.getByText('L 20 ft • W 20 ft • 53°')).toBeInTheDocument();
+  });
+
   test('renders a remote shared AoE preview with the broadcaster color', () => {
     render(
       <GrigliataBoard
@@ -623,6 +669,8 @@ describe('GrigliataBoard', () => {
     );
 
     expect(screen.getByTestId('aoe-figure-overlay-shared-other-user')).toBeInTheDocument();
+    expect(screen.getByTestId('aoe-figure-measurement-shared-other-user')).toBeInTheDocument();
+    expect(screen.getByText('10 ft side')).toBeInTheDocument();
     expect(document.querySelector('[data-stroke="#a3e635"]')).not.toBeNull();
   });
 

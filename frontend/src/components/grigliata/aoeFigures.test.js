@@ -58,6 +58,11 @@ describe('aoeFigures', () => {
       sizeSquares: 3,
       radius: 210,
       centerPoint: { x: 245, y: 315 },
+      measurement: {
+        radiusFeet: 15,
+        diameterFeet: 30,
+        label: 'R 15 ft • D 30 ft',
+      },
     }));
   });
 
@@ -78,6 +83,10 @@ describe('aoeFigures', () => {
       y: 70,
       width: 280,
       height: 280,
+      measurement: {
+        sideFeet: 20,
+        label: '20 ft side',
+      },
     }));
   });
 
@@ -95,6 +104,12 @@ describe('aoeFigures', () => {
       figureType: 'cone',
       sizeSquares: 4,
       length: 280,
+      measurement: {
+        lengthFeet: 20,
+        widthFeet: 20,
+        angleDegrees: 53,
+        label: 'L 20 ft • W 20 ft • 53°',
+      },
     }));
     expect(figure.points).toHaveLength(3);
     expect(figure.bounds.width).toBeGreaterThan(0);

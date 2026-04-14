@@ -1,5 +1,5 @@
 import { getGridCellPositionPx, normalizeGridConfig } from './boardUtils';
-import { resolveGrigliataDrawColorKey } from './constants';
+import { FEET_PER_GRID_SQUARE, resolveGrigliataDrawColorKey } from './constants';
 
 export const GRIGLIATA_AOE_FIGURE_COLLECTION = 'grigliata_aoe_figures';
 export const GRIGLIATA_AOE_FIGURE_TYPES = ['circle', 'square', 'cone'];
@@ -76,6 +76,39 @@ const buildBoundsFromPoints = (points) => {
     maxY,
     width: maxX - minX,
     height: maxY - minY,
+  };
+};
+
+const buildCircleMeasurement = (sizeSquares) => {
+  const radiusFeet = sizeSquares * FEET_PER_GRID_SQUARE;
+  const diameterFeet = radiusFeet * 2;
+
+  return {
+    radiusFeet,
+    diameterFeet,
+    label: `R ${radiusFeet} ft • D ${diameterFeet} ft`,
+  };
+};
+
+const buildSquareMeasurement = (sizeSquares) => {
+  const sideFeet = sizeSquares * FEET_PER_GRID_SQUARE;
+
+  return {
+    sideFeet,
+    label: `${sideFeet} ft side`,
+  };
+};
+
+const buildConeMeasurement = (sizeSquares) => {
+  const lengthFeet = sizeSquares * FEET_PER_GRID_SQUARE;
+  const widthFeet = lengthFeet;
+  const angleDegrees = Math.round(GRIGLIATA_AOE_FIGURE_CONE_ANGLE_DEGREES);
+
+  return {
+    lengthFeet,
+    widthFeet,
+    angleDegrees,
+    label: `L ${lengthFeet} ft • W ${widthFeet} ft • ${angleDegrees}°`,
   };
 };
 
@@ -248,6 +281,7 @@ export const buildRenderableGrigliataAoEFigure = ({ figure, grid }) => {
     return {
       ...normalizedFigure,
       sizeSquares,
+      measurement: buildCircleMeasurement(sizeSquares),
       centerPoint: { x: originCenter.x, y: originCenter.y },
       radius,
       bounds: {
@@ -271,6 +305,7 @@ export const buildRenderableGrigliataAoEFigure = ({ figure, grid }) => {
     return {
       ...normalizedFigure,
       sizeSquares,
+      measurement: buildSquareMeasurement(sizeSquares),
       x,
       y,
       width: side,
@@ -308,6 +343,7 @@ export const buildRenderableGrigliataAoEFigure = ({ figure, grid }) => {
     return {
       ...normalizedFigure,
       sizeSquares,
+      measurement: buildConeMeasurement(sizeSquares),
       centerPoint: { x: originCenter.x, y: originCenter.y },
       length,
       directionAngle,
