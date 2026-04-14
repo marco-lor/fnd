@@ -283,6 +283,44 @@ describe('GrigliataBoard', () => {
     expect(buttons[5]).toHaveAttribute('aria-label', 'Reset View');
   });
 
+  test('uses a shared square shell for the left tools and reserves neon styling for active board mode tools only', () => {
+    const { rerender } = render(<GrigliataBoard {...buildProps()} />);
+
+    const mouseSelectionButton = screen.getByTestId('mouse-selection-trigger');
+    const drawColorTrigger = screen.getByTestId('draw-color-trigger');
+    const rulerButton = screen.getByRole('button', { name: /enable ruler mode/i });
+    const aoeTrigger = screen.getByTestId('aoe-template-trigger');
+    const interactionSharingButton = screen.getByRole('button', { name: /share live interactions/i });
+    const resetViewButton = screen.getByRole('button', { name: /reset view/i });
+
+    [mouseSelectionButton, rulerButton, aoeTrigger, interactionSharingButton, resetViewButton].forEach((button) => {
+      expect(button.className).toContain('rounded-2xl');
+    });
+
+    expect(drawColorTrigger.className).toContain('rounded-full');
+    expect(drawColorTrigger.className).not.toContain('rounded-2xl');
+
+    expect(mouseSelectionButton.className).toContain('bg-gradient-to-br');
+    expect(rulerButton.className).not.toContain('bg-gradient-to-br');
+    expect(aoeTrigger.className).not.toContain('bg-gradient-to-br');
+    expect(interactionSharingButton.className).not.toContain('bg-gradient-to-br');
+    expect(resetViewButton.className).not.toContain('bg-gradient-to-br');
+
+    rerender(<GrigliataBoard {...buildProps({ isRulerEnabled: true })} />);
+
+    expect(screen.getByRole('button', { name: /disable ruler mode/i }).className).toContain('bg-gradient-to-br');
+    expect(screen.getByTestId('mouse-selection-trigger').className).not.toContain('bg-gradient-to-br');
+
+    rerender(<GrigliataBoard {...buildProps({ activeAoeFigureType: 'circle' })} />);
+
+    expect(screen.getByTestId('aoe-template-trigger').className).toContain('bg-gradient-to-br');
+
+    rerender(<GrigliataBoard {...buildProps({ isInteractionSharingEnabled: true })} />);
+
+    expect(screen.getByRole('button', { name: /stop sharing live interactions/i }).className).not.toContain('bg-gradient-to-br');
+    expect(screen.getByRole('button', { name: /reset view/i }).className).not.toContain('bg-gradient-to-br');
+  });
+
   test('shows only the map metadata in the top board header', () => {
     render(<GrigliataBoard {...buildProps()} />);
 

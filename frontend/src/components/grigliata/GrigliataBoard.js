@@ -65,6 +65,15 @@ const DEAD_TOKEN_SCRIM = 'rgba(15, 23, 42, 0.34)';
 const DEAD_TOKEN_BANNER_FILL = 'rgba(127, 29, 29, 0.88)';
 const DEAD_TOKEN_LABEL = '#fecaca';
 const DRAW_PICKER_EASE = [0.22, 1, 0.36, 1];
+const QUICK_CONTROL_NEUTRAL_SURFACE_CLASS = 'border-slate-700/90 bg-slate-950/92 shadow-lg shadow-slate-950/35';
+const QUICK_CONTROL_NEON_SURFACE_CLASS = 'border-fuchsia-300/70 bg-gradient-to-br from-fuchsia-500/28 via-violet-500/24 to-pink-500/34 shadow-lg shadow-fuchsia-950/45 ring-1 ring-fuchsia-200/20';
+const QUICK_CONTROL_BUTTON_BASE_CLASS = 'pointer-events-auto inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border p-2 text-sm font-medium backdrop-blur-md transition-all duration-200 hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950';
+const QUICK_CONTROL_BUTTON_IDLE_CLASS = 'text-slate-200 hover:border-slate-500/80 hover:bg-slate-900/96 hover:text-slate-50';
+const QUICK_CONTROL_BUTTON_ACTIVE_CLASS = 'text-fuchsia-50 hover:border-fuchsia-200/80 hover:from-fuchsia-500/36 hover:via-violet-500/30 hover:to-pink-500/42';
+const QUICK_CONTROL_DRAWER_CLASS = `flex min-h-10 items-center gap-2 overflow-hidden rounded-2xl border p-2 backdrop-blur-md ${QUICK_CONTROL_NEUTRAL_SURFACE_CLASS}`;
+const AOE_TEMPLATE_OPTION_BASE_CLASS = 'rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] transition-transform duration-150 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950';
+const AOE_TEMPLATE_OPTION_IDLE_CLASS = 'border-slate-700 bg-slate-900/96 text-slate-200';
+const AOE_TEMPLATE_OPTION_ACTIVE_CLASS = `${QUICK_CONTROL_NEON_SURFACE_CLASS} text-fuchsia-50`;
 
 const isPrimaryMouseButton = (nativeEvent) => nativeEvent?.button === 0;
 const isSecondaryMouseButton = (nativeEvent) => nativeEvent?.button === 2;
@@ -770,6 +779,17 @@ const getDrawSwatchStyle = (theme, isActive = false) => ({
     : `inset 0 0 0 1px rgba(255, 255, 255, 0.08), ${theme.swatchGlow}`,
 });
 
+const getQuickControlButtonClassName = (isActive = false) => [
+  QUICK_CONTROL_BUTTON_BASE_CLASS,
+  isActive ? QUICK_CONTROL_NEON_SURFACE_CLASS : QUICK_CONTROL_NEUTRAL_SURFACE_CLASS,
+  isActive ? QUICK_CONTROL_BUTTON_ACTIVE_CLASS : QUICK_CONTROL_BUTTON_IDLE_CLASS,
+].join(' ');
+
+const getAoETemplateOptionClassName = (isActive = false) => [
+  AOE_TEMPLATE_OPTION_BASE_CLASS,
+  isActive ? AOE_TEMPLATE_OPTION_ACTIVE_CLASS : AOE_TEMPLATE_OPTION_IDLE_CLASS,
+].join(' ');
+
 const DrawColorPicker = ({ activeColorKey, onChange }) => {
   const [isOpen, setIsOpen] = useState(false);
   const pickerRef = useRef(null);
@@ -960,17 +980,7 @@ const AoETemplatePicker = ({ activeFigureType = '', onChange }) => {
 
   return (
     <div ref={pickerRef} className="relative z-10 h-10 w-10 shrink-0" data-testid="aoe-template-picker">
-      <motion.div
-        initial={false}
-        animate={prefersReducedMotion
-          ? undefined
-          : {
-            boxShadow: isOpen
-              ? '0 22px 48px -22px rgba(2, 6, 23, 0.96)'
-              : '0 14px 32px -24px rgba(2, 6, 23, 0.9)',
-          }}
-        className="absolute left-0 top-0 z-20 flex min-h-10 items-center justify-start rounded-2xl border border-slate-800/90 bg-slate-950/92 p-1 backdrop-blur-md"
-      >
+      <div className="absolute left-0 top-0 z-20 flex items-start gap-2">
         <button
           ref={triggerRef}
           type="button"
@@ -985,11 +995,7 @@ const AoETemplatePicker = ({ activeFigureType = '', onChange }) => {
           aria-controls={drawerId}
           data-testid="aoe-template-trigger"
           onClick={() => setIsOpen((currentOpen) => !currentOpen)}
-          className={`group relative flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-black uppercase tracking-[0.18em] transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
-            activeFigureType
-              ? 'border-rose-300/70 bg-rose-500/22 text-rose-50'
-              : 'border-slate-600/90 bg-slate-900/96 text-slate-200'
-          }`}
+          className={`${getQuickControlButtonClassName(!!activeFigureType)} text-[10px] font-black uppercase tracking-[0.18em]`}
         >
           AoE
         </button>
@@ -1000,7 +1006,7 @@ const AoETemplatePicker = ({ activeFigureType = '', onChange }) => {
               key="aoe-template-drawer"
               id={drawerId}
               data-testid="aoe-template-drawer"
-              className="flex items-center gap-2 overflow-hidden pl-2 pr-2"
+              className={QUICK_CONTROL_DRAWER_CLASS}
               initial={prefersReducedMotion ? { opacity: 1, width: 'auto' } : { opacity: 0, width: 0 }}
               animate={{ opacity: 1, width: 'auto' }}
               exit={prefersReducedMotion ? { opacity: 0, width: 0 } : { opacity: 0, width: 0 }}
@@ -1037,11 +1043,7 @@ const AoETemplatePicker = ({ activeFigureType = '', onChange }) => {
                       transition={prefersReducedMotion
                         ? { duration: 0.01 }
                         : { duration: 0.18, delay: index * 0.03, ease: DRAW_PICKER_EASE }}
-                      className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] transition-transform duration-150 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
-                        isActive
-                          ? 'border-rose-300/70 bg-rose-500/28 text-rose-50'
-                          : 'border-slate-700 bg-slate-900/96 text-slate-200'
-                      }`}
+                      className={getAoETemplateOptionClassName(isActive)}
                     >
                       {label}
                     </motion.button>
@@ -1051,7 +1053,7 @@ const AoETemplatePicker = ({ activeFigureType = '', onChange }) => {
             </motion.div>
           )}
         </AnimatePresence>
-      </motion.div>
+      </div>
     </div>
   );
 };
@@ -2603,11 +2605,7 @@ export default function GrigliataBoard({
             aria-label="Return to mouse selection"
             aria-pressed={isMouseSelectionActive}
             data-testid="mouse-selection-trigger"
-            className={`pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-md border p-2 text-sm font-medium transition-colors ${
-              isMouseSelectionActive
-                ? 'border-slate-200/70 bg-slate-100/12 text-slate-50 hover:bg-slate-100/18'
-                : 'border-slate-700 bg-slate-950/92 text-slate-200 hover:bg-slate-800'
-            }`}
+            className={getQuickControlButtonClassName(isMouseSelectionActive)}
           >
             <FaHandPointer className="h-4 w-4" />
           </button>
@@ -2623,11 +2621,7 @@ export default function GrigliataBoard({
             title={isRulerEnabled ? 'Disable ruler mode' : 'Enable ruler mode'}
             aria-label={isRulerEnabled ? 'Disable ruler mode' : 'Enable ruler mode'}
             aria-pressed={isRulerEnabled}
-            className={`pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-md border p-2 text-sm font-medium transition-colors ${
-              isRulerEnabled
-                ? 'border-sky-400/60 bg-sky-500/15 text-sky-100 hover:bg-sky-500/20'
-                : 'border-slate-700 bg-slate-950/92 text-slate-200 hover:bg-slate-800'
-            }`}
+            className={getQuickControlButtonClassName(isRulerEnabled)}
           >
             <FaRulerHorizontal className="h-4 w-4" />
           </button>
@@ -2643,11 +2637,7 @@ export default function GrigliataBoard({
             title={isInteractionSharingEnabled ? 'Stop sharing live interactions' : 'Share live interactions'}
             aria-label={isInteractionSharingEnabled ? 'Stop sharing live interactions' : 'Share live interactions'}
             aria-pressed={isInteractionSharingEnabled}
-            className={`pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-md border p-2 text-sm font-medium transition-colors ${
-              isInteractionSharingEnabled
-                ? 'border-emerald-400/60 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/20'
-                : 'border-slate-700 bg-slate-950/92 text-slate-200 hover:bg-slate-800'
-            }`}
+            className={getQuickControlButtonClassName(false)}
           >
             {isInteractionSharingEnabled ? <FiUsers className="h-4 w-4" /> : <FiUser className="h-4 w-4" />}
           </button>
@@ -2656,7 +2646,7 @@ export default function GrigliataBoard({
             onClick={fitToBoard}
             title="Reset View"
             aria-label="Reset View"
-            className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-md border border-amber-500/40 bg-slate-950/92 p-2 text-sm font-medium text-amber-200 transition-colors hover:bg-amber-500/10"
+            className={getQuickControlButtonClassName(false)}
           >
             <MdCenterFocusStrong className="h-4 w-4" />
           </button>
