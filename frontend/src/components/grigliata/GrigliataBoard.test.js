@@ -530,7 +530,7 @@ describe('GrigliataBoard', () => {
     fireEvent.mouseMove(window, { clientX: 280, clientY: 140, buttons: 1 });
 
     expect(screen.getByTestId('aoe-figure-overlay-local')).toBeInTheDocument();
-    expect(screen.getByTestId('aoe-figure-measurement-local')).toHaveTextContent(/R \d+ ft • D \d+ ft/);
+    expect(screen.getByTestId('aoe-figure-measurement-local')).toHaveTextContent('R 30 ft • D 60 ft');
 
     fireEvent.mouseUp(window, { button: 0, clientX: 280, clientY: 140, buttons: 0 });
 

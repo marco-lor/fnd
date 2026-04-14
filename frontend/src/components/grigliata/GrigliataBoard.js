@@ -56,6 +56,7 @@ const AOE_LABEL_MAX_WIDTH = 220;
 const AOE_LABEL_SIDE_PADDING = 12;
 const AOE_LABEL_TOP_PADDING = 8;
 const AOE_LABEL_LINE_HEIGHT = 17;
+const AOE_LABEL_AVG_CHAR_WIDTH_PX = 7.4;
 const AOE_LABEL_GAP_PX = 12;
 const AOE_LABEL_EDGE_PADDING = 8;
 const DEFAULT_DRAW_THEME = getGrigliataDrawTheme(DEFAULT_GRIGLIATA_DRAW_COLOR_KEY);
@@ -676,7 +677,7 @@ const MeasurementOverlay = ({
 };
 
 const estimateAoELabelWidth = (line) => (
-  Math.round((String(line || '').length * 7.4) + (AOE_LABEL_SIDE_PADDING * 2))
+  Math.round((String(line || '').length * AOE_LABEL_AVG_CHAR_WIDTH_PX) + (AOE_LABEL_SIDE_PADDING * 2))
 );
 
 const splitAoEFigureMeasurementLines = (figure, maxWidth) => {
@@ -701,19 +702,23 @@ const buildAoEFigureMeasurementBadgeLayout = ({ figure, boardBounds }) => {
     return null;
   }
 
-  const boundedWidth = Math.max(
+  const boardWidth = Math.max(0, boardBounds?.width || 0);
+  const availableWidth = boardWidth - (AOE_LABEL_EDGE_PADDING * 2);
+  const boundedWidth = clampToRange(
+    availableWidth,
     AOE_LABEL_MIN_WIDTH,
-    Math.min(AOE_LABEL_MAX_WIDTH, Math.max(0, boardBounds?.width || 0) - (AOE_LABEL_EDGE_PADDING * 2))
+    AOE_LABEL_MAX_WIDTH
   );
   const lines = splitAoEFigureMeasurementLines(figure, boundedWidth);
   if (!lines.length) {
     return null;
   }
 
-  const width = Math.min(
-    boundedWidth,
-    Math.max(AOE_LABEL_MIN_WIDTH, ...lines.map((line) => estimateAoELabelWidth(line)))
+  const contentWidth = Math.max(
+    AOE_LABEL_MIN_WIDTH,
+    ...lines.map((line) => estimateAoELabelWidth(line))
   );
+  const width = Math.min(boundedWidth, contentWidth);
   const textHeight = lines.length * AOE_LABEL_LINE_HEIGHT;
   const height = textHeight + (AOE_LABEL_TOP_PADDING * 2);
   const unclampedX = figure.bounds.maxX + AOE_LABEL_GAP_PX;
