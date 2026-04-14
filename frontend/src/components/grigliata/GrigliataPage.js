@@ -175,6 +175,47 @@ export default function GrigliataPage() {
   const sidebarTabListClassName = SIDEBAR_TAB_GRID_CLASS_NAMES[sidebarTabs.length]
     || DEFAULT_SIDEBAR_TAB_GRID_CLASS_NAME;
 
+  const runPaginatedWriteBatch = useCallback(async ({
+    collectionName,
+    baseConstraints,
+    applyDocument,
+    useCursor = true,
+  }) => {
+    let cursor = null;
+
+    while (true) {
+      const pageConstraints = cursor && useCursor
+        ? [...baseConstraints, startAfter(cursor)]
+        : baseConstraints;
+      const snapshot = await getDocs(query(collection(db, collectionName), ...pageConstraints));
+
+      if (snapshot.empty) {
+        return;
+      }
+
+      const batch = writeBatch(db);
+      let pendingWriteCount = 0;
+
+      for (const docSnap of snapshot.docs) {
+        pendingWriteCount += applyDocument({ batch, docSnap }) || 0;
+      }
+
+      if (pendingWriteCount > 0) {
+        await batch.commit();
+      }
+
+      if (snapshot.size < FIRESTORE_BATCH_SIZE) {
+        return;
+      }
+
+      if (!useCursor) {
+        continue;
+      }
+
+      cursor = snapshot.docs[snapshot.docs.length - 1];
+    }
+  }, []);
+
   useEffect(() => {
     persistedDrawColorKeyRef.current = persistedDrawColorKey;
 
@@ -594,23 +635,13 @@ export default function GrigliataPage() {
 
     const runLegacyCleanup = async () => {
       try {
-        let cursor = null;
-
-        while (true) {
-          const baseConstraints = [
+        await runPaginatedWriteBatch({
+          collectionName: 'grigliata_tokens',
+          baseConstraints: [
             orderBy(documentId()),
             limit(FIRESTORE_BATCH_SIZE),
-          ];
-
-          const pageQuery = cursor
-            ? query(collection(db, 'grigliata_tokens'), ...baseConstraints, startAfter(cursor))
-            : query(collection(db, 'grigliata_tokens'), ...baseConstraints);
-
-          const snapshot = await getDocs(pageQuery);
-          if (snapshot.empty) break;
-
-          const batch = writeBatch(db);
-          for (const docSnap of snapshot.docs) {
+          ],
+          applyDocument: ({ batch, docSnap }) => {
             batch.set(docSnap.ref, {
               placed: deleteField(),
               col: deleteField(),
@@ -618,15 +649,9 @@ export default function GrigliataPage() {
               updatedAt: serverTimestamp(),
               updatedBy: currentUserId || null,
             }, { merge: true });
-          }
-          await batch.commit();
-
-          if (snapshot.size < FIRESTORE_BATCH_SIZE) {
-            break;
-          }
-
-          cursor = snapshot.docs[snapshot.docs.length - 1];
-        }
+            return 1;
+          },
+        });
 
         if (cancelled) return;
 
@@ -649,7 +674,7 @@ export default function GrigliataPage() {
     return () => {
       cancelled = true;
     };
-  }, [currentUserId, isManager, legacyCleanupCompletedAt]);
+  }, [currentUserId, isManager, legacyCleanupCompletedAt, runPaginatedWriteBatch]);
 
   useEffect(() => {
     if (!currentUserId || !isManager) return undefined;
@@ -662,28 +687,16 @@ export default function GrigliataPage() {
 
     const runPlacementVisibilityCleanup = async () => {
       try {
-        let cursor = null;
-
-        while (true) {
-          const baseConstraints = [
+        await runPaginatedWriteBatch({
+          collectionName: 'grigliata_token_placements',
+          baseConstraints: [
             orderBy(documentId()),
             limit(FIRESTORE_BATCH_SIZE),
-          ];
-
-          const pageQuery = cursor
-            ? query(collection(db, 'grigliata_token_placements'), ...baseConstraints, startAfter(cursor))
-            : query(collection(db, 'grigliata_token_placements'), ...baseConstraints);
-
-          const snapshot = await getDocs(pageQuery);
-          if (snapshot.empty) break;
-
-          const batch = writeBatch(db);
-          let shouldCommitBatch = false;
-
-          for (const docSnap of snapshot.docs) {
+          ],
+          applyDocument: ({ batch, docSnap }) => {
             const placement = docSnap.data();
             if (placement?.isVisibleToPlayers === true || placement?.isVisibleToPlayers === false) {
-              continue;
+              return 0;
             }
 
             batch.set(docSnap.ref, {
@@ -691,19 +704,9 @@ export default function GrigliataPage() {
               updatedAt: serverTimestamp(),
               updatedBy: currentUserId || null,
             }, { merge: true });
-            shouldCommitBatch = true;
-          }
-
-          if (shouldCommitBatch) {
-            await batch.commit();
-          }
-
-          if (snapshot.size < FIRESTORE_BATCH_SIZE) {
-            break;
-          }
-
-          cursor = snapshot.docs[snapshot.docs.length - 1];
-        }
+            return 1;
+          },
+        });
 
         if (cancelled) return;
 
@@ -726,7 +729,7 @@ export default function GrigliataPage() {
     return () => {
       cancelled = true;
     };
-  }, [currentUserId, isManager, legacyPlacementVisibilityCleanupCompletedAt]);
+  }, [currentUserId, isManager, legacyPlacementVisibilityCleanupCompletedAt, runPaginatedWriteBatch]);
 
   const tokenProfilesByOwnerUid = useMemo(() => {
     const nextMap = new Map();
@@ -957,29 +960,16 @@ export default function GrigliataPage() {
   const syncOwnedAoEFigureVisibility = useCallback(async (nextIsVisibleToPlayers) => {
     if (!currentUserId) return;
 
-    let cursor = null;
-
-    while (true) {
-      const baseConstraints = [
+    await runPaginatedWriteBatch({
+      collectionName: GRIGLIATA_AOE_FIGURE_COLLECTION,
+      baseConstraints: [
         where('ownerUid', '==', currentUserId),
         orderBy(documentId()),
         limit(FIRESTORE_BATCH_SIZE),
-      ];
-      const pageQuery = cursor
-        ? query(collection(db, GRIGLIATA_AOE_FIGURE_COLLECTION), ...baseConstraints, startAfter(cursor))
-        : query(collection(db, GRIGLIATA_AOE_FIGURE_COLLECTION), ...baseConstraints);
-      const snapshot = await getDocs(pageQuery);
-
-      if (snapshot.empty) {
-        return;
-      }
-
-      const batch = writeBatch(db);
-      let shouldCommitBatch = false;
-
-      snapshot.docs.forEach((docSnap) => {
+      ],
+      applyDocument: ({ batch, docSnap }) => {
         if (docSnap.data()?.isVisibleToPlayers === nextIsVisibleToPlayers) {
-          return;
+          return 0;
         }
 
         batch.set(docSnap.ref, {
@@ -987,20 +977,10 @@ export default function GrigliataPage() {
           updatedAt: serverTimestamp(),
           updatedBy: currentUserId || null,
         }, { merge: true });
-        shouldCommitBatch = true;
-      });
-
-      if (shouldCommitBatch) {
-        await batch.commit();
-      }
-
-      if (snapshot.size < FIRESTORE_BATCH_SIZE) {
-        return;
-      }
-
-      cursor = snapshot.docs[snapshot.docs.length - 1];
-    }
-  }, [currentUserId]);
+        return 1;
+      },
+    });
+  }, [currentUserId, runPaginatedWriteBatch]);
 
   const persistInteractionSharingPreference = useCallback(async (nextIsEnabled) => {
     if (!currentUserId) return;
@@ -1164,17 +1144,13 @@ export default function GrigliataPage() {
 
     let deletedCount = 0;
 
-    while (true) {
-      const snapshot = await getDocs(query(
-        collection(db, 'grigliata_token_placements'),
+    await runPaginatedWriteBatch({
+      collectionName: 'grigliata_token_placements',
+      baseConstraints: [
         where('backgroundId', '==', backgroundId),
-        limit(FIRESTORE_BATCH_SIZE)
-      ));
-
-      if (snapshot.empty) return deletedCount;
-
-      const batch = writeBatch(db);
-      for (const docSnap of snapshot.docs) {
+        limit(FIRESTORE_BATCH_SIZE),
+      ],
+      applyDocument: ({ batch, docSnap }) => {
         const ownerUid = docSnap.data()?.ownerUid;
         batch.delete(docSnap.ref);
         if (typeof ownerUid === 'string' && ownerUid) {
@@ -1185,11 +1161,12 @@ export default function GrigliataPage() {
           );
         }
         deletedCount += 1;
-      }
-      await batch.commit();
+        return 1;
+      },
+      useCursor: false,
+    });
 
-      if (snapshot.size < FIRESTORE_BATCH_SIZE) return deletedCount;
-    }
+    return deletedCount;
   };
 
   useEffect(() => {

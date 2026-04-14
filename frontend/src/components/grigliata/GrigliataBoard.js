@@ -1754,13 +1754,13 @@ export default function GrigliataBoard({
       return;
     }
 
-    if (activeInteraction.type === 'aoe-drag-candidate') {
-      setAoEFigureDragState(null);
-      clearActiveSharedInteraction();
-      return;
-    }
+    if (isAoEDragInteraction(activeInteraction)) {
+      if (activeInteraction.type === 'aoe-drag-candidate') {
+        setAoEFigureDragState(null);
+        clearActiveSharedInteraction();
+        return;
+      }
 
-    if (activeInteraction.type === 'aoe-drag') {
       const dragDraft = pointerWorld
         ? getDraggedAoEFigureDraft(activeInteraction, pointerWorld)
         : null;
@@ -1967,27 +1967,18 @@ export default function GrigliataBoard({
         return;
       }
 
-      if (activeInteraction.type === 'aoe-drag-candidate') {
-        if (!hasMovedBeyondThreshold) return;
+      if (isAoEDragInteraction(activeInteraction)) {
+        if (activeInteraction.type === 'aoe-drag-candidate' && !hasMovedBeyondThreshold) return;
 
         const dragDraft = getDraggedAoEFigureDraft(activeInteraction, pointerWorld);
         if (!dragDraft) return;
 
-        interactionRef.current = {
-          ...activeInteraction,
-          type: 'aoe-drag',
-        };
-        setAoEFigureDragState({
-          figureId: activeInteraction.figureId,
-          draft: dragDraft.draft,
-        });
-        syncSharedAoEInteraction(dragDraft.draft, 'aoe-move');
-        return;
-      }
-
-      if (activeInteraction.type === 'aoe-drag') {
-        const dragDraft = getDraggedAoEFigureDraft(activeInteraction, pointerWorld);
-        if (!dragDraft) return;
+        if (activeInteraction.type === 'aoe-drag-candidate') {
+          interactionRef.current = {
+            ...activeInteraction,
+            type: 'aoe-drag',
+          };
+        }
 
         setAoEFigureDragState({
           figureId: activeInteraction.figureId,

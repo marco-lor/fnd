@@ -63,13 +63,7 @@ service cloud.firestore {
         && ownerUid is string
         && isValidGrigliataAoEFigureType(figureType)
         && isValidGrigliataAoEFigureSlot(slot)
-        && (
-          (slot == 1 && figureId == backgroundId + "__" + ownerUid + "__" + figureType + "__1")
-          || (slot == 2 && figureId == backgroundId + "__" + ownerUid + "__" + figureType + "__2")
-          || (slot == 3 && figureId == backgroundId + "__" + ownerUid + "__" + figureType + "__3")
-          || (slot == 4 && figureId == backgroundId + "__" + ownerUid + "__" + figureType + "__4")
-          || (slot == 5 && figureId == backgroundId + "__" + ownerUid + "__" + figureType + "__5")
-        );
+        && figureId == backgroundId + "__" + ownerUid + "__" + figureType + "__" + string(slot);
     }
 
     function isOwnGrigliataAoEFigureProbeId(figureId) {
