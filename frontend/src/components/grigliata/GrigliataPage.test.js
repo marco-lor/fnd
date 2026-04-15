@@ -509,6 +509,33 @@ describe('GrigliataPage', () => {
     });
   });
 
+  test('derives a music track extension from the MIME type when the filename has none', async () => {
+    setManagerAuth();
+    const storageApi = require('firebase/storage');
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /music/i }));
+
+    const file = new File(['audio-bytes'], 'battle-theme', { type: 'audio/mpeg' });
+    Object.defineProperty(file, 'size', { value: 2048 });
+
+    fireEvent.change(screen.getByLabelText(/music track file/i), {
+      target: { files: [file] },
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /add track/i }));
+    });
+
+    await waitFor(() => {
+      expect(storageApi.ref).toHaveBeenCalledWith(
+        {},
+        expect.stringMatching(/^grigliata\/music\/user-1\/battle_theme_\d+\.mp3$/)
+      );
+    });
+  });
+
   test('cleans up an uploaded music file when metadata persistence fails', async () => {
     setManagerAuth();
     const storageApi = require('firebase/storage');

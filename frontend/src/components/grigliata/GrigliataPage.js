@@ -29,6 +29,7 @@ import {
   buildStorageSafeName,
   getDisplayNameFromFileName,
   getFileExtension,
+  getFileExtensionFromContentType,
   isManagerRole,
   normalizeGridConfig,
   readFileImageDimensions,
@@ -1403,7 +1404,7 @@ export default function GrigliataPage() {
 
     const trackName = (musicUploadName || getDisplayNameFromFileName(file.name)).trim();
     const safeName = buildStorageSafeName(trackName, 'grigliata_music');
-    const fileExtension = getFileExtension(file.name) || '.audio';
+    const fileExtension = getFileExtension(file.name) || getFileExtensionFromContentType(file.type);
     const storagePath = `grigliata/music/${user.uid}/${safeName}_${Date.now()}${fileExtension}`;
     let uploadedPath = '';
 

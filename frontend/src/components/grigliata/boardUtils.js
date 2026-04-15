@@ -9,6 +9,14 @@ import {
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
+const CONTENT_TYPE_EXTENSION_ALIASES = {
+  mpeg: 'mp3',
+  mp4: 'm4a',
+  'x-flac': 'flac',
+  'x-m4a': 'm4a',
+  'x-wav': 'wav',
+};
+
 const asFiniteNumber = (value, fallback = 0) => {
   const numericValue = Number(value);
   return Number.isFinite(numericValue) ? numericValue : fallback;
@@ -83,6 +91,18 @@ export const getFileExtension = (fileName) => {
   const safeName = typeof fileName === 'string' ? fileName.trim() : '';
   const match = safeName.match(/(\.[^.]+)$/);
   return match ? match[1].replace(/[^.a-zA-Z0-9]/g, '') : '';
+};
+
+export const getFileExtensionFromContentType = (contentType) => {
+  const safeContentType = typeof contentType === 'string'
+    ? contentType.split(';')[0].trim().toLowerCase()
+    : '';
+  const [type = '', subtype = ''] = safeContentType.split('/');
+  if (!type || !subtype) return '';
+
+  const normalizedSubtype = CONTENT_TYPE_EXTENSION_ALIASES[subtype] || subtype;
+  const safeExtension = normalizedSubtype.replace(/[^a-z0-9]+/g, '');
+  return safeExtension ? `.${safeExtension}` : '';
 };
 
 export const buildStorageSafeName = (value, fallback = 'asset') => {

@@ -272,6 +272,73 @@ describe('GlobalGrigliataMusicPlayer', () => {
     }
   });
 
+  test('logs and clears the shared audio source when loading fails during seek', async () => {
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const { container } = render(
+        <GlobalGrigliataMusicPlayer subscribeToPlaybackState={subscribeToPlaybackState} />
+      );
+      const audio = container.querySelector('audio');
+      let currentTime = 0;
+      let canSeek = false;
+
+      Object.defineProperty(audio, 'readyState', {
+        configurable: true,
+        get: () => 0,
+      });
+
+      Object.defineProperty(audio, 'currentTime', {
+        configurable: true,
+        get: () => currentTime,
+        set: (value) => {
+          if (!canSeek) {
+            throw new Error('metadata unavailable');
+          }
+
+          currentTime = value;
+        },
+      });
+
+      await waitFor(() => {
+        expect(subscribeToPlaybackState).toHaveBeenCalledTimes(1);
+      });
+
+      await act(async () => {
+        setPlaybackDoc({
+          status: 'paused',
+          trackId: 'track-1',
+          trackName: 'Battle Theme',
+          audioUrl: 'https://example.com/audio/battle-theme.mp3',
+          durationMs: 120_000,
+          offsetMs: 9_000,
+          volume: 0.48,
+          startedAt: null,
+          commandId: 'cmd-load-failed',
+          updatedBy: 'user-1',
+        });
+      });
+
+      canSeek = true;
+
+      await act(async () => {
+        audio.dispatchEvent(new Event('error'));
+      });
+
+      await waitFor(() => {
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          'Failed to prepare Grigliata music playback:',
+          expect.objectContaining({ name: 'GrigliataAudioLoadError' })
+        );
+      });
+
+      expect(audio.getAttribute('src')).toBe(null);
+      expect(screen.queryByRole('button', { name: /enable audio/i })).not.toBeInTheDocument();
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
   test('ignores interrupted play requests without showing the unlock prompt', async () => {
     const playError = new Error('The play() request was interrupted by a call to pause().');
     playError.name = 'AbortError';

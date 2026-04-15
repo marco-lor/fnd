@@ -39,7 +39,7 @@ const ensureAudioSource = async (audio, audioUrl) => {
   try {
     audio.load();
   } catch (error) {
-    // Ignore load errors here and let audio.play surface them if needed.
+    throw createAudioLoadError('Unable to load the shared music source.', error);
   }
 };
 
@@ -54,6 +54,15 @@ const isAutoplayBlockedError = (error) => {
   return error?.name === 'NotAllowedError'
     || errorMessage.includes('autoplay')
     || errorMessage.includes('user gesture');
+};
+
+const createAudioLoadError = (message, cause) => {
+  const error = new Error(message);
+  error.name = 'GrigliataAudioLoadError';
+  if (cause) {
+    error.cause = cause;
+  }
+  return error;
 };
 
 const seekAudio = async (audio, targetSeconds) => {
@@ -71,7 +80,9 @@ const seekAudio = async (audio, targetSeconds) => {
   };
 
   if (audio.readyState >= 1) {
-    trySeekImmediately();
+    if (!trySeekImmediately()) {
+      throw createAudioLoadError('Unable to seek the shared music source.');
+    }
     return;
   }
 
@@ -79,7 +90,7 @@ const seekAudio = async (audio, targetSeconds) => {
     return;
   }
 
-  await new Promise((resolve) => {
+  await new Promise((resolve, reject) => {
     const cleanup = () => {
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
       audio.removeEventListener('error', handleError);
@@ -87,13 +98,17 @@ const seekAudio = async (audio, targetSeconds) => {
 
     const handleLoadedMetadata = () => {
       cleanup();
-      audio.currentTime = resolvedSeconds;
-      resolve();
+      try {
+        audio.currentTime = resolvedSeconds;
+        resolve();
+      } catch (error) {
+        reject(createAudioLoadError('Unable to seek the shared music source.', error));
+      }
     };
 
     const handleError = () => {
       cleanup();
-      resolve();
+      reject(createAudioLoadError('Unable to load the shared music source.'));
     };
 
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
@@ -158,35 +173,34 @@ export default function GlobalGrigliataMusicPlayer({
     const normalizedState = normalizeGrigliataMusicPlaybackState(nextPlaybackState);
     applyAudioVolume(audio, normalizedState.volume);
 
-    if (
-      normalizedState.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED
-      || !normalizedState.audioUrl
-    ) {
-      setIsUnlockPromptVisible(false);
-      clearAudioSource(audio);
-      return;
-    }
-
-    await ensureAudioSource(audio, normalizedState.audioUrl);
-
-    if (normalizedState.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PAUSED) {
-      await seekAudio(audio, normalizedState.offsetMs / 1000);
-      audio.pause();
-      setIsUnlockPromptVisible(false);
-      return;
-    }
-
-    const targetOffsetMs = computeGrigliataMusicPlaybackOffsetMs(normalizedState);
-    if (normalizedState.durationMs > 0 && targetOffsetMs >= normalizedState.durationMs) {
-      await seekAudio(audio, normalizedState.durationMs / 1000);
-      audio.pause();
-      setIsUnlockPromptVisible(false);
-      return;
-    }
-
-    await seekAudio(audio, targetOffsetMs / 1000);
-
     try {
+      if (
+        normalizedState.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED
+        || !normalizedState.audioUrl
+      ) {
+        setIsUnlockPromptVisible(false);
+        clearAudioSource(audio);
+        return;
+      }
+
+      await ensureAudioSource(audio, normalizedState.audioUrl);
+
+      if (normalizedState.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PAUSED) {
+        await seekAudio(audio, normalizedState.offsetMs / 1000);
+        audio.pause();
+        setIsUnlockPromptVisible(false);
+        return;
+      }
+
+      const targetOffsetMs = computeGrigliataMusicPlaybackOffsetMs(normalizedState);
+      if (normalizedState.durationMs > 0 && targetOffsetMs >= normalizedState.durationMs) {
+        await seekAudio(audio, normalizedState.durationMs / 1000);
+        audio.pause();
+        setIsUnlockPromptVisible(false);
+        return;
+      }
+
+      await seekAudio(audio, targetOffsetMs / 1000);
       await audio.play();
       setIsUnlockPromptVisible(false);
     } catch (error) {
@@ -200,7 +214,13 @@ export default function GlobalGrigliataMusicPlayer({
         return;
       }
 
-      console.error('Failed to start Grigliata music playback:', error);
+      if (error?.name === 'GrigliataAudioLoadError') {
+        console.error('Failed to prepare Grigliata music playback:', error);
+        clearAudioSource(audio);
+      } else {
+        console.error('Failed to start Grigliata music playback:', error);
+      }
+
       setIsUnlockPromptVisible(false);
     }
   }, []);
