@@ -1080,12 +1080,19 @@ export default function GrigliataPage() {
     ),
     [activeBackgroundId, localLiveInteraction]
   );
+  const isLocalLiveInteractionPublishEnabled = useMemo(
+    () => !!(
+      publishableLocalLiveInteraction
+      && (isInteractionSharingEnabled || publishableLocalLiveInteraction.type === 'ping')
+    ),
+    [isInteractionSharingEnabled, publishableLocalLiveInteraction]
+  );
 
   useEffect(() => {
     const nextDocId = (
       currentUserId
       && activeBackgroundId
-      && isInteractionSharingEnabled
+      && isLocalLiveInteractionPublishEnabled
       && publishableLocalLiveInteraction
     )
       ? buildGrigliataLiveInteractionDocId(activeBackgroundId, currentUserId)
@@ -1127,7 +1134,7 @@ export default function GrigliataPage() {
     deletePublishedLiveInteraction,
     discardPendingLiveInteractionPublish,
     drawColorKey,
-    isInteractionSharingEnabled,
+    isLocalLiveInteractionPublishEnabled,
     publishableLocalLiveInteraction,
     scheduleLiveInteractionPublish,
   ]);

@@ -39,6 +39,7 @@ import useImageAsset from './useImageAsset';
 import {
   buildAoEFigureFromGrigliataLiveInteraction,
   buildMeasurementFromGrigliataLiveInteraction,
+  buildPingFromGrigliataLiveInteraction,
   normalizeGrigliataLiveInteractionDraft,
 } from './liveInteractions';
 import {
@@ -64,6 +65,10 @@ const MEASUREMENT_OUTLINE_STROKE_WIDTH = 7;
 const SHAPE_OUTLINE_STROKE_WIDTH = 4;
 const TOKEN_RING_OUTLINE_STROKE_WIDTH = 6;
 const TOKEN_STATUS_VISIBLE_BADGE_COUNT = 3;
+const MAP_PING_HOLD_DELAY_MS = 500;
+const MAP_PING_VISIBLE_MS = 1100;
+const MAP_PING_BROADCAST_CLEAR_MS = 1500;
+const MAP_PING_ANIMATION_INTERVAL_MS = 32;
 const HIDDEN_TOKEN_PRIMARY = 'rgba(226, 232, 240, 0.96)';
 const HIDDEN_TOKEN_SECONDARY = 'rgba(148, 163, 184, 0.94)';
 const HIDDEN_TOKEN_SCRIM = 'rgba(15, 23, 42, 0.6)';
@@ -106,6 +111,7 @@ const isAoEDragInteraction = (interaction) => (
   interaction?.type === 'aoe-drag-candidate'
   || interaction?.type === 'aoe-drag'
 );
+const isPingHoldInteraction = (interaction) => interaction?.type === 'ping-hold';
 
 const normalizeSelectionRect = (selectionBox) => {
   if (!selectionBox?.start || !selectionBox?.end) return null;
@@ -147,6 +153,16 @@ const buildSelectionActionToolbarPosition = ({ left, top, width, buttonSize, gap
 });
 
 const clampToRange = (value, min, max) => Math.min(max, Math.max(min, value));
+const easeOutCubic = (value) => 1 - ((1 - clampToRange(value, 0, 1)) ** 3);
+
+const isPointWithinBounds = (point, bounds) => (
+  !!point
+  && !!bounds
+  && point.x >= bounds.minX
+  && point.x <= bounds.maxX
+  && point.y >= bounds.minY
+  && point.y <= bounds.maxY
+);
 
 const HiddenEyeBadge = ({ x, y, size }) => {
   const half = size / 2;
@@ -672,6 +688,136 @@ const MeasurementOverlay = ({
           text={measurement.label}
         />
       </Group>
+    </Group>
+  );
+};
+
+const MapPingOverlay = ({
+  ping,
+  drawTheme = DEFAULT_DRAW_THEME,
+  overlayId = '',
+  now,
+  prefersReducedMotion = false,
+}) => {
+  if (!ping?.point || !Number.isFinite(ping.startedAtMs) || !Number.isFinite(now)) {
+    return null;
+  }
+
+  const ageMs = clampToRange(now - ping.startedAtMs, 0, MAP_PING_VISIBLE_MS);
+  if (ageMs >= MAP_PING_VISIBLE_MS) {
+    return null;
+  }
+
+  const progress = clampToRange(ageMs / MAP_PING_VISIBLE_MS, 0, 1);
+  const easedProgress = easeOutCubic(progress);
+  const pulseStrength = Math.sin(progress * Math.PI);
+  const fadeOpacity = 1 - progress;
+  const outerRadius = prefersReducedMotion ? 42 : 18 + (easedProgress * 108);
+  const innerRadius = prefersReducedMotion ? 24 : 10 + (easedProgress * 54);
+  const sigilRadius = prefersReducedMotion ? 18 : 16 + (pulseStrength * 12);
+  const coreRadius = prefersReducedMotion ? 7 : 7 + (pulseStrength * 6);
+  const rayInnerRadius = prefersReducedMotion ? 12 : 12 + (easedProgress * 12);
+  const rayOuterRadius = prefersReducedMotion ? 34 : 30 + (easedProgress * 42);
+  const rayStrokeWidth = prefersReducedMotion ? 1.5 : Math.max(1.4, 2.4 - progress);
+  const rayAngles = [0, Math.PI / 4, Math.PI / 2, (Math.PI * 3) / 4];
+  const diamondRadius = prefersReducedMotion ? 12 : 10 + (pulseStrength * 8);
+
+  return (
+    <Group
+      x={ping.point.x}
+      y={ping.point.y}
+      listening={false}
+      data-testid={overlayId ? `map-ping-overlay-${overlayId}` : undefined}
+    >
+      <Circle
+        radius={outerRadius}
+        stroke={drawTheme.outlineStroke}
+        strokeWidth={Math.max(3.5, 6 - (progress * 2))}
+        opacity={0.16 + (fadeOpacity * 0.12)}
+      />
+      <Circle
+        radius={outerRadius}
+        stroke={drawTheme.stroke}
+        strokeWidth={Math.max(1.8, 3 - progress)}
+        opacity={fadeOpacity * 0.66}
+        shadowColor={drawTheme.glow}
+        shadowBlur={22}
+        shadowOpacity={fadeOpacity * 0.36}
+      />
+      <Circle
+        radius={innerRadius}
+        fill="#f8fafc"
+        opacity={fadeOpacity * 0.08}
+        shadowColor={drawTheme.glow}
+        shadowBlur={28}
+        shadowOpacity={fadeOpacity * 0.3}
+      />
+      <Circle
+        radius={sigilRadius}
+        stroke="#fef3c7"
+        strokeWidth={1.4}
+        dash={[10, 8]}
+        opacity={fadeOpacity * (prefersReducedMotion ? 0.34 : 0.5)}
+      />
+      <Circle
+        radius={sigilRadius}
+        stroke={drawTheme.stroke}
+        strokeWidth={1.1}
+        dash={[10, 8]}
+        opacity={fadeOpacity * (prefersReducedMotion ? 0.26 : 0.42)}
+      />
+      <Line
+        points={[0, -diamondRadius, diamondRadius, 0, 0, diamondRadius, -diamondRadius, 0]}
+        closed
+        stroke="#fef3c7"
+        strokeWidth={1.4}
+        lineJoin="round"
+        opacity={fadeOpacity * 0.56}
+      />
+      {!prefersReducedMotion && rayAngles.map((angle) => (
+        <React.Fragment key={`ping-ray-${angle}`}>
+          <Line
+            points={[
+              Math.cos(angle) * rayInnerRadius,
+              Math.sin(angle) * rayInnerRadius,
+              Math.cos(angle) * rayOuterRadius,
+              Math.sin(angle) * rayOuterRadius,
+            ]}
+            stroke={drawTheme.outlineStroke}
+            strokeWidth={rayStrokeWidth + 1.6}
+            lineCap="round"
+            opacity={fadeOpacity * 0.22}
+          />
+          <Line
+            points={[
+              Math.cos(angle) * rayInnerRadius,
+              Math.sin(angle) * rayInnerRadius,
+              Math.cos(angle) * rayOuterRadius,
+              Math.sin(angle) * rayOuterRadius,
+            ]}
+            stroke="#fef3c7"
+            strokeWidth={rayStrokeWidth}
+            lineCap="round"
+            opacity={fadeOpacity * 0.62}
+            shadowColor={drawTheme.stroke}
+            shadowBlur={10}
+            shadowOpacity={fadeOpacity * 0.3}
+          />
+        </React.Fragment>
+      ))}
+      <Circle
+        radius={coreRadius}
+        fill="#fef3c7"
+        opacity={0.22 + (fadeOpacity * 0.72)}
+        shadowColor={drawTheme.stroke}
+        shadowBlur={18}
+        shadowOpacity={fadeOpacity * 0.5}
+      />
+      <Circle
+        radius={Math.max(2.5, coreRadius * 0.42)}
+        fill={drawTheme.stroke}
+        opacity={fadeOpacity * 0.84}
+      />
     </Group>
   );
 };
@@ -1213,6 +1359,9 @@ export default function GrigliataBoard({
   const containerRef = useRef(null);
   const stageRef = useRef(null);
   const interactionRef = useRef(null);
+  const pingHoldTimeoutRef = useRef(null);
+  const pingBroadcastClearTimeoutRef = useRef(null);
+  const nextLocalPingIdRef = useRef(0);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
   const [isDropActive, setIsDropActive] = useState(false);
@@ -1224,12 +1373,15 @@ export default function GrigliataBoard({
   const [selectedAoEFigureId, setSelectedAoEFigureId] = useState('');
   const [aoeFigureDragState, setAoEFigureDragState] = useState(null);
   const [activeSharedInteraction, setActiveSharedInteraction] = useState(null);
+  const [localPings, setLocalPings] = useState([]);
+  const [pingAnimationClock, setPingAnimationClock] = useState(() => Date.now());
   const [hoveredOverflowTokenId, setHoveredOverflowTokenId] = useState('');
   const [pinnedOverflowTokenId, setPinnedOverflowTokenId] = useState('');
   const backgroundImage = useImageAsset(activeBackground?.imageUrl || '');
   const lastFitKeyRef = useRef('');
   const resolvedDrawTheme = drawTheme || DEFAULT_DRAW_THEME;
   const isMouseSelectionActive = !isRulerEnabled && !activeAoeFigureType;
+  const prefersReducedMotion = useReducedMotion();
 
   const normalizedGrid = useMemo(() => normalizeGridConfig(grid), [grid]);
 
@@ -1381,6 +1533,21 @@ export default function GrigliataBoard({
     () => (sharedInteractions || [])
       .filter((interaction) => interaction?.ownerUid && interaction.ownerUid !== currentUserId)
       .map((interaction) => {
+        if (interaction.type === 'ping') {
+          const ping = buildPingFromGrigliataLiveInteraction({ interaction });
+
+          if (!ping || (pingAnimationClock - ping.startedAtMs) >= MAP_PING_VISIBLE_MS) {
+            return null;
+          }
+
+          return {
+            kind: 'ping',
+            ownerUid: interaction.ownerUid,
+            drawTheme: getGrigliataDrawTheme(interaction.colorKey),
+            ping,
+          };
+        }
+
         if (interaction.type === 'measure') {
           const measurement = buildMeasurementFromGrigliataLiveInteraction({
             interaction,
@@ -1420,7 +1587,15 @@ export default function GrigliataBoard({
         return null;
       })
       .filter(Boolean),
-    [currentUserId, normalizedGrid, sharedInteractions]
+    [currentUserId, normalizedGrid, pingAnimationClock, sharedInteractions]
+  );
+  const visibleLocalPings = useMemo(
+    () => localPings.filter((ping) => (pingAnimationClock - ping.startedAtMs) < MAP_PING_VISIBLE_MS),
+    [localPings, pingAnimationClock]
+  );
+  const hasVisibleRemotePing = useMemo(
+    () => renderedSharedInteractions.some((interaction) => interaction.kind === 'ping'),
+    [renderedSharedInteractions]
   );
 
   const clearActiveSharedInteraction = useCallback(() => {
@@ -1430,6 +1605,67 @@ export default function GrigliataBoard({
   const updateActiveSharedInteraction = useCallback((draft) => {
     setActiveSharedInteraction(normalizeGrigliataLiveInteractionDraft(draft));
   }, []);
+
+  const clearPingHoldTimer = useCallback(() => {
+    if (pingHoldTimeoutRef.current) {
+      window.clearTimeout(pingHoldTimeoutRef.current);
+      pingHoldTimeoutRef.current = null;
+    }
+  }, []);
+
+  const clearPingBroadcastTimer = useCallback(() => {
+    if (pingBroadcastClearTimeoutRef.current) {
+      window.clearTimeout(pingBroadcastClearTimeoutRef.current);
+      pingBroadcastClearTimeoutRef.current = null;
+    }
+  }, []);
+
+  const spawnMapPing = useCallback((point, { broadcast = false } = {}) => {
+    if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y)) {
+      return;
+    }
+
+    const startedAtMs = Date.now();
+    const nextLocalPingId = nextLocalPingIdRef.current + 1;
+    nextLocalPingIdRef.current = nextLocalPingId;
+    setPingAnimationClock(startedAtMs);
+    setLocalPings((currentPings) => ([
+      ...currentPings.filter((ping) => (startedAtMs - ping.startedAtMs) < MAP_PING_VISIBLE_MS),
+      {
+        id: `local-ping-${nextLocalPingId}-${startedAtMs}`,
+        point: {
+          x: point.x,
+          y: point.y,
+        },
+        startedAtMs,
+        colorKey: resolvedDrawTheme.key,
+      },
+    ]));
+
+    if (!broadcast) {
+      return;
+    }
+
+    updateActiveSharedInteraction({
+      type: 'ping',
+      source: 'free',
+      point: {
+        x: point.x,
+        y: point.y,
+      },
+      startedAtMs,
+    });
+
+    clearPingBroadcastTimer();
+    pingBroadcastClearTimeoutRef.current = window.setTimeout(() => {
+      pingBroadcastClearTimeoutRef.current = null;
+      setActiveSharedInteraction((currentInteraction) => (
+        currentInteraction?.type === 'ping' && currentInteraction.startedAtMs === startedAtMs
+          ? null
+          : currentInteraction
+      ));
+    }, MAP_PING_BROADCAST_CLEAR_MS);
+  }, [clearPingBroadcastTimer, resolvedDrawTheme.key, updateActiveSharedInteraction]);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -1479,6 +1715,8 @@ export default function GrigliataBoard({
 
   useEffect(() => {
     interactionRef.current = null;
+    clearPingHoldTimer();
+    clearPingBroadcastTimer();
     setSelectedTokenIds([]);
     setSelectionBox(null);
     setTokenDragState(null);
@@ -1486,10 +1724,12 @@ export default function GrigliataBoard({
     setAoEPreviewState(null);
     setSelectedAoEFigureId('');
     setAoEFigureDragState(null);
+    setLocalPings([]);
+    setPingAnimationClock(Date.now());
     clearActiveSharedInteraction();
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
-  }, [clearActiveSharedInteraction, fitKey]);
+  }, [clearActiveSharedInteraction, clearPingBroadcastTimer, clearPingHoldTimer, fitKey]);
 
   useEffect(() => {
     if (!isRulerEnabled) {
@@ -1502,6 +1742,33 @@ export default function GrigliataBoard({
       clearActiveSharedInteraction();
     }
   }, [activeAoeFigureType, clearActiveSharedInteraction, isRulerEnabled]);
+
+  useEffect(() => {
+    if (visibleLocalPings.length === localPings.length) {
+      return;
+    }
+
+    setLocalPings(visibleLocalPings);
+  }, [localPings.length, visibleLocalPings]);
+
+  useEffect(() => {
+    if (!visibleLocalPings.length && !hasVisibleRemotePing) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setPingAnimationClock(Date.now());
+    }, MAP_PING_ANIMATION_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [hasVisibleRemotePing, visibleLocalPings.length]);
+
+  useEffect(() => (
+    () => {
+      clearPingHoldTimer();
+      clearPingBroadcastTimer();
+    }
+  ), [clearPingBroadcastTimer, clearPingHoldTimer]);
 
   useEffect(() => {
     onSharedInteractionChange?.(activeSharedInteraction);
@@ -1794,6 +2061,7 @@ export default function GrigliataBoard({
     const activeInteraction = interactionRef.current;
     if (!activeInteraction) return;
 
+    clearPingHoldTimer();
     interactionRef.current = null;
 
     const pointerWorld = (
@@ -1807,6 +2075,10 @@ export default function GrigliataBoard({
       setSelectedTokenIds([]);
       setSelectedAoEFigureId('');
       clearActiveSharedInteraction();
+      return;
+    }
+
+    if (isPingHoldInteraction(activeInteraction)) {
       return;
     }
 
@@ -1968,6 +2240,7 @@ export default function GrigliataBoard({
     selectionBox,
     tokenDragState,
     tokenItems,
+    clearPingHoldTimer,
   ]);
 
   useEffect(() => {
@@ -1984,6 +2257,10 @@ export default function GrigliataBoard({
         return;
       }
 
+      if (isPingHoldInteraction(activeInteraction)) {
+        return;
+      }
+
       const pointerWorld = getWorldPointFromClient(event.clientX, event.clientY);
       if (!pointerWorld) return;
 
@@ -1994,6 +2271,8 @@ export default function GrigliataBoard({
 
       if (activeInteraction.type === 'selection-candidate') {
         if (!hasMovedBeyondThreshold) return;
+
+        clearPingHoldTimer();
 
         if (isRulerEnabled) {
           const nextInteraction = {
@@ -2194,6 +2473,7 @@ export default function GrigliataBoard({
     isRulerEnabled,
     normalizedGrid,
     syncSharedMeasureInteraction,
+    clearPingHoldTimer,
   ]);
 
   useEffect(() => {
@@ -2239,6 +2519,7 @@ export default function GrigliataBoard({
     setPinnedOverflowTokenId('');
 
     if (isSecondaryMouseButton(nativeEvent)) {
+      clearPingHoldTimer();
       nativeEvent.preventDefault();
       if (hasPrimaryMouseButtonPressed(nativeEvent) && commitMeasurementWaypoint(nativeEvent.clientX, nativeEvent.clientY)) {
         return;
@@ -2264,6 +2545,8 @@ export default function GrigliataBoard({
 
     const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
     if (!pointerWorld) return;
+
+    clearPingHoldTimer();
 
     setMeasurementState(null);
     setAoEPreviewState(null);
@@ -2324,7 +2607,26 @@ export default function GrigliataBoard({
         y: nativeEvent.clientY,
       },
       startWorld: pointerWorld,
+      canTriggerPing: isPointWithinBounds(pointerWorld, boardBounds),
     };
+
+    if (!isPointWithinBounds(pointerWorld, boardBounds)) {
+      return;
+    }
+
+    pingHoldTimeoutRef.current = window.setTimeout(() => {
+      pingHoldTimeoutRef.current = null;
+      const activeInteraction = interactionRef.current;
+      if (activeInteraction?.type !== 'selection-candidate' || !activeInteraction.canTriggerPing) {
+        return;
+      }
+
+      spawnMapPing(activeInteraction.startWorld, { broadcast: true });
+      interactionRef.current = {
+        ...activeInteraction,
+        type: 'ping-hold',
+      };
+    }, MAP_PING_HOLD_DELAY_MS);
   };
 
   const handleTokenMouseDown = (token, event) => {
@@ -2332,6 +2634,7 @@ export default function GrigliataBoard({
     event.cancelBubble = true;
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
+    clearPingHoldTimer();
 
     if (activeAoeFigureType) {
       return;
@@ -2399,6 +2702,7 @@ export default function GrigliataBoard({
     event.cancelBubble = true;
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
+    clearPingHoldTimer();
 
     if (activeAoeFigureType || isRulerEnabled) {
       return;
@@ -2933,7 +3237,8 @@ export default function GrigliataBoard({
                       overlayId={`shared-${sharedInteraction.ownerUid}`}
                     />
                   )
-                  : (
+                  : sharedInteraction.kind === 'aoe'
+                    ? (
                     <AoEFigureOverlay
                       key={`shared-aoe-${sharedInteraction.ownerUid}`}
                       figure={sharedInteraction.figure}
@@ -2942,7 +3247,28 @@ export default function GrigliataBoard({
                       boardBounds={boardBounds}
                       listening={false}
                     />
+                    )
+                    : (
+                    <MapPingOverlay
+                      key={`shared-ping-${sharedInteraction.ownerUid}-${sharedInteraction.ping.startedAtMs}`}
+                      ping={sharedInteraction.ping}
+                      drawTheme={sharedInteraction.drawTheme}
+                      overlayId={`shared-${sharedInteraction.ownerUid}`}
+                      now={pingAnimationClock}
+                      prefersReducedMotion={prefersReducedMotion}
+                    />
                   )
+              ))}
+
+              {visibleLocalPings.map((ping) => (
+                <MapPingOverlay
+                  key={ping.id}
+                  ping={ping}
+                  drawTheme={getGrigliataDrawTheme(ping.colorKey)}
+                  overlayId={ping.id}
+                  now={pingAnimationClock}
+                  prefersReducedMotion={prefersReducedMotion}
+                />
               ))}
 
               {measurementState && (

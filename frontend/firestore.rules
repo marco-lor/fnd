@@ -155,6 +155,14 @@ service cloud.firestore {
         && cell.row is int;
     }
 
+    function isValidGrigliataBoardPoint(point) {
+      return point is map
+        && point.keys().hasAll(["x", "y"])
+        && point.keys().hasOnly(["x", "y"])
+        && (point.x is int || point.x is float)
+        && (point.y is int || point.y is float);
+    }
+
     function isValidGrigliataAoEFigure(data, figureId) {
       return data.keys().hasAll([
           "backgroundId",
@@ -274,6 +282,25 @@ service cloud.firestore {
             && isValidGrigliataAoEFigureType(data.figureType)
             && isValidGrigliataGridCell(data.originCell)
             && isValidGrigliataGridCell(data.targetCell)
+          )
+          || (
+            data.type == "ping"
+            && data.keys().hasAll(["point", "startedAtMs"])
+            && data.keys().hasOnly([
+              "backgroundId",
+              "ownerUid",
+              "type",
+              "source",
+              "colorKey",
+              "point",
+              "startedAtMs",
+              "updatedAt",
+              "updatedBy"
+            ])
+            && data.source == "free"
+            && isValidGrigliataBoardPoint(data.point)
+            && data.startedAtMs is int
+            && data.startedAtMs > 0
           )
         );
     }

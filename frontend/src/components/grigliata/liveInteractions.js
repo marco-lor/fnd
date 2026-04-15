@@ -10,7 +10,7 @@ export const GRIGLIATA_LIVE_INTERACTION_COLLECTION = 'grigliata_live_interaction
 export const GRIGLIATA_LIVE_INTERACTION_THROTTLE_MS = 100;
 export const GRIGLIATA_LIVE_INTERACTION_STALE_MS = 2 * 60 * 1000;
 export const MAX_GRIGLIATA_LIVE_INTERACTION_ANCHOR_CELLS = 16;
-export const GRIGLIATA_LIVE_INTERACTION_TYPES = ['measure', 'aoe'];
+export const GRIGLIATA_LIVE_INTERACTION_TYPES = ['measure', 'aoe', 'ping'];
 export const GRIGLIATA_LIVE_INTERACTION_SOURCES = ['free', 'token-drag', 'aoe-create', 'aoe-move'];
 
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0;
@@ -24,6 +24,25 @@ const normalizeGridCell = (cell) => {
     col: cell.col,
     row: cell.row,
   };
+};
+
+const normalizeBoardPoint = (point) => {
+  if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y)) {
+    return null;
+  }
+
+  return {
+    x: point.x,
+    y: point.y,
+  };
+};
+
+const normalizeStartedAtMs = (value) => {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+
+  return Math.floor(value);
 };
 
 const normalizeTimestampMillis = (timestamp) => {
@@ -76,6 +95,22 @@ export const normalizeGrigliataLiveInteractionDraft = (draft) => {
       figureType: figureDraft.figureType,
       originCell: figureDraft.originCell,
       targetCell: figureDraft.targetCell,
+    };
+  }
+
+  if (draft.type === 'ping') {
+    const point = normalizeBoardPoint(draft.point);
+    const startedAtMs = normalizeStartedAtMs(draft.startedAtMs);
+
+    if (!point || !startedAtMs) {
+      return null;
+    }
+
+    return {
+      type: 'ping',
+      source: draft.source,
+      point,
+      startedAtMs,
     };
   }
 
@@ -195,4 +230,16 @@ export const buildAoEFigureFromGrigliataLiveInteraction = ({ interaction, grid }
     },
     grid,
   });
+};
+
+export const buildPingFromGrigliataLiveInteraction = ({ interaction }) => {
+  const normalizedInteraction = normalizeGrigliataLiveInteraction(interaction);
+  if (!normalizedInteraction || normalizedInteraction.type !== 'ping') {
+    return null;
+  }
+
+  return {
+    point: normalizedInteraction.point,
+    startedAtMs: normalizedInteraction.startedAtMs,
+  };
 };

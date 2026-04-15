@@ -1,7 +1,9 @@
 import {
   buildAoEFigureFromGrigliataLiveInteraction,
+  buildGrigliataLiveInteractionDoc,
   buildGrigliataLiveInteractionDocId,
   buildMeasurementFromGrigliataLiveInteraction,
+  buildPingFromGrigliataLiveInteraction,
   filterActiveGrigliataLiveInteractions,
   GRIGLIATA_LIVE_INTERACTION_STALE_MS,
   normalizeGrigliataLiveInteractionDraft,
@@ -99,6 +101,57 @@ describe('liveInteractions', () => {
     }));
   });
 
+  test('normalizes and builds a renderable ping interaction', () => {
+    const draft = normalizeGrigliataLiveInteractionDraft({
+      type: 'ping',
+      source: 'free',
+      point: { x: 412.5, y: 188.25 },
+      startedAtMs: 1_713_100_000_250,
+    });
+
+    expect(draft).toEqual({
+      type: 'ping',
+      source: 'free',
+      point: { x: 412.5, y: 188.25 },
+      startedAtMs: 1_713_100_000_250,
+    });
+
+    expect(buildGrigliataLiveInteractionDoc({
+      backgroundId: 'map-1',
+      ownerUid: 'user-7',
+      colorKey: 'ion-cyan',
+      draft,
+      updatedBy: 'user-7',
+      updatedAt: { toMillis: () => 1_713_100_000_300 },
+    })).toEqual(expect.objectContaining({
+      backgroundId: 'map-1',
+      ownerUid: 'user-7',
+      type: 'ping',
+      source: 'free',
+      point: { x: 412.5, y: 188.25 },
+      startedAtMs: 1_713_100_000_250,
+      colorKey: 'ion-cyan',
+      updatedBy: 'user-7',
+    }));
+
+    expect(buildPingFromGrigliataLiveInteraction({
+      interaction: {
+        backgroundId: 'map-1',
+        ownerUid: 'user-7',
+        type: 'ping',
+        source: 'free',
+        colorKey: 'ion-cyan',
+        point: { x: 412.5, y: 188.25 },
+        startedAtMs: 1_713_100_000_250,
+        updatedAt: { toMillis: () => 1_713_100_000_300 },
+        updatedBy: 'user-7',
+      },
+    })).toEqual({
+      point: { x: 412.5, y: 188.25 },
+      startedAtMs: 1_713_100_000_250,
+    });
+  });
+
   test('returns null for invalid live interaction payloads', () => {
     expect(normalizeGrigliataLiveInteractionDraft({
       type: 'measure',
@@ -136,6 +189,27 @@ describe('liveInteractions', () => {
         updatedBy: 'user-1',
       },
       grid,
+    })).toBeNull();
+
+    expect(normalizeGrigliataLiveInteractionDraft({
+      type: 'ping',
+      source: 'free',
+      point: { x: Number.NaN, y: 42 },
+      startedAtMs: Date.now(),
+    })).toBeNull();
+
+    expect(buildPingFromGrigliataLiveInteraction({
+      interaction: {
+        backgroundId: 'map-1',
+        ownerUid: 'user-1',
+        type: 'ping',
+        source: 'free',
+        colorKey: 'ion-cyan',
+        point: { x: 240, y: 180 },
+        startedAtMs: 0,
+        updatedAt: { toMillis: () => Date.now() },
+        updatedBy: 'user-1',
+      },
     })).toBeNull();
   });
 });

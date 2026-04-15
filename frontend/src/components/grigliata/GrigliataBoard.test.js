@@ -1,11 +1,13 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import GrigliataBoard from './GrigliataBoard';
 import { getGrigliataDrawTheme } from './constants';
+import { splitTokenStatusesForDisplay } from './tokenStatuses';
 
 jest.mock('./useImageAsset', () => jest.fn(() => null));
 jest.mock('./tokenStatuses', () => ({
   getTokenStatusDefinition: jest.fn(() => null),
+  normalizeTokenStatuses: jest.fn((statuses) => (Array.isArray(statuses) ? statuses : [])),
   splitTokenStatusesForDisplay: jest.fn(() => ({
     visibleStatuses: [],
     overflowStatuses: [],
@@ -120,6 +122,10 @@ const grid = {
   offsetYPx: 0,
 };
 
+const MAP_PING_HOLD_DELAY_MS = 500;
+const MAP_PING_VISIBLE_MS = 1100;
+const MAP_PING_BROADCAST_CLEAR_MS = 1500;
+
 const buildProps = (overrides = {}) => ({
   activeBackground: {
     id: 'map-1',
@@ -212,9 +218,17 @@ describe('GrigliataBoard', () => {
         right: 920,
         bottom: 640,
       }));
+
+    splitTokenStatusesForDisplay.mockImplementation(() => ({
+      visibleStatuses: [],
+      overflowStatuses: [],
+      overflowCount: 0,
+    }));
   });
 
   afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
     resizeObserverInstance = null;
     getBoundingClientRectSpy.mockRestore();
     delete global.ResizeObserver;
@@ -470,6 +484,38 @@ describe('GrigliataBoard', () => {
     expect(document.querySelector('[data-stroke="#38bdf8"]')).not.toBeNull();
   });
 
+  test('renders a remote shared ping with the broadcaster color and lets it expire locally', () => {
+    jest.useFakeTimers();
+    const startedAtMs = Date.now();
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          sharedInteractions: [{
+            backgroundId: 'map-1',
+            ownerUid: 'other-user',
+            type: 'ping',
+            source: 'free',
+            colorKey: 'ion-cyan',
+            point: { x: 280, y: 210 },
+            startedAtMs,
+            updatedAt: { toMillis: () => startedAtMs + 30 },
+            updatedBy: 'other-user',
+          }],
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('map-ping-overlay-shared-other-user')).toBeInTheDocument();
+    expect(document.querySelector('[data-stroke="#38bdf8"]')).not.toBeNull();
+
+    act(() => {
+      jest.advanceTimersByTime(MAP_PING_VISIBLE_MS + 64);
+    });
+
+    expect(screen.queryByTestId('map-ping-overlay-shared-other-user')).not.toBeInTheDocument();
+  });
+
   test('does not duplicate the current user shared interaction as a remote overlay', () => {
     render(
       <GrigliataBoard
@@ -491,6 +537,211 @@ describe('GrigliataBoard', () => {
 
     expect(screen.queryByTestId('measurement-overlay-shared-current-user')).not.toBeInTheDocument();
     expect(screen.queryByText('10 ft (2 squares)')).not.toBeInTheDocument();
+  });
+
+  test('emits a local and shared ping after a long press on empty map space even when sharing is disabled', () => {
+    jest.useFakeTimers();
+    const onSharedInteractionChange = jest.fn();
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          onSharedInteractionChange,
+        })}
+      />
+    );
+
+    onSharedInteractionChange.mockClear();
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 260, clientY: 220, buttons: 1 });
+
+    act(() => {
+      jest.advanceTimersByTime(MAP_PING_HOLD_DELAY_MS);
+    });
+
+    expect(document.querySelectorAll('[data-testid^="map-ping-overlay-local-ping-"]')).toHaveLength(1);
+    expect(onSharedInteractionChange).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'ping',
+      source: 'free',
+      point: expect.objectContaining({
+        x: expect.any(Number),
+        y: expect.any(Number),
+      }),
+      startedAtMs: expect.any(Number),
+    }));
+
+    fireEvent.mouseUp(window, { button: 0, clientX: 260, clientY: 220, buttons: 0 });
+
+    act(() => {
+      jest.advanceTimersByTime(MAP_PING_VISIBLE_MS + 64);
+    });
+
+    expect(document.querySelectorAll('[data-testid^="map-ping-overlay-local-ping-"]')).toHaveLength(0);
+
+    act(() => {
+      jest.advanceTimersByTime(MAP_PING_BROADCAST_CLEAR_MS - MAP_PING_VISIBLE_MS + 64);
+    });
+
+    expect(onSharedInteractionChange).toHaveBeenLastCalledWith(null);
+  });
+
+  test('cancels the long-press ping when the pointer moves into a selection drag', () => {
+    jest.useFakeTimers();
+    const onSharedInteractionChange = jest.fn();
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isInteractionSharingEnabled: true,
+          onSharedInteractionChange,
+        })}
+      />
+    );
+
+    onSharedInteractionChange.mockClear();
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 240, clientY: 210, buttons: 1 });
+    fireEvent.mouseMove(window, { clientX: 290, clientY: 260, buttons: 1 });
+
+    act(() => {
+      jest.advanceTimersByTime(MAP_PING_HOLD_DELAY_MS + 80);
+    });
+
+    fireEvent.mouseUp(window, { button: 0, clientX: 290, clientY: 260, buttons: 0 });
+
+    expect(document.querySelectorAll('[data-testid^="map-ping-overlay-local-ping-"]')).toHaveLength(0);
+    expect(onSharedInteractionChange.mock.calls.find(([interaction]) => interaction?.type === 'ping')).toBeUndefined();
+  });
+
+  test('does not emit a ping while ruler mode is active', () => {
+    jest.useFakeTimers();
+    const onSharedInteractionChange = jest.fn();
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isInteractionSharingEnabled: true,
+          isRulerEnabled: true,
+          onSharedInteractionChange,
+        })}
+      />
+    );
+
+    onSharedInteractionChange.mockClear();
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 280, clientY: 210, buttons: 1 });
+
+    act(() => {
+      jest.advanceTimersByTime(MAP_PING_HOLD_DELAY_MS + 80);
+    });
+
+    fireEvent.mouseUp(window, { button: 0, clientX: 280, clientY: 210, buttons: 0 });
+
+    expect(document.querySelectorAll('[data-testid^="map-ping-overlay-local-ping-"]')).toHaveLength(0);
+    expect(onSharedInteractionChange.mock.calls.find(([interaction]) => interaction?.type === 'ping')).toBeUndefined();
+  });
+
+  test('does not emit a ping while the AoE tool is active or when holding an AoE figure', () => {
+    jest.useFakeTimers();
+    const onSharedInteractionChange = jest.fn();
+    const figureId = 'map-1__current-user__circle__1';
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isInteractionSharingEnabled: true,
+          onSharedInteractionChange,
+          aoeFigures: [{
+            id: figureId,
+            backgroundId: 'map-1',
+            ownerUid: 'current-user',
+            figureType: 'circle',
+            slot: 1,
+            originCell: { col: 4, row: 2 },
+            targetCell: { col: 5, row: 2 },
+            colorKey: 'ion-cyan',
+            isVisibleToPlayers: true,
+          }],
+        })}
+      />
+    );
+
+    onSharedInteractionChange.mockClear();
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isInteractionSharingEnabled: true,
+          onSharedInteractionChange,
+          activeAoeFigureType: 'circle',
+          aoeFigures: [{
+            id: figureId,
+            backgroundId: 'map-1',
+            ownerUid: 'current-user',
+            figureType: 'circle',
+            slot: 1,
+            originCell: { col: 4, row: 2 },
+            targetCell: { col: 5, row: 2 },
+            colorKey: 'ion-cyan',
+            isVisibleToPlayers: true,
+          }],
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(stage, {
+      button: 0,
+      clientX: 315,
+      clientY: 175,
+      buttons: 1,
+    });
+
+    act(() => {
+      jest.advanceTimersByTime(MAP_PING_HOLD_DELAY_MS + 80);
+    });
+
+    fireEvent.mouseUp(window, { button: 0, clientX: 315, clientY: 175, buttons: 0 });
+
+    onSharedInteractionChange.mockClear();
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isInteractionSharingEnabled: true,
+          onSharedInteractionChange,
+          aoeFigures: [{
+            id: figureId,
+            backgroundId: 'map-1',
+            ownerUid: 'current-user',
+            figureType: 'circle',
+            slot: 1,
+            originCell: { col: 4, row: 2 },
+            targetCell: { col: 5, row: 2 },
+            colorKey: 'ion-cyan',
+            isVisibleToPlayers: true,
+          }],
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+      button: 0,
+      clientX: 315,
+      clientY: 175,
+      buttons: 1,
+    });
+
+    act(() => {
+      jest.advanceTimersByTime(MAP_PING_HOLD_DELAY_MS + 80);
+    });
+
+    fireEvent.mouseUp(window, { button: 0, clientX: 315, clientY: 175, buttons: 0 });
+
+    expect(document.querySelectorAll('[data-testid^="map-ping-overlay-local-ping-"]')).toHaveLength(0);
+    expect(onSharedInteractionChange.mock.calls.find(([interaction]) => interaction?.type === 'ping')).toBeUndefined();
   });
 
   test('opens the AoE template drawer and emits the selected template type', () => {

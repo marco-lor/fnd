@@ -247,6 +247,17 @@ jest.mock('./GrigliataBoard', () => {
         >
           emit aoe interaction
         </button>
+        <button
+          type="button"
+          onClick={() => props.onSharedInteractionChange?.({
+            type: 'ping',
+            source: 'free',
+            point: { x: 320, y: 180 },
+            startedAtMs: 1_713_100_000_250,
+          })}
+        >
+          emit ping interaction
+        </button>
         <button type="button" onClick={() => props.onSharedInteractionChange?.(null)}>
           clear interaction
         </button>
@@ -355,21 +366,16 @@ describe('GrigliataPage', () => {
   test('publishes only when sharing is enabled and a live interaction exists', async () => {
     render(<GrigliataPage />);
 
-    fireEvent.click(screen.getByRole('button', { name: /toggle interaction sharing/i }));
+    fireEvent.click(screen.getByRole('button', { name: /emit interaction a/i }));
     await act(async () => {
       jest.advanceTimersByTime(100);
     });
     expect(firestore.setDoc).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: /emit interaction a/i }));
+    fireEvent.click(screen.getByRole('button', { name: /toggle interaction sharing/i }));
 
     await act(async () => {
-      jest.advanceTimersByTime(99);
-    });
-    expect(firestore.setDoc).not.toHaveBeenCalled();
-
-    await act(async () => {
-      jest.advanceTimersByTime(1);
+      jest.advanceTimersByTime(100);
     });
 
     await waitFor(() => {
@@ -409,6 +415,42 @@ describe('GrigliataPage', () => {
     expect(firestore.setDoc.mock.calls[0][1]).toEqual(expect.objectContaining({
       liveEndCell: { col: 4, row: 1 },
     }));
+  });
+
+  test('publishes ping interactions through the shared interaction pipeline even when sharing is disabled', async () => {
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: /emit ping interaction/i }));
+
+    await act(async () => {
+      jest.advanceTimersByTime(100);
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledTimes(1);
+    });
+
+    expect(firestore.setDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_live_interactions/map-1__user-1' }),
+      expect.objectContaining({
+        backgroundId: 'map-1',
+        ownerUid: 'user-1',
+        type: 'ping',
+        source: 'free',
+        colorKey: 'ion-cyan',
+        point: { x: 320, y: 180 },
+        startedAtMs: 1_713_100_000_250,
+        updatedBy: 'user-1',
+      })
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /clear interaction/i }));
+
+    await waitFor(() => {
+      expect(firestore.deleteDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_live_interactions/map-1__user-1' })
+      );
+    });
   });
 
   test('deletes the shared interaction when the live interaction ends', async () => {
