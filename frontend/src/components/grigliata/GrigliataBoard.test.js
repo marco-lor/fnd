@@ -145,11 +145,14 @@ const buildProps = (overrides = {}) => ({
   isRulerEnabled: false,
   activeAoeFigureType: '',
   isInteractionSharingEnabled: false,
+  isMusicMuted: false,
+  isMusicMutePending: false,
   drawTheme: getGrigliataDrawTheme('aurora-fuchsia'),
   onSelectMouseTool: jest.fn(),
   onToggleRuler: jest.fn(),
   onChangeAoeFigureType: jest.fn(),
   onToggleInteractionSharing: jest.fn(),
+  onToggleMusicMuted: jest.fn(),
   onChangeDrawColor: jest.fn(),
   onToggleGridVisibility: null,
   isGridVisibilityToggleDisabled: false,
@@ -289,16 +292,20 @@ describe('GrigliataBoard', () => {
     const quickControls = screen.getByTestId('grigliata-quick-controls');
     const buttons = within(quickControls).getAllByRole('button');
 
-    expect(buttons).toHaveLength(6);
+    expect(buttons).toHaveLength(7);
     expect(buttons[0]).toBe(screen.getByTestId('mouse-selection-trigger'));
     expect(buttons[1]).toBe(screen.getByTestId('draw-color-trigger'));
     expect(buttons[2]).toHaveAttribute('aria-label', 'Enable ruler mode');
     expect(buttons[3]).toHaveAttribute('aria-label', 'Choose an area template');
     expect(buttons[4]).toHaveAttribute('aria-label', 'Share live interactions');
     expect(buttons[5]).toHaveAttribute('aria-label', 'Reset View');
+    expect(buttons[6]).toBe(screen.getByTestId('music-mute-trigger'));
+    expect(buttons[6]).toHaveAttribute('aria-label', 'Shared music enabled');
+    expect(buttons[6]).toHaveAttribute('aria-pressed', 'true');
+    expect(buttons[6]).toHaveAttribute('title', 'Mute Music');
   });
 
-  test('uses a shared square shell for the left tools and reserves neon styling for active board mode tools only', () => {
+  test('uses a shared square shell for the left tools and shows the music control as active when shared music is enabled', () => {
     const { rerender } = render(<GrigliataBoard {...buildProps()} />);
 
     const mouseSelectionButton = screen.getByTestId('mouse-selection-trigger');
@@ -307,8 +314,9 @@ describe('GrigliataBoard', () => {
     const aoeTrigger = screen.getByTestId('aoe-template-trigger');
     const interactionSharingButton = screen.getByRole('button', { name: /share live interactions/i });
     const resetViewButton = screen.getByRole('button', { name: /reset view/i });
+    const musicToggleButton = screen.getByTestId('music-mute-trigger');
 
-    [mouseSelectionButton, rulerButton, aoeTrigger, interactionSharingButton, resetViewButton].forEach((button) => {
+    [mouseSelectionButton, rulerButton, aoeTrigger, interactionSharingButton, resetViewButton, musicToggleButton].forEach((button) => {
       expect(button.className).toContain('rounded-2xl');
     });
 
@@ -320,6 +328,7 @@ describe('GrigliataBoard', () => {
     expect(aoeTrigger.className).not.toContain('bg-gradient-to-br');
     expect(interactionSharingButton.className).not.toContain('bg-gradient-to-br');
     expect(resetViewButton.className).not.toContain('bg-gradient-to-br');
+    expect(musicToggleButton.className).toContain('bg-gradient-to-br');
 
     rerender(<GrigliataBoard {...buildProps({ isRulerEnabled: true })} />);
 
@@ -334,6 +343,58 @@ describe('GrigliataBoard', () => {
 
     expect(screen.getByRole('button', { name: /stop sharing live interactions/i }).className).not.toContain('bg-gradient-to-br');
     expect(screen.getByRole('button', { name: /reset view/i }).className).not.toContain('bg-gradient-to-br');
+    expect(screen.getByTestId('music-mute-trigger').className).toContain('bg-gradient-to-br');
+
+    rerender(<GrigliataBoard {...buildProps({ isMusicMuted: true })} />);
+
+    expect(screen.getByTestId('music-mute-trigger').className).not.toContain('bg-gradient-to-br');
+  });
+
+  test('renders the music toggle beneath reset view and exposes state plus action labels', () => {
+    const onToggleMusicMuted = jest.fn();
+    const { rerender } = render(
+      <GrigliataBoard {...buildProps({ onToggleMusicMuted })} />
+    );
+
+    const quickControls = screen.getByTestId('grigliata-quick-controls');
+    const buttons = within(quickControls).getAllByRole('button');
+    const resetViewButton = screen.getByRole('button', { name: /reset view/i });
+    const musicToggleButton = screen.getByTestId('music-mute-trigger');
+
+    expect(buttons[5]).toBe(resetViewButton);
+    expect(buttons[6]).toBe(musicToggleButton);
+  expect(musicToggleButton).toHaveAttribute('aria-label', 'Shared music enabled');
+  expect(musicToggleButton).toHaveAttribute('aria-pressed', 'true');
+  expect(musicToggleButton).toHaveAttribute('title', 'Mute Music');
+
+    fireEvent.click(musicToggleButton);
+
+    expect(onToggleMusicMuted).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isMusicMuted: true,
+          onToggleMusicMuted,
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('music-mute-trigger')).toHaveAttribute('aria-label', 'Shared music muted');
+    expect(screen.getByTestId('music-mute-trigger')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('music-mute-trigger')).toHaveAttribute('title', 'Unmute Music');
+  });
+
+  test('disables the music toggle while the mute preference update is pending', () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isMusicMutePending: true,
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('music-mute-trigger')).toBeDisabled();
   });
 
   test('shows only the map metadata in the top board header', () => {

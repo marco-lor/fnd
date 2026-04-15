@@ -11,7 +11,7 @@ import {
   Text,
 } from 'react-konva';
 import { FaHandPointer, FaRulerHorizontal } from 'react-icons/fa';
-import { FiEye, FiEyeOff, FiTrash2, FiUser, FiUsers } from 'react-icons/fi';
+import { FiEye, FiEyeOff, FiTrash2, FiUser, FiUsers, FiVolume2, FiVolumeX } from 'react-icons/fi';
 import { MdCenterFocusStrong } from 'react-icons/md';
 import {
   BOARD_FIT_PADDING,
@@ -1331,11 +1331,14 @@ export default function GrigliataBoard({
   isRulerEnabled,
   activeAoeFigureType = '',
   isInteractionSharingEnabled = false,
+  isMusicMuted = false,
+  isMusicMutePending = false,
   drawTheme,
   onSelectMouseTool,
   onToggleRuler,
   onChangeAoeFigureType,
   onToggleInteractionSharing,
+  onToggleMusicMuted,
   onChangeDrawColor,
   onToggleGridVisibility,
   isGridVisibilityToggleDisabled,
@@ -1381,6 +1384,9 @@ export default function GrigliataBoard({
   const lastFitKeyRef = useRef('');
   const resolvedDrawTheme = drawTheme || DEFAULT_DRAW_THEME;
   const isMouseSelectionActive = !isRulerEnabled && !activeAoeFigureType;
+  const isMusicEnabled = !isMusicMuted;
+  const musicToggleActionLabel = isMusicEnabled ? 'Mute Music' : 'Unmute Music';
+  const musicToggleStateLabel = isMusicEnabled ? 'Shared music enabled' : 'Shared music muted';
   const prefersReducedMotion = useReducedMotion();
 
   const normalizedGrid = useMemo(() => normalizeGridConfig(grid), [grid]);
@@ -3068,6 +3074,19 @@ export default function GrigliataBoard({
             className={getQuickControlButtonClassName(false)}
           >
             <MdCenterFocusStrong className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onToggleMusicMuted?.()}
+            disabled={isMusicMutePending || !onToggleMusicMuted}
+            title={musicToggleActionLabel}
+            aria-label={musicToggleStateLabel}
+            aria-pressed={isMusicEnabled}
+            aria-busy={isMusicMutePending ? true : undefined}
+            data-testid="music-mute-trigger"
+            className={`${getQuickControlButtonClassName(isMusicEnabled)} disabled:cursor-not-allowed disabled:opacity-60`}
+          >
+            {isMusicEnabled ? <FiVolume2 className="h-4 w-4" /> : <FiVolumeX className="h-4 w-4" />}
           </button>
         </div>
 

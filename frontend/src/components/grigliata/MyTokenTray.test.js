@@ -5,7 +5,6 @@ import MyTokenTray from './MyTokenTray';
 const renderTray = (props = {}) => {
   const {
     currentUserToken,
-    onToggleMusicMuted = jest.fn(),
     ...restProps
   } = props;
 
@@ -23,9 +22,6 @@ const renderTray = (props = {}) => {
         ...currentUserToken,
       }}
       activeMapName="Sunken Ruins"
-      isMusicMuted={false}
-      isMusicMutePending={false}
-      onToggleMusicMuted={onToggleMusicMuted}
       {...restProps}
     />
   );
@@ -123,23 +119,11 @@ describe('MyTokenTray', () => {
     expect(onDragStart).not.toHaveBeenCalled();
   });
 
-  test('shows the mute music action and calls the toggle handler', () => {
-    const onToggleMusicMuted = jest.fn();
-    renderTray({ onToggleMusicMuted });
+  test('does not render the shared music control inside the token tray', () => {
+    renderTray();
 
-    fireEvent.click(screen.getByRole('button', { name: /mute music/i }));
-
-    expect(onToggleMusicMuted).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/shared grigliata music will play here whenever the dm starts a track/i)).toBeInTheDocument();
-  });
-
-  test('shows the unmute action and disables it while the preference update is pending', () => {
-    renderTray({
-      isMusicMuted: true,
-      isMusicMutePending: true,
-    });
-
-    expect(screen.getByRole('button', { name: /unmute music/i })).toBeDisabled();
-    expect(screen.getByText(/shared grigliata music is muted only for you on this device/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /mute music/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /unmute music/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/shared grigliata music/i)).not.toBeInTheDocument();
   });
 });

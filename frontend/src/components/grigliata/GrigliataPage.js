@@ -2488,11 +2488,14 @@ export default function GrigliataPage() {
                 isRulerEnabled={isRulerEnabled}
                 activeAoeFigureType={activeAoeFigureType}
                 isInteractionSharingEnabled={isInteractionSharingEnabled}
+                isMusicMuted={isMusicMuted}
+                isMusicMutePending={isMusicMutePending}
                 drawTheme={drawTheme}
                 onSelectMouseTool={handleSelectMouseTool}
                 onToggleRuler={handleToggleRuler}
                 onChangeAoeFigureType={handleChangeAoeFigureType}
                 onToggleInteractionSharing={handleToggleInteractionSharing}
+                onToggleMusicMuted={handleToggleMusicMuted}
                 onChangeDrawColor={handleDrawColorChange}
                 onToggleGridVisibility={isManager ? handleToggleGridVisibility : null}
                 isGridVisibilityToggleDisabled={!activeBackgroundId || gridVisibilityUpdateBackgroundId === activeBackgroundId}
@@ -2560,9 +2563,6 @@ export default function GrigliataPage() {
                   <MyTokenTray
                     currentUserToken={currentUserToken}
                     activeMapName={activeBackground?.name || ''}
-                    isMusicMuted={isMusicMuted}
-                    isMusicMutePending={isMusicMutePending}
-                    onToggleMusicMuted={handleToggleMusicMuted}
                     onDragStart={() => setIsTrayDragging(true)}
                     onDragEnd={() => setIsTrayDragging(false)}
                   />

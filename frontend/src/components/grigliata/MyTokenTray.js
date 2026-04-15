@@ -4,9 +4,6 @@ import { TRAY_DRAG_MIME } from './constants';
 export default function MyTokenTray({
   currentUserToken,
   activeMapName,
-  isMusicMuted = false,
-  isMusicMutePending = false,
-  onToggleMusicMuted,
   onDragStart,
   onDragEnd,
 }) {
@@ -48,7 +45,7 @@ export default function MyTokenTray({
         <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-300">My Token</h2>
       </div>
 
-      <div className="p-4 space-y-4">
+      <div className="p-4">
         <div
           draggable={canDrag}
           onDragStart={handleDragStart}
@@ -91,29 +88,6 @@ export default function MyTokenTray({
                 ? 'Drag this portrait onto the active map to place or reposition your round token.'
                 : 'Select a map first. Token positions are saved independently for each map.'}
           </p>
-        </div>
-
-        <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Music</p>
-              <p className="mt-2 text-xs leading-relaxed text-slate-300">
-                {isMusicMuted
-                  ? 'Shared Grigliata music is muted only for you on this device.'
-                  : 'Shared Grigliata music will play here whenever the DM starts a track.'}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => onToggleMusicMuted?.()}
-              disabled={isMusicMutePending}
-              aria-busy={isMusicMutePending ? true : undefined}
-              className="shrink-0 rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-sky-100 transition-colors hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isMusicMuted ? 'Unmute Music' : 'Mute Music'}
-            </button>
-          </div>
         </div>
       </div>
     </section>

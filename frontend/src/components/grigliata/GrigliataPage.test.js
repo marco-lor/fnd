@@ -187,6 +187,13 @@ jest.mock('./GrigliataBoard', () => {
         <button type="button" onClick={() => props.onToggleInteractionSharing?.()}>
           toggle interaction sharing
         </button>
+        <button
+          type="button"
+          disabled={props.isMusicMutePending}
+          onClick={() => props.onToggleMusicMuted?.()}
+        >
+          {props.isMusicMuted ? 'Unmute Music' : 'Mute Music'}
+        </button>
         <button type="button" onClick={() => props.onChangeAoeFigureType?.('circle')}>
           activate circle tool
         </button>
