@@ -179,6 +179,7 @@ jest.mock('./GrigliataBoard', () => {
         <div data-testid="board-sharing-state">{String(props.isInteractionSharingEnabled)}</div>
         <div data-testid="board-shared-count">{String(props.sharedInteractions?.length || 0)}</div>
         <div data-testid="board-aoe-count">{String(props.aoeFigures?.length || 0)}</div>
+        <div data-testid="board-token-count">{String(props.tokens?.length || 0)}</div>
         <div data-testid="board-aoe-tool">{props.activeAoeFigureType || ''}</div>
         <div data-testid="board-draw-color">{props.drawTheme?.key || ''}</div>
         <button type="button" onClick={() => props.onSelectMouseTool?.()}>
@@ -269,6 +270,31 @@ jest.mock('./GrigliataBoard', () => {
           })}
         >
           emit ping interaction
+        </button>
+        <button type="button" onClick={() => props.onSetSelectedTokensVisibility?.(['user-2'], false)}>
+          hide selected token
+        </button>
+        <button type="button" onClick={() => props.onSetSelectedTokensDeadState?.(['user-2'], true)}>
+          mark selected token dead
+        </button>
+        <button type="button" onClick={() => props.onUpdateTokenStatuses?.('user-1', ['burning', 'marked'])}>
+          update selected token statuses
+        </button>
+        <button type="button" onClick={() => props.onDropCurrentToken?.({ x: 140, y: 140 })}>
+          drop current token
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onMoveTokens?.([
+            {
+              backgroundId: 'map-1',
+              ownerUid: 'user-1',
+              col: 4,
+              row: 5,
+            },
+          ])}
+        >
+          move token placement
         </button>
         <button type="button" onClick={() => props.onSharedInteractionChange?.(null)}>
           clear interaction
@@ -415,6 +441,10 @@ describe('GrigliataPage', () => {
     });
   };
 
+  const getLastCommittedBatch = () => (
+    [...mockBatchInstances].reverse().find((batch) => batch.commit.mock.calls.length > 0)
+  );
+
   test('publishes only when sharing is enabled and a live interaction exists', async () => {
     render(<GrigliataPage />);
 
@@ -447,6 +477,286 @@ describe('GrigliataPage', () => {
         updatedBy: 'user-1',
       })
     );
+  });
+
+  test('places the current token with an explicit dead-state flag', async () => {
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'player',
+        settings: {
+          grigliata_draw_color: 'ion-cyan',
+          grigliata_share_interactions: false,
+        },
+        imageUrl: 'https://example.com/token.png',
+        imagePath: 'grigliata/tokens/user-1.png',
+      },
+      loading: false,
+    });
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /drop current token/i }));
+    });
+
+    await waitFor(() => {
+      expect(mockBatchInstances).toHaveLength(1);
+      expect(mockBatchInstances[0].commit).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mockBatchInstances[0].set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-1' }),
+      expect.objectContaining({
+        backgroundId: 'map-1',
+        ownerUid: 'user-1',
+        isVisibleToPlayers: true,
+        isDead: false,
+        updatedBy: 'user-1',
+      }),
+      { merge: true }
+    );
+  });
+
+  test('preserves existing dead state and statuses when moving a placement', async () => {
+    act(() => {
+      setCollectionData('grigliata_token_placements', [
+        {
+          id: 'map-1__user-1',
+          backgroundId: 'map-1',
+          ownerUid: 'user-1',
+          col: 1,
+          row: 2,
+          isVisibleToPlayers: true,
+          isDead: true,
+          statuses: ['burning'],
+        },
+      ]);
+    });
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /move token placement/i }));
+    });
+
+    await waitFor(() => {
+      expect(mockBatchInstances).toHaveLength(1);
+      expect(mockBatchInstances[0].commit).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mockBatchInstances[0].set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-1' }),
+      expect.objectContaining({
+        backgroundId: 'map-1',
+        ownerUid: 'user-1',
+        col: 4,
+        row: 5,
+        isVisibleToPlayers: true,
+        isDead: true,
+        statuses: ['burning'],
+        updatedBy: 'user-1',
+      }),
+      { merge: true }
+    );
+  });
+
+  test('backfills legacy placement docs that are missing isDead', async () => {
+    setManagerAuth();
+
+    act(() => {
+      setCollectionData('grigliata_token_placements', [
+        {
+          id: 'map-1__user-2',
+          backgroundId: 'map-1',
+          ownerUid: 'user-2',
+          col: 3,
+          row: 4,
+          isVisibleToPlayers: true,
+        },
+      ]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(mockBatchInstances).toHaveLength(1);
+      expect(mockBatchInstances[0].commit).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mockBatchInstances[0].set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+      expect.objectContaining({
+        isDead: false,
+        updatedBy: 'user-1',
+      }),
+      { merge: true }
+    );
+
+    expect(firestore.setDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_state/current' }),
+      expect.objectContaining({
+        legacyPlacementDeadStateCleanupCompletedAt: { __type: 'serverTimestamp' },
+        updatedBy: 'user-1',
+      }),
+      { merge: true }
+    );
+  });
+
+  test('applies selected-token visibility changes from the board actions', async () => {
+    setManagerAuth();
+
+    act(() => {
+      setCollectionData('grigliata_token_placements', [
+        {
+          id: 'map-1__user-2',
+          backgroundId: 'map-1',
+          ownerUid: 'user-2',
+          col: 3,
+          row: 4,
+          isVisibleToPlayers: true,
+          isDead: true,
+          statuses: ['burning'],
+        },
+      ]);
+    });
+
+    render(<GrigliataPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('board-token-count')).toHaveTextContent('1');
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /hide selected token/i }));
+    });
+
+    await waitFor(() => {
+      expect(getLastCommittedBatch()).toBeDefined();
+    });
+
+    const committedBatch = getLastCommittedBatch();
+    expect(committedBatch.commit).toHaveBeenCalledTimes(1);
+    expect(committedBatch.set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+      expect.objectContaining({
+        backgroundId: 'map-1',
+        ownerUid: 'user-2',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: false,
+        isDead: true,
+        statuses: ['burning'],
+        updatedBy: 'user-1',
+      }),
+      { merge: true }
+    );
+    expect(committedBatch.set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'users/user-2' }),
+      {
+        settings: {
+          grigliata_hidden_background_ids: { __type: 'arrayUnion', value: 'map-1' },
+        },
+      },
+      { merge: true }
+    );
+  });
+
+  test('applies selected-token dead-state changes from the board actions', async () => {
+    setManagerAuth();
+
+    act(() => {
+      setCollectionData('grigliata_token_placements', [
+        {
+          id: 'map-1__user-2',
+          backgroundId: 'map-1',
+          ownerUid: 'user-2',
+          col: 5,
+          row: 6,
+          isVisibleToPlayers: false,
+          isDead: false,
+          statuses: ['sleeping'],
+        },
+      ]);
+    });
+
+    render(<GrigliataPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('board-token-count')).toHaveTextContent('1');
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /mark selected token dead/i }));
+    });
+
+    await waitFor(() => {
+      expect(getLastCommittedBatch()).toBeDefined();
+    });
+
+    const committedBatch = getLastCommittedBatch();
+    expect(committedBatch.commit).toHaveBeenCalledTimes(1);
+    expect(committedBatch.set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+      expect.objectContaining({
+        backgroundId: 'map-1',
+        ownerUid: 'user-2',
+        col: 5,
+        row: 6,
+        isVisibleToPlayers: false,
+        isDead: true,
+        statuses: ['sleeping'],
+        updatedBy: 'user-1',
+      }),
+      { merge: true }
+    );
+  });
+
+  test('updates selected token statuses from the board actions without dropping placement state', async () => {
+    setManagerAuth();
+
+    act(() => {
+      setCollectionData('grigliata_token_placements', [
+        {
+          id: 'map-1__user-1',
+          backgroundId: 'map-1',
+          ownerUid: 'user-1',
+          col: 2,
+          row: 3,
+          isVisibleToPlayers: false,
+          isDead: true,
+          statuses: ['sleeping'],
+        },
+      ]);
+    });
+
+    render(<GrigliataPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('board-token-count')).toHaveTextContent('1');
+    });
+    firestore.setDoc.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /update selected token statuses/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-1' }),
+        expect.objectContaining({
+          backgroundId: 'map-1',
+          ownerUid: 'user-1',
+          col: 2,
+          row: 3,
+          isVisibleToPlayers: false,
+          isDead: true,
+          statuses: ['burning', 'marked'],
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
   });
 
   test('shows the music tab only for managers', () => {
