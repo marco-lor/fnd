@@ -115,13 +115,6 @@ export default function MyTokenTray({
             </button>
           </div>
         </div>
-
-        <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-3">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Token Rules</p>
-          <p className="mt-2 text-xs leading-relaxed text-slate-300">
-            Your token always uses your shared public token snapshot, not a live read of another user profile.
-          </p>
-        </div>
       </div>
     </section>
   );
