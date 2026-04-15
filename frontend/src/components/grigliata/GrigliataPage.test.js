@@ -2,7 +2,10 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import GrigliataPage from './GrigliataPage';
 import { useAuth } from '../../AuthContext';
-import { GRIGLIATA_LIVE_INTERACTION_STALE_MS } from './liveInteractions';
+import {
+  GRIGLIATA_LIVE_INTERACTION_STALE_MS,
+  GRIGLIATA_LIVE_INTERACTION_THROTTLE_MS,
+} from './liveInteractions';
 
 const mockFirestoreState = {
   collections: {},
@@ -368,14 +371,14 @@ describe('GrigliataPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /emit interaction a/i }));
     await act(async () => {
-      jest.advanceTimersByTime(100);
+      jest.advanceTimersByTime(GRIGLIATA_LIVE_INTERACTION_THROTTLE_MS);
     });
     expect(firestore.setDoc).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: /toggle interaction sharing/i }));
 
     await act(async () => {
-      jest.advanceTimersByTime(100);
+      jest.advanceTimersByTime(GRIGLIATA_LIVE_INTERACTION_THROTTLE_MS);
     });
 
     await waitFor(() => {
@@ -405,7 +408,13 @@ describe('GrigliataPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /emit interaction b/i }));
 
     await act(async () => {
-      jest.advanceTimersByTime(100);
+      jest.advanceTimersByTime(GRIGLIATA_LIVE_INTERACTION_THROTTLE_MS - 1);
+    });
+
+    expect(firestore.setDoc).not.toHaveBeenCalled();
+
+    await act(async () => {
+      jest.advanceTimersByTime(1);
     });
 
     await waitFor(() => {
@@ -423,7 +432,7 @@ describe('GrigliataPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /emit ping interaction/i }));
 
     await act(async () => {
-      jest.advanceTimersByTime(100);
+      jest.advanceTimersByTime(GRIGLIATA_LIVE_INTERACTION_THROTTLE_MS);
     });
 
     await waitFor(() => {
@@ -460,7 +469,7 @@ describe('GrigliataPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /emit interaction a/i }));
 
     await act(async () => {
-      jest.advanceTimersByTime(100);
+      jest.advanceTimersByTime(GRIGLIATA_LIVE_INTERACTION_THROTTLE_MS);
     });
 
     fireEvent.click(screen.getByRole('button', { name: /clear interaction/i }));
@@ -479,7 +488,7 @@ describe('GrigliataPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /emit interaction a/i }));
 
     await act(async () => {
-      jest.advanceTimersByTime(100);
+      jest.advanceTimersByTime(GRIGLIATA_LIVE_INTERACTION_THROTTLE_MS);
     });
 
     fireEvent.click(screen.getByRole('button', { name: /toggle interaction sharing/i }));
@@ -498,7 +507,7 @@ describe('GrigliataPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /emit interaction a/i }));
 
     await act(async () => {
-      jest.advanceTimersByTime(100);
+      jest.advanceTimersByTime(GRIGLIATA_LIVE_INTERACTION_THROTTLE_MS);
     });
 
     act(() => {
@@ -521,7 +530,7 @@ describe('GrigliataPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /emit interaction a/i }));
 
     await act(async () => {
-      jest.advanceTimersByTime(100);
+      jest.advanceTimersByTime(GRIGLIATA_LIVE_INTERACTION_THROTTLE_MS);
     });
 
     rendered.unmount();

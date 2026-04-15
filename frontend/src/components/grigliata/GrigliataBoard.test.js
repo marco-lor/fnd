@@ -1,7 +1,12 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import GrigliataBoard from './GrigliataBoard';
-import { getGrigliataDrawTheme } from './constants';
+import {
+  getGrigliataDrawTheme,
+  MAP_PING_BROADCAST_CLEAR_MS,
+  MAP_PING_HOLD_DELAY_MS,
+  MAP_PING_VISIBLE_MS,
+} from './constants';
 import { splitTokenStatusesForDisplay } from './tokenStatuses';
 
 jest.mock('./useImageAsset', () => jest.fn(() => null));
@@ -121,10 +126,6 @@ const grid = {
   offsetXPx: 0,
   offsetYPx: 0,
 };
-
-const MAP_PING_HOLD_DELAY_MS = 500;
-const MAP_PING_VISIBLE_MS = 1100;
-const MAP_PING_BROADCAST_CLEAR_MS = 1500;
 
 const buildProps = (overrides = {}) => ({
   activeBackground: {
