@@ -67,6 +67,7 @@ import {
   computeGrigliataMusicPlaybackOffsetMs,
   DEFAULT_GRIGLIATA_MUSIC_VOLUME,
   EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE,
+  GRIGLIATA_MUSIC_MUTED_FIELD,
   GRIGLIATA_MUSIC_PLAYBACK_COLLECTION,
   GRIGLIATA_MUSIC_PLAYBACK_DOC_ID,
   GRIGLIATA_MUSIC_PLAYBACK_STATUSES,
@@ -121,6 +122,7 @@ export default function GrigliataPage() {
   const currentTokenLabel = currentCharacterId || currentUserEmail.split('@')[0] || 'Player';
   const persistedDrawColorKey = resolveGrigliataDrawColorKey(userData?.settings?.grigliata_draw_color);
   const persistedInteractionSharingEnabled = userData?.settings?.[GRIGLIATA_SHARE_INTERACTIONS_FIELD] === true;
+  const isMusicMuted = userData?.settings?.[GRIGLIATA_MUSIC_MUTED_FIELD] === true;
   const [navbarOffset, setNavbarOffset] = useState(0);
   const [backgrounds, setBackgrounds] = useState([]);
   const [boardState, setBoardState] = useState({});
@@ -142,6 +144,7 @@ export default function GrigliataPage() {
   const [musicUploadName, setMusicUploadName] = useState('');
   const [musicUploadError, setMusicUploadError] = useState('');
   const [isMusicUploading, setIsMusicUploading] = useState(false);
+  const [isMusicMutePending, setIsMusicMutePending] = useState(false);
 
   const [selectedBackgroundId, setSelectedBackgroundId] = useState('');
   const [activatingBackgroundId, setActivatingBackgroundId] = useState('');
@@ -1175,6 +1178,24 @@ export default function GrigliataPage() {
       [`settings.${GRIGLIATA_SHARE_INTERACTIONS_FIELD}`]: nextIsEnabled,
     });
   }, [currentUserId]);
+
+  const handleToggleMusicMuted = useCallback(async () => {
+    if (!currentUserId || isMusicMutePending) return;
+
+    setBoardError('');
+    setIsMusicMutePending(true);
+
+    try {
+      await updateDoc(doc(db, 'users', currentUserId), {
+        [`settings.${GRIGLIATA_MUSIC_MUTED_FIELD}`]: !isMusicMuted,
+      });
+    } catch (error) {
+      console.error('Failed to update Grigliata music mute preference:', error);
+      setBoardError('Unable to update your Grigliata music setting right now.');
+    } finally {
+      setIsMusicMutePending(false);
+    }
+  }, [currentUserId, isMusicMutePending, isMusicMuted]);
 
   const clearLiveInteractionPublishTimer = useCallback(() => {
     if (!liveInteractionPublishTimeoutRef.current) return;
@@ -2539,6 +2560,9 @@ export default function GrigliataPage() {
                   <MyTokenTray
                     currentUserToken={currentUserToken}
                     activeMapName={activeBackground?.name || ''}
+                    isMusicMuted={isMusicMuted}
+                    isMusicMutePending={isMusicMutePending}
+                    onToggleMusicMuted={handleToggleMusicMuted}
                     onDragStart={() => setIsTrayDragging(true)}
                     onDragEnd={() => setIsTrayDragging(false)}
                   />

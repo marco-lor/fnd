@@ -5,6 +5,7 @@ import { useAuth } from '../../AuthContext';
 import {
   computeGrigliataMusicPlaybackOffsetMs,
   EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE,
+  GRIGLIATA_MUSIC_MUTED_FIELD,
   GRIGLIATA_MUSIC_PLAYBACK_COLLECTION,
   GRIGLIATA_MUSIC_PLAYBACK_DOC_ID,
   GRIGLIATA_MUSIC_PLAYBACK_STATUSES,
@@ -47,6 +48,12 @@ const applyAudioVolume = (audio, volume) => {
   if (!audio) return;
 
   audio.volume = Math.min(1, Math.max(0, Number(volume || 0)));
+};
+
+const applyAudioMuted = (audio, isMuted) => {
+  if (!audio) return;
+
+  audio.muted = isMuted === true;
 };
 
 const isAutoplayBlockedError = (error) => {
@@ -131,10 +138,11 @@ export const subscribeToGrigliataMusicPlayback = (onPlaybackState, onError) => o
 export default function GlobalGrigliataMusicPlayer({
   subscribeToPlaybackState = subscribeToGrigliataMusicPlayback,
 }) {
-  const { user } = useAuth();
+  const { user, userData } = useAuth();
   const audioRef = useRef(null);
   const [playbackState, setPlaybackState] = useState(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
   const [isUnlockPromptVisible, setIsUnlockPromptVisible] = useState(false);
+  const isMusicMuted = userData?.settings?.[GRIGLIATA_MUSIC_MUTED_FIELD] === true;
 
   useEffect(() => {
     if (!user?.uid) {
@@ -172,6 +180,7 @@ export default function GlobalGrigliataMusicPlayer({
 
     const normalizedState = normalizeGrigliataMusicPlaybackState(nextPlaybackState);
     applyAudioVolume(audio, normalizedState.volume);
+    applyAudioMuted(audio, isMusicMuted);
 
     try {
       if (
@@ -210,7 +219,7 @@ export default function GlobalGrigliataMusicPlayer({
 
       if (isAutoplayBlockedError(error)) {
         console.error('Grigliata music playback was blocked by the browser:', error);
-        setIsUnlockPromptVisible(true);
+        setIsUnlockPromptVisible(!isMusicMuted);
         return;
       }
 
@@ -223,7 +232,7 @@ export default function GlobalGrigliataMusicPlayer({
 
       setIsUnlockPromptVisible(false);
     }
-  }, []);
+  }, [isMusicMuted]);
 
   useEffect(() => {
     let cancelled = false;
@@ -265,7 +274,9 @@ export default function GlobalGrigliataMusicPlayer({
         aria-hidden="true"
       />
 
-      {isUnlockPromptVisible && normalizedPlaybackState.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING && (
+      {isUnlockPromptVisible
+        && !isMusicMuted
+        && normalizedPlaybackState.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING && (
         <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-2xl border border-amber-400/40 bg-slate-950/95 p-4 text-white shadow-2xl backdrop-blur">
           <p className="text-sm font-semibold text-amber-200">Enable audio</p>
           <p className="mt-1 text-xs text-slate-300">

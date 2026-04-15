@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { FiDownload, FiPause, FiPlay, FiSquare, FiTrash2 } from 'react-icons/fi';
 import {
   GRIGLIATA_MUSIC_PLAYBACK_STATUSES,
   normalizeGrigliataMusicVolume,
@@ -35,6 +36,15 @@ const VOLUME_COMMIT_KEYS = new Set([
   'PageDown',
   'PageUp',
 ]);
+
+const MUSIC_ACTION_BASE_CLASS_NAME = 'inline-flex h-9 w-9 items-center justify-center rounded-md border transition-colors disabled:cursor-not-allowed disabled:opacity-60';
+const MUSIC_ACTION_ICON_CLASS_NAME = 'h-4 w-4';
+
+const getMusicActionClassName = (toneClassName) => (
+  `${MUSIC_ACTION_BASE_CLASS_NAME} ${toneClassName}`
+);
+
+const buildTrackActionLabel = (actionLabel, trackName) => `${actionLabel} ${trackName}`;
 
 export default function MusicLibraryPanel({
   tracks,
@@ -168,6 +178,7 @@ export default function MusicLibraryPanel({
               </div>
             ) : (
               tracks.map((track) => {
+                const trackName = track.name || 'Untitled Track';
                 const isActiveTrack = track.id === activeTrackId;
                 const isPlaying = isActiveTrack && activeStatus === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING;
                 const isPaused = isActiveTrack && activeStatus === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PAUSED;
@@ -179,7 +190,7 @@ export default function MusicLibraryPanel({
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-sm font-semibold text-slate-100 truncate">{track.name || 'Untitled Track'}</p>
+                          <p className="text-sm font-semibold text-slate-100 truncate">{trackName}</p>
                           {isPlaying && (
                             <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-300">
                               Playing
@@ -207,9 +218,12 @@ export default function MusicLibraryPanel({
                           type="button"
                           onClick={() => onPlayTrack(track)}
                           disabled={isPlaybackActionPending || isDeleting}
-                          className="rounded-md border border-emerald-500/40 px-3 py-1.5 text-xs font-semibold text-emerald-200 transition-colors hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                          aria-label={buildTrackActionLabel('Play', trackName)}
+                          title={isActionPending && playbackActionType === 'play' ? `Starting ${trackName}` : buildTrackActionLabel('Play', trackName)}
+                          aria-busy={isActionPending && playbackActionType === 'play' ? true : undefined}
+                          className={getMusicActionClassName('border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10')}
                         >
-                          {isActionPending && playbackActionType === 'play' ? 'Starting...' : 'Play'}
+                          <FiPlay className={MUSIC_ACTION_ICON_CLASS_NAME} />
                         </button>
                       )}
 
@@ -218,9 +232,12 @@ export default function MusicLibraryPanel({
                           type="button"
                           onClick={() => onPauseTrack(track)}
                           disabled={isPlaybackActionPending || isDeleting}
-                          className="rounded-md border border-amber-500/40 px-3 py-1.5 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                          aria-label={buildTrackActionLabel('Pause', trackName)}
+                          title={isActionPending && playbackActionType === 'pause' ? `Pausing ${trackName}` : buildTrackActionLabel('Pause', trackName)}
+                          aria-busy={isActionPending && playbackActionType === 'pause' ? true : undefined}
+                          className={getMusicActionClassName('border-amber-500/40 text-amber-200 hover:bg-amber-500/10')}
                         >
-                          {isActionPending && playbackActionType === 'pause' ? 'Pausing...' : 'Pause'}
+                          <FiPause className={MUSIC_ACTION_ICON_CLASS_NAME} />
                         </button>
                       )}
 
@@ -229,9 +246,12 @@ export default function MusicLibraryPanel({
                           type="button"
                           onClick={() => onResumeTrack(track)}
                           disabled={isPlaybackActionPending || isDeleting}
-                          className="rounded-md border border-emerald-500/40 px-3 py-1.5 text-xs font-semibold text-emerald-200 transition-colors hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                          aria-label={buildTrackActionLabel('Resume', trackName)}
+                          title={isActionPending && playbackActionType === 'resume' ? `Resuming ${trackName}` : buildTrackActionLabel('Resume', trackName)}
+                          aria-busy={isActionPending && playbackActionType === 'resume' ? true : undefined}
+                          className={getMusicActionClassName('border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10')}
                         >
-                          {isActionPending && playbackActionType === 'resume' ? 'Resuming...' : 'Resume'}
+                          <FiPlay className={MUSIC_ACTION_ICON_CLASS_NAME} />
                         </button>
                       )}
 
@@ -240,9 +260,12 @@ export default function MusicLibraryPanel({
                           type="button"
                           onClick={() => onStopTrack(track)}
                           disabled={isPlaybackActionPending || isDeleting}
-                          className="rounded-md border border-rose-500/40 px-3 py-1.5 text-xs font-semibold text-rose-200 transition-colors hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                          aria-label={buildTrackActionLabel('Stop', trackName)}
+                          title={isActionPending && playbackActionType === 'stop' ? `Stopping ${trackName}` : buildTrackActionLabel('Stop', trackName)}
+                          aria-busy={isActionPending && playbackActionType === 'stop' ? true : undefined}
+                          className={getMusicActionClassName('border-rose-500/40 text-rose-200 hover:bg-rose-500/10')}
                         >
-                          {isActionPending && playbackActionType === 'stop' ? 'Stopping...' : 'Stop'}
+                          <FiSquare className={MUSIC_ACTION_ICON_CLASS_NAME} />
                         </button>
                       )}
 
@@ -251,18 +274,23 @@ export default function MusicLibraryPanel({
                         download={track.fileName || `${track.name || 'track'}.mp3`}
                         target="_blank"
                         rel="noreferrer"
-                        className="rounded-md border border-sky-500/40 px-3 py-1.5 text-xs font-semibold text-sky-200 transition-colors hover:bg-sky-500/10"
+                        aria-label={buildTrackActionLabel('Download', trackName)}
+                        title={buildTrackActionLabel('Download', trackName)}
+                        className={getMusicActionClassName('border-sky-500/40 text-sky-200 hover:bg-sky-500/10')}
                       >
-                        Download
+                        <FiDownload className={MUSIC_ACTION_ICON_CLASS_NAME} />
                       </a>
 
                       <button
                         type="button"
                         onClick={() => onDeleteTrack(track)}
                         disabled={isDeleting || isPlaybackActionPending}
-                        className="rounded-md border border-red-500/40 px-3 py-1.5 text-xs font-semibold text-red-200 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                        aria-label={buildTrackActionLabel('Delete', trackName)}
+                        title={isDeleting ? `Deleting ${trackName}` : buildTrackActionLabel('Delete', trackName)}
+                        aria-busy={isDeleting ? true : undefined}
+                        className={getMusicActionClassName('border-red-500/40 text-red-200 hover:bg-red-500/10')}
                       >
-                        {isDeleting ? 'Deleting...' : 'Delete'}
+                        <FiTrash2 className={MUSIC_ACTION_ICON_CLASS_NAME} />
                       </button>
                     </div>
                   </div>

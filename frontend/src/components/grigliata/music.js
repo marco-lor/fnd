@@ -8,6 +8,7 @@ export const GRIGLIATA_MUSIC_PLAYBACK_STATUSES = {
   PAUSED: 'paused',
   STOPPED: 'stopped',
 };
+export const GRIGLIATA_MUSIC_MUTED_FIELD = 'grigliata_music_muted';
 export const MAX_GRIGLIATA_MUSIC_FILE_BYTES = 25 * 1024 * 1024;
 export const MIN_GRIGLIATA_MUSIC_VOLUME = 0;
 export const MAX_GRIGLIATA_MUSIC_VOLUME = 1;

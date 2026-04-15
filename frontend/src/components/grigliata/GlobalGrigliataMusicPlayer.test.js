@@ -73,6 +73,9 @@ describe('GlobalGrigliataMusicPlayer', () => {
       user: {
         uid: 'user-1',
       },
+      userData: {
+        settings: {},
+      },
     });
 
     subscribeToPlaybackState = jest.fn((onPlaybackState) => {
@@ -267,6 +270,87 @@ describe('GlobalGrigliataMusicPlayer', () => {
       });
 
       expect(audio.volume).toBeCloseTo(0.28);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  test('keeps playback muted until the player unmutes without resetting the current source or offset', async () => {
+    const playError = new Error('Autoplay blocked');
+    playError.name = 'NotAllowedError';
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    playSpy.mockImplementationOnce(() => Promise.reject(playError));
+
+    try {
+      useAuth.mockReturnValue({
+        user: {
+          uid: 'user-1',
+        },
+        userData: {
+          settings: {
+            grigliata_music_muted: true,
+          },
+        },
+      });
+
+      const { container, rerender } = render(
+        <GlobalGrigliataMusicPlayer subscribeToPlaybackState={subscribeToPlaybackState} />
+      );
+      const audio = container.querySelector('audio');
+      prepareAudioElement(audio);
+
+      await waitFor(() => {
+        expect(subscribeToPlaybackState).toHaveBeenCalledTimes(1);
+      });
+
+      await act(async () => {
+        setPlaybackDoc({
+          status: 'playing',
+          trackId: 'track-1',
+          trackName: 'Battle Theme',
+          audioUrl: 'https://example.com/audio/battle-theme.mp3',
+          durationMs: 120_000,
+          offsetMs: 0,
+          volume: 0.28,
+          startedAt: { toMillis: () => 9_000 },
+          commandId: 'cmd-muted',
+          updatedBy: 'user-1',
+        });
+      });
+
+      await waitFor(() => {
+        expect(playSpy).toHaveBeenCalledTimes(1);
+      });
+
+      expect(audio.muted).toBe(true);
+      expect(audio.dataset.grigliataAudioUrl).toBe('https://example.com/audio/battle-theme.mp3');
+      expect(audio.currentTime).toBe(1);
+      expect(screen.queryByRole('button', { name: /enable audio/i })).not.toBeInTheDocument();
+
+      const syncedAudioUrl = audio.dataset.grigliataAudioUrl;
+      const syncedOffsetSeconds = audio.currentTime;
+
+      useAuth.mockReturnValue({
+        user: {
+          uid: 'user-1',
+        },
+        userData: {
+          settings: {
+            grigliata_music_muted: false,
+          },
+        },
+      });
+
+      rerender(<GlobalGrigliataMusicPlayer subscribeToPlaybackState={subscribeToPlaybackState} />);
+
+      await waitFor(() => {
+        expect(playSpy).toHaveBeenCalledTimes(2);
+      });
+
+      expect(audio.muted).toBe(false);
+      expect(audio.dataset.grigliataAudioUrl).toBe(syncedAudioUrl);
+      expect(audio.currentTime).toBe(syncedOffsetSeconds);
+      expect(screen.queryByRole('button', { name: /enable audio/i })).not.toBeInTheDocument();
     } finally {
       consoleErrorSpy.mockRestore();
     }

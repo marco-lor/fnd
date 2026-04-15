@@ -155,7 +155,6 @@ jest.mock('firebase/firestore', () => ({
 
 jest.mock('./BackgroundGalleryPanel', () => jest.fn(() => <div data-testid="background-gallery-panel" />));
 jest.mock('./MapCalibrationPanel', () => jest.fn(() => <div data-testid="map-calibration-panel" />));
-jest.mock('./MyTokenTray', () => jest.fn(() => <div data-testid="my-token-tray" />));
 jest.mock('./music', () => {
   const actual = jest.requireActual('./music');
 
@@ -770,6 +769,73 @@ describe('GrigliataPage', () => {
     expect(screen.getByRole('tab', { name: /music/i })).toBeInTheDocument();
   });
 
+  test('toggles the current user Grigliata music mute preference', async () => {
+    const { rerender } = render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^mute music$/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'users/user-1' }),
+        { 'settings.grigliata_music_muted': true }
+      );
+    });
+
+    firestore.updateDoc.mockClear();
+
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'player',
+        settings: {
+          grigliata_draw_color: 'ion-cyan',
+          grigliata_share_interactions: false,
+          grigliata_music_muted: true,
+        },
+        imageUrl: '',
+        imagePath: '',
+      },
+      loading: false,
+    });
+
+    rerender(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^unmute music$/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'users/user-1' }),
+        { 'settings.grigliata_music_muted': false }
+      );
+    });
+  });
+
+  test('shows an error when the current user music mute preference cannot be updated', async () => {
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    firestore.updateDoc.mockRejectedValueOnce(new Error('write failed'));
+
+    try {
+      render(<GrigliataPage />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /^mute music$/i }));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/unable to update your grigliata music setting right now/i)).toBeInTheDocument();
+      });
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
   test('uploads a music track and persists its metadata', async () => {
     setManagerAuth();
     const storageApi = require('firebase/storage');
@@ -934,7 +1000,7 @@ describe('GrigliataPage', () => {
     firestore.setDoc.mockClear();
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /^play$/i }));
+      fireEvent.click(screen.getByRole('button', { name: /^play battle theme$/i }));
     });
 
     await waitFor(() => {
@@ -972,11 +1038,11 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /^pause$/i })).not.toBeDisabled();
+      expect(screen.getByRole('button', { name: /^pause battle theme$/i })).not.toBeDisabled();
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /^pause$/i }));
+      fireEvent.click(screen.getByRole('button', { name: /^pause battle theme$/i }));
     });
 
     await waitFor(() => {
@@ -1011,11 +1077,11 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /^resume$/i })).not.toBeDisabled();
+      expect(screen.getByRole('button', { name: /^resume battle theme$/i })).not.toBeDisabled();
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /^resume$/i }));
+      fireEvent.click(screen.getByRole('button', { name: /^resume battle theme$/i }));
     });
 
     await waitFor(() => {
@@ -1050,11 +1116,11 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /^stop$/i })).not.toBeDisabled();
+      expect(screen.getByRole('button', { name: /^stop battle theme$/i })).not.toBeDisabled();
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /^stop$/i }));
+      fireEvent.click(screen.getByRole('button', { name: /^stop battle theme$/i }));
     });
 
     await waitFor(() => {
@@ -1113,7 +1179,7 @@ describe('GrigliataPage', () => {
     firestore.setDoc.mockClear();
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /^delete$/i }));
+      fireEvent.click(screen.getByRole('button', { name: /^delete battle theme$/i }));
     });
 
     await waitFor(() => {
