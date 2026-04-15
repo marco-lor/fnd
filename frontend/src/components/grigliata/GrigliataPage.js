@@ -24,6 +24,7 @@ import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from 'fi
 import { useAuth } from '../../AuthContext';
 import { db, storage } from '../firebaseConfig';
 import BackgroundGalleryPanel from './BackgroundGalleryPanel';
+import MusicLibraryPanel from './MusicLibraryPanel';
 import {
   buildStorageSafeName,
   getDisplayNameFromFileName,
@@ -60,12 +61,28 @@ import {
 } from './liveInteractions';
 import MapCalibrationPanel from './MapCalibrationPanel';
 import MyTokenTray from './MyTokenTray';
+import {
+  buildGrigliataMusicPlaybackState,
+  computeGrigliataMusicPlaybackOffsetMs,
+  DEFAULT_GRIGLIATA_MUSIC_VOLUME,
+  EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE,
+  GRIGLIATA_MUSIC_PLAYBACK_COLLECTION,
+  GRIGLIATA_MUSIC_PLAYBACK_DOC_ID,
+  GRIGLIATA_MUSIC_PLAYBACK_STATUSES,
+  GRIGLIATA_MUSIC_TRACK_COLLECTION,
+  MAX_GRIGLIATA_MUSIC_FILE_BYTES,
+  normalizeGrigliataMusicVolume,
+  normalizeGrigliataMusicPlaybackState,
+  readAudioFileMetadata,
+  sortGrigliataMusicTracks,
+} from './music';
 
 const MAX_BACKGROUND_FILE_BYTES = 15 * 1024 * 1024;
 const FIRESTORE_BATCH_SIZE = 450;
 const DRAW_COLOR_AUTOSAVE_DEBOUNCE_MS = 300;
 const GRID_SIZE_AUTOSAVE_DEBOUNCE_MS = 300;
 const LIVE_INTERACTION_CLOCK_INTERVAL_MS = 15 * 1000;
+const MUSIC_VOLUME_WRITE_THROTTLE_MS = 150;
 const LEGACY_TOKEN_CLEANUP_FIELD = 'legacyTokenPlacementCleanupCompletedAt';
 const LEGACY_PLACEMENT_VISIBILITY_CLEANUP_FIELD = 'legacyPlacementVisibilityCleanupCompletedAt';
 const GRIGLIATA_HIDDEN_BACKGROUND_IDS_FIELD = 'grigliata_hidden_background_ids';
@@ -87,6 +104,7 @@ const SIDEBAR_TAB_GRID_CLASS_NAMES = {
   1: 'grid grid-cols-1 gap-2',
   2: 'grid grid-cols-2 gap-2',
   3: 'grid grid-cols-3 gap-2',
+  4: 'grid grid-cols-2 gap-2',
 };
 const DEFAULT_SIDEBAR_TAB_GRID_CLASS_NAME = SIDEBAR_TAB_GRID_CLASS_NAMES[3];
 
@@ -107,6 +125,8 @@ export default function GrigliataPage() {
   const [activePlacements, setActivePlacements] = useState([]);
   const [aoeFigureSnapshots, setAoEFigureSnapshots] = useState([]);
   const [liveInteractionSnapshots, setLiveInteractionSnapshots] = useState([]);
+  const [musicTracks, setMusicTracks] = useState([]);
+  const [musicPlaybackState, setMusicPlaybackState] = useState(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
   const [localLiveInteraction, setLocalLiveInteraction] = useState(null);
   const [isInteractionSharingEnabled, setIsInteractionSharingEnabled] = useState(persistedInteractionSharingEnabled);
   const [liveInteractionClock, setLiveInteractionClock] = useState(() => Date.now());
@@ -115,11 +135,18 @@ export default function GrigliataPage() {
   const [uploadName, setUploadName] = useState('');
   const [uploadError, setUploadError] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  const [musicSelectedFile, setMusicSelectedFile] = useState(null);
+  const [musicUploadName, setMusicUploadName] = useState('');
+  const [musicUploadError, setMusicUploadError] = useState('');
+  const [isMusicUploading, setIsMusicUploading] = useState(false);
 
   const [selectedBackgroundId, setSelectedBackgroundId] = useState('');
   const [activatingBackgroundId, setActivatingBackgroundId] = useState('');
   const [deletingBackgroundId, setDeletingBackgroundId] = useState('');
   const [clearingTokensBackgroundId, setClearingTokensBackgroundId] = useState('');
+  const [deletingMusicTrackId, setDeletingMusicTrackId] = useState('');
+  const [musicPlaybackActionTrackId, setMusicPlaybackActionTrackId] = useState('');
+  const [musicPlaybackActionType, setMusicPlaybackActionType] = useState('');
   const [calibrationDraft, setCalibrationDraft] = useState(DEFAULT_GRID);
   const [calibrationError, setCalibrationError] = useState('');
   const [isSavingCalibration, setIsSavingCalibration] = useState(false);
@@ -146,6 +173,10 @@ export default function GrigliataPage() {
   const pendingGridSizeAutosaveRef = useRef(null);
   const liveInteractionPublishTimeoutRef = useRef(null);
   const pendingLiveInteractionPublishRef = useRef(null);
+  const musicVolumeWriteTimeoutRef = useRef(null);
+  const pendingMusicVolumeRef = useRef(null);
+  const latestRequestedMusicVolumeRef = useRef(DEFAULT_GRIGLIATA_MUSIC_VOLUME);
+  const latestMusicPlaybackStateRef = useRef(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
   const activeLiveInteractionDocIdRef = useRef('');
   const liveInteractionMutationQueueRef = useRef(Promise.resolve());
   const [gridVisibilityUpdateBackgroundId, setGridVisibilityUpdateBackgroundId] = useState('');
@@ -163,11 +194,30 @@ export default function GrigliataPage() {
     () => getGrigliataDrawTheme(drawColorKey),
     [drawColorKey]
   );
+  const normalizedMusicPlaybackState = useMemo(
+    () => normalizeGrigliataMusicPlaybackState(musicPlaybackState),
+    [musicPlaybackState]
+  );
+
+  useEffect(() => {
+    latestMusicPlaybackStateRef.current = normalizedMusicPlaybackState;
+
+    if (pendingMusicVolumeRef.current !== null) {
+      if (normalizedMusicPlaybackState.volume === pendingMusicVolumeRef.current) {
+        pendingMusicVolumeRef.current = null;
+      } else {
+        return;
+      }
+    }
+
+    latestRequestedMusicVolumeRef.current = normalizedMusicPlaybackState.volume;
+  }, [normalizedMusicPlaybackState]);
   const sidebarTabs = useMemo(() => (
     isManager
       ? [
         { key: 'tokens', label: 'Tokens' },
         { key: 'gallery', label: 'DM Gallery' },
+        { key: 'music', label: 'Music' },
         { key: 'calibration', label: 'Map Calibration' },
       ]
       : [{ key: 'tokens', label: 'Tokens' }]
@@ -490,6 +540,49 @@ export default function GrigliataPage() {
 
     return () => unsubscribeInteractions();
   }, [activeBackgroundId, currentUserId]);
+
+  useEffect(() => {
+    if (!currentUserId || !isManager) {
+      setMusicTracks([]);
+      setMusicPlaybackState(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
+      return undefined;
+    }
+
+    const unsubscribeTracks = onSnapshot(
+      collection(db, GRIGLIATA_MUSIC_TRACK_COLLECTION),
+      (snapshot) => {
+        const nextTracks = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
+        setMusicTracks(sortGrigliataMusicTracks(nextTracks));
+      },
+      (error) => {
+        console.error('Failed to load Grigliata music tracks:', error);
+        setMusicTracks([]);
+      }
+    );
+
+    const unsubscribePlayback = onSnapshot(
+      doc(db, GRIGLIATA_MUSIC_PLAYBACK_COLLECTION, GRIGLIATA_MUSIC_PLAYBACK_DOC_ID),
+      (snapshot) => {
+        setMusicPlaybackState(
+          snapshot.exists()
+            ? normalizeGrigliataMusicPlaybackState(snapshot.data())
+            : EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE
+        );
+      },
+      (error) => {
+        console.error('Failed to load Grigliata music playback state:', error);
+        setMusicPlaybackState(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
+      }
+    );
+
+    return () => {
+      unsubscribeTracks();
+      unsubscribePlayback();
+    };
+  }, [currentUserId, isManager]);
 
   useEffect(() => {
     setLiveInteractionClock(Date.now());
@@ -1175,6 +1268,282 @@ export default function GrigliataPage() {
 
     return deletedCount;
   };
+
+  const clearMusicVolumeWriteTimer = useCallback(() => {
+    if (!musicVolumeWriteTimeoutRef.current) return;
+
+    window.clearTimeout(musicVolumeWriteTimeoutRef.current);
+    musicVolumeWriteTimeoutRef.current = null;
+  }, []);
+
+  const getCurrentSharedMusicVolume = useCallback(() => normalizeGrigliataMusicVolume(
+    pendingMusicVolumeRef.current !== null
+      ? pendingMusicVolumeRef.current
+      : latestRequestedMusicVolumeRef.current
+  ), []);
+
+  const persistMusicPlaybackState = useCallback(async (nextPlaybackState) => {
+    await setDoc(
+      doc(db, GRIGLIATA_MUSIC_PLAYBACK_COLLECTION, GRIGLIATA_MUSIC_PLAYBACK_DOC_ID),
+      nextPlaybackState
+    );
+  }, []);
+
+  const persistSharedMusicVolume = useCallback(async (nextVolume) => {
+    if (!isManager || !currentUserId) return;
+
+    const resolvedVolume = normalizeGrigliataMusicVolume(nextVolume);
+    latestRequestedMusicVolumeRef.current = resolvedVolume;
+
+    await persistMusicPlaybackState({
+      ...latestMusicPlaybackStateRef.current,
+      volume: resolvedVolume,
+      updatedAt: serverTimestamp(),
+      updatedBy: currentUserId,
+    });
+  }, [currentUserId, isManager, persistMusicPlaybackState]);
+
+  const persistPendingMusicVolume = useCallback(async () => {
+    const pendingVolume = pendingMusicVolumeRef.current;
+    if (pendingVolume === null) return;
+
+    clearMusicVolumeWriteTimer();
+
+    try {
+      await persistSharedMusicVolume(pendingVolume);
+    } catch (error) {
+      console.error('Failed to update the shared Grigliata music volume:', error);
+      setBoardError('Unable to update the shared music volume right now.');
+    }
+  }, [clearMusicVolumeWriteTimer, persistSharedMusicVolume]);
+
+  const handleSharedMusicVolumeChange = useCallback((nextVolume) => {
+    if (!isManager || !currentUserId) return;
+
+    const resolvedVolume = normalizeGrigliataMusicVolume(nextVolume);
+    pendingMusicVolumeRef.current = resolvedVolume;
+    latestRequestedMusicVolumeRef.current = resolvedVolume;
+    setBoardError('');
+    clearMusicVolumeWriteTimer();
+
+    musicVolumeWriteTimeoutRef.current = window.setTimeout(() => {
+      musicVolumeWriteTimeoutRef.current = null;
+      void persistPendingMusicVolume();
+    }, MUSIC_VOLUME_WRITE_THROTTLE_MS);
+  }, [clearMusicVolumeWriteTimer, currentUserId, isManager, persistPendingMusicVolume]);
+
+  const handleSharedMusicVolumeCommit = useCallback((nextVolume) => {
+    if (!isManager || !currentUserId) return;
+
+    const resolvedVolume = normalizeGrigliataMusicVolume(nextVolume);
+    pendingMusicVolumeRef.current = resolvedVolume;
+    latestRequestedMusicVolumeRef.current = resolvedVolume;
+    setBoardError('');
+    void persistPendingMusicVolume();
+  }, [currentUserId, isManager, persistPendingMusicVolume]);
+
+  useEffect(() => (
+    () => {
+      clearMusicVolumeWriteTimer();
+    }
+  ), [clearMusicVolumeWriteTimer]);
+
+  const runMusicPlaybackAction = useCallback(async ({
+    actionType,
+    buildState,
+  }) => {
+    if (!isManager || !currentUserId) return;
+
+    const nextPlaybackState = buildState?.();
+    if (!nextPlaybackState) return;
+
+    const targetTrackId = nextPlaybackState.trackId || normalizedMusicPlaybackState.trackId || '';
+
+    setBoardError('');
+    clearMusicVolumeWriteTimer();
+    setMusicPlaybackActionTrackId(targetTrackId);
+    setMusicPlaybackActionType(actionType);
+    try {
+      await persistMusicPlaybackState(nextPlaybackState);
+    } catch (error) {
+      console.error(`Failed to ${actionType} Grigliata music playback:`, error);
+      setBoardError('Unable to update the shared music playback right now.');
+    } finally {
+      setMusicPlaybackActionTrackId('');
+      setMusicPlaybackActionType('');
+    }
+  }, [
+    clearMusicVolumeWriteTimer,
+    currentUserId,
+    isManager,
+    normalizedMusicPlaybackState.trackId,
+    persistMusicPlaybackState,
+  ]);
+
+  const handleUploadMusicTrack = useCallback(async () => {
+    if (!isManager || !user?.uid) return;
+
+    setMusicUploadError('');
+    const file = musicSelectedFile;
+
+    if (!file) {
+      setMusicUploadError('Select an audio file first.');
+      return;
+    }
+
+    if (!file.type?.startsWith('audio/')) {
+      setMusicUploadError('The selected file must be an audio file.');
+      return;
+    }
+
+    if (file.size > MAX_GRIGLIATA_MUSIC_FILE_BYTES) {
+      setMusicUploadError('Audio tracks must be 25 MB or smaller.');
+      return;
+    }
+
+    const trackName = (musicUploadName || getDisplayNameFromFileName(file.name)).trim();
+    const safeName = buildStorageSafeName(trackName, 'grigliata_music');
+    const fileExtension = getFileExtension(file.name) || '.audio';
+    const storagePath = `grigliata/music/${user.uid}/${safeName}_${Date.now()}${fileExtension}`;
+    let uploadedPath = '';
+
+    setIsMusicUploading(true);
+    try {
+      const { durationMs } = await readAudioFileMetadata(file);
+      const fileRef = storageRef(storage, storagePath);
+      await uploadBytes(fileRef, file);
+      uploadedPath = storagePath;
+      const audioUrl = await getDownloadURL(fileRef);
+
+      await addDoc(collection(db, GRIGLIATA_MUSIC_TRACK_COLLECTION), {
+        name: trackName || 'Untitled Track',
+        fileName: file.name || '',
+        audioUrl,
+        audioPath: storagePath,
+        contentType: file.type || '',
+        sizeBytes: file.size || 0,
+        durationMs,
+        createdAt: serverTimestamp(),
+        createdBy: user.uid,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+
+      setMusicSelectedFile(null);
+      setMusicUploadName('');
+      setMusicUploadError('');
+    } catch (error) {
+      console.error('Failed to upload Grigliata music track:', error);
+      setMusicUploadError('Failed to upload the selected audio track.');
+
+      if (uploadedPath) {
+        try {
+          await deleteObject(storageRef(storage, uploadedPath));
+        } catch (cleanupError) {
+          console.warn('Music upload cleanup failed:', cleanupError);
+        }
+      }
+    } finally {
+      setIsMusicUploading(false);
+    }
+  }, [
+    isManager,
+    musicSelectedFile,
+    musicUploadName,
+    user?.uid,
+  ]);
+
+  const handlePlayMusicTrack = useCallback(async (track) => {
+    await runMusicPlaybackAction({
+      actionType: 'play',
+      buildState: () => buildGrigliataMusicPlaybackState({
+        status: GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING,
+        track,
+        offsetMs: 0,
+        volume: getCurrentSharedMusicVolume(),
+        startedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUserId,
+      }),
+    });
+  }, [currentUserId, getCurrentSharedMusicVolume, runMusicPlaybackAction]);
+
+  const handlePauseMusicTrack = useCallback(async (track) => {
+    await runMusicPlaybackAction({
+      actionType: 'pause',
+      buildState: () => buildGrigliataMusicPlaybackState({
+        status: GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PAUSED,
+        track,
+        offsetMs: computeGrigliataMusicPlaybackOffsetMs(normalizedMusicPlaybackState),
+        volume: getCurrentSharedMusicVolume(),
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUserId,
+      }),
+    });
+  }, [currentUserId, getCurrentSharedMusicVolume, normalizedMusicPlaybackState, runMusicPlaybackAction]);
+
+  const handleResumeMusicTrack = useCallback(async (track) => {
+    await runMusicPlaybackAction({
+      actionType: 'resume',
+      buildState: () => buildGrigliataMusicPlaybackState({
+        status: GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING,
+        track,
+        offsetMs: normalizedMusicPlaybackState.offsetMs,
+        volume: getCurrentSharedMusicVolume(),
+        startedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUserId,
+      }),
+    });
+  }, [currentUserId, getCurrentSharedMusicVolume, normalizedMusicPlaybackState.offsetMs, runMusicPlaybackAction]);
+
+  const handleStopMusicTrack = useCallback(async () => {
+    await runMusicPlaybackAction({
+      actionType: 'stop',
+      buildState: () => buildGrigliataMusicPlaybackState({
+        status: GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED,
+        volume: getCurrentSharedMusicVolume(),
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUserId,
+      }),
+    });
+  }, [currentUserId, getCurrentSharedMusicVolume, runMusicPlaybackAction]);
+
+  const handleDeleteMusicTrack = useCallback(async (track) => {
+    if (!isManager || !user?.uid || !track?.id) return;
+
+    const confirmed = window.confirm(`Delete track "${track.name || 'Untitled Track'}" permanently?`);
+    if (!confirmed) return;
+
+    setDeletingMusicTrackId(track.id);
+    setBoardError('');
+    try {
+      if (normalizedMusicPlaybackState.trackId === track.id) {
+        clearMusicVolumeWriteTimer();
+        await persistMusicPlaybackState(buildGrigliataMusicPlaybackState({
+          status: GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED,
+          volume: getCurrentSharedMusicVolume(),
+          updatedAt: serverTimestamp(),
+          updatedBy: currentUserId,
+        }));
+      }
+
+      await deleteDoc(doc(db, GRIGLIATA_MUSIC_TRACK_COLLECTION, track.id));
+    } catch (error) {
+      console.error('Failed to delete Grigliata music track:', error);
+      setBoardError('Unable to delete that music track right now.');
+    } finally {
+      setDeletingMusicTrackId('');
+    }
+  }, [
+    clearMusicVolumeWriteTimer,
+    currentUserId,
+    getCurrentSharedMusicVolume,
+    isManager,
+    normalizedMusicPlaybackState.trackId,
+    persistMusicPlaybackState,
+    user?.uid,
+  ]);
 
   useEffect(() => {
     if (!activeGridSizeOverride) return;
@@ -1939,6 +2308,37 @@ export default function GrigliataPage() {
                     onClearTokensForBackground={handleClearTokensForBackground}
                     onDeleteBackground={handleDeleteBackground}
                     onCalibrateBackground={handleOpenCalibration}
+                  />
+                )}
+
+                {isManager && activeSidebarTab === 'music' && (
+                  <MusicLibraryPanel
+                    tracks={musicTracks}
+                    activePlaybackState={normalizedMusicPlaybackState}
+                    uploadName={musicUploadName}
+                    selectedFileName={musicSelectedFile?.name || ''}
+                    uploadError={musicUploadError}
+                    isUploading={isMusicUploading}
+                    deletingTrackId={deletingMusicTrackId}
+                    playbackActionTrackId={musicPlaybackActionTrackId}
+                    playbackActionType={musicPlaybackActionType}
+                    onUploadNameChange={setMusicUploadName}
+                    onUploadFileChange={(event) => {
+                      const file = event.target.files?.[0] || null;
+                      setMusicSelectedFile(file);
+                      setMusicUploadError('');
+                      if (file && !musicUploadName.trim()) {
+                        setMusicUploadName(getDisplayNameFromFileName(file.name));
+                      }
+                    }}
+                    onUploadTrack={handleUploadMusicTrack}
+                    onSharedVolumeChange={handleSharedMusicVolumeChange}
+                    onSharedVolumeCommit={handleSharedMusicVolumeCommit}
+                    onPlayTrack={handlePlayMusicTrack}
+                    onPauseTrack={handlePauseMusicTrack}
+                    onResumeTrack={handleResumeMusicTrack}
+                    onStopTrack={handleStopMusicTrack}
+                    onDeleteTrack={handleDeleteMusicTrack}
                   />
                 )}
 

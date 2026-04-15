@@ -6,6 +6,7 @@ import {
   GRIGLIATA_LIVE_INTERACTION_STALE_MS,
   GRIGLIATA_LIVE_INTERACTION_THROTTLE_MS,
 } from './liveInteractions';
+import { readAudioFileMetadata } from './music';
 
 const mockFirestoreState = {
   collections: {},
@@ -155,6 +156,14 @@ jest.mock('firebase/firestore', () => ({
 jest.mock('./BackgroundGalleryPanel', () => jest.fn(() => <div data-testid="background-gallery-panel" />));
 jest.mock('./MapCalibrationPanel', () => jest.fn(() => <div data-testid="map-calibration-panel" />));
 jest.mock('./MyTokenTray', () => jest.fn(() => <div data-testid="my-token-tray" />));
+jest.mock('./music', () => {
+  const actual = jest.requireActual('./music');
+
+  return {
+    ...actual,
+    readAudioFileMetadata: jest.fn(() => Promise.resolve({ durationMs: 12_345 })),
+  };
+});
 jest.mock('./GrigliataBoard', () => {
   const React = require('react');
 
@@ -295,10 +304,23 @@ describe('GrigliataPage', () => {
       grigliata_token_placements: [],
       grigliata_aoe_figures: [],
       grigliata_live_interactions: [],
+      grigliata_music_tracks: [],
     };
     mockFirestoreState.docs = {
       'grigliata_state/current': {
         activeBackgroundId: 'map-1',
+      },
+      'grigliata_music_playback/current': {
+        status: 'stopped',
+        trackId: '',
+        trackName: '',
+        audioUrl: '',
+        durationMs: 0,
+        offsetMs: 0,
+        volume: 0.65,
+        startedAt: null,
+        commandId: '',
+        updatedBy: '',
       },
     };
 
@@ -359,12 +381,39 @@ describe('GrigliataPage', () => {
       mockBatchInstances.push(batch);
       return batch;
     });
+
+    const storageApi = require('firebase/storage');
+    storageApi.deleteObject.mockClear().mockResolvedValue(undefined);
+    storageApi.getDownloadURL.mockClear().mockResolvedValue('https://example.com/uploaded-map.png');
+    storageApi.ref.mockClear().mockImplementation((storage, path) => ({ storage, path }));
+    storageApi.uploadBytes.mockClear().mockResolvedValue(undefined);
+
+    readAudioFileMetadata.mockClear().mockResolvedValue({ durationMs: 12_345 });
   });
 
   afterEach(() => {
     jest.clearAllTimers();
     jest.useRealTimers();
   });
+
+  const setManagerAuth = () => {
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'dm',
+        settings: {
+          grigliata_draw_color: 'ion-cyan',
+          grigliata_share_interactions: false,
+        },
+        imageUrl: '',
+        imagePath: '',
+      },
+      loading: false,
+    });
+  };
 
   test('publishes only when sharing is enabled and a live interaction exists', async () => {
     render(<GrigliataPage />);
@@ -398,6 +447,357 @@ describe('GrigliataPage', () => {
         updatedBy: 'user-1',
       })
     );
+  });
+
+  test('shows the music tab only for managers', () => {
+    const { rerender } = render(<GrigliataPage />);
+
+    expect(screen.queryByRole('tab', { name: /music/i })).not.toBeInTheDocument();
+
+    setManagerAuth();
+    rerender(<GrigliataPage />);
+
+    expect(screen.getByRole('tab', { name: /music/i })).toBeInTheDocument();
+  });
+
+  test('uploads a music track and persists its metadata', async () => {
+    setManagerAuth();
+    const storageApi = require('firebase/storage');
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /music/i }));
+
+    const file = new File(['audio-bytes'], 'battle-theme.mp3', { type: 'audio/mpeg' });
+    Object.defineProperty(file, 'size', { value: 2048 });
+
+    fireEvent.change(screen.getByLabelText(/music track file/i), {
+      target: { files: [file] },
+    });
+
+    expect(screen.getByDisplayValue('battle theme')).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /add track/i }));
+    });
+
+    await waitFor(() => {
+      expect(readAudioFileMetadata).toHaveBeenCalledWith(file);
+    });
+
+    expect(storageApi.ref).toHaveBeenCalledWith(
+      {},
+      expect.stringMatching(/^grigliata\/music\/user-1\/battle_theme_\d+\.mp3$/)
+    );
+    expect(storageApi.uploadBytes).toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(firestore.addDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_tracks' }),
+        expect.objectContaining({
+          name: 'battle theme',
+          fileName: 'battle-theme.mp3',
+          audioUrl: 'https://example.com/uploaded-map.png',
+          audioPath: expect.stringMatching(/^grigliata\/music\/user-1\/battle_theme_\d+\.mp3$/),
+          contentType: 'audio/mpeg',
+          sizeBytes: 2048,
+          durationMs: 12_345,
+          createdBy: 'user-1',
+          updatedBy: 'user-1',
+        })
+      );
+    });
+  });
+
+  test('cleans up an uploaded music file when metadata persistence fails', async () => {
+    setManagerAuth();
+    const storageApi = require('firebase/storage');
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    firestore.addDoc.mockRejectedValueOnce(new Error('write failed'));
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /music/i }));
+
+    const file = new File(['audio-bytes'], 'ambience.mp3', { type: 'audio/mpeg' });
+    Object.defineProperty(file, 'size', { value: 1024 });
+
+    fireEvent.change(screen.getByLabelText(/music track file/i), {
+      target: { files: [file] },
+    });
+
+    try {
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /add track/i }));
+      });
+
+      await waitFor(() => {
+        expect(firestore.addDoc).toHaveBeenCalled();
+      });
+
+      expect(storageApi.ref).toHaveBeenCalledWith(
+        {},
+        expect.stringMatching(/^grigliata\/music\/user-1\/ambience_\d+\.mp3$/)
+      );
+
+      await waitFor(() => {
+        expect(storageApi.deleteObject).toHaveBeenCalled();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/failed to upload the selected audio track/i)).toBeInTheDocument();
+      });
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  test('plays, pauses, resumes, and stops shared music playback', async () => {
+    setManagerAuth();
+    jest.setSystemTime(new Date('2026-04-15T18:00:10.000Z'));
+
+    act(() => {
+      setCollectionData('grigliata_music_tracks', [
+        {
+          id: 'track-1',
+          name: 'Battle Theme',
+          fileName: 'battle-theme.mp3',
+          audioUrl: 'https://example.com/audio/battle-theme.mp3',
+          audioPath: 'grigliata/music/user-1/battle-theme.mp3',
+          contentType: 'audio/mpeg',
+          sizeBytes: 2048,
+          durationMs: 120_000,
+        },
+      ]);
+    });
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /music/i }));
+    firestore.setDoc.mockClear();
+
+    const volumeSlider = screen.getByRole('slider', { name: /shared music volume/i });
+
+    await act(async () => {
+      fireEvent.change(volumeSlider, { target: { value: '35' } });
+      fireEvent.mouseUp(volumeSlider);
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_playback/current' }),
+        expect.objectContaining({
+          status: 'stopped',
+          trackId: '',
+          volume: 0.35,
+          updatedBy: 'user-1',
+        })
+      );
+    });
+    firestore.setDoc.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^play$/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_playback/current' }),
+        expect.objectContaining({
+          status: 'playing',
+          trackId: 'track-1',
+          trackName: 'Battle Theme',
+          audioUrl: 'https://example.com/audio/battle-theme.mp3',
+          durationMs: 120_000,
+          offsetMs: 0,
+          volume: 0.35,
+          startedAt: { __type: 'serverTimestamp' },
+          updatedBy: 'user-1',
+          commandId: expect.any(String),
+        })
+      );
+    });
+    firestore.setDoc.mockClear();
+
+    act(() => {
+      setDocData('grigliata_music_playback/current', {
+        status: 'playing',
+        trackId: 'track-1',
+        trackName: 'Battle Theme',
+        audioUrl: 'https://example.com/audio/battle-theme.mp3',
+        durationMs: 120_000,
+        offsetMs: 2_000,
+        volume: 0.35,
+        startedAt: { toMillis: () => Date.now() - 5_000 },
+        commandId: 'cmd-play',
+        updatedBy: 'user-1',
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^pause$/i })).not.toBeDisabled();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^pause$/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_playback/current' }),
+        expect.objectContaining({
+          status: 'paused',
+          trackId: 'track-1',
+          offsetMs: 7_000,
+          volume: 0.35,
+          startedAt: null,
+          updatedBy: 'user-1',
+          commandId: expect.any(String),
+        })
+      );
+    });
+    firestore.setDoc.mockClear();
+
+    act(() => {
+      setDocData('grigliata_music_playback/current', {
+        status: 'paused',
+        trackId: 'track-1',
+        trackName: 'Battle Theme',
+        audioUrl: 'https://example.com/audio/battle-theme.mp3',
+        durationMs: 120_000,
+        offsetMs: 7_000,
+        volume: 0.35,
+        startedAt: null,
+        commandId: 'cmd-pause',
+        updatedBy: 'user-1',
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^resume$/i })).not.toBeDisabled();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^resume$/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_playback/current' }),
+        expect.objectContaining({
+          status: 'playing',
+          trackId: 'track-1',
+          offsetMs: 7_000,
+          volume: 0.35,
+          startedAt: { __type: 'serverTimestamp' },
+          updatedBy: 'user-1',
+          commandId: expect.any(String),
+        })
+      );
+    });
+    firestore.setDoc.mockClear();
+
+    act(() => {
+      setDocData('grigliata_music_playback/current', {
+        status: 'playing',
+        trackId: 'track-1',
+        trackName: 'Battle Theme',
+        audioUrl: 'https://example.com/audio/battle-theme.mp3',
+        durationMs: 120_000,
+        offsetMs: 7_000,
+        volume: 0.35,
+        startedAt: { toMillis: () => Date.now() - 1_000 },
+        commandId: 'cmd-resume',
+        updatedBy: 'user-1',
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^stop$/i })).not.toBeDisabled();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^stop$/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_playback/current' }),
+        expect.objectContaining({
+          status: 'stopped',
+          trackId: '',
+          trackName: '',
+          audioUrl: '',
+          durationMs: 0,
+          offsetMs: 0,
+          volume: 0.35,
+          startedAt: null,
+          updatedBy: 'user-1',
+          commandId: expect.any(String),
+        })
+      );
+    });
+  });
+
+  test('stops shared playback before deleting the active music track', async () => {
+    setManagerAuth();
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+
+    act(() => {
+      setCollectionData('grigliata_music_tracks', [
+        {
+          id: 'track-1',
+          name: 'Battle Theme',
+          fileName: 'battle-theme.mp3',
+          audioUrl: 'https://example.com/audio/battle-theme.mp3',
+          audioPath: 'grigliata/music/user-1/battle-theme.mp3',
+          contentType: 'audio/mpeg',
+          sizeBytes: 2048,
+          durationMs: 120_000,
+        },
+      ]);
+      setDocData('grigliata_music_playback/current', {
+        status: 'playing',
+        trackId: 'track-1',
+        trackName: 'Battle Theme',
+        audioUrl: 'https://example.com/audio/battle-theme.mp3',
+        durationMs: 120_000,
+        offsetMs: 0,
+        volume: 0.42,
+        startedAt: { toMillis: () => Date.now() - 1_000 },
+        commandId: 'cmd-active',
+        updatedBy: 'user-1',
+      });
+    });
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /music/i }));
+    firestore.setDoc.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^delete$/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_playback/current' }),
+        expect.objectContaining({
+          status: 'stopped',
+          trackId: '',
+          audioUrl: '',
+          volume: 0.42,
+        })
+      );
+    });
+
+    await waitFor(() => {
+      expect(firestore.deleteDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_tracks/track-1' })
+      );
+    });
+
+    confirmSpy.mockRestore();
   });
 
   test('throttles live interaction publishes and keeps only the latest pending payload', async () => {

@@ -42,6 +42,10 @@ service cloud.firestore {
       return isDM();
     }
 
+    function isProtectedGrigliataDocument(documentPath) {
+      return documentPath.matches('^(grigliata_state|grigliata_backgrounds|grigliata_music_tracks|grigliata_music_playback|grigliata_tokens|grigliata_token_placements|grigliata_live_interactions|grigliata_aoe_figures)(/.*)?$');
+    }
+
     function isGrigliataPlacementId(backgroundId, ownerUid, placementId) {
       return backgroundId is string
         && ownerUid is string
@@ -305,6 +309,126 @@ service cloud.firestore {
         );
     }
 
+    function isValidGrigliataMusicTrack(data) {
+      return data.keys().hasAll([
+          "name",
+          "fileName",
+          "audioUrl",
+          "audioPath",
+          "contentType",
+          "sizeBytes",
+          "durationMs",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.keys().hasOnly([
+          "name",
+          "fileName",
+          "audioUrl",
+          "audioPath",
+          "contentType",
+          "sizeBytes",
+          "durationMs",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.name is string
+        && data.name.size() > 0
+        && data.fileName is string
+        && data.fileName.size() > 0
+        && data.audioUrl is string
+        && data.audioUrl.size() > 0
+        && data.audioPath is string
+        && data.audioPath.matches('^grigliata/music/.+$')
+        && data.contentType is string
+        && data.contentType.matches('^audio/.+$')
+        && data.sizeBytes is int
+        && data.sizeBytes >= 0
+        && data.durationMs is int
+        && data.durationMs > 0
+        && (data.createdBy == null || data.createdBy is string)
+        && (data.updatedBy == null || data.updatedBy is string);
+    }
+
+    function isValidGrigliataMusicPlaybackStatus(status) {
+      return status in ["playing", "paused", "stopped"];
+    }
+
+    function isValidGrigliataMusicPlayback(data) {
+      return data.keys().hasAll([
+          "status",
+          "trackId",
+          "trackName",
+          "audioUrl",
+          "durationMs",
+          "offsetMs",
+          "volume",
+          "startedAt",
+          "commandId",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.keys().hasOnly([
+          "status",
+          "trackId",
+          "trackName",
+          "audioUrl",
+          "durationMs",
+          "offsetMs",
+          "volume",
+          "startedAt",
+          "commandId",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.status is string
+        && isValidGrigliataMusicPlaybackStatus(data.status)
+        && data.trackId is string
+        && data.trackName is string
+        && data.audioUrl is string
+        && data.durationMs is int
+        && data.durationMs >= 0
+        && data.offsetMs is int
+        && data.offsetMs >= 0
+        && (data.volume is int || data.volume is float)
+        && data.volume >= 0
+        && data.volume <= 1
+        && data.commandId is string
+        && data.commandId.size() > 0
+        && (data.updatedBy == null || data.updatedBy is string)
+        && (
+          (
+            data.status == "stopped"
+            && data.trackId.size() == 0
+            && data.trackName.size() == 0
+            && data.audioUrl.size() == 0
+            && data.durationMs == 0
+            && data.offsetMs == 0
+            && data.startedAt == null
+          )
+          || (
+            data.status == "paused"
+            && data.trackId.size() > 0
+            && data.trackName.size() > 0
+            && data.audioUrl.size() > 0
+            && data.offsetMs <= data.durationMs
+            && data.startedAt == null
+          )
+          || (
+            data.status == "playing"
+            && data.trackId.size() > 0
+            && data.trackName.size() > 0
+            && data.audioUrl.size() > 0
+            && data.offsetMs <= data.durationMs
+            && data.startedAt != null
+          )
+        );
+    }
+
     function isGrigliataPlacementVisibleToPlayers(data) {
       return !data.keys().hasAny(["isVisibleToPlayers"])
         || data.isVisibleToPlayers == true;
@@ -351,7 +475,7 @@ service cloud.firestore {
 
     // DMs can do everything anywhere
     match /{document=**} {
-      allow read, write: if isDM();
+      allow read, write: if isDM() && !isProtectedGrigliataDocument(document);
     }
 
     // Users
@@ -434,6 +558,24 @@ service cloud.firestore {
     match /grigliata_backgrounds/{backgroundId} {
       allow read: if isSignedIn();
       allow write: if isGrigliataManager();
+    }
+
+    match /grigliata_music_tracks/{trackId} {
+      allow read: if isGrigliataManager();
+
+      allow create, update: if isGrigliataManager()
+        && isValidGrigliataMusicTrack(request.resource.data);
+
+      allow delete: if isGrigliataManager()
+        && isValidGrigliataMusicTrack(resource.data);
+    }
+
+    match /grigliata_music_playback/{stateId} {
+      allow read: if isSignedIn() && stateId == "current";
+
+      allow create, update: if stateId == "current"
+        && isGrigliataManager()
+        && isValidGrigliataMusicPlayback(request.resource.data);
     }
 
     match /grigliata_tokens/{tokenId} {

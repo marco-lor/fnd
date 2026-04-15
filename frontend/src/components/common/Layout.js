@@ -1,6 +1,7 @@
 import React from 'react';
 import Navbar from './navbar';
 import GlobalAuroraBackground from '../backgrounds/GlobalAuroraBackground';
+import GlobalGrigliataMusicPlayer from '../grigliata/GlobalGrigliataMusicPlayer';
 
 /**
  * Layout component that wraps page content and includes the navbar
@@ -11,6 +12,7 @@ const Layout = ({ children }) => {
   return (
     <div className="relative min-h-screen flex flex-col">
       <GlobalAuroraBackground density={140} />
+      <GlobalGrigliataMusicPlayer />
       <Navbar />
       <main className="relative z-10 flex-grow">
         {children}

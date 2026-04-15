@@ -20,6 +20,7 @@ import {levelUpAll} from "./levelUpAll";
 import {levelUpUser} from "./levelUpUser";
 import {duplicateFoeWithAssets} from "./duplicateFoeWithAssets";
 import {expireBarriera} from "./expireBarriera";
+import {cleanupGrigliataMusicTrack} from "./cleanupGrigliataMusicTrack";
 
 admin.initializeApp();
 
@@ -35,4 +36,5 @@ export {
   levelUpUser,
   duplicateFoeWithAssets,
   expireBarriera,
+  cleanupGrigliataMusicTrack,
 };
