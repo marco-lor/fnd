@@ -485,6 +485,39 @@ describe('GrigliataPage', () => {
     );
   });
 
+        test('syncs the current user token profile from the page layer and scrubs legacy placement fields', async () => {
+          setCollectionData('grigliata_tokens', [{
+            id: 'user-1',
+            ownerUid: 'user-1',
+            characterId: '',
+            label: 'Legacy Token',
+            imageUrl: '',
+            imagePath: '',
+            placed: true,
+            col: 3,
+            row: 4,
+          }]);
+
+          render(<GrigliataPage />);
+
+          await waitFor(() => {
+            expect(firestore.setDoc).toHaveBeenCalledWith(
+              expect.objectContaining({ path: 'grigliata_tokens/user-1' }),
+              expect.objectContaining({
+                ownerUid: 'user-1',
+                characterId: '',
+                label: 'user-1',
+                imageUrl: '',
+                imagePath: '',
+                placed: { __type: 'deleteField' },
+                col: { __type: 'deleteField' },
+                row: { __type: 'deleteField' },
+              }),
+              { merge: true }
+            );
+          });
+        });
+
   test('places the current token with an explicit dead-state flag', async () => {
     useAuth.mockReturnValue({
       user: {

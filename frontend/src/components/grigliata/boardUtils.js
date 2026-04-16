@@ -78,6 +78,8 @@ export const sortBackgrounds = (backgrounds) => (
   })
 );
 
+export const buildPlacementDocId = (backgroundId, ownerUid) => `${backgroundId}__${ownerUid}`;
+
 export const getDisplayNameFromFileName = (fileName) => {
   const safeName = typeof fileName === 'string' ? fileName.trim() : '';
   if (!safeName) return 'Untitled Map';

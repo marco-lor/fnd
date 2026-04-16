@@ -1,0 +1,511 @@
+import { useEffect, useMemo, useState } from 'react';
+import {
+  collection,
+  doc,
+  onSnapshot,
+  query,
+  where,
+} from 'firebase/firestore';
+import { db } from '../firebaseConfig';
+import {
+  buildGrigliataAoEFigureDocId,
+  GRIGLIATA_AOE_FIGURE_COLLECTION,
+  GRIGLIATA_AOE_FIGURE_TYPES,
+  MAX_GRIGLIATA_AOE_FIGURES_PER_TYPE,
+} from './aoeFigures';
+import { buildPlacementDocId, normalizeGridConfig, sortBackgrounds } from './boardUtils';
+import {
+  filterActiveGrigliataLiveInteractions,
+  GRIGLIATA_LIVE_INTERACTION_COLLECTION,
+  GRIGLIATA_LIVE_INTERACTION_STALE_MS,
+} from './liveInteractions';
+import {
+  EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE,
+  GRIGLIATA_MUSIC_PLAYBACK_COLLECTION,
+  GRIGLIATA_MUSIC_PLAYBACK_DOC_ID,
+  GRIGLIATA_MUSIC_TRACK_COLLECTION,
+  normalizeGrigliataMusicPlaybackState,
+  sortGrigliataMusicTracks,
+} from './music';
+
+const LIVE_INTERACTION_CLOCK_INTERVAL_MS = 15 * 1000;
+
+export default function useGrigliataPageData({
+  currentUserId = '',
+  currentCharacterId = '',
+  currentTokenLabel = '',
+  currentImageUrl = '',
+  currentImagePath = '',
+  currentUserHiddenBackgroundIds = [],
+  isManager = false,
+  activeGridSizeOverride = null,
+}) {
+  const [backgrounds, setBackgrounds] = useState([]);
+  const [boardState, setBoardState] = useState({});
+  const [tokenProfiles, setTokenProfiles] = useState([]);
+  const [activePlacements, setActivePlacements] = useState([]);
+  const [aoeFigureSnapshots, setAoEFigureSnapshots] = useState([]);
+  const [liveInteractionSnapshots, setLiveInteractionSnapshots] = useState([]);
+  const [musicTracks, setMusicTracks] = useState([]);
+  const [musicPlaybackState, setMusicPlaybackState] = useState(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
+  const [selectedBackgroundId, setSelectedBackgroundId] = useState('');
+  const [liveInteractionClock, setLiveInteractionClock] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!currentUserId) {
+      setBackgrounds([]);
+      setBoardState({});
+      setTokenProfiles([]);
+      return undefined;
+    }
+
+    const unsubscribeBackgrounds = onSnapshot(
+      collection(db, 'grigliata_backgrounds'),
+      (snapshot) => {
+        const nextBackgrounds = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
+        setBackgrounds(sortBackgrounds(nextBackgrounds));
+      },
+      (error) => {
+        console.error('Failed to load Grigliata backgrounds:', error);
+      }
+    );
+
+    const unsubscribeState = onSnapshot(
+      doc(db, 'grigliata_state', 'current'),
+      (snapshot) => {
+        setBoardState(snapshot.exists() ? snapshot.data() : {});
+      },
+      (error) => {
+        console.error('Failed to load Grigliata state:', error);
+      }
+    );
+
+    const unsubscribeTokenProfiles = onSnapshot(
+      collection(db, 'grigliata_tokens'),
+      (snapshot) => {
+        const nextTokens = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
+        setTokenProfiles(nextTokens);
+      },
+      (error) => {
+        console.error('Failed to load Grigliata token profiles:', error);
+      }
+    );
+
+    return () => {
+      unsubscribeBackgrounds();
+      unsubscribeState();
+      unsubscribeTokenProfiles();
+    };
+  }, [currentUserId]);
+
+  const activeBackgroundId = typeof boardState?.activeBackgroundId === 'string'
+    ? boardState.activeBackgroundId
+    : '';
+
+  useEffect(() => {
+    if (!currentUserId || !activeBackgroundId) {
+      setActivePlacements([]);
+      return undefined;
+    }
+
+    const placementsQuery = isManager
+      ? query(
+        collection(db, 'grigliata_token_placements'),
+        where('backgroundId', '==', activeBackgroundId)
+      )
+      : query(
+        collection(db, 'grigliata_token_placements'),
+        where('backgroundId', '==', activeBackgroundId),
+        where('isVisibleToPlayers', '==', true)
+      );
+
+    const unsubscribePlacements = onSnapshot(
+      placementsQuery,
+      (snapshot) => {
+        const nextPlacements = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
+        setActivePlacements(nextPlacements);
+      },
+      (error) => {
+        console.error('Failed to load Grigliata token placements:', error);
+        setActivePlacements([]);
+      }
+    );
+
+    return () => unsubscribePlacements();
+  }, [activeBackgroundId, currentUserId, isManager]);
+
+  useEffect(() => {
+    if (!currentUserId || !activeBackgroundId) {
+      setAoEFigureSnapshots([]);
+      return undefined;
+    }
+
+    const mergeFigureCollections = (visibleFigures, ownFigures) => {
+      const nextMap = new Map();
+
+      [...visibleFigures, ...ownFigures].forEach((figure) => {
+        if (figure?.id) {
+          nextMap.set(figure.id, figure);
+        }
+      });
+
+      setAoEFigureSnapshots([...nextMap.values()]);
+    };
+
+    if (isManager) {
+      const figuresQuery = query(
+        collection(db, GRIGLIATA_AOE_FIGURE_COLLECTION),
+        where('backgroundId', '==', activeBackgroundId)
+      );
+
+      const unsubscribeFigures = onSnapshot(
+        figuresQuery,
+        (snapshot) => {
+          const nextFigures = snapshot.docs.map((docSnap) => ({
+            id: docSnap.id,
+            ...docSnap.data(),
+          }));
+          setAoEFigureSnapshots(nextFigures);
+        },
+        (error) => {
+          console.error('Failed to load Grigliata AoE figures:', error);
+          setAoEFigureSnapshots([]);
+        }
+      );
+
+      return () => unsubscribeFigures();
+    }
+
+    let visibleFigures = [];
+    const ownFiguresById = new Map();
+
+    const publishMergedFigures = () => {
+      mergeFigureCollections(visibleFigures, [...ownFiguresById.values()]);
+    };
+
+    const visibleFiguresQuery = query(
+      collection(db, GRIGLIATA_AOE_FIGURE_COLLECTION),
+      where('backgroundId', '==', activeBackgroundId),
+      where('isVisibleToPlayers', '==', true)
+    );
+    const unsubscribeVisibleFigures = onSnapshot(
+      visibleFiguresQuery,
+      (snapshot) => {
+        visibleFigures = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
+        publishMergedFigures();
+      },
+      (error) => {
+        console.error('Failed to load visible Grigliata AoE figures:', error);
+        visibleFigures = [];
+        publishMergedFigures();
+      }
+    );
+
+    const ownFigureDocIds = GRIGLIATA_AOE_FIGURE_TYPES.flatMap((figureType) => (
+      Array.from({ length: MAX_GRIGLIATA_AOE_FIGURES_PER_TYPE }, (_, index) => (
+        buildGrigliataAoEFigureDocId(activeBackgroundId, currentUserId, figureType, index + 1)
+      ))
+    )).filter(Boolean);
+
+    const unsubscribeOwnFigures = ownFigureDocIds.map((figureId) => (
+      onSnapshot(
+        doc(db, GRIGLIATA_AOE_FIGURE_COLLECTION, figureId),
+        (snapshot) => {
+          if (snapshot.exists()) {
+            ownFiguresById.set(figureId, {
+              id: snapshot.id,
+              ...snapshot.data(),
+            });
+          } else {
+            ownFiguresById.delete(figureId);
+          }
+          publishMergedFigures();
+        },
+        (error) => {
+          console.error(`Failed to load owned Grigliata AoE figure ${figureId}:`, error);
+          ownFiguresById.delete(figureId);
+          publishMergedFigures();
+        }
+      )
+    ));
+
+    return () => {
+      unsubscribeVisibleFigures();
+      unsubscribeOwnFigures.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [activeBackgroundId, currentUserId, isManager]);
+
+  useEffect(() => {
+    if (!currentUserId || !activeBackgroundId) {
+      setLiveInteractionSnapshots([]);
+      return undefined;
+    }
+
+    const interactionsQuery = query(
+      collection(db, GRIGLIATA_LIVE_INTERACTION_COLLECTION),
+      where('backgroundId', '==', activeBackgroundId)
+    );
+
+    const unsubscribeInteractions = onSnapshot(
+      interactionsQuery,
+      (snapshot) => {
+        const nextInteractions = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
+        setLiveInteractionSnapshots(nextInteractions);
+      },
+      (error) => {
+        console.error('Failed to load Grigliata live interactions:', error);
+        setLiveInteractionSnapshots([]);
+      }
+    );
+
+    return () => unsubscribeInteractions();
+  }, [activeBackgroundId, currentUserId]);
+
+  useEffect(() => {
+    if (!currentUserId || !isManager) {
+      setMusicTracks([]);
+      setMusicPlaybackState(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
+      return undefined;
+    }
+
+    const unsubscribeTracks = onSnapshot(
+      collection(db, GRIGLIATA_MUSIC_TRACK_COLLECTION),
+      (snapshot) => {
+        const nextTracks = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
+        setMusicTracks(sortGrigliataMusicTracks(nextTracks));
+      },
+      (error) => {
+        console.error('Failed to load Grigliata music tracks:', error);
+        setMusicTracks([]);
+      }
+    );
+
+    const unsubscribePlayback = onSnapshot(
+      doc(db, GRIGLIATA_MUSIC_PLAYBACK_COLLECTION, GRIGLIATA_MUSIC_PLAYBACK_DOC_ID),
+      (snapshot) => {
+        setMusicPlaybackState(
+          snapshot.exists()
+            ? normalizeGrigliataMusicPlaybackState(snapshot.data())
+            : EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE
+        );
+      },
+      (error) => {
+        console.error('Failed to load Grigliata music playback state:', error);
+        setMusicPlaybackState(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
+      }
+    );
+
+    return () => {
+      unsubscribeTracks();
+      unsubscribePlayback();
+    };
+  }, [currentUserId, isManager]);
+
+  useEffect(() => {
+    setLiveInteractionClock(Date.now());
+    if (!activeBackgroundId) return undefined;
+
+    const intervalId = window.setInterval(() => {
+      setLiveInteractionClock(Date.now());
+    }, LIVE_INTERACTION_CLOCK_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [activeBackgroundId]);
+
+  const activeBackground = useMemo(
+    () => backgrounds.find((background) => background.id === activeBackgroundId) || null,
+    [backgrounds, activeBackgroundId]
+  );
+
+  const sharedInteractions = useMemo(
+    () => filterActiveGrigliataLiveInteractions(
+      liveInteractionSnapshots,
+      liveInteractionClock,
+      GRIGLIATA_LIVE_INTERACTION_STALE_MS
+    ),
+    [liveInteractionClock, liveInteractionSnapshots]
+  );
+
+  const selectedBackground = useMemo(
+    () => backgrounds.find((background) => background.id === selectedBackgroundId) || null,
+    [backgrounds, selectedBackgroundId]
+  );
+
+  useEffect(() => {
+    if (!backgrounds.length) {
+      setSelectedBackgroundId('');
+      return;
+    }
+
+    setSelectedBackgroundId((previousId) => {
+      if (previousId && backgrounds.some((background) => background.id === previousId)) {
+        return previousId;
+      }
+      if (activeBackgroundId && backgrounds.some((background) => background.id === activeBackgroundId)) {
+        return activeBackgroundId;
+      }
+      return backgrounds[0].id;
+    });
+  }, [backgrounds, activeBackgroundId]);
+
+  const currentUserTokenProfileDoc = useMemo(
+    () => tokenProfiles.find((token) => token.id === currentUserId || token.ownerUid === currentUserId) || null,
+    [currentUserId, tokenProfiles]
+  );
+
+  const activePlacementsById = useMemo(() => {
+    const nextMap = new Map();
+
+    activePlacements.forEach((placement) => {
+      if (!placement?.backgroundId || !placement?.ownerUid) {
+        return;
+      }
+
+      nextMap.set(buildPlacementDocId(placement.backgroundId, placement.ownerUid), placement);
+    });
+
+    return nextMap;
+  }, [activePlacements]);
+
+  const tokenProfilesByOwnerUid = useMemo(() => {
+    const nextMap = new Map();
+    tokenProfiles.forEach((token) => {
+      const ownerUid = token?.ownerUid || token?.id;
+      if (ownerUid) {
+        nextMap.set(ownerUid, token);
+      }
+    });
+    return nextMap;
+  }, [tokenProfiles]);
+
+  const boardTokens = useMemo(
+    () => activePlacements
+      .filter((placement) => placement?.ownerUid)
+      .map((placement) => {
+        const profile = tokenProfilesByOwnerUid.get(placement.ownerUid)
+          || (placement.ownerUid === currentUserId ? {
+            ownerUid: currentUserId,
+            characterId: currentCharacterId,
+            label: currentTokenLabel,
+            imageUrl: currentImageUrl,
+            imagePath: currentImagePath,
+          } : null);
+
+        return {
+          id: placement.ownerUid,
+          backgroundId: placement.backgroundId,
+          ownerUid: placement.ownerUid,
+          characterId: profile?.characterId || '',
+          label: profile?.label || placement.ownerUid || 'Player',
+          imageUrl: profile?.imageUrl || '',
+          imagePath: profile?.imagePath || '',
+          col: Number.isFinite(placement?.col) ? placement.col : 0,
+          row: Number.isFinite(placement?.row) ? placement.row : 0,
+          isVisibleToPlayers: placement?.isVisibleToPlayers !== false,
+          isDead: placement?.isDead === true,
+          statuses: Array.isArray(placement?.statuses) ? placement.statuses : [],
+          placed: true,
+        };
+      }),
+    [
+      activePlacements,
+      currentCharacterId,
+      currentImagePath,
+      currentImageUrl,
+      currentTokenLabel,
+      currentUserId,
+      tokenProfilesByOwnerUid,
+    ]
+  );
+
+  const currentUserPlacement = useMemo(
+    () => activePlacements.find((placement) => placement.ownerUid === currentUserId) || null,
+    [activePlacements, currentUserId]
+  );
+
+  const isCurrentUserTokenHiddenOnActiveMap = useMemo(
+    () => !isManager
+      && !currentUserPlacement
+      && !!activeBackgroundId
+      && currentUserHiddenBackgroundIds.includes(activeBackgroundId),
+    [activeBackgroundId, currentUserHiddenBackgroundIds, currentUserPlacement, isManager]
+  );
+
+  const currentUserToken = useMemo(() => ({
+    ownerUid: currentUserId,
+    characterId: currentCharacterId,
+    label: currentTokenLabel,
+    imageUrl: currentUserTokenProfileDoc?.imageUrl || currentImageUrl,
+    imagePath: currentUserTokenProfileDoc?.imagePath || currentImagePath,
+    placed: !!currentUserPlacement,
+    col: Number.isFinite(currentUserPlacement?.col) ? currentUserPlacement.col : 0,
+    row: Number.isFinite(currentUserPlacement?.row) ? currentUserPlacement.row : 0,
+    isHiddenByManager: isCurrentUserTokenHiddenOnActiveMap,
+  }), [
+    currentCharacterId,
+    currentImagePath,
+    currentImageUrl,
+    currentTokenLabel,
+    currentUserId,
+    currentUserPlacement,
+    currentUserTokenProfileDoc,
+    isCurrentUserTokenHiddenOnActiveMap,
+  ]);
+
+  const persistedActiveGrid = useMemo(
+    () => normalizeGridConfig(activeBackground?.grid),
+    [activeBackground]
+  );
+  const isGridVisible = activeBackground?.isGridVisible !== false;
+
+  const grid = useMemo(() => {
+    if (!activeBackgroundId || activeGridSizeOverride?.backgroundId !== activeBackgroundId) {
+      return persistedActiveGrid;
+    }
+
+    return normalizeGridConfig({
+      ...persistedActiveGrid,
+      cellSizePx: activeGridSizeOverride.cellSizePx,
+    });
+  }, [activeBackgroundId, activeGridSizeOverride, persistedActiveGrid]);
+
+  return {
+    activeBackground,
+    activeBackgroundId,
+    activePlacementsById,
+    aoeFigureSnapshots,
+    backgrounds,
+    boardState,
+    boardTokens,
+    currentUserToken,
+    currentUserTokenProfileDoc,
+    grid,
+    isCurrentUserTokenHiddenOnActiveMap,
+    isGridVisible,
+    musicPlaybackState,
+    musicTracks,
+    persistedActiveGrid,
+    selectedBackground,
+    selectedBackgroundId,
+    setSelectedBackgroundId,
+    sharedInteractions,
+  };
+}

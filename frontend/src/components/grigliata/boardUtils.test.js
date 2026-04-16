@@ -1,4 +1,10 @@
-import { isCurrentUserTokenHiddenForViewer } from './boardUtils';
+import { buildPlacementDocId, isCurrentUserTokenHiddenForViewer } from './boardUtils';
+
+describe('buildPlacementDocId', () => {
+  test('serializes the background and owner ids with the shared placement format', () => {
+    expect(buildPlacementDocId('map-1', 'user-7')).toBe('map-1__user-7');
+  });
+});
 
 describe('isCurrentUserTokenHiddenForViewer', () => {
   test('returns true for a player with a hidden token and no visible placement', () => {
