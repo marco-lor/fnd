@@ -242,7 +242,7 @@ export default function GrigliataTokenActions({
 }) {
   const [isStatusPopoverOpen, setIsStatusPopoverOpen] = useState(false);
   const statusControlRef = useRef(null);
-  const statusOwnerUid = actionState?.statusToken?.ownerUid || '';
+  const statusTokenId = actionState?.statusToken?.tokenId || '';
   const hasStatusToken = !!actionState?.statusToken;
   const statusPopoverPlacement = useMemo(() => {
     if (!actionState || !viewportSize?.width || !viewportSize?.height) {
@@ -289,24 +289,24 @@ export default function GrigliataTokenActions({
     }
 
     setIsStatusPopoverOpen(false);
-  }, [hasStatusToken, statusOwnerUid]);
+  }, [hasStatusToken, statusTokenId]);
 
   if (!actionState) {
     return null;
   }
 
   const handleToggleStatus = (statusId) => {
-    if (!actionState.statusToken?.ownerUid) return;
+    if (!actionState.statusToken?.tokenId) return;
 
     onUpdateTokenStatuses?.(
-      actionState.statusToken.ownerUid,
+      actionState.statusToken.tokenId,
       toggleTokenStatus(actionState.statusToken.statuses, statusId)
     );
   };
   const handleClearAllStatuses = () => {
-    if (!actionState.statusToken?.ownerUid) return;
+    if (!actionState.statusToken?.tokenId) return;
 
-    onUpdateTokenStatuses?.(actionState.statusToken.ownerUid, []);
+    onUpdateTokenStatuses?.(actionState.statusToken.tokenId, []);
   };
 
   const visibilityTitle = actionState.visibilityTitle || 'Toggle token visibility';
@@ -337,7 +337,7 @@ export default function GrigliataTokenActions({
                 onClick={(event) => {
                   event.stopPropagation();
                   onSetSelectedTokensVisibility?.(
-                    actionState.ownerUids,
+                    actionState.tokenIds,
                     actionState.nextIsVisibleToPlayers
                   );
                 }}
@@ -365,7 +365,7 @@ export default function GrigliataTokenActions({
                 onClick={(event) => {
                   event.stopPropagation();
                   onSetSelectedTokensDeadState?.(
-                    actionState.ownerUids,
+                    actionState.tokenIds,
                     actionState.nextIsDead
                   );
                 }}

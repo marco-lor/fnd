@@ -2024,7 +2024,24 @@ export default function GrigliataBoard({
       try {
         const parsed = JSON.parse(candidate);
         if (parsed?.type === 'grigliata-token') {
-          return parsed;
+          const tokenId = typeof parsed?.tokenId === 'string' && parsed.tokenId
+            ? parsed.tokenId
+            : typeof parsed?.uid === 'string' && parsed.uid
+              ? parsed.uid
+              : '';
+          const ownerUid = typeof parsed?.ownerUid === 'string' && parsed.ownerUid
+            ? parsed.ownerUid
+            : typeof parsed?.uid === 'string' && parsed.uid
+              ? parsed.uid
+              : '';
+
+          if (tokenId && ownerUid) {
+            return {
+              ...parsed,
+              tokenId,
+              ownerUid,
+            };
+          }
         }
       } catch {
         // ignore malformed payloads
@@ -2041,18 +2058,18 @@ export default function GrigliataBoard({
     const payload = parseDropPayload(event.dataTransfer);
     const canAcceptCurrentTrayDrop = !!(isTokenDragActive && currentUserId);
     if (!containerRef.current) return;
-    if (!canAcceptCurrentTrayDrop && (!payload || payload.uid !== currentUserId)) return;
+    if (!canAcceptCurrentTrayDrop && (!payload || payload.ownerUid !== currentUserId)) return;
 
     const worldPoint = getWorldPointFromClient(event.clientX, event.clientY);
     if (!worldPoint) return;
 
-    onDropCurrentToken?.(worldPoint);
+    onDropCurrentToken?.(payload, worldPoint);
   };
 
   const handleDragOver = (event) => {
     const payload = parseDropPayload(event.dataTransfer);
     const canAcceptCurrentTrayDrop = !!(isTokenDragActive && currentUserId);
-    if (!canAcceptCurrentTrayDrop && (!payload || payload.uid !== currentUserId)) return;
+    if (!canAcceptCurrentTrayDrop && (!payload || payload.ownerUid !== currentUserId)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
     setIsDropActive(true);
@@ -2217,6 +2234,7 @@ export default function GrigliataBoard({
         if ((colDelta !== 0 || rowDelta !== 0) && activeInteraction.originTokens.length > 0) {
           await Promise.resolve(onMoveTokens?.(
             activeInteraction.originTokens.map((originToken) => ({
+              tokenId: originToken.tokenId,
               ownerUid: originToken.ownerUid,
               backgroundId: originToken.backgroundId,
               col: originToken.col + colDelta,
@@ -2805,18 +2823,18 @@ export default function GrigliataBoard({
     );
     const buttonSize = Math.max(36, Math.min(84, Math.round(referenceScreenSize)));
     const gap = Math.max(14, Math.round(buttonSize * 0.22));
-    const normalizedOwnerUids = [...new Set(
+    const normalizedTokenIds = [...new Set(
       selectedTokens
-        .map((token) => token.ownerUid)
+        .map((token) => token.tokenId)
         .filter(Boolean)
     )];
-    if (!normalizedOwnerUids.length) {
+    if (!normalizedTokenIds.length) {
       return null;
     }
 
     const statusToken = selectedTokens.length === 1
       ? {
-        ownerUid: selectedTokens[0].ownerUid,
+        tokenId: selectedTokens[0].tokenId,
         label: selectedTokens[0].label || 'token',
         statuses: selectedTokens[0].statuses || [],
       }
@@ -2830,7 +2848,7 @@ export default function GrigliataBoard({
     const toolbarHeight = buttonSize + 16;
     const allSelectedTokensHidden = selectedTokens.every((token) => token.isVisibleToPlayers === false);
     const allSelectedTokensDead = selectedTokens.every((token) => token.isDead === true);
-    const selectionLabel = normalizedOwnerUids.length === 1 ? 'token' : 'tokens';
+    const selectionLabel = normalizedTokenIds.length === 1 ? 'token' : 'tokens';
     const rawToolbarPosition = buildSelectionActionToolbarPosition({
       left: viewport.x + (selectionBounds.minX * viewport.scale),
       top: viewport.y + (selectionBounds.minY * viewport.scale),
@@ -2840,7 +2858,7 @@ export default function GrigliataBoard({
     });
 
     return {
-      ownerUids: normalizedOwnerUids,
+      tokenIds: normalizedTokenIds,
       buttonSize,
       toolbarWidth,
       toolbarHeight,

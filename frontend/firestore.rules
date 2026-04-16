@@ -46,10 +46,94 @@ service cloud.firestore {
       return documentPath.matches('^(grigliata_state|grigliata_backgrounds|grigliata_music_tracks|grigliata_music_playback|grigliata_tokens|grigliata_token_placements|grigliata_live_interactions|grigliata_aoe_figures)(/.*)?$');
     }
 
-    function isGrigliataPlacementId(backgroundId, ownerUid, placementId) {
+    function grigliataTokenDocPath(tokenId) {
+      return /databases/$(database)/documents/grigliata_tokens/$(tokenId);
+    }
+
+    function isValidGrigliataTokenType(tokenType) {
+      return tokenType in ["character", "custom"];
+    }
+
+    function isValidGrigliataTokenImageSource(imageSource) {
+      return imageSource in ["profile", "uploaded"];
+    }
+
+    function isValidGrigliataTokenProfile(data, tokenId) {
+      return data.keys().hasAll([
+          "ownerUid",
+          "label",
+          "imageUrl",
+          "imagePath",
+          "tokenType",
+          "imageSource",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.keys().hasOnly([
+          "ownerUid",
+          "characterId",
+          "label",
+          "imageUrl",
+          "imagePath",
+          "tokenType",
+          "imageSource",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy",
+          "placed",
+          "col",
+          "row"
+        ])
+        && data.ownerUid is string
+        && data.label is string
+        && data.imageUrl is string
+        && data.imagePath is string
+        && isValidGrigliataTokenType(data.tokenType)
+        && isValidGrigliataTokenImageSource(data.imageSource)
+        && (!data.keys().hasAny(["characterId"]) || data.characterId is string)
+        && (!data.keys().hasAny(["createdBy"]) || data.createdBy == null || data.createdBy is string)
+        && (data.updatedBy == null || data.updatedBy is string)
+        && (
+          (data.tokenType == "character" && tokenId == data.ownerUid && data.imageSource == "profile")
+          || (data.tokenType == "custom" && tokenId != data.ownerUid && data.imageSource == "uploaded")
+        );
+    }
+
+    function isValidLegacyGrigliataTokenScrubUpdate(data, existingData) {
+      return existingData is map
+        && data.ownerUid == existingData.ownerUid
+        && !data.keys().hasAny(["placed", "col", "row"])
+        && data.diff(existingData).affectedKeys().hasOnly([
+          "placed",
+          "col",
+          "row",
+          "updatedAt",
+          "updatedBy"
+        ]);
+    }
+
+    function isGrigliataPlacementId(backgroundId, scopedId, placementId) {
       return backgroundId is string
-        && ownerUid is string
-        && placementId == backgroundId + "__" + ownerUid;
+        && scopedId is string
+        && placementId == backgroundId + "__" + scopedId;
+    }
+
+    function resolveGrigliataPlacementTokenId(data) {
+      return data.keys().hasAny(["tokenId"]) && data.tokenId is string && data.tokenId.size() > 0
+        ? data.tokenId
+        : data.ownerUid;
+    }
+
+    function isValidGrigliataPlacementTokenReference(data) {
+      return resolveGrigliataPlacementTokenId(data) is string
+        && (
+          resolveGrigliataPlacementTokenId(data) == data.ownerUid
+          || (
+            exists(grigliataTokenDocPath(resolveGrigliataPlacementTokenId(data)))
+            && get(grigliataTokenDocPath(resolveGrigliataPlacementTokenId(data))).data.ownerUid == data.ownerUid
+          )
+        );
     }
 
     function isValidGrigliataAoEFigureType(figureType) {
@@ -88,7 +172,10 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           "backgroundId",
+          "tokenId",
           "ownerUid",
+          "label",
+          "imageUrl",
           "col",
           "row",
           "isVisibleToPlayers",
@@ -99,6 +186,9 @@ service cloud.firestore {
         ])
         && data.backgroundId is string
         && data.ownerUid is string
+        && (!data.keys().hasAny(["tokenId"]) || data.tokenId is string)
+        && (!data.keys().hasAny(["label"]) || data.label is string)
+        && (!data.keys().hasAny(["imageUrl"]) || data.imageUrl is string)
         && data.col is int
         && data.row is int
         && (
@@ -137,10 +227,11 @@ service cloud.firestore {
           )
         )
         && (data.updatedBy == null || data.updatedBy is string)
-        && isGrigliataPlacementId(data.backgroundId, data.ownerUid, placementId);
+        && isGrigliataPlacementId(data.backgroundId, resolveGrigliataPlacementTokenId(data), placementId)
+        && isValidGrigliataPlacementTokenReference(data);
     }
 
-    function isGrigliataDrawColorKey(colorKey) {
+    function isValidGrigliataDrawColorKey(colorKey) {
       return colorKey in [
         "aurora-fuchsia",
         "ion-cyan",
@@ -203,7 +294,7 @@ service cloud.firestore {
         && isValidGrigliataGridCell(data.originCell)
         && isValidGrigliataGridCell(data.targetCell)
         && data.colorKey is string
-        && isGrigliataDrawColorKey(data.colorKey)
+        && isValidGrigliataDrawColorKey(data.colorKey)
         && data.isVisibleToPlayers is bool
         && (data.createdBy == null || data.createdBy is string)
         && (data.updatedBy == null || data.updatedBy is string)
@@ -245,7 +336,7 @@ service cloud.firestore {
         && data.backgroundId is string
         && data.ownerUid is string
         && data.colorKey is string
-        && isGrigliataDrawColorKey(data.colorKey)
+        && isValidGrigliataDrawColorKey(data.colorKey)
         && (data.updatedBy == null || data.updatedBy is string)
         && isGrigliataPlacementId(data.backgroundId, data.ownerUid, interactionId)
         && (
@@ -481,9 +572,9 @@ service cloud.firestore {
     // Users
     match /users/{userId} {
       // Owner read, plus webmaster read. (Note: players cannot read other users.)
-      allow read: if isSignedIn() && (request.auth.uid == userId || isWebmaster());
+      allow read: if isSignedIn() && (request.auth.uid == userId || isWebmaster() || isDM());
       // Owner write or webmaster write (DM already covered by global rule)
-      allow write: if isSignedIn() && (request.auth.uid == userId || isWebmaster());
+      allow write: if isSignedIn() && (request.auth.uid == userId || isWebmaster() || isDM());
 
       // Dice roll logs subcollection: each user can manage ONLY their own dice rolls
       match /diceRolls/{rollId} {
@@ -579,16 +670,29 @@ service cloud.firestore {
     }
 
     match /grigliata_tokens/{tokenId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn()
+        && (
+          tokenId == resource.data.ownerUid
+          || request.auth.uid == resource.data.ownerUid
+          || isGrigliataManager()
+        );
 
       allow create: if isSignedIn()
-        && request.resource.data.ownerUid == tokenId
-        && (request.auth.uid == tokenId || isGrigliataManager());
+        && isValidGrigliataTokenProfile(request.resource.data, tokenId)
+        && (request.auth.uid == request.resource.data.ownerUid || isGrigliataManager());
 
       allow update: if isSignedIn()
-        && resource.data.ownerUid == tokenId
         && request.resource.data.ownerUid == resource.data.ownerUid
-        && (request.auth.uid == tokenId || isGrigliataManager());
+        && (
+          (
+            isValidGrigliataTokenProfile(request.resource.data, tokenId)
+            && (request.auth.uid == resource.data.ownerUid || isGrigliataManager())
+          )
+          || (
+            isGrigliataManager()
+            && isValidLegacyGrigliataTokenScrubUpdate(request.resource.data, resource.data)
+          )
+        );
 
       allow delete: if isGrigliataManager();
     }
@@ -598,6 +702,7 @@ service cloud.firestore {
         && (isGrigliataManager() || isGrigliataPlacementVisibleToPlayers(resource.data));
 
       allow create: if isSignedIn()
+        && request.resource.data.keys().hasAll(["tokenId"])
         && isValidGrigliataPlacement(request.resource.data, placementId)
         && (
           isGrigliataManager()
@@ -609,8 +714,10 @@ service cloud.firestore {
         );
 
       allow update: if isSignedIn()
+        && request.resource.data.keys().hasAll(["tokenId"])
         && isValidGrigliataPlacement(request.resource.data, placementId)
         && request.resource.data.backgroundId == resource.data.backgroundId
+        && request.resource.data.tokenId == resolveGrigliataPlacementTokenId(resource.data)
         && request.resource.data.ownerUid == resource.data.ownerUid
         && (
           isGrigliataManager()

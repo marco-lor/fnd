@@ -17,7 +17,8 @@ service firebase.storage {
 
     function isProtectedGrigliataPath(path) {
       return path.matches('^grigliata/backgrounds(/.*)?$')
-        || path.matches('^grigliata/music(/.*)?$');
+        || path.matches('^grigliata/music(/.*)?$')
+        || path.matches('^grigliata/tokens(/.*)?$');
     }
 
     match /grigliata/backgrounds/{allPaths=**} {
@@ -28,6 +29,11 @@ service firebase.storage {
     match /grigliata/music/{allPaths=**} {
       allow read: if isSignedIn();
       allow write: if isDM();
+    }
+
+    match /grigliata/tokens/{userId}/{allPaths=**} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isDM());
+      allow write: if isSignedIn() && request.auth.uid == userId;
     }
 
     match /{allPaths=**} {

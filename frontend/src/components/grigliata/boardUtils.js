@@ -78,7 +78,42 @@ export const sortBackgrounds = (backgrounds) => (
   })
 );
 
-export const buildPlacementDocId = (backgroundId, ownerUid) => `${backgroundId}__${ownerUid}`;
+export const buildPlacementDocId = (backgroundId, tokenId) => `${backgroundId}__${tokenId}`;
+
+export const normalizeHiddenTokenIdsByBackground = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.entries(value).reduce((nextMap, [backgroundId, tokenIds]) => {
+    if (typeof backgroundId !== 'string' || !backgroundId) {
+      return nextMap;
+    }
+
+    const normalizedTokenIds = [...new Set(
+      (Array.isArray(tokenIds) ? tokenIds : [])
+        .filter((tokenId) => typeof tokenId === 'string' && tokenId)
+    )];
+
+    if (normalizedTokenIds.length) {
+      nextMap[backgroundId] = normalizedTokenIds;
+    }
+
+    return nextMap;
+  }, {});
+};
+
+export const getHiddenTokenIdsForBackground = ({
+  activeBackgroundId,
+  hiddenTokenIdsByBackground,
+}) => {
+  if (typeof activeBackgroundId !== 'string' || !activeBackgroundId) {
+    return [];
+  }
+
+  const normalizedMap = normalizeHiddenTokenIdsByBackground(hiddenTokenIdsByBackground);
+  return normalizedMap[activeBackgroundId] || [];
+};
 
 export const getDisplayNameFromFileName = (fileName) => {
   const safeName = typeof fileName === 'string' ? fileName.trim() : '';
@@ -127,15 +162,27 @@ export const isManagerRole = (role) => {
 export const isCurrentUserTokenHiddenForViewer = ({
   activeBackgroundId,
   currentUserHiddenBackgroundIds,
+  currentUserHiddenTokenIdsByBackground,
   currentUserPlacement,
   isManager,
+  tokenId,
+  includeLegacyBackgroundFallback = false,
 }) => (
   !isManager
   && !currentUserPlacement
   && typeof activeBackgroundId === 'string'
   && !!activeBackgroundId
-  && Array.isArray(currentUserHiddenBackgroundIds)
-  && currentUserHiddenBackgroundIds.includes(activeBackgroundId)
+  && (
+    getHiddenTokenIdsForBackground({
+      activeBackgroundId,
+      hiddenTokenIdsByBackground: currentUserHiddenTokenIdsByBackground,
+    }).includes(tokenId)
+    || (
+      includeLegacyBackgroundFallback
+      && Array.isArray(currentUserHiddenBackgroundIds)
+      && currentUserHiddenBackgroundIds.includes(activeBackgroundId)
+    )
+  )
 );
 
 export const getTokenPositionPx = (token, grid) => {

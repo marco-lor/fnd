@@ -9,6 +9,12 @@ import {
 import { preloadImageAssets, scheduleImageAssetPreload } from './imageAssetRegistry';
 import { readAudioFileMetadata } from './music';
 
+const mockDeleteGrigliataCustomTokenCallable = jest.fn(() => Promise.resolve({ data: { success: true } }));
+
+function mockInvokeDeleteGrigliataCustomTokenCallable(...args) {
+  return mockDeleteGrigliataCustomTokenCallable(...args);
+}
+
 const mockFirestoreState = {
   collections: {},
   docs: {},
@@ -102,7 +108,18 @@ jest.mock('../../AuthContext', () => ({
 
 jest.mock('../firebaseConfig', () => ({
   db: {},
+  functions: {},
   storage: {},
+}));
+
+jest.mock('firebase/functions', () => ({
+  httpsCallable: jest.fn((functions, functionName) => {
+    if (functionName === 'deleteGrigliataCustomToken') {
+      return mockInvokeDeleteGrigliataCustomTokenCallable;
+    }
+
+    return jest.fn();
+  }),
 }));
 
 jest.mock('firebase/storage', () => ({
@@ -291,13 +308,17 @@ jest.mock('./GrigliataBoard', () => {
         <button type="button" onClick={() => props.onUpdateTokenStatuses?.('user-1', ['burning', 'marked'])}>
           update selected token statuses
         </button>
-        <button type="button" onClick={() => props.onDropCurrentToken?.({ x: 140, y: 140 })}>
+        <button
+          type="button"
+          onClick={() => props.onDropCurrentToken?.({ tokenId: 'user-1', ownerUid: 'user-1' }, { x: 140, y: 140 })}
+        >
           drop current token
         </button>
         <button
           type="button"
           onClick={() => props.onMoveTokens?.([
             {
+              tokenId: 'user-1',
               backgroundId: 'map-1',
               ownerUid: 'user-1',
               col: 4,
@@ -429,6 +450,7 @@ describe('GrigliataPage', () => {
     scheduleImageAssetPreload.mockClear().mockImplementation(() => jest.fn());
 
     readAudioFileMetadata.mockClear().mockResolvedValue({ durationMs: 12_345 });
+    mockDeleteGrigliataCustomTokenCallable.mockClear().mockResolvedValue({ data: { success: true } });
   });
 
   afterEach(() => {
@@ -488,7 +510,10 @@ describe('GrigliataPage', () => {
       {
         id: 'map-1__user-2',
         backgroundId: 'map-1',
+        tokenId: 'user-2',
         ownerUid: 'user-2',
+        label: 'Orc Raider',
+        imageUrl: 'https://example.com/orc-raider.png',
         col: 2,
         row: 4,
         isVisibleToPlayers: true,
@@ -513,6 +538,11 @@ describe('GrigliataPage', () => {
     });
 
     render(<GrigliataPage />);
+
+    expect(firestore.query).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_tokens' }),
+      expect.objectContaining({ kind: 'where', field: 'ownerUid', op: '==', value: 'user-1' })
+    );
 
     await waitFor(() => {
       expect(
@@ -647,6 +677,8 @@ describe('GrigliataPage', () => {
                 label: 'user-1',
                 imageUrl: '',
                 imagePath: '',
+                tokenType: 'character',
+                imageSource: 'profile',
                 placed: { __type: 'deleteField' },
                 col: { __type: 'deleteField' },
                 row: { __type: 'deleteField' },
@@ -689,7 +721,10 @@ describe('GrigliataPage', () => {
       expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-1' }),
       expect.objectContaining({
         backgroundId: 'map-1',
+        tokenId: 'user-1',
         ownerUid: 'user-1',
+        label: 'user-1',
+        imageUrl: 'https://example.com/token.png',
         isVisibleToPlayers: true,
         isDead: false,
         updatedBy: 'user-1',
@@ -729,7 +764,10 @@ describe('GrigliataPage', () => {
       expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-1' }),
       expect.objectContaining({
         backgroundId: 'map-1',
+        tokenId: 'user-1',
         ownerUid: 'user-1',
+        label: 'user-1',
+        imageUrl: '',
         col: 4,
         row: 5,
         isVisibleToPlayers: true,
@@ -820,7 +858,10 @@ describe('GrigliataPage', () => {
       expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
       expect.objectContaining({
         backgroundId: 'map-1',
+        tokenId: 'user-2',
         ownerUid: 'user-2',
+        label: 'user-2',
+        imageUrl: '',
         col: 3,
         row: 4,
         isVisibleToPlayers: false,
@@ -834,6 +875,9 @@ describe('GrigliataPage', () => {
       expect.objectContaining({ path: 'users/user-2' }),
       {
         settings: {
+          grigliata_hidden_token_ids_by_background: {
+            'map-1': { __type: 'arrayUnion', value: 'user-2' },
+          },
           grigliata_hidden_background_ids: { __type: 'arrayUnion', value: 'map-1' },
         },
       },
@@ -878,7 +922,10 @@ describe('GrigliataPage', () => {
       expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
       expect.objectContaining({
         backgroundId: 'map-1',
+        tokenId: 'user-2',
         ownerUid: 'user-2',
+        label: 'user-2',
+        imageUrl: '',
         col: 5,
         row: 6,
         isVisibleToPlayers: false,
@@ -923,7 +970,10 @@ describe('GrigliataPage', () => {
         expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-1' }),
         expect.objectContaining({
           backgroundId: 'map-1',
+          tokenId: 'user-1',
           ownerUid: 'user-1',
+          label: 'user-1',
+          imageUrl: '',
           col: 2,
           row: 3,
           isVisibleToPlayers: false,
@@ -934,6 +984,115 @@ describe('GrigliataPage', () => {
         { merge: true }
       );
     });
+  });
+
+  test('creates a custom token from the token tab and uploads its image', async () => {
+    const file = new File(['wolf'], 'wolf.png', { type: 'image/png' });
+    const storageApi = require('firebase/storage');
+
+    render(<GrigliataPage />);
+
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Summoned Wolf' },
+    });
+    fireEvent.change(screen.getByLabelText('Image'), {
+      target: { files: [file] },
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /create token/i }));
+    });
+
+    await waitFor(() => {
+      expect(storageApi.uploadBytes).toHaveBeenCalledTimes(1);
+      expect(firestore.addDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_tokens' }),
+        expect.objectContaining({
+          ownerUid: 'user-1',
+          label: 'Summoned Wolf',
+          tokenType: 'custom',
+          imageSource: 'uploaded',
+          createdBy: 'user-1',
+          updatedBy: 'user-1',
+        })
+      );
+    });
+
+    expect(storageApi.ref).toHaveBeenCalledWith(
+      {},
+      expect.stringMatching(/^grigliata\/tokens\/user-1\/summoned_wolf_/i)
+    );
+  });
+
+  test('disables a custom tray token when the per-token hidden map marks it hidden on the active background', async () => {
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'player',
+        settings: {
+          grigliata_draw_color: 'ion-cyan',
+          grigliata_share_interactions: false,
+          grigliata_hidden_token_ids_by_background: {
+            'map-1': ['token-2'],
+          },
+        },
+        imageUrl: '',
+        imagePath: '',
+      },
+      loading: false,
+    });
+
+    setCollectionData('grigliata_tokens', [{
+      id: 'token-2',
+      ownerUid: 'user-1',
+      tokenType: 'custom',
+      imageSource: 'uploaded',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      imagePath: 'grigliata/tokens/user-1/wolf.png',
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Wolf')).toBeInTheDocument();
+    });
+
+    expect(screen.getAllByText('Hidden on Sunken Ruins by the DM')[0]).toBeInTheDocument();
+    expect(screen.getByText('Wolf').closest('[draggable]')).toHaveAttribute('draggable', 'false');
+  });
+
+  test('deletes a custom token through the callable cleanup flow', async () => {
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+
+    setCollectionData('grigliata_tokens', [{
+      id: 'token-2',
+      ownerUid: 'user-1',
+      tokenType: 'custom',
+      imageSource: 'uploaded',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      imagePath: 'grigliata/tokens/user-1/wolf.png',
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /delete wolf/i })).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /delete wolf/i }));
+    });
+
+    await waitFor(() => {
+      expect(mockDeleteGrigliataCustomTokenCallable).toHaveBeenCalledWith({ tokenId: 'token-2' });
+    });
+
+    confirmSpy.mockRestore();
   });
 
   test('shows the music tab only for managers', () => {

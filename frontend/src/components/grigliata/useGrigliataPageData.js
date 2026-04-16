@@ -13,7 +13,13 @@ import {
   GRIGLIATA_AOE_FIGURE_TYPES,
   MAX_GRIGLIATA_AOE_FIGURES_PER_TYPE,
 } from './aoeFigures';
-import { buildPlacementDocId, normalizeGridConfig, sortBackgrounds } from './boardUtils';
+import {
+  buildPlacementDocId,
+  normalizeGridConfig,
+  normalizeHiddenTokenIdsByBackground,
+  sortBackgrounds,
+  timestampToMillis,
+} from './boardUtils';
 import {
   filterActiveGrigliataLiveInteractions,
   GRIGLIATA_LIVE_INTERACTION_COLLECTION,
@@ -37,6 +43,7 @@ export default function useGrigliataPageData({
   currentImageUrl = '',
   currentImagePath = '',
   currentUserHiddenBackgroundIds = [],
+  currentUserHiddenTokenIdsByBackground = {},
   isManager = false,
   activeGridSizeOverride = null,
 }) {
@@ -84,7 +91,10 @@ export default function useGrigliataPageData({
     );
 
     const unsubscribeTokenProfiles = onSnapshot(
-      collection(db, 'grigliata_tokens'),
+      query(
+        collection(db, 'grigliata_tokens'),
+        where('ownerUid', '==', currentUserId)
+      ),
       (snapshot) => {
         const nextTokens = snapshot.docs.map((docSnap) => ({
           id: docSnap.id,
@@ -366,56 +376,131 @@ export default function useGrigliataPageData({
     });
   }, [backgrounds, activeBackgroundId]);
 
+  const normalizedHiddenTokenIdsByBackground = useMemo(
+    () => normalizeHiddenTokenIdsByBackground(currentUserHiddenTokenIdsByBackground),
+    [currentUserHiddenTokenIdsByBackground]
+  );
+
+  const normalizedTokenProfiles = useMemo(
+    () => tokenProfiles
+      .map((token) => {
+        const tokenId = typeof token?.id === 'string' ? token.id : '';
+        const ownerUid = typeof token?.ownerUid === 'string' && token.ownerUid
+          ? token.ownerUid
+          : tokenId;
+
+        if (!tokenId || !ownerUid) {
+          return null;
+        }
+
+        const tokenType = token?.tokenType === 'custom' || tokenId !== ownerUid
+          ? 'custom'
+          : 'character';
+        const imageSource = token?.imageSource === 'uploaded' || tokenType === 'custom'
+          ? 'uploaded'
+          : 'profile';
+
+        return {
+          ...token,
+          id: tokenId,
+          ownerUid,
+          tokenType,
+          imageSource,
+        };
+      })
+      .filter(Boolean),
+    [tokenProfiles]
+  );
+
+  const normalizedActivePlacements = useMemo(
+    () => activePlacements
+      .map((placement) => {
+        const tokenId = typeof placement?.tokenId === 'string' && placement.tokenId
+          ? placement.tokenId
+          : placement?.ownerUid || '';
+
+        if (!placement?.backgroundId || !placement?.ownerUid || !tokenId) {
+          return null;
+        }
+
+        return {
+          ...placement,
+          tokenId,
+          label: typeof placement?.label === 'string' ? placement.label : '',
+          imageUrl: typeof placement?.imageUrl === 'string' ? placement.imageUrl : '',
+        };
+      })
+      .filter(Boolean),
+    [activePlacements]
+  );
+
   const currentUserTokenProfileDoc = useMemo(
-    () => tokenProfiles.find((token) => token.id === currentUserId || token.ownerUid === currentUserId) || null,
-    [currentUserId, tokenProfiles]
+    () => normalizedTokenProfiles.find((token) => (
+      token.ownerUid === currentUserId
+      && (token.id === currentUserId || token.tokenType === 'character')
+    )) || null,
+    [currentUserId, normalizedTokenProfiles]
   );
 
   const activePlacementsById = useMemo(() => {
     const nextMap = new Map();
 
-    activePlacements.forEach((placement) => {
-      if (!placement?.backgroundId || !placement?.ownerUid) {
-        return;
-      }
-
-      nextMap.set(buildPlacementDocId(placement.backgroundId, placement.ownerUid), placement);
+    normalizedActivePlacements.forEach((placement) => {
+      nextMap.set(buildPlacementDocId(placement.backgroundId, placement.tokenId), placement);
     });
 
     return nextMap;
-  }, [activePlacements]);
+  }, [normalizedActivePlacements]);
 
-  const tokenProfilesByOwnerUid = useMemo(() => {
+  const activePlacementsByTokenId = useMemo(() => {
     const nextMap = new Map();
-    tokenProfiles.forEach((token) => {
-      const ownerUid = token?.ownerUid || token?.id;
-      if (ownerUid) {
-        nextMap.set(ownerUid, token);
+
+    normalizedActivePlacements.forEach((placement) => {
+      nextMap.set(placement.tokenId, placement);
+    });
+
+    return nextMap;
+  }, [normalizedActivePlacements]);
+
+  const tokenProfilesByTokenId = useMemo(() => {
+    const nextMap = new Map();
+    normalizedTokenProfiles.forEach((token) => {
+      if (token?.id) {
+        nextMap.set(token.id, token);
       }
     });
     return nextMap;
-  }, [tokenProfiles]);
+  }, [normalizedTokenProfiles]);
 
   const boardTokens = useMemo(
-    () => activePlacements
-      .filter((placement) => placement?.ownerUid)
+    () => normalizedActivePlacements
       .map((placement) => {
-        const profile = tokenProfilesByOwnerUid.get(placement.ownerUid)
-          || (placement.ownerUid === currentUserId ? {
+        const placementLabel = typeof placement?.label === 'string' ? placement.label.trim() : '';
+        const placementImageUrl = typeof placement?.imageUrl === 'string' ? placement.imageUrl.trim() : '';
+        const profile = tokenProfilesByTokenId.get(placement.tokenId)
+          || (placement.tokenId === currentUserId ? {
+            id: currentUserId,
             ownerUid: currentUserId,
             characterId: currentCharacterId,
             label: currentTokenLabel,
             imageUrl: currentImageUrl,
             imagePath: currentImagePath,
+            tokenType: 'character',
+            imageSource: 'profile',
           } : null);
+        const tokenType = profile?.tokenType || (placement.tokenId !== placement.ownerUid ? 'custom' : 'character');
+        const imageSource = profile?.imageSource || (tokenType === 'custom' ? 'uploaded' : 'profile');
 
         return {
-          id: placement.ownerUid,
+          id: placement.tokenId,
+          tokenId: placement.tokenId,
           backgroundId: placement.backgroundId,
           ownerUid: placement.ownerUid,
           characterId: profile?.characterId || '',
-          label: profile?.label || placement.ownerUid || 'Player',
-          imageUrl: profile?.imageUrl || '',
+          tokenType,
+          imageSource,
+          label: placementLabel || profile?.label || placement.ownerUid || 'Player',
+          imageUrl: placementImageUrl || profile?.imageUrl || '',
           imagePath: profile?.imagePath || '',
           col: Number.isFinite(placement?.col) ? placement.col : 0,
           row: Number.isFinite(placement?.row) ? placement.row : 0,
@@ -426,38 +511,69 @@ export default function useGrigliataPageData({
         };
       }),
     [
-      activePlacements,
       currentCharacterId,
       currentImagePath,
       currentImageUrl,
       currentTokenLabel,
       currentUserId,
-      tokenProfilesByOwnerUid,
+      normalizedActivePlacements,
+      tokenProfilesByTokenId,
     ]
   );
 
+  const customUserTokenProfiles = useMemo(
+    () => [...normalizedTokenProfiles]
+      .filter((token) => token.ownerUid === currentUserId && token.id !== currentUserId)
+      .sort((left, right) => {
+        const rightMillis = timestampToMillis(right.updatedAt || right.createdAt);
+        const leftMillis = timestampToMillis(left.updatedAt || left.createdAt);
+        if (rightMillis !== leftMillis) {
+          return rightMillis - leftMillis;
+        }
+        return (left.label || '').localeCompare(right.label || '');
+      }),
+    [currentUserId, normalizedTokenProfiles]
+  );
+
   const currentUserPlacement = useMemo(
-    () => activePlacements.find((placement) => placement.ownerUid === currentUserId) || null,
-    [activePlacements, currentUserId]
+    () => activePlacementsByTokenId.get(currentUserId) || null,
+    [activePlacementsByTokenId, currentUserId]
   );
 
   const isCurrentUserTokenHiddenOnActiveMap = useMemo(
     () => !isManager
       && !currentUserPlacement
       && !!activeBackgroundId
-      && currentUserHiddenBackgroundIds.includes(activeBackgroundId),
-    [activeBackgroundId, currentUserHiddenBackgroundIds, currentUserPlacement, isManager]
+      && (
+        (normalizedHiddenTokenIdsByBackground[activeBackgroundId] || []).includes(currentUserId)
+        || currentUserHiddenBackgroundIds.includes(activeBackgroundId)
+      ),
+    [
+      activeBackgroundId,
+      currentUserHiddenBackgroundIds,
+      currentUserId,
+      currentUserPlacement,
+      isManager,
+      normalizedHiddenTokenIdsByBackground,
+    ]
   );
 
   const currentUserToken = useMemo(() => ({
+    id: currentUserId,
+    tokenId: currentUserId,
     ownerUid: currentUserId,
     characterId: currentCharacterId,
-    label: currentTokenLabel,
+    tokenType: 'character',
+    imageSource: currentUserTokenProfileDoc?.imageSource || 'profile',
+    label: currentUserTokenProfileDoc?.label || currentTokenLabel,
     imageUrl: currentUserTokenProfileDoc?.imageUrl || currentImageUrl,
     imagePath: currentUserTokenProfileDoc?.imagePath || currentImagePath,
     placed: !!currentUserPlacement,
     col: Number.isFinite(currentUserPlacement?.col) ? currentUserPlacement.col : 0,
     row: Number.isFinite(currentUserPlacement?.row) ? currentUserPlacement.row : 0,
+    isVisibleToPlayers: currentUserPlacement?.isVisibleToPlayers !== false,
+    isDead: currentUserPlacement?.isDead === true,
+    statuses: Array.isArray(currentUserPlacement?.statuses) ? currentUserPlacement.statuses : [],
     isHiddenByManager: isCurrentUserTokenHiddenOnActiveMap,
   }), [
     currentCharacterId,
@@ -469,6 +585,44 @@ export default function useGrigliataPageData({
     currentUserTokenProfileDoc,
     isCurrentUserTokenHiddenOnActiveMap,
   ]);
+
+  const customUserTokens = useMemo(
+    () => customUserTokenProfiles.map((tokenProfile) => {
+      const placement = activePlacementsByTokenId.get(tokenProfile.id) || null;
+      const hiddenTokenIds = activeBackgroundId
+        ? (normalizedHiddenTokenIdsByBackground[activeBackgroundId] || [])
+        : [];
+
+      return {
+        id: tokenProfile.id,
+        tokenId: tokenProfile.id,
+        ownerUid: tokenProfile.ownerUid,
+        characterId: tokenProfile.characterId || '',
+        tokenType: 'custom',
+        imageSource: tokenProfile.imageSource || 'uploaded',
+        label: tokenProfile.label || 'Custom Token',
+        imageUrl: tokenProfile.imageUrl || '',
+        imagePath: tokenProfile.imagePath || '',
+        placed: !!placement,
+        col: Number.isFinite(placement?.col) ? placement.col : 0,
+        row: Number.isFinite(placement?.row) ? placement.row : 0,
+        isVisibleToPlayers: placement?.isVisibleToPlayers !== false,
+        isDead: placement?.isDead === true,
+        statuses: Array.isArray(placement?.statuses) ? placement.statuses : [],
+        isHiddenByManager: !isManager && !placement && hiddenTokenIds.includes(tokenProfile.id),
+        createdAt: tokenProfile.createdAt || null,
+        updatedAt: tokenProfile.updatedAt || null,
+      };
+    }),
+    [
+      activeBackgroundId,
+      activePlacementsByTokenId,
+      currentUserId,
+      customUserTokenProfiles,
+      isManager,
+      normalizedHiddenTokenIdsByBackground,
+    ]
+  );
 
   const persistedActiveGrid = useMemo(
     () => normalizeGridConfig(activeBackground?.grid),
@@ -497,6 +651,7 @@ export default function useGrigliataPageData({
     boardTokens,
     currentUserToken,
     currentUserTokenProfileDoc,
+    customUserTokens,
     grid,
     isCurrentUserTokenHiddenOnActiveMap,
     isGridVisible,

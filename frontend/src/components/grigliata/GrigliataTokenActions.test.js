@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import GrigliataTokenActions, { TokenStatusSummaryCard } from './GrigliataTokenActions';
 
 const buildActionState = (overrides = {}) => ({
-  ownerUids: ['user-1'],
+  tokenIds: ['token-1'],
   buttonSize: 44,
   toolbarWidth: 52,
   toolbarHeight: 60,
@@ -14,7 +14,7 @@ const buildActionState = (overrides = {}) => ({
   visibilityTitle: 'Hide selected token from players',
   deadStateTitle: 'Mark selected token as dead',
   statusToken: {
-    ownerUid: 'user-1',
+    tokenId: 'token-1',
     label: 'Aldor',
     statuses: [],
   },
@@ -37,7 +37,7 @@ describe('GrigliataTokenActions', () => {
     render(
       <GrigliataTokenActions
         actionState={buildActionState({
-          ownerUids: ['user-1', 'user-2'],
+          tokenIds: ['token-1', 'token-2'],
           showVisibilityAction: true,
           showDeadAction: true,
           statusToken: null,
@@ -56,7 +56,7 @@ describe('GrigliataTokenActions', () => {
       <GrigliataTokenActions
         actionState={buildActionState({
           statusToken: {
-            ownerUid: 'user-1',
+            tokenId: 'token-1',
             label: 'Aldor',
             statuses: ['burning', 'sleeping'],
           },
@@ -69,7 +69,7 @@ describe('GrigliataTokenActions', () => {
     fireEvent.click(screen.getByRole('button', { name: /edit statuses for aldor/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Marked' }));
 
-    expect(handleUpdateTokenStatuses).toHaveBeenCalledWith('user-1', [
+    expect(handleUpdateTokenStatuses).toHaveBeenCalledWith('token-1', [
       'marked',
       'burning',
       'sleeping',
@@ -81,7 +81,7 @@ describe('GrigliataTokenActions', () => {
       <GrigliataTokenActions
         actionState={buildActionState({
           statusToken: {
-            ownerUid: 'user-1',
+            tokenId: 'token-1',
             label: 'Aldor',
             statuses: ['burning'],
           },
@@ -115,7 +115,7 @@ describe('GrigliataTokenActions', () => {
       <GrigliataTokenActions
         actionState={buildActionState({
           statusToken: {
-            ownerUid: 'user-1',
+            tokenId: 'token-1',
             label: 'Aldor',
             statuses: ['burning', 'sleeping'],
           },
@@ -128,7 +128,7 @@ describe('GrigliataTokenActions', () => {
     fireEvent.click(screen.getByRole('button', { name: /edit statuses for aldor/i }));
     fireEvent.click(screen.getByRole('button', { name: /clear all/i }));
 
-    expect(handleUpdateTokenStatuses).toHaveBeenCalledWith('user-1', []);
+    expect(handleUpdateTokenStatuses).toHaveBeenCalledWith('token-1', []);
   });
 
   test('renders a stronger active marker for active statuses only', () => {
@@ -136,7 +136,7 @@ describe('GrigliataTokenActions', () => {
       <GrigliataTokenActions
         actionState={buildActionState({
           statusToken: {
-            ownerUid: 'user-1',
+            tokenId: 'token-1',
             label: 'Aldor',
             statuses: ['burning'],
           },
