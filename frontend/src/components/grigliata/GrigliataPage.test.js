@@ -6,6 +6,7 @@ import {
   GRIGLIATA_LIVE_INTERACTION_STALE_MS,
   GRIGLIATA_LIVE_INTERACTION_THROTTLE_MS,
 } from './liveInteractions';
+import { preloadImageAssets, scheduleImageAssetPreload } from './imageAssetRegistry';
 import { readAudioFileMetadata } from './music';
 
 const mockFirestoreState = {
@@ -155,6 +156,10 @@ jest.mock('firebase/firestore', () => ({
 
 jest.mock('./BackgroundGalleryPanel', () => jest.fn(() => <div data-testid="background-gallery-panel" />));
 jest.mock('./MapCalibrationPanel', () => jest.fn(() => <div data-testid="map-calibration-panel" />));
+jest.mock('./imageAssetRegistry', () => ({
+  preloadImageAssets: jest.fn(() => Promise.resolve([])),
+  scheduleImageAssetPreload: jest.fn(() => jest.fn()),
+}));
 jest.mock('./music', () => {
   const actual = jest.requireActual('./music');
 
@@ -420,6 +425,9 @@ describe('GrigliataPage', () => {
     storageApi.ref.mockClear().mockImplementation((storage, path) => ({ storage, path }));
     storageApi.uploadBytes.mockClear().mockResolvedValue(undefined);
 
+    preloadImageAssets.mockClear().mockResolvedValue([]);
+    scheduleImageAssetPreload.mockClear().mockImplementation(() => jest.fn());
+
     readAudioFileMetadata.mockClear().mockResolvedValue({ durationMs: 12_345 });
   });
 
@@ -450,6 +458,136 @@ describe('GrigliataPage', () => {
   const getLastCommittedBatch = () => (
     [...mockBatchInstances].reverse().find((batch) => batch.commit.mock.calls.length > 0)
   );
+
+  test('preloads the active battlemap, visible board tokens, and the tray portrait for players', async () => {
+    mockFirestoreState.collections.grigliata_backgrounds = [
+      {
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        imageUrl: 'https://example.com/map-1.png',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+      },
+      {
+        id: 'map-2',
+        name: 'Iron Keep',
+        imageUrl: 'https://example.com/map-2.png',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+      },
+    ];
+    mockFirestoreState.collections.grigliata_tokens = [
+      {
+        id: 'user-2',
+        ownerUid: 'user-2',
+        label: 'Orc Raider',
+        imageUrl: 'https://example.com/orc-raider.png',
+      },
+    ];
+    mockFirestoreState.collections.grigliata_token_placements = [
+      {
+        id: 'map-1__user-2',
+        backgroundId: 'map-1',
+        ownerUid: 'user-2',
+        col: 2,
+        row: 4,
+        isVisibleToPlayers: true,
+      },
+    ];
+
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'player',
+        settings: {
+          grigliata_draw_color: 'ion-cyan',
+          grigliata_share_interactions: false,
+        },
+        imageUrl: 'https://example.com/player-tray.png',
+        imagePath: 'characters/player-tray.png',
+      },
+      loading: false,
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(
+        preloadImageAssets.mock.calls.some(([urls]) => (
+          Array.isArray(urls)
+          && urls.length === 3
+          && urls.includes('https://example.com/map-1.png')
+          && urls.includes('https://example.com/orc-raider.png')
+          && urls.includes('https://example.com/player-tray.png')
+        ))
+      ).toBe(true);
+    });
+
+    expect(scheduleImageAssetPreload).not.toHaveBeenCalled();
+  });
+
+  test('waits for the DM gallery tab before scheduling deferred battleground preloads', async () => {
+    setManagerAuth();
+    mockFirestoreState.collections.grigliata_backgrounds = [
+      {
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        imageUrl: 'https://example.com/map-1.png',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+      },
+      {
+        id: 'map-2',
+        name: 'Iron Keep',
+        imageUrl: 'https://example.com/map-2.png',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+      },
+    ];
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(preloadImageAssets).toHaveBeenCalledWith(['https://example.com/map-1.png']);
+    });
+
+    expect(scheduleImageAssetPreload).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+
+    await waitFor(() => {
+      expect(scheduleImageAssetPreload).toHaveBeenCalledWith(['https://example.com/map-2.png']);
+    });
+  });
+
+  test('limits deferred DM gallery preloads to a bounded batch', async () => {
+    setManagerAuth();
+    mockFirestoreState.collections.grigliata_backgrounds = Array.from({ length: 8 }, (_, index) => ({
+      id: `map-${index + 1}`,
+      name: `Map ${index + 1}`,
+      imageUrl: `https://example.com/map-${index + 1}.png`,
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+      isGridVisible: true,
+    }));
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+
+    await waitFor(() => {
+      expect(scheduleImageAssetPreload).toHaveBeenCalled();
+    });
+
+    const lastScheduledUrls = scheduleImageAssetPreload.mock.calls[
+      scheduleImageAssetPreload.mock.calls.length - 1
+    ][0];
+
+    expect(lastScheduledUrls).toHaveLength(6);
+    expect(lastScheduledUrls).not.toContain('https://example.com/map-1.png');
+  });
 
   test('publishes only when sharing is enabled and a live interaction exists', async () => {
     render(<GrigliataPage />);

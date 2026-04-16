@@ -72,6 +72,7 @@ import {
   normalizeGrigliataMusicPlaybackState,
   readAudioFileMetadata,
 } from './music';
+import { preloadImageAssets, scheduleImageAssetPreload } from './imageAssetRegistry';
 import useGrigliataPageData from './useGrigliataPageData';
 
 const MAX_BACKGROUND_FILE_BYTES = 15 * 1024 * 1024;
@@ -104,6 +105,10 @@ const SIDEBAR_TAB_GRID_CLASS_NAMES = {
   4: 'grid grid-cols-2 gap-2',
 };
 const DEFAULT_SIDEBAR_TAB_GRID_CLASS_NAME = SIDEBAR_TAB_GRID_CLASS_NAMES[3];
+const MAX_DEFERRED_GALLERY_IMAGE_PRELOADS = 6;
+const collectUniqueImageUrls = (urls) => [...new Set(
+  (urls || []).map((url) => (typeof url === 'string' ? url.trim() : '')).filter(Boolean)
+)];
 
 export default function GrigliataPage() {
   const { user, userData, loading } = useAuth();
@@ -246,6 +251,25 @@ export default function GrigliataPage() {
   ), [isManager]);
   const sidebarTabListClassName = SIDEBAR_TAB_GRID_CLASS_NAMES[sidebarTabs.length]
     || DEFAULT_SIDEBAR_TAB_GRID_CLASS_NAME;
+  const isGallerySidebarActive = isManager && activeSidebarTab === 'gallery';
+  const immediateImageUrls = useMemo(() => collectUniqueImageUrls([
+    activeBackground?.imageUrl,
+    currentUserToken?.imageUrl,
+    ...boardTokens.map((token) => token?.imageUrl),
+  ]), [activeBackground?.imageUrl, boardTokens, currentUserToken?.imageUrl]);
+  const deferredGalleryImageUrls = useMemo(() => {
+    if (!isGallerySidebarActive) {
+      return [];
+    }
+
+    const immediateImageUrlSet = new Set(immediateImageUrls);
+    return collectUniqueImageUrls(
+      backgrounds
+        .map((background) => background?.imageUrl)
+        .filter((imageUrl) => !immediateImageUrlSet.has(imageUrl))
+        .slice(0, MAX_DEFERRED_GALLERY_IMAGE_PRELOADS)
+    );
+  }, [backgrounds, immediateImageUrls, isGallerySidebarActive]);
 
   const runPaginatedWriteBatch = useCallback(async ({
     collectionName,
@@ -318,6 +342,23 @@ export default function GrigliataPage() {
     if (sidebarTabs.some((tab) => tab.key === activeSidebarTab)) return;
     setActiveSidebarTab(sidebarTabs[0].key);
   }, [activeSidebarTab, sidebarTabs]);
+
+  useEffect(() => {
+    if (!immediateImageUrls.length) {
+      return undefined;
+    }
+
+    preloadImageAssets(immediateImageUrls);
+    return undefined;
+  }, [immediateImageUrls]);
+
+  useEffect(() => {
+    if (!deferredGalleryImageUrls.length) {
+      return undefined;
+    }
+
+    return scheduleImageAssetPreload(deferredGalleryImageUrls);
+  }, [deferredGalleryImageUrls]);
 
   useEffect(() => {
     const navbar = document.querySelector('[data-navbar]');
@@ -2029,7 +2070,7 @@ export default function GrigliataPage() {
     if (isManager) {
       setActiveSidebarTab('calibration');
     }
-  }, [isManager]);
+  }, [isManager, setSelectedBackgroundId]);
 
   if (loading) {
     return <div className="px-6 py-8 text-white">Loading Grigliata...</div>;

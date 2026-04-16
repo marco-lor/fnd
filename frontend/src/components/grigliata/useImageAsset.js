@@ -1,35 +1,26 @@
 import { useEffect, useState } from 'react';
+import {
+  ensureImageAsset,
+  getImageAssetSnapshot,
+  subscribeToImageAsset,
+} from './imageAssetRegistry';
 
 export default function useImageAsset(src) {
-  const [image, setImage] = useState(null);
+  const normalizedSrc = typeof src === 'string' ? src.trim() : '';
+  const [snapshot, setSnapshot] = useState(() => getImageAssetSnapshot(normalizedSrc));
 
   useEffect(() => {
-    if (!src) {
-      setImage(null);
+    if (!normalizedSrc) {
+      setSnapshot(getImageAssetSnapshot(''));
       return undefined;
     }
 
-    let active = true;
-    const nextImage = new window.Image();
+    setSnapshot(getImageAssetSnapshot(normalizedSrc));
+    const unsubscribe = subscribeToImageAsset(normalizedSrc, setSnapshot);
+    ensureImageAsset(normalizedSrc).catch(() => null);
 
-    nextImage.onload = () => {
-      if (active) {
-        setImage(nextImage);
-      }
-    };
+    return () => unsubscribe();
+  }, [normalizedSrc]);
 
-    nextImage.onerror = () => {
-      if (active) {
-        setImage(null);
-      }
-    };
-
-    nextImage.src = src;
-
-    return () => {
-      active = false;
-    };
-  }, [src]);
-
-  return image;
+  return snapshot.image;
 }
