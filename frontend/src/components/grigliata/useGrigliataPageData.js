@@ -35,6 +35,16 @@ import {
 } from './music';
 
 const LIVE_INTERACTION_CLOCK_INTERVAL_MS = 15 * 1000;
+const sortFoesLibrary = (foes) => (
+  [...foes].sort((left, right) => {
+    const rightMillis = timestampToMillis(right.updated_at || right.created_at);
+    const leftMillis = timestampToMillis(left.updated_at || left.created_at);
+    if (rightMillis !== leftMillis) {
+      return rightMillis - leftMillis;
+    }
+    return (left.name || '').localeCompare(right.name || '');
+  })
+);
 
 export default function useGrigliataPageData({
   currentUserId = '',
@@ -49,6 +59,7 @@ export default function useGrigliataPageData({
 }) {
   const [backgrounds, setBackgrounds] = useState([]);
   const [boardState, setBoardState] = useState({});
+  const [foeLibrary, setFoeLibrary] = useState([]);
   const [tokenProfiles, setTokenProfiles] = useState([]);
   const [activePlacements, setActivePlacements] = useState([]);
   const [aoeFigureSnapshots, setAoEFigureSnapshots] = useState([]);
@@ -62,6 +73,7 @@ export default function useGrigliataPageData({
     if (!currentUserId) {
       setBackgrounds([]);
       setBoardState({});
+      setFoeLibrary([]);
       setTokenProfiles([]);
       return undefined;
     }
@@ -107,12 +119,33 @@ export default function useGrigliataPageData({
       }
     );
 
+    const unsubscribeFoes = isManager
+      ? onSnapshot(
+        collection(db, 'foes'),
+        (snapshot) => {
+          const nextFoes = snapshot.docs.map((docSnap) => ({
+            id: docSnap.id,
+            ...docSnap.data(),
+          }));
+          setFoeLibrary(sortFoesLibrary(nextFoes));
+        },
+        (error) => {
+          console.error('Failed to load Grigliata foes library:', error);
+          setFoeLibrary([]);
+        }
+      )
+      : (() => {
+        setFoeLibrary([]);
+        return () => {};
+      })();
+
     return () => {
       unsubscribeBackgrounds();
       unsubscribeState();
+      unsubscribeFoes();
       unsubscribeTokenProfiles();
     };
-  }, [currentUserId]);
+  }, [currentUserId, isManager]);
 
   const activeBackgroundId = typeof boardState?.activeBackgroundId === 'string'
     ? boardState.activeBackgroundId
@@ -393,12 +426,20 @@ export default function useGrigliataPageData({
           return null;
         }
 
-        const tokenType = token?.tokenType === 'custom' || tokenId !== ownerUid
-          ? 'custom'
-          : 'character';
-        const imageSource = token?.imageSource === 'uploaded' || tokenType === 'custom'
-          ? 'uploaded'
-          : 'profile';
+        const tokenType = token?.tokenType === 'foe'
+          ? 'foe'
+          : (
+            token?.tokenType === 'custom' || tokenId !== ownerUid
+              ? 'custom'
+              : 'character'
+          );
+        const imageSource = tokenType === 'foe'
+          ? 'foesHub'
+          : (
+            token?.imageSource === 'uploaded' || tokenType === 'custom'
+              ? 'uploaded'
+              : 'profile'
+          );
 
         return {
           ...token,
@@ -437,7 +478,8 @@ export default function useGrigliataPageData({
   const currentUserTokenProfileDoc = useMemo(
     () => normalizedTokenProfiles.find((token) => (
       token.ownerUid === currentUserId
-      && (token.id === currentUserId || token.tokenType === 'character')
+      && token.id === currentUserId
+      && token.tokenType === 'character'
     )) || null,
     [currentUserId, normalizedTokenProfiles]
   );
@@ -489,9 +531,14 @@ export default function useGrigliataPageData({
             imageSource: 'profile',
           } : null);
         const tokenType = profile?.tokenType || (placement.tokenId !== placement.ownerUid ? 'custom' : 'character');
-        const imageSource = profile?.imageSource || (tokenType === 'custom' ? 'uploaded' : 'profile');
+        const imageSource = profile?.imageSource || (
+          tokenType === 'foe'
+            ? 'foesHub'
+            : (tokenType === 'custom' ? 'uploaded' : 'profile')
+        );
 
         return {
+          ...(profile || {}),
           id: placement.tokenId,
           tokenId: placement.tokenId,
           backgroundId: placement.backgroundId,
@@ -502,6 +549,15 @@ export default function useGrigliataPageData({
           label: placementLabel || profile?.label || placement.ownerUid || 'Player',
           imageUrl: placementImageUrl || profile?.imageUrl || '',
           imagePath: profile?.imagePath || '',
+          category: profile?.category || '',
+          rank: profile?.rank || '',
+          dadoAnima: profile?.dadoAnima || '',
+          notes: profile?.notes || '',
+          foeSourceId: profile?.foeSourceId || '',
+          stats: profile?.stats || {},
+          Parametri: profile?.Parametri || {},
+          spells: Array.isArray(profile?.spells) ? profile.spells : [],
+          tecniche: Array.isArray(profile?.tecniche) ? profile.tecniche : [],
           col: Number.isFinite(placement?.col) ? placement.col : 0,
           row: Number.isFinite(placement?.row) ? placement.row : 0,
           isVisibleToPlayers: placement?.isVisibleToPlayers !== false,
@@ -523,7 +579,7 @@ export default function useGrigliataPageData({
 
   const customUserTokenProfiles = useMemo(
     () => [...normalizedTokenProfiles]
-      .filter((token) => token.ownerUid === currentUserId && token.id !== currentUserId)
+      .filter((token) => token.ownerUid === currentUserId && token.tokenType === 'custom')
       .sort((left, right) => {
         const rightMillis = timestampToMillis(right.updatedAt || right.createdAt);
         const leftMillis = timestampToMillis(left.updatedAt || left.createdAt);
@@ -652,6 +708,7 @@ export default function useGrigliataPageData({
     currentUserToken,
     currentUserTokenProfileDoc,
     customUserTokens,
+    foeLibrary,
     grid,
     isCurrentUserTokenHiddenOnActiveMap,
     isGridVisible,
@@ -662,5 +719,6 @@ export default function useGrigliataPageData({
     selectedBackgroundId,
     setSelectedBackgroundId,
     sharedInteractions,
+    tokenProfilesByTokenId,
   };
 }

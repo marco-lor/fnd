@@ -22,6 +22,7 @@ import {
   MAP_PING_BROADCAST_CLEAR_MS,
   MAP_PING_HOLD_DELAY_MS,
   MAP_PING_VISIBLE_MS,
+  FOE_LIBRARY_DRAG_TYPE,
   TRAY_DRAG_MIME,
 } from './constants';
 import {
@@ -369,6 +370,7 @@ const TokenNode = ({
     <Group
       x={position.x}
       y={position.y}
+      data-testid={token?.tokenId ? `token-node-${token.tokenId}` : undefined}
       onMouseDown={(event) => onMouseDown?.(token, event)}
     >
       {isSelected && (
@@ -1328,6 +1330,7 @@ export default function GrigliataBoard({
   currentUserId,
   isManager,
   isTokenDragActive,
+  activeTrayDragType = '',
   isRulerEnabled,
   activeAoeFigureType = '',
   isInteractionSharingEnabled = false,
@@ -1356,6 +1359,7 @@ export default function GrigliataBoard({
   onUpdateTokenStatuses,
   isTokenStatusActionPending,
   onDropCurrentToken,
+  onSelectedTokenIdsChange,
   sharedInteractions = [],
   onSharedInteractionChange,
 }) {
@@ -2043,6 +2047,25 @@ export default function GrigliataBoard({
             };
           }
         }
+
+        if (parsed?.type === FOE_LIBRARY_DRAG_TYPE) {
+          const foeId = typeof parsed?.foeId === 'string' && parsed.foeId
+            ? parsed.foeId
+            : '';
+          const ownerUid = typeof parsed?.ownerUid === 'string' && parsed.ownerUid
+            ? parsed.ownerUid
+            : typeof parsed?.uid === 'string' && parsed.uid
+              ? parsed.uid
+              : '';
+
+          if (foeId && ownerUid) {
+            return {
+              ...parsed,
+              foeId,
+              ownerUid,
+            };
+          }
+        }
       } catch {
         // ignore malformed payloads
       }
@@ -2051,12 +2074,18 @@ export default function GrigliataBoard({
     return null;
   };
 
+  const getDropEffectForType = (dragType) => (
+    dragType === FOE_LIBRARY_DRAG_TYPE ? 'copy' : 'move'
+  );
+
   const handleDrop = (event) => {
     event.preventDefault();
+    event.stopPropagation();
     setIsDropActive(false);
 
     const payload = parseDropPayload(event.dataTransfer);
-    const canAcceptCurrentTrayDrop = !!(isTokenDragActive && currentUserId);
+    const dragType = payload?.type || activeTrayDragType;
+    const canAcceptCurrentTrayDrop = !!(dragType && currentUserId);
     if (!containerRef.current) return;
     if (!canAcceptCurrentTrayDrop && (!payload || payload.ownerUid !== currentUserId)) return;
 
@@ -2068,10 +2097,11 @@ export default function GrigliataBoard({
 
   const handleDragOver = (event) => {
     const payload = parseDropPayload(event.dataTransfer);
-    const canAcceptCurrentTrayDrop = !!(isTokenDragActive && currentUserId);
+    const dragType = payload?.type || activeTrayDragType;
+    const canAcceptCurrentTrayDrop = !!(dragType && currentUserId);
     if (!canAcceptCurrentTrayDrop && (!payload || payload.ownerUid !== currentUserId)) return;
     event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
+    event.dataTransfer.dropEffect = getDropEffectForType(dragType);
     setIsDropActive(true);
   };
 
@@ -2780,6 +2810,9 @@ export default function GrigliataBoard({
     () => renderedTokens.filter((token) => selectedTokenIdSet.has(token.tokenId)),
     [renderedTokens, selectedTokenIdSet]
   );
+  useEffect(() => {
+    onSelectedTokenIdsChange?.(selectedTokens.map((token) => token.tokenId));
+  }, [onSelectedTokenIdsChange, selectedTokens]);
   const selectedTokenActionState = useMemo(() => {
     if (
       !selectedTokens.length
@@ -3029,6 +3062,7 @@ export default function GrigliataBoard({
       >
         {isTokenDragActive && (
           <div
+            data-testid="grigliata-board-drop-overlay"
             className="absolute inset-0 z-20"
             onDrop={handleDrop}
             onDragOver={handleDragOver}

@@ -100,3 +100,4 @@ export const MAP_PING_VISIBLE_MS = 1100;
 export const MAP_PING_BROADCAST_CLEAR_MS = 1500;
 export const MAP_PING_ANIMATION_INTERVAL_MS = 32;
 export const TRAY_DRAG_MIME = 'application/x-grigliata-token';
+export const FOE_LIBRARY_DRAG_TYPE = 'grigliata-foe-library-token';

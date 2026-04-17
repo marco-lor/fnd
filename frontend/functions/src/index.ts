@@ -22,6 +22,7 @@ import {duplicateFoeWithAssets} from "./duplicateFoeWithAssets";
 import {expireBarriera} from "./expireBarriera";
 import {cleanupGrigliataMusicTrack} from "./cleanupGrigliataMusicTrack";
 import {deleteGrigliataCustomToken} from "./deleteGrigliataCustomToken";
+import {spawnGrigliataFoeToken} from "./spawnGrigliataFoeToken";
 import {
   cleanupDeletedGrigliataTokenImage,
   cleanupReplacedGrigliataTokenImage,
@@ -43,6 +44,7 @@ export {
   expireBarriera,
   cleanupGrigliataMusicTrack,
   deleteGrigliataCustomToken,
+  spawnGrigliataFoeToken,
   cleanupDeletedGrigliataTokenImage,
   cleanupReplacedGrigliataTokenImage,
 };

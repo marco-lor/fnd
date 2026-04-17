@@ -8,6 +8,7 @@ import {
   deleteField,
   doc,
   documentId,
+  getDoc,
   getDocs,
   limit,
   orderBy,
@@ -38,6 +39,7 @@ import {
 } from './boardUtils';
 import {
   DEFAULT_GRID,
+  FOE_LIBRARY_DRAG_TYPE,
   getGrigliataDrawTheme,
   resolveGrigliataDrawColorKey,
 } from './constants';
@@ -79,8 +81,12 @@ import useGrigliataPageData from './useGrigliataPageData';
 const MAX_BACKGROUND_FILE_BYTES = 15 * 1024 * 1024;
 const MAX_CUSTOM_TOKEN_FILE_BYTES = 8 * 1024 * 1024;
 const FIRESTORE_BATCH_SIZE = 450;
-const PLACEMENT_RULE_SAFE_BATCH_SIZE = 10;
-const PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE = PLACEMENT_RULE_SAFE_BATCH_SIZE;
+// Firestore batched writes are capped at 20 rule access calls. Grigliata
+// placement writes trigger role checks and, for custom/foe tokens, token
+// reference validation reads, so these bulk actions need conservative chunking.
+const PLACEMENT_RULE_SAFE_BATCH_SIZE = 6;
+const PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE = 4;
+const PLACEMENT_DELETE_BATCH_SIZE = 3;
 const DRAW_COLOR_AUTOSAVE_DEBOUNCE_MS = 300;
 const GRID_SIZE_AUTOSAVE_DEBOUNCE_MS = 300;
 const MUSIC_VOLUME_WRITE_THROTTLE_MS = 150;
@@ -91,8 +97,10 @@ const GRIGLIATA_HIDDEN_BACKGROUND_IDS_FIELD = 'grigliata_hidden_background_ids';
 const GRIGLIATA_HIDDEN_TOKEN_IDS_BY_BACKGROUND_FIELD = 'grigliata_hidden_token_ids_by_background';
 const GRIGLIATA_SHARE_INTERACTIONS_FIELD = 'grigliata_share_interactions';
 const GRIGLIATA_CUSTOM_TOKEN_DELETE_FUNCTION = 'deleteGrigliataCustomToken';
+const GRIGLIATA_SPAWN_FOE_TOKEN_FUNCTION = 'spawnGrigliataFoeToken';
 
 const deleteGrigliataCustomTokenCallable = httpsCallable(functions, GRIGLIATA_CUSTOM_TOKEN_DELETE_FUNCTION);
+const spawnGrigliataFoeTokenCallable = httpsCallable(functions, GRIGLIATA_SPAWN_FOE_TOKEN_FUNCTION);
 
 const buildHiddenPlacementSettingsPayload = ({
   backgroundId,
@@ -118,6 +126,7 @@ const isLegacyHiddenPlacementToken = ({ tokenId, ownerUid }) => tokenId === owne
 const isPermissionDeniedError = (error) => (
   error?.code === 'permission-denied'
   || error?.code === 'firestore/permission-denied'
+  || error?.code === 'functions/permission-denied'
 );
 const SIDEBAR_TAB_GRID_CLASS_NAMES = {
   1: 'grid grid-cols-1 gap-2',
@@ -130,6 +139,36 @@ const MAX_DEFERRED_GALLERY_IMAGE_PRELOADS = 6;
 const collectUniqueImageUrls = (urls) => [...new Set(
   (urls || []).map((url) => (typeof url === 'string' ? url.trim() : '')).filter(Boolean)
 )];
+const normalizeNumericDraftValue = (value, fallback = 0) => {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : fallback;
+};
+const clampResourceCurrentValue = (value, total) => (
+  Math.max(0, Math.min(normalizeNumericDraftValue(value, 0), Math.max(0, normalizeNumericDraftValue(total, 0))))
+);
+const normalizeFoeParametri = (value, fallback = {}) => {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+  return ['Base', 'Combattimento', 'Special'].reduce((nextParametri, groupKey) => {
+    const sourceGroup = source?.[groupKey];
+    if (!sourceGroup || typeof sourceGroup !== 'object' || Array.isArray(sourceGroup)) {
+      return nextParametri;
+    }
+
+    nextParametri[groupKey] = Object.entries(sourceGroup).reduce((nextGroup, [paramKey, paramValue]) => {
+      const currentValue = paramValue && typeof paramValue === 'object' && !Array.isArray(paramValue)
+        ? paramValue
+        : {};
+
+      nextGroup[paramKey] = {
+        ...currentValue,
+        Tot: normalizeNumericDraftValue(currentValue?.Tot, 0),
+      };
+      return nextGroup;
+    }, {});
+
+    return nextParametri;
+  }, {});
+};
 
 export default function GrigliataPage() {
   const { user, userData, loading } = useAuth();
@@ -166,7 +205,7 @@ export default function GrigliataPage() {
   const [calibrationError, setCalibrationError] = useState('');
   const [isSavingCalibration, setIsSavingCalibration] = useState(false);
   const [boardError, setBoardError] = useState('');
-  const [isTrayDragging, setIsTrayDragging] = useState(false);
+  const [activeTrayDragType, setActiveTrayDragType] = useState('');
   const [isRulerEnabled, setIsRulerEnabled] = useState(false);
   const [activeAoeFigureType, setActiveAoeFigureType] = useState('');
   const [drawColorKey, setDrawColorKey] = useState(persistedDrawColorKey);
@@ -202,6 +241,9 @@ export default function GrigliataPage() {
   const [isCreatingCustomToken, setIsCreatingCustomToken] = useState(false);
   const [updatingCustomTokenId, setUpdatingCustomTokenId] = useState('');
   const [deletingCustomTokenId, setDeletingCustomTokenId] = useState('');
+  const [selectedBoardTokenIds, setSelectedBoardTokenIds] = useState([]);
+  const [savingFoeTokenId, setSavingFoeTokenId] = useState('');
+  const isTrayDragging = !!activeTrayDragType;
 
   const role = (userData?.role || '').toLowerCase();
   const isManager = isManagerRole(role);
@@ -246,6 +288,7 @@ export default function GrigliataPage() {
     currentUserToken,
     currentUserTokenProfileDoc,
     customUserTokens,
+    foeLibrary,
     grid,
     isCurrentUserTokenHiddenOnActiveMap,
     isGridVisible,
@@ -256,6 +299,7 @@ export default function GrigliataPage() {
     selectedBackgroundId,
     setSelectedBackgroundId,
     sharedInteractions,
+    tokenProfilesByTokenId,
   } = useGrigliataPageData({
     activeGridSizeOverride,
     currentCharacterId,
@@ -272,6 +316,49 @@ export default function GrigliataPage() {
       .filter((token) => token?.tokenId && token?.ownerUid === currentUserId)
       .map((token) => [token.tokenId, token])
   ), [currentUserId, currentUserToken, customUserTokens]);
+  const boardTokensById = useMemo(() => new Map(
+    boardTokens
+      .filter((token) => token?.tokenId)
+      .map((token) => [token.tokenId, token])
+  ), [boardTokens]);
+  const selectedBoardTokens = useMemo(
+    () => selectedBoardTokenIds
+      .map((tokenId) => boardTokensById.get(tokenId))
+      .filter(Boolean),
+    [boardTokensById, selectedBoardTokenIds]
+  );
+  const selectedFoeToken = useMemo(() => {
+    if (!isManager || selectedBoardTokens.length !== 1) {
+      return null;
+    }
+
+    const selectedToken = selectedBoardTokens[0];
+    const tokenProfile = tokenProfilesByTokenId.get(selectedToken.tokenId) || null;
+    if ((tokenProfile?.tokenType || selectedToken?.tokenType) !== 'foe') {
+      return null;
+    }
+
+    return {
+      ...(tokenProfile || {}),
+      ...selectedToken,
+      label: selectedToken.label || tokenProfile?.label || 'Foe',
+      imageUrl: selectedToken.imageUrl || tokenProfile?.imageUrl || '',
+      imagePath: tokenProfile?.imagePath || '',
+      category: tokenProfile?.category || '',
+      rank: tokenProfile?.rank || '',
+      dadoAnima: tokenProfile?.dadoAnima || '',
+      notes: tokenProfile?.notes || '',
+      foeSourceId: tokenProfile?.foeSourceId || '',
+      stats: tokenProfile?.stats || {},
+      Parametri: tokenProfile?.Parametri || {},
+      spells: Array.isArray(tokenProfile?.spells) ? tokenProfile.spells : [],
+      tecniche: Array.isArray(tokenProfile?.tecniche) ? tokenProfile.tecniche : [],
+    };
+  }, [isManager, selectedBoardTokens, tokenProfilesByTokenId]);
+  const trayCurrentUserToken = isManager ? null : currentUserToken;
+  useEffect(() => {
+    setSelectedBoardTokenIds([]);
+  }, [activeBackgroundId]);
   const drawTheme = useMemo(
     () => getGrigliataDrawTheme(drawColorKey),
     [drawColorKey]
@@ -1553,10 +1640,24 @@ export default function GrigliataPage() {
     const targetPlacements = getActiveMapPlacementContexts(tokenIds);
     if (!targetPlacements.length) return;
 
-    for (let index = 0; index < targetPlacements.length; index += PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE) {
+    for (let index = 0; index < targetPlacements.length; index += PLACEMENT_DELETE_BATCH_SIZE) {
+      const placementChunk = targetPlacements.slice(index, index + PLACEMENT_DELETE_BATCH_SIZE);
+      const tokenProfileEntries = await Promise.all(
+        placementChunk
+          .filter(({ tokenId, ownerUid }) => tokenId && tokenId !== ownerUid)
+          .map(async ({ tokenId }) => {
+            const tokenSnapshot = await getDoc(doc(db, 'grigliata_tokens', tokenId));
+            return [tokenId, tokenSnapshot.exists() ? tokenSnapshot.data() : null];
+          })
+      );
+      const deleteTargetTokenProfiles = new Map(tokenProfileEntries);
       const batch = writeBatch(db);
-      targetPlacements.slice(index, index + PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE).forEach(({ ownerUid, placementId, tokenId }) => {
+      placementChunk.forEach(({ ownerUid, placementId, tokenId }) => {
+        const tokenProfile = deleteTargetTokenProfiles.get(tokenId) || null;
         batch.delete(doc(db, 'grigliata_token_placements', placementId));
+        if (tokenProfile?.tokenType === 'foe') {
+          batch.delete(doc(db, 'grigliata_tokens', tokenId));
+        }
         batch.set(
           doc(db, 'users', ownerUid),
           buildHiddenPlacementSettingsPayload({
@@ -1763,6 +1864,73 @@ export default function GrigliataPage() {
       return false;
     } finally {
       setDeletingCustomTokenId('');
+    }
+  };
+
+  const handleUpdateFoeToken = async ({
+    tokenId,
+    label,
+    dadoAnima,
+    stats,
+    Parametri,
+  }) => {
+    if (!isManager || !currentUserId || !tokenId) return false;
+
+    const existingToken = tokenProfilesByTokenId.get(tokenId);
+    if (!existingToken || existingToken.tokenType !== 'foe') {
+      setBoardError('Unable to find that foe token.');
+      return false;
+    }
+
+    const trimmedLabel = typeof label === 'string' ? label.trim() : '';
+    if (!trimmedLabel) {
+      setBoardError('Enter a name for the foe token.');
+      return false;
+    }
+
+    const existingStats = existingToken.stats || {};
+    const nextStats = {
+      ...existingStats,
+      ...(stats || {}),
+      hpCurrent: clampResourceCurrentValue(stats?.hpCurrent, stats?.hpTotal ?? existingStats?.hpTotal),
+      manaCurrent: clampResourceCurrentValue(stats?.manaCurrent, stats?.manaTotal ?? existingStats?.manaTotal),
+    };
+    const nextParametri = normalizeFoeParametri(Parametri, existingToken.Parametri || {});
+    const nextDadoAnima = typeof dadoAnima === 'string' ? dadoAnima.trim() : (existingToken.dadoAnima || '');
+    const activePlacement = activeBackgroundId
+      ? activePlacementsById.get(buildPlacementDocId(activeBackgroundId, tokenId))
+      : null;
+
+    setBoardError('');
+    setSavingFoeTokenId(tokenId);
+    try {
+      const batch = writeBatch(db);
+
+      batch.set(doc(db, 'grigliata_tokens', tokenId), {
+        label: trimmedLabel,
+        dadoAnima: nextDadoAnima,
+        stats: nextStats,
+        Parametri: nextParametri,
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUserId,
+      }, { merge: true });
+
+      if (activePlacement) {
+        batch.set(doc(db, 'grigliata_token_placements', activePlacement.id || activePlacement.placementId || buildPlacementDocId(activeBackgroundId, tokenId)), {
+          label: trimmedLabel,
+          updatedAt: serverTimestamp(),
+          updatedBy: currentUserId,
+        }, { merge: true });
+      }
+
+      await batch.commit();
+      return true;
+    } catch (error) {
+      console.error('Failed to update Grigliata foe token:', error);
+      setBoardError('Unable to update that foe token right now.');
+      return false;
+    } finally {
+      setSavingFoeTokenId('');
     }
   };
 
@@ -2115,6 +2283,44 @@ export default function GrigliataPage() {
   const handlePlaceTrayToken = async (trayToken, worldPoint) => {
     if (!user?.uid) return;
 
+    if (trayToken?.type === FOE_LIBRARY_DRAG_TYPE) {
+      if (!isManager) {
+        setBoardError('Only the DM can place foes from the Foes Hub.');
+        return;
+      }
+
+      const foeId = typeof trayToken?.foeId === 'string' ? trayToken.foeId : '';
+      if (!foeId) {
+        return;
+      }
+
+      if (!activeBackgroundId) {
+        setBoardError('Select a map before placing a foe.');
+        return;
+      }
+
+      setBoardError('');
+      const snapped = snapBoardPointToGrid(worldPoint, grid, 'center');
+
+      try {
+        await spawnGrigliataFoeTokenCallable({
+          foeId,
+          backgroundId: activeBackgroundId,
+          col: snapped.col,
+          row: snapped.row,
+        });
+      } catch (error) {
+        console.error('Failed to spawn Grigliata foe token:', error);
+        setBoardError(
+          isPermissionDeniedError(error)
+            ? 'Only the DM can place foes from the Foes Hub.'
+            : 'Unable to place that foe right now.'
+        );
+      }
+
+      return;
+    }
+
     const tokenId = typeof trayToken?.tokenId === 'string' && trayToken.tokenId
       ? trayToken.tokenId
       : '';
@@ -2459,6 +2665,7 @@ export default function GrigliataPage() {
                 currentUserId={user.uid}
                 isManager={isManager}
                 isTokenDragActive={isTrayDragging}
+                activeTrayDragType={activeTrayDragType}
                 isRulerEnabled={isRulerEnabled}
                 activeAoeFigureType={activeAoeFigureType}
                 isInteractionSharingEnabled={isInteractionSharingEnabled}
@@ -2488,8 +2695,9 @@ export default function GrigliataPage() {
                 isTokenStatusActionPending={isTokenStatusActionPending}
                 sharedInteractions={sharedInteractions}
                 onSharedInteractionChange={handleSharedInteractionChange}
+                onSelectedTokenIdsChange={setSelectedBoardTokenIds}
                 onDropCurrentToken={(payload, worldPoint) => {
-                  setIsTrayDragging(false);
+                  setActiveTrayDragType('');
                   handlePlaceTrayToken(payload, worldPoint);
                 }}
               />
@@ -2535,18 +2743,24 @@ export default function GrigliataPage() {
               >
                 {activeSidebarTab === 'tokens' && (
                   <MyTokenTray
-                    currentUserToken={currentUserToken}
+                    currentUserId={currentUserId}
+                    isManager={isManager}
+                    currentUserToken={trayCurrentUserToken}
                     customTokens={customUserTokens}
+                    foeLibrary={foeLibrary}
+                    selectedFoeToken={selectedFoeToken}
                     activeMapName={activeBackground?.name || ''}
                     hasActiveMap={!!activeBackgroundId}
-                    onDragStart={() => setIsTrayDragging(true)}
-                    onDragEnd={() => setIsTrayDragging(false)}
+                    onDragStart={(payload) => setActiveTrayDragType(payload?.type || 'grigliata-token')}
+                    onDragEnd={() => setActiveTrayDragType('')}
                     onCreateCustomToken={handleCreateCustomToken}
                     isCreatingCustomToken={isCreatingCustomToken}
                     onUpdateCustomToken={handleUpdateCustomToken}
                     updatingCustomTokenId={updatingCustomTokenId}
                     onDeleteCustomToken={handleDeleteCustomToken}
                     deletingCustomTokenId={deletingCustomTokenId}
+                    onUpdateFoeToken={handleUpdateFoeToken}
+                    savingFoeTokenId={savingFoeTokenId}
                   />
                 )}
 

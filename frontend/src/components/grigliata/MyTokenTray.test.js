@@ -1,5 +1,5 @@
 import { act, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { TRAY_DRAG_MIME } from './constants';
+import { FOE_LIBRARY_DRAG_TYPE, TRAY_DRAG_MIME } from './constants';
 import MyTokenTray from './MyTokenTray';
 
 const renderTray = (props = {}) => {
@@ -11,21 +11,25 @@ const renderTray = (props = {}) => {
     ...restProps
   } = props;
 
+  const resolvedCurrentUserToken = currentUserToken === null
+    ? null
+    : {
+      tokenId: 'user-1',
+      ownerUid: 'user-1',
+      tokenType: 'character',
+      label: 'Aldor',
+      imageUrl: 'https://example.com/token.png',
+      imagePath: 'tokens/aldor.png',
+      placed: false,
+      col: 0,
+      row: 0,
+      isHiddenByManager: false,
+      ...currentUserToken,
+    };
+
   return render(
     <MyTokenTray
-      currentUserToken={{
-        tokenId: 'user-1',
-        ownerUid: 'user-1',
-        tokenType: 'character',
-        label: 'Aldor',
-        imageUrl: 'https://example.com/token.png',
-        imagePath: 'tokens/aldor.png',
-        placed: false,
-        col: 0,
-        row: 0,
-        isHiddenByManager: false,
-        ...currentUserToken,
-      }}
+      currentUserToken={resolvedCurrentUserToken}
       customTokens={customTokens || []}
       activeMapName={activeMapName}
       hasActiveMap={hasActiveMap}
@@ -40,6 +44,13 @@ const createDataTransfer = () => ({
 });
 
 describe('MyTokenTray', () => {
+  beforeEach(() => {
+    Object.defineProperty(window, 'scrollTo', {
+      writable: true,
+      value: jest.fn(),
+    });
+  });
+
   test('shows a single tray-level drag and drop instruction', () => {
     renderTray({
       customTokens: [{
@@ -62,6 +73,31 @@ describe('MyTokenTray', () => {
     expect(screen.queryByText(/Drag this portrait onto the active map/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Drag this custom token onto the active map/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/On Sunken Ruins at/i)).not.toBeInTheDocument();
+  });
+
+  test('hides the dm character card while keeping custom token controls visible', () => {
+    renderTray({
+      currentUserId: 'user-1',
+      isManager: true,
+      currentUserToken: null,
+      customTokens: [{
+        tokenId: 'token-2',
+        ownerUid: 'user-1',
+        tokenType: 'custom',
+        label: 'Wolf',
+        imageUrl: 'https://example.com/wolf.png',
+        imagePath: 'grigliata/tokens/user-1/wolf.png',
+        placed: false,
+        col: 0,
+        row: 0,
+        isHiddenByManager: false,
+      }],
+    });
+
+    expect(screen.queryByText('Aldor')).not.toBeInTheDocument();
+    expect(screen.getByText('Wolf')).toBeInTheDocument();
+    expect(screen.getByText('Foes Hub')).toBeInTheDocument();
+    expect(screen.getByText('Add Custom Token')).toBeInTheDocument();
   });
 
   test('shows the hidden-by-dm state and disables dragging for the main token', () => {
@@ -319,6 +355,145 @@ describe('MyTokenTray', () => {
     expect(onDeleteCustomToken).toHaveBeenCalledWith(expect.objectContaining({
       tokenId: 'token-2',
       label: 'Wolf',
+    }));
+  });
+
+  test('renders the dm foes hub subsection and emits foe-library drag payloads', () => {
+    const onDragStart = jest.fn();
+    const onDragEnd = jest.fn();
+
+    renderTray({
+      isManager: true,
+      currentUserId: 'user-1',
+      foeLibrary: [{
+        id: 'foe-1',
+        name: 'Test One',
+        category: 'Beast',
+        rank: 'Elite',
+        dadoAnima: 'd10',
+        stats: { level: 10, hpTotal: 60, hpCurrent: 60, manaTotal: 20, manaCurrent: 20 },
+      }],
+      onDragStart,
+      onDragEnd,
+    });
+
+    expect(screen.getByText('Foes Hub')).toBeInTheDocument();
+    expect(screen.getByText('Test One')).toBeInTheDocument();
+
+    const dragTarget = screen.getByTestId('foe-library-card-foe-1');
+    const dataTransfer = createDataTransfer();
+    const expectedPayload = JSON.stringify({
+      type: FOE_LIBRARY_DRAG_TYPE,
+      foeId: 'foe-1',
+      ownerUid: 'user-1',
+      uid: 'user-1',
+    });
+
+    fireEvent.dragStart(dragTarget, { dataTransfer });
+    fireEvent.dragEnd(dragTarget);
+
+    expect(dataTransfer.setData).toHaveBeenCalledWith(TRAY_DRAG_MIME, expectedPayload);
+    expect(dataTransfer.setData).toHaveBeenCalledWith('text/plain', expectedPayload);
+    expect(dataTransfer.effectAllowed).toBe('copy');
+    expect(onDragStart).toHaveBeenCalledTimes(1);
+    expect(onDragEnd).toHaveBeenCalledTimes(1);
+  });
+
+  test('renders foe parametri groups collapsed by default and toggles them independently', async () => {
+    renderTray({
+      isManager: true,
+      selectedFoeToken: {
+        tokenId: 'foe-token-1',
+        label: 'Test One',
+        category: 'Beast',
+        rank: 'Elite',
+        dadoAnima: 'd10',
+        notes: 'Alpha foe',
+        stats: { level: 10, hpTotal: 60, hpCurrent: 60, manaTotal: 20, manaCurrent: 20 },
+        Parametri: {
+          Base: { Forza: { Tot: 7 } },
+          Combattimento: { Attacco: { Tot: 5 } },
+        },
+        spells: [{ name: 'Hex' }],
+        tecniche: [{ name: 'Claw' }],
+      },
+    });
+
+    const baseToggle = screen.getByRole('button', { name: 'Expand Base parameters' });
+    const combattimentoToggle = screen.getByRole('button', { name: 'Expand Combattimento parameters' });
+
+    expect(baseToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(combattimentoToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByLabelText('Forza')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Attacco')).not.toBeInTheDocument();
+
+    fireEvent.click(baseToggle);
+
+    expect(baseToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(await screen.findByLabelText('Forza')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Attacco')).not.toBeInTheDocument();
+
+    fireEvent.click(combattimentoToggle);
+
+    expect(combattimentoToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(await screen.findByLabelText('Attacco')).toBeInTheDocument();
+    expect(screen.getByLabelText('Forza')).toBeInTheDocument();
+
+    fireEvent.click(baseToggle);
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Forza')).not.toBeInTheDocument();
+    });
+    expect(screen.getByLabelText('Attacco')).toBeInTheDocument();
+  });
+
+  test('renders and saves the selected foe token details after expanding a parametri group', async () => {
+    const onUpdateFoeToken = jest.fn(() => Promise.resolve(true));
+
+    renderTray({
+      isManager: true,
+      selectedFoeToken: {
+        tokenId: 'foe-token-1',
+        label: 'Test One',
+        category: 'Beast',
+        rank: 'Elite',
+        dadoAnima: 'd10',
+        notes: 'Alpha foe',
+        stats: { level: 10, hpTotal: 60, hpCurrent: 60, manaTotal: 20, manaCurrent: 20 },
+        Parametri: {
+          Base: { Forza: { Tot: 7 } },
+          Combattimento: { Attacco: { Tot: 5 } },
+        },
+        spells: [{ name: 'Hex' }],
+        tecniche: [{ name: 'Claw' }],
+      },
+      onUpdateFoeToken,
+    });
+
+    expect(screen.getByText('Selected Foe')).toBeInTheDocument();
+    expect(screen.getByText('Hex')).toBeInTheDocument();
+    expect(screen.getByText('Claw')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Base parameters' }));
+
+    expect(await screen.findByLabelText('Forza')).toHaveValue(7);
+    fireEvent.change(screen.getByLabelText('Foe Name'), { target: { value: 'Test One Prime' } });
+    fireEvent.change(screen.getByLabelText('Current HP'), { target: { value: '42' } });
+    fireEvent.change(screen.getByLabelText('Forza'), { target: { value: '9' } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save foe/i }));
+    });
+
+    expect(onUpdateFoeToken).toHaveBeenCalledWith(expect.objectContaining({
+      tokenId: 'foe-token-1',
+      label: 'Test One Prime',
+      Parametri: expect.objectContaining({
+        Base: expect.objectContaining({
+          Forza: expect.objectContaining({ Tot: 9 }),
+        }),
+      }),
+      stats: expect.objectContaining({ hpCurrent: 42, hpTotal: 60 }),
     }));
   });
 

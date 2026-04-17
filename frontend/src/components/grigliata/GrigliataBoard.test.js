@@ -2,10 +2,12 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import GrigliataBoard from './GrigliataBoard';
 import {
+  FOE_LIBRARY_DRAG_TYPE,
   getGrigliataDrawTheme,
   MAP_PING_BROADCAST_CLEAR_MS,
   MAP_PING_HOLD_DELAY_MS,
   MAP_PING_VISIBLE_MS,
+  TRAY_DRAG_MIME,
 } from './constants';
 import { splitTokenStatusesForDisplay } from './tokenStatuses';
 
@@ -142,6 +144,7 @@ const buildProps = (overrides = {}) => ({
   currentUserId: 'current-user',
   isManager: false,
   isTokenDragActive: false,
+  activeTrayDragType: '',
   isRulerEnabled: false,
   activeAoeFigureType: '',
   isInteractionSharingEnabled: false,
@@ -170,6 +173,7 @@ const buildProps = (overrides = {}) => ({
   onUpdateTokenStatuses: jest.fn(),
   isTokenStatusActionPending: false,
   onDropCurrentToken: jest.fn(),
+  onSelectedTokenIdsChange: jest.fn(),
   sharedInteractions: [],
   onSharedInteractionChange: jest.fn(),
   ...overrides,
@@ -284,6 +288,53 @@ describe('GrigliataBoard', () => {
     );
 
     expect(screen.getByTestId('mouse-selection-trigger')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('fires a tray drop only once when the drop lands on the active overlay', () => {
+    const onDropCurrentToken = jest.fn();
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'current-user',
+          isTokenDragActive: true,
+          activeTrayDragType: FOE_LIBRARY_DRAG_TYPE,
+          onDropCurrentToken,
+        })}
+      />
+    );
+
+    const overlay = screen.getByTestId('grigliata-board-drop-overlay');
+    const payload = JSON.stringify({
+      type: FOE_LIBRARY_DRAG_TYPE,
+      foeId: 'foe-1',
+      ownerUid: 'current-user',
+    });
+    const dataTransfer = {
+      getData: jest.fn((type) => {
+        if (type === TRAY_DRAG_MIME || type === 'text/plain') {
+          return payload;
+        }
+
+        return '';
+      }),
+      dropEffect: '',
+    };
+
+    fireEvent.drop(overlay, {
+      clientX: 140,
+      clientY: 140,
+      dataTransfer,
+    });
+
+    expect(onDropCurrentToken).toHaveBeenCalledTimes(1);
+    expect(onDropCurrentToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: FOE_LIBRARY_DRAG_TYPE,
+        foeId: 'foe-1',
+        ownerUid: 'current-user',
+      }),
+      expect.any(Object)
+    );
   });
 
   test('renders the quick controls stack in the expected order and keeps reset view available', () => {
@@ -402,6 +453,40 @@ describe('GrigliataBoard', () => {
 
     expect(screen.queryByRole('heading', { name: /grigliata/i })).not.toBeInTheDocument();
     expect(screen.getByText('Sunken Ruins | 70px squares | 5 ft per square')).toBeInTheDocument();
+  });
+
+  test('emits selected token ids when the user selects a token', () => {
+    const onSelectedTokenIdsChange = jest.fn();
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'foe-token-1',
+            id: 'foe-token-1',
+            ownerUid: 'user-1',
+            label: 'Test One',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          onSelectedTokenIdsChange,
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-foe-token-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+
+    expect(onSelectedTokenIdsChange).toHaveBeenLastCalledWith(['foe-token-1']);
   });
 
   test('does not render the manager controls stack for non-managers', () => {

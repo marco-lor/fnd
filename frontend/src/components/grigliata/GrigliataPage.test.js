@@ -10,9 +10,14 @@ import { preloadImageAssets, scheduleImageAssetPreload } from './imageAssetRegis
 import { readAudioFileMetadata } from './music';
 
 const mockDeleteGrigliataCustomTokenCallable = jest.fn(() => Promise.resolve({ data: { success: true } }));
+const mockSpawnGrigliataFoeTokenCallable = jest.fn(() => Promise.resolve({ data: { success: true, tokenId: 'foe-token-1' } }));
 
 function mockInvokeDeleteGrigliataCustomTokenCallable(...args) {
   return mockDeleteGrigliataCustomTokenCallable(...args);
+}
+
+function mockInvokeSpawnGrigliataFoeTokenCallable(...args) {
+  return mockSpawnGrigliataFoeTokenCallable(...args);
 }
 
 const mockFirestoreState = {
@@ -118,6 +123,10 @@ jest.mock('firebase/functions', () => ({
       return mockInvokeDeleteGrigliataCustomTokenCallable;
     }
 
+    if (functionName === 'spawnGrigliataFoeToken') {
+      return mockInvokeSpawnGrigliataFoeTokenCallable;
+    }
+
     return jest.fn();
   }),
 }));
@@ -138,6 +147,7 @@ jest.mock('firebase/firestore', () => ({
   deleteField: jest.fn(() => ({ __type: 'deleteField' })),
   doc: jest.fn((db, ...segments) => mockBuildDocTarget(...segments)),
   documentId: jest.fn(() => '__name__'),
+  getDoc: jest.fn((target) => Promise.resolve(mockBuildSnapshotForTarget(target))),
   getDocs: jest.fn((target) => Promise.resolve(mockBuildSnapshotForTarget(target))),
   limit: jest.fn((value) => ({ kind: 'limit', value })),
   onSnapshot: jest.fn((target, onNext) => {
@@ -302,6 +312,12 @@ jest.mock('./GrigliataBoard', () => {
         <button type="button" onClick={() => props.onSetSelectedTokensVisibility?.(['user-2'], false)}>
           hide selected token
         </button>
+        <button
+          type="button"
+          onClick={() => props.onSetSelectedTokensVisibility?.(['user-2', 'user-3', 'user-4', 'user-5', 'user-6'], false)}
+        >
+          hide five selected tokens
+        </button>
         <button type="button" onClick={() => props.onSetSelectedTokensDeadState?.(['user-2'], true)}>
           mark selected token dead
         </button>
@@ -313,6 +329,12 @@ jest.mock('./GrigliataBoard', () => {
           onClick={() => props.onDropCurrentToken?.({ tokenId: 'user-1', ownerUid: 'user-1' }, { x: 140, y: 140 })}
         >
           drop current token
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onDropCurrentToken?.({ type: 'grigliata-foe-library-token', foeId: 'foe-1', ownerUid: 'user-1' }, { x: 140, y: 140 })}
+        >
+          drop foe library token
         </button>
         <button
           type="button"
@@ -328,6 +350,24 @@ jest.mock('./GrigliataBoard', () => {
         >
           move token placement
         </button>
+        <button
+          type="button"
+          onClick={() => props.onDeleteTokens?.(['foe-token-1'])}
+        >
+          delete foe token placement
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onDeleteTokens?.(['user-2', 'user-3', 'user-4', 'user-5', 'user-6'])}
+        >
+          delete five token placements
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onSelectedTokenIdsChange?.(['foe-token-1'])}
+        >
+          select foe token
+        </button>
         <button type="button" onClick={() => props.onSharedInteractionChange?.(null)}>
           clear interaction
         </button>
@@ -341,6 +381,11 @@ describe('GrigliataPage', () => {
 
   beforeEach(() => {
     jest.useFakeTimers();
+    Object.defineProperty(window, 'scrollTo', {
+      writable: true,
+      value: jest.fn(),
+    });
+    window.localStorage.clear();
     mockFirestoreListeners.splice(0, mockFirestoreListeners.length);
     mockBatchInstances.splice(0, mockBatchInstances.length);
     mockFirestoreState.collections = {
@@ -363,6 +408,7 @@ describe('GrigliataPage', () => {
       grigliata_aoe_figures: [],
       grigliata_live_interactions: [],
       grigliata_music_tracks: [],
+      foes: [],
     };
     mockFirestoreState.docs = {
       'grigliata_state/current': {
@@ -408,6 +454,7 @@ describe('GrigliataPage', () => {
     firestore.deleteField.mockClear().mockImplementation(() => ({ __type: 'deleteField' }));
     firestore.doc.mockClear().mockImplementation((db, ...segments) => mockBuildDocTarget(...segments));
     firestore.documentId.mockClear().mockImplementation(() => '__name__');
+    firestore.getDoc.mockClear().mockImplementation((target) => Promise.resolve(mockBuildSnapshotForTarget(target)));
     firestore.getDocs.mockClear().mockImplementation((target) => Promise.resolve(mockBuildSnapshotForTarget(target)));
     firestore.limit.mockClear().mockImplementation((value) => ({ kind: 'limit', value }));
     firestore.onSnapshot.mockClear().mockImplementation((target, onNext) => {
@@ -451,6 +498,7 @@ describe('GrigliataPage', () => {
 
     readAudioFileMetadata.mockClear().mockResolvedValue({ durationMs: 12_345 });
     mockDeleteGrigliataCustomTokenCallable.mockClear().mockResolvedValue({ data: { success: true } });
+    mockSpawnGrigliataFoeTokenCallable.mockClear().mockResolvedValue({ data: { success: true, tokenId: 'foe-token-1' } });
   });
 
   afterEach(() => {
@@ -885,6 +933,51 @@ describe('GrigliataPage', () => {
     );
   });
 
+  test('splits bulk selected-token visibility changes into multiple safe batches', async () => {
+    setManagerAuth();
+
+    act(() => {
+      setCollectionData('grigliata_token_placements', ['user-2', 'user-3', 'user-4', 'user-5', 'user-6'].map((ownerUid, index) => ({
+        id: `map-1__${ownerUid}`,
+        backgroundId: 'map-1',
+        ownerUid,
+        col: index + 1,
+        row: index + 2,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+      })));
+    });
+
+    render(<GrigliataPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('board-token-count')).toHaveTextContent('5');
+    });
+
+    mockBatchInstances.splice(0, mockBatchInstances.length);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /hide five selected tokens/i }));
+    });
+
+    await waitFor(() => {
+      const committedBatches = mockBatchInstances.filter((batch) => batch.commit.mock.calls.length > 0);
+      expect(committedBatches).toHaveLength(2);
+    });
+
+    const committedBatches = mockBatchInstances.filter((batch) => batch.commit.mock.calls.length > 0);
+    expect(committedBatches[0].set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+      expect.objectContaining({ isVisibleToPlayers: false }),
+      { merge: true }
+    );
+    expect(committedBatches[1].set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-6' }),
+      expect.objectContaining({ isVisibleToPlayers: false }),
+      { merge: true }
+    );
+  });
+
   test('applies selected-token dead-state changes from the board actions', async () => {
     setManagerAuth();
 
@@ -1093,6 +1186,376 @@ describe('GrigliataPage', () => {
     });
 
     confirmSpy.mockRestore();
+  });
+
+  test('hides the dm character tray entry while keeping custom token controls visible', async () => {
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'marcodm@example.com',
+      },
+      userData: {
+        role: 'dm',
+        settings: {
+          grigliata_draw_color: 'ion-cyan',
+          grigliata_share_interactions: false,
+        },
+        imageUrl: 'https://example.com/marco.png',
+        imagePath: 'characters/marco.png',
+      },
+      loading: false,
+    });
+    setCollectionData('grigliata_tokens', [{
+      id: 'user-1',
+      ownerUid: 'user-1',
+      tokenType: 'character',
+      imageSource: 'profile',
+      label: 'MarcoDM',
+      imageUrl: 'https://example.com/marco.png',
+      imagePath: 'characters/marco.png',
+    }, {
+      id: 'token-2',
+      ownerUid: 'user-1',
+      tokenType: 'custom',
+      imageSource: 'uploaded',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      imagePath: 'grigliata/tokens/user-1/wolf.png',
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Wolf')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Foes Hub')).toBeInTheDocument();
+    expect(screen.getByText('Add Custom Token')).toBeInTheDocument();
+    expect(screen.queryByText('MarcoDM')).not.toBeInTheDocument();
+  });
+
+  test('shows the DM foes hub subsection inside the tokens tab and lets it collapse and reopen', async () => {
+    setManagerAuth();
+    setCollectionData('foes', [{
+      id: 'foe-1',
+      name: 'Test One',
+      category: 'Beast',
+      rank: 'Elite',
+      dadoAnima: 'd10',
+      stats: { level: 10, hpTotal: 60, hpCurrent: 60, manaTotal: 20, manaCurrent: 20 },
+    }]);
+
+    render(<GrigliataPage />);
+
+    const toggle = await screen.findByTestId('foe-library-toggle');
+
+    expect(await screen.findByText('Foes Hub')).toBeInTheDocument();
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('foe-library-content')).toBeInTheDocument();
+    expect(screen.getByText('Test One')).toBeInTheDocument();
+    expect(screen.getByText('Add Custom Token')).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(toggle);
+      jest.advanceTimersByTime(400);
+    });
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await waitFor(() => {
+      expect(screen.queryByTestId('foe-library-content')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('Foes Hub')).toBeInTheDocument();
+    expect(screen.getByText('1 saved')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Search Foes')).not.toBeInTheDocument();
+    expect(screen.getByText('Add Custom Token')).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(await screen.findByTestId('foe-library-content')).toBeInTheDocument();
+    expect(screen.getByLabelText('Search Foes')).toBeInTheDocument();
+    expect(screen.getByText('Test One')).toBeInTheDocument();
+  });
+
+  test('persists the DM foes hub collapsed state across remounts', async () => {
+    setManagerAuth();
+    setCollectionData('foes', [{
+      id: 'foe-1',
+      name: 'Test One',
+      category: 'Beast',
+      rank: 'Elite',
+      dadoAnima: 'd10',
+      stats: { level: 10, hpTotal: 60, hpCurrent: 60, manaTotal: 20, manaCurrent: 20 },
+    }]);
+
+    const storageKey = 'grigliata.foeLibraryCollapsed.user-1';
+    const { unmount } = render(<GrigliataPage />);
+    const toggle = await screen.findByTestId('foe-library-toggle');
+
+    await act(async () => {
+      fireEvent.click(toggle);
+      jest.advanceTimersByTime(400);
+    });
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem(storageKey)).toBe('true');
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId('foe-library-content')).not.toBeInTheDocument();
+    });
+
+    unmount();
+
+    render(<GrigliataPage />);
+
+    const restoredToggle = await screen.findByTestId('foe-library-toggle');
+    expect(restoredToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('foe-library-content')).not.toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(restoredToggle);
+    });
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem(storageKey)).toBe('false');
+    });
+    expect(restoredToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(await screen.findByTestId('foe-library-content')).toBeInTheDocument();
+  });
+
+  test('spawns a foe token when a foes hub library payload is dropped onto the board', async () => {
+    setManagerAuth();
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /drop foe library token/i }));
+    });
+
+    await waitFor(() => {
+      expect(mockSpawnGrigliataFoeTokenCallable).toHaveBeenCalledWith({
+        foeId: 'foe-1',
+        backgroundId: 'map-1',
+        col: 2,
+        row: 2,
+      });
+    });
+  });
+
+  test('shows and updates the selected foe token details for the DM', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_tokens', [{
+      id: 'foe-token-1',
+      ownerUid: 'user-1',
+      tokenType: 'foe',
+      imageSource: 'foesHub',
+      label: 'Test One',
+      imageUrl: 'https://example.com/foe.png',
+      imagePath: 'foes/test-one.png',
+      foeSourceId: 'foe-1',
+      category: 'Beast',
+      rank: 'Elite',
+      dadoAnima: 'd10',
+      notes: 'Alpha foe',
+      stats: { level: 10, hpTotal: 60, hpCurrent: 60, manaTotal: 20, manaCurrent: 20 },
+      Parametri: {
+        Base: { Forza: { Tot: 7 } },
+        Combattimento: { Attacco: { Tot: 5 } },
+      },
+      spells: [{ name: 'Hex', effetti: 'Slow' }],
+      tecniche: [{ name: 'Claw', danni: '2d6' }],
+    }]);
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__foe-token-1',
+      backgroundId: 'map-1',
+      tokenId: 'foe-token-1',
+      ownerUid: 'user-1',
+      label: 'Test One',
+      imageUrl: 'https://example.com/foe.png',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /select foe token/i }));
+    });
+
+    expect(await screen.findByText('Selected Foe')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Test One')).toBeInTheDocument();
+    expect(screen.getByText('Claw')).toBeInTheDocument();
+    expect(screen.getByText('Hex')).toBeInTheDocument();
+
+    mockBatchInstances.splice(0, mockBatchInstances.length);
+
+    fireEvent.change(screen.getByLabelText('Foe Name'), { target: { value: 'Test One Prime' } });
+    fireEvent.change(screen.getByLabelText('Current HP'), { target: { value: '42' } });
+    fireEvent.change(screen.getByLabelText('Dado Anima'), { target: { value: 'd12' } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save foe/i }));
+    });
+
+    const batch = getLastCommittedBatch();
+    expect(batch).toBeTruthy();
+    expect(batch.set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_tokens/foe-token-1' }),
+      expect.objectContaining({
+        label: 'Test One Prime',
+        dadoAnima: 'd12',
+        stats: expect.objectContaining({ hpCurrent: 42, hpTotal: 60 }),
+      }),
+      { merge: true }
+    );
+    expect(batch.set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_token_placements/map-1__foe-token-1' }),
+      expect.objectContaining({ label: 'Test One Prime' }),
+      { merge: true }
+    );
+  });
+
+  test('deletes the foe token profile together with its active placement', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_tokens', [{
+      id: 'foe-token-1',
+      ownerUid: 'user-1',
+      tokenType: 'foe',
+      imageSource: 'foesHub',
+      label: 'Test One',
+      imageUrl: 'https://example.com/foe.png',
+      imagePath: 'foes/test-one.png',
+      foeSourceId: 'foe-1',
+      stats: { level: 10, hpTotal: 60, hpCurrent: 60, manaTotal: 20, manaCurrent: 20 },
+      Parametri: {},
+      spells: [],
+      tecniche: [],
+    }]);
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__foe-token-1',
+      backgroundId: 'map-1',
+      tokenId: 'foe-token-1',
+      ownerUid: 'user-1',
+      label: 'Test One',
+      imageUrl: 'https://example.com/foe.png',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+
+    render(<GrigliataPage />);
+    mockBatchInstances.splice(0, mockBatchInstances.length);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /delete foe token placement/i }));
+    });
+
+    await waitFor(() => {
+      const deletionBatch = mockBatchInstances.find((batch) => (
+        batch.delete.mock.calls.some(([ref]) => ref?.path === 'grigliata_token_placements/map-1__foe-token-1')
+      ));
+
+      expect(deletionBatch).toBeTruthy();
+      expect(deletionBatch.delete).toHaveBeenCalledWith(expect.objectContaining({ path: 'grigliata_token_placements/map-1__foe-token-1' }));
+      expect(deletionBatch.delete).toHaveBeenCalledWith(expect.objectContaining({ path: 'grigliata_tokens/foe-token-1' }));
+    });
+  });
+
+  test('deletes a foe token profile even when the local token cache has not loaded it yet', async () => {
+    setManagerAuth();
+    setDocData('grigliata_tokens/foe-token-1', {
+      ownerUid: 'user-1',
+      tokenType: 'foe',
+      imageSource: 'foesHub',
+      label: 'Test One',
+      imageUrl: 'https://example.com/foe.png',
+      imagePath: 'foes/test-one.png',
+      foeSourceId: 'foe-1',
+      stats: { level: 10, hpTotal: 60, hpCurrent: 60, manaTotal: 20, manaCurrent: 20 },
+      Parametri: {},
+      spells: [],
+      tecniche: [],
+    });
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__foe-token-1',
+      backgroundId: 'map-1',
+      tokenId: 'foe-token-1',
+      ownerUid: 'user-1',
+      label: 'Test One',
+      imageUrl: 'https://example.com/foe.png',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+
+    render(<GrigliataPage />);
+    mockBatchInstances.splice(0, mockBatchInstances.length);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /delete foe token placement/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.getDoc).toHaveBeenCalledWith(expect.objectContaining({ path: 'grigliata_tokens/foe-token-1' }));
+
+      const deletionBatch = mockBatchInstances.find((batch) => (
+        batch.delete.mock.calls.some(([ref]) => ref?.path === 'grigliata_token_placements/map-1__foe-token-1')
+      ));
+
+      expect(deletionBatch).toBeTruthy();
+      expect(deletionBatch.delete).toHaveBeenCalledWith(expect.objectContaining({ path: 'grigliata_token_placements/map-1__foe-token-1' }));
+      expect(deletionBatch.delete).toHaveBeenCalledWith(expect.objectContaining({ path: 'grigliata_tokens/foe-token-1' }));
+    });
+  });
+
+  test('splits bulk token deletions into multiple safe batches', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_token_placements', ['user-2', 'user-3', 'user-4', 'user-5', 'user-6'].map((ownerUid, index) => ({
+      id: `map-1__${ownerUid}`,
+      backgroundId: 'map-1',
+      tokenId: ownerUid,
+      ownerUid,
+      label: ownerUid,
+      imageUrl: '',
+      col: index + 2,
+      row: index + 3,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    })));
+
+    render(<GrigliataPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('board-token-count')).toHaveTextContent('5');
+    });
+
+    mockBatchInstances.splice(0, mockBatchInstances.length);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /delete five token placements/i }));
+    });
+
+    await waitFor(() => {
+      const committedBatches = mockBatchInstances.filter((batch) => batch.commit.mock.calls.length > 0);
+      expect(committedBatches).toHaveLength(2);
+    });
+
+    const committedBatches = mockBatchInstances.filter((batch) => batch.commit.mock.calls.length > 0);
+    expect(committedBatches[0].delete).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' })
+    );
+    expect(committedBatches[1].delete).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-6' })
+    );
   });
 
   test('shows the music tab only for managers', () => {

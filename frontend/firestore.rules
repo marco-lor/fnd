@@ -54,12 +54,16 @@ service cloud.firestore {
       return /databases/$(database)/documents/grigliata_tokens/$(tokenId);
     }
 
+    function isGrigliataFoeTokenData(data) {
+      return data.tokenType == "foe";
+    }
+
     function isValidGrigliataTokenType(tokenType) {
-      return tokenType in ["character", "custom"];
+      return tokenType in ["character", "custom", "foe"];
     }
 
     function isValidGrigliataTokenImageSource(imageSource) {
-      return imageSource in ["profile", "uploaded"];
+      return imageSource in ["profile", "uploaded", "foesHub"];
     }
 
     function isValidGrigliataTokenProfile(data, tokenId) {
@@ -87,7 +91,16 @@ service cloud.firestore {
           "updatedBy",
           "placed",
           "col",
-          "row"
+          "row",
+          "foeSourceId",
+          "category",
+          "rank",
+          "dadoAnima",
+          "notes",
+          "stats",
+          "Parametri",
+          "spells",
+          "tecniche"
         ])
         && data.ownerUid is string
         && data.label is string
@@ -96,11 +109,31 @@ service cloud.firestore {
         && isValidGrigliataTokenType(data.tokenType)
         && isValidGrigliataTokenImageSource(data.imageSource)
         && (!data.keys().hasAny(["characterId"]) || data.characterId is string)
+        && (!data.keys().hasAny(["foeSourceId"]) || data.foeSourceId is string)
+        && (!data.keys().hasAny(["category"]) || data.category is string)
+        && (!data.keys().hasAny(["rank"]) || data.rank is string)
+        && (!data.keys().hasAny(["dadoAnima"]) || data.dadoAnima is string)
+        && (!data.keys().hasAny(["notes"]) || data.notes is string)
+        && (!data.keys().hasAny(["stats"]) || data.stats is map)
+        && (!data.keys().hasAny(["Parametri"]) || data.Parametri is map)
+        && (!data.keys().hasAny(["spells"]) || data.spells is list)
+        && (!data.keys().hasAny(["tecniche"]) || data.tecniche is list)
         && (!data.keys().hasAny(["createdBy"]) || data.createdBy == null || data.createdBy is string)
         && (data.updatedBy == null || data.updatedBy is string)
         && (
           (data.tokenType == "character" && tokenId == data.ownerUid && data.imageSource == "profile")
           || (data.tokenType == "custom" && tokenId != data.ownerUid && data.imageSource == "uploaded")
+          || (
+            data.tokenType == "foe"
+            && tokenId != data.ownerUid
+            && data.imageSource == "foesHub"
+            && data.foeSourceId is string
+            && data.foeSourceId.size() > 0
+            && data.stats is map
+            && data.Parametri is map
+            && data.spells is list
+            && data.tecniche is list
+          )
         );
     }
 
@@ -129,13 +162,25 @@ service cloud.firestore {
         : data.ownerUid;
     }
 
+    function getReferencedGrigliataTokenData(data) {
+      let tokenId = resolveGrigliataPlacementTokenId(data);
+      return tokenId is string
+        && tokenId != data.ownerUid
+        && exists(grigliataTokenDocPath(tokenId))
+        ? get(grigliataTokenDocPath(tokenId)).data
+        : null;
+    }
+
     function isValidGrigliataPlacementTokenReference(data) {
-      return resolveGrigliataPlacementTokenId(data) is string
+      let tokenId = resolveGrigliataPlacementTokenId(data);
+      let tokenData = getReferencedGrigliataTokenData(data);
+      return tokenId is string
         && (
-          resolveGrigliataPlacementTokenId(data) == data.ownerUid
+          tokenId == data.ownerUid
           || (
-            exists(grigliataTokenDocPath(resolveGrigliataPlacementTokenId(data)))
-            && get(grigliataTokenDocPath(resolveGrigliataPlacementTokenId(data))).data.ownerUid == data.ownerUid
+            tokenData != null
+            && tokenData.ownerUid == data.ownerUid
+            && (isGrigliataManager() || tokenData.tokenType != "foe")
           )
         );
     }
@@ -693,14 +738,26 @@ service cloud.firestore {
 
       allow create: if isSignedIn()
         && isValidGrigliataTokenProfile(request.resource.data, tokenId)
-        && (request.auth.uid == request.resource.data.ownerUid || isGrigliataManager());
+        && (
+          isGrigliataManager()
+          || (
+            request.auth.uid == request.resource.data.ownerUid
+            && !isGrigliataFoeTokenData(request.resource.data)
+          )
+        );
 
       allow update: if isSignedIn()
         && request.resource.data.ownerUid == resource.data.ownerUid
         && (
           (
             isValidGrigliataTokenProfile(request.resource.data, tokenId)
-            && (request.auth.uid == resource.data.ownerUid || isGrigliataManager())
+            && (
+              isGrigliataManager()
+              || (
+                request.auth.uid == resource.data.ownerUid
+                && !isGrigliataFoeTokenData(request.resource.data)
+              )
+            )
           )
           || (
             isGrigliataManager()
