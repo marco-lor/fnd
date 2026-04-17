@@ -36,6 +36,10 @@ service firebase.storage {
       allow write: if isSignedIn() && request.auth.uid == userId;
     }
 
+    match /foes/{allPaths=**} {
+      allow read, write: if isDM();
+    }
+
     match /{allPaths=**} {
       allow read, write: if isSignedIn() && !isProtectedGrigliataPath(allPaths);
     }

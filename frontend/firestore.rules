@@ -602,6 +602,12 @@ service cloud.firestore {
       }
     }
 
+    // Foes
+    match /foes/{foeId} {
+      allow get, list: if isDM();
+      allow create, update, delete: if isDM();
+    }
+
     // Encounters
     match /encounters/{encounterId} {
   // Read: DM, Webmaster, or Player (full read like webmaster), or participant (by uid or characterId), not deleted
