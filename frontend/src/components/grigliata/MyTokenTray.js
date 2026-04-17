@@ -9,46 +9,51 @@ const buildTokenDragPayload = (token) => JSON.stringify({
   uid: token?.ownerUid || '',
 });
 
-const getTokenStatusLabel = (token, activeMapName) => {
-  if (!activeMapName) {
+const getTraySummaryText = (hasActiveMap) => (
+  hasActiveMap
+    ? 'Drag and drop tokens onto the active map to place or reposition them.'
+    : 'Select an active map to place or reposition tokens.'
+);
+
+const getTokenStatusLabel = (token, activeMapName, hasActiveMap) => {
+  if (!hasActiveMap) {
     return 'Select a map to place this token';
   }
 
   if (token?.isHiddenByManager) {
-    return `Hidden on ${activeMapName} by the DM`;
+    return activeMapName ? `Hidden on ${activeMapName} by the DM` : 'Hidden on the active map by the DM';
   }
 
   if (token?.placed) {
-    return `On ${activeMapName} at ${token.col}, ${token.row}`;
+    return activeMapName ? `Placed in ${activeMapName}` : 'Placed on the active map';
   }
 
-  return `Not placed on ${activeMapName} yet`;
+  return 'Not placed';
 };
 
-const getTokenHelpText = (token, activeMapName, canDrag) => {
+const getTokenHelpText = (token, activeMapName, hasActiveMap) => {
   if (token?.isHiddenByManager) {
     return 'The DM is currently hiding or controlling this token on the active map. It will be draggable again once it is shown.';
   }
 
-  if (!canDrag) {
+  if (!hasActiveMap) {
+    return 'Select a map first. Token positions are saved independently for each map.';
+  }
+
+  if (!token?.imageUrl) {
     return token?.tokenType === 'character'
       ? 'Upload a profile image from the navbar first. Without it, your main character token stays disabled.'
       : 'Upload an image for this custom token before dragging it onto the map.';
   }
 
-  if (!activeMapName) {
-    return 'Select a map first. Token positions are saved independently for each map.';
-  }
-
-  return token?.tokenType === 'character'
-    ? 'Drag this portrait onto the active map to place or reposition your round character token.'
-    : 'Drag this custom token onto the active map to place or reposition it.';
+  return '';
 };
 
 export default function MyTokenTray({
   currentUserToken,
   customTokens = [],
   activeMapName,
+  hasActiveMap = false,
   onDragStart,
   onDragEnd,
   onCreateCustomToken,
@@ -87,7 +92,7 @@ export default function MyTokenTray({
   const handleTokenDragStart = (event, token) => {
     const tokenId = token?.tokenId || token?.id || '';
     const ownerUid = token?.ownerUid || '';
-    const canDrag = !!(token?.imageUrl && tokenId && ownerUid && !token?.isHiddenByManager && editingTokenId !== tokenId);
+    const canDrag = !!(hasActiveMap && token?.imageUrl && tokenId && ownerUid && !token?.isHiddenByManager && editingTokenId !== tokenId);
 
     if (!canDrag) {
       event.preventDefault();
@@ -135,7 +140,7 @@ export default function MyTokenTray({
       <div className="px-4 py-3 border-b border-slate-800">
         <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-300">My Tokens</h2>
         <p className="mt-1 text-xs leading-relaxed text-slate-400">
-          Your main character token stays pinned first. Custom tokens stay private to your tray until you place them on the map.
+          {getTraySummaryText(hasActiveMap)}
         </p>
       </div>
 
@@ -148,9 +153,9 @@ export default function MyTokenTray({
           const isUpdating = updatingCustomTokenId === tokenId;
           const isDeleting = deletingCustomTokenId === tokenId;
           const imageUrl = token?.imageUrl || '';
-          const canDrag = !!(imageUrl && tokenId && ownerUid && !token?.isHiddenByManager && !isEditing && !isUpdating && !isDeleting);
-          const statusLabel = getTokenStatusLabel(token, activeMapName);
-          const helpText = getTokenHelpText(token, activeMapName, canDrag);
+          const canDrag = !!(hasActiveMap && imageUrl && tokenId && ownerUid && !token?.isHiddenByManager && !isEditing && !isUpdating && !isDeleting);
+          const statusLabel = getTokenStatusLabel(token, activeMapName, hasActiveMap);
+          const helpText = getTokenHelpText(token, activeMapName, hasActiveMap);
 
           return (
             <div
@@ -223,9 +228,11 @@ export default function MyTokenTray({
                 )}
               </div>
 
-              <p className="mt-3 text-xs leading-relaxed text-slate-300">
-                {helpText}
-              </p>
+              {helpText && (
+                <p className="mt-3 text-xs leading-relaxed text-slate-300">
+                  {helpText}
+                </p>
+              )}
 
               {isCustomToken && !isEditing && (isUpdating || isDeleting) && (
                 <p className="mt-3 text-xs font-medium text-slate-300">

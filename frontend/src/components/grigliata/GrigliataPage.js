@@ -2538,6 +2538,7 @@ export default function GrigliataPage() {
                     currentUserToken={currentUserToken}
                     customTokens={customUserTokens}
                     activeMapName={activeBackground?.name || ''}
+                    hasActiveMap={!!activeBackgroundId}
                     onDragStart={() => setIsTrayDragging(true)}
                     onDragEnd={() => setIsTrayDragging(false)}
                     onCreateCustomToken={handleCreateCustomToken}
