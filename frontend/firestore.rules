@@ -46,6 +46,10 @@ service cloud.firestore {
       return documentPath.matches('^(grigliata_state|grigliata_backgrounds|grigliata_music_tracks|grigliata_music_playback|grigliata_tokens|grigliata_token_placements|grigliata_live_interactions|grigliata_aoe_figures)(/.*)?$');
     }
 
+    function isUserDiceRollDocument(documentPath) {
+      return documentPath.matches('^users/[^/]+/diceRolls(/.*)?$');
+    }
+
     function grigliataTokenDocPath(tokenId) {
       return /databases/$(database)/documents/grigliata_tokens/$(tokenId);
     }
@@ -564,9 +568,12 @@ service cloud.firestore {
            );
     }
 
-    // DMs can do everything anywhere
+    // DMs can read any non-protected document and write any non-protected document except user dice rolls.
     match /{document=**} {
-      allow read, write: if isDM() && !isProtectedGrigliataDocument(document);
+      allow read: if isDM() && !isProtectedGrigliataDocument(document);
+      allow write: if isDM()
+        && !isProtectedGrigliataDocument(document)
+        && !isUserDiceRollDocument(document);
     }
 
     // Users
@@ -578,8 +585,9 @@ service cloud.firestore {
 
       // Dice roll logs subcollection: each user can manage ONLY their own dice rolls
       match /diceRolls/{rollId} {
-        // Owner full access (DM already globally allowed). Webmaster may access via parent rule if desired, but keep explicit owner rule.
-        allow read, write: if isSignedIn() && request.auth.uid == userId;
+        // Explicit DM read access keeps dashboard listeners query-friendly; writes stay owner-only.
+        allow read: if isSignedIn() && (request.auth.uid == userId || isDM());
+        allow write: if isSignedIn() && request.auth.uid == userId;
       }
 
       // Private map markers per user
