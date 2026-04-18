@@ -1,5 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useReducedMotion } from 'framer-motion';
 import GrigliataBoard from './GrigliataBoard';
 import {
   FOE_LIBRARY_DRAG_TYPE,
@@ -10,8 +11,26 @@ import {
   TRAY_DRAG_MIME,
 } from './constants';
 import { splitTokenStatusesForDisplay } from './tokenStatuses';
+import useImageAsset, { useImageAssetSnapshot } from './useImageAsset';
 
-jest.mock('./useImageAsset', () => jest.fn(() => null));
+jest.mock('framer-motion', () => {
+  const actual = jest.requireActual('framer-motion');
+
+  return {
+    ...actual,
+    useReducedMotion: jest.fn(() => false),
+  };
+});
+
+jest.mock('./useImageAsset', () => ({
+  __esModule: true,
+  default: jest.fn(() => null),
+  useImageAssetSnapshot: jest.fn(() => ({
+    status: 'idle',
+    image: null,
+    error: null,
+  })),
+}));
 jest.mock('./tokenStatuses', () => ({
   getTokenStatusDefinition: jest.fn(() => null),
   normalizeTokenStatuses: jest.fn((statuses) => (Array.isArray(statuses) ? statuses : [])),
@@ -200,6 +219,20 @@ const buildKonvaEvent = (event) => {
 };
 
 describe('GrigliataBoard', () => {
+  const mockBattlemapImage = {
+    width: 1280,
+    height: 720,
+    naturalWidth: 1280,
+    naturalHeight: 720,
+  };
+  const mockAlternateBattlemapImage = {
+    width: 1920,
+    height: 1080,
+    naturalWidth: 1920,
+    naturalHeight: 1080,
+  };
+  const originalRequestAnimationFrame = window.requestAnimationFrame;
+  const originalCancelAnimationFrame = window.cancelAnimationFrame;
   let resizeObserverInstance;
   let getBoundingClientRectSpy;
 
@@ -234,6 +267,15 @@ describe('GrigliataBoard', () => {
       overflowStatuses: [],
       overflowCount: 0,
     }));
+    useReducedMotion.mockReturnValue(false);
+    useImageAsset.mockImplementation(() => null);
+    useImageAssetSnapshot.mockImplementation(() => ({
+      status: 'loaded',
+      image: mockBattlemapImage,
+      error: null,
+    }));
+    window.requestAnimationFrame = (callback) => window.setTimeout(() => callback(Date.now()), 16);
+    window.cancelAnimationFrame = (handle) => window.clearTimeout(handle);
   });
 
   afterEach(() => {
@@ -242,6 +284,166 @@ describe('GrigliataBoard', () => {
     resizeObserverInstance = null;
     getBoundingClientRectSpy.mockRestore();
     delete global.ResizeObserver;
+    window.requestAnimationFrame = originalRequestAnimationFrame;
+    window.cancelAnimationFrame = originalCancelAnimationFrame;
+  });
+
+  test('fades in the battlemap image when activating from grid only', async () => {
+    jest.useFakeTimers();
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: null,
+        })}
+      />
+    );
+
+    expect(screen.queryByTestId('battlemap-image-active')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: 'map-1',
+            name: 'Sunken Ruins',
+            imageUrl: 'https://example.com/map-1.png',
+            imageWidth: 1280,
+            imageHeight: 720,
+          },
+        })}
+      />
+    );
+
+    const activeImage = await screen.findByTestId('battlemap-image-active');
+    expect(activeImage).toHaveAttribute('data-opacity', '0');
+
+    await act(async () => {
+      jest.advanceTimersByTime(240);
+    });
+
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-opacity', '1');
+    expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
+  });
+
+  test('keeps the old battlemap briefly while fading it out on deactivation', async () => {
+    jest.useFakeTimers();
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: 'map-1',
+            name: 'Sunken Ruins',
+            imageUrl: 'https://example.com/map-1.png',
+            imageWidth: 1280,
+            imageHeight: 720,
+          },
+        })}
+      />
+    );
+
+    await act(async () => {
+      jest.advanceTimersByTime(240);
+    });
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: null,
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('battlemap-image-outgoing')).toBeInTheDocument();
+
+    await act(async () => {
+      jest.advanceTimersByTime(240);
+    });
+
+    expect(screen.queryByTestId('battlemap-image-active')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
+  });
+
+  test('crossfades between the current and next battlemap image', async () => {
+    jest.useFakeTimers();
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: 'map-1',
+            name: 'Sunken Ruins',
+            imageUrl: 'https://example.com/map-1.png',
+            imageWidth: 1280,
+            imageHeight: 720,
+          },
+        })}
+      />
+    );
+
+    await act(async () => {
+      jest.advanceTimersByTime(240);
+    });
+
+    useImageAssetSnapshot.mockImplementation(() => ({
+      status: 'loaded',
+      image: mockAlternateBattlemapImage,
+      error: null,
+    }));
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: 'map-2',
+            name: 'Iron Keep',
+            imageUrl: 'https://example.com/map-2.png',
+            imageWidth: 1920,
+            imageHeight: 1080,
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('battlemap-image-active')).toBeInTheDocument();
+    expect(screen.getByTestId('battlemap-image-outgoing')).toBeInTheDocument();
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-width', '1920');
+    expect(screen.getByTestId('battlemap-image-outgoing')).toHaveAttribute('data-width', '1280');
+
+    await act(async () => {
+      jest.advanceTimersByTime(240);
+    });
+
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-width', '1920');
+    expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
+  });
+
+  test('swaps the battlemap image immediately when reduced motion is enabled', () => {
+    jest.useFakeTimers();
+    useReducedMotion.mockReturnValue(true);
+    useImageAssetSnapshot.mockImplementation(() => ({
+      status: 'loaded',
+      image: mockAlternateBattlemapImage,
+      error: null,
+    }));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: 'map-2',
+            name: 'Iron Keep',
+            imageUrl: 'https://example.com/map-2.png',
+            imageWidth: 1920,
+            imageHeight: 1080,
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-opacity', '1');
+    expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
   });
 
   test('renders the interaction sharing toggle and updates its pressed state', () => {

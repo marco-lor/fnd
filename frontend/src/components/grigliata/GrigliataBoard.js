@@ -52,6 +52,7 @@ import {
   useTokenStatusIconImages,
 } from './tokenStatuses';
 import useImageAsset from './useImageAsset';
+import { useImageAssetSnapshot } from './useImageAsset';
 import {
   buildAoEFigureFromGrigliataLiveInteraction,
   buildMeasurementFromGrigliataLiveInteraction,
@@ -90,6 +91,7 @@ const DEAD_TOKEN_SCRIM = 'rgba(15, 23, 42, 0.34)';
 const DEAD_TOKEN_BANNER_FILL = 'rgba(127, 29, 29, 0.88)';
 const DEAD_TOKEN_LABEL = '#fecaca';
 const DRAW_PICKER_EASE = [0.22, 1, 0.36, 1];
+const BATTLEMAP_IMAGE_FADE_DURATION_MS = 1000;
 const QUICK_CONTROL_NEUTRAL_SURFACE_CLASS = 'border-slate-700/90 bg-slate-950/92 shadow-lg shadow-slate-950/35';
 const QUICK_CONTROL_NEON_SURFACE_CLASS = 'border-fuchsia-300/70 bg-gradient-to-br from-fuchsia-500/28 via-violet-500/24 to-pink-500/34 shadow-lg shadow-fuchsia-950/45 ring-1 ring-fuchsia-200/20';
 const QUICK_CONTROL_BUTTON_BASE_CLASS = 'pointer-events-auto inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border p-2 text-sm font-medium backdrop-blur-md transition-all duration-200 hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950';
@@ -166,6 +168,52 @@ const buildSelectionActionToolbarPosition = ({ left, top, width, buttonSize, gap
 
 const clampToRange = (value, min, max) => Math.min(max, Math.max(min, value));
 const easeOutCubic = (value) => 1 - ((1 - clampToRange(value, 0, 1)) ** 3);
+const getAnimationTimestamp = () => (
+  typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now()
+);
+const requestAnimationFrameSafe = (callback) => {
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    return { kind: 'animation-frame', id: window.requestAnimationFrame(callback) };
+  }
+
+  return {
+    kind: 'timeout',
+    id: window.setTimeout(() => callback(getAnimationTimestamp()), 16),
+  };
+};
+const cancelAnimationFrameSafe = (handle) => {
+  if (!handle) return;
+
+  if (handle.kind === 'animation-frame' && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+    window.cancelAnimationFrame(handle.id);
+    return;
+  }
+
+  window.clearTimeout(handle.id);
+};
+const buildBattlemapImageLayer = ({ background, image, opacity = 1 }) => {
+  if (!background?.imageUrl || !image) {
+    return null;
+  }
+
+  return {
+    key: `${background.id || background.imageUrl}::${background.imageUrl}`,
+    src: background.imageUrl,
+    image,
+    imageWidth: background.imageWidth || image.naturalWidth || image.width || 0,
+    imageHeight: background.imageHeight || image.naturalHeight || image.height || 0,
+    opacity,
+  };
+};
+const getDominantBattlemapImageLayer = ({ visibleLayer, fadingOutLayer }) => {
+  if (visibleLayer && fadingOutLayer) {
+    return visibleLayer.opacity >= fadingOutLayer.opacity ? visibleLayer : fadingOutLayer;
+  }
+
+  return visibleLayer || fadingOutLayer || null;
+};
 
 const isPointWithinBounds = (point, bounds) => (
   !!point
@@ -1397,7 +1445,13 @@ export default function GrigliataBoard({
   const [pingAnimationClock, setPingAnimationClock] = useState(() => Date.now());
   const [hoveredOverflowTokenId, setHoveredOverflowTokenId] = useState('');
   const [pinnedOverflowTokenId, setPinnedOverflowTokenId] = useState('');
-  const backgroundImage = useImageAsset(activeBackground?.imageUrl || '');
+  const backgroundAssetSnapshot = useImageAssetSnapshot(activeBackground?.imageUrl || '');
+  const [battlemapImageTransition, setBattlemapImageTransition] = useState({
+    visibleLayer: null,
+    fadingOutLayer: null,
+  });
+  const battlemapImageTransitionRef = useRef(battlemapImageTransition);
+  const battlemapImageAnimationHandleRef = useRef(null);
   const lastFitKeyRef = useRef('');
   const resolvedDrawTheme = drawTheme || DEFAULT_DRAW_THEME;
   const isMouseSelectionActive = !isRulerEnabled && !activeAoeFigureType;
@@ -1406,6 +1460,21 @@ export default function GrigliataBoard({
   const musicToggleStateLabel = isMusicEnabled ? 'Shared music enabled' : 'Shared music muted';
   const prefersReducedMotion = useReducedMotion();
 
+  const cancelBattlemapImageAnimation = useCallback(() => {
+    cancelAnimationFrameSafe(battlemapImageAnimationHandleRef.current);
+    battlemapImageAnimationHandleRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    battlemapImageTransitionRef.current = battlemapImageTransition;
+  }, [battlemapImageTransition]);
+
+  useEffect(() => (
+    () => {
+      cancelBattlemapImageAnimation();
+    }
+  ), [cancelBattlemapImageAnimation]);
+
   const normalizedGrid = useMemo(() => normalizeGridConfig(grid), [grid]);
 
   const resolvedBackground = useMemo(() => {
@@ -1413,10 +1482,127 @@ export default function GrigliataBoard({
 
     return {
       ...activeBackground,
-      imageWidth: activeBackground.imageWidth || backgroundImage?.naturalWidth || backgroundImage?.width || 0,
-      imageHeight: activeBackground.imageHeight || backgroundImage?.naturalHeight || backgroundImage?.height || 0,
+      imageWidth: activeBackground.imageWidth || backgroundAssetSnapshot.image?.naturalWidth || backgroundAssetSnapshot.image?.width || 0,
+      imageHeight: activeBackground.imageHeight || backgroundAssetSnapshot.image?.naturalHeight || backgroundAssetSnapshot.image?.height || 0,
     };
-  }, [activeBackground, backgroundImage]);
+  }, [activeBackground, backgroundAssetSnapshot.image]);
+
+  const targetBattlemapImageLayer = useMemo(
+    () => buildBattlemapImageLayer({
+      background: resolvedBackground,
+      image: backgroundAssetSnapshot.image,
+    }),
+    [backgroundAssetSnapshot.image, resolvedBackground]
+  );
+
+  const runBattlemapImageTransition = useCallback((fromLayer, toLayer) => {
+    cancelBattlemapImageAnimation();
+
+    if (prefersReducedMotion) {
+      setBattlemapImageTransition({
+        visibleLayer: toLayer ? { ...toLayer, opacity: 1 } : null,
+        fadingOutLayer: null,
+      });
+      return;
+    }
+
+    const initialVisibleLayer = toLayer
+      ? { ...toLayer, opacity: fromLayer ? 0 : 0 }
+      : null;
+    const initialFadingOutLayer = fromLayer
+      ? { ...fromLayer, opacity: fromLayer.opacity ?? 1 }
+      : null;
+    const startedAtMs = getAnimationTimestamp();
+
+    setBattlemapImageTransition({
+      visibleLayer: initialVisibleLayer,
+      fadingOutLayer: initialFadingOutLayer,
+    });
+
+    const step = (timestamp) => {
+      const easedProgress = easeOutCubic(
+        clampToRange((timestamp - startedAtMs) / BATTLEMAP_IMAGE_FADE_DURATION_MS, 0, 1)
+      );
+
+      setBattlemapImageTransition({
+        visibleLayer: toLayer
+          ? { ...toLayer, opacity: easedProgress }
+          : null,
+        fadingOutLayer: fromLayer
+          ? { ...fromLayer, opacity: 1 - easedProgress }
+          : null,
+      });
+
+      if (easedProgress >= 1) {
+        battlemapImageAnimationHandleRef.current = null;
+        setBattlemapImageTransition({
+          visibleLayer: toLayer ? { ...toLayer, opacity: 1 } : null,
+          fadingOutLayer: null,
+        });
+        return;
+      }
+
+      battlemapImageAnimationHandleRef.current = requestAnimationFrameSafe(step);
+    };
+
+    battlemapImageAnimationHandleRef.current = requestAnimationFrameSafe(step);
+  }, [cancelBattlemapImageAnimation, prefersReducedMotion]);
+
+  useEffect(() => {
+    const currentTransition = battlemapImageTransitionRef.current;
+    const dominantLayer = getDominantBattlemapImageLayer(currentTransition);
+
+    if (!activeBackground?.imageUrl) {
+      if (!dominantLayer) {
+        cancelBattlemapImageAnimation();
+        setBattlemapImageTransition({ visibleLayer: null, fadingOutLayer: null });
+        return;
+      }
+
+      runBattlemapImageTransition(dominantLayer, null);
+      return;
+    }
+
+    if (
+      targetBattlemapImageLayer
+      && (
+        currentTransition.visibleLayer?.src === targetBattlemapImageLayer.src
+        || (!currentTransition.fadingOutLayer && dominantLayer?.src === targetBattlemapImageLayer.src)
+      )
+    ) {
+      cancelBattlemapImageAnimation();
+      setBattlemapImageTransition((currentState) => ({
+        visibleLayer: currentState.visibleLayer?.src === targetBattlemapImageLayer.src
+          ? { ...currentState.visibleLayer, ...targetBattlemapImageLayer, opacity: currentState.visibleLayer.opacity ?? 1 }
+          : { ...targetBattlemapImageLayer, opacity: 1 },
+        fadingOutLayer: currentState.fadingOutLayer?.src === targetBattlemapImageLayer.src
+          ? null
+          : currentState.fadingOutLayer,
+      }));
+      return;
+    }
+
+    if (backgroundAssetSnapshot.status === 'loaded' && targetBattlemapImageLayer) {
+      runBattlemapImageTransition(dominantLayer, targetBattlemapImageLayer);
+      return;
+    }
+
+    if (backgroundAssetSnapshot.status === 'error') {
+      if (!dominantLayer) {
+        cancelBattlemapImageAnimation();
+        setBattlemapImageTransition({ visibleLayer: null, fadingOutLayer: null });
+        return;
+      }
+
+      runBattlemapImageTransition(dominantLayer, null);
+    }
+  }, [
+    activeBackground?.imageUrl,
+    backgroundAssetSnapshot.status,
+    cancelBattlemapImageAnimation,
+    runBattlemapImageTransition,
+    targetBattlemapImageLayer,
+  ]);
 
   const placedTokens = useMemo(
     () => (tokens || []).filter((token) => token?.placed),
@@ -3227,13 +3413,28 @@ export default function GrigliataBoard({
                 listening={false}
               />
 
-              {backgroundImage && resolvedBackground?.imageWidth > 0 && resolvedBackground?.imageHeight > 0 && (
+              {battlemapImageTransition.fadingOutLayer && battlemapImageTransition.fadingOutLayer.imageWidth > 0 && battlemapImageTransition.fadingOutLayer.imageHeight > 0 && (
                 <KonvaImage
-                  image={backgroundImage}
+                  data-testid="battlemap-image-outgoing"
+                  image={battlemapImageTransition.fadingOutLayer.image}
                   x={0}
                   y={0}
-                  width={resolvedBackground.imageWidth}
-                  height={resolvedBackground.imageHeight}
+                  width={battlemapImageTransition.fadingOutLayer.imageWidth}
+                  height={battlemapImageTransition.fadingOutLayer.imageHeight}
+                  opacity={battlemapImageTransition.fadingOutLayer.opacity}
+                  listening={false}
+                />
+              )}
+
+              {battlemapImageTransition.visibleLayer && battlemapImageTransition.visibleLayer.imageWidth > 0 && battlemapImageTransition.visibleLayer.imageHeight > 0 && (
+                <KonvaImage
+                  data-testid="battlemap-image-active"
+                  image={battlemapImageTransition.visibleLayer.image}
+                  x={0}
+                  y={0}
+                  width={battlemapImageTransition.visibleLayer.imageWidth}
+                  height={battlemapImageTransition.visibleLayer.imageHeight}
+                  opacity={battlemapImageTransition.visibleLayer.opacity}
                   listening={false}
                 />
               )}

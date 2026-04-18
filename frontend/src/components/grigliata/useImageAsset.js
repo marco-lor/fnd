@@ -5,7 +5,7 @@ import {
   subscribeToImageAsset,
 } from './imageAssetRegistry';
 
-export default function useImageAsset(src) {
+export function useImageAssetSnapshot(src) {
   const normalizedSrc = typeof src === 'string' ? src.trim() : '';
   const [snapshot, setSnapshot] = useState(() => getImageAssetSnapshot(normalizedSrc));
 
@@ -21,6 +21,12 @@ export default function useImageAsset(src) {
 
     return () => unsubscribe();
   }, [normalizedSrc]);
+
+  return snapshot;
+}
+
+export default function useImageAsset(src) {
+  const snapshot = useImageAssetSnapshot(src);
 
   return snapshot.image;
 }
