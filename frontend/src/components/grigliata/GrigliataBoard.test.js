@@ -564,6 +564,14 @@ describe('GrigliataBoard', () => {
     expect(buttons[0]).toHaveAttribute('aria-pressed', 'true');
     expect(buttons[1]).toHaveAttribute('title', 'Increase square size');
     expect(buttons[2]).toHaveAttribute('title', 'Decrease square size');
+
+    buttons.forEach((button) => {
+      expect(button.className).toContain('rounded-2xl');
+    });
+
+    expect(buttons[0].className).toContain('bg-gradient-to-br');
+    expect(buttons[1].className).not.toContain('bg-gradient-to-br');
+    expect(buttons[2].className).not.toContain('bg-gradient-to-br');
   });
 
   test('updates the manager grid control labels and disabled states', () => {
@@ -602,6 +610,7 @@ describe('GrigliataBoard', () => {
     );
 
     expect(screen.getByRole('button', { name: /show grid/i })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: /show grid/i }).className).not.toContain('bg-gradient-to-br');
     expect(screen.getByRole('button', { name: /show grid/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /increase square size/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /decrease square size/i })).toBeDisabled();

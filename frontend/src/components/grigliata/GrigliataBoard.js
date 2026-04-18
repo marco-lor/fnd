@@ -11,7 +11,17 @@ import {
   Text,
 } from 'react-konva';
 import { FaHandPointer, FaRulerHorizontal } from 'react-icons/fa';
-import { FiEye, FiEyeOff, FiTrash2, FiUser, FiUsers, FiVolume2, FiVolumeX } from 'react-icons/fi';
+import {
+  FiEye,
+  FiEyeOff,
+  FiMinus,
+  FiPlus,
+  FiTrash2,
+  FiUser,
+  FiUsers,
+  FiVolume2,
+  FiVolumeX,
+} from 'react-icons/fi';
 import { MdCenterFocusStrong } from 'react-icons/md';
 import {
   BOARD_FIT_PADDING,
@@ -3154,11 +3164,7 @@ export default function GrigliataBoard({
               title={isGridVisible ? 'Hide the shared grid for everyone' : 'Show the shared grid for everyone'}
               aria-label={isGridVisible ? 'Hide Grid' : 'Show Grid'}
               aria-pressed={isGridVisible}
-              className={`pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-md border p-2 text-sm font-medium transition-colors ${
-                isGridVisible
-                  ? 'border-emerald-400/60 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/20'
-                  : 'border-slate-700 bg-slate-950/92 text-slate-200 hover:bg-slate-800'
-              } disabled:cursor-not-allowed disabled:opacity-50`}
+              className={`${getQuickControlButtonClassName(isGridVisible)} disabled:cursor-not-allowed disabled:opacity-60`}
             >
               {isGridVisible ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
             </button>
@@ -3168,9 +3174,9 @@ export default function GrigliataBoard({
               disabled={isGridSizeAdjustmentDisabled}
               title="Increase square size"
               aria-label="Increase square size"
-              className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-700 bg-slate-950/92 p-2 text-sm font-medium text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
             >
-              +
+              <FiPlus className="h-4 w-4" />
             </button>
             <button
               type="button"
@@ -3178,9 +3184,9 @@ export default function GrigliataBoard({
               disabled={isGridSizeAdjustmentDisabled}
               title="Decrease square size"
               aria-label="Decrease square size"
-              className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-700 bg-slate-950/92 p-2 text-sm font-medium text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
             >
-              -
+              <FiMinus className="h-4 w-4" />
             </button>
           </div>
         )}
