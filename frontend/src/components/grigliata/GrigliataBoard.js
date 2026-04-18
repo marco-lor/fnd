@@ -1064,6 +1064,34 @@ const AoEFigureOverlay = ({
     );
   }
 
+  if (figure.figureType === 'rectangle') {
+    return (
+      <Group {...overlayProps}>
+        <Rect
+          x={figure.x}
+          y={figure.y}
+          width={figure.width}
+          height={figure.height}
+          stroke={outlineStroke}
+          strokeWidth={outlineStrokeWidth}
+        />
+        <Rect
+          x={figure.x}
+          y={figure.y}
+          width={figure.width}
+          height={figure.height}
+          fill={drawTheme.fill}
+          stroke={accentStroke}
+          strokeWidth={accentStrokeWidth}
+          shadowColor={drawTheme.glow}
+          shadowBlur={shadowBlur}
+          shadowOpacity={0.24}
+        />
+        {measurementBadge}
+      </Group>
+    );
+  }
+
   if (figure.figureType === 'cone') {
     return (
       <Group {...overlayProps}>
@@ -1260,6 +1288,7 @@ const AOE_TEMPLATE_LABELS = {
   circle: 'Circle',
   square: 'Square',
   cone: 'Cone',
+  rectangle: 'Rectangle',
 };
 
 const AoETemplatePicker = ({ activeFigureType = '', onChange }) => {

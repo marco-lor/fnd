@@ -43,6 +43,20 @@ describe('aoeFigures', () => {
     });
   });
 
+  test('normalizes and shifts a valid rectangle AoE figure draft', () => {
+    const normalizedDraft = normalizeGrigliataAoEFigureDraft({
+      figureType: 'rectangle',
+      originCell: { col: 5, row: 3 },
+      targetCell: { col: 2, row: 6 },
+    });
+
+    expect(shiftGrigliataAoEFigureCells(normalizedDraft, 2, -1)).toEqual({
+      figureType: 'rectangle',
+      originCell: { col: 7, row: 2 },
+      targetCell: { col: 4, row: 5 },
+    });
+  });
+
   test('builds a renderable circle template with the expected radius and size', () => {
     const figure = buildRenderableGrigliataAoEFigure({
       figure: {
@@ -114,5 +128,39 @@ describe('aoeFigures', () => {
     expect(figure.points).toHaveLength(3);
     expect(figure.bounds.width).toBeGreaterThan(0);
     expect(figure.bounds.height).toBeGreaterThan(0);
+  });
+
+  test('builds a renderable rectangle template with independent width and height', () => {
+    const figure = buildRenderableGrigliataAoEFigure({
+      figure: {
+        figureType: 'rectangle',
+        originCell: { col: 5, row: 4 },
+        targetCell: { col: 3, row: 1 },
+      },
+      grid,
+    });
+
+    expect(figure).toEqual(expect.objectContaining({
+      figureType: 'rectangle',
+      x: 210,
+      y: 70,
+      width: 210,
+      height: 280,
+      widthSquares: 3,
+      heightSquares: 4,
+      measurement: {
+        widthFeet: 15,
+        heightFeet: 20,
+        label: 'W 15 ft • H 20 ft',
+      },
+    }));
+    expect(figure.bounds).toEqual({
+      minX: 210,
+      minY: 70,
+      maxX: 420,
+      maxY: 350,
+      width: 210,
+      height: 280,
+    });
   });
 });

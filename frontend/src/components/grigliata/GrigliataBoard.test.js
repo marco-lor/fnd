@@ -1134,6 +1134,7 @@ describe('GrigliataBoard', () => {
 
     fireEvent.click(trigger);
     expect(screen.getByTestId('aoe-template-drawer')).toBeInTheDocument();
+    expect(screen.getByTestId('aoe-template-option-rectangle')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('aoe-template-option-circle'));
     expect(onChangeAoeFigureType).toHaveBeenCalledWith('circle');
@@ -1173,6 +1174,46 @@ describe('GrigliataBoard', () => {
         }),
       }));
     });
+  });
+
+  test('renders a local rectangle preview and creates the figure on mouseup', async () => {
+    const onCreateAoEFigure = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          activeAoeFigureType: 'rectangle',
+          onCreateAoEFigure,
+        })}
+      />
+    );
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+    fireEvent.mouseMove(window, { clientX: 350, clientY: 210, buttons: 1 });
+
+    expect(screen.getByTestId('aoe-figure-overlay-local')).toBeInTheDocument();
+    expect(screen.getByTestId('aoe-figure-measurement-local')).toHaveTextContent(/^W \d+ ft • H \d+ ft$/);
+
+    fireEvent.mouseUp(window, { button: 0, clientX: 350, clientY: 210, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onCreateAoEFigure).toHaveBeenCalledWith(expect.objectContaining({
+        figureType: 'rectangle',
+        originCell: expect.objectContaining({
+          col: expect.any(Number),
+          row: expect.any(Number),
+        }),
+        targetCell: expect.objectContaining({
+          col: expect.any(Number),
+          row: expect.any(Number),
+        }),
+      }));
+    });
+
+    const createdDraft = onCreateAoEFigure.mock.calls[0][0];
+    expect(Math.abs(createdDraft.targetCell.col - createdDraft.originCell.col)).toBeGreaterThan(0);
+    expect(Math.abs(createdDraft.targetCell.row - createdDraft.originCell.row)).toBeGreaterThan(0);
   });
 
   test('returns to mouse selection after a successful AoE placement', async () => {
@@ -1263,6 +1304,16 @@ describe('GrigliataBoard', () => {
             targetCell: { col: 11, row: 3 },
             colorKey: 'solar-amber',
             isVisibleToPlayers: true,
+          }, {
+            id: 'map-1__current-user__rectangle__1',
+            backgroundId: 'map-1',
+            ownerUid: 'current-user',
+            figureType: 'rectangle',
+            slot: 1,
+            originCell: { col: 1, row: 6 },
+            targetCell: { col: 3, row: 7 },
+            colorKey: 'volt-lime',
+            isVisibleToPlayers: true,
           }],
         })}
       />
@@ -1272,6 +1323,7 @@ describe('GrigliataBoard', () => {
     expect(screen.getByText('R 20 ft • D 40 ft')).toBeInTheDocument();
     expect(screen.getByText('15 ft side')).toBeInTheDocument();
     expect(screen.getByText('L 20 ft • W 20 ft • 53°')).toBeInTheDocument();
+    expect(screen.getByText('W 15 ft • H 10 ft')).toBeInTheDocument();
   });
 
   test('renders a remote shared AoE preview with the broadcaster color', () => {
@@ -1383,6 +1435,60 @@ describe('GrigliataBoard', () => {
         }),
       }));
     });
+  });
+
+  test('moves an editable rectangle AoE figure without resizing it', async () => {
+    const onMoveAoEFigure = jest.fn(() => Promise.resolve());
+    const figureId = 'map-1__current-user__rectangle__1';
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          aoeFigures: [{
+            id: figureId,
+            backgroundId: 'map-1',
+            ownerUid: 'current-user',
+            figureType: 'rectangle',
+            slot: 1,
+            originCell: { col: 2, row: 2 },
+            targetCell: { col: 4, row: 3 },
+            colorKey: 'nova-teal',
+            isVisibleToPlayers: true,
+          }],
+          onMoveAoEFigure,
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+      button: 0,
+      clientX: 210,
+      clientY: 175,
+      buttons: 1,
+    });
+    fireEvent.mouseMove(window, { clientX: 280, clientY: 175, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 280, clientY: 175, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onMoveAoEFigure).toHaveBeenCalledWith(
+        figureId,
+        expect.objectContaining({
+          figureType: 'rectangle',
+          originCell: expect.objectContaining({
+            col: expect.any(Number),
+            row: expect.any(Number),
+          }),
+          targetCell: expect.objectContaining({
+            col: expect.any(Number),
+            row: expect.any(Number),
+          }),
+        })
+      );
+    });
+
+    const movedDraft = onMoveAoEFigure.mock.calls[0][1];
+    expect(movedDraft.targetCell.col - movedDraft.originCell.col).toBe(2);
+    expect(movedDraft.targetCell.row - movedDraft.originCell.row).toBe(1);
   });
 
   test('deletes a selected AoE figure when Delete is pressed', async () => {

@@ -2,7 +2,7 @@ import { getGridCellPositionPx, normalizeGridConfig } from './boardUtils';
 import { FEET_PER_GRID_SQUARE, resolveGrigliataDrawColorKey } from './constants';
 
 export const GRIGLIATA_AOE_FIGURE_COLLECTION = 'grigliata_aoe_figures';
-export const GRIGLIATA_AOE_FIGURE_TYPES = ['circle', 'square', 'cone'];
+export const GRIGLIATA_AOE_FIGURE_TYPES = ['circle', 'square', 'cone', 'rectangle'];
 export const MAX_GRIGLIATA_AOE_FIGURES_PER_TYPE = 5;
 export const GRIGLIATA_AOE_FIGURE_CONE_ANGLE_DEGREES = 53.13;
 
@@ -46,6 +46,11 @@ const getFigureSizeSquares = ({ originCell, targetCell }) => (
     Math.abs(targetCell.row - originCell.row),
   ) + 1
 );
+
+const getRectangleSpanSquares = ({ originCell, targetCell }) => ({
+  widthSquares: Math.abs(targetCell.col - originCell.col) + 1,
+  heightSquares: Math.abs(targetCell.row - originCell.row) + 1,
+});
 
 const getNearestDirectionAngle = (deltaX, deltaY) => {
   if (deltaX === 0 && deltaY === 0) {
@@ -96,6 +101,17 @@ const buildSquareMeasurement = (sizeSquares) => {
   return {
     sideFeet,
     label: `${sideFeet} ft side`,
+  };
+};
+
+const buildRectangleMeasurement = ({ widthSquares, heightSquares }) => {
+  const widthFeet = widthSquares * FEET_PER_GRID_SQUARE;
+  const heightFeet = heightSquares * FEET_PER_GRID_SQUARE;
+
+  return {
+    widthFeet,
+    heightFeet,
+    label: `W ${widthFeet} ft • H ${heightFeet} ft`,
   };
 };
 
@@ -350,6 +366,37 @@ export const buildRenderableGrigliataAoEFigure = ({ figure, grid }) => {
       points: polygonPoints,
       flatPoints: polygonPoints.flatMap((point) => [point.x, point.y]),
       bounds: buildBoundsFromPoints(polygonPoints),
+    };
+  }
+
+  if (normalizedFigure.figureType === 'rectangle') {
+    const { widthSquares, heightSquares } = getRectangleSpanSquares(normalizedFigure);
+    const minCol = Math.min(normalizedFigure.originCell.col, normalizedFigure.targetCell.col);
+    const maxCol = Math.max(normalizedFigure.originCell.col, normalizedFigure.targetCell.col);
+    const minRow = Math.min(normalizedFigure.originCell.row, normalizedFigure.targetCell.row);
+    const maxRow = Math.max(normalizedFigure.originCell.row, normalizedFigure.targetCell.row);
+    const topLeft = getGridCellPositionPx({ col: minCol, row: minRow }, normalizedGrid, 'top-left');
+    const bottomRight = getGridCellPositionPx({ col: maxCol, row: maxRow }, normalizedGrid, 'top-left');
+    const width = (bottomRight.x - topLeft.x) + cellSize;
+    const height = (bottomRight.y - topLeft.y) + cellSize;
+
+    return {
+      ...normalizedFigure,
+      widthSquares,
+      heightSquares,
+      measurement: buildRectangleMeasurement({ widthSquares, heightSquares }),
+      x: topLeft.x,
+      y: topLeft.y,
+      width,
+      height,
+      bounds: {
+        minX: topLeft.x,
+        minY: topLeft.y,
+        maxX: topLeft.x + width,
+        maxY: topLeft.y + height,
+        width,
+        height,
+      },
     };
   }
 

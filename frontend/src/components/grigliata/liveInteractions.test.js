@@ -101,6 +101,32 @@ describe('liveInteractions', () => {
     }));
   });
 
+  test('builds a renderable rectangle preview from a shared template interaction', () => {
+    const figure = buildAoEFigureFromGrigliataLiveInteraction({
+      interaction: {
+        backgroundId: 'map-1',
+        ownerUid: 'user-1',
+        type: 'aoe',
+        source: 'aoe-create',
+        colorKey: 'nova-teal',
+        figureType: 'rectangle',
+        originCell: { col: 2, row: 3 },
+        targetCell: { col: 4, row: 4 },
+        updatedAt: { toMillis: () => Date.now() },
+        updatedBy: 'user-1',
+      },
+      grid,
+    });
+
+    expect(figure).toEqual(expect.objectContaining({
+      figureType: 'rectangle',
+      widthSquares: 3,
+      heightSquares: 2,
+      width: 210,
+      height: 140,
+    }));
+  });
+
   test('normalizes and builds a renderable ping interaction', () => {
     const draft = normalizeGrigliataLiveInteractionDraft({
       type: 'ping',
@@ -185,6 +211,22 @@ describe('liveInteractions', () => {
         figureType: 'circle',
         originCell: { col: 2.5, row: 0 },
         targetCell: { col: 4, row: 0 },
+        updatedAt: { toMillis: () => Date.now() },
+        updatedBy: 'user-1',
+      },
+      grid,
+    })).toBeNull();
+
+    expect(buildAoEFigureFromGrigliataLiveInteraction({
+      interaction: {
+        backgroundId: 'map-1',
+        ownerUid: 'user-1',
+        type: 'aoe',
+        source: 'aoe-create',
+        colorKey: 'ion-cyan',
+        figureType: 'rectangle',
+        originCell: { col: 2, row: 0 },
+        targetCell: { col: 4.25, row: 1 },
         updatedAt: { toMillis: () => Date.now() },
         updatedBy: 'user-1',
       },

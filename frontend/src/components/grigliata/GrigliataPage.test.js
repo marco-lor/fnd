@@ -236,6 +236,9 @@ jest.mock('./GrigliataBoard', () => {
         <button type="button" onClick={() => props.onChangeAoeFigureType?.('circle')}>
           activate circle tool
         </button>
+        <button type="button" onClick={() => props.onChangeAoeFigureType?.('rectangle')}>
+          activate rectangle tool
+        </button>
         <button
           type="button"
           onClick={async () => {
@@ -252,6 +255,22 @@ jest.mock('./GrigliataBoard', () => {
         >
           create aoe circle
         </button>
+        <button
+          type="button"
+          onClick={async () => {
+            const didCreateFigure = await props.onCreateAoEFigure?.({
+              figureType: 'rectangle',
+              originCell: { col: 1, row: 1 },
+              targetCell: { col: 4, row: 2 },
+            });
+
+            if (didCreateFigure) {
+              props.onSelectMouseTool?.();
+            }
+          }}
+        >
+          create aoe rectangle
+        </button>
         <button type="button" onClick={() => props.onMoveAoEFigure?.(
           'map-1__user-1__circle__1',
           {
@@ -262,8 +281,21 @@ jest.mock('./GrigliataBoard', () => {
         )}>
           move aoe circle
         </button>
+        <button type="button" onClick={() => props.onMoveAoEFigure?.(
+          'map-1__user-1__rectangle__1',
+          {
+            figureType: 'rectangle',
+            originCell: { col: 2, row: 2 },
+            targetCell: { col: 5, row: 3 },
+          }
+        )}>
+          move aoe rectangle
+        </button>
         <button type="button" onClick={() => props.onDeleteAoEFigures?.(['map-1__user-1__circle__1'])}>
           delete aoe circle
+        </button>
+        <button type="button" onClick={() => props.onDeleteAoEFigures?.(['map-1__user-1__rectangle__1'])}>
+          delete aoe rectangle
         </button>
         <button type="button" onClick={() => props.onChangeDrawColor?.('nova-teal')}>
           emit draw color nova teal
@@ -304,6 +336,18 @@ jest.mock('./GrigliataBoard', () => {
           })}
         >
           emit aoe interaction
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onSharedInteractionChange?.({
+            type: 'aoe',
+            source: 'aoe-create',
+            figureType: 'rectangle',
+            originCell: { col: 1, row: 1 },
+            targetCell: { col: 4, row: 2 },
+          })}
+        >
+          emit rectangle aoe interaction
         </button>
         <button
           type="button"
@@ -2396,6 +2440,50 @@ describe('GrigliataPage', () => {
     expect(screen.getByTestId('board-aoe-count')).toHaveTextContent('2');
   });
 
+  test('subscribes players to visible rectangles plus their own hidden rectangles', () => {
+    act(() => {
+      setCollectionData('grigliata_aoe_figures', [
+        {
+          id: 'map-1__other-user__rectangle__1',
+          backgroundId: 'map-1',
+          ownerUid: 'other-user',
+          figureType: 'rectangle',
+          slot: 1,
+          originCell: { col: 1, row: 1 },
+          targetCell: { col: 3, row: 2 },
+          colorKey: 'solar-amber',
+          isVisibleToPlayers: true,
+        },
+        {
+          id: 'map-1__user-1__rectangle__1',
+          backgroundId: 'map-1',
+          ownerUid: 'user-1',
+          figureType: 'rectangle',
+          slot: 1,
+          originCell: { col: 2, row: 2 },
+          targetCell: { col: 4, row: 3 },
+          colorKey: 'nova-teal',
+          isVisibleToPlayers: false,
+        },
+        {
+          id: 'map-1__other-user__cone__1',
+          backgroundId: 'map-1',
+          ownerUid: 'other-user',
+          figureType: 'cone',
+          slot: 1,
+          originCell: { col: 5, row: 5 },
+          targetCell: { col: 6, row: 5 },
+          colorKey: 'warp-violet',
+          isVisibleToPlayers: false,
+        },
+      ]);
+    });
+
+    render(<GrigliataPage />);
+
+    expect(screen.getByTestId('board-aoe-count')).toHaveTextContent('2');
+  });
+
   test('creates a deterministic AoE figure doc for the current user', async () => {
     render(<GrigliataPage />);
 
@@ -2414,6 +2502,37 @@ describe('GrigliataPage', () => {
           slot: 1,
           originCell: { col: 1, row: 1 },
           targetCell: { col: 3, row: 1 },
+          colorKey: 'ion-cyan',
+          isVisibleToPlayers: false,
+          createdBy: 'user-1',
+          updatedBy: 'user-1',
+        })
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-aoe-tool')).toHaveTextContent('');
+    });
+  });
+
+  test('creates a deterministic rectangle AoE figure doc for the current user', async () => {
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: /activate rectangle tool/i }));
+    expect(screen.getByTestId('board-aoe-tool')).toHaveTextContent('rectangle');
+
+    fireEvent.click(screen.getByRole('button', { name: /create aoe rectangle/i }));
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_aoe_figures/map-1__user-1__rectangle__1' }),
+        expect.objectContaining({
+          backgroundId: 'map-1',
+          ownerUid: 'user-1',
+          figureType: 'rectangle',
+          slot: 1,
+          originCell: { col: 1, row: 1 },
+          targetCell: { col: 4, row: 2 },
           colorKey: 'ion-cyan',
           isVisibleToPlayers: false,
           createdBy: 'user-1',
@@ -2470,6 +2589,49 @@ describe('GrigliataPage', () => {
     });
   });
 
+  test('moves and deletes an existing rectangle AoE figure through page handlers', async () => {
+    act(() => {
+      setCollectionData('grigliata_aoe_figures', [
+        {
+          id: 'map-1__user-1__rectangle__1',
+          backgroundId: 'map-1',
+          ownerUid: 'user-1',
+          figureType: 'rectangle',
+          slot: 1,
+          originCell: { col: 1, row: 1 },
+          targetCell: { col: 4, row: 2 },
+          colorKey: 'ion-cyan',
+          isVisibleToPlayers: false,
+        },
+      ]);
+    });
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: /move aoe rectangle/i }));
+
+    await waitFor(() => {
+      expect(firestore.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_aoe_figures/map-1__user-1__rectangle__1' }),
+        expect.objectContaining({
+          originCell: { col: 2, row: 2 },
+          targetCell: { col: 5, row: 3 },
+          isVisibleToPlayers: false,
+          updatedBy: 'user-1',
+        })
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /delete aoe rectangle/i }));
+
+    await waitFor(() => {
+      const lastBatch = mockBatchInstances[mockBatchInstances.length - 1];
+      expect(lastBatch.delete).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_aoe_figures/map-1__user-1__rectangle__1' })
+      );
+    });
+  });
+
   test('blocks the sixth AoE figure of the same type on the same map', async () => {
     act(() => {
       setCollectionData('grigliata_aoe_figures', [
@@ -2500,5 +2662,37 @@ describe('GrigliataPage', () => {
     );
     expect(screen.getByTestId('board-aoe-tool')).toHaveTextContent('circle');
     expect(screen.getByText(/at most 5 circle templates on this map/i)).toBeInTheDocument();
+  });
+
+  test('blocks the sixth rectangle AoE figure of the same type on the same map', async () => {
+    act(() => {
+      setCollectionData('grigliata_aoe_figures', [
+        1, 2, 3, 4, 5,
+      ].map((slot) => ({
+        id: `map-1__user-1__rectangle__${slot}`,
+        backgroundId: 'map-1',
+        ownerUid: 'user-1',
+        figureType: 'rectangle',
+        slot,
+        originCell: { col: slot, row: 1 },
+        targetCell: { col: slot + 2, row: 2 },
+        colorKey: 'ion-cyan',
+        isVisibleToPlayers: false,
+      })));
+    });
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: /activate rectangle tool/i }));
+    expect(screen.getByTestId('board-aoe-tool')).toHaveTextContent('rectangle');
+
+    fireEvent.click(screen.getByRole('button', { name: /create aoe rectangle/i }));
+
+    expect(firestore.setDoc).not.toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_aoe_figures/map-1__user-1__rectangle__6' }),
+      expect.anything()
+    );
+    expect(screen.getByTestId('board-aoe-tool')).toHaveTextContent('rectangle');
+    expect(screen.getByText(/at most 5 rectangle templates on this map/i)).toBeInTheDocument();
   });
 });

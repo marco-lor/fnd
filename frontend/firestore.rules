@@ -186,7 +186,7 @@ service cloud.firestore {
     }
 
     function isValidGrigliataAoEFigureType(figureType) {
-      return figureType in ["circle", "square", "cone"];
+      return figureType in ["circle", "square", "cone", "rectangle"];
     }
 
     function isValidGrigliataAoEFigureSlot(slot) {
@@ -206,7 +206,7 @@ service cloud.firestore {
     function isOwnGrigliataAoEFigureProbeId(figureId) {
       return isSignedIn()
         && figureId is string
-        && figureId.matches('^.+__' + request.auth.uid + '__(circle|square|cone)__(1|2|3|4|5)$');
+        && figureId.matches('^.+__' + request.auth.uid + '__(circle|square|cone|rectangle)__(1|2|3|4|5)$');
     }
 
     function isValidGrigliataPlacement(data, placementId) {
