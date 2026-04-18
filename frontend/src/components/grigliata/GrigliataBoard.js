@@ -61,7 +61,6 @@ import {
 } from './liveInteractions';
 import {
   buildRenderableGrigliataAoEFigure,
-  GRIGLIATA_AOE_FIGURE_TYPES,
   normalizeGrigliataAoEFigure,
   normalizeGrigliataAoEFigureDraft,
   shiftGrigliataAoEFigureCells,
@@ -98,7 +97,7 @@ const QUICK_CONTROL_BUTTON_BASE_CLASS = 'pointer-events-auto inline-flex h-10 w-
 const QUICK_CONTROL_BUTTON_IDLE_CLASS = 'text-slate-200 hover:border-slate-500/80 hover:bg-slate-900/96 hover:text-slate-50';
 const QUICK_CONTROL_BUTTON_ACTIVE_CLASS = 'text-fuchsia-50 hover:border-fuchsia-200/80 hover:from-fuchsia-500/36 hover:via-violet-500/30 hover:to-pink-500/42';
 const QUICK_CONTROL_DRAWER_CLASS = `flex min-h-10 items-center gap-2 overflow-hidden rounded-2xl border p-2 backdrop-blur-md ${QUICK_CONTROL_NEUTRAL_SURFACE_CLASS}`;
-const AOE_TEMPLATE_OPTION_BASE_CLASS = 'rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] transition-transform duration-150 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950';
+const AOE_TEMPLATE_OPTION_BASE_CLASS = 'inline-flex h-10 w-10 items-center justify-center rounded-full border transition-transform duration-150 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950';
 const AOE_TEMPLATE_OPTION_IDLE_CLASS = 'border-slate-700 bg-slate-900/96 text-slate-200';
 const AOE_TEMPLATE_OPTION_ACTIVE_CLASS = `${QUICK_CONTROL_NEON_SURFACE_CLASS} text-fuchsia-50`;
 
@@ -1290,6 +1289,33 @@ const AOE_TEMPLATE_LABELS = {
   cone: 'Cone',
   rectangle: 'Rectangle',
 };
+const SELECTABLE_AOE_FIGURE_TYPES = ['circle', 'rectangle', 'cone'];
+
+const AoETemplateIcon = ({ figureType }) => {
+  if (figureType === 'circle') {
+    return <span aria-hidden="true" className="block h-4 w-4 rounded-full border-2 border-current" />;
+  }
+
+  if (figureType === 'rectangle') {
+    return <span aria-hidden="true" className="block h-3.5 w-5 rounded-[4px] border-2 border-current" />;
+  }
+
+  if (figureType === 'cone') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 20 20" className="h-5 w-5 overflow-visible">
+        <path
+          d="M4 15 10 5l6 10Z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.9"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+
+  return null;
+};
 
 const AoETemplatePicker = ({ activeFigureType = '', onChange }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -1363,19 +1389,8 @@ const AoETemplatePicker = ({ activeFigureType = '', onChange }) => {
               exit={prefersReducedMotion ? { opacity: 0, width: 0 } : { opacity: 0, width: 0 }}
               transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.26, ease: DRAW_PICKER_EASE }}
             >
-              <motion.span
-                aria-hidden="true"
-                initial={prefersReducedMotion ? false : { opacity: 0, x: 8 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: 8 }}
-                transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.16, ease: DRAW_PICKER_EASE }}
-                className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400"
-              >
-                Templates
-              </motion.span>
-
               <div className="flex items-center gap-1.5" role="group" aria-label="Choose an area template">
-                {GRIGLIATA_AOE_FIGURE_TYPES.map((figureType, index) => {
+                {SELECTABLE_AOE_FIGURE_TYPES.map((figureType, index) => {
                   const isActive = figureType === activeFigureType;
                   const label = AOE_TEMPLATE_LABELS[figureType] || figureType;
 
@@ -1396,7 +1411,7 @@ const AoETemplatePicker = ({ activeFigureType = '', onChange }) => {
                         : { duration: 0.18, delay: index * 0.03, ease: DRAW_PICKER_EASE }}
                       className={getAoETemplateOptionClassName(isActive)}
                     >
-                      {label}
+                      <AoETemplateIcon figureType={figureType} />
                     </motion.button>
                   );
                 })}

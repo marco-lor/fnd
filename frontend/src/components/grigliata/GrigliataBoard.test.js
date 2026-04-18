@@ -1134,7 +1134,9 @@ describe('GrigliataBoard', () => {
 
     fireEvent.click(trigger);
     expect(screen.getByTestId('aoe-template-drawer')).toBeInTheDocument();
+    expect(screen.queryByText('Templates')).not.toBeInTheDocument();
     expect(screen.getByTestId('aoe-template-option-rectangle')).toBeInTheDocument();
+    expect(screen.queryByTestId('aoe-template-option-square')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('aoe-template-option-circle'));
     expect(onChangeAoeFigureType).toHaveBeenCalledWith('circle');
