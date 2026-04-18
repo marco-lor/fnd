@@ -235,6 +235,7 @@ export default function GrigliataPage() {
   const activeLiveInteractionDocIdRef = useRef('');
   const liveInteractionMutationQueueRef = useRef(Promise.resolve());
   const [gridVisibilityUpdateBackgroundId, setGridVisibilityUpdateBackgroundId] = useState('');
+  const [isActiveBackgroundDeactivationPending, setIsActiveBackgroundDeactivationPending] = useState(false);
   const [isTokenVisibilityActionPending, setIsTokenVisibilityActionPending] = useState(false);
   const [isTokenDeadActionPending, setIsTokenDeadActionPending] = useState(false);
   const [isTokenStatusActionPending, setIsTokenStatusActionPending] = useState(false);
@@ -2043,6 +2044,25 @@ export default function GrigliataPage() {
     }
   };
 
+  const handleDeactivateActiveBackground = async () => {
+    if (!isManager || !user?.uid || !activeBackgroundId) return;
+
+    setBoardError('');
+    setIsActiveBackgroundDeactivationPending(true);
+    try {
+      await setDoc(doc(db, 'grigliata_state', 'current'), {
+        activeBackgroundId: '',
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      }, { merge: true });
+    } catch (error) {
+      console.error('Failed to deactivate active background:', error);
+      setBoardError('Unable to deactivate the active background.');
+    } finally {
+      setIsActiveBackgroundDeactivationPending(false);
+    }
+  };
+
   const handleSetSelectedTokensVisibility = async (tokenIds, nextIsVisibleToPlayers) => {
     if (
       !isManager
@@ -2680,6 +2700,8 @@ export default function GrigliataPage() {
                 onChangeDrawColor={handleDrawColorChange}
                 onToggleGridVisibility={isManager ? handleToggleGridVisibility : null}
                 isGridVisibilityToggleDisabled={!activeBackgroundId || gridVisibilityUpdateBackgroundId === activeBackgroundId}
+                onDeactivateActiveBackground={isManager ? handleDeactivateActiveBackground : null}
+                isDeactivateActiveBackgroundDisabled={!activeBackgroundId || isActiveBackgroundDeactivationPending}
                 onAdjustGridSize={isManager ? handleAdjustActiveGridSize : null}
                 isGridSizeAdjustmentDisabled={!activeBackgroundId}
                 onMoveTokens={handleMoveTokens}

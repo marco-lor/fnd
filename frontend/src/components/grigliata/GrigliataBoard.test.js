@@ -159,6 +159,8 @@ const buildProps = (overrides = {}) => ({
   onChangeDrawColor: jest.fn(),
   onToggleGridVisibility: null,
   isGridVisibilityToggleDisabled: false,
+  onDeactivateActiveBackground: null,
+  isDeactivateActiveBackgroundDisabled: false,
   onAdjustGridSize: null,
   isGridSizeAdjustmentDisabled: false,
   onMoveTokens: jest.fn(),
@@ -546,11 +548,13 @@ describe('GrigliataBoard', () => {
   });
 
   test('renders the manager controls stack on the right in the expected order', () => {
+    const onDeactivateActiveBackground = jest.fn();
     render(
       <GrigliataBoard
         {...buildProps({
           isManager: true,
           onToggleGridVisibility: jest.fn(),
+          onDeactivateActiveBackground,
           onAdjustGridSize: jest.fn(),
         })}
       />
@@ -559,11 +563,12 @@ describe('GrigliataBoard', () => {
     const managerControls = screen.getByTestId('grigliata-manager-controls');
     const buttons = within(managerControls).getAllByRole('button');
 
-    expect(buttons).toHaveLength(3);
+    expect(buttons).toHaveLength(4);
     expect(buttons[0]).toHaveAttribute('aria-label', 'Hide Grid');
     expect(buttons[0]).toHaveAttribute('aria-pressed', 'true');
-    expect(buttons[1]).toHaveAttribute('title', 'Increase square size');
-    expect(buttons[2]).toHaveAttribute('title', 'Decrease square size');
+    expect(buttons[1]).toHaveAttribute('aria-label', 'Deactivate active map');
+    expect(buttons[2]).toHaveAttribute('title', 'Increase square size');
+    expect(buttons[3]).toHaveAttribute('title', 'Decrease square size');
 
     buttons.forEach((button) => {
       expect(button.className).toContain('rounded-2xl');
@@ -572,10 +577,15 @@ describe('GrigliataBoard', () => {
     expect(buttons[0].className).toContain('bg-gradient-to-br');
     expect(buttons[1].className).not.toContain('bg-gradient-to-br');
     expect(buttons[2].className).not.toContain('bg-gradient-to-br');
+    expect(buttons[3].className).not.toContain('bg-gradient-to-br');
+
+    fireEvent.click(buttons[1]);
+    expect(onDeactivateActiveBackground).toHaveBeenCalledTimes(1);
   });
 
   test('updates the manager grid control labels and disabled states', () => {
     const onToggleGridVisibility = jest.fn();
+    const onDeactivateActiveBackground = jest.fn();
     const onAdjustGridSize = jest.fn();
     const { rerender } = render(
       <GrigliataBoard
@@ -583,6 +593,7 @@ describe('GrigliataBoard', () => {
           isManager: true,
           isGridVisible: true,
           onToggleGridVisibility,
+          onDeactivateActiveBackground,
           onAdjustGridSize,
         })}
       />
@@ -590,6 +601,9 @@ describe('GrigliataBoard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /hide grid/i }));
     expect(onToggleGridVisibility).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: /deactivate active map/i }));
+    expect(onDeactivateActiveBackground).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: /increase square size/i }));
     fireEvent.click(screen.getByRole('button', { name: /decrease square size/i }));
@@ -602,8 +616,10 @@ describe('GrigliataBoard', () => {
           isManager: true,
           isGridVisible: false,
           isGridVisibilityToggleDisabled: true,
+          isDeactivateActiveBackgroundDisabled: true,
           isGridSizeAdjustmentDisabled: true,
           onToggleGridVisibility,
+          onDeactivateActiveBackground,
           onAdjustGridSize,
         })}
       />
@@ -612,6 +628,7 @@ describe('GrigliataBoard', () => {
     expect(screen.getByRole('button', { name: /show grid/i })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('button', { name: /show grid/i }).className).not.toContain('bg-gradient-to-br');
     expect(screen.getByRole('button', { name: /show grid/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /deactivate active map/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /increase square size/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /decrease square size/i })).toBeDisabled();
   });

@@ -14,6 +14,7 @@ import { FaHandPointer, FaRulerHorizontal } from 'react-icons/fa';
 import {
   FiEye,
   FiEyeOff,
+  FiImage,
   FiMinus,
   FiPlus,
   FiTrash2,
@@ -1355,6 +1356,8 @@ export default function GrigliataBoard({
   onChangeDrawColor,
   onToggleGridVisibility,
   isGridVisibilityToggleDisabled,
+  onDeactivateActiveBackground,
+  isDeactivateActiveBackgroundDisabled,
   onAdjustGridSize,
   isGridSizeAdjustmentDisabled,
   onMoveTokens,
@@ -3167,6 +3170,16 @@ export default function GrigliataBoard({
               className={`${getQuickControlButtonClassName(isGridVisible)} disabled:cursor-not-allowed disabled:opacity-60`}
             >
               {isGridVisible ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => onDeactivateActiveBackground?.()}
+              disabled={isDeactivateActiveBackgroundDisabled}
+              title="Deactivate active map"
+              aria-label="Deactivate active map"
+              className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
+            >
+              <FiImage className="h-4 w-4" />
             </button>
             <button
               type="button"

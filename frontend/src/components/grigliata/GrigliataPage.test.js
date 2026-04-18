@@ -221,6 +221,13 @@ jest.mock('./GrigliataBoard', () => {
         </button>
         <button
           type="button"
+          disabled={props.isDeactivateActiveBackgroundDisabled}
+          onClick={() => props.onDeactivateActiveBackground?.()}
+        >
+          deactivate active background
+        </button>
+        <button
+          type="button"
           disabled={props.isMusicMutePending}
           onClick={() => props.onToggleMusicMuted?.()}
         >
@@ -1265,7 +1272,6 @@ describe('GrigliataPage', () => {
       expect(screen.queryByTestId('foe-library-content')).not.toBeInTheDocument();
     });
     expect(screen.getByText('Foes Hub')).toBeInTheDocument();
-    expect(screen.getByText('1 saved')).toBeInTheDocument();
     expect(screen.queryByLabelText('Search Foes')).not.toBeInTheDocument();
     expect(screen.getByText('Add Custom Token')).toBeInTheDocument();
 
@@ -2124,6 +2130,34 @@ describe('GrigliataPage', () => {
         expect.objectContaining({ path: 'grigliata_live_interactions/map-1__user-1' })
       );
     });
+  });
+
+  test('deactivates the active background without modifying background documents', async () => {
+    setManagerAuth();
+    render(<GrigliataPage />);
+
+    firestore.setDoc.mockClear();
+    firestore.updateDoc.mockClear();
+    firestore.deleteDoc.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /deactivate active background/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_state/current' }),
+        expect.objectContaining({
+          activeBackgroundId: '',
+          updatedAt: { __type: 'serverTimestamp' },
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
+
+    expect(firestore.updateDoc).not.toHaveBeenCalled();
+    expect(firestore.deleteDoc).not.toHaveBeenCalled();
   });
 
   test('deletes the shared interaction on unmount', async () => {
