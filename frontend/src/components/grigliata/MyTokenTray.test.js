@@ -379,6 +379,7 @@ describe('MyTokenTray', () => {
 
     expect(screen.getByText('Foes Hub')).toBeInTheDocument();
     expect(screen.getByText('Test One')).toBeInTheDocument();
+    expect(screen.queryByText('1 saved')).not.toBeInTheDocument();
 
     const dragTarget = screen.getByTestId('foe-library-card-foe-1');
     const dataTransfer = createDataTransfer();

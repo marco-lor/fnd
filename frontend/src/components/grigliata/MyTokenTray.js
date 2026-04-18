@@ -163,9 +163,6 @@ function FoeLibrarySection({ currentUserId, foeLibrary = [], hasActiveMap, onDra
               {hasActiveMap ? 'Drag a foe onto the map to spawn a fresh instance.' : 'Select an active map before spawning foes.'}
             </p>
           </div>
-          <div className="rounded-full border border-violet-400/25 bg-violet-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-100">
-            {foeLibrary.length} saved
-          </div>
         </div>
       </div>
 
