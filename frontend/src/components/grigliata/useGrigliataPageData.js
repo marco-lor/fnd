@@ -35,6 +35,26 @@ import {
 } from './music';
 
 const LIVE_INTERACTION_CLOCK_INTERVAL_MS = 15 * 1000;
+const resolveCustomTokenRole = (token = {}, tokenType = '') => {
+  if (tokenType !== 'custom') {
+    return '';
+  }
+
+  return token?.customTokenRole === 'instance' ? 'instance' : 'template';
+};
+const resolveCustomTemplateId = (token = {}, tokenType = '', tokenId = '') => {
+  if (tokenType !== 'custom') {
+    return '';
+  }
+
+  const rawTemplateId = typeof token?.customTemplateId === 'string' ? token.customTemplateId.trim() : '';
+  if (rawTemplateId) {
+    return rawTemplateId;
+  }
+
+  return tokenId;
+};
+const isCustomTemplateToken = (token = {}) => token?.tokenType === 'custom' && token?.customTokenRole !== 'instance';
 const sortFoesLibrary = (foes) => (
   [...foes].sort((left, right) => {
     const rightMillis = timestampToMillis(right.updated_at || right.created_at);
@@ -446,6 +466,8 @@ export default function useGrigliataPageData({
           id: tokenId,
           ownerUid,
           tokenType,
+          customTokenRole: resolveCustomTokenRole(token, tokenType),
+          customTemplateId: resolveCustomTemplateId(token, tokenType, tokenId),
           imageSource,
         };
       })
@@ -545,6 +567,10 @@ export default function useGrigliataPageData({
           ownerUid: placement.ownerUid,
           characterId: profile?.characterId || '',
           tokenType,
+          customTokenRole: tokenType === 'custom' ? (profile?.customTokenRole || 'template') : '',
+          customTemplateId: tokenType === 'custom'
+            ? (profile?.customTemplateId || placement.tokenId)
+            : '',
           imageSource,
           label: placementLabel || profile?.label || placement.ownerUid || 'Player',
           imageUrl: placementImageUrl || profile?.imageUrl || '',
@@ -579,7 +605,7 @@ export default function useGrigliataPageData({
 
   const customUserTokenProfiles = useMemo(
     () => [...normalizedTokenProfiles]
-      .filter((token) => token.ownerUid === currentUserId && token.tokenType === 'custom')
+      .filter((token) => token.ownerUid === currentUserId && isCustomTemplateToken(token))
       .sort((left, right) => {
         const rightMillis = timestampToMillis(right.updatedAt || right.createdAt);
         const leftMillis = timestampToMillis(left.updatedAt || left.createdAt);
@@ -590,6 +616,22 @@ export default function useGrigliataPageData({
       }),
     [currentUserId, normalizedTokenProfiles]
   );
+
+  const activeCustomPlacementCountsByTemplateId = useMemo(() => {
+    const nextMap = new Map();
+
+    normalizedActivePlacements.forEach((placement) => {
+      const tokenProfile = tokenProfilesByTokenId.get(placement.tokenId);
+      if (tokenProfile?.tokenType !== 'custom') {
+        return;
+      }
+
+      const templateId = tokenProfile.customTemplateId || tokenProfile.id || placement.tokenId;
+      nextMap.set(templateId, (nextMap.get(templateId) || 0) + 1);
+    });
+
+    return nextMap;
+  }, [normalizedActivePlacements, tokenProfilesByTokenId]);
 
   const currentUserPlacement = useMemo(
     () => activePlacementsByTokenId.get(currentUserId) || null,
@@ -644,10 +686,7 @@ export default function useGrigliataPageData({
 
   const customUserTokens = useMemo(
     () => customUserTokenProfiles.map((tokenProfile) => {
-      const placement = activePlacementsByTokenId.get(tokenProfile.id) || null;
-      const hiddenTokenIds = activeBackgroundId
-        ? (normalizedHiddenTokenIdsByBackground[activeBackgroundId] || [])
-        : [];
+      const activePlacementCount = activeCustomPlacementCountsByTemplateId.get(tokenProfile.id) || 0;
 
       return {
         id: tokenProfile.id,
@@ -655,28 +694,28 @@ export default function useGrigliataPageData({
         ownerUid: tokenProfile.ownerUid,
         characterId: tokenProfile.characterId || '',
         tokenType: 'custom',
+        customTokenRole: 'template',
+        customTemplateId: tokenProfile.customTemplateId || tokenProfile.id,
         imageSource: tokenProfile.imageSource || 'uploaded',
         label: tokenProfile.label || 'Custom Token',
         imageUrl: tokenProfile.imageUrl || '',
         imagePath: tokenProfile.imagePath || '',
-        placed: !!placement,
-        col: Number.isFinite(placement?.col) ? placement.col : 0,
-        row: Number.isFinite(placement?.row) ? placement.row : 0,
-        isVisibleToPlayers: placement?.isVisibleToPlayers !== false,
-        isDead: placement?.isDead === true,
-        statuses: Array.isArray(placement?.statuses) ? placement.statuses : [],
-        isHiddenByManager: !isManager && !placement && hiddenTokenIds.includes(tokenProfile.id),
+        placed: activePlacementCount > 0,
+        activePlacementCount,
+        col: 0,
+        row: 0,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isHiddenByManager: false,
         createdAt: tokenProfile.createdAt || null,
         updatedAt: tokenProfile.updatedAt || null,
       };
     }),
     [
-      activeBackgroundId,
-      activePlacementsByTokenId,
+      activeCustomPlacementCountsByTemplateId,
       currentUserId,
       customUserTokenProfiles,
-      isManager,
-      normalizedHiddenTokenIdsByBackground,
     ]
   );
 

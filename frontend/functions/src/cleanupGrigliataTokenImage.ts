@@ -13,7 +13,9 @@ const isCustomUploadedToken = (value: unknown) => {
   }
 
   const token = value as Record<string, unknown>;
+  const customTokenRole = asNonEmptyString(token.customTokenRole);
   return asNonEmptyString(token.tokenType) === "custom"
+    && customTokenRole !== "instance"
     && asNonEmptyString(token.imageSource) === "uploaded";
 };
 

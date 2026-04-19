@@ -66,6 +66,68 @@ service cloud.firestore {
       return imageSource in ["profile", "uploaded", "foesHub"];
     }
 
+    function isValidGrigliataCustomTokenRole(customTokenRole) {
+      return customTokenRole in ["template", "instance"];
+    }
+
+    function resolveGrigliataCustomTokenRole(data) {
+      return data.keys().hasAny(["customTokenRole"]) && data.customTokenRole is string
+        ? data.customTokenRole
+        : "template";
+    }
+
+    function resolveGrigliataCustomTemplateId(data, tokenId) {
+      return data.keys().hasAny(["customTemplateId"])
+          && data.customTemplateId is string
+          && data.customTemplateId.size() > 0
+        ? data.customTemplateId
+        : tokenId;
+    }
+
+    function isValidGrigliataCustomTokenContract(data, tokenId) {
+      let hasRole = data.keys().hasAny(["customTokenRole"]);
+      let hasTemplateId = data.keys().hasAny(["customTemplateId"]);
+      let resolvedRole = resolveGrigliataCustomTokenRole(data);
+      let resolvedTemplateId = resolveGrigliataCustomTemplateId(data, tokenId);
+      return (
+        (
+          (!hasRole && !hasTemplateId)
+          || (
+            hasRole
+            && hasTemplateId
+            && data.customTokenRole is string
+            && isValidGrigliataCustomTokenRole(data.customTokenRole)
+            && data.customTemplateId is string
+            && data.customTemplateId.size() > 0
+          )
+        )
+        && (
+          (resolvedRole == "template" && resolvedTemplateId == tokenId)
+          || (
+            resolvedRole == "instance"
+            && resolvedTemplateId != tokenId
+            && resolvedTemplateId != data.ownerUid
+          )
+        )
+      );
+    }
+
+    function isOwnerCreatableGrigliataCustomTokenProfile(data, tokenId) {
+      return data.tokenType != "custom"
+        || (
+          resolveGrigliataCustomTokenRole(data) == "template"
+          && resolveGrigliataCustomTemplateId(data, tokenId) == tokenId
+        );
+    }
+
+    function isStableGrigliataCustomTokenContract(data, existingData, tokenId) {
+      return data.tokenType != "custom"
+        || (
+          resolveGrigliataCustomTokenRole(data) == resolveGrigliataCustomTokenRole(existingData)
+          && resolveGrigliataCustomTemplateId(data, tokenId) == resolveGrigliataCustomTemplateId(existingData, tokenId)
+        );
+    }
+
     function isValidGrigliataTokenProfile(data, tokenId) {
       return data.keys().hasAll([
           "ownerUid",
@@ -84,6 +146,8 @@ service cloud.firestore {
           "imageUrl",
           "imagePath",
           "tokenType",
+          "customTokenRole",
+          "customTemplateId",
           "imageSource",
           "createdAt",
           "createdBy",
@@ -108,7 +172,10 @@ service cloud.firestore {
         && data.imagePath is string
         && isValidGrigliataTokenType(data.tokenType)
         && isValidGrigliataTokenImageSource(data.imageSource)
+        && (data.tokenType == "custom" || !data.keys().hasAny(["customTokenRole", "customTemplateId"]))
         && (!data.keys().hasAny(["characterId"]) || data.characterId is string)
+        && (!data.keys().hasAny(["customTokenRole"]) || data.customTokenRole is string)
+        && (!data.keys().hasAny(["customTemplateId"]) || data.customTemplateId is string)
         && (!data.keys().hasAny(["foeSourceId"]) || data.foeSourceId is string)
         && (!data.keys().hasAny(["category"]) || data.category is string)
         && (!data.keys().hasAny(["rank"]) || data.rank is string)
@@ -122,7 +189,12 @@ service cloud.firestore {
         && (data.updatedBy == null || data.updatedBy is string)
         && (
           (data.tokenType == "character" && tokenId == data.ownerUid && data.imageSource == "profile")
-          || (data.tokenType == "custom" && tokenId != data.ownerUid && data.imageSource == "uploaded")
+          || (
+            data.tokenType == "custom"
+            && tokenId != data.ownerUid
+            && data.imageSource == "uploaded"
+            && isValidGrigliataCustomTokenContract(data, tokenId)
+          )
           || (
             data.tokenType == "foe"
             && tokenId != data.ownerUid
@@ -743,6 +815,7 @@ service cloud.firestore {
           || (
             request.auth.uid == request.resource.data.ownerUid
             && !isGrigliataFoeTokenData(request.resource.data)
+            && isOwnerCreatableGrigliataCustomTokenProfile(request.resource.data, tokenId)
           )
         );
 
@@ -751,6 +824,7 @@ service cloud.firestore {
         && (
           (
             isValidGrigliataTokenProfile(request.resource.data, tokenId)
+            && isStableGrigliataCustomTokenContract(request.resource.data, resource.data, tokenId)
             && (
               isGrigliataManager()
               || (

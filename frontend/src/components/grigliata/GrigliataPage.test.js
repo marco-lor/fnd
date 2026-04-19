@@ -10,14 +10,24 @@ import { preloadImageAssets, scheduleImageAssetPreload } from './imageAssetRegis
 import { readAudioFileMetadata } from './music';
 
 const mockDeleteGrigliataCustomTokenCallable = jest.fn(() => Promise.resolve({ data: { success: true } }));
+const mockSpawnGrigliataCustomTokenInstanceCallable = jest.fn(() => Promise.resolve({ data: { success: true, tokenId: 'custom-instance-1' } }));
 const mockSpawnGrigliataFoeTokenCallable = jest.fn(() => Promise.resolve({ data: { success: true, tokenId: 'foe-token-1' } }));
+const mockUpdateGrigliataCustomTokenTemplateCallable = jest.fn(() => Promise.resolve({ data: { success: true } }));
 
 function mockInvokeDeleteGrigliataCustomTokenCallable(...args) {
   return mockDeleteGrigliataCustomTokenCallable(...args);
 }
 
+function mockInvokeSpawnGrigliataCustomTokenInstanceCallable(...args) {
+  return mockSpawnGrigliataCustomTokenInstanceCallable(...args);
+}
+
 function mockInvokeSpawnGrigliataFoeTokenCallable(...args) {
   return mockSpawnGrigliataFoeTokenCallable(...args);
+}
+
+function mockInvokeUpdateGrigliataCustomTokenTemplateCallable(...args) {
+  return mockUpdateGrigliataCustomTokenTemplateCallable(...args);
 }
 
 const mockFirestoreState = {
@@ -27,9 +37,22 @@ const mockFirestoreState = {
 
 const mockFirestoreListeners = [];
 const mockBatchInstances = [];
+let mockGeneratedDocCounter = 0;
 
 const mockBuildCollectionTarget = (path) => ({ kind: 'collection', path });
 const mockBuildDocTarget = (...segments) => ({ kind: 'doc', path: segments.join('/'), id: segments[segments.length - 1] });
+const mockBuildDocTargetFromArgs = (baseOrDb, ...segments) => {
+  if (baseOrDb?.kind === 'collection') {
+    if (!segments.length) {
+      mockGeneratedDocCounter += 1;
+      return mockBuildDocTarget(baseOrDb.path, `generated-doc-${mockGeneratedDocCounter}`);
+    }
+
+    return mockBuildDocTarget(baseOrDb.path, ...segments);
+  }
+
+  return mockBuildDocTarget(...segments);
+};
 const mockBuildWhereConstraint = (field, op, value) => ({ kind: 'where', field, op, value });
 const mockBuildQueryTarget = (base, constraints) => ({ kind: 'query', base, constraints });
 
@@ -123,8 +146,16 @@ jest.mock('firebase/functions', () => ({
       return mockInvokeDeleteGrigliataCustomTokenCallable;
     }
 
+    if (functionName === 'spawnGrigliataCustomTokenInstance') {
+      return mockInvokeSpawnGrigliataCustomTokenInstanceCallable;
+    }
+
     if (functionName === 'spawnGrigliataFoeToken') {
       return mockInvokeSpawnGrigliataFoeTokenCallable;
+    }
+
+    if (functionName === 'updateGrigliataCustomTokenTemplate') {
+      return mockInvokeUpdateGrigliataCustomTokenTemplateCallable;
     }
 
     return jest.fn();
@@ -145,7 +176,7 @@ jest.mock('firebase/firestore', () => ({
   collection: jest.fn((db, path) => mockBuildCollectionTarget(path)),
   deleteDoc: jest.fn(() => Promise.resolve()),
   deleteField: jest.fn(() => ({ __type: 'deleteField' })),
-  doc: jest.fn((db, ...segments) => mockBuildDocTarget(...segments)),
+  doc: jest.fn((dbOrCollection, ...segments) => mockBuildDocTargetFromArgs(dbOrCollection, ...segments)),
   documentId: jest.fn(() => '__name__'),
   getDoc: jest.fn((target) => Promise.resolve(mockBuildSnapshotForTarget(target))),
   getDocs: jest.fn((target) => Promise.resolve(mockBuildSnapshotForTarget(target))),
@@ -383,6 +414,12 @@ jest.mock('./GrigliataBoard', () => {
         </button>
         <button
           type="button"
+          onClick={() => props.onDropCurrentToken?.({ tokenId: 'token-2', ownerUid: 'user-1' }, { x: 140, y: 140 })}
+        >
+          drop custom token template
+        </button>
+        <button
+          type="button"
           onClick={() => props.onDropCurrentToken?.({ type: 'grigliata-foe-library-token', foeId: 'foe-1', ownerUid: 'user-1' }, { x: 140, y: 140 })}
         >
           drop foe library token
@@ -406,6 +443,12 @@ jest.mock('./GrigliataBoard', () => {
           onClick={() => props.onDeleteTokens?.(['foe-token-1'])}
         >
           delete foe token placement
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onDeleteTokens?.(['custom-instance-1'])}
+        >
+          delete custom token placement
         </button>
         <button
           type="button"
@@ -457,6 +500,7 @@ describe('GrigliataPage', () => {
     window.localStorage.clear();
     mockFirestoreListeners.splice(0, mockFirestoreListeners.length);
     mockBatchInstances.splice(0, mockBatchInstances.length);
+    mockGeneratedDocCounter = 0;
     mockFirestoreState.collections = {
       grigliata_backgrounds: [
         {
@@ -521,7 +565,7 @@ describe('GrigliataPage', () => {
     firestore.collection.mockClear().mockImplementation((db, path) => mockBuildCollectionTarget(path));
     firestore.deleteDoc.mockClear().mockResolvedValue(undefined);
     firestore.deleteField.mockClear().mockImplementation(() => ({ __type: 'deleteField' }));
-    firestore.doc.mockClear().mockImplementation((db, ...segments) => mockBuildDocTarget(...segments));
+    firestore.doc.mockClear().mockImplementation((dbOrCollection, ...segments) => mockBuildDocTargetFromArgs(dbOrCollection, ...segments));
     firestore.documentId.mockClear().mockImplementation(() => '__name__');
     firestore.getDoc.mockClear().mockImplementation((target) => Promise.resolve(mockBuildSnapshotForTarget(target)));
     firestore.getDocs.mockClear().mockImplementation((target) => Promise.resolve(mockBuildSnapshotForTarget(target)));
@@ -567,7 +611,9 @@ describe('GrigliataPage', () => {
 
     readAudioFileMetadata.mockClear().mockResolvedValue({ durationMs: 12_345 });
     mockDeleteGrigliataCustomTokenCallable.mockClear().mockResolvedValue({ data: { success: true } });
+    mockSpawnGrigliataCustomTokenInstanceCallable.mockClear().mockResolvedValue({ data: { success: true, tokenId: 'custom-instance-1' } });
     mockSpawnGrigliataFoeTokenCallable.mockClear().mockResolvedValue({ data: { success: true, tokenId: 'foe-token-1' } });
+    mockUpdateGrigliataCustomTokenTemplateCallable.mockClear().mockResolvedValue({ data: { success: true } });
   });
 
   afterEach(() => {
@@ -1179,12 +1225,14 @@ describe('GrigliataPage', () => {
 
     await waitFor(() => {
       expect(storageApi.uploadBytes).toHaveBeenCalledTimes(1);
-      expect(firestore.addDoc).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'grigliata_tokens' }),
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_tokens/generated-doc-1' }),
         expect.objectContaining({
           ownerUid: 'user-1',
           label: 'Summoned Wolf',
           tokenType: 'custom',
+          customTokenRole: 'template',
+          customTemplateId: 'generated-doc-1',
           imageSource: 'uploaded',
           notes: 'Mirror image',
           stats: expect.objectContaining({
@@ -1320,6 +1368,8 @@ describe('GrigliataPage', () => {
     setDocData('grigliata_tokens/token-2', {
       ownerUid: 'user-2',
       tokenType: 'custom',
+      customTokenRole: 'instance',
+      customTemplateId: 'template-2',
       imageSource: 'uploaded',
       label: 'Wolf',
       imageUrl: 'https://example.com/wolf.png',
@@ -1649,8 +1699,8 @@ describe('GrigliataPage', () => {
       expect(screen.getByText('Wolf')).toBeInTheDocument();
     });
 
-    expect(screen.getAllByText('Hidden on Sunken Ruins by the DM')[0]).toBeInTheDocument();
-    expect(screen.getByText('Wolf').closest('[draggable]')).toHaveAttribute('draggable', 'false');
+    expect(screen.getAllByText('No active instances in Sunken Ruins')[0]).toBeInTheDocument();
+    expect(screen.getByText('Wolf').closest('[draggable]')).toHaveAttribute('draggable', 'true');
   });
 
   test('deletes a custom token through the callable cleanup flow', async () => {
@@ -1681,6 +1731,42 @@ describe('GrigliataPage', () => {
     });
 
     confirmSpy.mockRestore();
+  });
+
+  test('spawns a fresh custom token instance when a template is dropped onto the board', async () => {
+    setCollectionData('grigliata_tokens', [{
+      id: 'token-2',
+      ownerUid: 'user-1',
+      tokenType: 'custom',
+      customTokenRole: 'template',
+      customTemplateId: 'token-2',
+      imageSource: 'uploaded',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      imagePath: 'grigliata/tokens/user-1/wolf.png',
+    }]);
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /drop custom token template/i }));
+      fireEvent.click(screen.getByRole('button', { name: /drop custom token template/i }));
+    });
+
+    await waitFor(() => {
+      expect(mockSpawnGrigliataCustomTokenInstanceCallable).toHaveBeenNthCalledWith(1, {
+        templateTokenId: 'token-2',
+        backgroundId: 'map-1',
+        col: 2,
+        row: 2,
+      });
+      expect(mockSpawnGrigliataCustomTokenInstanceCallable).toHaveBeenNthCalledWith(2, {
+        templateTokenId: 'token-2',
+        backgroundId: 'map-1',
+        col: 2,
+        row: 2,
+      });
+    });
   });
 
   test('hides the dm character tray entry while keeping custom token controls visible', async () => {
@@ -1963,6 +2049,54 @@ describe('GrigliataPage', () => {
       expect(deletionBatch.delete).toHaveBeenCalledWith(expect.objectContaining({ path: 'grigliata_token_placements/map-1__foe-token-1' }));
       expect(deletionBatch.delete).toHaveBeenCalledWith(expect.objectContaining({ path: 'grigliata_tokens/foe-token-1' }));
     });
+  });
+
+  test('deletes a spawned custom token through the callable cleanup flow', async () => {
+    setCollectionData('grigliata_tokens', [{
+      id: 'custom-instance-1',
+      ownerUid: 'user-1',
+      tokenType: 'custom',
+      customTokenRole: 'instance',
+      customTemplateId: 'token-2',
+      imageSource: 'uploaded',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      imagePath: 'grigliata/tokens/user-1/wolf.png',
+      stats: { hpTotal: 12, hpCurrent: 9, manaTotal: 4, manaCurrent: 4, shieldTotal: 2, shieldCurrent: 2 },
+    }]);
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__custom-instance-1',
+      backgroundId: 'map-1',
+      tokenId: 'custom-instance-1',
+      ownerUid: 'user-1',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+
+    render(<GrigliataPage />);
+    mockBatchInstances.splice(0, mockBatchInstances.length);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /delete custom token placement/i }));
+    });
+
+    await waitFor(() => {
+      expect(mockDeleteGrigliataCustomTokenCallable).toHaveBeenCalledWith({ tokenId: 'custom-instance-1' });
+    });
+
+    const issuedClientDelete = mockBatchInstances.some((batch) => (
+      batch.delete.mock.calls.some(([ref]) => (
+        ref?.path === 'grigliata_token_placements/map-1__custom-instance-1'
+        || ref?.path === 'grigliata_tokens/custom-instance-1'
+      ))
+    ));
+
+    expect(issuedClientDelete).toBe(false);
   });
 
   test('deletes a foe token profile even when the local token cache has not loaded it yet', async () => {

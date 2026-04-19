@@ -7,6 +7,7 @@ type DeleteGrigliataCustomTokenPayload = {
 
 const REGION = "europe-west1";
 const HIDDEN_TOKEN_FIELD = "grigliata_hidden_token_ids_by_background";
+const FIRESTORE_BATCH_SIZE = 450;
 
 const asNonEmptyString = (value: unknown) => (
   typeof value === "string" && value.trim() ? value.trim() : ""
@@ -65,6 +66,7 @@ export const deleteGrigliataCustomToken = onCall<DeleteGrigliataCustomTokenPaylo
     const tokenData = tokenSnap.data() || {};
     const ownerUid = asNonEmptyString(tokenData.ownerUid);
     const tokenType = asNonEmptyString(tokenData.tokenType);
+    const customTokenRole = asNonEmptyString(tokenData.customTokenRole);
     if (!ownerUid || tokenType !== "custom") {
       throw new HttpsError("failed-precondition", "Only custom tokens can be deleted through this function.");
     }
@@ -73,16 +75,42 @@ export const deleteGrigliataCustomToken = onCall<DeleteGrigliataCustomTokenPaylo
       throw new HttpsError("permission-denied", "You can only delete your own custom tokens.");
     }
 
-    const placementsSnap = await db.collection("grigliata_token_placements")
-      .where("tokenId", "==", tokenId)
-      .get();
+    const deletedTokenIds = new Set<string>([tokenId]);
+    const isTemplate = customTokenRole !== "instance";
+    const instanceDocs = isTemplate
+      ? (await db.collection("grigliata_tokens")
+        .where("customTemplateId", "==", tokenId)
+        .get()).docs.filter((docSnap) => docSnap.id !== tokenId)
+      : [];
 
-    for (let index = 0; index < placementsSnap.docs.length; index += 450) {
+    instanceDocs.forEach((docSnap) => {
+      deletedTokenIds.add(docSnap.id);
+    });
+
+    const placementDocs = [];
+    for (const targetTokenId of deletedTokenIds) {
+      const placementsSnap = await db.collection("grigliata_token_placements")
+        .where("tokenId", "==", targetTokenId)
+        .get();
+      placementDocs.push(...placementsSnap.docs);
+    }
+
+    for (let index = 0; index < placementDocs.length; index += FIRESTORE_BATCH_SIZE) {
       const batch = db.batch();
-      placementsSnap.docs.slice(index, index + 450).forEach((placementDoc) => {
+      placementDocs.slice(index, index + FIRESTORE_BATCH_SIZE).forEach((placementDoc) => {
         batch.delete(placementDoc.ref);
       });
       await batch.commit();
+    }
+
+    if (instanceDocs.length) {
+      for (let index = 0; index < instanceDocs.length; index += FIRESTORE_BATCH_SIZE) {
+        const batch = db.batch();
+        instanceDocs.slice(index, index + FIRESTORE_BATCH_SIZE).forEach((instanceDoc) => {
+          batch.delete(instanceDoc.ref);
+        });
+        await batch.commit();
+      }
     }
 
     const ownerRef = db.doc(`users/${ownerUid}`);
@@ -93,7 +121,8 @@ export const deleteGrigliataCustomToken = onCall<DeleteGrigliataCustomTokenPaylo
       const nextHiddenTokenIdsByBackground = normalizeHiddenTokenIdsByBackground(currentSettings[HIDDEN_TOKEN_FIELD]);
 
       Object.keys(nextHiddenTokenIdsByBackground).forEach((backgroundId) => {
-        const filteredTokenIds = nextHiddenTokenIdsByBackground[backgroundId].filter((hiddenTokenId) => hiddenTokenId !== tokenId);
+        const filteredTokenIds = nextHiddenTokenIdsByBackground[backgroundId]
+          .filter((hiddenTokenId) => !deletedTokenIds.has(hiddenTokenId));
         if (filteredTokenIds.length) {
           nextHiddenTokenIdsByBackground[backgroundId] = filteredTokenIds;
         } else {
@@ -113,7 +142,8 @@ export const deleteGrigliataCustomToken = onCall<DeleteGrigliataCustomTokenPaylo
     return {
       success: true,
       tokenId,
-      deletedPlacementCount: placementsSnap.size,
+      deletedPlacementCount: placementDocs.length,
+      deletedInstanceCount: instanceDocs.length,
     };
   }
 );

@@ -25,6 +25,17 @@ const getTraySummaryText = (hasActiveMap) => (
 
 const getTokenStatusLabel = (token, activeMapName, hasActiveMap) => {
   if (!hasActiveMap) return 'Select a map to place this token';
+  if (token?.tokenType === 'custom') {
+    const activePlacementCount = Math.max(0, Number(token?.activePlacementCount) || 0);
+    if (activePlacementCount < 1) {
+      return activeMapName ? `No active instances in ${activeMapName}` : 'No active instances on the active map';
+    }
+
+    const instanceLabel = activePlacementCount === 1 ? 'instance' : 'instances';
+    return activeMapName
+      ? `${activePlacementCount} active ${instanceLabel} in ${activeMapName}`
+      : `${activePlacementCount} active ${instanceLabel} on the active map`;
+  }
   if (token?.isHiddenByManager) {
     return activeMapName ? `Hidden on ${activeMapName} by the DM` : 'Hidden on the active map by the DM';
   }
@@ -44,7 +55,7 @@ const getTokenHelpText = (token, hasActiveMap) => {
   if (!token?.imageUrl) {
     return token?.tokenType === 'character'
       ? 'Upload a profile image from the navbar first. Without it, your main character token stays disabled.'
-      : 'Upload an image for this custom token before dragging it onto the map.';
+      : 'Upload an image for this custom token template before dragging it onto the map.';
   }
   return '';
 };

@@ -98,10 +98,14 @@ const GRIGLIATA_HIDDEN_BACKGROUND_IDS_FIELD = 'grigliata_hidden_background_ids';
 const GRIGLIATA_HIDDEN_TOKEN_IDS_BY_BACKGROUND_FIELD = 'grigliata_hidden_token_ids_by_background';
 const GRIGLIATA_SHARE_INTERACTIONS_FIELD = 'grigliata_share_interactions';
 const GRIGLIATA_CUSTOM_TOKEN_DELETE_FUNCTION = 'deleteGrigliataCustomToken';
+const GRIGLIATA_CUSTOM_TOKEN_SPAWN_FUNCTION = 'spawnGrigliataCustomTokenInstance';
+const GRIGLIATA_CUSTOM_TOKEN_UPDATE_FUNCTION = 'updateGrigliataCustomTokenTemplate';
 const GRIGLIATA_SPAWN_FOE_TOKEN_FUNCTION = 'spawnGrigliataFoeToken';
 
 const deleteGrigliataCustomTokenCallable = httpsCallable(functions, GRIGLIATA_CUSTOM_TOKEN_DELETE_FUNCTION);
+const spawnGrigliataCustomTokenInstanceCallable = httpsCallable(functions, GRIGLIATA_CUSTOM_TOKEN_SPAWN_FUNCTION);
 const spawnGrigliataFoeTokenCallable = httpsCallable(functions, GRIGLIATA_SPAWN_FOE_TOKEN_FUNCTION);
+const updateGrigliataCustomTokenTemplateCallable = httpsCallable(functions, GRIGLIATA_CUSTOM_TOKEN_UPDATE_FUNCTION);
 
 const buildHiddenPlacementSettingsPayload = ({
   backgroundId,
@@ -151,6 +155,14 @@ const normalizeCurrentResourceValue = (value, fallback = 0) => (
   normalizeNonNegativeNumericValue(value, fallback)
 );
 const normalizeTokenNotesValue = (value) => (typeof value === 'string' ? value : '');
+const resolveCustomTokenRole = (token = {}) => (
+  token?.tokenType === 'custom'
+    ? (token?.customTokenRole === 'instance' ? 'instance' : 'template')
+    : ''
+);
+const isCustomTokenInstance = (token = {}) => (
+  token?.tokenType === 'custom' && resolveCustomTokenRole(token) === 'instance'
+);
 const hasFiniteOwnNumericField = (value, key) => (
   !!value
   && typeof value === 'object'
@@ -1916,8 +1928,27 @@ export default function GrigliataPage() {
           })
       );
       const deleteTargetTokenProfiles = new Map(tokenProfileEntries);
+      const customInstanceTokenIds = [...new Set(
+        placementChunk
+          .filter(({ tokenId }) => isCustomTokenInstance(deleteTargetTokenProfiles.get(tokenId) || null))
+          .map(({ tokenId }) => tokenId)
+      )];
+
+      for (const customInstanceTokenId of customInstanceTokenIds) {
+        await deleteGrigliataCustomTokenCallable({ tokenId: customInstanceTokenId });
+      }
+
+      const customInstanceTokenIdSet = new Set(customInstanceTokenIds);
+      const directDeletePlacements = placementChunk.filter(
+        ({ tokenId }) => !customInstanceTokenIdSet.has(tokenId)
+      );
+
+      if (!directDeletePlacements.length) {
+        continue;
+      }
+
       const batch = writeBatch(db);
-      placementChunk.forEach(({ ownerUid, placementId, tokenId }) => {
+      directDeletePlacements.forEach(({ ownerUid, placementId, tokenId }) => {
         const tokenProfile = deleteTargetTokenProfiles.get(tokenId) || null;
         batch.delete(doc(db, 'grigliata_token_placements', placementId));
         if (tokenProfile?.tokenType === 'foe') {
@@ -2012,13 +2043,16 @@ export default function GrigliataPage() {
       });
       uploadedPath = imagePath;
 
-      await addDoc(collection(db, 'grigliata_tokens'), {
+      const templateRef = doc(collection(db, 'grigliata_tokens'));
+      await setDoc(templateRef, {
         ownerUid: currentUserId,
         characterId: '',
         label: trimmedLabel,
         imageUrl,
         imagePath,
         tokenType: 'custom',
+        customTokenRole: 'template',
+        customTemplateId: templateRef.id,
         imageSource: 'uploaded',
         notes: normalizeTokenNotesValue(notes),
         stats: {
@@ -2092,16 +2126,12 @@ export default function GrigliataPage() {
         nextImagePath = uploadedImage.imagePath;
       }
 
-      await setDoc(doc(db, 'grigliata_tokens', tokenId), {
-        ownerUid: currentUserId,
+      await updateGrigliataCustomTokenTemplateCallable({
+        tokenId,
         label: trimmedLabel,
         imageUrl: nextImageUrl,
         imagePath: nextImagePath,
-        tokenType: 'custom',
-        imageSource: 'uploaded',
-        updatedAt: serverTimestamp(),
-        updatedBy: currentUserId,
-      }, { merge: true });
+      });
 
       return true;
     } catch (error) {
@@ -2757,6 +2787,16 @@ export default function GrigliataPage() {
     setBoardError('');
     const snapped = snapBoardPointToGrid(worldPoint, grid, 'center');
     try {
+      if (targetToken.tokenType === 'custom') {
+        await spawnGrigliataCustomTokenInstanceCallable({
+          templateTokenId: tokenId,
+          backgroundId: activeBackgroundId,
+          col: snapped.col,
+          row: snapped.row,
+        });
+        return;
+      }
+
       await upsertTokenPlacement({
         backgroundId: activeBackgroundId,
         tokenId,
@@ -2770,7 +2810,11 @@ export default function GrigliataPage() {
       setBoardError(
         isPermissionDeniedError(error)
           ? 'The DM is currently hiding or controlling that token.'
-          : 'Unable to place your token right now.'
+          : (
+            targetToken.tokenType === 'custom'
+              ? 'Unable to spawn that custom token right now.'
+              : 'Unable to place your token right now.'
+          )
       );
     }
   };

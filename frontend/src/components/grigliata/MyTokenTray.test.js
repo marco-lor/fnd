@@ -60,6 +60,7 @@ describe('MyTokenTray', () => {
         label: 'Wolf',
         imageUrl: 'https://example.com/wolf.png',
         imagePath: 'grigliata/tokens/user-1/wolf.png',
+        activePlacementCount: 1,
         placed: true,
         col: 2,
         row: 3,
@@ -68,7 +69,7 @@ describe('MyTokenTray', () => {
     });
 
     expect(screen.getByText('Drag and drop tokens onto the active map to place or reposition them.')).toBeInTheDocument();
-    expect(screen.getByText('Placed in Sunken Ruins')).toBeInTheDocument();
+    expect(screen.getByText('1 active instance in Sunken Ruins')).toBeInTheDocument();
     expect(screen.queryByText(/Your main character token stays pinned first/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Drag this portrait onto the active map/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Drag this custom token onto the active map/i)).not.toBeInTheDocument();
@@ -153,7 +154,7 @@ describe('MyTokenTray', () => {
       }],
     });
 
-    expect(screen.getByText(/Upload an image for this custom token before dragging it onto the map/i)).toBeInTheDocument();
+    expect(screen.getByText(/Upload an image for this custom token template before dragging it onto the map/i)).toBeInTheDocument();
     expect(screen.getByText('Wolf').closest('[draggable]')).toHaveAttribute('draggable', 'false');
   });
 
