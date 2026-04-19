@@ -11,6 +11,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -143,9 +144,66 @@ const normalizeNumericDraftValue = (value, fallback = 0) => {
   const numericValue = Number(value);
   return Number.isFinite(numericValue) ? numericValue : fallback;
 };
-const clampResourceCurrentValue = (value, total) => (
-  Math.max(0, Math.min(normalizeNumericDraftValue(value, 0), Math.max(0, normalizeNumericDraftValue(total, 0))))
+const normalizeNonNegativeNumericValue = (value, fallback = 0) => (
+  Math.max(0, normalizeNumericDraftValue(value, fallback))
 );
+const normalizeCurrentResourceValue = (value, fallback = 0) => (
+  normalizeNonNegativeNumericValue(value, fallback)
+);
+const normalizeTokenNotesValue = (value) => (typeof value === 'string' ? value : '');
+const hasFiniteOwnNumericField = (value, key) => (
+  !!value
+  && typeof value === 'object'
+  && !Array.isArray(value)
+  && Object.prototype.hasOwnProperty.call(value, key)
+  && Number.isFinite(Number(value[key]))
+);
+const buildMissingResourceTotals = (stats = {}, { hasShield = true } = {}) => ({
+  hpTotal: !hasFiniteOwnNumericField(stats, 'hpTotal'),
+  manaTotal: !hasFiniteOwnNumericField(stats, 'manaTotal'),
+  shieldTotal: hasShield ? !hasFiniteOwnNumericField(stats, 'shieldTotal') : false,
+});
+const buildEmptySelectedExternalTokenState = () => ({
+  tokenId: '',
+  ownerUid: '',
+  tokenType: '',
+  userData: null,
+  tokenProfile: null,
+  isUserDataReady: false,
+  isTokenProfileReady: false,
+  userDataError: '',
+  tokenProfileError: '',
+});
+const buildCharacterResourceValues = (stats = {}) => {
+  const hpTotal = normalizeNonNegativeNumericValue(stats?.hpTotal, 0);
+  const manaTotal = normalizeNonNegativeNumericValue(stats?.manaTotal, 0);
+  const shieldTotal = normalizeNonNegativeNumericValue(stats?.barrieraTotal, 0);
+
+  return {
+    hpCurrent: normalizeCurrentResourceValue(stats?.hpCurrent, 0),
+    hpTotal,
+    manaCurrent: normalizeCurrentResourceValue(stats?.manaCurrent, 0),
+    manaTotal,
+    shieldCurrent: normalizeCurrentResourceValue(stats?.barrieraCurrent ?? stats?.barriera ?? 0, 0),
+    shieldTotal,
+    hasShield: true,
+  };
+};
+const buildProfileResourceValues = (stats = {}, { hasShield = true } = {}) => {
+  const hpTotal = normalizeNonNegativeNumericValue(stats?.hpTotal, 0);
+  const manaTotal = normalizeNonNegativeNumericValue(stats?.manaTotal, 0);
+  const shieldTotal = normalizeNonNegativeNumericValue(stats?.shieldTotal, 0);
+
+  return {
+    hpCurrent: normalizeCurrentResourceValue(stats?.hpCurrent, 0),
+    hpTotal,
+    manaCurrent: normalizeCurrentResourceValue(stats?.manaCurrent, 0),
+    manaTotal,
+    shieldCurrent: hasShield ? normalizeCurrentResourceValue(stats?.shieldCurrent, 0) : 0,
+    shieldTotal: hasShield ? shieldTotal : 0,
+    hasShield,
+  };
+};
 const normalizeFoeParametri = (value, fallback = {}) => {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
   return ['Base', 'Combattimento', 'Special'].reduce((nextParametri, groupKey) => {
@@ -244,6 +302,8 @@ export default function GrigliataPage() {
   const [deletingCustomTokenId, setDeletingCustomTokenId] = useState('');
   const [selectedBoardTokenIds, setSelectedBoardTokenIds] = useState([]);
   const [savingFoeTokenId, setSavingFoeTokenId] = useState('');
+  const [selectedExternalTokenState, setSelectedExternalTokenState] = useState(() => buildEmptySelectedExternalTokenState());
+  const [savingSelectedTokenDetailsId, setSavingSelectedTokenDetailsId] = useState('');
   const isTrayDragging = !!activeTrayDragType;
 
   const role = (userData?.role || '').toLowerCase();
@@ -328,34 +388,238 @@ export default function GrigliataPage() {
       .filter(Boolean),
     [boardTokensById, selectedBoardTokenIds]
   );
-  const selectedFoeToken = useMemo(() => {
-    if (!isManager || selectedBoardTokens.length !== 1) {
+  const selectedBoardToken = selectedBoardTokens.length === 1 ? selectedBoardTokens[0] : null;
+  const selectedBoardTokenId = selectedBoardToken?.tokenId || '';
+
+  useEffect(() => {
+    if (!isManager || !selectedBoardToken) {
+      setSelectedExternalTokenState(buildEmptySelectedExternalTokenState());
+      return undefined;
+    }
+
+    const isOwnedByCurrentUser = (
+      selectedBoardToken.ownerUid === currentUserId
+      || selectedBoardToken.tokenId === currentUserId
+    );
+    const tokenType = selectedBoardToken.tokenType || 'character';
+    if (isOwnedByCurrentUser || tokenType === 'foe') {
+      setSelectedExternalTokenState(buildEmptySelectedExternalTokenState());
+      return undefined;
+    }
+
+    const nextSelectionState = {
+      tokenId: selectedBoardToken.tokenId || '',
+      ownerUid: selectedBoardToken.ownerUid || '',
+      tokenType,
+      userData: null,
+      tokenProfile: null,
+      isUserDataReady: tokenType !== 'character',
+      isTokenProfileReady: false,
+      userDataError: '',
+      tokenProfileError: '',
+    };
+    setSelectedExternalTokenState(nextSelectionState);
+
+    let isActive = true;
+    const unsubscribes = [];
+
+    const updateSelectedExternalTokenState = (updater) => {
+      if (!isActive) {
+        return;
+      }
+
+      setSelectedExternalTokenState((currentState) => {
+        if (
+          currentState.tokenId !== nextSelectionState.tokenId
+          || currentState.ownerUid !== nextSelectionState.ownerUid
+          || currentState.tokenType !== nextSelectionState.tokenType
+        ) {
+          return currentState;
+        }
+
+        return updater(currentState);
+      });
+    };
+
+    if (tokenType === 'character' && nextSelectionState.ownerUid) {
+      unsubscribes.push(onSnapshot(
+        doc(db, 'users', nextSelectionState.ownerUid),
+        (snapshot) => {
+          updateSelectedExternalTokenState((currentState) => ({
+            ...currentState,
+            userData: snapshot.exists() ? snapshot.data() : null,
+            isUserDataReady: true,
+            userDataError: '',
+          }));
+        },
+        (error) => {
+          console.error('Failed to subscribe to selected Grigliata character user data:', error);
+          updateSelectedExternalTokenState((currentState) => ({
+            ...currentState,
+            userData: null,
+            isUserDataReady: false,
+            userDataError: 'Unable to load the current character sheet values.',
+          }));
+        }
+      ));
+    }
+
+    if (tokenType === 'character' || tokenType === 'custom') {
+      unsubscribes.push(onSnapshot(
+        doc(db, 'grigliata_tokens', nextSelectionState.tokenId),
+        (snapshot) => {
+          updateSelectedExternalTokenState((currentState) => ({
+            ...currentState,
+            tokenProfile: snapshot.exists() ? {
+              id: snapshot.id,
+              ...snapshot.data(),
+            } : null,
+            isTokenProfileReady: true,
+            tokenProfileError: '',
+          }));
+        },
+        (error) => {
+          console.error('Failed to subscribe to selected Grigliata token profile:', error);
+          updateSelectedExternalTokenState((currentState) => ({
+            ...currentState,
+            tokenProfile: null,
+            isTokenProfileReady: false,
+            tokenProfileError: 'Unable to load the current token profile.',
+          }));
+        }
+      ));
+    }
+
+    return () => {
+      isActive = false;
+      unsubscribes.forEach((unsubscribe) => unsubscribe?.());
+    };
+  }, [currentUserId, isManager, selectedBoardToken]);
+
+  const selectedTokenDetails = useMemo(() => {
+    if (!selectedBoardToken) {
       return null;
     }
 
-    const selectedToken = selectedBoardTokens[0];
-    const tokenProfile = tokenProfilesByTokenId.get(selectedToken.tokenId) || null;
-    if ((tokenProfile?.tokenType || selectedToken?.tokenType) !== 'foe') {
+    const tokenType = selectedBoardToken.tokenType || 'character';
+    const isOwnedByCurrentUser = (
+      selectedBoardToken.ownerUid === currentUserId
+      || selectedBoardToken.tokenId === currentUserId
+    );
+    const isExternalSelection = !isOwnedByCurrentUser && tokenType !== 'foe';
+    const externalSelectionState = isExternalSelection
+      && selectedExternalTokenState.tokenId === selectedBoardToken.tokenId
+      && selectedExternalTokenState.ownerUid === (selectedBoardToken.ownerUid || '')
+      && selectedExternalTokenState.tokenType === tokenType
+      ? selectedExternalTokenState
+      : null;
+    const isSelectedExternalTokenReady = !isExternalSelection || (
+      !!externalSelectionState
+      && externalSelectionState.isTokenProfileReady
+      && (tokenType !== 'character' || externalSelectionState.isUserDataReady)
+    );
+    const selectedExternalUserData = externalSelectionState?.userData || null;
+    const selectedExternalTokenProfile = externalSelectionState?.tokenProfile || null;
+    const selectedTokenLoadingMessage = externalSelectionState?.userDataError
+      || externalSelectionState?.tokenProfileError
+      || (tokenType === 'custom'
+        ? 'Loading the current token values...'
+        : 'Loading the current character sheet values...');
+
+    if (tokenType === 'foe' && !isManager) {
       return null;
     }
 
+    if (tokenType !== 'foe' && !isManager && !isOwnedByCurrentUser) {
+      return null;
+    }
+
+    const localTokenProfile = tokenProfilesByTokenId.get(selectedBoardToken.tokenId) || null;
+    const tokenProfile = isOwnedByCurrentUser ? localTokenProfile : selectedExternalTokenProfile;
+    const profileLabel = typeof tokenProfile?.label === 'string' ? tokenProfile.label.trim() : '';
+    const resolvedImageUrl = tokenProfile?.imageUrl || selectedBoardToken.imageUrl || '';
+    const resolvedImagePath = tokenProfile?.imagePath || '';
+    const resolvedNotes = normalizeTokenNotesValue(tokenProfile?.notes);
+
+    if (tokenType === 'foe') {
+      const foeStats = tokenProfile?.stats || {};
+      const resourceValues = buildProfileResourceValues(foeStats, { hasShield: false });
+      return {
+        ...(tokenProfile || {}),
+        ...selectedBoardToken,
+        isReady: true,
+        tokenType: 'foe',
+        label: profileLabel || selectedBoardToken.label || 'Foe',
+        imageUrl: resolvedImageUrl,
+        imagePath: resolvedImagePath,
+        category: tokenProfile?.category || '',
+        rank: tokenProfile?.rank || '',
+        dadoAnima: tokenProfile?.dadoAnima || '',
+        notes: resolvedNotes,
+        foeSourceId: tokenProfile?.foeSourceId || '',
+        stats: foeStats,
+        Parametri: tokenProfile?.Parametri || {},
+        spells: Array.isArray(tokenProfile?.spells) ? tokenProfile.spells : [],
+        tecniche: Array.isArray(tokenProfile?.tecniche) ? tokenProfile.tecniche : [],
+        ...resourceValues,
+      };
+    }
+
+    if (tokenType === 'character') {
+      const userSource = isOwnedByCurrentUser ? userData : selectedExternalUserData;
+      const resourceValues = buildCharacterResourceValues(userSource?.stats || {});
+      return {
+        ...(tokenProfile || {}),
+        ...selectedBoardToken,
+        isReady: isSelectedExternalTokenReady,
+        loadingMessage: isSelectedExternalTokenReady ? '' : selectedTokenLoadingMessage,
+        tokenType: 'character',
+        ownerUid: selectedBoardToken.ownerUid || selectedBoardToken.tokenId,
+        tokenId: selectedBoardToken.tokenId,
+        characterId: tokenProfile?.characterId || selectedBoardToken.characterId || userSource?.characterId || '',
+        label: profileLabel || selectedBoardToken.label || userSource?.characterId || 'Character',
+        imageUrl: resolvedImageUrl,
+        imagePath: resolvedImagePath,
+        notes: resolvedNotes,
+        stats: {
+          hpCurrent: resourceValues.hpCurrent,
+          hpTotal: resourceValues.hpTotal,
+          manaCurrent: resourceValues.manaCurrent,
+          manaTotal: resourceValues.manaTotal,
+          shieldCurrent: resourceValues.shieldCurrent,
+          shieldTotal: resourceValues.shieldTotal,
+        },
+        ...resourceValues,
+      };
+    }
+
+    const customStats = tokenProfile?.stats || {};
+    const resourceValues = buildProfileResourceValues(customStats, { hasShield: true });
+    const missingResourceTotals = buildMissingResourceTotals(customStats, { hasShield: true });
     return {
       ...(tokenProfile || {}),
-      ...selectedToken,
-      label: selectedToken.label || tokenProfile?.label || 'Foe',
-      imageUrl: selectedToken.imageUrl || tokenProfile?.imageUrl || '',
-      imagePath: tokenProfile?.imagePath || '',
-      category: tokenProfile?.category || '',
-      rank: tokenProfile?.rank || '',
-      dadoAnima: tokenProfile?.dadoAnima || '',
-      notes: tokenProfile?.notes || '',
-      foeSourceId: tokenProfile?.foeSourceId || '',
-      stats: tokenProfile?.stats || {},
-      Parametri: tokenProfile?.Parametri || {},
-      spells: Array.isArray(tokenProfile?.spells) ? tokenProfile.spells : [],
-      tecniche: Array.isArray(tokenProfile?.tecniche) ? tokenProfile.tecniche : [],
+      ...selectedBoardToken,
+      isReady: isSelectedExternalTokenReady,
+      loadingMessage: isSelectedExternalTokenReady ? '' : selectedTokenLoadingMessage,
+      tokenType: 'custom',
+      ownerUid: selectedBoardToken.ownerUid,
+      tokenId: selectedBoardToken.tokenId,
+      label: profileLabel || selectedBoardToken.label || 'Custom Token',
+      imageUrl: resolvedImageUrl,
+      imagePath: resolvedImagePath,
+      notes: resolvedNotes,
+      stats: customStats,
+      missingResourceTotals,
+      ...resourceValues,
     };
-  }, [isManager, selectedBoardTokens, tokenProfilesByTokenId]);
+  }, [
+    currentUserId,
+    isManager,
+    selectedBoardToken,
+    selectedExternalTokenState,
+    tokenProfilesByTokenId,
+    userData,
+  ]);
   const trayCurrentUserToken = isManager ? null : currentUserToken;
   useEffect(() => {
     setSelectedBoardTokenIds([]);
@@ -1712,7 +1976,14 @@ export default function GrigliataPage() {
     };
   };
 
-  const handleCreateCustomToken = async ({ label, imageFile }) => {
+  const handleCreateCustomToken = async ({
+    label,
+    imageFile,
+    hpCurrent,
+    manaCurrent,
+    shieldCurrent,
+    notes,
+  }) => {
     if (!currentUserId) return false;
 
     const trimmedLabel = typeof label === 'string' ? label.trim() : '';
@@ -1728,6 +1999,9 @@ export default function GrigliataPage() {
     }
 
     let uploadedPath = '';
+    const nextHpTotal = normalizeNonNegativeNumericValue(hpCurrent, 0);
+    const nextManaTotal = normalizeNonNegativeNumericValue(manaCurrent, 0);
+    const nextShieldTotal = normalizeNonNegativeNumericValue(shieldCurrent, 0);
 
     setBoardError('');
     setIsCreatingCustomToken(true);
@@ -1746,6 +2020,15 @@ export default function GrigliataPage() {
         imagePath,
         tokenType: 'custom',
         imageSource: 'uploaded',
+        notes: normalizeTokenNotesValue(notes),
+        stats: {
+          hpTotal: nextHpTotal,
+          hpCurrent: nextHpTotal,
+          manaTotal: nextManaTotal,
+          manaCurrent: nextManaTotal,
+          shieldTotal: nextShieldTotal,
+          shieldCurrent: nextShieldTotal,
+        },
         createdAt: serverTimestamp(),
         createdBy: currentUserId,
         updatedAt: serverTimestamp(),
@@ -1874,6 +2157,7 @@ export default function GrigliataPage() {
     dadoAnima,
     stats,
     Parametri,
+    notes,
   }) => {
     if (!isManager || !currentUserId || !tokenId) return false;
 
@@ -1893,8 +2177,8 @@ export default function GrigliataPage() {
     const nextStats = {
       ...existingStats,
       ...(stats || {}),
-      hpCurrent: clampResourceCurrentValue(stats?.hpCurrent, stats?.hpTotal ?? existingStats?.hpTotal),
-      manaCurrent: clampResourceCurrentValue(stats?.manaCurrent, stats?.manaTotal ?? existingStats?.manaTotal),
+      hpCurrent: normalizeCurrentResourceValue(stats?.hpCurrent, existingStats?.hpCurrent ?? 0),
+      manaCurrent: normalizeCurrentResourceValue(stats?.manaCurrent, existingStats?.manaCurrent ?? 0),
     };
     const nextParametri = normalizeFoeParametri(Parametri, existingToken.Parametri || {});
     const nextDadoAnima = typeof dadoAnima === 'string' ? dadoAnima.trim() : (existingToken.dadoAnima || '');
@@ -1912,6 +2196,7 @@ export default function GrigliataPage() {
         dadoAnima: nextDadoAnima,
         stats: nextStats,
         Parametri: nextParametri,
+        notes: normalizeTokenNotesValue(notes),
         updatedAt: serverTimestamp(),
         updatedBy: currentUserId,
       }, { merge: true });
@@ -1932,6 +2217,107 @@ export default function GrigliataPage() {
       return false;
     } finally {
       setSavingFoeTokenId('');
+    }
+  };
+
+  const handleSaveSelectedTokenDetails = async ({
+    tokenId,
+    tokenType,
+    ownerUid,
+    characterId,
+    label,
+    imageUrl,
+    imagePath,
+    hpCurrent,
+    hpTotal,
+    manaCurrent,
+    manaTotal,
+    shieldCurrent,
+    shieldTotal,
+    notes,
+  }) => {
+    if (!currentUserId || !tokenId) return false;
+
+    const activeSelectedTokenDetails = selectedTokenDetails?.tokenId === tokenId
+      ? selectedTokenDetails
+      : null;
+
+    if (selectedBoardTokenId !== tokenId || !activeSelectedTokenDetails) {
+      setBoardError('Select a token before saving its details.');
+      return false;
+    }
+
+    if (activeSelectedTokenDetails.isReady === false) {
+      setBoardError(activeSelectedTokenDetails.loadingMessage || 'Wait for the selected token details to finish loading.');
+      return false;
+    }
+
+    setBoardError('');
+    setSavingSelectedTokenDetailsId(tokenId);
+    try {
+      if (tokenType === 'character') {
+        await Promise.all([
+          updateDoc(doc(db, 'users', ownerUid || tokenId), {
+            'stats.hpCurrent': normalizeCurrentResourceValue(hpCurrent, 0),
+            'stats.manaCurrent': normalizeCurrentResourceValue(manaCurrent, 0),
+            'stats.barrieraCurrent': normalizeCurrentResourceValue(shieldCurrent, 0),
+          }),
+          setDoc(doc(db, 'grigliata_tokens', tokenId), {
+            ownerUid: ownerUid || tokenId,
+            characterId: characterId || '',
+            label: label || 'Character',
+            imageUrl: imageUrl || '',
+            imagePath: imagePath || '',
+            tokenType: 'character',
+            imageSource: 'profile',
+            notes: normalizeTokenNotesValue(notes),
+            updatedAt: serverTimestamp(),
+            updatedBy: currentUserId,
+          }, { merge: true }),
+        ]);
+
+        return true;
+      }
+
+      if (tokenType === 'custom') {
+        const missingResourceTotals = activeSelectedTokenDetails.missingResourceTotals || {};
+        const nextHpCurrent = normalizeCurrentResourceValue(hpCurrent, 0);
+        const nextManaCurrent = normalizeCurrentResourceValue(manaCurrent, 0);
+        const nextShieldCurrent = normalizeCurrentResourceValue(shieldCurrent, 0);
+        const nextHpTotal = missingResourceTotals.hpTotal
+          ? nextHpCurrent
+          : normalizeNonNegativeNumericValue(hpTotal, 0);
+        const nextManaTotal = missingResourceTotals.manaTotal
+          ? nextManaCurrent
+          : normalizeNonNegativeNumericValue(manaTotal, 0);
+        const nextShieldTotal = missingResourceTotals.shieldTotal
+          ? nextShieldCurrent
+          : normalizeNonNegativeNumericValue(shieldTotal, 0);
+
+        await setDoc(doc(db, 'grigliata_tokens', tokenId), {
+          notes: normalizeTokenNotesValue(notes),
+          stats: {
+            hpTotal: nextHpTotal,
+            hpCurrent: nextHpCurrent,
+            manaTotal: nextManaTotal,
+            manaCurrent: nextManaCurrent,
+            shieldTotal: nextShieldTotal,
+            shieldCurrent: nextShieldCurrent,
+          },
+          updatedAt: serverTimestamp(),
+          updatedBy: currentUserId,
+        }, { merge: true });
+
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error('Failed to save selected Grigliata token details:', error);
+      setBoardError('Unable to save those token details right now.');
+      return false;
+    } finally {
+      setSavingSelectedTokenDetailsId('');
     }
   };
 
@@ -2715,6 +3101,7 @@ export default function GrigliataPage() {
                 isTokenDeadActionPending={isTokenDeadActionPending}
                 onUpdateTokenStatuses={handleUpdateTokenStatuses}
                 isTokenStatusActionPending={isTokenStatusActionPending}
+                selectedTokenDetails={selectedTokenDetails}
                 sharedInteractions={sharedInteractions}
                 onSharedInteractionChange={handleSharedInteractionChange}
                 onSelectedTokenIdsChange={setSelectedBoardTokenIds}
@@ -2770,7 +3157,7 @@ export default function GrigliataPage() {
                     currentUserToken={trayCurrentUserToken}
                     customTokens={customUserTokens}
                     foeLibrary={foeLibrary}
-                    selectedFoeToken={selectedFoeToken}
+                    selectedTokenDetails={selectedTokenDetails}
                     activeMapName={activeBackground?.name || ''}
                     hasActiveMap={!!activeBackgroundId}
                     onDragStart={(payload) => setActiveTrayDragType(payload?.type || 'grigliata-token')}
@@ -2781,6 +3168,8 @@ export default function GrigliataPage() {
                     updatingCustomTokenId={updatingCustomTokenId}
                     onDeleteCustomToken={handleDeleteCustomToken}
                     deletingCustomTokenId={deletingCustomTokenId}
+                    onSaveSelectedTokenDetails={handleSaveSelectedTokenDetails}
+                    savingSelectedTokenDetailsId={savingSelectedTokenDetailsId}
                     onUpdateFoeToken={handleUpdateFoeToken}
                     savingFoeTokenId={savingFoeTokenId}
                   />

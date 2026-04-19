@@ -11,6 +11,7 @@ import {
   Text,
 } from 'react-konva';
 import { FaHandPointer, FaRulerHorizontal } from 'react-icons/fa';
+import { GiHearts, GiMagicSwirl, GiShield } from 'react-icons/gi';
 import {
   FiEye,
   FiEyeOff,
@@ -166,6 +167,30 @@ const buildSelectionActionToolbarPosition = ({ left, top, width, buttonSize, gap
 });
 
 const clampToRange = (value, min, max) => Math.min(max, Math.max(min, value));
+const TOKEN_HUD_EDGE_PADDING = 12;
+const TOKEN_HUD_CHIP_GAP = 6;
+const TOKEN_HUD_CHIP_ROW_HEIGHT = 32;
+const TOKEN_HUD_CHIP_COLLISION_GAP = 10;
+const buildSelectedTokenHudChipLayout = ({
+  chipCount,
+  tokenScreenSize,
+  stageWidth,
+  forceTwoRows = false,
+}) => {
+  const maxWidth = Math.max(180, stageWidth - (TOKEN_HUD_EDGE_PADDING * 2));
+  const columns = forceTwoRows && chipCount > 2 ? 2 : chipCount;
+  const rows = Math.max(1, Math.ceil(chipCount / Math.max(1, columns)));
+  const preferredWidth = forceTwoRows
+    ? Math.max(180, (columns * 92) + (Math.max(0, columns - 1) * TOKEN_HUD_CHIP_GAP), tokenScreenSize * 2.05)
+    : Math.max(180, (chipCount * 96) + (Math.max(0, chipCount - 1) * TOKEN_HUD_CHIP_GAP), tokenScreenSize * 2.8);
+
+  return {
+    columns,
+    rows,
+    width: Math.min(preferredWidth, maxWidth),
+    height: (rows * TOKEN_HUD_CHIP_ROW_HEIGHT) + (Math.max(0, rows - 1) * TOKEN_HUD_CHIP_GAP),
+  };
+};
 const easeOutCubic = (value) => 1 - ((1 - clampToRange(value, 0, 1)) ** 3);
 const getAnimationTimestamp = () => (
   typeof performance !== 'undefined' && typeof performance.now === 'function'
@@ -385,6 +410,67 @@ const TokenStatusBadges = ({
         </Group>
       )}
     </>
+  );
+};
+
+const SelectedTokenResourceHud = ({
+  token,
+  hudState,
+}) => {
+  const prefersReducedMotion = useReducedMotion();
+
+  if (!token || !hudState) {
+    return null;
+  }
+
+  const statChips = [
+    { key: 'hp', label: 'HP', value: token.hpCurrent, icon: GiHearts, className: 'border-emerald-100/90 bg-emerald-600/95 text-white' },
+    { key: 'mana', label: 'Mana', value: token.manaCurrent, icon: GiMagicSwirl, className: 'border-cyan-100/90 bg-sky-600/95 text-white' },
+    ...(token.hasShield ? [{ key: 'shield', label: 'Shield', value: token.shieldCurrent, icon: GiShield, className: 'border-amber-100/95 bg-amber-500/95 text-white' }] : []),
+  ];
+  const chipTransition = prefersReducedMotion
+    ? { duration: 0.01 }
+    : { duration: 0.24, ease: [0.22, 1, 0.36, 1] };
+
+  return (
+    <div data-testid="selected-token-resource-hud" className="pointer-events-none absolute inset-0 z-[19]">
+      <AnimatePresence initial={false}>
+        <motion.div
+          key={`${token.tokenId}-chips`}
+          data-testid="selected-token-resource-chip-cluster"
+          className="pointer-events-none absolute grid justify-center justify-items-center gap-1.5"
+          style={{
+            left: hudState.chipLeft,
+            top: hudState.chipTop,
+            width: hudState.chipWidth,
+            gridTemplateColumns: `repeat(${hudState.chipColumns}, max-content)`,
+          }}
+          initial={prefersReducedMotion ? { opacity: 1 } : { opacity: 0, y: 10, scale: 0.94 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 6, scale: 0.96 }}
+          transition={chipTransition}
+        >
+          {statChips.map((chip, index) => (
+            <motion.div
+              key={chip.key}
+              data-testid={`selected-token-resource-chip-${chip.key}`}
+              aria-label={`${chip.label} ${Math.max(0, Number(chip.value) || 0)}`}
+              className={`inline-flex items-center justify-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold shadow-2xl shadow-black/55 ring-1 ring-black/35 ${chip.className}`}
+              style={hudState.chipColumns === 2 && statChips.length % 2 === 1 && index === statChips.length - 1
+                ? { gridColumn: '1 / -1', justifySelf: 'center' }
+                : undefined}
+              initial={prefersReducedMotion ? { opacity: 1 } : { opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 5 }}
+              transition={prefersReducedMotion ? { duration: 0.01 } : { ...chipTransition, delay: index * 0.04 }}
+            >
+              <chip.icon className="h-4 w-4 shrink-0 drop-shadow-[0_1px_2px_rgba(2,6,23,0.45)]" aria-hidden="true" />
+              <span>{Math.max(0, Number(chip.value) || 0)}</span>
+            </motion.div>
+          ))}
+        </motion.div>
+      </AnimatePresence>
+    </div>
   );
 };
 
@@ -1463,6 +1549,7 @@ export default function GrigliataBoard({
   isTokenDeadActionPending,
   onUpdateTokenStatuses,
   isTokenStatusActionPending,
+  selectedTokenDetails = null,
   onDropCurrentToken,
   onSelectedTokenIdsChange,
   sharedInteractions = [],
@@ -3175,6 +3262,103 @@ export default function GrigliataBoard({
     viewport.x,
     viewport.y,
   ]);
+  const selectedSingleTokenHudState = useMemo(() => {
+    if (
+      !selectedTokenDetails
+      || selectedTokenDetails.isReady === false
+      || selectedTokens.length !== 1
+      || selectionBox
+      || tokenDragState
+      || isTokenDragActive
+      || isRulerEnabled
+      || !!activeAoeFigureType
+      || !!selectedAoEFigureId
+    ) {
+      return null;
+    }
+
+    const selectedToken = selectedTokens[0];
+    if (!selectedToken || selectedToken.tokenId !== selectedTokenDetails.tokenId) {
+      return null;
+    }
+
+    const chipCount = selectedTokenDetails.hasShield ? 3 : 2;
+    const tokenScreenLeft = viewport.x + (selectedToken.renderPosition.x * viewport.scale);
+    const tokenScreenTop = viewport.y + (selectedToken.renderPosition.y * viewport.scale);
+    const tokenScreenSize = selectedToken.renderPosition.size * viewport.scale;
+    const tokenScreenCenterX = tokenScreenLeft + (tokenScreenSize / 2);
+    const obstacleRect = selectedTokenActionState
+      ? {
+        x: selectedTokenActionState.toolbarPosition.left,
+        y: selectedTokenActionState.toolbarPosition.top,
+        width: selectedTokenActionState.toolbarWidth,
+        height: selectedTokenActionState.toolbarHeight,
+      }
+      : null;
+    const resolveChipPlacement = (forceTwoRows = false) => {
+      const chipLayout = buildSelectedTokenHudChipLayout({
+        chipCount,
+        tokenScreenSize,
+        stageWidth: stageSize.width,
+        forceTwoRows,
+      });
+      const chipTop = clampToRange(
+        tokenScreenTop + tokenScreenSize + 12,
+        TOKEN_HUD_EDGE_PADDING,
+        Math.max(TOKEN_HUD_EDGE_PADDING, stageSize.height - chipLayout.height - TOKEN_HUD_EDGE_PADDING)
+      );
+      const chipLeftMin = TOKEN_HUD_EDGE_PADDING;
+      const chipLeftMax = Math.max(chipLeftMin, stageSize.width - chipLayout.width - TOKEN_HUD_EDGE_PADDING);
+      let chipLeft = clampToRange(
+        tokenScreenCenterX - (chipLayout.width / 2),
+        chipLeftMin,
+        chipLeftMax
+      );
+      const chipRect = {
+        x: chipLeft,
+        y: chipTop,
+        width: chipLayout.width,
+        height: chipLayout.height,
+      };
+
+      if (obstacleRect && rectsIntersect(chipRect, obstacleRect)) {
+        const shiftedLeft = obstacleRect.x - chipLayout.width - TOKEN_HUD_CHIP_COLLISION_GAP;
+        if (shiftedLeft >= chipLeftMin) {
+          chipLeft = shiftedLeft;
+        } else if (!forceTwoRows && chipCount > 2) {
+          return resolveChipPlacement(true);
+        }
+      }
+
+      return {
+        chipLeft: clampToRange(chipLeft, chipLeftMin, chipLeftMax),
+        chipTop,
+        chipWidth: chipLayout.width,
+        chipHeight: chipLayout.height,
+        chipColumns: chipLayout.columns,
+      };
+    };
+    const chipPlacement = resolveChipPlacement();
+
+    return {
+      ...chipPlacement,
+    };
+  }, [
+    activeAoeFigureType,
+    isTokenDragActive,
+    isRulerEnabled,
+    selectedAoEFigureId,
+    selectedTokenActionState,
+    selectedTokenDetails,
+    selectedTokens,
+    selectionBox,
+    stageSize.height,
+    stageSize.width,
+    tokenDragState,
+    viewport.scale,
+    viewport.x,
+    viewport.y,
+  ]);
   const selectedAoEFigureActionState = useMemo(() => {
     if (
       !selectedAoEFigure
@@ -3625,6 +3809,13 @@ export default function GrigliataBoard({
               )}
             </Layer>
           </Stage>
+        )}
+
+        {selectedSingleTokenHudState && selectedTokenDetails && (
+          <SelectedTokenResourceHud
+            token={selectedTokenDetails}
+            hudState={selectedSingleTokenHudState}
+          />
         )}
 
         {activeOverflowToken && activeOverflowCardStyle && (

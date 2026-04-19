@@ -2,7 +2,7 @@ import { act, createEvent, fireEvent, render, screen, waitFor } from '@testing-l
 import { FOE_LIBRARY_DRAG_TYPE, TRAY_DRAG_MIME } from './constants';
 import MyTokenTray from './MyTokenTray';
 
-const renderTray = (props = {}) => {
+const buildTrayProps = (props = {}) => {
   const {
     currentUserToken,
     customTokens,
@@ -27,16 +27,16 @@ const renderTray = (props = {}) => {
       ...currentUserToken,
     };
 
-  return render(
-    <MyTokenTray
-      currentUserToken={resolvedCurrentUserToken}
-      customTokens={customTokens || []}
-      activeMapName={activeMapName}
-      hasActiveMap={hasActiveMap}
-      {...restProps}
-    />
-  );
+  return {
+    currentUserToken: resolvedCurrentUserToken,
+    customTokens: customTokens || [],
+    activeMapName,
+    hasActiveMap,
+    ...restProps,
+  };
 };
+
+const renderTray = (props = {}) => render(<MyTokenTray {...buildTrayProps(props)} />);
 
 const createDataTransfer = () => ({
   setData: jest.fn(),
@@ -226,8 +226,45 @@ describe('MyTokenTray', () => {
       expect(onCreateCustomToken).toHaveBeenCalledWith({
         label: 'Summoned Wolf',
         imageFile: file,
+        hpCurrent: 0,
+        manaCurrent: 0,
+        shieldCurrent: 0,
+        notes: '',
       });
     });
+  });
+
+  test('creates a custom token with resource values and notes', async () => {
+    const onCreateCustomToken = jest.fn(() => Promise.resolve(true));
+    renderTray({ onCreateCustomToken });
+
+    fireEvent.change(screen.getByPlaceholderText('Summoned Wolf'), {
+      target: { value: 'Arcane Echo' },
+    });
+    fireEvent.change(screen.getByLabelText('HP'), {
+      target: { value: '12' },
+    });
+    fireEvent.change(screen.getByLabelText('Mana'), {
+      target: { value: '8' },
+    });
+    fireEvent.change(screen.getByLabelText('Shield'), {
+      target: { value: '5' },
+    });
+    fireEvent.change(screen.getByLabelText('Notes'), {
+      target: { value: 'Mirror image' },
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /create token/i }));
+    });
+
+    expect(onCreateCustomToken).toHaveBeenCalledWith(expect.objectContaining({
+      label: 'Arcane Echo',
+      hpCurrent: 12,
+      manaCurrent: 8,
+      shieldCurrent: 5,
+      notes: 'Mirror image',
+    }));
   });
 
   test('remounts the create image input after a successful custom token creation', async () => {
@@ -403,8 +440,9 @@ describe('MyTokenTray', () => {
   test('renders foe parametri groups collapsed by default and toggles them independently', async () => {
     renderTray({
       isManager: true,
-      selectedFoeToken: {
+      selectedTokenDetails: {
         tokenId: 'foe-token-1',
+        tokenType: 'foe',
         label: 'Test One',
         category: 'Beast',
         rank: 'Elite',
@@ -453,8 +491,9 @@ describe('MyTokenTray', () => {
 
     renderTray({
       isManager: true,
-      selectedFoeToken: {
+      selectedTokenDetails: {
         tokenId: 'foe-token-1',
+        tokenType: 'foe',
         label: 'Test One',
         category: 'Beast',
         rank: 'Elite',
@@ -479,7 +518,8 @@ describe('MyTokenTray', () => {
 
     expect(await screen.findByLabelText('Forza')).toHaveValue(7);
     fireEvent.change(screen.getByLabelText('Foe Name'), { target: { value: 'Test One Prime' } });
-    fireEvent.change(screen.getByLabelText('Current HP'), { target: { value: '42' } });
+    fireEvent.change(screen.getByLabelText('Current HP'), { target: { value: '84' } });
+    fireEvent.change(screen.getByLabelText('Current Mana'), { target: { value: '33' } });
     fireEvent.change(screen.getByLabelText('Forza'), { target: { value: '9' } });
 
     await act(async () => {
@@ -489,13 +529,199 @@ describe('MyTokenTray', () => {
     expect(onUpdateFoeToken).toHaveBeenCalledWith(expect.objectContaining({
       tokenId: 'foe-token-1',
       label: 'Test One Prime',
+      notes: 'Alpha foe',
       Parametri: expect.objectContaining({
         Base: expect.objectContaining({
           Forza: expect.objectContaining({ Tot: 9 }),
         }),
       }),
-      stats: expect.objectContaining({ hpCurrent: 42, hpTotal: 60 }),
+      stats: expect.objectContaining({ hpCurrent: 84, hpTotal: 60, manaCurrent: 33, manaTotal: 20 }),
     }));
+  });
+
+  test('renders and saves selected character token details for the owner', async () => {
+    const onSaveSelectedTokenDetails = jest.fn(() => Promise.resolve(true));
+
+    renderTray({
+      selectedTokenDetails: {
+        tokenId: 'user-1',
+        ownerUid: 'user-1',
+        tokenType: 'character',
+        label: 'Aldor',
+        imageUrl: 'https://example.com/token.png',
+        imagePath: 'characters/aldor.png',
+        characterId: 'Aldor',
+        hpCurrent: 14,
+        hpTotal: 18,
+        manaCurrent: 7,
+        manaTotal: 12,
+        shieldCurrent: 3,
+        shieldTotal: 6,
+        hasShield: true,
+        notes: 'Frontline',
+      },
+      onSaveSelectedTokenDetails,
+    });
+
+    expect(screen.getByText('Selected Character')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Current HP'), { target: { value: '24' } });
+    fireEvent.change(screen.getByLabelText('Current Shield'), { target: { value: '9' } });
+    fireEvent.change(screen.getByDisplayValue('Frontline'), { target: { value: 'Hold the bridge' } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save details/i }));
+    });
+
+    expect(onSaveSelectedTokenDetails).toHaveBeenCalledWith(expect.objectContaining({
+      tokenId: 'user-1',
+      tokenType: 'character',
+      hpCurrent: 24,
+      shieldCurrent: 9,
+      notes: 'Hold the bridge',
+    }));
+  });
+
+  test('renders and saves selected custom token details above the displayed totals', async () => {
+    const onSaveSelectedTokenDetails = jest.fn(() => Promise.resolve(true));
+
+    renderTray({
+      selectedTokenDetails: {
+        tokenId: 'token-2',
+        ownerUid: 'user-1',
+        tokenType: 'custom',
+        label: 'Wolf',
+        imageUrl: 'https://example.com/wolf.png',
+        imagePath: 'grigliata/tokens/user-1/wolf.png',
+        hpCurrent: 12,
+        hpTotal: 12,
+        manaCurrent: 4,
+        manaTotal: 4,
+        shieldCurrent: 5,
+        shieldTotal: 5,
+        hasShield: true,
+        notes: 'Companion',
+      },
+      onSaveSelectedTokenDetails,
+    });
+
+    expect(screen.getByText('Selected Custom Token')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Current Mana'), { target: { value: '9' } });
+    fireEvent.change(screen.getByLabelText('Current Shield'), { target: { value: '11' } });
+    fireEvent.change(screen.getByDisplayValue('Companion'), { target: { value: 'Guard companion' } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save details/i }));
+    });
+
+    expect(onSaveSelectedTokenDetails).toHaveBeenCalledWith(expect.objectContaining({
+      tokenId: 'token-2',
+      tokenType: 'custom',
+      manaCurrent: 9,
+      shieldCurrent: 11,
+      notes: 'Guard companion',
+    }));
+  });
+
+  test('hydrates selected token details when async data for the same token becomes ready', async () => {
+    const onSaveSelectedTokenDetails = jest.fn(() => Promise.resolve(true));
+    const baseSelectedTokenDetails = {
+      tokenId: 'token-2',
+      ownerUid: 'user-2',
+      tokenType: 'custom',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      imagePath: 'grigliata/tokens/user-2/wolf.png',
+      hpCurrent: 0,
+      hpTotal: 0,
+      manaCurrent: 0,
+      manaTotal: 0,
+      shieldCurrent: 0,
+      shieldTotal: 0,
+      hasShield: true,
+      notes: '',
+      isReady: false,
+      loadingMessage: 'Loading the current token values...',
+    };
+    const { rerender } = renderTray({
+      selectedTokenDetails: baseSelectedTokenDetails,
+      onSaveSelectedTokenDetails,
+    });
+
+    expect(screen.getByText('Selected Custom Token')).toBeInTheDocument();
+    expect(screen.getByText('Loading the current token values...')).toBeInTheDocument();
+    expect(screen.getByLabelText('Current HP')).toBeDisabled();
+    expect(screen.getByRole('button', { name: /loading/i })).toBeDisabled();
+
+    rerender(
+      <MyTokenTray
+        {...buildTrayProps({
+          selectedTokenDetails: {
+            ...baseSelectedTokenDetails,
+            hpCurrent: 18,
+            hpTotal: 12,
+            manaCurrent: 7,
+            manaTotal: 4,
+            shieldCurrent: 9,
+            shieldTotal: 5,
+            notes: 'Companion',
+            isReady: true,
+            loadingMessage: '',
+          },
+          onSaveSelectedTokenDetails,
+        })}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Current HP')).toHaveValue(18);
+    });
+    expect(screen.getByLabelText('Current HP')).not.toBeDisabled();
+    expect(screen.getByDisplayValue('Companion')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /save details/i })).toBeEnabled();
+  });
+
+  test('preserves same-token draft edits when the selected token object rerenders', () => {
+    const onSaveSelectedTokenDetails = jest.fn(() => Promise.resolve(true));
+    const baseSelectedTokenDetails = {
+      tokenId: 'token-2',
+      ownerUid: 'user-1',
+      tokenType: 'custom',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      imagePath: 'grigliata/tokens/user-1/wolf.png',
+      hpCurrent: 12,
+      hpTotal: 12,
+      manaCurrent: 4,
+      manaTotal: 4,
+      shieldCurrent: 5,
+      shieldTotal: 5,
+      hasShield: true,
+      notes: 'Companion',
+      isReady: true,
+    };
+    const { rerender } = renderTray({
+      selectedTokenDetails: baseSelectedTokenDetails,
+      onSaveSelectedTokenDetails,
+    });
+
+    fireEvent.change(screen.getByLabelText('Current Mana'), { target: { value: '9' } });
+    fireEvent.change(screen.getByDisplayValue('Companion'), { target: { value: 'Guard companion' } });
+
+    rerender(
+      <MyTokenTray
+        {...buildTrayProps({
+          selectedTokenDetails: {
+            ...baseSelectedTokenDetails,
+            imageUrl: 'https://example.com/wolf-updated.png',
+            label: 'Wolf Scout',
+          },
+          onSaveSelectedTokenDetails,
+        })}
+      />
+    );
+
+    expect(screen.getByLabelText('Current Mana')).toHaveValue(9);
+    expect(screen.getByDisplayValue('Guard companion')).toBeInTheDocument();
   });
 
   test('does not render the shared music control inside the token tray', () => {

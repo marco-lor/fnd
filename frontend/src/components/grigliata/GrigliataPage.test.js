@@ -419,6 +419,24 @@ jest.mock('./GrigliataBoard', () => {
         >
           select foe token
         </button>
+        <button
+          type="button"
+          onClick={() => props.onSelectedTokenIdsChange?.(['user-1'])}
+        >
+          select self character token
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onSelectedTokenIdsChange?.(['user-2'])}
+        >
+          select character token
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onSelectedTokenIdsChange?.(['token-2'])}
+        >
+          select custom token
+        </button>
         <button type="button" onClick={() => props.onSharedInteractionChange?.(null)}>
           clear interaction
         </button>
@@ -1142,6 +1160,18 @@ describe('GrigliataPage', () => {
     fireEvent.change(screen.getByLabelText('Image'), {
       target: { files: [file] },
     });
+    fireEvent.change(screen.getByLabelText('HP'), {
+      target: { value: '12' },
+    });
+    fireEvent.change(screen.getByLabelText('Mana'), {
+      target: { value: '8' },
+    });
+    fireEvent.change(screen.getByLabelText('Shield'), {
+      target: { value: '5' },
+    });
+    fireEvent.change(screen.getByLabelText('Notes'), {
+      target: { value: 'Mirror image' },
+    });
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /create token/i }));
@@ -1156,6 +1186,15 @@ describe('GrigliataPage', () => {
           label: 'Summoned Wolf',
           tokenType: 'custom',
           imageSource: 'uploaded',
+          notes: 'Mirror image',
+          stats: expect.objectContaining({
+            hpTotal: 12,
+            hpCurrent: 12,
+            manaTotal: 8,
+            manaCurrent: 8,
+            shieldTotal: 5,
+            shieldCurrent: 5,
+          }),
           createdBy: 'user-1',
           updatedBy: 'user-1',
         })
@@ -1165,6 +1204,411 @@ describe('GrigliataPage', () => {
     expect(storageApi.ref).toHaveBeenCalledWith(
       {},
       expect.stringMatching(/^grigliata\/tokens\/user-1\/summoned_wolf_/i)
+    );
+  });
+
+  test('saves selected character token details for the owner', async () => {
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'player',
+        characterId: 'Aldor',
+        settings: {
+          grigliata_draw_color: 'ion-cyan',
+          grigliata_share_interactions: false,
+        },
+      imageUrl: 'https://example.com/aldor.png',
+      imagePath: 'characters/aldor.png',
+      stats: {
+        hpTotal: 18,
+        hpCurrent: 22,
+        manaTotal: 12,
+        manaCurrent: 15,
+        barrieraTotal: 6,
+        barrieraCurrent: 8,
+      },
+    },
+      loading: false,
+    });
+    setCollectionData('grigliata_tokens', [{
+      id: 'user-1',
+      ownerUid: 'user-1',
+      tokenType: 'character',
+      imageSource: 'profile',
+      label: 'Aldor',
+      imageUrl: 'https://example.com/aldor.png',
+      imagePath: 'characters/aldor.png',
+      notes: 'Front line',
+    }]);
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-1',
+      backgroundId: 'map-1',
+      tokenId: 'user-1',
+      ownerUid: 'user-1',
+      label: 'Aldor',
+      imageUrl: 'https://example.com/aldor.png',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /select self character token/i }));
+    });
+
+    expect(await screen.findByText('Selected Character')).toBeInTheDocument();
+    expect(screen.getByLabelText('Current HP')).toHaveValue(22);
+    expect(screen.getByLabelText('Current Mana')).toHaveValue(15);
+    expect(screen.getByLabelText('Current Shield')).toHaveValue(8);
+    fireEvent.change(screen.getByLabelText('Current HP'), { target: { value: '27' } });
+    fireEvent.change(screen.getByLabelText('Current Shield'), { target: { value: '10' } });
+    fireEvent.change(screen.getByDisplayValue('Front line'), { target: { value: 'Hold the line' } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save details/i }));
+    });
+
+    expect(firestore.updateDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'users/user-1' }),
+      expect.objectContaining({
+        'stats.hpCurrent': 27,
+        'stats.manaCurrent': 15,
+        'stats.barrieraCurrent': 10,
+      })
+    );
+    expect(firestore.setDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_tokens/user-1' }),
+      expect.objectContaining({
+        ownerUid: 'user-1',
+        notes: 'Hold the line',
+        tokenType: 'character',
+      }),
+      { merge: true }
+    );
+  });
+
+  test('loads and saves DM-selected external character and custom token details', async () => {
+    setManagerAuth();
+    setDocData('users/user-2', {
+      characterId: 'Bran',
+      stats: {
+        hpTotal: 20,
+        hpCurrent: 28,
+        manaTotal: 9,
+        manaCurrent: 13,
+        barrieraTotal: 4,
+        barrieraCurrent: 6,
+      },
+    });
+    setDocData('grigliata_tokens/user-2', {
+      ownerUid: 'user-2',
+      tokenType: 'character',
+      imageSource: 'profile',
+      characterId: 'Bran',
+      label: 'Bran',
+      imageUrl: 'https://example.com/bran.png',
+      imagePath: 'characters/bran.png',
+      notes: 'Scout',
+    });
+    setDocData('grigliata_tokens/token-2', {
+      ownerUid: 'user-2',
+      tokenType: 'custom',
+      imageSource: 'uploaded',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      imagePath: 'grigliata/tokens/user-2/wolf.png',
+      notes: 'Companion',
+      stats: {
+        hpTotal: 12,
+        hpCurrent: 18,
+        manaTotal: 4,
+        manaCurrent: 7,
+        shieldTotal: 5,
+        shieldCurrent: 9,
+      },
+    });
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      tokenId: 'user-2',
+      ownerUid: 'user-2',
+      label: 'Bran',
+      imageUrl: 'https://example.com/bran.png',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }, {
+      id: 'map-1__token-2',
+      backgroundId: 'map-1',
+      tokenId: 'token-2',
+      ownerUid: 'user-2',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      col: 3,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /select character token/i }));
+    });
+
+    expect(await screen.findByText('Selected Character')).toBeInTheDocument();
+    expect(screen.getByLabelText('Current HP')).toHaveValue(28);
+    expect(screen.getByLabelText('Current Mana')).toHaveValue(13);
+    expect(screen.getByLabelText('Current Shield')).toHaveValue(6);
+    fireEvent.change(screen.getByLabelText('Current HP'), { target: { value: '31' } });
+    fireEvent.change(screen.getByDisplayValue('Scout'), { target: { value: 'Advance scout' } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save details/i }));
+    });
+
+    expect(firestore.updateDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'users/user-2' }),
+      expect.objectContaining({
+        'stats.hpCurrent': 31,
+        'stats.manaCurrent': 13,
+        'stats.barrieraCurrent': 6,
+      })
+    );
+    expect(firestore.setDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_tokens/user-2' }),
+      expect.objectContaining({
+        notes: 'Advance scout',
+        tokenType: 'character',
+      }),
+      { merge: true }
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /select custom token/i }));
+    });
+
+    expect(await screen.findByText('Selected Custom Token')).toBeInTheDocument();
+    expect(screen.getByLabelText('Current HP')).toHaveValue(18);
+    expect(screen.getByLabelText('Current Mana')).toHaveValue(7);
+    expect(screen.getByLabelText('Current Shield')).toHaveValue(9);
+    fireEvent.change(screen.getByLabelText('Current Shield'), { target: { value: '11' } });
+    fireEvent.change(screen.getByDisplayValue('Companion'), { target: { value: 'Guard companion' } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save details/i }));
+    });
+
+    expect(firestore.setDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_tokens/token-2' }),
+      expect.objectContaining({
+        notes: 'Guard companion',
+        stats: expect.objectContaining({
+          hpCurrent: 18,
+          hpTotal: 12,
+          manaCurrent: 7,
+          manaTotal: 4,
+          shieldCurrent: 11,
+          shieldTotal: 5,
+        }),
+      }),
+      { merge: true }
+    );
+  });
+
+  test('clears stale external details and blocks saving until the current external selection has loaded', async () => {
+    setManagerAuth();
+    setDocData('users/user-2', {
+      characterId: 'Bran',
+      stats: {
+        hpTotal: 20,
+        hpCurrent: 28,
+        manaTotal: 9,
+        manaCurrent: 13,
+        barrieraTotal: 4,
+        barrieraCurrent: 6,
+      },
+    });
+    setDocData('grigliata_tokens/user-2', {
+      ownerUid: 'user-2',
+      tokenType: 'character',
+      imageSource: 'profile',
+      characterId: 'Bran',
+      label: 'Bran',
+      imageUrl: 'https://example.com/bran.png',
+      imagePath: 'characters/bran.png',
+      notes: 'Scout',
+    });
+    setDocData('grigliata_tokens/token-2', {
+      ownerUid: 'user-2',
+      tokenType: 'custom',
+      imageSource: 'uploaded',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      imagePath: 'grigliata/tokens/user-2/wolf.png',
+      notes: 'Companion',
+      stats: {
+        hpTotal: 12,
+        hpCurrent: 18,
+        manaTotal: 4,
+        manaCurrent: 7,
+        shieldTotal: 5,
+        shieldCurrent: 9,
+      },
+    });
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      tokenId: 'user-2',
+      ownerUid: 'user-2',
+      label: 'Bran',
+      imageUrl: 'https://example.com/bran.png',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }, {
+      id: 'map-1__token-2',
+      backgroundId: 'map-1',
+      tokenId: 'token-2',
+      ownerUid: 'user-2',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      col: 3,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+
+    const delayedTargetPaths = new Set(['grigliata_tokens/token-2']);
+    const delayedListeners = [];
+    firestore.onSnapshot.mockClear().mockImplementation((target, onNext) => {
+      const listener = { target, onNext };
+      mockFirestoreListeners.push(listener);
+
+      if (delayedTargetPaths.has(target?.path)) {
+        delayedListeners.push(listener);
+      } else {
+        onNext(mockBuildSnapshotForTarget(target));
+      }
+
+      return () => {
+        const listenerIndex = mockFirestoreListeners.indexOf(listener);
+        if (listenerIndex >= 0) {
+          mockFirestoreListeners.splice(listenerIndex, 1);
+        }
+
+        const delayedListenerIndex = delayedListeners.indexOf(listener);
+        if (delayedListenerIndex >= 0) {
+          delayedListeners.splice(delayedListenerIndex, 1);
+        }
+      };
+    });
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /select character token/i }));
+    });
+
+    expect(await screen.findByDisplayValue('Scout')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /save details/i })).toBeEnabled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /select custom token/i }));
+    });
+
+    expect(await screen.findByText('Selected Custom Token')).toBeInTheDocument();
+    expect(screen.getByText('Loading the current token values...')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /loading/i })).toBeDisabled();
+    expect(screen.getByLabelText('Current HP')).toBeDisabled();
+    expect(screen.queryByDisplayValue('Scout')).not.toBeInTheDocument();
+
+    act(() => {
+      delayedListeners.forEach((listener) => {
+        listener.onNext(mockBuildSnapshotForTarget(listener.target));
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Companion')).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText('Current HP')).toHaveValue(18);
+    expect(screen.getByRole('button', { name: /save details/i })).toBeEnabled();
+  });
+
+  test('migrates missing custom token totals from the current values on first save', async () => {
+    setManagerAuth();
+    setDocData('grigliata_tokens/token-2', {
+      ownerUid: 'user-2',
+      tokenType: 'custom',
+      imageSource: 'uploaded',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      imagePath: 'grigliata/tokens/user-2/wolf.png',
+      notes: 'Companion',
+      stats: {
+        hpCurrent: 18,
+        manaCurrent: 7,
+        shieldCurrent: 9,
+      },
+    });
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__token-2',
+      backgroundId: 'map-1',
+      tokenId: 'token-2',
+      ownerUid: 'user-2',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      col: 3,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /select custom token/i }));
+    });
+
+    expect(await screen.findByText('Selected Custom Token')).toBeInTheDocument();
+    expect(screen.getByText(/missing one or more saved totals/i)).toBeInTheDocument();
+    firestore.setDoc.mockClear();
+
+    fireEvent.change(screen.getByLabelText('Current Shield'), { target: { value: '11' } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save details/i }));
+    });
+
+    expect(firestore.setDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_tokens/token-2' }),
+      expect.objectContaining({
+        notes: 'Companion',
+        stats: expect.objectContaining({
+          hpTotal: 18,
+          hpCurrent: 18,
+          manaTotal: 7,
+          manaCurrent: 7,
+          shieldTotal: 11,
+          shieldCurrent: 11,
+        }),
+      }),
+      { merge: true }
     );
   });
 
@@ -1445,8 +1889,10 @@ describe('GrigliataPage', () => {
     mockBatchInstances.splice(0, mockBatchInstances.length);
 
     fireEvent.change(screen.getByLabelText('Foe Name'), { target: { value: 'Test One Prime' } });
-    fireEvent.change(screen.getByLabelText('Current HP'), { target: { value: '42' } });
+    fireEvent.change(screen.getByLabelText('Current HP'), { target: { value: '84' } });
+    fireEvent.change(screen.getByLabelText('Current Mana'), { target: { value: '28' } });
     fireEvent.change(screen.getByLabelText('Dado Anima'), { target: { value: 'd12' } });
+    fireEvent.change(screen.getByDisplayValue('Alpha foe'), { target: { value: 'Prime foe' } });
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /save foe/i }));
@@ -1459,7 +1905,8 @@ describe('GrigliataPage', () => {
       expect.objectContaining({
         label: 'Test One Prime',
         dadoAnima: 'd12',
-        stats: expect.objectContaining({ hpCurrent: 42, hpTotal: 60 }),
+        notes: 'Prime foe',
+        stats: expect.objectContaining({ hpCurrent: 84, hpTotal: 60, manaCurrent: 28, manaTotal: 20 }),
       }),
       { merge: true }
     );

@@ -193,6 +193,7 @@ const buildProps = (overrides = {}) => ({
   isTokenDeadActionPending: false,
   onUpdateTokenStatuses: jest.fn(),
   isTokenStatusActionPending: false,
+  selectedTokenDetails: null,
   onDropCurrentToken: jest.fn(),
   onSelectedTokenIdsChange: jest.fn(),
   sharedInteractions: [],
@@ -691,6 +692,287 @@ describe('GrigliataBoard', () => {
     });
 
     expect(onSelectedTokenIdsChange).toHaveBeenLastCalledWith(['foe-token-1']);
+  });
+
+  test('shows the single-token resource hud for selected character tokens', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          selectedTokenDetails: {
+            tokenId: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            notes: 'Front line',
+            hpCurrent: 14,
+            hpTotal: 18,
+            manaCurrent: 7,
+            manaTotal: 12,
+            shieldCurrent: 3,
+            shieldTotal: 6,
+            hasShield: true,
+          },
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+
+    expect(await screen.findByTestId('selected-token-resource-hud')).toBeInTheDocument();
+    expect(within(screen.getByTestId('selected-token-resource-chip-hp')).getByText('14')).toBeInTheDocument();
+    expect(within(screen.getByTestId('selected-token-resource-chip-mana')).getByText('7')).toBeInTheDocument();
+    expect(within(screen.getByTestId('selected-token-resource-chip-shield')).getByText('3')).toBeInTheDocument();
+    expect(screen.queryByText(/^HP\b/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Mana\b/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Shield\b/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('selected-token-notes-preview')).not.toBeInTheDocument();
+  });
+
+  test('shows hp and mana only in the foe resource hud', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'foe-token-1',
+            id: 'foe-token-1',
+            ownerUid: 'user-1',
+            tokenType: 'foe',
+            label: 'Test One',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          selectedTokenDetails: {
+            tokenId: 'foe-token-1',
+            ownerUid: 'user-1',
+            tokenType: 'foe',
+            label: 'Test One',
+            imageUrl: '',
+            notes: 'Alpha',
+            hpCurrent: 42,
+            manaCurrent: 9,
+            hasShield: false,
+          },
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-foe-token-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+
+    expect(within(await screen.findByTestId('selected-token-resource-chip-hp')).getByText('42')).toBeInTheDocument();
+    expect(within(screen.getByTestId('selected-token-resource-chip-mana')).getByText('9')).toBeInTheDocument();
+    expect(screen.queryByText(/Shield /i)).not.toBeInTheDocument();
+  });
+
+  test('hides the resource hud when multiple tokens are selected via box select', async () => {
+    const { container } = render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }, {
+            tokenId: 'token-2',
+            id: 'token-2',
+            ownerUid: 'user-1',
+            tokenType: 'custom',
+            label: 'Wolf',
+            imageUrl: '',
+            placed: true,
+            col: 3,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          selectedTokenDetails: {
+            tokenId: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            hpCurrent: 14,
+            manaCurrent: 7,
+            shieldCurrent: 3,
+            hasShield: true,
+            notes: 'Front line',
+          },
+        })}
+      />
+    );
+
+    const stage = container.querySelector('[data-konva-type="Stage"]');
+
+    fireEvent.mouseDown(stage, {
+      button: 0,
+      buttons: 1,
+      clientX: 0,
+      clientY: 0,
+    });
+    fireEvent.mouseMove(window, {
+      button: 0,
+      buttons: 1,
+      clientX: 900,
+      clientY: 600,
+    });
+    fireEvent.mouseUp(window, {
+      button: 0,
+      buttons: 1,
+      clientX: 900,
+      clientY: 600,
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('selected-token-resource-hud')).not.toBeInTheDocument();
+    });
+  });
+
+  test('does not render any board-side notes block even when the token has notes', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          selectedTokenDetails: {
+            tokenId: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            notes: 'Front line',
+            hpCurrent: 14,
+            manaCurrent: 7,
+            shieldCurrent: 3,
+            hasShield: true,
+          },
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+
+    expect(await screen.findByTestId('selected-token-resource-hud')).toBeInTheDocument();
+    expect(screen.queryByTestId('selected-token-notes-preview')).not.toBeInTheDocument();
+  });
+
+  test('positions the selected token chip cluster below the token near the top-right edge', async () => {
+    const { container } = render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 10,
+            row: 1,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          selectedTokenDetails: {
+            tokenId: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            notes: 'Front line',
+            hpCurrent: 34,
+            manaCurrent: 10,
+            shieldCurrent: 0,
+            hasShield: true,
+          },
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 720,
+      clientY: 80,
+    });
+
+    const chipCluster = await screen.findByTestId('selected-token-resource-chip-cluster');
+    const stage = container.querySelector('[data-konva-type="Stage"]');
+    const tokenNode = screen.getByTestId('token-node-user-1');
+
+    expect(stage).toBeTruthy();
+    expect(chipCluster.style.gridTemplateColumns).toContain('repeat(3');
+
+    const viewportTop = Number.parseFloat(stage.getAttribute('data-y') || '0');
+    const viewportScale = Number.parseFloat(stage.getAttribute('data-scaley') || '1');
+    const tokenWorldTop = Number.parseFloat(tokenNode.getAttribute('data-y') || '0');
+    const tokenScreenTop = viewportTop + (tokenWorldTop * viewportScale);
+    const tokenScreenSize = 70 * viewportScale;
+    const chipTop = Number.parseFloat(chipCluster.style.top);
+
+    expect(chipTop).toBeGreaterThanOrEqual((tokenScreenTop + tokenScreenSize) - 0.5);
+    expect(within(screen.getByTestId('selected-token-resource-chip-shield')).getByText('0')).toBeInTheDocument();
+    expect(screen.queryByTestId('selected-token-notes-preview')).not.toBeInTheDocument();
   });
 
   test('does not render the manager controls stack for non-managers', () => {

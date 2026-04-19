@@ -90,6 +90,71 @@ const buildCollapsedFoeParamGroups = (sections = []) => sections.reduce((nextSta
 
 const getFoeParamSectionContentId = (groupKey) => `selected-foe-parametri-${groupKey.toLowerCase()}-content`;
 
+const getSelectedTokenPanelTitle = (tokenType) => {
+  if (tokenType === 'foe') return 'Selected Foe';
+  if (tokenType === 'custom') return 'Selected Custom Token';
+  return 'Selected Character';
+};
+
+const getSelectedTokenBadgeLabel = (tokenType) => {
+  if (tokenType === 'foe') return 'Instance';
+  if (tokenType === 'custom') return 'Custom';
+  return 'Character';
+};
+const EMPTY_SELECTED_TOKEN_DRAFT = {
+  hpCurrent: 0,
+  manaCurrent: 0,
+  shieldCurrent: 0,
+  notes: '',
+};
+const EMPTY_SELECTED_TOKEN_DIRTY_STATE = {
+  hpCurrent: false,
+  manaCurrent: false,
+  shieldCurrent: false,
+  notes: false,
+};
+const buildSelectedTokenDraft = (token) => ({
+  hpCurrent: n(token?.hpCurrent, 0),
+  manaCurrent: n(token?.manaCurrent, 0),
+  shieldCurrent: n(token?.shieldCurrent, 0),
+  notes: token?.notes || '',
+});
+const areSelectedTokenDraftsEqual = (left, right) => (
+  left.hpCurrent === right.hpCurrent
+  && left.manaCurrent === right.manaCurrent
+  && left.shieldCurrent === right.shieldCurrent
+  && left.notes === right.notes
+);
+const areSelectedTokenDirtyStatesEqual = (left, right) => (
+  left.hpCurrent === right.hpCurrent
+  && left.manaCurrent === right.manaCurrent
+  && left.shieldCurrent === right.shieldCurrent
+  && left.notes === right.notes
+);
+const mergeSelectedTokenDraft = ({ currentDraft, persistedDraft, dirtyFields }) => ({
+  hpCurrent: dirtyFields.hpCurrent ? currentDraft.hpCurrent : persistedDraft.hpCurrent,
+  manaCurrent: dirtyFields.manaCurrent ? currentDraft.manaCurrent : persistedDraft.manaCurrent,
+  shieldCurrent: dirtyFields.shieldCurrent ? currentDraft.shieldCurrent : persistedDraft.shieldCurrent,
+  notes: dirtyFields.notes ? currentDraft.notes : persistedDraft.notes,
+});
+const syncSelectedTokenDirtyFields = ({ dirtyFields, draft, persistedDraft }) => ({
+  hpCurrent: dirtyFields.hpCurrent && draft.hpCurrent !== persistedDraft.hpCurrent,
+  manaCurrent: dirtyFields.manaCurrent && draft.manaCurrent !== persistedDraft.manaCurrent,
+  shieldCurrent: dirtyFields.shieldCurrent && draft.shieldCurrent !== persistedDraft.shieldCurrent,
+  notes: dirtyFields.notes && draft.notes !== persistedDraft.notes,
+});
+const getSelectedTokenLoadingMessage = (token) => (
+  token?.loadingMessage
+  || (token?.tokenType === 'custom'
+    ? 'Loading the current token values...'
+    : 'Loading the current character sheet values...')
+);
+const getSelectedTokenTotalText = (label, totalValue, isMissing) => (
+  isMissing
+    ? `${label}: will use current value on save`
+    : `${label}: ${n(totalValue, 0)}`
+);
+
 function FoeLibrarySection({ currentUserId, foeLibrary = [], hasActiveMap, onDragStart, onDragEnd }) {
   const [query, setQuery] = useState('');
   const [isCollapsed, setIsCollapsed] = useState(() => readStoredFoeLibraryCollapsed(currentUserId));
@@ -203,6 +268,7 @@ function FoeLibrarySection({ currentUserId, foeLibrary = [], hasActiveMap, onDra
                   const canDrag = !!(hasActiveMap && currentUserId && foe?.id);
                   const hpTotal = n(foe?.stats?.hpTotal, 0);
                   const manaTotal = n(foe?.stats?.manaTotal, 0);
+
                   return (
                     <div
                       key={foe.id}
@@ -221,7 +287,7 @@ function FoeLibrarySection({ currentUserId, foeLibrary = [], hasActiveMap, onDra
                             <p className="truncate text-base font-semibold text-slate-100">{foe?.name || 'Unnamed Foe'}</p>
                             <span className="rounded-full border border-violet-400/25 bg-violet-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-100">Foe</span>
                           </div>
-                          <p className="mt-1 truncate text-xs text-slate-400">Lv {n(foe?.stats?.level, 1)} • {foe?.category || 'Unknown'} • {foe?.rank || 'Unranked'}</p>
+                          <p className="mt-1 truncate text-xs text-slate-400">Lv {n(foe?.stats?.level, 1)} | {foe?.category || 'Unknown'} | {foe?.rank || 'Unranked'}</p>
                           <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-300">
                             <span className="rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2 py-1">HP {n(foe?.stats?.hpCurrent, hpTotal)}/{hpTotal}</span>
                             <span className="rounded-full border border-sky-400/25 bg-sky-500/10 px-2 py-1">Mana {n(foe?.stats?.manaCurrent, manaTotal)}/{manaTotal}</span>
@@ -241,11 +307,230 @@ function FoeLibrarySection({ currentUserId, foeLibrary = [], hasActiveMap, onDra
   );
 }
 
+function SelectedResourceTokenDetailsPanel({
+  token,
+  onSaveSelectedTokenDetails,
+  savingSelectedTokenDetailsId,
+}) {
+  const [draft, setDraft] = useState(EMPTY_SELECTED_TOKEN_DRAFT);
+  const [dirtyFields, setDirtyFields] = useState(EMPTY_SELECTED_TOKEN_DIRTY_STATE);
+  const previousTokenIdRef = useRef('');
+  const persistedDraft = useMemo(() => buildSelectedTokenDraft(token), [
+    token?.tokenId,
+    token?.hpCurrent,
+    token?.manaCurrent,
+    token?.shieldCurrent,
+    token?.notes,
+  ]);
+
+  useEffect(() => {
+    const nextTokenId = token?.tokenId || '';
+
+    if (!nextTokenId) {
+      previousTokenIdRef.current = '';
+      setDraft((currentDraft) => (
+        areSelectedTokenDraftsEqual(currentDraft, EMPTY_SELECTED_TOKEN_DRAFT)
+          ? currentDraft
+          : EMPTY_SELECTED_TOKEN_DRAFT
+      ));
+      setDirtyFields((currentDirtyFields) => (
+        areSelectedTokenDirtyStatesEqual(currentDirtyFields, EMPTY_SELECTED_TOKEN_DIRTY_STATE)
+          ? currentDirtyFields
+          : EMPTY_SELECTED_TOKEN_DIRTY_STATE
+      ));
+      return;
+    }
+
+    if (previousTokenIdRef.current !== nextTokenId) {
+      previousTokenIdRef.current = nextTokenId;
+      setDraft((currentDraft) => (
+        areSelectedTokenDraftsEqual(currentDraft, persistedDraft)
+          ? currentDraft
+          : persistedDraft
+      ));
+      setDirtyFields((currentDirtyFields) => (
+        areSelectedTokenDirtyStatesEqual(currentDirtyFields, EMPTY_SELECTED_TOKEN_DIRTY_STATE)
+          ? currentDirtyFields
+          : EMPTY_SELECTED_TOKEN_DIRTY_STATE
+      ));
+      return;
+    }
+
+    setDraft((currentDraft) => {
+      const nextDraft = mergeSelectedTokenDraft({
+        currentDraft,
+        persistedDraft,
+        dirtyFields,
+      });
+
+      return areSelectedTokenDraftsEqual(currentDraft, nextDraft)
+        ? currentDraft
+        : nextDraft;
+    });
+  }, [dirtyFields, persistedDraft, token?.tokenId]);
+
+  useEffect(() => {
+    if (!token?.tokenId) {
+      return;
+    }
+
+    setDirtyFields((currentDirtyFields) => {
+      const nextDirtyFields = syncSelectedTokenDirtyFields({
+        dirtyFields: currentDirtyFields,
+        draft,
+        persistedDraft,
+      });
+
+      return areSelectedTokenDirtyStatesEqual(currentDirtyFields, nextDirtyFields)
+        ? currentDirtyFields
+        : nextDirtyFields;
+    });
+  }, [draft, persistedDraft, token?.tokenId]);
+
+  if (!token) return null;
+
+  const isSaving = savingSelectedTokenDetailsId === token.tokenId;
+  const isReady = token.isReady !== false;
+  const isBusy = isSaving || !isReady;
+  const panelTitle = getSelectedTokenPanelTitle(token.tokenType);
+  const badgeLabel = getSelectedTokenBadgeLabel(token.tokenType);
+  const missingResourceTotals = token.missingResourceTotals || {};
+  const isLegacyCustomToken = token.tokenType === 'custom'
+    && (missingResourceTotals.hpTotal || missingResourceTotals.manaTotal || missingResourceTotals.shieldTotal);
+
+  const updateDraftField = (field, value) => {
+    setDraft((currentDraft) => (
+      currentDraft[field] === value
+        ? currentDraft
+        : { ...currentDraft, [field]: value }
+    ));
+    setDirtyFields((currentDirtyFields) => (
+      currentDirtyFields[field]
+        ? currentDirtyFields
+        : { ...currentDirtyFields, [field]: true }
+    ));
+  };
+
+  return (
+    <div className="rounded-2xl border border-emerald-500/25 bg-emerald-950/10 p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-700 bg-slate-800 text-lg font-semibold text-slate-100">
+          {token?.imageUrl ? <img src={token.imageUrl} alt={token?.label || 'Token'} className="h-full w-full object-cover" /> : <span>{(token?.label || '?').charAt(0).toUpperCase()}</span>}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-100">{panelTitle}</h3>
+            <span className="rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-100">{badgeLabel}</span>
+          </div>
+          <p className="mt-1 truncate text-lg font-semibold text-slate-100">{token?.label || 'Token'}</p>
+          <p className="mt-1 truncate text-xs text-slate-400">
+            {token.tokenType === 'custom' ? 'Update the live token values used on the board.' : 'Linked to the character sheet values for this player.'}
+          </p>
+        </div>
+      </div>
+
+      <div className={`mt-4 grid grid-cols-1 gap-3 ${token.hasShield ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
+        <div>
+          <label htmlFor={`selected-token-hp-${token.tokenId}`} className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Current HP</label>
+          <input
+            id={`selected-token-hp-${token.tokenId}`}
+            type="number"
+            value={draft.hpCurrent}
+            onChange={(event) => updateDraftField('hpCurrent', n(event.target.value, 0))}
+            disabled={isBusy}
+            className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-300"
+          />
+          <p className="mt-1 text-[11px] text-slate-500">{getSelectedTokenTotalText('Total HP', token.hpTotal, missingResourceTotals.hpTotal)}</p>
+        </div>
+        <div>
+          <label htmlFor={`selected-token-mana-${token.tokenId}`} className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Current Mana</label>
+          <input
+            id={`selected-token-mana-${token.tokenId}`}
+            type="number"
+            value={draft.manaCurrent}
+            onChange={(event) => updateDraftField('manaCurrent', n(event.target.value, 0))}
+            disabled={isBusy}
+            className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-300"
+          />
+          <p className="mt-1 text-[11px] text-slate-500">{getSelectedTokenTotalText('Total Mana', token.manaTotal, missingResourceTotals.manaTotal)}</p>
+        </div>
+        {token.hasShield && (
+          <div>
+            <label htmlFor={`selected-token-shield-${token.tokenId}`} className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Current Shield</label>
+            <input
+              id={`selected-token-shield-${token.tokenId}`}
+              type="number"
+              value={draft.shieldCurrent}
+              onChange={(event) => updateDraftField('shieldCurrent', n(event.target.value, 0))}
+              disabled={isBusy}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-300"
+            />
+            <p className="mt-1 text-[11px] text-slate-500">{getSelectedTokenTotalText('Total Shield', token.shieldTotal, missingResourceTotals.shieldTotal)}</p>
+          </div>
+        )}
+      </div>
+
+      {!isReady && (
+        <div className="mt-4 rounded-2xl border border-dashed border-emerald-300/35 bg-slate-950/60 px-3 py-3 text-sm text-emerald-100">
+          {getSelectedTokenLoadingMessage(token)}
+        </div>
+      )}
+
+      {isReady && isLegacyCustomToken && (
+        <div className="mt-4 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-3 py-3 text-xs text-amber-100">
+          This legacy custom token is missing one or more saved totals. Saving will seed each missing total from the current value.
+        </div>
+      )}
+
+      <div className="mt-4">
+        <label htmlFor={`selected-token-notes-${token.tokenId}`} className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Notes</label>
+        <textarea
+          id={`selected-token-notes-${token.tokenId}`}
+          rows={4}
+          value={draft.notes}
+          onChange={(event) => updateDraftField('notes', event.target.value)}
+          placeholder="Add token notes"
+          disabled={isBusy}
+          className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-emerald-300"
+        />
+      </div>
+
+      <div className="mt-4 flex justify-end">
+        <button
+          type="button"
+          onClick={() => onSaveSelectedTokenDetails?.({
+            tokenId: token.tokenId,
+            tokenType: token.tokenType,
+            ownerUid: token.ownerUid,
+            characterId: token.characterId || '',
+            label: token.label || '',
+            imageUrl: token.imageUrl || '',
+            imagePath: token.imagePath || '',
+            hpCurrent: draft.hpCurrent,
+            hpTotal: n(token.hpTotal, 0),
+            manaCurrent: draft.manaCurrent,
+            manaTotal: n(token.manaTotal, 0),
+            shieldCurrent: draft.shieldCurrent,
+            shieldTotal: n(token.shieldTotal, 0),
+            notes: draft.notes,
+          })}
+          disabled={isBusy}
+          className="inline-flex items-center gap-2 rounded-xl border border-emerald-300/45 bg-emerald-400 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-black transition-colors hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-55"
+        >
+          <FiCheck className="h-4 w-4" />
+          {isSaving ? 'Saving' : (isReady ? 'Save Details' : 'Loading')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) {
   const [label, setLabel] = useState('');
   const [dadoAnima, setDadoAnima] = useState('');
   const [stats, setStats] = useState({});
   const [parametri, setParametri] = useState({});
+  const [notes, setNotes] = useState('');
   const [collapsedParamGroups, setCollapsedParamGroups] = useState({});
   const previousTokenIdRef = useRef('');
   const prefersReducedMotion = useReducedMotion();
@@ -256,6 +541,7 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
     setDadoAnima(token.dadoAnima || '');
     setStats(token.stats || {});
     setParametri(token.Parametri || {});
+    setNotes(token.notes || '');
   }, [token]);
 
   const sections = useMemo(() => buildFoeParamSections(parametri), [parametri]);
@@ -276,12 +562,12 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
     }
 
     setCollapsedParamGroups((current) => {
-      const nextState = sections.reduce((result, { groupKey }) => {
-        result[groupKey] = Object.prototype.hasOwnProperty.call(current, groupKey)
+      const nextState = {};
+      sections.forEach(({ groupKey }) => {
+        nextState[groupKey] = Object.prototype.hasOwnProperty.call(current, groupKey)
           ? current[groupKey]
           : true;
-        return result;
-      }, {});
+      });
 
       const currentKeys = Object.keys(current);
       const nextKeys = Object.keys(nextState);
@@ -297,6 +583,7 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
   }, [sections, token?.tokenId]);
 
   if (!token) return null;
+
   const hpTotal = n(stats?.hpTotal, 0);
   const manaTotal = n(stats?.manaTotal, 0);
   const isSaving = savingFoeTokenId === token.tokenId;
@@ -316,7 +603,7 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
             <span className="rounded-full border border-cyan-400/25 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-100">Instance</span>
           </div>
           <p className="mt-1 truncate text-lg font-semibold text-slate-100">{token?.label || 'Foe Token'}</p>
-          <p className="mt-1 truncate text-xs text-slate-400">Lv {n(stats?.level, 1)} • {token?.category || 'Unknown'} • {token?.rank || 'Unranked'}</p>
+          <p className="mt-1 truncate text-xs text-slate-400">Lv {n(stats?.level, 1)} | {token?.category || 'Unknown'} | {token?.rank || 'Unranked'}</p>
         </div>
       </div>
 
@@ -341,6 +628,18 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
         </div>
       </div>
 
+      <div className="mt-4">
+        <label htmlFor={`selected-foe-notes-${token.tokenId}`} className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Notes</label>
+        <textarea
+          id={`selected-foe-notes-${token.tokenId}`}
+          rows={4}
+          value={notes}
+          onChange={(event) => setNotes(event.target.value)}
+          placeholder="Optional foe notes"
+          className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-cyan-300"
+        />
+      </div>
+
       {sections.length > 0 && (
         <div className="mt-4 space-y-3">
           {sections.map(({ groupKey, entries }) => {
@@ -356,13 +655,10 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
                   aria-controls={contentId}
                   aria-label={toggleLabel}
                   title={toggleLabel}
-                  onClick={() => setCollapsedParamGroups((current) => {
-                    const currentValue = current[groupKey] !== false;
-                    return {
-                      ...current,
-                      [groupKey]: !currentValue,
-                    };
-                  })}
+                  onClick={() => setCollapsedParamGroups((current) => ({
+                    ...current,
+                    [groupKey]: current[groupKey] === false,
+                  }))}
                   className="flex w-full items-center justify-between gap-3 rounded-xl text-left transition-colors hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
                 >
                   <h4 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{groupKey}</h4>
@@ -412,13 +708,6 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
         </div>
       )}
 
-      {token?.notes && (
-        <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/65 p-3">
-          <h4 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Notes</h4>
-          <p className="mt-2 whitespace-pre-wrap text-sm text-slate-200">{token.notes}</p>
-        </div>
-      )}
-
       {['tecniche', 'spells'].map((sectionKey) => {
         const entries = Array.isArray(token?.[sectionKey]) ? token[sectionKey] : [];
         if (!entries.length) return null;
@@ -459,7 +748,7 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
       <div className="mt-4 flex justify-end">
         <button
           type="button"
-          onClick={() => onUpdateFoeToken?.({ tokenId: token.tokenId, label, dadoAnima, stats, Parametri: parametri })}
+          onClick={() => onUpdateFoeToken?.({ tokenId: token.tokenId, label, dadoAnima, stats, Parametri: parametri, notes })}
           disabled={isSaving}
           className="inline-flex items-center gap-2 rounded-xl border border-cyan-300/45 bg-cyan-400 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-black transition-colors hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-55"
         >
@@ -477,7 +766,7 @@ export default function MyTokenTray({
   currentUserToken,
   customTokens = [],
   foeLibrary = [],
-  selectedFoeToken = null,
+  selectedTokenDetails = null,
   activeMapName,
   hasActiveMap = false,
   onDragStart,
@@ -488,11 +777,17 @@ export default function MyTokenTray({
   updatingCustomTokenId = '',
   onDeleteCustomToken,
   deletingCustomTokenId = '',
+  onSaveSelectedTokenDetails,
+  savingSelectedTokenDetailsId = '',
   onUpdateFoeToken,
   savingFoeTokenId = '',
 }) {
   const [createLabel, setCreateLabel] = useState('');
   const [createImageFile, setCreateImageFile] = useState(null);
+  const [createHpCurrent, setCreateHpCurrent] = useState(0);
+  const [createManaCurrent, setCreateManaCurrent] = useState(0);
+  const [createShieldCurrent, setCreateShieldCurrent] = useState(0);
+  const [createNotes, setCreateNotes] = useState('');
   const [createImageInputKey, setCreateImageInputKey] = useState(0);
   const [editingTokenId, setEditingTokenId] = useState('');
   const [editingLabel, setEditingLabel] = useState('');
@@ -504,6 +799,10 @@ export default function MyTokenTray({
   const resetCreateForm = () => {
     setCreateLabel('');
     setCreateImageFile(null);
+    setCreateHpCurrent(0);
+    setCreateManaCurrent(0);
+    setCreateShieldCurrent(0);
+    setCreateNotes('');
     setCreateImageInputKey((key) => key + 1);
   };
 
@@ -541,6 +840,22 @@ export default function MyTokenTray({
       </div>
 
       <div className="space-y-3 p-4">
+        {selectedTokenDetails?.tokenType === 'foe' && isManager && (
+          <SelectedFoeDetailsPanel
+            token={selectedTokenDetails}
+            onUpdateFoeToken={onUpdateFoeToken}
+            savingFoeTokenId={savingFoeTokenId}
+          />
+        )}
+
+        {selectedTokenDetails && selectedTokenDetails.tokenType !== 'foe' && (
+          <SelectedResourceTokenDetailsPanel
+            token={selectedTokenDetails}
+            onSaveSelectedTokenDetails={onSaveSelectedTokenDetails}
+            savingSelectedTokenDetailsId={savingSelectedTokenDetailsId}
+          />
+        )}
+
         {trayTokens.map((token) => {
           const tokenId = token?.tokenId || token?.id || '';
           const isEditing = editingTokenId === tokenId;
@@ -548,6 +863,7 @@ export default function MyTokenTray({
           const isUpdating = updatingCustomTokenId === tokenId;
           const isDeleting = deletingCustomTokenId === tokenId;
           const canDrag = !!(hasActiveMap && token?.imageUrl && tokenId && token?.ownerUid && !token?.isHiddenByManager && !isEditing && !isUpdating && !isDeleting);
+
           return (
             <div
               key={tokenId || token?.label || 'tray-token'}
@@ -579,7 +895,7 @@ export default function MyTokenTray({
               </div>
 
               {getTokenHelpText(token, hasActiveMap) && <p className="mt-3 text-xs text-slate-300">{getTokenHelpText(token, hasActiveMap)}</p>}
-              {isCustomToken && !isEditing && (isUpdating || isDeleting) && <p className="mt-3 text-xs font-medium text-slate-300">{isDeleting ? 'Deleting custom token…' : 'Saving custom token…'}</p>}
+              {isCustomToken && !isEditing && (isUpdating || isDeleting) && <p className="mt-3 text-xs font-medium text-slate-300">{isDeleting ? 'Deleting custom token...' : 'Saving custom token...'}</p>}
 
               {isCustomToken && isEditing && (
                 <div className="mt-4 space-y-3 rounded-2xl border border-slate-800 bg-slate-950/75 p-3">
@@ -603,7 +919,6 @@ export default function MyTokenTray({
         })}
 
         {isManager && <FoeLibrarySection currentUserId={currentUserId} foeLibrary={foeLibrary} hasActiveMap={hasActiveMap} onDragStart={onDragStart} onDragEnd={onDragEnd} />}
-        {isManager && selectedFoeToken && <SelectedFoeDetailsPanel token={selectedFoeToken} onUpdateFoeToken={onUpdateFoeToken} savingFoeTokenId={savingFoeTokenId} />}
 
         <div className="rounded-2xl border border-slate-700/80 bg-slate-900/70 p-4">
           <div className="flex items-center gap-2">
@@ -619,13 +934,31 @@ export default function MyTokenTray({
               <label htmlFor="create-custom-token-name" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Name</label>
               <input id="create-custom-token-name" type="text" value={createLabel} onChange={(event) => setCreateLabel(event.target.value)} placeholder="Summoned Wolf" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-amber-300" />
             </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div>
+                <label htmlFor="create-custom-token-hp" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">HP</label>
+                <input id="create-custom-token-hp" type="number" value={createHpCurrent} onChange={(event) => setCreateHpCurrent(n(event.target.value, 0))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-300" />
+              </div>
+              <div>
+                <label htmlFor="create-custom-token-mana" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Mana</label>
+                <input id="create-custom-token-mana" type="number" value={createManaCurrent} onChange={(event) => setCreateManaCurrent(n(event.target.value, 0))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-300" />
+              </div>
+              <div>
+                <label htmlFor="create-custom-token-shield" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Shield</label>
+                <input id="create-custom-token-shield" type="number" value={createShieldCurrent} onChange={(event) => setCreateShieldCurrent(n(event.target.value, 0))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-300" />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="create-custom-token-notes" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Notes</label>
+              <textarea id="create-custom-token-notes" rows={4} value={createNotes} onChange={(event) => setCreateNotes(event.target.value)} placeholder="Optional notes" className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-amber-300" />
+            </div>
             <div>
               <label htmlFor="create-custom-token-image" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Image</label>
               <input key={`create-custom-token-image-${createImageInputKey}`} id="create-custom-token-image" type="file" accept="image/*" onChange={(event) => setCreateImageFile(event.target.files?.[0] || null)} className="block w-full text-xs text-slate-300 file:mr-3 file:rounded-xl file:border-0 file:bg-amber-400 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-black hover:file:bg-amber-300" />
               <p className="mt-1 text-[11px] text-slate-500">{createImageFile?.name || 'Upload an image to use as the token portrait.'}</p>
             </div>
             <div className="flex justify-end">
-              <button type="button" onClick={async () => { const didCreate = await onCreateCustomToken?.({ label: createLabel, imageFile: createImageFile }); if (didCreate) resetCreateForm(); }} disabled={isCreatingCustomToken} className="inline-flex items-center gap-2 rounded-xl border border-amber-300/45 bg-amber-400 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-55"><FiPlus className="h-4 w-4" />{isCreatingCustomToken ? 'Creating' : 'Create Token'}</button>
+              <button type="button" onClick={async () => { const didCreate = await onCreateCustomToken?.({ label: createLabel, imageFile: createImageFile, hpCurrent: createHpCurrent, manaCurrent: createManaCurrent, shieldCurrent: createShieldCurrent, notes: createNotes }); if (didCreate) resetCreateForm(); }} disabled={isCreatingCustomToken} className="inline-flex items-center gap-2 rounded-xl border border-amber-300/45 bg-amber-400 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-55"><FiPlus className="h-4 w-4" />{isCreatingCustomToken ? 'Creating' : 'Create Token'}</button>
             </div>
           </div>
         </div>
