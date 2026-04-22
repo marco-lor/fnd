@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 // Path correction: this file is at components/dmDashboard/elements/playerInfo/sections -> need to go up 4 levels to reach components/firebaseConfig.js
 import { db } from '../../../../firebaseConfig';
@@ -7,36 +7,91 @@ import { db } from '../../../../firebaseConfig';
 // Each cell lists rolls newest first with small formatting.
 const PlayerInfoDiceRollsRow = ({ users, variant = "table" }) => {
   const [rollsByUser, setRollsByUser] = useState({});
+  const [errorsByUser, setErrorsByUser] = useState({});
+  const loggedErrorsRef = useRef(new Set());
+  const safeUsers = useMemo(
+    () => (Array.isArray(users) ? users.filter((user) => user?.id) : []),
+    [users]
+  );
+  const safeUsersRef = useRef(safeUsers);
+  const userIdsKey = safeUsers.map((user) => user.id).join('|');
+
+  safeUsersRef.current = safeUsers;
 
   useEffect(() => {
-    if (!Array.isArray(users) || !users.length) return;
+    const activeUsers = safeUsersRef.current;
 
-    const unsubs = users.map(u => {
-      if (!u?.id) return null;
+    if (!activeUsers.length) {
+      setRollsByUser({});
+      setErrorsByUser({});
+      loggedErrorsRef.current.clear();
+      return undefined;
+    }
+
+    const allowedIds = new Set(activeUsers.map((user) => user.id));
+
+    setRollsByUser((prev) => {
+      const next = {};
+      allowedIds.forEach((userId) => {
+        if (prev[userId]) next[userId] = prev[userId];
+      });
+      return next;
+    });
+
+    setErrorsByUser((prev) => {
+      const next = {};
+      allowedIds.forEach((userId) => {
+        if (prev[userId]) next[userId] = prev[userId];
+      });
+      return next;
+    });
+
+    const unsubs = activeUsers.map((user) => {
       const qRef = query(
-        collection(db, 'users', u.id, 'diceRolls'),
+        collection(db, 'users', user.id, 'diceRolls'),
         orderBy('createdAt', 'desc'),
         limit(20)
       );
-      return onSnapshot(qRef, snap => {
+      return onSnapshot(qRef, (snap) => {
         const data = [];
-        snap.forEach(d => {
+        snap.forEach((d) => {
           const val = d.data();
           data.push({ id: d.id, ...val });
         });
-        setRollsByUser(prev => ({ ...prev, [u.id]: data }));
-      }, err => {
-        console.warn('Dice rolls listener failed for user', u.id, err);
+        loggedErrorsRef.current.delete(user.id);
+        setErrorsByUser((prev) => {
+          if (!prev[user.id]) return prev;
+          const next = { ...prev };
+          delete next[user.id];
+          return next;
+        });
+        setRollsByUser((prev) => ({ ...prev, [user.id]: data }));
+      }, (err) => {
+        setErrorsByUser((prev) => ({ ...prev, [user.id]: err }));
+        if (!loggedErrorsRef.current.has(user.id)) {
+          loggedErrorsRef.current.add(user.id);
+          console.warn('Dice rolls listener failed for user', user.id, err);
+        }
       });
     }).filter(Boolean);
 
     return () => {
-      unsubs.forEach(un => { try { un && un(); } catch (_) {} });
+      unsubs.forEach((un) => {
+        try {
+          un && un();
+        } catch (_) {}
+      });
     };
-  }, [users]);
+  }, [userIdsKey]);
 
   const renderList = (user) => {
     const rolls = rollsByUser[user.id] || [];
+    const loadError = errorsByUser[user.id];
+
+    if (loadError) {
+      return <span className="text-amber-300 italic">Dice rolls unavailable</span>;
+    }
+
     if (!rolls.length) return <span className="text-gray-500 italic">No rolls</span>;
 
     return (

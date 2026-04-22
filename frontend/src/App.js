@@ -12,6 +12,7 @@ import CombatPage from "./components/combatTool/combatPage"; // Combat page
 import AdminPage from "./components/admin/adminPage"; // AdminPage
 import Codex from "./components/codex/Codex"; // Codex page
 import EchiDiViaggio from "./components/echiDiViaggio/EchiDiViaggio"; // Import for Echi di Viaggio page
+import GrigliataPage from "./components/grigliata/GrigliataPage";
 import Layout from "./components/common/Layout"; // Import our new Layout component
 import { AuthProvider, useAuth } from "./AuthContext";
 import "./App.css";
@@ -64,6 +65,7 @@ function AppRoutes() {
         <Route path="/tecniche-spell" element={<TecnicheSpell />} />
         <Route path="/codex" element={<Codex />} />
         <Route path="/echi-di-viaggio" element={<EchiDiViaggio />} />
+        <Route path="/grigliata" element={<GrigliataPage />} />
         <Route
           path="/dm-dashboard"
           element={

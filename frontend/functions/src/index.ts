@@ -20,6 +20,15 @@ import {levelUpAll} from "./levelUpAll";
 import {levelUpUser} from "./levelUpUser";
 import {duplicateFoeWithAssets} from "./duplicateFoeWithAssets";
 import {expireBarriera} from "./expireBarriera";
+import {cleanupGrigliataMusicTrack} from "./cleanupGrigliataMusicTrack";
+import {deleteGrigliataCustomToken} from "./deleteGrigliataCustomToken";
+import {spawnGrigliataCustomTokenInstance} from "./spawnGrigliataCustomTokenInstance";
+import {spawnGrigliataFoeToken} from "./spawnGrigliataFoeToken";
+import {updateGrigliataCustomTokenTemplate} from "./updateGrigliataCustomTokenTemplate";
+import {
+  cleanupDeletedGrigliataTokenImage,
+  cleanupReplacedGrigliataTokenImage,
+} from "./cleanupGrigliataTokenImage";
 
 admin.initializeApp();
 
@@ -35,4 +44,11 @@ export {
   levelUpUser,
   duplicateFoeWithAssets,
   expireBarriera,
+  cleanupGrigliataMusicTrack,
+  deleteGrigliataCustomToken,
+  spawnGrigliataCustomTokenInstance,
+  spawnGrigliataFoeToken,
+  updateGrigliataCustomTokenTemplate,
+  cleanupDeletedGrigliataTokenImage,
+  cleanupReplacedGrigliataTokenImage,
 };

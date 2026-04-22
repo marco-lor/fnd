@@ -38,6 +38,723 @@ service cloud.firestore {
             || get(userDocPath(request.auth.uid)).data.role == "players");
     }
 
+    function isGrigliataManager() {
+      return isDM();
+    }
+
+    function isProtectedGrigliataDocument(documentPath) {
+      return documentPath.matches('^(grigliata_state|grigliata_backgrounds|grigliata_music_tracks|grigliata_music_playback|grigliata_tokens|grigliata_token_placements|grigliata_live_interactions|grigliata_aoe_figures)(/.*)?$');
+    }
+
+    function isUserDiceRollDocument(documentPath) {
+      return documentPath.matches('^users/[^/]+/diceRolls(/.*)?$');
+    }
+
+    function grigliataTokenDocPath(tokenId) {
+      return /databases/$(database)/documents/grigliata_tokens/$(tokenId);
+    }
+
+    function isGrigliataFoeTokenData(data) {
+      return data.tokenType == "foe";
+    }
+
+    function isValidGrigliataTokenType(tokenType) {
+      return tokenType in ["character", "custom", "foe"];
+    }
+
+    function isValidGrigliataTokenImageSource(imageSource) {
+      return imageSource in ["profile", "uploaded", "foesHub"];
+    }
+
+    function isValidGrigliataCustomTokenRole(customTokenRole) {
+      return customTokenRole in ["template", "instance"];
+    }
+
+    function resolveGrigliataCustomTokenRole(data) {
+      return data.keys().hasAny(["customTokenRole"]) && data.customTokenRole is string
+        ? data.customTokenRole
+        : "template";
+    }
+
+    function resolveGrigliataCustomTemplateId(data, tokenId) {
+      return data.keys().hasAny(["customTemplateId"])
+          && data.customTemplateId is string
+          && data.customTemplateId.size() > 0
+        ? data.customTemplateId
+        : tokenId;
+    }
+
+    function isValidGrigliataCustomTokenContract(data, tokenId) {
+      let hasRole = data.keys().hasAny(["customTokenRole"]);
+      let hasTemplateId = data.keys().hasAny(["customTemplateId"]);
+      let resolvedRole = resolveGrigliataCustomTokenRole(data);
+      let resolvedTemplateId = resolveGrigliataCustomTemplateId(data, tokenId);
+      return (
+        (
+          (!hasRole && !hasTemplateId)
+          || (
+            hasRole
+            && hasTemplateId
+            && data.customTokenRole is string
+            && isValidGrigliataCustomTokenRole(data.customTokenRole)
+            && data.customTemplateId is string
+            && data.customTemplateId.size() > 0
+          )
+        )
+        && (
+          (resolvedRole == "template" && resolvedTemplateId == tokenId)
+          || (
+            resolvedRole == "instance"
+            && resolvedTemplateId != tokenId
+            && resolvedTemplateId != data.ownerUid
+          )
+        )
+      );
+    }
+
+    function isOwnerCreatableGrigliataCustomTokenProfile(data, tokenId) {
+      return data.tokenType != "custom"
+        || (
+          resolveGrigliataCustomTokenRole(data) == "template"
+          && resolveGrigliataCustomTemplateId(data, tokenId) == tokenId
+        );
+    }
+
+    function isStableGrigliataCustomTokenContract(data, existingData, tokenId) {
+      return data.tokenType != "custom"
+        || (
+          resolveGrigliataCustomTokenRole(data) == resolveGrigliataCustomTokenRole(existingData)
+          && resolveGrigliataCustomTemplateId(data, tokenId) == resolveGrigliataCustomTemplateId(existingData, tokenId)
+        );
+    }
+
+    function isValidGrigliataTokenProfile(data, tokenId) {
+      return data.keys().hasAll([
+          "ownerUid",
+          "label",
+          "imageUrl",
+          "imagePath",
+          "tokenType",
+          "imageSource",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.keys().hasOnly([
+          "ownerUid",
+          "characterId",
+          "label",
+          "imageUrl",
+          "imagePath",
+          "tokenType",
+          "customTokenRole",
+          "customTemplateId",
+          "imageSource",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy",
+          "placed",
+          "col",
+          "row",
+          "foeSourceId",
+          "category",
+          "rank",
+          "dadoAnima",
+          "notes",
+          "stats",
+          "Parametri",
+          "spells",
+          "tecniche"
+        ])
+        && data.ownerUid is string
+        && data.label is string
+        && data.imageUrl is string
+        && data.imagePath is string
+        && isValidGrigliataTokenType(data.tokenType)
+        && isValidGrigliataTokenImageSource(data.imageSource)
+        && (data.tokenType == "custom" || !data.keys().hasAny(["customTokenRole", "customTemplateId"]))
+        && (!data.keys().hasAny(["characterId"]) || data.characterId is string)
+        && (!data.keys().hasAny(["customTokenRole"]) || data.customTokenRole is string)
+        && (!data.keys().hasAny(["customTemplateId"]) || data.customTemplateId is string)
+        && (!data.keys().hasAny(["foeSourceId"]) || data.foeSourceId is string)
+        && (!data.keys().hasAny(["category"]) || data.category is string)
+        && (!data.keys().hasAny(["rank"]) || data.rank is string)
+        && (!data.keys().hasAny(["dadoAnima"]) || data.dadoAnima is string)
+        && (!data.keys().hasAny(["notes"]) || data.notes is string)
+        && (!data.keys().hasAny(["stats"]) || data.stats is map)
+        && (!data.keys().hasAny(["Parametri"]) || data.Parametri is map)
+        && (!data.keys().hasAny(["spells"]) || data.spells is list)
+        && (!data.keys().hasAny(["tecniche"]) || data.tecniche is list)
+        && (!data.keys().hasAny(["createdBy"]) || data.createdBy == null || data.createdBy is string)
+        && (data.updatedBy == null || data.updatedBy is string)
+        && (
+          (data.tokenType == "character" && tokenId == data.ownerUid && data.imageSource == "profile")
+          || (
+            data.tokenType == "custom"
+            && tokenId != data.ownerUid
+            && data.imageSource == "uploaded"
+            && isValidGrigliataCustomTokenContract(data, tokenId)
+          )
+          || (
+            data.tokenType == "foe"
+            && tokenId != data.ownerUid
+            && data.imageSource == "foesHub"
+            && data.foeSourceId is string
+            && data.foeSourceId.size() > 0
+            && data.stats is map
+            && data.Parametri is map
+            && data.spells is list
+            && data.tecniche is list
+          )
+        );
+    }
+
+    function isValidLegacyGrigliataTokenScrubUpdate(data, existingData) {
+      return existingData is map
+        && data.ownerUid == existingData.ownerUid
+        && !data.keys().hasAny(["placed", "col", "row"])
+        && data.diff(existingData).affectedKeys().hasOnly([
+          "placed",
+          "col",
+          "row",
+          "updatedAt",
+          "updatedBy"
+        ]);
+    }
+
+    function isGrigliataPlacementId(backgroundId, scopedId, placementId) {
+      return backgroundId is string
+        && scopedId is string
+        && placementId == backgroundId + "__" + scopedId;
+    }
+
+    function resolveGrigliataPlacementTokenId(data) {
+      return data.keys().hasAny(["tokenId"]) && data.tokenId is string && data.tokenId.size() > 0
+        ? data.tokenId
+        : data.ownerUid;
+    }
+
+    function getReferencedGrigliataTokenData(data) {
+      let tokenId = resolveGrigliataPlacementTokenId(data);
+      return tokenId is string
+        && tokenId != data.ownerUid
+        && exists(grigliataTokenDocPath(tokenId))
+        ? get(grigliataTokenDocPath(tokenId)).data
+        : null;
+    }
+
+    function isValidGrigliataPlacementTokenReference(data) {
+      let tokenId = resolveGrigliataPlacementTokenId(data);
+      let tokenData = getReferencedGrigliataTokenData(data);
+      return tokenId is string
+        && (
+          tokenId == data.ownerUid
+          || (
+            tokenData != null
+            && tokenData.ownerUid == data.ownerUid
+            && (isGrigliataManager() || tokenData.tokenType != "foe")
+          )
+        );
+    }
+
+    function isValidGrigliataTurnEffect(effect) {
+      return effect is map
+        && effect.keys().hasAll([
+          "id",
+          "kind",
+          "totalTurns",
+          "remainingTurns",
+          "appliesFromTurnCounter"
+        ])
+        && effect.keys().hasOnly([
+          "id",
+          "kind",
+          "totalTurns",
+          "remainingTurns",
+          "appliesFromTurnCounter"
+        ])
+        && effect.id is string
+        && effect.id.size() > 0
+        && effect.kind is string
+        && effect.kind.size() > 0
+        && effect.totalTurns is int
+        && effect.totalTurns > 0
+        && effect.remainingTurns is int
+        && effect.remainingTurns >= 0
+        && effect.remainingTurns <= effect.totalTurns
+        && effect.appliesFromTurnCounter is int
+        && effect.appliesFromTurnCounter >= 0;
+    }
+
+    function hasValidGrigliataTurnEffects(effects) {
+      return effects is list
+        && effects.size() <= 12
+        && (effects.size() < 1 || isValidGrigliataTurnEffect(effects[0]))
+        && (effects.size() < 2 || isValidGrigliataTurnEffect(effects[1]))
+        && (effects.size() < 3 || isValidGrigliataTurnEffect(effects[2]))
+        && (effects.size() < 4 || isValidGrigliataTurnEffect(effects[3]))
+        && (effects.size() < 5 || isValidGrigliataTurnEffect(effects[4]))
+        && (effects.size() < 6 || isValidGrigliataTurnEffect(effects[5]))
+        && (effects.size() < 7 || isValidGrigliataTurnEffect(effects[6]))
+        && (effects.size() < 8 || isValidGrigliataTurnEffect(effects[7]))
+        && (effects.size() < 9 || isValidGrigliataTurnEffect(effects[8]))
+        && (effects.size() < 10 || isValidGrigliataTurnEffect(effects[9]))
+        && (effects.size() < 11 || isValidGrigliataTurnEffect(effects[10]))
+        && (effects.size() < 12 || isValidGrigliataTurnEffect(effects[11]));
+    }
+
+    function isValidOwnerManagedGrigliataTurnOrderCreate(data) {
+      let hasJoinedAt = data.keys().hasAny(["turnOrderJoinedAt"]);
+      let isInTurnOrder = data.keys().hasAny(["isInTurnOrder"]) && data.isInTurnOrder == true;
+
+      return (
+        !hasJoinedAt && !isInTurnOrder
+      ) || (
+        hasJoinedAt
+        && isInTurnOrder
+        && data.turnOrderJoinedAt == request.time
+      );
+    }
+
+    function isValidOwnerManagedGrigliataTurnOrderUpdate(nextData, prevData) {
+      let nextHasJoinedAt = nextData.keys().hasAny(["turnOrderJoinedAt"]);
+      let prevHasJoinedAt = prevData.keys().hasAny(["turnOrderJoinedAt"]);
+      let nextIsInTurnOrder = nextData.keys().hasAny(["isInTurnOrder"]) && nextData.isInTurnOrder == true;
+
+      return (
+        !nextHasJoinedAt && !nextIsInTurnOrder
+      ) || (
+        nextHasJoinedAt
+        && nextIsInTurnOrder
+        && (
+          (!prevHasJoinedAt && nextData.turnOrderJoinedAt == request.time)
+          || (prevHasJoinedAt && nextData.turnOrderJoinedAt == prevData.turnOrderJoinedAt)
+        )
+      );
+    }
+
+    function isValidGrigliataAoEFigureType(figureType) {
+      return figureType in ["circle", "square", "cone", "rectangle"];
+    }
+
+    function isValidGrigliataAoEFigureSlot(slot) {
+      return slot is int
+        && slot >= 1
+        && slot <= 5;
+    }
+
+    function isGrigliataAoEFigureId(backgroundId, ownerUid, figureType, slot, figureId) {
+      return backgroundId is string
+        && ownerUid is string
+        && isValidGrigliataAoEFigureType(figureType)
+        && isValidGrigliataAoEFigureSlot(slot)
+        && figureId == backgroundId + "__" + ownerUid + "__" + figureType + "__" + string(slot);
+    }
+
+    function isOwnGrigliataAoEFigureProbeId(figureId) {
+      return isSignedIn()
+        && figureId is string
+        && figureId.matches('^.+__' + request.auth.uid + '__(circle|square|cone|rectangle)__(1|2|3|4|5)$');
+    }
+
+    function isValidGrigliataPlacement(data, placementId) {
+      return data.keys().hasAll([
+          "backgroundId",
+          "ownerUid",
+          "col",
+          "row",
+          "isDead",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.keys().hasOnly([
+          "backgroundId",
+          "tokenId",
+          "ownerUid",
+          "label",
+          "imageUrl",
+          "col",
+          "row",
+          "isVisibleToPlayers",
+          "isDead",
+          "statuses",
+          "isInTurnOrder",
+          "turnOrderInitiative",
+          "turnOrderJoinedAt",
+          "turnCounter",
+          "turnEffects",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.backgroundId is string
+        && data.ownerUid is string
+        && (!data.keys().hasAny(["tokenId"]) || data.tokenId is string)
+        && (!data.keys().hasAny(["label"]) || data.label is string)
+        && (!data.keys().hasAny(["imageUrl"]) || data.imageUrl is string)
+        && data.col is int
+        && data.row is int
+        && (
+          !data.keys().hasAny(["isVisibleToPlayers"])
+          || data.isVisibleToPlayers is bool
+        )
+        && data.isDead is bool
+        && (
+          !data.keys().hasAny(["isInTurnOrder"])
+          || data.isInTurnOrder is bool
+        )
+        && (
+          !data.keys().hasAny(["turnOrderInitiative"])
+          || data.turnOrderInitiative is int
+        )
+        && (
+          !data.keys().hasAny(["turnOrderJoinedAt"])
+          || data.turnOrderJoinedAt is timestamp
+        )
+        && (
+          !data.keys().hasAny(["turnCounter"])
+          || (
+            data.turnCounter is int
+            && data.turnCounter >= 0
+          )
+        )
+        && (
+          !data.keys().hasAny(["turnEffects"])
+          || hasValidGrigliataTurnEffects(data.turnEffects)
+        )
+        && (
+          !data.keys().hasAny(["statuses"])
+          || (
+            data.statuses is list
+            && data.statuses.size() <= 21
+            && data.statuses.hasOnly([
+              "bleeding",
+              "blinded",
+              "burning",
+              "charmed",
+              "concentrating",
+              "crippled",
+              "flying",
+              "frightened",
+              "frozen",
+              "grappled",
+              "hastened",
+              "marked",
+              "petrified",
+              "poisoned",
+              "prone",
+              "restrained",
+              "shielded",
+              "silenced",
+              "sleeping",
+              "slowed",
+              "stunned"
+            ])
+          )
+        )
+        && (data.updatedBy == null || data.updatedBy is string)
+        && isGrigliataPlacementId(data.backgroundId, resolveGrigliataPlacementTokenId(data), placementId)
+        && isValidGrigliataPlacementTokenReference(data);
+    }
+
+    function isValidGrigliataDrawColorKey(colorKey) {
+      return colorKey in [
+        "aurora-fuchsia",
+        "ion-cyan",
+        "nova-teal",
+        "volt-lime",
+        "solar-amber",
+        "warp-violet"
+      ];
+    }
+
+    function isValidGrigliataGridCell(cell) {
+      return cell is map
+        && cell.keys().hasAll(["col", "row"])
+        && cell.keys().hasOnly(["col", "row"])
+        && cell.col is int
+        && cell.row is int;
+    }
+
+    function isValidGrigliataBoardPoint(point) {
+      return point is map
+        && point.keys().hasAll(["x", "y"])
+        && point.keys().hasOnly(["x", "y"])
+        && (point.x is int || point.x is float)
+        && (point.y is int || point.y is float);
+    }
+
+    function isValidGrigliataAoEFigure(data, figureId) {
+      return data.keys().hasAll([
+          "backgroundId",
+          "ownerUid",
+          "figureType",
+          "slot",
+          "originCell",
+          "targetCell",
+          "colorKey",
+          "isVisibleToPlayers",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.keys().hasOnly([
+          "backgroundId",
+          "ownerUid",
+          "figureType",
+          "slot",
+          "originCell",
+          "targetCell",
+          "colorKey",
+          "isVisibleToPlayers",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.backgroundId is string
+        && data.ownerUid is string
+        && isValidGrigliataAoEFigureType(data.figureType)
+        && isValidGrigliataAoEFigureSlot(data.slot)
+        && isValidGrigliataGridCell(data.originCell)
+        && isValidGrigliataGridCell(data.targetCell)
+        && data.colorKey is string
+        && isValidGrigliataDrawColorKey(data.colorKey)
+        && data.isVisibleToPlayers is bool
+        && (data.createdBy == null || data.createdBy is string)
+        && (data.updatedBy == null || data.updatedBy is string)
+        && isGrigliataAoEFigureId(data.backgroundId, data.ownerUid, data.figureType, data.slot, figureId);
+    }
+
+    function hasValidGrigliataAnchorCells(cells) {
+      return cells is list
+        && cells.size() > 0
+        && cells.size() <= 16
+        && (cells.size() < 1 || isValidGrigliataGridCell(cells[0]))
+        && (cells.size() < 2 || isValidGrigliataGridCell(cells[1]))
+        && (cells.size() < 3 || isValidGrigliataGridCell(cells[2]))
+        && (cells.size() < 4 || isValidGrigliataGridCell(cells[3]))
+        && (cells.size() < 5 || isValidGrigliataGridCell(cells[4]))
+        && (cells.size() < 6 || isValidGrigliataGridCell(cells[5]))
+        && (cells.size() < 7 || isValidGrigliataGridCell(cells[6]))
+        && (cells.size() < 8 || isValidGrigliataGridCell(cells[7]))
+        && (cells.size() < 9 || isValidGrigliataGridCell(cells[8]))
+        && (cells.size() < 10 || isValidGrigliataGridCell(cells[9]))
+        && (cells.size() < 11 || isValidGrigliataGridCell(cells[10]))
+        && (cells.size() < 12 || isValidGrigliataGridCell(cells[11]))
+        && (cells.size() < 13 || isValidGrigliataGridCell(cells[12]))
+        && (cells.size() < 14 || isValidGrigliataGridCell(cells[13]))
+        && (cells.size() < 15 || isValidGrigliataGridCell(cells[14]))
+        && (cells.size() < 16 || isValidGrigliataGridCell(cells[15]));
+    }
+
+    function isValidGrigliataLiveInteraction(data, interactionId) {
+      return data.keys().hasAll([
+          "backgroundId",
+          "ownerUid",
+          "type",
+          "source",
+          "colorKey",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.backgroundId is string
+        && data.ownerUid is string
+        && data.colorKey is string
+        && isValidGrigliataDrawColorKey(data.colorKey)
+        && (data.updatedBy == null || data.updatedBy is string)
+        && isGrigliataPlacementId(data.backgroundId, data.ownerUid, interactionId)
+        && (
+          (
+            data.type == "measure"
+            && data.keys().hasAll(["anchorCells", "liveEndCell"])
+            && data.keys().hasOnly([
+              "backgroundId",
+              "ownerUid",
+              "type",
+              "source",
+              "colorKey",
+              "anchorCells",
+              "liveEndCell",
+              "updatedAt",
+              "updatedBy"
+            ])
+            && data.source in ["free", "token-drag"]
+            && hasValidGrigliataAnchorCells(data.anchorCells)
+            && isValidGrigliataGridCell(data.liveEndCell)
+          )
+          || (
+            data.type == "aoe"
+            && data.keys().hasAll(["figureType", "originCell", "targetCell"])
+            && data.keys().hasOnly([
+              "backgroundId",
+              "ownerUid",
+              "type",
+              "source",
+              "colorKey",
+              "figureType",
+              "originCell",
+              "targetCell",
+              "updatedAt",
+              "updatedBy"
+            ])
+            && data.source in ["aoe-create", "aoe-move"]
+            && isValidGrigliataAoEFigureType(data.figureType)
+            && isValidGrigliataGridCell(data.originCell)
+            && isValidGrigliataGridCell(data.targetCell)
+          )
+          || (
+            data.type == "ping"
+            && data.keys().hasAll(["point", "startedAtMs"])
+            && data.keys().hasOnly([
+              "backgroundId",
+              "ownerUid",
+              "type",
+              "source",
+              "colorKey",
+              "point",
+              "startedAtMs",
+              "updatedAt",
+              "updatedBy"
+            ])
+            && data.source == "free"
+            && isValidGrigliataBoardPoint(data.point)
+            && data.startedAtMs is int
+            && data.startedAtMs > 0
+          )
+        );
+    }
+
+    function isValidGrigliataMusicTrack(data) {
+      return data.keys().hasAll([
+          "name",
+          "fileName",
+          "audioUrl",
+          "audioPath",
+          "contentType",
+          "sizeBytes",
+          "durationMs",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.keys().hasOnly([
+          "name",
+          "fileName",
+          "audioUrl",
+          "audioPath",
+          "contentType",
+          "sizeBytes",
+          "durationMs",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.name is string
+        && data.name.size() > 0
+        && data.fileName is string
+        && data.fileName.size() > 0
+        && data.audioUrl is string
+        && data.audioUrl.size() > 0
+        && data.audioPath is string
+        && data.audioPath.matches('^grigliata/music/.+$')
+        && data.contentType is string
+        && data.contentType.matches('^audio/.+$')
+        && data.sizeBytes is int
+        && data.sizeBytes >= 0
+        && data.durationMs is int
+        && data.durationMs > 0
+        && (data.createdBy == null || data.createdBy is string)
+        && (data.updatedBy == null || data.updatedBy is string);
+    }
+
+    function isValidGrigliataMusicPlaybackStatus(status) {
+      return status in ["playing", "paused", "stopped"];
+    }
+
+    function isValidGrigliataMusicPlayback(data) {
+      return data.keys().hasAll([
+          "status",
+          "trackId",
+          "trackName",
+          "audioUrl",
+          "durationMs",
+          "offsetMs",
+          "volume",
+          "startedAt",
+          "commandId",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.keys().hasOnly([
+          "status",
+          "trackId",
+          "trackName",
+          "audioUrl",
+          "durationMs",
+          "offsetMs",
+          "volume",
+          "startedAt",
+          "commandId",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.status is string
+        && isValidGrigliataMusicPlaybackStatus(data.status)
+        && data.trackId is string
+        && data.trackName is string
+        && data.audioUrl is string
+        && data.durationMs is int
+        && data.durationMs >= 0
+        && data.offsetMs is int
+        && data.offsetMs >= 0
+        && (data.volume is int || data.volume is float)
+        && data.volume >= 0
+        && data.volume <= 1
+        && data.commandId is string
+        && data.commandId.size() > 0
+        && (data.updatedBy == null || data.updatedBy is string)
+        && (
+          (
+            data.status == "stopped"
+            && data.trackId.size() == 0
+            && data.trackName.size() == 0
+            && data.audioUrl.size() == 0
+            && data.durationMs == 0
+            && data.offsetMs == 0
+            && data.startedAt == null
+          )
+          || (
+            data.status == "paused"
+            && data.trackId.size() > 0
+            && data.trackName.size() > 0
+            && data.audioUrl.size() > 0
+            && data.offsetMs <= data.durationMs
+            && data.startedAt == null
+          )
+          || (
+            data.status == "playing"
+            && data.trackId.size() > 0
+            && data.trackName.size() > 0
+            && data.audioUrl.size() > 0
+            && data.offsetMs <= data.durationMs
+            && data.startedAt != null
+          )
+        );
+    }
+
+    function isGrigliataPlacementVisibleToPlayers(data) {
+      return !data.keys().hasAny(["isVisibleToPlayers"])
+        || data.isVisibleToPlayers == true;
+    }
+
+    function isGrigliataPlacementDead(data) {
+      return data.keys().hasAny(["isDead"])
+        && data.isDead == true;
+    }
+
     function isNpcTextOnlyUpdate() {
       return request.resource.data.imageUrl == resource.data.imageUrl
         && request.resource.data.imagePath == resource.data.imagePath;
@@ -72,22 +789,26 @@ service cloud.firestore {
            );
     }
 
-    // DMs can do everything anywhere
+    // DMs can read any non-protected document and write any non-protected document except user dice rolls.
     match /{document=**} {
-      allow read, write: if isDM();
+      allow read: if isDM() && !isProtectedGrigliataDocument(document);
+      allow write: if isDM()
+        && !isProtectedGrigliataDocument(document)
+        && !isUserDiceRollDocument(document);
     }
 
     // Users
     match /users/{userId} {
       // Owner read, plus webmaster read. (Note: players cannot read other users.)
-      allow read: if isSignedIn() && (request.auth.uid == userId || isWebmaster());
+      allow read: if isSignedIn() && (request.auth.uid == userId || isWebmaster() || isDM());
       // Owner write or webmaster write (DM already covered by global rule)
-      allow write: if isSignedIn() && (request.auth.uid == userId || isWebmaster());
+      allow write: if isSignedIn() && (request.auth.uid == userId || isWebmaster() || isDM());
 
       // Dice roll logs subcollection: each user can manage ONLY their own dice rolls
       match /diceRolls/{rollId} {
-        // Owner full access (DM already globally allowed). Webmaster may access via parent rule if desired, but keep explicit owner rule.
-        allow read, write: if isSignedIn() && request.auth.uid == userId;
+        // Explicit DM read access keeps dashboard listeners query-friendly; writes stay owner-only.
+        allow read: if isSignedIn() && (request.auth.uid == userId || isDM());
+        allow write: if isSignedIn() && request.auth.uid == userId;
       }
 
       // Private map markers per user
@@ -108,6 +829,12 @@ service cloud.firestore {
       match /Razze/{raceId} {
         allow read: if isSignedIn();
       }
+    }
+
+    // Foes
+    match /foes/{foeId} {
+      allow get, list: if isDM();
+      allow create, update, delete: if isDM();
     }
 
     // Encounters
@@ -147,6 +874,205 @@ service cloud.firestore {
     match /map_markers/{markerId} {
       allow read: if isSignedIn();
       allow write: if isDM() || isWebmaster() || isPlayer();
+    }
+
+    match /grigliata_state/{stateId} {
+      allow read: if isSignedIn();
+      allow write: if isGrigliataManager();
+    }
+
+    match /grigliata_backgrounds/{backgroundId} {
+      allow read: if isSignedIn();
+      allow write: if isGrigliataManager();
+    }
+
+    match /grigliata_music_tracks/{trackId} {
+      allow read: if isGrigliataManager();
+
+      allow create, update: if isGrigliataManager()
+        && isValidGrigliataMusicTrack(request.resource.data);
+
+      allow delete: if isGrigliataManager()
+        && isValidGrigliataMusicTrack(resource.data);
+    }
+
+    match /grigliata_music_playback/{stateId} {
+      allow read: if isSignedIn() && stateId == "current";
+
+      allow create, update: if stateId == "current"
+        && isGrigliataManager()
+        && isValidGrigliataMusicPlayback(request.resource.data);
+    }
+
+    match /grigliata_tokens/{tokenId} {
+      allow read: if isSignedIn()
+        && (
+          tokenId == resource.data.ownerUid
+          || request.auth.uid == resource.data.ownerUid
+          || isGrigliataManager()
+        );
+
+      allow create: if isSignedIn()
+        && isValidGrigliataTokenProfile(request.resource.data, tokenId)
+        && (
+          isGrigliataManager()
+          || (
+            request.auth.uid == request.resource.data.ownerUid
+            && !isGrigliataFoeTokenData(request.resource.data)
+            && isOwnerCreatableGrigliataCustomTokenProfile(request.resource.data, tokenId)
+          )
+        );
+
+      allow update: if isSignedIn()
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && (
+          (
+            isValidGrigliataTokenProfile(request.resource.data, tokenId)
+            && isStableGrigliataCustomTokenContract(request.resource.data, resource.data, tokenId)
+            && (
+              isGrigliataManager()
+              || (
+                request.auth.uid == resource.data.ownerUid
+                && !isGrigliataFoeTokenData(request.resource.data)
+              )
+            )
+          )
+          || (
+            isGrigliataManager()
+            && isValidLegacyGrigliataTokenScrubUpdate(request.resource.data, resource.data)
+          )
+        );
+
+      allow delete: if isGrigliataManager();
+    }
+
+    match /grigliata_token_placements/{placementId} {
+      allow read: if isSignedIn()
+        && (isGrigliataManager() || isGrigliataPlacementVisibleToPlayers(resource.data));
+
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasAll(["tokenId"])
+        && isValidGrigliataPlacement(request.resource.data, placementId)
+        && (
+          isGrigliataManager()
+          || (
+            request.auth.uid == request.resource.data.ownerUid
+            && isGrigliataPlacementVisibleToPlayers(request.resource.data)
+            && !isGrigliataPlacementDead(request.resource.data)
+            && !request.resource.data.keys().hasAny(["turnCounter", "turnEffects"])
+            && isValidOwnerManagedGrigliataTurnOrderCreate(request.resource.data)
+          )
+        );
+
+      allow update: if isSignedIn()
+        && request.resource.data.keys().hasAll(["tokenId"])
+        && isValidGrigliataPlacement(request.resource.data, placementId)
+        && request.resource.data.backgroundId == resource.data.backgroundId
+        && request.resource.data.tokenId == resolveGrigliataPlacementTokenId(resource.data)
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && (
+          isGrigliataManager()
+          || (
+            request.auth.uid == resource.data.ownerUid
+            && isGrigliataPlacementVisibleToPlayers(resource.data)
+            && isGrigliataPlacementVisibleToPlayers(request.resource.data)
+            && isGrigliataPlacementDead(request.resource.data) == isGrigliataPlacementDead(resource.data)
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["turnCounter", "turnEffects"])
+            && isValidOwnerManagedGrigliataTurnOrderUpdate(request.resource.data, resource.data)
+          )
+        );
+
+      allow delete: if isSignedIn()
+        && isValidGrigliataPlacement(resource.data, placementId)
+        && (
+          isGrigliataManager()
+          || (
+            request.auth.uid == resource.data.ownerUid
+            && isGrigliataPlacementVisibleToPlayers(resource.data)
+          )
+        );
+    }
+
+    match /grigliata_live_interactions/{interactionId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && isValidGrigliataLiveInteraction(request.resource.data, interactionId)
+        && (
+          isGrigliataManager()
+          || (
+            request.auth.uid == request.resource.data.ownerUid
+            && (
+              request.resource.data.updatedBy == null
+              || request.resource.data.updatedBy == request.auth.uid
+            )
+          )
+        );
+
+      allow update: if isSignedIn()
+        && isValidGrigliataLiveInteraction(request.resource.data, interactionId)
+        && request.resource.data.backgroundId == resource.data.backgroundId
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && (
+          isGrigliataManager()
+          || (
+            request.auth.uid == resource.data.ownerUid
+            && (
+              request.resource.data.updatedBy == null
+              || request.resource.data.updatedBy == request.auth.uid
+            )
+          )
+        );
+
+      allow delete: if isSignedIn()
+        && isValidGrigliataLiveInteraction(resource.data, interactionId)
+        && (
+          isGrigliataManager()
+          || request.auth.uid == resource.data.ownerUid
+        );
+    }
+
+    match /grigliata_aoe_figures/{figureId} {
+      allow read: if isSignedIn()
+        && (
+          isGrigliataManager()
+          || (
+            resource == null
+            && isOwnGrigliataAoEFigureProbeId(figureId)
+          )
+          || (
+            resource != null
+            && (
+              request.auth.uid == resource.data.ownerUid
+              || resource.data.isVisibleToPlayers == true
+            )
+          )
+        );
+
+      allow create: if isSignedIn()
+        && isValidGrigliataAoEFigure(request.resource.data, figureId)
+        && (
+          isGrigliataManager()
+          || request.auth.uid == request.resource.data.ownerUid
+        );
+
+      allow update: if isSignedIn()
+        && isValidGrigliataAoEFigure(request.resource.data, figureId)
+        && request.resource.data.backgroundId == resource.data.backgroundId
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.figureType == resource.data.figureType
+        && request.resource.data.slot == resource.data.slot
+        && (
+          isGrigliataManager()
+          || request.auth.uid == resource.data.ownerUid
+        );
+
+      allow delete: if isSignedIn()
+        && isValidGrigliataAoEFigure(resource.data, figureId)
+        && (
+          isGrigliataManager()
+          || request.auth.uid == resource.data.ownerUid
+        );
     }
 
     // Echi NPCs

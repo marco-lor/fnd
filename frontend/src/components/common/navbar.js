@@ -45,6 +45,11 @@ const NAV_ITEMS = [
     end: true,
   },
   {
+    label: 'Grigliata',
+    path: '/grigliata',
+    end: true,
+  },
+  {
     label: 'DM Dashboard',
     path: '/dm-dashboard',
     roles: ['dm'],
@@ -108,7 +113,7 @@ const Navbar = () => {
       return (
         <>
           <div className="w-20 h-20 rounded-full bg-gray-600 animate-pulse mr-3"></div>
-          <div className="flex flex-col">
+          <div className="flex min-w-0 flex-col">
             <div className="h-6 w-32 bg-gray-600 animate-pulse rounded mb-1"></div>
             <div className="h-4 w-24 bg-gray-600 animate-pulse rounded"></div>
           </div>
@@ -173,11 +178,11 @@ const Navbar = () => {
             </div>
           </div>
         )}
-        <div className="flex flex-col">
-          <h1 className="text-xl md:text-2xl font-bold text-white">
+        <div className="flex min-w-0 flex-col">
+          <h1 className="truncate text-xl md:text-2xl font-bold text-white">
             {userData?.characterId || (user && user.email) || "User"}
           </h1>
-          <p className="text-sm text-gray-300">
+          <p className="truncate text-sm text-gray-300">
             {userData?.race || 'No Race'}
           </p>
         </div>
@@ -225,15 +230,15 @@ const Navbar = () => {
 
   return (
     <>
-      <header data-navbar className="w-full bg-[rgba(40,40,60,0.8)] p-3 grid grid-cols-1 md:grid-cols-3 items-center sticky top-0 z-50 backdrop-blur-sm">
+      <header data-navbar className="w-full bg-[rgba(40,40,60,0.8)] p-3 grid grid-cols-1 md:grid-cols-[max-content_minmax(0,1fr)_max-content] items-center sticky top-0 z-50 backdrop-blur-sm">
         {/* Left Column: Profile Picture and Character Name */}
-        <div className="flex items-center justify-center md:justify-start mb-4 md:mb-0">
+        <div className="flex max-w-full items-center justify-center mb-4 md:mb-0 md:max-w-[24rem] md:justify-start">
           {renderProfileInfo()}
         </div>
 
         {/* Center Column: Navigation Buttons */}
-        <nav className="flex justify-center" aria-label="Primary">
-          <ul className="flex flex-wrap justify-center gap-2 md:gap-4">
+        <nav className="flex min-w-0 w-full justify-center" aria-label="Primary">
+          <ul className="flex w-full max-w-full flex-wrap justify-center gap-2 md:gap-4">
             {navItems.map((item) => {
               const Icon = item.icon;
               return (
@@ -259,7 +264,7 @@ const Navbar = () => {
         </nav>
 
         {/* Right Column: Logout Button */}
-        <div className="flex items-center justify-center md:justify-end gap-3 mt-4 md:mt-0 md:mr-4">
+        <div className="flex items-center justify-center md:justify-end gap-3 mt-4 md:mt-0">
           <button
             className="bg-[#8B0000] text-white px-3 py-1 md:px-4 md:py-2 rounded-[5px] cursor-pointer transition-colors duration-300 hover:bg-[#B22222] text-sm md:text-base font-medium disabled:opacity-75"
             onClick={handleLogout}
