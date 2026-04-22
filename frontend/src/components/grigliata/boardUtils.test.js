@@ -2,12 +2,43 @@ import {
   buildPlacementDocId,
   getHiddenTokenIdsForBackground,
   isCurrentUserTokenHiddenForViewer,
+  normalizeGridConfig,
   normalizeHiddenTokenIdsByBackground,
 } from './boardUtils';
 
 describe('buildPlacementDocId', () => {
   test('serializes the background and token ids with the shared placement format', () => {
     expect(buildPlacementDocId('map-1', 'token-7')).toBe('map-1__token-7');
+  });
+});
+
+describe('normalizeGridConfig', () => {
+  test('clamps the cell size at the new 12px floor and keeps nearby valid values', () => {
+    expect(normalizeGridConfig({ cellSizePx: 1, offsetXPx: 0, offsetYPx: 0 })).toEqual({
+      cellSizePx: 12,
+      offsetXPx: 0,
+      offsetYPx: 0,
+    });
+
+    expect(normalizeGridConfig({ cellSizePx: 12, offsetXPx: 0, offsetYPx: 0 })).toEqual({
+      cellSizePx: 12,
+      offsetXPx: 0,
+      offsetYPx: 0,
+    });
+
+    expect(normalizeGridConfig({ cellSizePx: 13, offsetXPx: 0, offsetYPx: 0 })).toEqual({
+      cellSizePx: 13,
+      offsetXPx: 0,
+      offsetYPx: 0,
+    });
+  });
+
+  test('still clamps the cell size at the existing 240px ceiling', () => {
+    expect(normalizeGridConfig({ cellSizePx: 999, offsetXPx: 0, offsetYPx: 0 })).toEqual({
+      cellSizePx: 240,
+      offsetXPx: 0,
+      offsetYPx: 0,
+    });
   });
 });
 

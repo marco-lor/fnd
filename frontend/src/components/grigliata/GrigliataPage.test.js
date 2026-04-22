@@ -263,6 +263,7 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-turn-order-order">{(props.turnOrderEntries || []).map((entry) => entry.tokenId).join(',')}</div>
       <div data-testid="board-aoe-tool">{props.activeAoeFigureType || ''}</div>
       <div data-testid="board-draw-color">{props.drawTheme?.key || ''}</div>
+      <div data-testid="board-grid-size">{String(props.grid?.cellSizePx || '')}</div>
         <button type="button" onClick={() => props.onSelectMouseTool?.()}>
           select mouse tool
         </button>
@@ -303,6 +304,20 @@ jest.mock('./GrigliataBoard', () => {
           onClick={() => props.onToggleMusicMuted?.()}
         >
           {props.isMusicMuted ? 'Unmute Music' : 'Mute Music'}
+        </button>
+        <button
+          type="button"
+          disabled={props.isGridSizeAdjustmentDisabled}
+          onClick={() => props.onAdjustGridSize?.(1)}
+        >
+          increase square size
+        </button>
+        <button
+          type="button"
+          disabled={props.isGridSizeAdjustmentDisabled}
+          onClick={() => props.onAdjustGridSize?.(-1)}
+        >
+          decrease square size
         </button>
         <button type="button" onClick={() => props.onChangeAoeFigureType?.('circle')}>
           activate circle tool
@@ -5016,6 +5031,62 @@ describe('GrigliataPage', () => {
     expect(firestore.updateDoc).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'users/user-1' }),
       { 'settings.grigliata_draw_color': 'solar-amber' }
+    );
+  });
+
+  test('lets the DM decrease the active grid size down to 12px without persisting a smaller value', async () => {
+    setManagerAuth();
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 13, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+      }, {
+        id: 'map-2',
+        name: 'Iron Keep',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-grid-size')).toHaveTextContent('13');
+    });
+
+    firestore.updateDoc.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: /decrease square size/i }));
+    expect(screen.getByTestId('board-grid-size')).toHaveTextContent('12');
+
+    fireEvent.click(screen.getByRole('button', { name: /decrease square size/i }));
+    expect(screen.getByTestId('board-grid-size')).toHaveTextContent('12');
+    expect(firestore.updateDoc).not.toHaveBeenCalled();
+
+    await act(async () => {
+      jest.advanceTimersByTime(299);
+    });
+    expect(firestore.updateDoc).not.toHaveBeenCalled();
+
+    await act(async () => {
+      jest.advanceTimersByTime(1);
+    });
+
+    await waitFor(() => {
+      expect(firestore.updateDoc).toHaveBeenCalledTimes(1);
+    });
+
+    expect(firestore.updateDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+      expect.objectContaining({
+        'grid.cellSizePx': 12,
+        updatedAt: { __type: 'serverTimestamp' },
+        updatedBy: 'user-1',
+      })
     );
   });
 

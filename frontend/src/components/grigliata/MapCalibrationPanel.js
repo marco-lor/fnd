@@ -1,4 +1,5 @@
 import React from 'react';
+import { MAX_GRID_CELL_SIZE, MIN_GRID_CELL_SIZE } from './constants';
 
 export default function MapCalibrationPanel({
   selectedBackground,
@@ -29,8 +30,8 @@ export default function MapCalibrationPanel({
               <span className="text-xs text-slate-300">Square Size</span>
               <input
                 type="number"
-                min="24"
-                max="240"
+                min={MIN_GRID_CELL_SIZE}
+                max={MAX_GRID_CELL_SIZE}
                 step="1"
                 value={calibrationDraft.cellSizePx}
                 onChange={(event) => onCalibrationDraftChange('cellSizePx', event.target.value)}
