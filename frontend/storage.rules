@@ -15,12 +15,6 @@ service firebase.storage {
         && firestore.get(userDocPath(request.auth.uid)).data.role == "dm";
     }
 
-    function isProtectedGrigliataPath(path) {
-      return path.matches('^grigliata/backgrounds(/.*)?$')
-        || path.matches('^grigliata/music(/.*)?$')
-        || path.matches('^grigliata/tokens(/.*)?$');
-    }
-
     match /grigliata/backgrounds/{allPaths=**} {
       allow read: if isSignedIn();
       allow write: if isDM();
@@ -36,12 +30,24 @@ service firebase.storage {
       allow write: if isSignedIn() && request.auth.uid == userId;
     }
 
+    match /tecnicas/{allPaths=**} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /spells/{allPaths=**} {
+      allow read, write: if isSignedIn();
+    }
+
     match /foes/{allPaths=**} {
       allow read, write: if isDM();
     }
 
-    match /{allPaths=**} {
-      allow read, write: if isSignedIn() && !isProtectedGrigliataPath(allPaths);
+    match /{root} {
+      allow read, write: if isSignedIn() && root != "grigliata" && root != "foes";
+    }
+
+    match /{root}/{allPaths=**} {
+      allow read, write: if isSignedIn() && root != "grigliata" && root != "foes";
     }
   }
 }

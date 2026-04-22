@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { SpellOverlay } from "../../../common/SpellOverlay";
 import { db, storage } from "../../../firebaseConfig";
+import { saveSpellForUser } from "../../../common/userOwnedMedia";
 import {
   doc, getDoc, updateDoc,
 } from "firebase/firestore";
@@ -62,10 +63,24 @@ export function AddSpellOverlay({ userId, onClose, savePath = null }) {
       }
       const spellName = spellData.Nome.trim();
       const safeBase  = `spell_${(savePath?.id || userId)}_${spellName.replace(/[^a-zA-Z0-9]/g,"_")}_${Date.now()}`;
+      const isItemSave = savePath && savePath.type === "item";
 
       /* ---------------------------------------------------- */
       /* 1. optional media upload                            */
       /* ---------------------------------------------------- */
+      if (!isItemSave) {
+        await saveSpellForUser({
+          userId,
+          originalName: spellName,
+          entryData: spellData,
+          imageFile,
+          videoFile,
+        });
+
+        onClose(true);
+        return;
+      }
+
       if (imageFile) {
         const imgRef  = ref(storage, `spells/${safeBase}_image`);
         await uploadBytes(imgRef, imageFile);
@@ -80,10 +95,7 @@ export function AddSpellOverlay({ userId, onClose, savePath = null }) {
       /* ---------------------------------------------------- */
       /* 2. write (or merge) into Firestore                  */
       /* ---------------------------------------------------- */
-      const [collection, docId] =
-        savePath && savePath.type === "item"
-          ? ["items", savePath.id]
-          : ["users", userId];
+      const [collection, docId] = ["items", savePath.id];
 
       const docRef = doc(db, collection, docId);
       const snap   = await getDoc(docRef);
