@@ -87,6 +87,31 @@ const DEFAULT_DRAW_THEME = getGrigliataDrawTheme(DEFAULT_GRIGLIATA_DRAW_COLOR_KE
 const MEASUREMENT_OUTLINE_STROKE_WIDTH = 7;
 const SHAPE_OUTLINE_STROKE_WIDTH = 4;
 const TOKEN_RING_OUTLINE_STROKE_WIDTH = 6;
+const SCREEN_RULER_STROKE_WIDTH = 3;
+const SCREEN_RULER_DASH_LENGTH = 10;
+const SCREEN_RULER_DASH_GAP = 6;
+const SCREEN_RULER_MARKER_RADIUS = 6;
+const SCREEN_RULER_LABEL_HEIGHT = 28;
+const SCREEN_RULER_LABEL_FONT_SIZE = 13;
+const SCREEN_RULER_LABEL_OFFSET_X = 12;
+const SCREEN_RULER_LABEL_OFFSET_Y = -14;
+const SCREEN_AOE_OUTLINE_STROKE_WIDTH = 4;
+const SCREEN_AOE_ACCENT_STROKE_WIDTH = 1.75;
+const SCREEN_AOE_GLOW_BLUR = 10;
+const SCREEN_AOE_HIT_STROKE_WIDTH = 18;
+const SCREEN_AOE_ARROW_STROKE_WIDTH = 2.4;
+const SCREEN_AOE_ARROW_HEAD_LENGTH = 12;
+const SCREEN_AOE_ARROW_HEAD_WIDTH = 10;
+const SCREEN_AOE_DOT_RADIUS = 5;
+const SCREEN_AOE_BADGE_MIN_WIDTH = 72;
+const SCREEN_AOE_BADGE_SIDE_PADDING = 10;
+const SCREEN_AOE_BADGE_TOP_PADDING = 7;
+const SCREEN_AOE_BADGE_CORNER_RADIUS = 10;
+const SCREEN_AOE_BADGE_GAP = 12;
+const SCREEN_AOE_BADGE_EDGE_PADDING = 12;
+const SCREEN_AOE_PRIMARY_FONT_SIZE = 16;
+const SCREEN_AOE_SECONDARY_FONT_SIZE = 12;
+const SCREEN_AOE_LINE_GAP = 2;
 const TOKEN_STATUS_VISIBLE_BADGE_COUNT = 3;
 const HIDDEN_TOKEN_PRIMARY = 'rgba(226, 232, 240, 0.96)';
 const HIDDEN_TOKEN_SECONDARY = 'rgba(148, 163, 184, 0.94)';
@@ -215,6 +240,255 @@ const canEditTurnOrderEntry = ({ entry, currentUserId = '', isManager = false })
 );
 
 const clampToRange = (value, min, max) => Math.min(max, Math.max(min, value));
+const normalizeViewportScale = (viewportScale = 1) => (
+  Number.isFinite(viewportScale) && viewportScale > 0 ? viewportScale : 1
+);
+const scaleScreenPxToWorld = (screenPx, viewportScale = 1) => (
+  screenPx / normalizeViewportScale(viewportScale)
+);
+const estimateTextWidth = (text, fontSize) => (
+  Math.round(String(text || '').length * fontSize * 0.62)
+);
+const normalizeVector = (deltaX, deltaY, fallback = { x: 1, y: 0 }) => {
+  const magnitude = Math.hypot(deltaX, deltaY);
+  if (!magnitude) {
+    return fallback;
+  }
+
+  return {
+    x: deltaX / magnitude,
+    y: deltaY / magnitude,
+  };
+};
+const buildArrowHeadFlatPoints = (tipPoint, direction, length, width) => {
+  const normalizedDirection = normalizeVector(direction.x, direction.y);
+  const perpendicular = {
+    x: -normalizedDirection.y,
+    y: normalizedDirection.x,
+  };
+  const baseCenter = {
+    x: tipPoint.x - (normalizedDirection.x * length),
+    y: tipPoint.y - (normalizedDirection.y * length),
+  };
+
+  return [
+    tipPoint.x,
+    tipPoint.y,
+    baseCenter.x + (perpendicular.x * (width / 2)),
+    baseCenter.y + (perpendicular.y * (width / 2)),
+    baseCenter.x - (perpendicular.x * (width / 2)),
+    baseCenter.y - (perpendicular.y * (width / 2)),
+  ];
+};
+const midpointBetween = (left, right) => ({
+  x: (left.x + right.x) / 2,
+  y: (left.y + right.y) / 2,
+});
+export const buildZoomNormalizedOverlayMetrics = (viewportScale = 1) => ({
+  rulerOutlineStrokeWidth: scaleScreenPxToWorld(MEASUREMENT_OUTLINE_STROKE_WIDTH, viewportScale),
+  rulerStrokeWidth: scaleScreenPxToWorld(SCREEN_RULER_STROKE_WIDTH, viewportScale),
+  rulerDash: [
+    scaleScreenPxToWorld(SCREEN_RULER_DASH_LENGTH, viewportScale),
+    scaleScreenPxToWorld(SCREEN_RULER_DASH_GAP, viewportScale),
+  ],
+  rulerMarkerRadius: scaleScreenPxToWorld(SCREEN_RULER_MARKER_RADIUS, viewportScale),
+  rulerLabelMinWidth: scaleScreenPxToWorld(RULER_LABEL_MIN_WIDTH, viewportScale),
+  rulerLabelHeight: scaleScreenPxToWorld(SCREEN_RULER_LABEL_HEIGHT, viewportScale),
+  rulerLabelFontSize: scaleScreenPxToWorld(SCREEN_RULER_LABEL_FONT_SIZE, viewportScale),
+  rulerLabelOffsetX: scaleScreenPxToWorld(SCREEN_RULER_LABEL_OFFSET_X, viewportScale),
+  rulerLabelOffsetY: scaleScreenPxToWorld(SCREEN_RULER_LABEL_OFFSET_Y, viewportScale),
+  aoeOutlineStrokeWidth: scaleScreenPxToWorld(SCREEN_AOE_OUTLINE_STROKE_WIDTH, viewportScale),
+  aoeAccentStrokeWidth: scaleScreenPxToWorld(SCREEN_AOE_ACCENT_STROKE_WIDTH, viewportScale),
+  aoeGlowBlur: scaleScreenPxToWorld(SCREEN_AOE_GLOW_BLUR, viewportScale),
+  aoeHitStrokeWidth: scaleScreenPxToWorld(SCREEN_AOE_HIT_STROKE_WIDTH, viewportScale),
+  aoeArrowStrokeWidth: scaleScreenPxToWorld(SCREEN_AOE_ARROW_STROKE_WIDTH, viewportScale),
+  aoeArrowHeadLength: scaleScreenPxToWorld(SCREEN_AOE_ARROW_HEAD_LENGTH, viewportScale),
+  aoeArrowHeadWidth: scaleScreenPxToWorld(SCREEN_AOE_ARROW_HEAD_WIDTH, viewportScale),
+  aoeDotRadius: scaleScreenPxToWorld(SCREEN_AOE_DOT_RADIUS, viewportScale),
+  aoeBadgeMinWidth: scaleScreenPxToWorld(SCREEN_AOE_BADGE_MIN_WIDTH, viewportScale),
+  aoeBadgeSidePadding: scaleScreenPxToWorld(SCREEN_AOE_BADGE_SIDE_PADDING, viewportScale),
+  aoeBadgeTopPadding: scaleScreenPxToWorld(SCREEN_AOE_BADGE_TOP_PADDING, viewportScale),
+  aoeBadgeCornerRadius: scaleScreenPxToWorld(SCREEN_AOE_BADGE_CORNER_RADIUS, viewportScale),
+  aoeBadgeGap: scaleScreenPxToWorld(SCREEN_AOE_BADGE_GAP, viewportScale),
+  aoeBadgeEdgePadding: scaleScreenPxToWorld(SCREEN_AOE_BADGE_EDGE_PADDING, viewportScale),
+  aoePrimaryFontSize: scaleScreenPxToWorld(SCREEN_AOE_PRIMARY_FONT_SIZE, viewportScale),
+  aoeSecondaryFontSize: scaleScreenPxToWorld(SCREEN_AOE_SECONDARY_FONT_SIZE, viewportScale),
+  aoeLineGap: scaleScreenPxToWorld(SCREEN_AOE_LINE_GAP, viewportScale),
+});
+export const getAoEFigureMeasurementTextLines = (figure) => {
+  const measurement = figure?.measurement;
+  if (!measurement || !figure?.figureType) {
+    return null;
+  }
+
+  if (figure.figureType === 'circle') {
+    return {
+      primary: `${measurement.radiusFeet} ft`,
+      secondary: `${figure.sizeSquares} sq`,
+    };
+  }
+
+  if (figure.figureType === 'square') {
+    return {
+      primary: `${measurement.sideFeet} ft`,
+      secondary: `${figure.sizeSquares} sq`,
+    };
+  }
+
+  if (figure.figureType === 'cone') {
+    return {
+      primary: `${measurement.lengthFeet} ft`,
+      secondary: `${figure.sizeSquares} sq`,
+    };
+  }
+
+  if (figure.figureType === 'rectangle') {
+    return {
+      primary: `${measurement.widthFeet} x ${measurement.heightFeet} ft`,
+      secondary: `${figure.widthSquares} x ${figure.heightSquares} sq`,
+    };
+  }
+
+  return null;
+};
+export const buildAoEFigureMeasurementDecorationLayout = ({ figure, viewportScale = 1 }) => {
+  if (!figure?.figureType || figure.showMeasurementDetails === false) {
+    return null;
+  }
+
+  const lines = getAoEFigureMeasurementTextLines(figure);
+  if (!lines) {
+    return null;
+  }
+
+  const metrics = buildZoomNormalizedOverlayMetrics(viewportScale);
+  const width = Math.max(
+    metrics.aoeBadgeMinWidth,
+    estimateTextWidth(lines.primary, metrics.aoePrimaryFontSize),
+    estimateTextWidth(lines.secondary, metrics.aoeSecondaryFontSize)
+  ) + (metrics.aoeBadgeSidePadding * 2);
+  const height = (metrics.aoeBadgeTopPadding * 2)
+    + metrics.aoePrimaryFontSize
+    + metrics.aoeLineGap
+    + metrics.aoeSecondaryFontSize;
+  const buildBadgeCenterAlongLine = (startPoint, endPoint, progress = 0.72) => ({
+    x: startPoint.x + ((endPoint.x - startPoint.x) * progress),
+    y: startPoint.y + ((endPoint.y - startPoint.y) * progress),
+  });
+
+  if (figure.figureType === 'circle') {
+    const arrowEnd = {
+      x: figure.centerPoint.x + figure.radius - metrics.aoeBadgeEdgePadding,
+      y: figure.centerPoint.y,
+    };
+    const badgeCenter = buildBadgeCenterAlongLine(figure.centerPoint, arrowEnd, 0.7);
+    const minX = figure.centerPoint.x - figure.radius + metrics.aoeBadgeEdgePadding;
+    const maxX = figure.centerPoint.x + figure.radius - width - metrics.aoeBadgeEdgePadding;
+    const badgeX = clampToRange(
+      badgeCenter.x - (width / 2),
+      minX,
+      Math.max(minX, maxX)
+    );
+    const badgeY = clampToRange(
+      badgeCenter.y - (height / 2),
+      figure.centerPoint.y - figure.radius + metrics.aoeBadgeEdgePadding,
+      figure.centerPoint.y + figure.radius - height - metrics.aoeBadgeEdgePadding
+    );
+    const direction = normalizeVector(arrowEnd.x - figure.centerPoint.x, arrowEnd.y - figure.centerPoint.y);
+
+    return {
+      lines,
+      width,
+      height,
+      badgeX,
+      badgeY,
+      startDot: figure.centerPoint,
+      arrowPoints: [figure.centerPoint.x, figure.centerPoint.y, arrowEnd.x, arrowEnd.y],
+      arrowHeadPoints: buildArrowHeadFlatPoints(
+        arrowEnd,
+        direction,
+        metrics.aoeArrowHeadLength,
+        metrics.aoeArrowHeadWidth
+      ),
+      metrics,
+    };
+  }
+
+  if (figure.figureType === 'square' || figure.figureType === 'rectangle') {
+    const centerY = figure.y + (figure.height / 2);
+    const arrowStart = {
+      x: figure.x + (figure.width / 2),
+      y: centerY,
+    };
+    const arrowEnd = {
+      x: figure.x + figure.width - metrics.aoeBadgeEdgePadding,
+      y: centerY,
+    };
+    const badgeCenter = buildBadgeCenterAlongLine(arrowStart, arrowEnd, 0.72);
+    const minX = figure.x + metrics.aoeBadgeEdgePadding;
+    const maxX = figure.x + figure.width - width - metrics.aoeBadgeEdgePadding;
+    const badgeX = clampToRange(
+      badgeCenter.x - (width / 2),
+      minX,
+      Math.max(minX, maxX)
+    );
+    const badgeY = clampToRange(
+      badgeCenter.y - (height / 2),
+      figure.y + metrics.aoeBadgeEdgePadding,
+      figure.y + figure.height - height - metrics.aoeBadgeEdgePadding
+    );
+    const direction = normalizeVector(arrowEnd.x - arrowStart.x, arrowEnd.y - arrowStart.y);
+
+    return {
+      lines,
+      width,
+      height,
+      badgeX,
+      badgeY,
+      startDot: arrowStart,
+      arrowPoints: [arrowStart.x, arrowStart.y, arrowEnd.x, arrowEnd.y],
+      arrowHeadPoints: buildArrowHeadFlatPoints(
+        arrowEnd,
+        direction,
+        metrics.aoeArrowHeadLength,
+        metrics.aoeArrowHeadWidth
+      ),
+      metrics,
+    };
+  }
+
+  if (figure.figureType === 'cone' && Array.isArray(figure.points) && figure.points.length === 3) {
+    const apex = figure.points[0];
+    const baseMidpoint = midpointBetween(figure.points[1], figure.points[2]);
+    const direction = normalizeVector(baseMidpoint.x - apex.x, baseMidpoint.y - apex.y);
+    const arrowEnd = {
+      x: baseMidpoint.x - (direction.x * metrics.aoeBadgeEdgePadding),
+      y: baseMidpoint.y - (direction.y * metrics.aoeBadgeEdgePadding),
+    };
+    const badgeCenter = buildBadgeCenterAlongLine(apex, arrowEnd, 0.7);
+    const badgeX = badgeCenter.x - (width / 2);
+    const badgeY = badgeCenter.y - (height / 2);
+
+    return {
+      lines,
+      width,
+      height,
+      badgeX,
+      badgeY,
+      startDot: apex,
+      arrowPoints: [apex.x, apex.y, arrowEnd.x, arrowEnd.y],
+      arrowHeadPoints: buildArrowHeadFlatPoints(
+        arrowEnd,
+        direction,
+        metrics.aoeArrowHeadLength,
+        metrics.aoeArrowHeadWidth
+      ),
+      metrics,
+    };
+  }
+
+  return null;
+};
 const TOKEN_HUD_EDGE_PADDING = 12;
 const TOKEN_HUD_CHIP_GAP = 6;
 const TOKEN_HUD_CHIP_ROW_HEIGHT = 32;
@@ -841,6 +1115,7 @@ const MeasurementOverlay = ({
   measurement,
   drawTheme = DEFAULT_DRAW_THEME,
   overlayId = '',
+  viewportScale = 1,
 }) => {
   if (!measurement?.pathPoints?.length || measurement.pathPoints.length < 2 || !measurement?.endPoint || !measurement?.label) {
     return null;
@@ -848,34 +1123,73 @@ const MeasurementOverlay = ({
 
   const linePoints = measurement.pathPoints.flatMap((point) => [point.x, point.y]);
   const markerPoints = measurement.markerPoints || measurement.pathPoints;
+  const metrics = buildZoomNormalizedOverlayMetrics(viewportScale);
+  const segmentLabelFontSize = metrics.rulerLabelFontSize * 0.9;
+  const segmentLabelHeight = metrics.rulerLabelHeight * 0.86;
+  const segmentLabelVerticalInset = Math.max(
+    metrics.aoeBadgeTopPadding * 0.8,
+    segmentLabelHeight - segmentLabelFontSize - metrics.aoeBadgeTopPadding
+  );
+  const segmentLabelOffset = metrics.rulerMarkerRadius + metrics.aoeBadgeTopPadding;
 
   const labelWidth = Math.max(
-    RULER_LABEL_MIN_WIDTH,
-    Math.round((measurement.label.length * 7.2) + 16)
+    metrics.rulerLabelMinWidth,
+    estimateTextWidth(measurement.label, metrics.rulerLabelFontSize) + (metrics.aoeBadgeSidePadding * 2)
   );
-  const labelHeight = 28;
-  const labelX = measurement.endPoint.x + 12;
-  const labelY = measurement.endPoint.y - 14;
+  const labelHeight = metrics.rulerLabelHeight;
+  const labelX = measurement.endPoint.x + metrics.rulerLabelOffsetX;
+  const labelY = measurement.endPoint.y + metrics.rulerLabelOffsetY;
+  const segmentLabelLayouts = (measurement.segments?.length || 0) > 1
+    ? measurement.segments.map((segment, index) => {
+      const segmentLabel = `${segment.feet} ft`;
+      const midpoint = midpointBetween(segment.startPoint, segment.endPoint);
+      const direction = normalizeVector(
+        segment.endPoint.x - segment.startPoint.x,
+        segment.endPoint.y - segment.startPoint.y,
+        { x: 1, y: 0 }
+      );
+      const perpendicular = {
+        x: -direction.y,
+        y: direction.x,
+      };
+      const preferredDirection = perpendicular.y > 0 ? -1 : 1;
+      const offsetX = perpendicular.x * segmentLabelOffset * preferredDirection;
+      const offsetY = perpendicular.y * segmentLabelOffset * preferredDirection;
+      const segmentLabelWidth = Math.max(
+        metrics.rulerLabelMinWidth * 0.66,
+        estimateTextWidth(segmentLabel, segmentLabelFontSize) + (metrics.aoeBadgeSidePadding * 2)
+      );
+
+      return {
+        key: `${segment.startCell?.col ?? 's'}:${segment.startCell?.row ?? 's'}:${segment.endCell?.col ?? 'e'}:${segment.endCell?.row ?? 'e'}:${index}`,
+        text: segmentLabel,
+        width: segmentLabelWidth,
+        height: segmentLabelHeight,
+        x: midpoint.x + offsetX - (segmentLabelWidth / 2),
+        y: midpoint.y + offsetY - (segmentLabelHeight / 2),
+      };
+    })
+    : [];
 
   return (
     <Group listening={false} data-testid={overlayId ? `measurement-overlay-${overlayId}` : undefined}>
       <Line
         points={linePoints}
         stroke={drawTheme.outlineStroke}
-        strokeWidth={MEASUREMENT_OUTLINE_STROKE_WIDTH}
-        dash={[10, 6]}
+        strokeWidth={metrics.rulerOutlineStrokeWidth}
+        dash={metrics.rulerDash}
         lineCap="round"
         lineJoin="round"
       />
       <Line
         points={linePoints}
         stroke={drawTheme.stroke}
-        strokeWidth={3}
-        dash={[10, 6]}
+        strokeWidth={metrics.rulerStrokeWidth}
+        dash={metrics.rulerDash}
         lineCap="round"
         lineJoin="round"
         shadowColor={drawTheme.glow}
-        shadowBlur={10}
+        shadowBlur={metrics.aoeGlowBlur}
         shadowOpacity={0.28}
       />
 
@@ -884,47 +1198,86 @@ const MeasurementOverlay = ({
           <Circle
             x={point.x}
             y={point.y}
-            radius={6}
+            radius={metrics.rulerMarkerRadius}
             fill="#0f172a"
             stroke={drawTheme.outlineStroke}
-            strokeWidth={TOKEN_RING_OUTLINE_STROKE_WIDTH}
+            strokeWidth={metrics.rulerOutlineStrokeWidth}
           />
           <Circle
             x={point.x}
             y={point.y}
-            radius={6}
+            radius={metrics.rulerMarkerRadius}
             fill="#0f172a"
             stroke={drawTheme.stroke}
-            strokeWidth={2}
+            strokeWidth={metrics.rulerStrokeWidth}
           />
         </React.Fragment>
+      ))}
+
+      {segmentLabelLayouts.map((segmentLabel) => (
+        <Group
+          key={segmentLabel.key}
+          x={segmentLabel.x}
+          y={segmentLabel.y}
+          listening={false}
+          data-testid={overlayId ? `measurement-segment-label-${overlayId}` : undefined}
+        >
+          <Rect
+            width={segmentLabel.width}
+            height={segmentLabel.height}
+            cornerRadius={metrics.aoeBadgeCornerRadius}
+            stroke={drawTheme.outlineStroke}
+            strokeWidth={metrics.aoeOutlineStrokeWidth}
+          />
+          <Rect
+            width={segmentLabel.width}
+            height={segmentLabel.height}
+            cornerRadius={metrics.aoeBadgeCornerRadius}
+            fill="rgba(2, 6, 23, 0.84)"
+            stroke={drawTheme.labelBorder}
+            strokeWidth={metrics.aoeAccentStrokeWidth}
+            shadowColor={drawTheme.glow}
+            shadowBlur={metrics.aoeGlowBlur}
+            shadowOpacity={0.18}
+          />
+          <Text
+            x={0}
+            y={segmentLabelVerticalInset}
+            width={segmentLabel.width}
+            align="center"
+            fontSize={segmentLabelFontSize}
+            fontStyle="bold"
+            fill={drawTheme.labelText}
+            text={segmentLabel.text}
+          />
+        </Group>
       ))}
 
       <Group x={labelX} y={labelY}>
         <Rect
           width={labelWidth}
           height={labelHeight}
-          cornerRadius={9}
+          cornerRadius={metrics.aoeBadgeCornerRadius}
           stroke={drawTheme.outlineStroke}
-          strokeWidth={SHAPE_OUTLINE_STROKE_WIDTH}
+          strokeWidth={metrics.aoeOutlineStrokeWidth}
         />
         <Rect
           width={labelWidth}
           height={labelHeight}
-          cornerRadius={9}
+          cornerRadius={metrics.aoeBadgeCornerRadius}
           fill="rgba(2, 6, 23, 0.92)"
           stroke={drawTheme.labelBorder}
-          strokeWidth={1.5}
+          strokeWidth={metrics.aoeAccentStrokeWidth}
           shadowColor={drawTheme.glow}
-          shadowBlur={8}
+          shadowBlur={metrics.aoeGlowBlur}
           shadowOpacity={0.2}
         />
         <Text
           x={0}
-          y={6}
+          y={metrics.aoeBadgeTopPadding}
           width={labelWidth}
           align="center"
-          fontSize={13}
+          fontSize={metrics.rulerLabelFontSize}
           fontStyle="bold"
           fill={drawTheme.labelText}
           text={measurement.label}
@@ -1350,6 +1703,222 @@ const AoEFigureOverlay = ({
           shadowOpacity={0.24}
         />
         {measurementBadge}
+      </Group>
+    );
+  }
+
+  return null;
+};
+
+const EnhancedAoEFigureOverlay = ({
+  figure,
+  drawTheme = DEFAULT_DRAW_THEME,
+  overlayId = '',
+  isSelected = false,
+  onMouseDown,
+  listening = true,
+  viewportScale = 1,
+}) => {
+  if (!figure?.figureType) {
+    return null;
+  }
+
+  const overlayProps = {
+    listening,
+    onMouseDown,
+    'data-testid': overlayId ? `aoe-figure-overlay-${overlayId}` : undefined,
+  };
+  const metrics = buildZoomNormalizedOverlayMetrics(viewportScale);
+  const outlineStroke = isSelected ? 'rgba(248, 250, 252, 0.96)' : drawTheme.outlineStroke;
+  const accentStroke = isSelected ? '#ffffff' : drawTheme.stroke;
+  const outlineStrokeWidth = isSelected ? metrics.aoeOutlineStrokeWidth * 1.25 : metrics.aoeOutlineStrokeWidth;
+  const accentStrokeWidth = isSelected ? metrics.aoeAccentStrokeWidth * 1.3 : metrics.aoeAccentStrokeWidth;
+  const shadowBlur = isSelected ? metrics.aoeGlowBlur * 1.5 : metrics.aoeGlowBlur;
+  const hitFill = 'rgba(255, 255, 255, 0.001)';
+  const visibleFill = figure.isFilled === false ? 'rgba(255, 255, 255, 0)' : drawTheme.fill;
+  const measurementLayout = buildAoEFigureMeasurementDecorationLayout({ figure, viewportScale });
+
+  const measurementDecoration = measurementLayout ? (
+    <Group listening={false} data-testid={overlayId ? `aoe-figure-measurement-${overlayId}` : undefined}>
+      <Line
+        points={measurementLayout.arrowPoints}
+        stroke={accentStroke}
+        strokeWidth={measurementLayout.metrics.aoeArrowStrokeWidth}
+        lineCap="round"
+        lineJoin="round"
+      />
+      <Line
+        points={measurementLayout.arrowHeadPoints}
+        closed
+        fill={accentStroke}
+        stroke={accentStroke}
+        strokeWidth={measurementLayout.metrics.aoeArrowStrokeWidth * 0.65}
+        lineJoin="round"
+      />
+      <Circle
+        x={measurementLayout.startDot.x}
+        y={measurementLayout.startDot.y}
+        radius={measurementLayout.metrics.aoeDotRadius}
+        fill={accentStroke}
+        shadowColor={drawTheme.glow}
+        shadowBlur={measurementLayout.metrics.aoeGlowBlur}
+        shadowOpacity={0.2}
+      />
+      <Rect
+        x={measurementLayout.badgeX}
+        y={measurementLayout.badgeY}
+        width={measurementLayout.width}
+        height={measurementLayout.height}
+        cornerRadius={measurementLayout.metrics.aoeBadgeCornerRadius}
+        stroke={outlineStroke}
+        strokeWidth={measurementLayout.metrics.aoeOutlineStrokeWidth}
+      />
+      <Rect
+        x={measurementLayout.badgeX}
+        y={measurementLayout.badgeY}
+        width={measurementLayout.width}
+        height={measurementLayout.height}
+        cornerRadius={measurementLayout.metrics.aoeBadgeCornerRadius}
+        fill="rgba(2, 6, 23, 0.72)"
+        stroke={drawTheme.labelBorder}
+        strokeWidth={measurementLayout.metrics.aoeAccentStrokeWidth}
+        shadowColor={drawTheme.glow}
+        shadowBlur={measurementLayout.metrics.aoeGlowBlur}
+        shadowOpacity={0.24}
+      />
+      <Text
+        x={measurementLayout.badgeX + measurementLayout.metrics.aoeBadgeSidePadding}
+        y={measurementLayout.badgeY + measurementLayout.metrics.aoeBadgeTopPadding}
+        width={measurementLayout.width - (measurementLayout.metrics.aoeBadgeSidePadding * 2)}
+        align="center"
+        fontSize={measurementLayout.metrics.aoePrimaryFontSize}
+        fontStyle="bold"
+        fill={drawTheme.labelText}
+        text={measurementLayout.lines.primary}
+      />
+      <Text
+        x={measurementLayout.badgeX + measurementLayout.metrics.aoeBadgeSidePadding}
+        y={measurementLayout.badgeY + measurementLayout.metrics.aoeBadgeTopPadding + measurementLayout.metrics.aoePrimaryFontSize + measurementLayout.metrics.aoeLineGap}
+        width={measurementLayout.width - (measurementLayout.metrics.aoeBadgeSidePadding * 2)}
+        align="center"
+        fontSize={measurementLayout.metrics.aoeSecondaryFontSize}
+        fontStyle="bold"
+        fill={drawTheme.labelText}
+        text={measurementLayout.lines.secondary}
+      />
+      {figure.measurement?.label && (
+        <Text
+          x={measurementLayout.badgeX}
+          y={measurementLayout.badgeY}
+          width={measurementLayout.width}
+          opacity={0}
+          text={figure.measurement.label}
+        />
+      )}
+    </Group>
+  ) : null;
+
+  if (figure.figureType === 'circle') {
+    return (
+      <Group {...overlayProps}>
+        <Circle
+          x={figure.centerPoint.x}
+          y={figure.centerPoint.y}
+          radius={figure.radius}
+          fill={hitFill}
+          stroke="rgba(255,255,255,0)"
+          strokeWidth={metrics.aoeHitStrokeWidth}
+        />
+        <Circle
+          x={figure.centerPoint.x}
+          y={figure.centerPoint.y}
+          radius={figure.radius}
+          stroke={outlineStroke}
+          strokeWidth={outlineStrokeWidth}
+        />
+        <Circle
+          x={figure.centerPoint.x}
+          y={figure.centerPoint.y}
+          radius={figure.radius}
+          fill={visibleFill}
+          stroke={accentStroke}
+          strokeWidth={accentStrokeWidth}
+          shadowColor={drawTheme.glow}
+          shadowBlur={shadowBlur}
+          shadowOpacity={0.24}
+        />
+        {measurementDecoration}
+      </Group>
+    );
+  }
+
+  if (figure.figureType === 'square' || figure.figureType === 'rectangle') {
+    return (
+      <Group {...overlayProps}>
+        <Rect
+          x={figure.x}
+          y={figure.y}
+          width={figure.width}
+          height={figure.height}
+          fill={hitFill}
+          stroke="rgba(255,255,255,0)"
+          strokeWidth={metrics.aoeHitStrokeWidth}
+        />
+        <Rect
+          x={figure.x}
+          y={figure.y}
+          width={figure.width}
+          height={figure.height}
+          stroke={outlineStroke}
+          strokeWidth={outlineStrokeWidth}
+        />
+        <Rect
+          x={figure.x}
+          y={figure.y}
+          width={figure.width}
+          height={figure.height}
+          fill={visibleFill}
+          stroke={accentStroke}
+          strokeWidth={accentStrokeWidth}
+          shadowColor={drawTheme.glow}
+          shadowBlur={shadowBlur}
+          shadowOpacity={0.24}
+        />
+        {measurementDecoration}
+      </Group>
+    );
+  }
+
+  if (figure.figureType === 'cone') {
+    return (
+      <Group {...overlayProps}>
+        <Line
+          points={figure.flatPoints}
+          closed
+          fill={hitFill}
+          stroke="rgba(255,255,255,0)"
+          strokeWidth={metrics.aoeHitStrokeWidth}
+          lineJoin="round"
+        />
+        <Line
+          points={figure.flatPoints}
+          closed
+          stroke={outlineStroke}
+          strokeWidth={outlineStrokeWidth}
+          lineJoin="round"
+        />
+        <Line
+          points={figure.flatPoints}
+          closed
+          fill={visibleFill}
+          stroke={accentStroke}
+          strokeWidth={accentStrokeWidth}
+          lineJoin="round"
+          shadowColor={drawTheme.glow}
+          shadowBlur={shadowBlur}
+          shadowOpacity={0.24}
+        />
+        {measurementDecoration}
       </Group>
     );
   }
@@ -1933,6 +2502,7 @@ export default function GrigliataBoard({
   onDeleteTokens,
   onCreateAoEFigure,
   onMoveAoEFigure,
+  onUpdateAoEFigurePresentation,
   onDeleteAoEFigures,
   onSetSelectedTokensVisibility,
   isTokenVisibilityActionPending,
@@ -3983,8 +4553,10 @@ export default function GrigliataBoard({
     );
     const buttonSize = Math.max(36, Math.min(72, Math.round(referenceScreenSize * 0.28)));
     const gap = Math.max(14, Math.round(buttonSize * 0.22));
+    const actionCount = 3;
+    const toolbarInnerGap = Math.max(8, Math.round(buttonSize * 0.18));
     const toolbarWidth = buttonSize + 16;
-    const toolbarHeight = buttonSize + 16;
+    const toolbarHeight = (buttonSize * actionCount) + (toolbarInnerGap * (actionCount - 1)) + 16;
     const rawToolbarPosition = buildSelectionActionToolbarPosition({
       left: viewport.x + (figureBounds.minX * viewport.scale),
       top: viewport.y + (figureBounds.minY * viewport.scale),
@@ -3996,6 +4568,9 @@ export default function GrigliataBoard({
     return {
       figureId: selectedAoEFigure.id,
       buttonSize,
+      toolbarInnerGap,
+      showMeasurementDetails: selectedAoEFigure.showMeasurementDetails !== false,
+      isFilled: selectedAoEFigure.isFilled !== false,
       toolbarPosition: {
         left: Math.min(
           Math.max(12, rawToolbarPosition.left),
@@ -4409,13 +4984,13 @@ export default function GrigliataBoard({
               )}
 
               {visibleRenderedAoEFigures.map((figure) => (
-                <AoEFigureOverlay
+                <EnhancedAoEFigureOverlay
                   key={figure.id}
                   figure={figure.renderable}
                   drawTheme={getGrigliataDrawTheme(figure.colorKey)}
                   overlayId={figure.id}
                   isSelected={figure.isSelected}
-                  boardBounds={boardBounds}
+                  viewportScale={viewport.scale}
                   onMouseDown={(event) => handleAoEFigureMouseDown(figure, event)}
                 />
               ))}
@@ -4457,16 +5032,17 @@ export default function GrigliataBoard({
                       measurement={sharedInteraction.measurement}
                       drawTheme={sharedInteraction.drawTheme}
                       overlayId={`shared-${sharedInteraction.ownerUid}`}
+                      viewportScale={viewport.scale}
                     />
                   )
                   : sharedInteraction.kind === 'aoe'
                     ? (
-                    <AoEFigureOverlay
+                    <EnhancedAoEFigureOverlay
                       key={`shared-aoe-${sharedInteraction.ownerUid}`}
                       figure={sharedInteraction.figure}
                       drawTheme={sharedInteraction.drawTheme}
                       overlayId={`shared-${sharedInteraction.ownerUid}`}
-                      boardBounds={boardBounds}
+                      viewportScale={viewport.scale}
                       listening={false}
                     />
                     )
@@ -4498,15 +5074,16 @@ export default function GrigliataBoard({
                   measurement={visibleMeasurementState}
                   drawTheme={resolvedDrawTheme}
                   overlayId="local"
+                  viewportScale={viewport.scale}
                 />
               )}
 
               {visibleAoEPreviewState && (
-                <AoEFigureOverlay
+                <EnhancedAoEFigureOverlay
                   figure={visibleAoEPreviewState}
                   drawTheme={resolvedDrawTheme}
                   overlayId="local"
-                  boardBounds={boardBounds}
+                  viewportScale={viewport.scale}
                   listening={false}
                 />
               )}
@@ -4697,7 +5274,68 @@ export default function GrigliataBoard({
                 top: visibleSelectedAoEFigureActionState.toolbarPosition.top,
               }}
             >
-              <div className="rounded-[1.4rem] border border-rose-300/40 bg-slate-950/88 p-2 shadow-2xl backdrop-blur-sm">
+              <div
+                className="flex flex-col rounded-[1.4rem] border border-slate-700/70 bg-slate-950/88 p-2 shadow-2xl backdrop-blur-sm"
+                style={{ gap: visibleSelectedAoEFigureActionState.toolbarInnerGap }}
+              >
+                <button
+                  type="button"
+                  aria-label={visibleSelectedAoEFigureActionState.showMeasurementDetails ? 'Hide size details' : 'Show size details'}
+                  title={visibleSelectedAoEFigureActionState.showMeasurementDetails ? 'Hide size details' : 'Show size details'}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={async (event) => {
+                    event.stopPropagation();
+
+                    try {
+                      await Promise.resolve(onUpdateAoEFigurePresentation?.(
+                        visibleSelectedAoEFigureActionState.figureId,
+                        {
+                          showMeasurementDetails: !visibleSelectedAoEFigureActionState.showMeasurementDetails,
+                        }
+                      ));
+                    } catch {
+                      // keep selection unchanged if update fails
+                    }
+                  }}
+                  className="flex items-center justify-center rounded-[1.15rem] border border-sky-300/50 bg-sky-500/20 text-slate-50 shadow-lg transition-transform duration-150 hover:scale-[1.03]"
+                  style={{
+                    width: visibleSelectedAoEFigureActionState.buttonSize,
+                    height: visibleSelectedAoEFigureActionState.buttonSize,
+                  }}
+                >
+                  {visibleSelectedAoEFigureActionState.showMeasurementDetails
+                    ? <FiEyeOff className="h-[42%] w-[42%]" />
+                    : <FiEye className="h-[42%] w-[42%]" />}
+                </button>
+                <button
+                  type="button"
+                  aria-label={visibleSelectedAoEFigureActionState.isFilled ? 'Show border only' : 'Fill selected AoE figure'}
+                  title={visibleSelectedAoEFigureActionState.isFilled ? 'Show border only' : 'Fill selected AoE figure'}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={async (event) => {
+                    event.stopPropagation();
+
+                    try {
+                      await Promise.resolve(onUpdateAoEFigurePresentation?.(
+                        visibleSelectedAoEFigureActionState.figureId,
+                        {
+                          isFilled: !visibleSelectedAoEFigureActionState.isFilled,
+                        }
+                      ));
+                    } catch {
+                      // keep selection unchanged if update fails
+                    }
+                  }}
+                  className="flex items-center justify-center rounded-[1.15rem] border border-amber-300/50 bg-amber-500/20 text-slate-50 shadow-lg transition-transform duration-150 hover:scale-[1.03]"
+                  style={{
+                    width: visibleSelectedAoEFigureActionState.buttonSize,
+                    height: visibleSelectedAoEFigureActionState.buttonSize,
+                  }}
+                >
+                  <span className="text-[0.6rem] font-semibold uppercase tracking-[0.16em]">
+                    {visibleSelectedAoEFigureActionState.isFilled ? 'Line' : 'Fill'}
+                  </span>
+                </button>
                 <button
                   type="button"
                   aria-label="Delete selected AoE figure"

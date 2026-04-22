@@ -3795,6 +3795,8 @@ export default function GrigliataPage() {
       slot,
       colorKey: drawColorKey,
       isVisibleToPlayers: isInteractionSharingEnabled,
+      showMeasurementDetails: true,
+      isFilled: true,
       draft: normalizedDraft,
       createdAt: serverTimestamp(),
       createdBy: currentUserId,
@@ -3856,6 +3858,43 @@ export default function GrigliataPage() {
       throw error;
     }
   }, [aoeFigureSnapshots, currentUserId, isInteractionSharingEnabled]);
+
+  const handleUpdateAoEFigurePresentation = useCallback(async (figureId, patch) => {
+    if (!currentUserId || !figureId || !patch || typeof patch !== 'object') return;
+
+    const existingFigure = aoeFigureSnapshots.find((figure) => figure.id === figureId);
+    if (!existingFigure) return;
+
+    const payload = {
+      updatedAt: serverTimestamp(),
+      updatedBy: currentUserId || null,
+    };
+
+    if (typeof patch.showMeasurementDetails === 'boolean') {
+      payload.showMeasurementDetails = patch.showMeasurementDetails;
+    }
+
+    if (typeof patch.isFilled === 'boolean') {
+      payload.isFilled = patch.isFilled;
+    }
+
+    if (Object.keys(payload).length <= 2) {
+      return;
+    }
+
+    setBoardError('');
+    try {
+      await updateDoc(doc(db, GRIGLIATA_AOE_FIGURE_COLLECTION, figureId), payload);
+    } catch (error) {
+      console.error('Failed to update Grigliata AoE figure presentation:', error);
+      setBoardError(
+        isPermissionDeniedError(error)
+          ? 'That AoE template is controlled by another player.'
+          : 'Unable to update that AoE template right now.'
+      );
+      throw error;
+    }
+  }, [aoeFigureSnapshots, currentUserId]);
 
   const handleDeleteAoEFigures = useCallback(async (figureIds) => {
     const normalizedFigureIds = [...new Set((figureIds || []).filter(Boolean))];
@@ -4046,6 +4085,7 @@ export default function GrigliataPage() {
                 onDeleteTokens={isNarrationOverlayActive ? null : handleDeleteTokens}
                 onCreateAoEFigure={isNarrationOverlayActive ? null : handleCreateAoEFigure}
                 onMoveAoEFigure={isNarrationOverlayActive ? null : handleMoveAoEFigure}
+                onUpdateAoEFigurePresentation={isNarrationOverlayActive ? null : handleUpdateAoEFigurePresentation}
                 onDeleteAoEFigures={isNarrationOverlayActive ? null : handleDeleteAoEFigures}
                 onSetSelectedTokensVisibility={isManager && !isNarrationOverlayActive ? handleSetSelectedTokensVisibility : null}
                 isTokenVisibilityActionPending={isTokenVisibilityActionPending}

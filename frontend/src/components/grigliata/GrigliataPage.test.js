@@ -362,6 +362,24 @@ jest.mock('./GrigliataBoard', () => {
         )}>
           move aoe rectangle
         </button>
+        <button
+          type="button"
+          onClick={() => props.onUpdateAoEFigurePresentation?.(
+            'map-1__user-1__circle__1',
+            { showMeasurementDetails: false }
+          )}
+        >
+          hide aoe size details
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onUpdateAoEFigurePresentation?.(
+            'map-1__user-1__circle__1',
+            { isFilled: false }
+          )}
+        >
+          show aoe border only
+        </button>
         <button type="button" onClick={() => props.onDeleteAoEFigures?.(['map-1__user-1__circle__1'])}>
           delete aoe circle
         </button>
@@ -5154,6 +5172,8 @@ describe('GrigliataPage', () => {
           targetCell: { col: 3, row: 1 },
           colorKey: 'ion-cyan',
           isVisibleToPlayers: false,
+          showMeasurementDetails: true,
+          isFilled: true,
           createdBy: 'user-1',
           updatedBy: 'user-1',
         })
@@ -5185,6 +5205,8 @@ describe('GrigliataPage', () => {
           targetCell: { col: 4, row: 2 },
           colorKey: 'ion-cyan',
           isVisibleToPlayers: false,
+          showMeasurementDetails: true,
+          isFilled: true,
           createdBy: 'user-1',
           updatedBy: 'user-1',
         })
@@ -5239,6 +5261,50 @@ describe('GrigliataPage', () => {
     });
   });
 
+  test('updates AoE presentation toggles through page handlers', async () => {
+    act(() => {
+      setCollectionData('grigliata_aoe_figures', [
+        {
+          id: 'map-1__user-1__circle__1',
+          backgroundId: 'map-1',
+          ownerUid: 'user-1',
+          figureType: 'circle',
+          slot: 1,
+          originCell: { col: 1, row: 1 },
+          targetCell: { col: 3, row: 1 },
+          colorKey: 'ion-cyan',
+          isVisibleToPlayers: false,
+        },
+      ]);
+    });
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: /hide aoe size details/i }));
+
+    await waitFor(() => {
+      expect(firestore.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_aoe_figures/map-1__user-1__circle__1' }),
+        expect.objectContaining({
+          showMeasurementDetails: false,
+          updatedBy: 'user-1',
+        })
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /show aoe border only/i }));
+
+    await waitFor(() => {
+      expect(firestore.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_aoe_figures/map-1__user-1__circle__1' }),
+        expect.objectContaining({
+          isFilled: false,
+          updatedBy: 'user-1',
+        })
+      );
+    });
+  });
+
   test('moves and deletes an existing rectangle AoE figure through page handlers', async () => {
     act(() => {
       setCollectionData('grigliata_aoe_figures', [
@@ -5278,6 +5344,39 @@ describe('GrigliataPage', () => {
       const lastBatch = mockBatchInstances[mockBatchInstances.length - 1];
       expect(lastBatch.delete).toHaveBeenCalledWith(
         expect.objectContaining({ path: 'grigliata_aoe_figures/map-1__user-1__rectangle__1' })
+      );
+    });
+  });
+
+  test('moves legacy AoE figures that do not yet store presentation fields', async () => {
+    act(() => {
+      setCollectionData('grigliata_aoe_figures', [
+        {
+          id: 'map-1__user-1__rectangle__1',
+          backgroundId: 'map-1',
+          ownerUid: 'user-1',
+          figureType: 'rectangle',
+          slot: 1,
+          originCell: { col: 1, row: 1 },
+          targetCell: { col: 4, row: 2 },
+          colorKey: 'ion-cyan',
+          isVisibleToPlayers: false,
+        },
+      ]);
+    });
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: /move aoe rectangle/i }));
+
+    await waitFor(() => {
+      expect(firestore.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_aoe_figures/map-1__user-1__rectangle__1' }),
+        expect.objectContaining({
+          originCell: { col: 2, row: 2 },
+          targetCell: { col: 5, row: 3 },
+          updatedBy: 'user-1',
+        })
       );
     });
   });

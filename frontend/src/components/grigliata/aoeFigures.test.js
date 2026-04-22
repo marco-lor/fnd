@@ -1,7 +1,9 @@
 import {
+  buildGrigliataAoEFigureDoc,
   buildGrigliataAoEFigureDocId,
   buildRenderableGrigliataAoEFigure,
   findNextGrigliataAoEFigureSlot,
+  normalizeGrigliataAoEFigure,
   normalizeGrigliataAoEFigureDraft,
   shiftGrigliataAoEFigureCells,
 } from './aoeFigures';
@@ -55,6 +57,40 @@ describe('aoeFigures', () => {
       originCell: { col: 7, row: 2 },
       targetCell: { col: 4, row: 5 },
     });
+  });
+
+  test('defaults legacy AoE figures to visible measurement details and filled shapes', () => {
+    expect(normalizeGrigliataAoEFigure({
+      id: 'map-1__user-1__circle__1',
+      backgroundId: 'map-1',
+      ownerUid: 'user-1',
+      figureType: 'circle',
+      slot: 1,
+      originCell: { col: 1, row: 1 },
+      targetCell: { col: 3, row: 1 },
+      colorKey: 'ion-cyan',
+      isVisibleToPlayers: true,
+    })).toEqual(expect.objectContaining({
+      showMeasurementDetails: true,
+      isFilled: true,
+    }));
+  });
+
+  test('builds AoE figure docs with persisted presentation defaults', () => {
+    expect(buildGrigliataAoEFigureDoc({
+      backgroundId: 'map-1',
+      ownerUid: 'user-1',
+      slot: 1,
+      colorKey: 'ion-cyan',
+      draft: {
+        figureType: 'square',
+        originCell: { col: 1, row: 1 },
+        targetCell: { col: 3, row: 3 },
+      },
+    })).toEqual(expect.objectContaining({
+      showMeasurementDetails: true,
+      isFilled: true,
+    }));
   });
 
   test('builds a renderable circle template with the expected radius and size', () => {

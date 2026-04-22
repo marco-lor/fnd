@@ -1,7 +1,11 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useReducedMotion } from 'framer-motion';
-import GrigliataBoard from './GrigliataBoard';
+import GrigliataBoard, {
+  buildAoEFigureMeasurementDecorationLayout,
+  buildZoomNormalizedOverlayMetrics,
+  getAoEFigureMeasurementTextLines,
+} from './GrigliataBoard';
 import {
   FOE_LIBRARY_DRAG_TYPE,
   getGrigliataDrawTheme,
@@ -10,6 +14,7 @@ import {
   MAP_PING_VISIBLE_MS,
   TRAY_DRAG_MIME,
 } from './constants';
+import { buildRenderableGrigliataAoEFigure } from './aoeFigures';
 import { splitTokenStatusesForDisplay } from './tokenStatuses';
 import useImageAsset, { useImageAssetSnapshot } from './useImageAsset';
 
@@ -203,6 +208,7 @@ const buildProps = (overrides = {}) => ({
   onDeleteTokens: jest.fn(),
   onCreateAoEFigure: jest.fn(),
   onMoveAoEFigure: jest.fn(),
+  onUpdateAoEFigurePresentation: jest.fn(),
   onDeleteAoEFigures: jest.fn(),
   onSetSelectedTokensVisibility: null,
   isTokenVisibilityActionPending: false,
@@ -236,6 +242,101 @@ const buildKonvaEvent = (event) => {
 
   return konvaEvent;
 };
+
+describe('GrigliataBoard helpers', () => {
+  test('normalizes overlay chrome against zoom', () => {
+    const nearMetrics = buildZoomNormalizedOverlayMetrics(1);
+    const farMetrics = buildZoomNormalizedOverlayMetrics(2);
+
+    expect(farMetrics.rulerStrokeWidth).toBeCloseTo(nearMetrics.rulerStrokeWidth / 2);
+    expect(farMetrics.aoePrimaryFontSize).toBeCloseTo(nearMetrics.aoePrimaryFontSize / 2);
+  });
+
+  test('formats rectangle measurement text lines', () => {
+    expect(getAoEFigureMeasurementTextLines({
+      figureType: 'rectangle',
+      widthSquares: 3,
+      heightSquares: 2,
+      measurement: {
+        widthFeet: 15,
+        heightFeet: 10,
+      },
+    })).toEqual({
+      primary: '15 x 10 ft',
+      secondary: '3 x 2 sq',
+    });
+  });
+
+  test('builds internal measurement decoration layouts for every AoE figure type', () => {
+    ['circle', 'square', 'cone', 'rectangle'].forEach((figureType) => {
+      const renderableFigure = buildRenderableGrigliataAoEFigure({
+        figure: (
+          figureType === 'rectangle'
+            ? {
+                figureType,
+                originCell: { col: 1, row: 1 },
+                targetCell: { col: 3, row: 2 },
+              }
+            : {
+                figureType,
+                originCell: { col: 2, row: 2 },
+                targetCell: { col: 5, row: 4 },
+              }
+        ),
+        grid,
+      });
+
+      const layout = buildAoEFigureMeasurementDecorationLayout({
+        figure: renderableFigure,
+        viewportScale: 1,
+      });
+
+      expect(layout).toEqual(expect.objectContaining({
+        width: expect.any(Number),
+        height: expect.any(Number),
+        badgeX: expect.any(Number),
+        badgeY: expect.any(Number),
+        arrowPoints: expect.any(Array),
+        arrowHeadPoints: expect.any(Array),
+      }));
+      expect(layout.lines.primary).toMatch(/ft$/);
+      expect(layout.lines.secondary).toMatch(/sq$/);
+    });
+  });
+
+  test('keeps the measurement arrow extending past the badge toward the border', () => {
+    const circleFigure = buildRenderableGrigliataAoEFigure({
+      figure: {
+        figureType: 'circle',
+        originCell: { col: 2, row: 2 },
+        targetCell: { col: 5, row: 2 },
+      },
+      grid,
+    });
+    const circleLayout = buildAoEFigureMeasurementDecorationLayout({
+      figure: circleFigure,
+      viewportScale: 1,
+    });
+
+    expect(circleLayout.arrowPoints[2]).toBeGreaterThan(circleLayout.badgeX + circleLayout.width);
+
+    const coneFigure = buildRenderableGrigliataAoEFigure({
+      figure: {
+        figureType: 'cone',
+        originCell: { col: 2, row: 2 },
+        targetCell: { col: 5, row: 4 },
+      },
+      grid,
+    });
+    const coneLayout = buildAoEFigureMeasurementDecorationLayout({
+      figure: coneFigure,
+      viewportScale: 1,
+    });
+
+    expect(coneLayout.arrowPoints[2]).toBeGreaterThan(coneLayout.badgeX);
+    expect(coneLayout.arrowPoints[3]).toBeGreaterThan(coneLayout.badgeY + (coneLayout.height * 0.4));
+  });
+});
 
 describe('GrigliataBoard', () => {
   const mockBattlemapImage = {
@@ -1836,6 +1937,34 @@ describe('GrigliataBoard', () => {
     expect(document.querySelector('[data-stroke="#38bdf8"]')).not.toBeNull();
   });
 
+  test('renders per-step feet labels for a multi-step shared ruler and keeps the total at the end', () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          sharedInteractions: [{
+            backgroundId: 'map-1',
+            ownerUid: 'other-user',
+            type: 'measure',
+            source: 'free',
+            colorKey: 'ion-cyan',
+            anchorCells: [
+              { col: 1, row: 1 },
+              { col: 3, row: 1 },
+            ],
+            liveEndCell: { col: 6, row: 1 },
+            updatedAt: { toMillis: () => Date.now() },
+            updatedBy: 'other-user',
+          }],
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('measurement-overlay-shared-other-user')).toBeInTheDocument();
+    expect(screen.getByText('10 ft')).toBeInTheDocument();
+    expect(screen.getByText('15 ft')).toBeInTheDocument();
+    expect(screen.getByText('25 ft (5 squares)')).toBeInTheDocument();
+  });
+
   test('renders a remote shared ping with the broadcaster color and lets it expire locally', () => {
     jest.useFakeTimers();
     const startedAtMs = Date.now();
@@ -2207,7 +2336,7 @@ describe('GrigliataBoard', () => {
     fireEvent.mouseMove(window, { clientX: 350, clientY: 210, buttons: 1 });
 
     expect(screen.getByTestId('aoe-figure-overlay-local')).toBeInTheDocument();
-    expect(screen.getByTestId('aoe-figure-measurement-local')).toHaveTextContent(/^W \d+ ft • H \d+ ft$/);
+    expect(screen.getByTestId('aoe-figure-measurement-local')).toHaveTextContent(/^\d+ x \d+ ft\s*\d+ x \d+ sq/);
 
     fireEvent.mouseUp(window, { button: 0, clientX: 350, clientY: 210, buttons: 0 });
 
@@ -2404,6 +2533,87 @@ describe('GrigliataBoard', () => {
     });
   });
 
+  test('shows the detail and fill actions for selected editable AoE figures', async () => {
+    const onUpdateAoEFigurePresentation = jest.fn(() => Promise.resolve());
+    const figureId = 'map-1__current-user__circle__1';
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          aoeFigures: [{
+            id: figureId,
+            backgroundId: 'map-1',
+            ownerUid: 'current-user',
+            figureType: 'circle',
+            slot: 1,
+            originCell: { col: 2, row: 2 },
+            targetCell: { col: 3, row: 2 },
+            colorKey: 'ion-cyan',
+            isVisibleToPlayers: true,
+          }],
+          onUpdateAoEFigurePresentation,
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+      button: 0,
+      clientX: 175,
+      clientY: 175,
+      buttons: 1,
+    });
+    fireEvent.mouseUp(window, { button: 0, clientX: 175, clientY: 175, buttons: 0 });
+
+    fireEvent.click(screen.getByRole('button', { name: /hide size details/i }));
+
+    await waitFor(() => {
+      expect(onUpdateAoEFigurePresentation).toHaveBeenCalledWith(figureId, {
+        showMeasurementDetails: false,
+      });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /show border only/i }));
+
+    await waitFor(() => {
+      expect(onUpdateAoEFigurePresentation).toHaveBeenCalledWith(figureId, {
+        isFilled: false,
+      });
+    });
+  });
+
+  test('keeps border-only AoE figures selectable', () => {
+    const figureId = 'map-1__current-user__square__1';
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          aoeFigures: [{
+            id: figureId,
+            backgroundId: 'map-1',
+            ownerUid: 'current-user',
+            figureType: 'square',
+            slot: 1,
+            originCell: { col: 2, row: 2 },
+            targetCell: { col: 4, row: 4 },
+            colorKey: 'nova-teal',
+            isVisibleToPlayers: true,
+            isFilled: false,
+          }],
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+      button: 0,
+      clientX: 210,
+      clientY: 210,
+      buttons: 1,
+    });
+    fireEvent.mouseUp(window, { button: 0, clientX: 210, clientY: 210, buttons: 0 });
+
+    expect(screen.getByRole('button', { name: /fill selected aoe figure/i })).toBeInTheDocument();
+  });
+
   test('moves an editable AoE figure when dragged', async () => {
     const onMoveAoEFigure = jest.fn(() => Promise.resolve());
     const figureId = 'map-1__current-user__square__1';
@@ -2572,5 +2782,7 @@ describe('GrigliataBoard', () => {
     fireEvent.mouseUp(window, { button: 0, clientX: 175, clientY: 175, buttons: 0 });
 
     expect(screen.queryByRole('button', { name: /delete selected aoe figure/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /hide size details/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /show border only/i })).not.toBeInTheDocument();
   });
 });

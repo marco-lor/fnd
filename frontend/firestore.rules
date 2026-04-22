@@ -510,7 +510,9 @@ service cloud.firestore {
           "createdAt",
           "createdBy",
           "updatedAt",
-          "updatedBy"
+          "updatedBy",
+          "showMeasurementDetails",
+          "isFilled"
         ])
         && data.backgroundId is string
         && data.ownerUid is string
@@ -521,6 +523,8 @@ service cloud.firestore {
         && data.colorKey is string
         && isValidGrigliataDrawColorKey(data.colorKey)
         && data.isVisibleToPlayers is bool
+        && (!data.keys().hasAny(["showMeasurementDetails"]) || data.showMeasurementDetails is bool)
+        && (!data.keys().hasAny(["isFilled"]) || data.isFilled is bool)
         && (data.createdBy == null || data.createdBy is string)
         && (data.updatedBy == null || data.updatedBy is string)
         && isGrigliataAoEFigureId(data.backgroundId, data.ownerUid, data.figureType, data.slot, figureId);
