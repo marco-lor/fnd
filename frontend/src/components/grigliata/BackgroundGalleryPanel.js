@@ -3,23 +3,33 @@ import React from 'react';
 export default function BackgroundGalleryPanel({
   backgrounds,
   activeBackgroundId,
+  presentationBackgroundId,
   selectedBackgroundId,
   uploadName,
   selectedFileName,
   uploadError,
   isUploading,
   activatingBackgroundId,
+  narrationActionBackgroundId,
+  isNarrationActionPending,
+  isNarrationClosePending,
   deletingBackgroundId,
   clearingTokensBackgroundId,
+  isUseBackgroundDisabled,
+  destructiveActionLockedBackgroundIds = [],
   onUploadNameChange,
   onUploadFileChange,
   onUploadBackground,
   onSelectBackground,
   onUseBackground,
+  onNarrateBackground,
+  onCloseNarration,
   onClearTokensForBackground,
   onDeleteBackground,
   onCalibrateBackground,
 }) {
+  const destructiveActionLockedBackgroundIdSet = new Set(destructiveActionLockedBackgroundIds);
+
   return (
     <section className="rounded-2xl border border-slate-700 bg-slate-950/75 backdrop-blur-sm shadow-2xl overflow-hidden">
       <div className="px-4 py-3 border-b border-slate-800">
@@ -79,7 +89,12 @@ export default function BackgroundGalleryPanel({
             ) : (
               backgrounds.map((background) => {
                 const isActive = background.id === activeBackgroundId;
+                const isNarrated = background.id === presentationBackgroundId;
                 const isSelected = background.id === selectedBackgroundId;
+                const isUsePending = activatingBackgroundId === background.id;
+                const isNarrationPending = narrationActionBackgroundId === background.id;
+                const isDestructiveActionLocked = destructiveActionLockedBackgroundIdSet.has(background.id);
+                const isBusy = isUsePending || isNarrationPending || deletingBackgroundId === background.id || clearingTokensBackgroundId === background.id;
 
                 return (
                   <div
@@ -108,6 +123,11 @@ export default function BackgroundGalleryPanel({
                                 Active
                               </span>
                             )}
+                            {isNarrated && (
+                              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200">
+                                Narration
+                              </span>
+                            )}
                           </div>
 
                           <p className="mt-1 text-xs text-slate-400">
@@ -124,11 +144,28 @@ export default function BackgroundGalleryPanel({
                       <button
                         type="button"
                         onClick={() => onUseBackground(background)}
-                        disabled={activatingBackgroundId === background.id || deletingBackgroundId === background.id}
+                        disabled={isBusy || isNarrationActionPending || isUseBackgroundDisabled || isActive}
                         className="rounded-md border border-emerald-500/40 px-3 py-1.5 text-xs font-semibold text-emerald-200 transition-colors hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        {activatingBackgroundId === background.id ? 'Using...' : 'Use'}
+                        {isUsePending ? 'Using...' : 'Use'}
                       </button>
+
+                      {(!isActive || isNarrated) && (
+                        <button
+                          type="button"
+                          onClick={() => (
+                            isNarrated
+                              ? onCloseNarration?.(background)
+                              : onNarrateBackground?.(background)
+                          )}
+                          disabled={isBusy || isNarrationActionPending}
+                          className="rounded-md border border-amber-500/40 px-3 py-1.5 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isNarrationPending
+                            ? (isNarrated && isNarrationClosePending ? 'Closing...' : 'Narrating...')
+                            : (isNarrated ? 'Close narration' : 'Narrate')}
+                        </button>
+                      )}
 
                       <button
                         type="button"
@@ -144,7 +181,7 @@ export default function BackgroundGalleryPanel({
                       <button
                         type="button"
                         onClick={() => onClearTokensForBackground(background)}
-                        disabled={clearingTokensBackgroundId === background.id || deletingBackgroundId === background.id}
+                        disabled={clearingTokensBackgroundId === background.id || deletingBackgroundId === background.id || isNarrationActionPending || isDestructiveActionLocked}
                         className="rounded-md border border-amber-500/40 px-3 py-1.5 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {clearingTokensBackgroundId === background.id ? 'Clearing...' : 'Clear Tokens'}
@@ -153,7 +190,7 @@ export default function BackgroundGalleryPanel({
                       <button
                         type="button"
                         onClick={() => onDeleteBackground(background)}
-                        disabled={deletingBackgroundId === background.id || clearingTokensBackgroundId === background.id}
+                        disabled={deletingBackgroundId === background.id || clearingTokensBackgroundId === background.id || isNarrationActionPending || isDestructiveActionLocked}
                         className="rounded-md border border-red-500/40 px-3 py-1.5 text-xs font-semibold text-red-200 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {deletingBackgroundId === background.id ? 'Deleting...' : 'Delete'}

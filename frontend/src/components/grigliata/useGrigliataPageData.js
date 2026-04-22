@@ -176,6 +176,9 @@ export default function useGrigliataPageData({
   const activeBackgroundId = typeof boardState?.activeBackgroundId === 'string'
     ? boardState.activeBackgroundId
     : '';
+  const presentationBackgroundId = typeof boardState?.presentationBackgroundId === 'string'
+    ? boardState.presentationBackgroundId
+    : '';
 
   useEffect(() => {
     if (!currentUserId || !activeBackgroundId) {
@@ -408,6 +411,11 @@ export default function useGrigliataPageData({
     () => backgrounds.find((background) => background.id === activeBackgroundId) || null,
     [backgrounds, activeBackgroundId]
   );
+  const presentationBackground = useMemo(
+    () => backgrounds.find((background) => background.id === presentationBackgroundId) || null,
+    [backgrounds, presentationBackgroundId]
+  );
+  const displayBackground = presentationBackground || activeBackground;
 
   const sharedInteractions = useMemo(
     () => filterActiveGrigliataLiveInteractions(
@@ -433,12 +441,15 @@ export default function useGrigliataPageData({
       if (previousId && backgrounds.some((background) => background.id === previousId)) {
         return previousId;
       }
+      if (presentationBackgroundId && backgrounds.some((background) => background.id === presentationBackgroundId)) {
+        return presentationBackgroundId;
+      }
       if (activeBackgroundId && backgrounds.some((background) => background.id === activeBackgroundId)) {
         return activeBackgroundId;
       }
       return backgrounds[0].id;
     });
-  }, [backgrounds, activeBackgroundId]);
+  }, [backgrounds, activeBackgroundId, presentationBackgroundId]);
 
   const normalizedHiddenTokenIdsByBackground = useMemo(
     () => normalizeHiddenTokenIdsByBackground(currentUserHiddenTokenIdsByBackground),
@@ -800,6 +811,7 @@ export default function useGrigliataPageData({
     currentUserToken,
     currentUserTokenProfileDoc,
     customUserTokens,
+    displayBackground,
     foeLibrary,
     grid,
     isActivePlacementsReady,
@@ -812,6 +824,8 @@ export default function useGrigliataPageData({
     musicPlaybackState,
     musicTracks,
     persistedActiveGrid,
+    presentationBackground,
+    presentationBackgroundId,
     selectedBackground,
     selectedBackgroundId,
     setSelectedBackgroundId,

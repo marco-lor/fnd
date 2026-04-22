@@ -277,6 +277,8 @@ export default function GrigliataPage() {
   const [isMusicMutePending, setIsMusicMutePending] = useState(false);
 
   const [activatingBackgroundId, setActivatingBackgroundId] = useState('');
+  const [narrationActionBackgroundId, setNarrationActionBackgroundId] = useState('');
+  const [isNarrationClosePending, setIsNarrationClosePending] = useState(false);
   const [deletingBackgroundId, setDeletingBackgroundId] = useState('');
   const [clearingTokensBackgroundId, setClearingTokensBackgroundId] = useState('');
   const [deletingMusicTrackId, setDeletingMusicTrackId] = useState('');
@@ -316,6 +318,7 @@ export default function GrigliataPage() {
   const activeLiveInteractionDocIdRef = useRef('');
   const liveInteractionMutationQueueRef = useRef(Promise.resolve());
   const turnOrderRepairPendingRef = useRef(false);
+  const narrationActionPendingRef = useRef(false);
   const [gridVisibilityUpdateBackgroundId, setGridVisibilityUpdateBackgroundId] = useState('');
   const [isActiveBackgroundDeactivationPending, setIsActiveBackgroundDeactivationPending] = useState(false);
   const [isTurnOrderResetPending, setIsTurnOrderResetPending] = useState(false);
@@ -367,7 +370,7 @@ export default function GrigliataPage() {
     }, {});
   }, [userData]);
   const {
-    activeBackground,
+    activeBackground: combatBackground,
     activeBackgroundId,
     activePlacementsById,
     aoeFigureSnapshots,
@@ -377,6 +380,7 @@ export default function GrigliataPage() {
     currentUserToken,
     currentUserTokenProfileDoc,
     customUserTokens,
+    displayBackground,
     foeLibrary,
     grid,
     isActivePlacementsReady,
@@ -389,6 +393,8 @@ export default function GrigliataPage() {
     musicPlaybackState,
     musicTracks,
     persistedActiveGrid,
+    presentationBackground,
+    presentationBackgroundId,
     selectedBackground,
     selectedBackgroundId,
     setSelectedBackgroundId,
@@ -424,9 +430,50 @@ export default function GrigliataPage() {
   );
   const selectedBoardToken = selectedBoardTokens.length === 1 ? selectedBoardTokens[0] : null;
   const selectedBoardTokenId = selectedBoardToken?.tokenId || '';
-  const activeTurnCursor = activeBackground?.turnOrderActive && typeof activeBackground.turnOrderActive === 'object'
-    ? activeBackground.turnOrderActive
+  const activeTurnCursor = combatBackground?.turnOrderActive && typeof combatBackground.turnOrderActive === 'object'
+    ? combatBackground.turnOrderActive
     : null;
+  const isNarrationOverlayActive = !!(
+    presentationBackgroundId
+    && presentationBackground
+    && presentationBackground.id === presentationBackgroundId
+  );
+  const isCombatMapChangeLocked = isNarrationOverlayActive || isTurnOrderStarted;
+  const isNarrationActionPending = !!narrationActionBackgroundId;
+  const destructiveGalleryLockBackgroundIds = useMemo(() => backgrounds.reduce((lockedBackgroundIds, background) => {
+    if (!background?.id) {
+      return lockedBackgroundIds;
+    }
+
+    const hasActiveTurnOrderCursor = !!(
+      background.turnOrderActive
+      && typeof background.turnOrderActive === 'object'
+    );
+    const isLockedActiveCombatMap = background.id === activeBackgroundId && isCombatMapChangeLocked;
+    if (isLockedActiveCombatMap || hasActiveTurnOrderCursor) {
+      lockedBackgroundIds.push(background.id);
+    }
+
+    return lockedBackgroundIds;
+  }, []), [activeBackgroundId, backgrounds, isCombatMapChangeLocked]);
+
+  useEffect(() => {
+    if (!isManager || !user?.uid || !presentationBackgroundId || presentationBackground || backgrounds.length < 1) {
+      return;
+    }
+
+    void setDoc(doc(db, 'grigliata_state', 'current'), {
+      presentationBackgroundId: '',
+      updatedAt: serverTimestamp(),
+      updatedBy: user.uid,
+    }, { merge: true });
+  }, [
+    backgrounds.length,
+    isManager,
+    presentationBackground,
+    presentationBackgroundId,
+    user?.uid,
+  ]);
 
   useEffect(() => {
     if (!isManager || !selectedBoardToken) {
@@ -660,10 +707,22 @@ export default function GrigliataPage() {
   const trayCurrentUserToken = isManager ? null : currentUserToken;
   useEffect(() => {
     setSelectedBoardTokenIds([]);
-  }, [activeBackgroundId]);
+  }, [activeBackgroundId, isNarrationOverlayActive]);
   const drawTheme = useMemo(
     () => getGrigliataDrawTheme(drawColorKey),
     [drawColorKey]
+  );
+  const visibleBoardTokens = useMemo(
+    () => (isNarrationOverlayActive ? [] : boardTokens),
+    [boardTokens, isNarrationOverlayActive]
+  );
+  const visibleAoeFigures = useMemo(
+    () => (isNarrationOverlayActive ? [] : aoeFigureSnapshots),
+    [aoeFigureSnapshots, isNarrationOverlayActive]
+  );
+  const visibleSharedInteractions = useMemo(
+    () => (isNarrationOverlayActive ? [] : sharedInteractions),
+    [isNarrationOverlayActive, sharedInteractions]
   );
   const normalizedMusicPlaybackState = useMemo(
     () => normalizeGrigliataMusicPlaybackState(musicPlaybackState),
@@ -697,11 +756,18 @@ export default function GrigliataPage() {
     || DEFAULT_SIDEBAR_TAB_GRID_CLASS_NAME;
   const isGallerySidebarActive = isManager && activeSidebarTab === 'gallery';
   const immediateImageUrls = useMemo(() => collectUniqueImageUrls([
-    activeBackground?.imageUrl,
+    combatBackground?.imageUrl,
+    displayBackground?.imageUrl,
     currentUserToken?.imageUrl,
     ...customUserTokens.map((token) => token?.imageUrl),
     ...boardTokens.map((token) => token?.imageUrl),
-  ]), [activeBackground?.imageUrl, boardTokens, currentUserToken?.imageUrl, customUserTokens]);
+  ]), [
+    boardTokens,
+    combatBackground?.imageUrl,
+    currentUserToken?.imageUrl,
+    customUserTokens,
+    displayBackground?.imageUrl,
+  ]);
   const deferredGalleryImageUrls = useMemo(() => {
     if (!isGallerySidebarActive) {
       return [];
@@ -788,6 +854,18 @@ export default function GrigliataPage() {
     if (sidebarTabs.some((tab) => tab.key === activeSidebarTab)) return;
     setActiveSidebarTab(sidebarTabs[0].key);
   }, [activeSidebarTab, sidebarTabs]);
+
+  useEffect(() => {
+    if (!isNarrationOverlayActive) {
+      return;
+    }
+
+    setActiveTrayDragType('');
+    setActiveAoeFigureType('');
+    setIsRulerEnabled(false);
+    setSelectedBoardTokenIds([]);
+    setLocalLiveInteraction(null);
+  }, [isNarrationOverlayActive]);
 
   useEffect(() => {
     if (!immediateImageUrls.length) {
@@ -1440,6 +1518,19 @@ export default function GrigliataPage() {
       void deletePublishedLiveInteraction();
     }
   ), [deletePublishedLiveInteraction, discardPendingLiveInteractionPublish]);
+
+  useEffect(() => {
+    if (!isNarrationOverlayActive) {
+      return;
+    }
+
+    discardPendingLiveInteractionPublish();
+    void deletePublishedLiveInteraction();
+  }, [
+    deletePublishedLiveInteraction,
+    discardPendingLiveInteractionPublish,
+    isNarrationOverlayActive,
+  ]);
 
   const clearPlacementsForBackground = async (backgroundId) => {
     if (!backgroundId) return 0;
@@ -2533,6 +2624,14 @@ export default function GrigliataPage() {
 
   const handleUseBackground = async (background) => {
     if (!isManager || !user?.uid || !background?.id) return;
+    if (isCombatMapChangeLocked) {
+      setBoardError(
+        isNarrationOverlayActive
+          ? 'Close narration before changing the combat map.'
+          : 'Use narration instead of switching the combat map during an active turn order.'
+      );
+      return;
+    }
 
     setBoardError('');
     setActivatingBackgroundId(background.id);
@@ -2547,6 +2646,62 @@ export default function GrigliataPage() {
       setBoardError('Unable to activate that background.');
     } finally {
       setActivatingBackgroundId('');
+    }
+  };
+
+  const handleStartNarration = async (background) => {
+    if (
+      !isManager
+      || !user?.uid
+      || !background?.id
+      || background.id === activeBackgroundId
+      || narrationActionPendingRef.current
+    ) return;
+
+    setBoardError('');
+    narrationActionPendingRef.current = true;
+    setIsNarrationClosePending(false);
+    setNarrationActionBackgroundId(background.id);
+    try {
+      if (background.imageUrl) {
+        await preloadImageAssets([background.imageUrl]);
+      }
+
+      await setDoc(doc(db, 'grigliata_state', 'current'), {
+        presentationBackgroundId: background.id,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      }, { merge: true });
+    } catch (error) {
+      console.error('Failed to start narration overlay:', error);
+      setBoardError('Unable to open that narration scene.');
+    } finally {
+      narrationActionPendingRef.current = false;
+      setNarrationActionBackgroundId('');
+      setIsNarrationClosePending(false);
+    }
+  };
+
+  const handleStopNarration = async () => {
+    if (!isManager || !user?.uid || !presentationBackgroundId || narrationActionPendingRef.current) return;
+
+    setBoardError('');
+    narrationActionPendingRef.current = true;
+    setIsNarrationClosePending(true);
+    setNarrationActionBackgroundId(presentationBackgroundId);
+    try {
+      await setDoc(doc(db, 'grigliata_state', 'current'), {
+        presentationBackgroundId: '',
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      }, { merge: true });
+    } catch (error) {
+      console.error('Failed to close narration overlay:', error);
+      setBoardError('Unable to close the narration scene.');
+    } finally {
+      narrationActionPendingRef.current = false;
+      setNarrationActionBackgroundId('');
+      setIsNarrationClosePending(false);
     }
   };
 
@@ -2574,6 +2729,14 @@ export default function GrigliataPage() {
 
   const handleDeactivateActiveBackground = async () => {
     if (!isManager || !user?.uid || !activeBackgroundId) return;
+    if (isCombatMapChangeLocked) {
+      setBoardError(
+        isNarrationOverlayActive
+          ? 'Close narration before deactivating the combat map.'
+          : 'Use narration instead of deactivating the combat map during an active turn order.'
+      );
+      return;
+    }
 
     setBoardError('');
     setIsActiveBackgroundDeactivationPending(true);
@@ -3315,6 +3478,21 @@ export default function GrigliataPage() {
   const handleClearTokensForBackground = async (background) => {
     if (!isManager || !user?.uid || !background?.id) return;
 
+    const hasActiveTurnOrderCursor = !!(
+      background.turnOrderActive
+      && typeof background.turnOrderActive === 'object'
+    );
+    if ((background.id === activeBackgroundId && isCombatMapChangeLocked) || hasActiveTurnOrderCursor) {
+      setBoardError(
+        background.id === activeBackgroundId
+          ? (isNarrationOverlayActive
+            ? 'Close narration before clearing tokens on the combat map.'
+            : 'Reset the active turn order before clearing tokens on the combat map.')
+          : 'Reset that map\'s active turn order before clearing its tokens.'
+      );
+      return;
+    }
+
     const confirmed = window.confirm(`Delete all token placements for "${background.name || 'Untitled Map'}"?`);
     if (!confirmed) return;
 
@@ -3332,6 +3510,21 @@ export default function GrigliataPage() {
 
   const handleDeleteBackground = async (background) => {
     if (!isManager || !user?.uid || !background?.id) return;
+
+    const hasActiveTurnOrderCursor = !!(
+      background.turnOrderActive
+      && typeof background.turnOrderActive === 'object'
+    );
+    if ((background.id === activeBackgroundId && isCombatMapChangeLocked) || hasActiveTurnOrderCursor) {
+      setBoardError(
+        background.id === activeBackgroundId
+          ? (isNarrationOverlayActive
+            ? 'Close narration before deleting the combat map.'
+            : 'Reset the active turn order before deleting the combat map.')
+          : 'Reset that map\'s active turn order before deleting it.'
+      );
+      return;
+    }
 
     const confirmed = window.confirm(`Delete background "${background.name || 'Untitled Map'}" permanently?`);
     if (!confirmed) return;
@@ -3361,6 +3554,14 @@ export default function GrigliataPage() {
       if (background.id === activeBackgroundId) {
         await setDoc(doc(db, 'grigliata_state', 'current'), {
           activeBackgroundId: '',
+          updatedAt: serverTimestamp(),
+          updatedBy: user.uid,
+        }, { merge: true });
+      }
+
+      if (background.id === presentationBackgroundId) {
+        await setDoc(doc(db, 'grigliata_state', 'current'), {
+          presentationBackgroundId: '',
           updatedAt: serverTimestamp(),
           updatedBy: user.uid,
         }, { merge: true });
@@ -3799,66 +4000,68 @@ export default function GrigliataPage() {
             <div className="h-full min-h-[480px] xl:min-h-0">
               <GrigliataBoard
                 key={activeBackgroundId || '__grid__'}
-                activeBackground={activeBackground}
+                activeBackground={displayBackground}
+                combatBackgroundName={combatBackground?.name || ''}
                 grid={grid}
-                isGridVisible={isGridVisible}
-                tokens={boardTokens}
-                aoeFigures={aoeFigureSnapshots}
+                isGridVisible={isNarrationOverlayActive ? false : isGridVisible}
+                tokens={visibleBoardTokens}
+                aoeFigures={visibleAoeFigures}
                 currentUserId={user.uid}
                 isManager={isManager}
-                isTokenDragActive={isTrayDragging}
+                isTokenDragActive={isTrayDragging && !isNarrationOverlayActive}
                 activeTrayDragType={activeTrayDragType}
                 isRulerEnabled={isRulerEnabled}
-                activeAoeFigureType={activeAoeFigureType}
+                activeAoeFigureType={isNarrationOverlayActive ? '' : activeAoeFigureType}
                 isInteractionSharingEnabled={isInteractionSharingEnabled}
                 isMusicMuted={isMusicMuted}
                 isMusicMutePending={isMusicMutePending}
                 drawTheme={drawTheme}
-                onSelectMouseTool={handleSelectMouseTool}
-                onToggleRuler={handleToggleRuler}
-                onChangeAoeFigureType={handleChangeAoeFigureType}
-                onToggleInteractionSharing={handleToggleInteractionSharing}
+                onSelectMouseTool={isNarrationOverlayActive ? null : handleSelectMouseTool}
+                onToggleRuler={isNarrationOverlayActive ? null : handleToggleRuler}
+                onChangeAoeFigureType={isNarrationOverlayActive ? null : handleChangeAoeFigureType}
+                onToggleInteractionSharing={isNarrationOverlayActive ? null : handleToggleInteractionSharing}
                 onToggleMusicMuted={handleToggleMusicMuted}
-                onChangeDrawColor={handleDrawColorChange}
-                onToggleGridVisibility={isManager ? handleToggleGridVisibility : null}
-                isGridVisibilityToggleDisabled={!activeBackgroundId || gridVisibilityUpdateBackgroundId === activeBackgroundId}
+                onChangeDrawColor={isNarrationOverlayActive ? null : handleDrawColorChange}
+                onToggleGridVisibility={isManager && !isNarrationOverlayActive ? handleToggleGridVisibility : null}
+                isGridVisibilityToggleDisabled={!activeBackgroundId || gridVisibilityUpdateBackgroundId === activeBackgroundId || isNarrationOverlayActive}
                 onDeactivateActiveBackground={isManager ? handleDeactivateActiveBackground : null}
-                isDeactivateActiveBackgroundDisabled={!activeBackgroundId || isActiveBackgroundDeactivationPending}
+                isDeactivateActiveBackgroundDisabled={!activeBackgroundId || isActiveBackgroundDeactivationPending || isCombatMapChangeLocked}
                 isTurnOrderEnabled={isTurnOrderEnabled}
                 turnOrderEntries={turnOrderEntries}
                 isTurnOrderStarted={isTurnOrderStarted}
                 activeTurnTokenId={activeTurnTokenId}
-                onStartTurnOrder={isManager ? handleStartTurnOrder : null}
-                onAdvanceTurnOrder={isManager ? handleAdvanceTurnOrder : null}
+                onStartTurnOrder={isManager && !isNarrationOverlayActive ? handleStartTurnOrder : null}
+                onAdvanceTurnOrder={isManager && !isNarrationOverlayActive ? handleAdvanceTurnOrder : null}
                 isTurnOrderProgressPending={isTurnOrderProgressPending}
-                onResetTurnOrder={isManager ? handleResetTurnOrder : null}
+                onResetTurnOrder={isManager && !isNarrationOverlayActive ? handleResetTurnOrder : null}
                 isTurnOrderResetPending={isTurnOrderResetPending}
-                onJoinTurnOrder={handleJoinTurnOrder}
-                onLeaveTurnOrder={handleLeaveTurnOrder}
+                onJoinTurnOrder={isNarrationOverlayActive ? null : handleJoinTurnOrder}
+                onLeaveTurnOrder={isNarrationOverlayActive ? null : handleLeaveTurnOrder}
                 turnOrderActionTokenId={turnOrderActionTokenId}
-                onSaveTurnOrderInitiative={handleSaveTurnOrderInitiative}
+                onSaveTurnOrderInitiative={isNarrationOverlayActive ? null : handleSaveTurnOrderInitiative}
                 savingTurnOrderInitiativeTokenId={savingTurnOrderInitiativeTokenId}
-                onAdjustGridSize={isManager ? handleAdjustActiveGridSize : null}
-                isGridSizeAdjustmentDisabled={!activeBackgroundId}
-                onMoveTokens={handleMoveTokens}
-                onDeleteTokens={handleDeleteTokens}
-                onCreateAoEFigure={handleCreateAoEFigure}
-                onMoveAoEFigure={handleMoveAoEFigure}
-                onDeleteAoEFigures={handleDeleteAoEFigures}
-                onSetSelectedTokensVisibility={isManager ? handleSetSelectedTokensVisibility : null}
+                onAdjustGridSize={isManager && !isNarrationOverlayActive ? handleAdjustActiveGridSize : null}
+                isGridSizeAdjustmentDisabled={!activeBackgroundId || isNarrationOverlayActive}
+                onMoveTokens={isNarrationOverlayActive ? null : handleMoveTokens}
+                onDeleteTokens={isNarrationOverlayActive ? null : handleDeleteTokens}
+                onCreateAoEFigure={isNarrationOverlayActive ? null : handleCreateAoEFigure}
+                onMoveAoEFigure={isNarrationOverlayActive ? null : handleMoveAoEFigure}
+                onDeleteAoEFigures={isNarrationOverlayActive ? null : handleDeleteAoEFigures}
+                onSetSelectedTokensVisibility={isManager && !isNarrationOverlayActive ? handleSetSelectedTokensVisibility : null}
                 isTokenVisibilityActionPending={isTokenVisibilityActionPending}
-                onSetSelectedTokensDeadState={isManager ? handleSetSelectedTokensDeadState : null}
+                onSetSelectedTokensDeadState={isManager && !isNarrationOverlayActive ? handleSetSelectedTokensDeadState : null}
                 isTokenDeadActionPending={isTokenDeadActionPending}
-                onUpdateTokenStatuses={handleUpdateTokenStatuses}
+                onUpdateTokenStatuses={isNarrationOverlayActive ? null : handleUpdateTokenStatuses}
                 isTokenStatusActionPending={isTokenStatusActionPending}
-                selectedTokenDetails={selectedTokenDetails}
-                sharedInteractions={sharedInteractions}
-                onSharedInteractionChange={handleSharedInteractionChange}
+                selectedTokenDetails={isNarrationOverlayActive ? null : selectedTokenDetails}
+                sharedInteractions={visibleSharedInteractions}
+                onSharedInteractionChange={isNarrationOverlayActive ? null : handleSharedInteractionChange}
                 onSelectedTokenIdsChange={setSelectedBoardTokenIds}
-                onDropCurrentToken={(payload, worldPoint) => {
+                onDropCurrentToken={isNarrationOverlayActive ? null : ((payload, worldPoint) => {
                   setActiveTrayDragType('');
                   handlePlaceTrayToken(payload, worldPoint);
-                }}
+                })}
+                isNarrationOverlayActive={isNarrationOverlayActive}
               />
             </div>
           </div>
@@ -3908,7 +4111,7 @@ export default function GrigliataPage() {
                     customTokens={customUserTokens}
                     foeLibrary={foeLibrary}
                     selectedTokenDetails={selectedTokenDetails}
-                    activeMapName={activeBackground?.name || ''}
+                    activeMapName={combatBackground?.name || ''}
                     hasActiveMap={!!activeBackgroundId}
                     onDragStart={(payload) => setActiveTrayDragType(payload?.type || 'grigliata-token')}
                     onDragEnd={() => setActiveTrayDragType('')}
@@ -3929,14 +4132,20 @@ export default function GrigliataPage() {
                   <BackgroundGalleryPanel
                     backgrounds={backgrounds}
                     activeBackgroundId={activeBackgroundId}
+                    presentationBackgroundId={presentationBackgroundId}
                     selectedBackgroundId={selectedBackgroundId}
                     uploadName={uploadName}
                     selectedFileName={selectedFile?.name || ''}
                     uploadError={uploadError}
                     isUploading={isUploading}
                     activatingBackgroundId={activatingBackgroundId}
+                    narrationActionBackgroundId={narrationActionBackgroundId}
+                    isNarrationActionPending={isNarrationActionPending}
+                    isNarrationClosePending={isNarrationClosePending}
                     deletingBackgroundId={deletingBackgroundId}
                     clearingTokensBackgroundId={clearingTokensBackgroundId}
+                    isUseBackgroundDisabled={isCombatMapChangeLocked}
+                    destructiveActionLockedBackgroundIds={destructiveGalleryLockBackgroundIds}
                     onUploadNameChange={setUploadName}
                     onUploadFileChange={(event) => {
                       const file = event.target.files?.[0] || null;
@@ -3949,6 +4158,8 @@ export default function GrigliataPage() {
                     onUploadBackground={handleUploadBackground}
                     onSelectBackground={setSelectedBackgroundId}
                     onUseBackground={handleUseBackground}
+                    onNarrateBackground={handleStartNarration}
+                    onCloseNarration={handleStopNarration}
                     onClearTokensForBackground={handleClearTokensForBackground}
                     onDeleteBackground={handleDeleteBackground}
                     onCalibrateBackground={handleOpenCalibration}
