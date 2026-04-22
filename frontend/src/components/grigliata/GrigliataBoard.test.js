@@ -158,6 +158,7 @@ const buildProps = (overrides = {}) => ({
     imageWidth: 0,
     imageHeight: 0,
   },
+  combatBackgroundName: '',
   grid,
   isGridVisible: true,
   tokens: [],
@@ -214,6 +215,7 @@ const buildProps = (overrides = {}) => ({
   onSelectedTokenIdsChange: jest.fn(),
   sharedInteractions: [],
   onSharedInteractionChange: jest.fn(),
+  isNarrationOverlayActive: false,
   ...overrides,
 });
 
@@ -432,6 +434,164 @@ describe('GrigliataBoard', () => {
     await act(async () => {
       jest.advanceTimersByTime(240);
     });
+
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-width', '1920');
+    expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
+  });
+
+  test('swaps to the narration battlemap immediately without showing the combat map underneath', async () => {
+    jest.useFakeTimers();
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: 'map-1',
+            name: 'Sunken Ruins',
+            imageUrl: 'https://example.com/map-1.png',
+            imageWidth: 1280,
+            imageHeight: 720,
+          },
+        })}
+      />
+    );
+
+    await act(async () => {
+      jest.advanceTimersByTime(240);
+    });
+
+    useImageAssetSnapshot.mockImplementation(() => ({
+      status: 'loaded',
+      image: mockAlternateBattlemapImage,
+      error: null,
+    }));
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: 'map-2',
+            name: 'Iron Keep',
+            imageUrl: 'https://example.com/map-2.png',
+            imageWidth: 1920,
+            imageHeight: 1080,
+          },
+          combatBackgroundName: 'Sunken Ruins',
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-width', '1920');
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-opacity', '1');
+    expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
+  });
+
+  test('hides the combat battlemap while the narration image is still loading', async () => {
+    jest.useFakeTimers();
+
+    useImageAssetSnapshot.mockImplementation((src) => {
+      if (src === 'https://example.com/map-1.png') {
+        return {
+          status: 'loaded',
+          image: mockBattlemapImage,
+          error: null,
+        };
+      }
+
+      if (src === 'https://example.com/map-2.png') {
+        return {
+          status: 'loading',
+          image: null,
+          error: null,
+        };
+      }
+
+      return {
+        status: 'idle',
+        image: null,
+        error: null,
+      };
+    });
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: 'map-1',
+            name: 'Sunken Ruins',
+            imageUrl: 'https://example.com/map-1.png',
+            imageWidth: 1280,
+            imageHeight: 720,
+          },
+        })}
+      />
+    );
+
+    await act(async () => {
+      jest.advanceTimersByTime(240);
+    });
+
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-width', '1280');
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: 'map-2',
+            name: 'Iron Keep',
+            imageUrl: 'https://example.com/map-2.png',
+            imageWidth: 1920,
+            imageHeight: 1080,
+          },
+          combatBackgroundName: 'Sunken Ruins',
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
+
+    expect(screen.queryByTestId('battlemap-image-active')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
+
+    useImageAssetSnapshot.mockImplementation((src) => {
+      if (src === 'https://example.com/map-1.png') {
+        return {
+          status: 'loaded',
+          image: mockBattlemapImage,
+          error: null,
+        };
+      }
+
+      if (src === 'https://example.com/map-2.png') {
+        return {
+          status: 'loaded',
+          image: mockAlternateBattlemapImage,
+          error: null,
+        };
+      }
+
+      return {
+        status: 'idle',
+        image: null,
+        error: null,
+      };
+    });
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: 'map-2',
+            name: 'Iron Keep',
+            imageUrl: 'https://example.com/map-2.png',
+            imageWidth: 1920,
+            imageHeight: 1080,
+          },
+          combatBackgroundName: 'Sunken Ruins',
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
 
     expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-width', '1920');
     expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
@@ -1194,6 +1354,92 @@ describe('GrigliataBoard', () => {
     expect(screen.getByRole('button', { name: /advance turn order/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /advance turn order/i }).className).toContain('bg-gradient-to-br');
     expect(screen.getByTestId('turn-order-rail-toggle')).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  test('renders narration mode as an image-only scene and freezes combat controls', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          isNarrationOverlayActive: true,
+          activeBackground: {
+            id: 'map-2',
+            name: 'Iron Keep',
+            imageUrl: 'https://example.com/map-2.png',
+            imageWidth: 1280,
+            imageHeight: 720,
+          },
+          combatBackgroundName: 'Sunken Ruins',
+          tokens: [{
+            tokenId: 'current-user',
+            ownerUid: 'current-user',
+            label: 'Ilya',
+            imageUrl: '',
+            placed: true,
+            col: 1,
+            row: 1,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          aoeFigures: [{
+            id: 'map-1__current-user__circle__1',
+            backgroundId: 'map-1',
+            ownerUid: 'current-user',
+            figureType: 'circle',
+            slot: 1,
+            originCell: { col: 1, row: 1 },
+            targetCell: { col: 3, row: 1 },
+            colorKey: 'ion-cyan',
+            isVisibleToPlayers: true,
+          }],
+          sharedInteractions: [{
+            ownerUid: 'other-user',
+            type: 'measure',
+            source: 'free',
+            colorKey: 'ion-cyan',
+            anchorCells: [{ col: 1, row: 1 }],
+            liveEndCell: { col: 3, row: 1 },
+          }],
+          turnOrderEntries: [{
+            tokenId: 'current-user',
+            ownerUid: 'current-user',
+            label: 'Ilya',
+            imageUrl: '',
+            tokenType: 'character',
+            initiative: 12,
+            joinedAt: null,
+            joinedAtMs: 10,
+          }],
+          onToggleGridVisibility: jest.fn(),
+          onDeactivateActiveBackground: jest.fn(),
+          onStartTurnOrder: jest.fn(),
+          onResetTurnOrder: jest.fn(),
+          onAdjustGridSize: jest.fn(),
+        })}
+      />
+    );
+
+    await screen.findByTestId('battlemap-image-active');
+
+    expect(screen.getByTestId('narration-overlay-badge')).toHaveTextContent('Narration');
+    expect(screen.getByText(/Iron Keep\s+\|\s+Narration scene over Sunken Ruins/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('grid-layer')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('token-node-current-user')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('aoe-figure-overlay-map-1__current-user__circle__1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('measurement-overlay-shared-other-user')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /return to mouse selection/i })).toBeDisabled();
+    expect(screen.getByTestId('draw-color-trigger')).toBeDisabled();
+    expect(screen.getByTestId('aoe-template-trigger')).toBeDisabled();
+    expect(screen.getByRole('button', { name: /share live interactions/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /hide grid/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /deactivate active map/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /increase square size/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /reset turn order/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /start turn order/i })).toBeDisabled();
+    expect(screen.getByTestId('turn-order-entry-current-user')).toBeInTheDocument();
+    expect(screen.queryByTestId('turn-order-initiative-input-current-user')).not.toBeInTheDocument();
+    expect(screen.getByTestId('turn-order-initiative-value-current-user')).toHaveTextContent('12');
   });
 
   test('shows the shared turn order panel by default and updates entries as data changes', () => {

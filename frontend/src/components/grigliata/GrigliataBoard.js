@@ -830,7 +830,11 @@ const GridLayer = ({ bounds, grid }) => {
     );
   }
 
-  return lines;
+  return (
+    <Group listening={false} data-testid="grid-layer">
+      {lines}
+    </Group>
+  );
 };
 
 const MeasurementOverlay = ({
@@ -1372,7 +1376,11 @@ const getAoETemplateOptionClassName = (isActive = false) => [
   isActive ? AOE_TEMPLATE_OPTION_ACTIVE_CLASS : AOE_TEMPLATE_OPTION_IDLE_CLASS,
 ].join(' ');
 
-const DrawColorPicker = ({ activeColorKey, onChange }) => {
+const areStringArraysEqual = (left = [], right = []) => (
+  left.length === right.length && left.every((value, index) => value === right[index])
+);
+
+const DrawColorPicker = ({ activeColorKey, onChange, disabled = false }) => {
   const [isOpen, setIsOpen] = useState(false);
   const pickerRef = useRef(null);
   const triggerRef = useRef(null);
@@ -1386,6 +1394,12 @@ const DrawColorPicker = ({ activeColorKey, onChange }) => {
     () => GRIGLIATA_DRAW_THEMES.filter((theme) => theme.key !== activeTheme.key),
     [activeTheme.key]
   );
+
+  useEffect(() => {
+    if (disabled) {
+      setIsOpen(false);
+    }
+  }, [disabled]);
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -1412,6 +1426,10 @@ const DrawColorPicker = ({ activeColorKey, onChange }) => {
   }, [isOpen]);
 
   const handleSelectColor = (nextColorKey) => {
+    if (disabled) {
+      return;
+    }
+
     onChange?.(nextColorKey);
     setIsOpen(false);
     triggerRef.current?.focus();
@@ -1443,8 +1461,9 @@ const DrawColorPicker = ({ activeColorKey, onChange }) => {
           aria-expanded={isOpen}
           aria-controls={drawerId}
           data-testid="draw-color-trigger"
+          disabled={disabled}
           onClick={() => setIsOpen((currentOpen) => !currentOpen)}
-          className="group relative flex h-8 w-8 items-center justify-center rounded-full border transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+          className="group relative flex h-8 w-8 items-center justify-center rounded-full border transition-transform duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
           style={getDrawSwatchStyle(activeTheme, true)}
         >
           <span className="sr-only">{activeTheme.label}</span>
@@ -1550,13 +1569,19 @@ const AoETemplateIcon = ({ figureType }) => {
   return null;
 };
 
-const AoETemplatePicker = ({ activeFigureType = '', onChange }) => {
+const AoETemplatePicker = ({ activeFigureType = '', onChange, disabled = false }) => {
   const [isOpen, setIsOpen] = useState(false);
   const pickerRef = useRef(null);
   const triggerRef = useRef(null);
   const prefersReducedMotion = useReducedMotion();
   const drawerId = useId();
   const activeLabel = activeFigureType ? AOE_TEMPLATE_LABELS[activeFigureType] || 'AoE' : 'AoE';
+
+  useEffect(() => {
+    if (disabled) {
+      setIsOpen(false);
+    }
+  }, [disabled]);
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -1583,6 +1608,10 @@ const AoETemplatePicker = ({ activeFigureType = '', onChange }) => {
   }, [isOpen]);
 
   const handleSelectTemplate = (figureType) => {
+    if (disabled) {
+      return;
+    }
+
     onChange?.(figureType === activeFigureType ? '' : figureType);
     setIsOpen(false);
     triggerRef.current?.focus();
@@ -1604,8 +1633,9 @@ const AoETemplatePicker = ({ activeFigureType = '', onChange }) => {
           aria-expanded={isOpen}
           aria-controls={drawerId}
           data-testid="aoe-template-trigger"
+          disabled={disabled}
           onClick={() => setIsOpen((currentOpen) => !currentOpen)}
-          className={`${getQuickControlButtonClassName(!!activeFigureType)} text-[10px] font-black uppercase tracking-[0.18em]`}
+          className={`${getQuickControlButtonClassName(!!activeFigureType)} text-[10px] font-black uppercase tracking-[0.18em] disabled:cursor-not-allowed disabled:opacity-60`}
         >
           AoE
         </button>
@@ -1664,6 +1694,7 @@ const TurnOrderPanel = ({
   activeTurnTokenId = '',
   onSaveTurnOrderInitiative,
   savingTurnOrderInitiativeTokenId = '',
+  isReadOnly = false,
 }) => {
   const prefersReducedMotion = useReducedMotion();
   const [initiativeEditors, setInitiativeEditors] = useState({});
@@ -1754,7 +1785,7 @@ const TurnOrderPanel = ({
         )}
         {entries.length ? entries.map((entry) => {
           const isActiveTurn = entry.tokenId === activeTurnTokenId;
-          const canEdit = canEditTurnOrderEntry({
+          const canEdit = !isReadOnly && canEditTurnOrderEntry({
             entry,
             currentUserId,
             isManager,
@@ -1793,7 +1824,7 @@ const TurnOrderPanel = ({
                       inputMode="numeric"
                       pattern="-?[0-9]*"
                       value={editor.draft}
-                      disabled={isSaving}
+                      disabled={isSaving || isReadOnly}
                       data-testid={`turn-order-initiative-input-${entry.tokenId}`}
                       aria-label={`Initiative for ${entry.label}`}
                       onChange={(event) => handleDraftChange(entry.tokenId, event.target.value)}
@@ -1857,6 +1888,7 @@ const TurnOrderPanel = ({
 
 export default function GrigliataBoard({
   activeBackground,
+  combatBackgroundName = '',
   grid,
   isGridVisible = true,
   tokens,
@@ -1913,6 +1945,7 @@ export default function GrigliataBoard({
   onSelectedTokenIdsChange,
   sharedInteractions = [],
   onSharedInteractionChange,
+  isNarrationOverlayActive = false,
 }) {
   const containerRef = useRef(null);
   const stageRef = useRef(null);
@@ -1942,12 +1975,14 @@ export default function GrigliataBoard({
   const backgroundAssetSnapshot = useImageAssetSnapshot(activeBackground?.imageUrl || '');
   const turnOrderContextMenuRef = useRef(null);
   const turnOrderJoinInputRef = useRef(null);
+  const lastReportedSelectedTokenIdsRef = useRef([]);
   const [battlemapImageTransition, setBattlemapImageTransition] = useState({
     visibleLayer: null,
     fadingOutLayer: null,
   });
   const battlemapImageTransitionRef = useRef(battlemapImageTransition);
   const battlemapImageAnimationHandleRef = useRef(null);
+  const previousNarrationOverlayActiveRef = useRef(isNarrationOverlayActive);
   const lastFitKeyRef = useRef('');
   const resolvedDrawTheme = drawTheme || DEFAULT_DRAW_THEME;
   const isMouseSelectionActive = !isRulerEnabled && !activeAoeFigureType;
@@ -2047,6 +2082,9 @@ export default function GrigliataBoard({
   useEffect(() => {
     const currentTransition = battlemapImageTransitionRef.current;
     const dominantLayer = getDominantBattlemapImageLayer(currentTransition);
+    const wasNarrationOverlayActive = previousNarrationOverlayActiveRef.current;
+    previousNarrationOverlayActiveRef.current = isNarrationOverlayActive;
+    const shouldSkipTransition = isNarrationOverlayActive || wasNarrationOverlayActive;
 
     if (!activeBackground?.imageUrl) {
       if (!dominantLayer) {
@@ -2056,6 +2094,21 @@ export default function GrigliataBoard({
       }
 
       runBattlemapImageTransition(dominantLayer, null);
+      return;
+    }
+
+    if (shouldSkipTransition && backgroundAssetSnapshot.status !== 'loaded') {
+      cancelBattlemapImageAnimation();
+      setBattlemapImageTransition({ visibleLayer: null, fadingOutLayer: null });
+      return;
+    }
+
+    if (backgroundAssetSnapshot.status === 'loaded' && targetBattlemapImageLayer && shouldSkipTransition) {
+      cancelBattlemapImageAnimation();
+      setBattlemapImageTransition({
+        visibleLayer: { ...targetBattlemapImageLayer, opacity: 1 },
+        fadingOutLayer: null,
+      });
       return;
     }
 
@@ -2096,6 +2149,7 @@ export default function GrigliataBoard({
     activeBackground?.imageUrl,
     backgroundAssetSnapshot.status,
     cancelBattlemapImageAnimation,
+    isNarrationOverlayActive,
     runBattlemapImageTransition,
     targetBattlemapImageLayer,
   ]);
@@ -2478,6 +2532,18 @@ export default function GrigliataBoard({
   }, [clearActiveSharedInteraction, clearPingBroadcastTimer, clearPingHoldTimer, fitKey]);
 
   useEffect(() => {
+    if (!isNarrationOverlayActive) {
+      return;
+    }
+
+    setTurnOrderContextMenu(null);
+    setTurnOrderJoinPrompt(null);
+    setSelectedTokenIds([]);
+    setSelectedAoEFigureId('');
+    clearActiveSharedInteraction();
+  }, [clearActiveSharedInteraction, isNarrationOverlayActive]);
+
+  useEffect(() => {
     if (!isRulerEnabled) {
       setMeasurementState(null);
     }
@@ -2578,9 +2644,12 @@ export default function GrigliataBoard({
   ), [onSharedInteractionChange]);
 
   useEffect(() => {
-    setSelectedTokenIds((currentSelectedTokenIds) => (
-      currentSelectedTokenIds.filter((tokenId) => movableTokenIds.has(tokenId))
-    ));
+    setSelectedTokenIds((currentSelectedTokenIds) => {
+      const nextSelectedTokenIds = currentSelectedTokenIds.filter((tokenId) => movableTokenIds.has(tokenId));
+      return areStringArraysEqual(currentSelectedTokenIds, nextSelectedTokenIds)
+        ? currentSelectedTokenIds
+        : nextSelectedTokenIds;
+    });
   }, [movableTokenIds]);
 
   useEffect(() => {
@@ -2866,6 +2935,13 @@ export default function GrigliataBoard({
   );
 
   const handleDrop = (event) => {
+    if (isNarrationOverlayActive) {
+      event.preventDefault();
+      event.stopPropagation();
+      setIsDropActive(false);
+      return;
+    }
+
     event.preventDefault();
     event.stopPropagation();
     setIsDropActive(false);
@@ -2883,6 +2959,10 @@ export default function GrigliataBoard({
   };
 
   const handleDragOver = (event) => {
+    if (isNarrationOverlayActive) {
+      return;
+    }
+
     const payload = parseDropPayload(event.dataTransfer);
     const dragType = payload?.type || activeTrayDragType;
     const canAcceptCurrentTrayDrop = !!(dragType && currentUserId);
@@ -3393,6 +3473,17 @@ export default function GrigliataBoard({
     if (isSecondaryMouseButton(nativeEvent)) {
       clearPingHoldTimer();
       nativeEvent.preventDefault();
+      if (isNarrationOverlayActive) {
+        interactionRef.current = {
+          type: 'pan',
+          startClient: {
+            x: nativeEvent.clientX,
+            y: nativeEvent.clientY,
+          },
+          startViewport: viewport,
+        };
+        return;
+      }
       if (hasPrimaryMouseButtonPressed(nativeEvent) && commitMeasurementWaypoint(nativeEvent.clientX, nativeEvent.clientY)) {
         return;
       }
@@ -3413,7 +3504,7 @@ export default function GrigliataBoard({
       return;
     }
 
-    if (!isPrimaryMouseButton(nativeEvent)) return;
+    if (isNarrationOverlayActive || !isPrimaryMouseButton(nativeEvent)) return;
 
     const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
     if (!pointerWorld) return;
@@ -3642,7 +3733,13 @@ export default function GrigliataBoard({
     [renderedTokens, selectedTokenIdSet]
   );
   useEffect(() => {
-    onSelectedTokenIdsChange?.(selectedTokens.map((token) => token.tokenId));
+    const nextSelectedTokenIds = selectedTokens.map((token) => token.tokenId);
+    if (areStringArraysEqual(lastReportedSelectedTokenIdsRef.current, nextSelectedTokenIds)) {
+      return;
+    }
+
+    lastReportedSelectedTokenIdsRef.current = nextSelectedTokenIds;
+    onSelectedTokenIdsChange?.(nextSelectedTokenIds);
   }, [onSelectedTokenIdsChange, selectedTokens]);
   const selectedTokenActionState = useMemo(() => {
     if (
@@ -3971,14 +4068,36 @@ export default function GrigliataBoard({
     () => sortTurnOrderEntries(turnOrderEntries),
     [turnOrderEntries]
   );
+  const areTurnOrderControlsDisabled = isNarrationOverlayActive;
+  const visibleRenderedAoEFigures = isNarrationOverlayActive ? [] : renderedAoEFigures;
+  const visibleRenderedTokens = isNarrationOverlayActive ? [] : renderedTokens;
+  const visibleRenderedSharedInteractions = isNarrationOverlayActive ? [] : renderedSharedInteractions;
+  const visibleLocalPingsForRender = isNarrationOverlayActive ? [] : visibleLocalPings;
+  const visibleMeasurementState = isNarrationOverlayActive ? null : measurementState;
+  const visibleAoEPreviewState = isNarrationOverlayActive ? null : aoePreviewState;
+  const visibleSelectedTokenHud = isNarrationOverlayActive ? null : selectedSingleTokenHudState;
+  const visibleOverflowToken = isNarrationOverlayActive ? null : activeOverflowToken;
+  const visibleSelectedAoEFigureActionState = isNarrationOverlayActive ? null : selectedAoEFigureActionState;
+  const visibleSelectedTokenActionState = isNarrationOverlayActive ? null : selectedTokenActionState;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-700 bg-slate-950/80 shadow-2xl">
       <div className="flex flex-col gap-3 border-b border-slate-800 px-4 py-3">
-        <div>
+        <div className="flex items-center gap-2">
           <p className="text-xs text-slate-400">
-            {resolvedBackground?.name || 'Grid only'} | {normalizedGrid.cellSizePx}px squares | 5 ft per square
+            {resolvedBackground?.name || 'Grid only'}
+            {isNarrationOverlayActive
+              ? ` | Narration scene${combatBackgroundName ? ` over ${combatBackgroundName}` : ''}`
+              : ` | ${normalizedGrid.cellSizePx}px squares | 5 ft per square`}
           </p>
+          {isNarrationOverlayActive && (
+            <span
+              data-testid="narration-overlay-badge"
+              className="rounded-full border border-amber-400/35 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200"
+            >
+              Narration
+            </span>
+          )}
         </div>
       </div>
 
@@ -4010,11 +4129,12 @@ export default function GrigliataBoard({
           <button
             type="button"
             onClick={onSelectMouseTool}
+            disabled={isNarrationOverlayActive}
             title={isMouseSelectionActive ? 'Mouse selection mode is active' : 'Return to mouse selection'}
             aria-label="Return to mouse selection"
             aria-pressed={isMouseSelectionActive}
             data-testid="mouse-selection-trigger"
-            className={getQuickControlButtonClassName(isMouseSelectionActive)}
+            className={`${getQuickControlButtonClassName(isMouseSelectionActive)} disabled:cursor-not-allowed disabled:opacity-60`}
           >
             <FaHandPointer className="h-4 w-4" />
           </button>
@@ -4022,15 +4142,17 @@ export default function GrigliataBoard({
             <DrawColorPicker
               activeColorKey={resolvedDrawTheme.key}
               onChange={onChangeDrawColor}
+              disabled={isNarrationOverlayActive}
             />
           </div>
           <button
             type="button"
             onClick={onToggleRuler}
+            disabled={isNarrationOverlayActive}
             title={isRulerEnabled ? 'Disable ruler mode' : 'Enable ruler mode'}
             aria-label={isRulerEnabled ? 'Disable ruler mode' : 'Enable ruler mode'}
             aria-pressed={isRulerEnabled}
-            className={getQuickControlButtonClassName(isRulerEnabled)}
+            className={`${getQuickControlButtonClassName(isRulerEnabled)} disabled:cursor-not-allowed disabled:opacity-60`}
           >
             <FaRulerHorizontal className="h-4 w-4" />
           </button>
@@ -4038,15 +4160,17 @@ export default function GrigliataBoard({
             <AoETemplatePicker
               activeFigureType={activeAoeFigureType}
               onChange={onChangeAoeFigureType}
+              disabled={isNarrationOverlayActive}
             />
           </div>
           <button
             type="button"
             onClick={onToggleInteractionSharing}
+            disabled={isNarrationOverlayActive}
             title={isInteractionSharingEnabled ? 'Stop sharing live interactions' : 'Share live interactions'}
             aria-label={isInteractionSharingEnabled ? 'Stop sharing live interactions' : 'Share live interactions'}
             aria-pressed={isInteractionSharingEnabled}
-            className={getQuickControlButtonClassName(false)}
+            className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
           >
             {isInteractionSharingEnabled ? <FiUsers className="h-4 w-4" /> : <FiUser className="h-4 w-4" />}
           </button>
@@ -4086,7 +4210,7 @@ export default function GrigliataBoard({
                 <button
                   type="button"
                   onClick={() => onToggleGridVisibility?.(activeBackground?.id || '')}
-                  disabled={isGridVisibilityToggleDisabled}
+                  disabled={isNarrationOverlayActive || isGridVisibilityToggleDisabled}
                   title={isGridVisible ? 'Hide the shared grid for everyone' : 'Show the shared grid for everyone'}
                   aria-label={isGridVisible ? 'Hide Grid' : 'Show Grid'}
                   aria-pressed={isGridVisible}
@@ -4097,7 +4221,7 @@ export default function GrigliataBoard({
                 <button
                   type="button"
                   onClick={() => onDeactivateActiveBackground?.()}
-                  disabled={isDeactivateActiveBackgroundDisabled}
+                  disabled={isNarrationOverlayActive || isDeactivateActiveBackgroundDisabled}
                   title="Deactivate active map"
                   aria-label="Deactivate active map"
                   className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
@@ -4107,7 +4231,7 @@ export default function GrigliataBoard({
                 <button
                   type="button"
                   onClick={() => onAdjustGridSize?.(1)}
-                  disabled={isGridSizeAdjustmentDisabled}
+                  disabled={isNarrationOverlayActive || isGridSizeAdjustmentDisabled}
                   title="Increase square size"
                   aria-label="Increase square size"
                   className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
@@ -4117,7 +4241,7 @@ export default function GrigliataBoard({
                 <button
                   type="button"
                   onClick={() => onAdjustGridSize?.(-1)}
-                  disabled={isGridSizeAdjustmentDisabled}
+                  disabled={isNarrationOverlayActive || isGridSizeAdjustmentDisabled}
                   title="Decrease square size"
                   aria-label="Decrease square size"
                   className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
@@ -4127,7 +4251,7 @@ export default function GrigliataBoard({
                 <button
                   type="button"
                   onClick={() => onResetTurnOrder?.()}
-                  disabled={isTurnOrderResetPending || isTurnOrderProgressPending || (turnOrderEntries.length < 1 && !isTurnOrderStarted)}
+                  disabled={areTurnOrderControlsDisabled || isTurnOrderResetPending || isTurnOrderProgressPending || (turnOrderEntries.length < 1 && !isTurnOrderStarted)}
                   title="Reset turn order"
                   aria-label="Reset turn order"
                   className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
@@ -4144,7 +4268,7 @@ export default function GrigliataBoard({
 
                     onStartTurnOrder?.();
                   }}
-                  disabled={isTurnOrderProgressPending || isTurnOrderResetPending || turnOrderEntries.length < 1 || (isTurnOrderStarted ? !onAdvanceTurnOrder : !onStartTurnOrder)}
+                  disabled={areTurnOrderControlsDisabled || isTurnOrderProgressPending || isTurnOrderResetPending || turnOrderEntries.length < 1 || (isTurnOrderStarted ? !onAdvanceTurnOrder : !onStartTurnOrder)}
                   title={isTurnOrderStarted ? 'Advance turn order' : 'Start turn order'}
                   aria-label={isTurnOrderStarted ? 'Advance turn order' : 'Start turn order'}
                   className={`${getQuickControlButtonClassName(isTurnOrderStarted)} disabled:cursor-not-allowed disabled:opacity-60`}
@@ -4188,6 +4312,7 @@ export default function GrigliataBoard({
                   activeTurnTokenId={activeTurnTokenId}
                   onSaveTurnOrderInitiative={onSaveTurnOrderInitiative}
                   savingTurnOrderInitiativeTokenId={savingTurnOrderInitiativeTokenId}
+                  isReadOnly={isNarrationOverlayActive}
                 />
               </motion.div>
             )}
@@ -4252,7 +4377,7 @@ export default function GrigliataBoard({
                 listening={false}
               />
 
-              {isGridVisible && <GridLayer bounds={boardBounds} grid={normalizedGrid} />}
+              {!isNarrationOverlayActive && isGridVisible && <GridLayer bounds={boardBounds} grid={normalizedGrid} />}
 
               {normalizedSelectionRect && (
                 <>
@@ -4283,7 +4408,7 @@ export default function GrigliataBoard({
                 </>
               )}
 
-              {renderedAoEFigures.map((figure) => (
+              {visibleRenderedAoEFigures.map((figure) => (
                 <AoEFigureOverlay
                   key={figure.id}
                   figure={figure.renderable}
@@ -4295,7 +4420,7 @@ export default function GrigliataBoard({
                 />
               ))}
 
-              {renderedTokens.map((token) => (
+              {visibleRenderedTokens.map((token) => (
                 <TokenNode
                   key={token.tokenId}
                   token={token}
@@ -4324,7 +4449,7 @@ export default function GrigliataBoard({
                 />
               ))}
 
-              {renderedSharedInteractions.map((sharedInteraction) => (
+              {visibleRenderedSharedInteractions.map((sharedInteraction) => (
                 sharedInteraction.kind === 'measure'
                   ? (
                     <MeasurementOverlay
@@ -4357,7 +4482,7 @@ export default function GrigliataBoard({
                   )
               ))}
 
-              {visibleLocalPings.map((ping) => (
+              {visibleLocalPingsForRender.map((ping) => (
                 <MapPingOverlay
                   key={ping.id}
                   ping={ping}
@@ -4368,17 +4493,17 @@ export default function GrigliataBoard({
                 />
               ))}
 
-              {measurementState && (
+              {visibleMeasurementState && (
                 <MeasurementOverlay
-                  measurement={measurementState}
+                  measurement={visibleMeasurementState}
                   drawTheme={resolvedDrawTheme}
                   overlayId="local"
                 />
               )}
 
-              {aoePreviewState && (
+              {visibleAoEPreviewState && (
                 <AoEFigureOverlay
-                  figure={aoePreviewState}
+                  figure={visibleAoEPreviewState}
                   drawTheme={resolvedDrawTheme}
                   overlayId="local"
                   boardBounds={boardBounds}
@@ -4389,20 +4514,20 @@ export default function GrigliataBoard({
           </Stage>
         )}
 
-        {selectedSingleTokenHudState && selectedTokenDetails && (
+        {visibleSelectedTokenHud && selectedTokenDetails && (
           <SelectedTokenResourceHud
             token={selectedTokenDetails}
-            hudState={selectedSingleTokenHudState}
+            hudState={visibleSelectedTokenHud}
           />
         )}
 
-        {activeOverflowToken && activeOverflowCardStyle && (
+        {visibleOverflowToken && activeOverflowCardStyle && (
           <div className="pointer-events-none absolute inset-0 z-[18]">
             <TokenStatusSummaryCard
-              statuses={activeOverflowToken.statuses}
+              statuses={visibleOverflowToken.statuses}
               className="pointer-events-auto absolute"
               style={activeOverflowCardStyle}
-              onMouseEnter={() => setHoveredOverflowTokenId(activeOverflowToken.tokenId)}
+              onMouseEnter={() => setHoveredOverflowTokenId(visibleOverflowToken.tokenId)}
               onMouseLeave={() => {
                 if (!pinnedOverflowTokenId) {
                   setHoveredOverflowTokenId('');
@@ -4412,7 +4537,7 @@ export default function GrigliataBoard({
           </div>
         )}
 
-          {turnOrderContextMenu && activeTurnOrderContextToken && (
+          {!isNarrationOverlayActive && turnOrderContextMenu && activeTurnOrderContextToken && (
             <div className="pointer-events-none absolute inset-0 z-[32]">
               <div
                 ref={turnOrderContextMenuRef}
@@ -4455,7 +4580,7 @@ export default function GrigliataBoard({
             </div>
           )}
 
-          {turnOrderJoinPrompt && activeTurnOrderJoinToken && (
+          {!isNarrationOverlayActive && turnOrderJoinPrompt && activeTurnOrderJoinToken && (
             <div className="pointer-events-auto absolute inset-0 z-[34] flex items-center justify-center">
               <button
                 type="button"
@@ -4552,8 +4677,8 @@ export default function GrigliataBoard({
             </div>
           )}
 
-          <GrigliataTokenActions
-            actionState={selectedTokenActionState}
+        <GrigliataTokenActions
+            actionState={visibleSelectedTokenActionState}
             viewportSize={stageSize}
           isTokenVisibilityActionPending={isTokenVisibilityActionPending}
           isTokenDeadActionPending={isTokenDeadActionPending}
@@ -4563,13 +4688,13 @@ export default function GrigliataBoard({
           onUpdateTokenStatuses={onUpdateTokenStatuses}
         />
 
-        {selectedAoEFigureActionState && (
+        {visibleSelectedAoEFigureActionState && (
           <div className="pointer-events-none absolute inset-0 z-20">
             <div
               className="pointer-events-auto absolute"
               style={{
-                left: selectedAoEFigureActionState.toolbarPosition.left,
-                top: selectedAoEFigureActionState.toolbarPosition.top,
+                left: visibleSelectedAoEFigureActionState.toolbarPosition.left,
+                top: visibleSelectedAoEFigureActionState.toolbarPosition.top,
               }}
             >
               <div className="rounded-[1.4rem] border border-rose-300/40 bg-slate-950/88 p-2 shadow-2xl backdrop-blur-sm">
@@ -4582,7 +4707,7 @@ export default function GrigliataBoard({
                     event.stopPropagation();
 
                     try {
-                      await Promise.resolve(onDeleteAoEFigures?.([selectedAoEFigureActionState.figureId]));
+                      await Promise.resolve(onDeleteAoEFigures?.([visibleSelectedAoEFigureActionState.figureId]));
                       setSelectedAoEFigureId('');
                     } catch {
                       // preserve selection if deletion fails
@@ -4590,8 +4715,8 @@ export default function GrigliataBoard({
                   }}
                   className="flex items-center justify-center rounded-[1.15rem] border border-rose-300/60 bg-rose-600/35 text-slate-50 shadow-lg transition-transform duration-150 hover:scale-[1.03]"
                   style={{
-                    width: selectedAoEFigureActionState.buttonSize,
-                    height: selectedAoEFigureActionState.buttonSize,
+                    width: visibleSelectedAoEFigureActionState.buttonSize,
+                    height: visibleSelectedAoEFigureActionState.buttonSize,
                   }}
                 >
                   <FiTrash2 className="h-[42%] w-[42%]" />
