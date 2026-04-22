@@ -180,6 +180,20 @@ const buildProps = (overrides = {}) => ({
   isGridVisibilityToggleDisabled: false,
   onDeactivateActiveBackground: null,
   isDeactivateActiveBackgroundDisabled: false,
+  isTurnOrderEnabled: true,
+  turnOrderEntries: [],
+  isTurnOrderStarted: false,
+  activeTurnTokenId: '',
+  onStartTurnOrder: jest.fn(),
+  onAdvanceTurnOrder: jest.fn(),
+  isTurnOrderProgressPending: false,
+  onResetTurnOrder: null,
+  isTurnOrderResetPending: false,
+  onJoinTurnOrder: jest.fn(),
+  onLeaveTurnOrder: jest.fn(),
+  turnOrderActionTokenId: '',
+  onSaveTurnOrderInitiative: jest.fn(),
+  savingTurnOrderInitiativeTokenId: '',
   onAdjustGridSize: null,
   isGridSizeAdjustmentDisabled: false,
   onMoveTokens: jest.fn(),
@@ -238,6 +252,7 @@ describe('GrigliataBoard', () => {
   let getBoundingClientRectSpy;
 
   beforeEach(() => {
+    window.localStorage.clear();
     class MockResizeObserver {
       constructor(callback) {
         this.callback = callback;
@@ -1033,12 +1048,15 @@ describe('GrigliataBoard', () => {
 
   test('renders the manager controls stack on the right in the expected order', () => {
     const onDeactivateActiveBackground = jest.fn();
+    const onStartTurnOrder = jest.fn();
     render(
       <GrigliataBoard
         {...buildProps({
           isManager: true,
           onToggleGridVisibility: jest.fn(),
           onDeactivateActiveBackground,
+          onStartTurnOrder,
+          onResetTurnOrder: jest.fn(),
           onAdjustGridSize: jest.fn(),
         })}
       />
@@ -1047,12 +1065,15 @@ describe('GrigliataBoard', () => {
     const managerControls = screen.getByTestId('grigliata-manager-controls');
     const buttons = within(managerControls).getAllByRole('button');
 
-    expect(buttons).toHaveLength(4);
+    expect(buttons).toHaveLength(6);
     expect(buttons[0]).toHaveAttribute('aria-label', 'Hide Grid');
     expect(buttons[0]).toHaveAttribute('aria-pressed', 'true');
     expect(buttons[1]).toHaveAttribute('aria-label', 'Deactivate active map');
     expect(buttons[2]).toHaveAttribute('title', 'Increase square size');
     expect(buttons[3]).toHaveAttribute('title', 'Decrease square size');
+    expect(buttons[4]).toHaveAttribute('aria-label', 'Reset turn order');
+    expect(buttons[5]).toHaveAttribute('aria-label', 'Start turn order');
+    expect(screen.getByTestId('turn-order-rail-toggle')).toHaveAttribute('aria-label', 'Collapse turn order');
 
     buttons.forEach((button) => {
       expect(button.className).toContain('rounded-2xl');
@@ -1062,14 +1083,23 @@ describe('GrigliataBoard', () => {
     expect(buttons[1].className).not.toContain('bg-gradient-to-br');
     expect(buttons[2].className).not.toContain('bg-gradient-to-br');
     expect(buttons[3].className).not.toContain('bg-gradient-to-br');
+    expect(buttons[4].className).not.toContain('bg-gradient-to-br');
+    expect(buttons[5].className).not.toContain('bg-gradient-to-br');
+    expect(screen.getByTestId('turn-order-rail-toggle').className).toContain('bg-gradient-to-br');
 
     fireEvent.click(buttons[1]);
     expect(onDeactivateActiveBackground).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(buttons[5]);
+    expect(onStartTurnOrder).not.toHaveBeenCalled();
   });
 
   test('updates the manager grid control labels and disabled states', () => {
     const onToggleGridVisibility = jest.fn();
     const onDeactivateActiveBackground = jest.fn();
+    const onStartTurnOrder = jest.fn();
+    const onAdvanceTurnOrder = jest.fn();
+    const onResetTurnOrder = jest.fn();
     const onAdjustGridSize = jest.fn();
     const { rerender } = render(
       <GrigliataBoard
@@ -1078,6 +1108,9 @@ describe('GrigliataBoard', () => {
           isGridVisible: true,
           onToggleGridVisibility,
           onDeactivateActiveBackground,
+          onStartTurnOrder,
+          onAdvanceTurnOrder,
+          onResetTurnOrder,
           onAdjustGridSize,
         })}
       />
@@ -1094,16 +1127,38 @@ describe('GrigliataBoard', () => {
     expect(onAdjustGridSize).toHaveBeenNthCalledWith(1, 1);
     expect(onAdjustGridSize).toHaveBeenNthCalledWith(2, -1);
 
+    fireEvent.click(screen.getByRole('button', { name: /reset turn order/i }));
+    expect(onResetTurnOrder).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /start turn order/i }));
+    expect(onStartTurnOrder).not.toHaveBeenCalled();
+
     rerender(
       <GrigliataBoard
         {...buildProps({
           isManager: true,
           isGridVisible: false,
+          isTurnOrderStarted: true,
+          turnOrderEntries: [{
+            tokenId: 'user-1',
+            ownerUid: 'current-user',
+            label: 'Ilya',
+            imageUrl: '',
+            tokenType: 'character',
+            initiative: 12,
+            joinedAt: null,
+            joinedAtMs: 10,
+          }],
           isGridVisibilityToggleDisabled: true,
           isDeactivateActiveBackgroundDisabled: true,
+          isTurnOrderProgressPending: true,
+          isTurnOrderResetPending: true,
           isGridSizeAdjustmentDisabled: true,
           onToggleGridVisibility,
           onDeactivateActiveBackground,
+          onStartTurnOrder,
+          onAdvanceTurnOrder,
+          onResetTurnOrder,
           onAdjustGridSize,
         })}
       />
@@ -1115,6 +1170,376 @@ describe('GrigliataBoard', () => {
     expect(screen.getByRole('button', { name: /deactivate active map/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /increase square size/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /decrease square size/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /reset turn order/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /advance turn order/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /advance turn order/i }).className).toContain('bg-gradient-to-br');
+    expect(screen.getByTestId('turn-order-rail-toggle')).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  test('shows the shared turn order panel by default and updates entries as data changes', () => {
+    const turnOrderEntries = [{
+      tokenId: 'user-1',
+      ownerUid: 'current-user',
+      label: 'Ilya',
+      imageUrl: '',
+      tokenType: 'character',
+      initiative: 12,
+      joinedAt: null,
+      joinedAtMs: 10,
+    }];
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          turnOrderEntries: [],
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('turn-order-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('turn-order-empty-state')).toHaveTextContent('No tokens have joined the turn order yet.');
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          turnOrderEntries,
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('turn-order-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('turn-order-entry-user-1')).toHaveTextContent('Ilya');
+  });
+
+  test('persists the turn order panel collapsed state across remounts', () => {
+    const storageKey = 'grigliata.turnOrderCollapsed.current-user';
+    const turnOrderEntries = [{
+      tokenId: 'user-1',
+      ownerUid: 'current-user',
+      label: 'Ilya',
+      imageUrl: '',
+      tokenType: 'character',
+      initiative: 12,
+      joinedAt: null,
+      joinedAtMs: 10,
+    }];
+    const { unmount } = render(
+      <GrigliataBoard
+        {...buildProps({
+          turnOrderEntries,
+        })}
+      />
+    );
+
+    const toggle = screen.getByTestId('turn-order-rail-toggle');
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(window.localStorage.getItem(storageKey)).toBe('true');
+
+    unmount();
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          turnOrderEntries,
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('turn-order-rail-toggle')).toHaveAttribute('aria-expanded', 'false');
+    expect(window.localStorage.getItem(storageKey)).toBe('true');
+  });
+
+  test('opens a token turn-order context menu on right click for placed tokens', async () => {
+    const onJoinTurnOrder = jest.fn(() => Promise.resolve());
+    const onLeaveTurnOrder = jest.fn(() => Promise.resolve());
+    const token = {
+      id: 'user-1',
+      tokenId: 'user-1',
+      ownerUid: 'current-user',
+      label: 'Ilya',
+      tokenType: 'character',
+      imageUrl: '',
+      placed: true,
+      col: 1,
+      row: 1,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+      isInTurnOrder: false,
+    };
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          tokens: [token],
+          onJoinTurnOrder,
+          onLeaveTurnOrder,
+        })}
+      />
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('token-node-user-1'), {
+      clientX: 160,
+      clientY: 160,
+      button: 2,
+    });
+
+      expect(screen.getByTestId('turn-order-context-menu')).toBeInTheDocument();
+      expect(screen.getByTestId('turn-order-context-action-user-1')).toHaveTextContent('Add turn order');
+
+      fireEvent.click(screen.getByTestId('turn-order-context-action-user-1'));
+      expect(onJoinTurnOrder).not.toHaveBeenCalled();
+      expect(screen.getByTestId('turn-order-join-overlay')).toBeInTheDocument();
+      expect(screen.getByTestId('turn-order-join-initiative-input')).toHaveValue('0');
+
+      fireEvent.change(screen.getByTestId('turn-order-join-initiative-input'), {
+        target: { value: '14' },
+      });
+      fireEvent.click(screen.getByTestId('turn-order-join-confirm'));
+
+      await waitFor(() => {
+        expect(onJoinTurnOrder).toHaveBeenCalledWith('user-1', 14);
+      });
+
+      rerender(
+        <GrigliataBoard
+        {...buildProps({
+          tokens: [{ ...token, isInTurnOrder: true }],
+          onJoinTurnOrder,
+          onLeaveTurnOrder,
+        })}
+      />
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('token-node-user-1'), {
+      clientX: 160,
+      clientY: 160,
+      button: 2,
+    });
+
+    expect(screen.getByTestId('turn-order-context-action-user-1')).toHaveTextContent('Remove from turn order');
+  });
+
+  test('renders sorted turn order rows and respects edit permissions', () => {
+    const turnOrderEntries = [{
+      tokenId: 'other-user',
+      ownerUid: 'other-user',
+      label: 'Boros',
+      imageUrl: '',
+      tokenType: 'foe',
+      initiative: 8,
+      joinedAt: null,
+      joinedAtMs: 20,
+    }, {
+      tokenId: 'current-user',
+      ownerUid: 'current-user',
+      label: 'Alya',
+      imageUrl: '',
+      tokenType: 'character',
+      initiative: 15,
+      joinedAt: null,
+      joinedAtMs: 50,
+    }, {
+      tokenId: 'tie-break-a',
+      ownerUid: 'tie-break-a',
+      label: 'Ciro',
+      imageUrl: '',
+      tokenType: 'character',
+      initiative: 15,
+      joinedAt: null,
+      joinedAtMs: 10,
+    }];
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          turnOrderEntries,
+        })}
+      />
+    );
+
+    const rows = [
+      screen.getByTestId('turn-order-entry-tie-break-a'),
+      screen.getByTestId('turn-order-entry-current-user'),
+      screen.getByTestId('turn-order-entry-other-user'),
+    ];
+
+    expect(rows[0].compareDocumentPosition(rows[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(rows[1].compareDocumentPosition(rows[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId('turn-order-initiative-input-current-user')).toBeInTheDocument();
+    expect(screen.getByTestId('turn-order-initiative-input-other-user')).toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'current-user',
+          isManager: false,
+          turnOrderEntries,
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('turn-order-initiative-input-current-user')).toBeInTheDocument();
+    expect(screen.queryByTestId('turn-order-initiative-input-other-user')).not.toBeInTheDocument();
+    expect(screen.getByTestId('turn-order-initiative-value-other-user')).toHaveTextContent('8');
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'spectator',
+          isManager: false,
+          turnOrderEntries,
+        })}
+      />
+    );
+
+    expect(screen.queryByTestId('turn-order-initiative-input-current-user')).not.toBeInTheDocument();
+    expect(screen.getByTestId('turn-order-initiative-value-current-user')).toHaveTextContent('15');
+    expect(screen.getByTestId('turn-order-initiative-value-other-user')).toHaveTextContent('8');
+  });
+
+  test('highlights the active turn row and matching battlemap token', () => {
+    const turnOrderEntries = [{
+      tokenId: 'user-1',
+      ownerUid: 'user-1',
+      label: 'Ilya',
+      imageUrl: '',
+      tokenType: 'character',
+      initiative: 14,
+      joinedAt: null,
+      joinedAtMs: 10,
+    }, {
+      tokenId: 'user-2',
+      ownerUid: 'user-2',
+      label: 'Boros',
+      imageUrl: '',
+      tokenType: 'character',
+      initiative: 7,
+      joinedAt: null,
+      joinedAtMs: 20,
+    }];
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          activeTurnTokenId: 'user-2',
+          isTurnOrderStarted: true,
+          turnOrderEntries,
+          tokens: [{
+            id: 'user-1',
+            tokenId: 'user-1',
+            ownerUid: 'user-1',
+            label: 'Ilya',
+            imageUrl: '',
+            placed: true,
+            col: 1,
+            row: 1,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }, {
+            id: 'user-2',
+            tokenId: 'user-2',
+            ownerUid: 'user-2',
+            label: 'Boros',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('turn-order-entry-user-2')).toHaveAttribute('data-active-turn', 'true');
+    expect(screen.getByTestId('turn-order-entry-user-1')).toHaveAttribute('data-active-turn', 'false');
+    expect(screen.getByTestId('token-node-user-2')).toHaveAttribute('data-active-turn', 'true');
+    expect(screen.getByTestId('token-node-user-1')).toHaveAttribute('data-active-turn', 'false');
+  });
+
+  test('saves initiative on submit and discards unsaved edits on Escape without showing a save button', async () => {
+    const onSaveTurnOrderInitiative = jest.fn(() => Promise.resolve());
+    const turnOrderEntries = [{
+      tokenId: 'current-user',
+      ownerUid: 'current-user',
+      label: 'Alya',
+      imageUrl: '',
+      tokenType: 'character',
+      initiative: 15,
+      joinedAt: null,
+      joinedAtMs: 50,
+    }];
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'current-user',
+          turnOrderEntries,
+          onSaveTurnOrderInitiative,
+        })}
+      />
+    );
+
+    const input = screen.getByTestId('turn-order-initiative-input-current-user');
+    expect(input).toHaveValue('15');
+
+    fireEvent.change(input, { target: { value: '22' } });
+    expect(screen.queryByTestId('turn-order-initiative-save-current-user')).not.toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
+    expect(onSaveTurnOrderInitiative).not.toHaveBeenCalled();
+    expect(screen.getByTestId('turn-order-initiative-input-current-user')).toHaveValue('15');
+
+    fireEvent.change(screen.getByTestId('turn-order-initiative-input-current-user'), { target: { value: '22' } });
+    fireEvent.submit(screen.getByTestId('turn-order-initiative-input-current-user').closest('form'));
+
+    await waitFor(() => {
+      expect(onSaveTurnOrderInitiative).toHaveBeenCalledWith('current-user', 22);
+    });
+
+    expect(screen.getByTestId('turn-order-initiative-input-current-user')).toHaveValue('22');
+  });
+
+  test('keeps the initiative editor dirty when the save callback reports failure', async () => {
+    const onSaveTurnOrderInitiative = jest.fn(() => Promise.resolve(false));
+    const turnOrderEntries = [{
+      tokenId: 'current-user',
+      ownerUid: 'current-user',
+      label: 'Alya',
+      imageUrl: '',
+      tokenType: 'character',
+      initiative: 15,
+      joinedAt: null,
+      joinedAtMs: 50,
+    }];
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'current-user',
+          turnOrderEntries,
+          onSaveTurnOrderInitiative,
+        })}
+      />
+    );
+
+    const input = screen.getByTestId('turn-order-initiative-input-current-user');
+    fireEvent.change(input, { target: { value: '22' } });
+    fireEvent.submit(input.closest('form'));
+
+    await waitFor(() => {
+      expect(onSaveTurnOrderInitiative).toHaveBeenCalledWith('current-user', 22);
+    });
+
+    expect(screen.getByTestId('turn-order-initiative-input-current-user')).toHaveValue('22');
+
+    fireEvent.keyDown(screen.getByTestId('turn-order-initiative-input-current-user'), { key: 'Escape', code: 'Escape' });
+    expect(screen.getByTestId('turn-order-initiative-input-current-user')).toHaveValue('15');
   });
 
   test('renders a remote shared ruler with the broadcaster color', () => {

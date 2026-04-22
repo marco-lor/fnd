@@ -240,10 +240,15 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="grigliata-board">
         <div data-testid="board-sharing-state">{String(props.isInteractionSharingEnabled)}</div>
         <div data-testid="board-shared-count">{String(props.sharedInteractions?.length || 0)}</div>
-        <div data-testid="board-aoe-count">{String(props.aoeFigures?.length || 0)}</div>
-        <div data-testid="board-token-count">{String(props.tokens?.length || 0)}</div>
-        <div data-testid="board-aoe-tool">{props.activeAoeFigureType || ''}</div>
-        <div data-testid="board-draw-color">{props.drawTheme?.key || ''}</div>
+      <div data-testid="board-aoe-count">{String(props.aoeFigures?.length || 0)}</div>
+      <div data-testid="board-token-count">{String(props.tokens?.length || 0)}</div>
+      <div data-testid="board-turn-order-enabled">{String(props.isTurnOrderEnabled)}</div>
+      <div data-testid="board-turn-order-started">{String(props.isTurnOrderStarted)}</div>
+      <div data-testid="board-turn-order-count">{String(props.turnOrderEntries?.length || 0)}</div>
+      <div data-testid="board-active-turn-token">{props.activeTurnTokenId || ''}</div>
+      <div data-testid="board-turn-order-order">{(props.turnOrderEntries || []).map((entry) => entry.tokenId).join(',')}</div>
+      <div data-testid="board-aoe-tool">{props.activeAoeFigureType || ''}</div>
+      <div data-testid="board-draw-color">{props.drawTheme?.key || ''}</div>
         <button type="button" onClick={() => props.onSelectMouseTool?.()}>
           select mouse tool
         </button>
@@ -256,6 +261,27 @@ jest.mock('./GrigliataBoard', () => {
           onClick={() => props.onDeactivateActiveBackground?.()}
         >
           deactivate active background
+        </button>
+        <button
+          type="button"
+          disabled={props.isTurnOrderResetPending}
+          onClick={() => props.onResetTurnOrder?.()}
+        >
+          reset turn order
+        </button>
+        <button
+          type="button"
+          disabled={props.isTurnOrderProgressPending}
+          onClick={() => props.onStartTurnOrder?.()}
+        >
+          start turn order
+        </button>
+        <button
+          type="button"
+          disabled={props.isTurnOrderProgressPending}
+          onClick={() => props.onAdvanceTurnOrder?.()}
+        >
+          advance turn order
         </button>
         <button
           type="button"
@@ -406,6 +432,21 @@ jest.mock('./GrigliataBoard', () => {
         <button type="button" onClick={() => props.onUpdateTokenStatuses?.('user-1', ['burning', 'marked'])}>
           update selected token statuses
         </button>
+        <button type="button" onClick={() => props.onJoinTurnOrder?.('user-1', 13)}>
+          join self turn order
+        </button>
+        <button type="button" onClick={() => props.onJoinTurnOrder?.('user-2', 11)}>
+          join other turn order
+        </button>
+        <button type="button" onClick={() => props.onLeaveTurnOrder?.('user-2')}>
+          leave other turn order
+        </button>
+        <button type="button" onClick={() => props.onSaveTurnOrderInitiative?.('user-1', 17)}>
+          save self turn order initiative
+        </button>
+        <button type="button" onClick={() => props.onSaveTurnOrderInitiative?.('user-2', 18)}>
+          save other turn order initiative
+        </button>
         <button
           type="button"
           onClick={() => props.onDropCurrentToken?.({ tokenId: 'user-1', ownerUid: 'user-1' }, { x: 140, y: 140 })}
@@ -488,6 +529,8 @@ jest.mock('./GrigliataBoard', () => {
   };
 });
 
+const BackgroundGalleryPanelMock = jest.requireMock('./BackgroundGalleryPanel');
+
 describe('GrigliataPage', () => {
   let firestore;
 
@@ -508,12 +551,14 @@ describe('GrigliataPage', () => {
           name: 'Sunken Ruins',
           grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
           isGridVisible: true,
+          isTurnOrderEnabled: false,
         },
         {
           id: 'map-2',
           name: 'Iron Keep',
           grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
           isGridVisible: true,
+          isTurnOrderEnabled: false,
         },
       ],
       grigliata_tokens: [],
@@ -642,6 +687,9 @@ describe('GrigliataPage', () => {
 
   const getLastCommittedBatch = () => (
     [...mockBatchInstances].reverse().find((batch) => batch.commit.mock.calls.length > 0)
+  );
+  const getCommittedBatches = () => (
+    [...mockBatchInstances].filter((batch) => batch.commit.mock.calls.length > 0)
   );
 
   test('preloads the active battlemap, visible board tokens, and the tray portrait for players', async () => {
@@ -2189,6 +2237,90 @@ describe('GrigliataPage', () => {
     );
   });
 
+  test('clears the gallery map turn-order cursor before deleting that map\'s token placements', async () => {
+    setManagerAuth();
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+        turnOrderActive: {
+          tokenId: 'user-1',
+          initiative: 12,
+          joinedAt: { seconds: 123 },
+          label: 'Ilya',
+          startedAt: { seconds: 999 },
+        },
+      }, {
+        id: 'map-2',
+        name: 'Iron Keep',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+      }]);
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__user-1',
+        backgroundId: 'map-1',
+        tokenId: 'user-1',
+        ownerUid: 'user-1',
+        label: 'Ilya',
+        imageUrl: '',
+        col: 1,
+        row: 1,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 12,
+        turnOrderJoinedAt: { seconds: 123 },
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+    });
+
+    firestore.updateDoc.mockClear();
+    mockBatchInstances.splice(0, mockBatchInstances.length);
+
+    const latestBackgroundGalleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+
+    await act(async () => {
+      await latestBackgroundGalleryProps.onClearTokensForBackground({
+        id: 'map-1',
+        name: 'Sunken Ruins',
+      });
+    });
+
+    await waitFor(() => {
+      expect(firestore.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+        expect.objectContaining({
+          turnOrderActive: { __type: 'deleteField' },
+          updatedAt: { __type: 'serverTimestamp' },
+          updatedBy: 'user-1',
+        })
+      );
+    });
+
+    const deletionBatch = mockBatchInstances.find((batch) => batch.delete.mock.calls.some(
+      ([ref]) => ref?.path === 'grigliata_token_placements/map-1__user-1'
+    ));
+
+    expect(deletionBatch).toBeTruthy();
+    expect(deletionBatch.delete).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-1' })
+    );
+
+    confirmSpy.mockRestore();
+  });
+
   test('shows the music tab only for managers', () => {
     const { rerender } = render(<GrigliataPage />);
 
@@ -2783,6 +2915,1382 @@ describe('GrigliataPage', () => {
 
     expect(firestore.updateDoc).not.toHaveBeenCalled();
     expect(firestore.deleteDoc).not.toHaveBeenCalled();
+  });
+
+  test('always exposes turn order to the board', async () => {
+    setManagerAuth();
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-turn-order-enabled')).toHaveTextContent('true');
+    });
+  });
+
+  test('starts turn order on the first sorted entry', async () => {
+    setManagerAuth();
+    act(() => {
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__user-1',
+        backgroundId: 'map-1',
+        tokenId: 'user-1',
+        ownerUid: 'user-1',
+        label: 'Ilya',
+        col: 1,
+        row: 2,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 12,
+        turnOrderJoinedAt: { seconds: 124 },
+      }, {
+        id: 'map-1__user-2',
+        backgroundId: 'map-1',
+        tokenId: 'user-2',
+        ownerUid: 'user-2',
+        label: 'Boros',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 18,
+        turnOrderJoinedAt: { seconds: 123 },
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-turn-order-count')).toHaveTextContent('2');
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /start turn order/i }));
+    });
+
+    await waitFor(() => {
+      const committedBatch = getLastCommittedBatch();
+      expect(committedBatch).toBeDefined();
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+        expect.objectContaining({
+          turnOrderActive: expect.objectContaining({
+            tokenId: 'user-2',
+            initiative: 18,
+            joinedAt: { seconds: 123 },
+            label: 'Boros',
+            startedAt: { __type: 'serverTimestamp' },
+          }),
+          updatedAt: { __type: 'serverTimestamp' },
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+        expect.objectContaining({
+          turnCounter: 1,
+          isInTurnOrder: true,
+          turnOrderInitiative: 18,
+          turnOrderJoinedAt: { seconds: 123 },
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
+  });
+
+  test('advances turn order to the next entry and wraps at the end', async () => {
+    setManagerAuth();
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+        turnOrderActive: {
+          tokenId: 'user-2',
+          initiative: 15,
+          joinedAt: { seconds: 124 },
+          label: 'Boros',
+          startedAt: { seconds: 999 },
+        },
+      }, {
+        id: 'map-2',
+        name: 'Iron Keep',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+      }]);
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__user-1',
+        backgroundId: 'map-1',
+        tokenId: 'user-1',
+        ownerUid: 'user-1',
+        label: 'Ilya',
+        col: 1,
+        row: 2,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 18,
+        turnOrderJoinedAt: { seconds: 123 },
+      }, {
+        id: 'map-1__user-2',
+        backgroundId: 'map-1',
+        tokenId: 'user-2',
+        ownerUid: 'user-2',
+        label: 'Boros',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 15,
+        turnOrderJoinedAt: { seconds: 124 },
+      }, {
+        id: 'map-1__user-3',
+        backgroundId: 'map-1',
+        tokenId: 'user-3',
+        ownerUid: 'user-3',
+        label: 'Ciro',
+        col: 4,
+        row: 5,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 10,
+        turnOrderJoinedAt: { seconds: 125 },
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-turn-order-started')).toHaveTextContent('true');
+      expect(screen.getByTestId('board-active-turn-token')).toHaveTextContent('user-2');
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /advance turn order/i }));
+    });
+
+    await waitFor(() => {
+      const committedBatch = getLastCommittedBatch();
+      expect(committedBatch).toBeDefined();
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+        expect.objectContaining({
+          turnOrderActive: expect.objectContaining({
+            tokenId: 'user-3',
+            initiative: 10,
+            joinedAt: { seconds: 125 },
+            label: 'Ciro',
+            startedAt: { seconds: 999 },
+          }),
+          updatedAt: { __type: 'serverTimestamp' },
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-3' }),
+        expect.objectContaining({
+          turnCounter: 1,
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
+
+    mockBatchInstances.splice(0, mockBatchInstances.length);
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+        turnOrderActive: {
+          tokenId: 'user-3',
+          initiative: 10,
+          joinedAt: { seconds: 125 },
+          label: 'Ciro',
+          startedAt: { seconds: 999 },
+        },
+      }, {
+        id: 'map-2',
+        name: 'Iron Keep',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+      }]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-active-turn-token')).toHaveTextContent('user-3');
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /advance turn order/i }));
+    });
+
+    await waitFor(() => {
+      const committedBatch = getLastCommittedBatch();
+      expect(committedBatch).toBeDefined();
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+        expect.objectContaining({
+          turnOrderActive: expect.objectContaining({
+            tokenId: 'user-1',
+            initiative: 18,
+            joinedAt: { seconds: 123 },
+            label: 'Ilya',
+            startedAt: { seconds: 999 },
+          }),
+          updatedAt: { __type: 'serverTimestamp' },
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-1' }),
+        expect.objectContaining({
+          turnCounter: 1,
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
+  });
+
+  test('keeps the current active token when a higher initiative token joins mid-combat and only reaches it after wrap', async () => {
+    setManagerAuth();
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+        turnOrderActive: {
+          tokenId: 'user-1',
+          initiative: 10,
+          joinedAt: { seconds: 124 },
+          label: 'Ilya',
+          startedAt: { seconds: 999 },
+        },
+      }, {
+        id: 'map-2',
+        name: 'Iron Keep',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+      }]);
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__user-1',
+        backgroundId: 'map-1',
+        tokenId: 'user-1',
+        ownerUid: 'user-1',
+        label: 'Ilya',
+        col: 1,
+        row: 2,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 10,
+        turnOrderJoinedAt: { seconds: 124 },
+      }, {
+        id: 'map-1__user-2',
+        backgroundId: 'map-1',
+        tokenId: 'user-2',
+        ownerUid: 'user-2',
+        label: 'Boros',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 8,
+        turnOrderJoinedAt: { seconds: 125 },
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-turn-order-order')).toHaveTextContent('user-1,user-2');
+      expect(screen.getByTestId('board-active-turn-token')).toHaveTextContent('user-1');
+    });
+
+    act(() => {
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__user-1',
+        backgroundId: 'map-1',
+        tokenId: 'user-1',
+        ownerUid: 'user-1',
+        label: 'Ilya',
+        col: 1,
+        row: 2,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 10,
+        turnOrderJoinedAt: { seconds: 124 },
+      }, {
+        id: 'map-1__user-2',
+        backgroundId: 'map-1',
+        tokenId: 'user-2',
+        ownerUid: 'user-2',
+        label: 'Boros',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 8,
+        turnOrderJoinedAt: { seconds: 125 },
+      }, {
+        id: 'map-1__user-3',
+        backgroundId: 'map-1',
+        tokenId: 'user-3',
+        ownerUid: 'user-3',
+        label: 'Ciro',
+        col: 4,
+        row: 5,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 12,
+        turnOrderJoinedAt: { seconds: 123 },
+      }]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-turn-order-order')).toHaveTextContent('user-3,user-1,user-2');
+      expect(screen.getByTestId('board-active-turn-token')).toHaveTextContent('user-1');
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /advance turn order/i }));
+    });
+
+    await waitFor(() => {
+      const committedBatch = getLastCommittedBatch();
+      expect(committedBatch).toBeDefined();
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+        expect.objectContaining({
+          turnOrderActive: expect.objectContaining({
+            tokenId: 'user-2',
+            initiative: 8,
+            joinedAt: { seconds: 125 },
+            label: 'Boros',
+            startedAt: { seconds: 999 },
+          }),
+          updatedAt: { __type: 'serverTimestamp' },
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+        expect.objectContaining({
+          turnCounter: 1,
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
+
+    mockBatchInstances.splice(0, mockBatchInstances.length);
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+        turnOrderActive: {
+          tokenId: 'user-2',
+          initiative: 8,
+          joinedAt: { seconds: 125 },
+          label: 'Boros',
+          startedAt: { seconds: 999 },
+        },
+      }, {
+        id: 'map-2',
+        name: 'Iron Keep',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+      }]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-active-turn-token')).toHaveTextContent('user-2');
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /advance turn order/i }));
+    });
+
+    await waitFor(() => {
+      const committedBatch = getLastCommittedBatch();
+      expect(committedBatch).toBeDefined();
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+        expect.objectContaining({
+          turnOrderActive: expect.objectContaining({
+            tokenId: 'user-3',
+            initiative: 12,
+            joinedAt: { seconds: 123 },
+            label: 'Ciro',
+            startedAt: { seconds: 999 },
+          }),
+          updatedAt: { __type: 'serverTimestamp' },
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-3' }),
+        expect.objectContaining({
+          turnCounter: 1,
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
+  });
+
+  test('hydrates a character shield effect on turn start without consuming it immediately', async () => {
+    setManagerAuth();
+    act(() => {
+      setDocData('users/user-2', {
+        stats: {
+          hpTotal: 12,
+          hpCurrent: 12,
+          manaTotal: 5,
+          manaCurrent: 5,
+          barrieraTotal: 6,
+          barrieraCurrent: 6,
+        },
+        active_turn_effect: {
+          barriera: {
+            totalTurns: 3,
+            remainingTurns: 3,
+          },
+        },
+      });
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__user-2',
+        backgroundId: 'map-1',
+        tokenId: 'user-2',
+        ownerUid: 'user-2',
+        label: 'Boros',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 18,
+        turnOrderJoinedAt: { seconds: 123 },
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-turn-order-count')).toHaveTextContent('1');
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /start turn order/i }));
+    });
+
+    await waitFor(() => {
+      const committedBatch = getLastCommittedBatch();
+      expect(committedBatch).toBeDefined();
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+        expect.objectContaining({
+          turnCounter: 1,
+          turnEffects: expect.arrayContaining([
+            expect.objectContaining({
+              id: 'shield',
+              kind: 'shield',
+              totalTurns: 3,
+              remainingTurns: 3,
+              appliesFromTurnCounter: 1,
+            }),
+          ]),
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'users/user-2' }),
+        expect.objectContaining({
+          active_turn_effect: {
+            barriera: {
+              totalTurns: 3,
+              remainingTurns: 3,
+            },
+          },
+        }),
+        { merge: true }
+      );
+    });
+  });
+
+  test('ticks only the newly active token and expires character shield on later own turns', async () => {
+    setManagerAuth();
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+        turnOrderActive: {
+          tokenId: 'user-2',
+          initiative: 10,
+          joinedAt: { seconds: 123 },
+          label: 'Boros',
+          startedAt: { seconds: 999 },
+        },
+      }, {
+        id: 'map-2',
+        name: 'Iron Keep',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+      }]);
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__user-2',
+        backgroundId: 'map-1',
+        tokenId: 'user-2',
+        ownerUid: 'user-2',
+        label: 'Boros',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 10,
+        turnOrderJoinedAt: { seconds: 123 },
+        turnCounter: 1,
+        turnEffects: [{
+          id: 'shield',
+          kind: 'shield',
+          totalTurns: 2,
+          remainingTurns: 2,
+          appliesFromTurnCounter: 1,
+        }],
+      }, {
+        id: 'map-1__user-3',
+        backgroundId: 'map-1',
+        tokenId: 'user-3',
+        ownerUid: 'user-3',
+        label: 'Ciro',
+        col: 4,
+        row: 5,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 8,
+        turnOrderJoinedAt: { seconds: 124 },
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-active-turn-token')).toHaveTextContent('user-2');
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /advance turn order/i }));
+    });
+
+    await waitFor(() => {
+      const committedBatch = getLastCommittedBatch();
+      expect(committedBatch).toBeDefined();
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-3' }),
+        expect.objectContaining({
+          turnCounter: 1,
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+      expect(committedBatch.set).not.toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+        expect.anything(),
+        expect.anything()
+      );
+    });
+
+    mockBatchInstances.splice(0, mockBatchInstances.length);
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+        turnOrderActive: {
+          tokenId: 'user-3',
+          initiative: 8,
+          joinedAt: { seconds: 124 },
+          label: 'Ciro',
+          startedAt: { seconds: 999 },
+        },
+      }, {
+        id: 'map-2',
+        name: 'Iron Keep',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+      }]);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /advance turn order/i }));
+    });
+
+    await waitFor(() => {
+      const committedBatch = getLastCommittedBatch();
+      expect(committedBatch).toBeDefined();
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+        expect.objectContaining({
+          turnCounter: 2,
+          turnEffects: expect.arrayContaining([
+            expect.objectContaining({
+              id: 'shield',
+              remainingTurns: 1,
+              appliesFromTurnCounter: 1,
+            }),
+          ]),
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'users/user-2' }),
+        expect.objectContaining({
+          active_turn_effect: {
+            barriera: {
+              totalTurns: 2,
+              remainingTurns: 1,
+            },
+          },
+        }),
+        { merge: true }
+      );
+    });
+
+    mockBatchInstances.splice(0, mockBatchInstances.length);
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+        turnOrderActive: {
+          tokenId: 'user-2',
+          initiative: 10,
+          joinedAt: { seconds: 123 },
+          label: 'Boros',
+          startedAt: { seconds: 999 },
+        },
+      }, {
+        id: 'map-2',
+        name: 'Iron Keep',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+      }]);
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__user-2',
+        backgroundId: 'map-1',
+        tokenId: 'user-2',
+        ownerUid: 'user-2',
+        label: 'Boros',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 10,
+        turnOrderJoinedAt: { seconds: 123 },
+        turnCounter: 2,
+        turnEffects: [{
+          id: 'shield',
+          kind: 'shield',
+          totalTurns: 2,
+          remainingTurns: 1,
+          appliesFromTurnCounter: 1,
+        }],
+      }, {
+        id: 'map-1__user-3',
+        backgroundId: 'map-1',
+        tokenId: 'user-3',
+        ownerUid: 'user-3',
+        label: 'Ciro',
+        col: 4,
+        row: 5,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 8,
+        turnOrderJoinedAt: { seconds: 124 },
+        turnCounter: 1,
+      }]);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /advance turn order/i }));
+    });
+
+    await waitFor(() => {
+      const committedBatch = getLastCommittedBatch();
+      expect(committedBatch).toBeDefined();
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-3' }),
+        expect.objectContaining({
+          turnCounter: 2,
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
+
+    mockBatchInstances.splice(0, mockBatchInstances.length);
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+        turnOrderActive: {
+          tokenId: 'user-3',
+          initiative: 8,
+          joinedAt: { seconds: 124 },
+          label: 'Ciro',
+          startedAt: { seconds: 999 },
+        },
+      }, {
+        id: 'map-2',
+        name: 'Iron Keep',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+      }]);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /advance turn order/i }));
+    });
+
+    await waitFor(() => {
+      const committedBatch = getLastCommittedBatch();
+      expect(committedBatch).toBeDefined();
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+        expect.objectContaining({
+          turnCounter: 3,
+          turnEffects: { __type: 'deleteField' },
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'users/user-2' }),
+        expect.objectContaining({
+          stats: {
+            barrieraCurrent: 0,
+            barrieraTotal: 0,
+          },
+          active_turn_effect: {
+            barriera: {
+              totalTurns: 0,
+              remainingTurns: 0,
+            },
+          },
+        }),
+        { merge: true }
+      );
+    });
+  });
+
+  test('joins and leaves turn order by updating placement fields', async () => {
+    setManagerAuth();
+    act(() => {
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__user-2',
+        backgroundId: 'map-1',
+        tokenId: 'user-2',
+        ownerUid: 'user-2',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-token-count')).toHaveTextContent('1');
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /join other turn order/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+        expect.objectContaining({
+          backgroundId: 'map-1',
+          tokenId: 'user-2',
+          ownerUid: 'user-2',
+          isInTurnOrder: true,
+          turnOrderInitiative: 11,
+          turnOrderJoinedAt: { __type: 'serverTimestamp' },
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
+
+    firestore.setDoc.mockClear();
+    act(() => {
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__user-2',
+        backgroundId: 'map-1',
+        tokenId: 'user-2',
+        ownerUid: 'user-2',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 11,
+        turnOrderJoinedAt: { seconds: 123 },
+        turnCounter: 2,
+        turnEffects: [{
+          id: 'shield',
+          kind: 'shield',
+          totalTurns: 3,
+          remainingTurns: 2,
+          appliesFromTurnCounter: 1,
+        }],
+      }]);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /leave other turn order/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+        expect.objectContaining({
+          isInTurnOrder: { __type: 'deleteField' },
+          turnOrderInitiative: { __type: 'deleteField' },
+          turnOrderJoinedAt: { __type: 'deleteField' },
+          turnCounter: { __type: 'deleteField' },
+          turnEffects: { __type: 'deleteField' },
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
+  });
+
+  test('lets a player save initiative only for their own turn-order token', async () => {
+    act(() => {
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__user-1',
+        backgroundId: 'map-1',
+        tokenId: 'user-1',
+        ownerUid: 'user-1',
+        col: 1,
+        row: 2,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 0,
+        turnOrderJoinedAt: { seconds: 123 },
+        turnCounter: 2,
+        turnEffects: [{
+          id: 'shield',
+          kind: 'shield',
+          totalTurns: 3,
+          remainingTurns: 2,
+          appliesFromTurnCounter: 1,
+        }],
+      }, {
+        id: 'map-1__user-2',
+        backgroundId: 'map-1',
+        tokenId: 'user-2',
+        ownerUid: 'user-2',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 5,
+        turnOrderJoinedAt: { seconds: 124 },
+        turnCounter: 1,
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-turn-order-count')).toHaveTextContent('2');
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save self turn order initiative/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-1' }),
+        expect.objectContaining({
+          isInTurnOrder: true,
+          turnOrderInitiative: 17,
+          turnOrderJoinedAt: { seconds: 123 },
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
+
+    firestore.setDoc.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save other turn order initiative/i }));
+    });
+
+    expect(firestore.setDoc).not.toHaveBeenCalled();
+  });
+
+  test('lets the DM save initiative for any turn-order token and reset the active map turn order', async () => {
+    setManagerAuth();
+    act(() => {
+      setDocData('grigliata_tokens/token-1', {
+        ownerUid: 'user-2',
+        tokenType: 'custom',
+        customTokenRole: 'instance',
+        label: 'Wolf',
+        stats: {
+          shieldCurrent: 5,
+          shieldTotal: 5,
+        },
+      });
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+        turnOrderActive: {
+          tokenId: 'user-1',
+          initiative: 0,
+          joinedAt: { seconds: 123 },
+          label: 'Ilya',
+          startedAt: { seconds: 999 },
+        },
+      }, {
+        id: 'map-2',
+        name: 'Iron Keep',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+      }]);
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__user-1',
+        backgroundId: 'map-1',
+        tokenId: 'user-1',
+        ownerUid: 'user-1',
+        label: 'Ilya',
+        col: 1,
+        row: 2,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 0,
+        turnOrderJoinedAt: { seconds: 123 },
+        turnCounter: 1,
+        turnEffects: [{
+          id: 'shield',
+          kind: 'shield',
+          totalTurns: 3,
+          remainingTurns: 2,
+          appliesFromTurnCounter: 1,
+        }],
+      }, {
+        id: 'map-1__user-2',
+        backgroundId: 'map-1',
+        tokenId: 'user-2',
+        ownerUid: 'user-2',
+        label: 'Boros',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 5,
+        turnOrderJoinedAt: { seconds: 124 },
+      }, {
+        id: 'map-1__token-1',
+        backgroundId: 'map-1',
+        tokenId: 'token-1',
+        ownerUid: 'user-2',
+        label: 'Wolf',
+        col: 5,
+        row: 4,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 4,
+        turnOrderJoinedAt: { seconds: 125 },
+        turnCounter: 2,
+        turnEffects: [{
+          id: 'shield',
+          kind: 'shield',
+          totalTurns: 2,
+          remainingTurns: 1,
+          appliesFromTurnCounter: 1,
+        }],
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-turn-order-count')).toHaveTextContent('3');
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save other turn order initiative/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+        expect.objectContaining({
+          isInTurnOrder: true,
+          turnOrderInitiative: 18,
+          turnOrderJoinedAt: { seconds: 124 },
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
+
+    mockBatchInstances.splice(0, mockBatchInstances.length);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /reset turn order/i }));
+    });
+
+    await waitFor(() => {
+      const committedBatches = getCommittedBatches();
+      const placementBatch = committedBatches.find((batch) => batch.set.mock.calls.some(
+        ([target]) => target?.path === 'grigliata_token_placements/map-1__user-1'
+      ));
+      const userBatch = committedBatches.find((batch) => batch.set.mock.calls.some(
+        ([target]) => target?.path === 'users/user-1'
+      ));
+      const customTokenBatch = committedBatches.find((batch) => batch.set.mock.calls.some(
+        ([target]) => target?.path === 'grigliata_tokens/token-1'
+      ));
+
+      expect(placementBatch).toBeDefined();
+      expect(userBatch).toBeDefined();
+      expect(customTokenBatch).toBeDefined();
+      expect(placementBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-1' }),
+        expect.objectContaining({
+          isInTurnOrder: { __type: 'deleteField' },
+          turnOrderInitiative: { __type: 'deleteField' },
+          turnOrderJoinedAt: { __type: 'deleteField' },
+          turnCounter: { __type: 'deleteField' },
+          turnEffects: { __type: 'deleteField' },
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+      expect(placementBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+        expect.objectContaining({
+          isInTurnOrder: { __type: 'deleteField' },
+          turnOrderInitiative: { __type: 'deleteField' },
+          turnOrderJoinedAt: { __type: 'deleteField' },
+          turnCounter: { __type: 'deleteField' },
+          turnEffects: { __type: 'deleteField' },
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+      expect(userBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'users/user-1' }),
+        expect.objectContaining({
+          stats: {
+            barrieraCurrent: 0,
+            barrieraTotal: 0,
+          },
+          active_turn_effect: {
+            barriera: {
+              totalTurns: 0,
+              remainingTurns: 0,
+            },
+          },
+        }),
+        { merge: true }
+      );
+      expect(customTokenBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_tokens/token-1' }),
+        expect.objectContaining({
+          stats: {
+            shieldCurrent: 0,
+            shieldTotal: 0,
+          },
+          updatedAt: { __type: 'serverTimestamp' },
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+      expect(firestore.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+        expect.objectContaining({
+          turnOrderActive: { __type: 'deleteField' },
+          updatedAt: { __type: 'serverTimestamp' },
+          updatedBy: 'user-1',
+        })
+      );
+    });
+  });
+
+  test('repairs or clears active turn state when the current token disappears', async () => {
+    setManagerAuth();
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+        turnOrderActive: {
+          tokenId: 'user-1',
+          initiative: 10,
+          joinedAt: { seconds: 124 },
+          label: 'Ilya',
+          startedAt: { seconds: 999 },
+        },
+      }, {
+        id: 'map-2',
+        name: 'Iron Keep',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+      }]);
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__user-1',
+        backgroundId: 'map-1',
+        tokenId: 'user-1',
+        ownerUid: 'user-1',
+        label: 'Ilya',
+        col: 1,
+        row: 2,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 10,
+        turnOrderJoinedAt: { seconds: 124 },
+      }, {
+        id: 'map-1__user-2',
+        backgroundId: 'map-1',
+        tokenId: 'user-2',
+        ownerUid: 'user-2',
+        label: 'Boros',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 8,
+        turnOrderJoinedAt: { seconds: 125 },
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-active-turn-token')).toHaveTextContent('user-1');
+      expect(screen.getByTestId('board-turn-order-count')).toHaveTextContent('2');
+    });
+
+    mockBatchInstances.splice(0, mockBatchInstances.length);
+    act(() => {
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__user-2',
+        backgroundId: 'map-1',
+        tokenId: 'user-2',
+        ownerUid: 'user-2',
+        label: 'Boros',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 8,
+        turnOrderJoinedAt: { seconds: 125 },
+      }]);
+    });
+
+    await waitFor(() => {
+      const committedBatch = getLastCommittedBatch();
+      expect(committedBatch).toBeDefined();
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+        expect.objectContaining({
+          turnOrderActive: expect.objectContaining({
+            tokenId: 'user-2',
+            initiative: 8,
+            joinedAt: { seconds: 125 },
+            label: 'Boros',
+            startedAt: { seconds: 999 },
+          }),
+          updatedAt: { __type: 'serverTimestamp' },
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+      expect(committedBatch.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+        expect.objectContaining({
+          turnCounter: 1,
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
+
+    firestore.updateDoc.mockClear();
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+        turnOrderActive: {
+          tokenId: 'user-2',
+          initiative: 8,
+          joinedAt: { seconds: 125 },
+          label: 'Boros',
+          startedAt: { seconds: 999 },
+        },
+      }, {
+        id: 'map-2',
+        name: 'Iron Keep',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+      }]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-active-turn-token')).toHaveTextContent('user-2');
+      expect(screen.getByRole('button', { name: /advance turn order/i })).not.toBeDisabled();
+    });
+
+    firestore.updateDoc.mockClear();
+    act(() => {
+      setCollectionData('grigliata_token_placements', []);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-turn-order-count')).toHaveTextContent('0');
+      expect(firestore.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+        expect.objectContaining({
+          turnOrderActive: { __type: 'deleteField' },
+          updatedAt: { __type: 'serverTimestamp' },
+          updatedBy: 'user-1',
+        })
+      );
+    });
+  });
+
+  test('removes deleted placements from the derived turn order list', async () => {
+    act(() => {
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__user-1',
+        backgroundId: 'map-1',
+        tokenId: 'user-1',
+        ownerUid: 'user-1',
+        col: 1,
+        row: 2,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        isInTurnOrder: true,
+        turnOrderInitiative: 7,
+        turnOrderJoinedAt: { seconds: 123 },
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-turn-order-count')).toHaveTextContent('1');
+    });
+
+    act(() => {
+      setCollectionData('grigliata_token_placements', []);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-turn-order-count')).toHaveTextContent('0');
+    });
   });
 
   test('deletes the shared interaction on unmount', async () => {

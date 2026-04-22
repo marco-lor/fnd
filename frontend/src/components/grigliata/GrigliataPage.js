@@ -77,6 +77,17 @@ import {
   readAudioFileMetadata,
 } from './music';
 import { preloadImageAssets, scheduleImageAssetPreload } from './imageAssetRegistry';
+import {
+  buildTurnOrderActiveState,
+  buildShieldTurnEffect,
+  getFirstTurnOrderEntry,
+  getNextTurnOrderEntry,
+  getTurnEffectByKind,
+  normalizeTurnCounter,
+  normalizeTurnEffects,
+  reconcileTurnEffectsAtTurnCounter,
+  TURN_EFFECT_KIND_SHIELD,
+} from './turnOrder';
 import useGrigliataPageData from './useGrigliataPageData';
 
 const MAX_BACKGROUND_FILE_BYTES = 15 * 1024 * 1024;
@@ -304,8 +315,13 @@ export default function GrigliataPage() {
   const latestMusicPlaybackStateRef = useRef(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
   const activeLiveInteractionDocIdRef = useRef('');
   const liveInteractionMutationQueueRef = useRef(Promise.resolve());
+  const turnOrderRepairPendingRef = useRef(false);
   const [gridVisibilityUpdateBackgroundId, setGridVisibilityUpdateBackgroundId] = useState('');
   const [isActiveBackgroundDeactivationPending, setIsActiveBackgroundDeactivationPending] = useState(false);
+  const [isTurnOrderResetPending, setIsTurnOrderResetPending] = useState(false);
+  const [isTurnOrderProgressPending, setIsTurnOrderProgressPending] = useState(false);
+  const [turnOrderActionTokenId, setTurnOrderActionTokenId] = useState('');
+  const [savingTurnOrderInitiativeTokenId, setSavingTurnOrderInitiativeTokenId] = useState('');
   const [isTokenVisibilityActionPending, setIsTokenVisibilityActionPending] = useState(false);
   const [isTokenDeadActionPending, setIsTokenDeadActionPending] = useState(false);
   const [isTokenStatusActionPending, setIsTokenStatusActionPending] = useState(false);
@@ -363,8 +379,13 @@ export default function GrigliataPage() {
     customUserTokens,
     foeLibrary,
     grid,
+    isActivePlacementsReady,
     isCurrentUserTokenHiddenOnActiveMap,
     isGridVisible,
+    isTurnOrderEnabled,
+    isTurnOrderStarted,
+    activeTurnEntry,
+    activeTurnTokenId,
     musicPlaybackState,
     musicTracks,
     persistedActiveGrid,
@@ -373,6 +394,7 @@ export default function GrigliataPage() {
     setSelectedBackgroundId,
     sharedInteractions,
     tokenProfilesByTokenId,
+    turnOrderEntries,
   } = useGrigliataPageData({
     activeGridSizeOverride,
     currentCharacterId,
@@ -402,6 +424,9 @@ export default function GrigliataPage() {
   );
   const selectedBoardToken = selectedBoardTokens.length === 1 ? selectedBoardTokens[0] : null;
   const selectedBoardTokenId = selectedBoardToken?.tokenId || '';
+  const activeTurnCursor = activeBackground?.turnOrderActive && typeof activeBackground.turnOrderActive === 'object'
+    ? activeBackground.turnOrderActive
+    : null;
 
   useEffect(() => {
     if (!isManager || !selectedBoardToken) {
@@ -1420,6 +1445,15 @@ export default function GrigliataPage() {
     if (!backgroundId) return 0;
 
     let deletedCount = 0;
+    const background = backgrounds.find((candidate) => candidate?.id === backgroundId) || null;
+    const hasActiveTurnOrderCursor = !!(
+      background?.turnOrderActive
+      && typeof background.turnOrderActive === 'object'
+    );
+
+    if (hasActiveTurnOrderCursor) {
+      await clearTurnOrderActiveState(backgroundId);
+    }
 
     await runPaginatedWriteBatch({
       collectionName: 'grigliata_token_placements',
@@ -1761,6 +1795,11 @@ export default function GrigliataPage() {
     isVisibleToPlayers,
     isDead,
     statuses,
+    isInTurnOrder,
+    turnOrderInitiative,
+    turnOrderJoinedAt,
+    turnCounter,
+    turnEffects,
   }) => {
     const resolvedTokenId = typeof tokenId === 'string' && tokenId ? tokenId : ownerUid;
     const placementId = buildPlacementDocId(backgroundId, resolvedTokenId);
@@ -1774,6 +1813,21 @@ export default function GrigliataPage() {
     const resolvedStatuses = Array.isArray(statuses)
       ? statuses
       : (Array.isArray(existingPlacement?.statuses) ? existingPlacement.statuses : null);
+    const resolvedIsInTurnOrder = typeof isInTurnOrder === 'boolean'
+      ? isInTurnOrder
+      : existingPlacement?.isInTurnOrder === true;
+    const resolvedTurnOrderInitiative = Number.isInteger(turnOrderInitiative)
+      ? turnOrderInitiative
+      : (Number.isInteger(existingPlacement?.turnOrderInitiative) ? existingPlacement.turnOrderInitiative : null);
+    const resolvedTurnOrderJoinedAt = turnOrderJoinedAt === undefined
+      ? (existingPlacement?.turnOrderJoinedAt || null)
+      : turnOrderJoinedAt;
+    const resolvedTurnCounter = turnCounter === undefined
+      ? normalizeTurnCounter(existingPlacement?.turnCounter, 0)
+      : normalizeTurnCounter(turnCounter, 0);
+    const resolvedTurnEffects = turnEffects === undefined
+      ? normalizeTurnEffects(existingPlacement?.turnEffects)
+      : normalizeTurnEffects(turnEffects);
     const ownedTrayToken = ownedTrayTokensById.get(resolvedTokenId) || null;
     const existingLabel = typeof existingPlacement?.label === 'string' ? existingPlacement.label.trim() : '';
     const ownedLabel = typeof ownedTrayToken?.label === 'string' ? ownedTrayToken.label.trim() : '';
@@ -1793,10 +1847,49 @@ export default function GrigliataPage() {
       isVisibleToPlayers: resolvedIsVisibleToPlayers,
       isDead: resolvedIsDead,
       ...(resolvedStatuses !== null ? { statuses: resolvedStatuses } : {}),
+      ...(resolvedIsInTurnOrder ? { isInTurnOrder: true } : {}),
+      ...(resolvedIsInTurnOrder && Number.isInteger(resolvedTurnOrderInitiative)
+        ? { turnOrderInitiative: resolvedTurnOrderInitiative }
+        : {}),
+      ...(resolvedIsInTurnOrder && resolvedTurnOrderJoinedAt
+        ? { turnOrderJoinedAt: resolvedTurnOrderJoinedAt }
+        : {}),
+      ...(resolvedIsInTurnOrder && resolvedTurnCounter > 0 ? { turnCounter: resolvedTurnCounter } : {}),
+      ...(resolvedIsInTurnOrder && resolvedTurnEffects.length ? { turnEffects: resolvedTurnEffects } : {}),
       updatedAt: serverTimestamp(),
       updatedBy: currentUserId || null,
     };
   }, [activePlacementsById, currentUserId, ownedTrayTokensById]);
+
+  const buildTurnOrderRemovalPlacementWrite = useCallback(({
+    backgroundId,
+    tokenId,
+    ownerUid,
+    col,
+    row,
+    isVisibleToPlayers,
+    isDead,
+    statuses,
+  }) => ({
+    ...buildPlacementWritePayload({
+      backgroundId,
+      tokenId,
+      ownerUid,
+      col,
+      row,
+      isVisibleToPlayers,
+      isDead,
+      statuses,
+      isInTurnOrder: false,
+      turnCounter: 0,
+      turnEffects: [],
+    }),
+    isInTurnOrder: deleteField(),
+    turnOrderInitiative: deleteField(),
+    turnOrderJoinedAt: deleteField(),
+    turnCounter: deleteField(),
+    turnEffects: deleteField(),
+  }), [buildPlacementWritePayload]);
 
   const upsertTokenPlacement = async ({
     backgroundId,
@@ -1860,10 +1953,29 @@ export default function GrigliataPage() {
           placementId,
           col: Number.isFinite(placement?.col) ? placement.col : 0,
           row: Number.isFinite(placement?.row) ? placement.row : 0,
+          isVisibleToPlayers: placement?.isVisibleToPlayers !== false,
+          isDead: placement?.isDead === true,
+          isInTurnOrder: placement?.isInTurnOrder === true,
+          turnOrderInitiative: Number.isInteger(placement?.turnOrderInitiative)
+            ? placement.turnOrderInitiative
+            : null,
+          turnOrderJoinedAt: placement?.turnOrderJoinedAt || null,
+          turnCounter: normalizeTurnCounter(placement?.turnCounter, 0),
+          turnEffects: normalizeTurnEffects(placement?.turnEffects),
         };
       })
       .filter(Boolean);
   };
+
+  const canCurrentUserManageTurnOrderPlacement = useCallback((placementContext) => {
+    if (!placementContext || !currentUserId) {
+      return false;
+    }
+
+    return isManager
+      || placementContext.ownerUid === currentUserId
+      || placementContext.tokenId === currentUserId;
+  }, [currentUserId, isManager]);
 
   const commitPlacementMoves = async (moves) => {
     const normalizedMoves = [...new Map(
@@ -2478,6 +2590,586 @@ export default function GrigliataPage() {
       setIsActiveBackgroundDeactivationPending(false);
     }
   };
+
+  const getCharacterTurnEffectSource = useCallback(async (ownerUid) => {
+    if (!ownerUid) {
+      return null;
+    }
+
+    if (ownerUid === currentUserId && userData) {
+      return userData;
+    }
+
+    const userSnapshot = await getDoc(doc(db, 'users', ownerUid));
+    return userSnapshot.exists() ? userSnapshot.data() : null;
+  }, [currentUserId, userData]);
+
+  const buildCharacterShieldTurnEffect = useCallback((sourceUserData, turnCounter) => {
+    const shieldTotal = normalizeNonNegativeNumericValue(sourceUserData?.stats?.barrieraTotal, 0);
+    const totalTurns = normalizeNonNegativeNumericValue(
+      sourceUserData?.active_turn_effect?.barriera?.totalTurns,
+      0,
+    );
+    const remainingTurns = normalizeNonNegativeNumericValue(
+      sourceUserData?.active_turn_effect?.barriera?.remainingTurns,
+      0,
+    );
+    if (shieldTotal < 1 || totalTurns < 1 || remainingTurns < 1) {
+      return null;
+    }
+
+    return buildShieldTurnEffect({
+      totalTurns,
+      remainingTurns,
+      turnCounter,
+    });
+  }, []);
+
+  const resolveTurnOrderProgressState = useCallback(async (entry) => {
+    if (!entry?.tokenId) {
+      return null;
+    }
+
+    const placementContext = getActiveMapPlacementContexts([entry.tokenId])[0];
+    const boardToken = boardTokensById.get(entry.tokenId) || null;
+    if (!placementContext || !boardToken) {
+      return null;
+    }
+
+    const nextTurnCounter = normalizeTurnCounter(placementContext.turnCounter, 0) + 1;
+    let nextTurnEffects = normalizeTurnEffects(placementContext.turnEffects);
+
+    if (
+      boardToken.tokenType === 'character'
+      && !getTurnEffectByKind(nextTurnEffects, TURN_EFFECT_KIND_SHIELD)
+    ) {
+      const sourceUserData = await getCharacterTurnEffectSource(placementContext.ownerUid);
+      const shieldTurnEffect = buildCharacterShieldTurnEffect(sourceUserData, nextTurnCounter);
+      if (shieldTurnEffect) {
+        nextTurnEffects = [...nextTurnEffects, shieldTurnEffect];
+      }
+    }
+
+    const reconciledTurnEffects = reconcileTurnEffectsAtTurnCounter({
+      turnCounter: nextTurnCounter,
+      turnEffects: nextTurnEffects,
+    });
+
+    return {
+      boardToken,
+      placementContext,
+      nextTurnCounter,
+      nextTurnEffects: reconciledTurnEffects.turnEffects,
+      expiredTurnEffects: reconciledTurnEffects.expiredEffects,
+      activeShieldEffect: getTurnEffectByKind(reconciledTurnEffects.turnEffects, TURN_EFFECT_KIND_SHIELD),
+      expiredShieldEffect: getTurnEffectByKind(reconciledTurnEffects.expiredEffects, TURN_EFFECT_KIND_SHIELD),
+    };
+  }, [
+    boardTokensById,
+    buildCharacterShieldTurnEffect,
+    getCharacterTurnEffectSource,
+  ]);
+
+  const clearTurnOrderActiveState = useCallback(async (backgroundIdOverride = '') => {
+    const targetBackgroundId = backgroundIdOverride || activeBackgroundId;
+    if (!isManager || !user?.uid || !targetBackgroundId) {
+      return;
+    }
+
+    await updateDoc(doc(db, 'grigliata_backgrounds', targetBackgroundId), {
+      turnOrderActive: deleteField(),
+      updatedAt: serverTimestamp(),
+      updatedBy: user.uid,
+    });
+  }, [activeBackgroundId, isManager, user?.uid]);
+
+  const writeTurnOrderActiveEntry = useCallback(async (entry, { preserveStartedAt = false } = {}) => {
+    if (!isManager || !user?.uid || !activeBackgroundId || !entry?.tokenId) {
+      return;
+    }
+
+    const progressState = await resolveTurnOrderProgressState(entry);
+    if (!progressState) {
+      return;
+    }
+
+    const nextStartedAt = preserveStartedAt && activeTurnCursor?.startedAt
+      ? activeTurnCursor.startedAt
+      : serverTimestamp();
+    const {
+      boardToken,
+      placementContext,
+      nextTurnCounter,
+      nextTurnEffects,
+      activeShieldEffect,
+      expiredShieldEffect,
+    } = progressState;
+    const batch = writeBatch(db);
+
+    batch.set(doc(db, 'grigliata_backgrounds', activeBackgroundId), {
+      turnOrderActive: buildTurnOrderActiveState(entry, nextStartedAt),
+      updatedAt: serverTimestamp(),
+      updatedBy: user.uid,
+    }, { merge: true });
+    batch.set(
+      doc(db, 'grigliata_token_placements', placementContext.placementId),
+      {
+        ...buildPlacementWritePayload({
+          backgroundId: activeBackgroundId,
+          tokenId: entry.tokenId,
+          ownerUid: placementContext.ownerUid,
+          col: placementContext.col,
+          row: placementContext.row,
+          isVisibleToPlayers: placementContext.isVisibleToPlayers,
+          isDead: placementContext.isDead,
+          isInTurnOrder: placementContext.isInTurnOrder,
+          turnOrderInitiative: placementContext.turnOrderInitiative,
+          turnOrderJoinedAt: placementContext.turnOrderJoinedAt,
+          turnCounter: nextTurnCounter,
+          turnEffects: nextTurnEffects,
+        }),
+        ...(!nextTurnEffects.length ? { turnEffects: deleteField() } : {}),
+      },
+      { merge: true }
+    );
+
+    if (boardToken.tokenType === 'character') {
+      if (activeShieldEffect) {
+        batch.set(doc(db, 'users', placementContext.ownerUid), {
+          active_turn_effect: {
+            barriera: {
+              totalTurns: activeShieldEffect.totalTurns,
+              remainingTurns: activeShieldEffect.remainingTurns,
+            },
+          },
+        }, { merge: true });
+      } else if (expiredShieldEffect) {
+        batch.set(doc(db, 'users', placementContext.ownerUid), {
+          stats: {
+            barrieraCurrent: 0,
+            barrieraTotal: 0,
+          },
+          active_turn_effect: {
+            barriera: {
+              totalTurns: 0,
+              remainingTurns: 0,
+            },
+          },
+        }, { merge: true });
+      }
+    } else if (boardToken.tokenType === 'custom' && expiredShieldEffect) {
+      batch.set(doc(db, 'grigliata_tokens', entry.tokenId), {
+        stats: {
+          shieldCurrent: 0,
+          shieldTotal: 0,
+        },
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUserId || null,
+      }, { merge: true });
+    }
+
+    await batch.commit();
+  }, [
+    activeBackgroundId,
+    activeTurnCursor?.startedAt,
+    buildPlacementWritePayload,
+    currentUserId,
+    isManager,
+    resolveTurnOrderProgressState,
+    user?.uid,
+  ]);
+
+  const handleStartTurnOrder = async () => {
+    if (!isManager || !user?.uid || !activeBackgroundId) {
+      return;
+    }
+
+    const firstEntry = getFirstTurnOrderEntry(turnOrderEntries);
+    if (!firstEntry) {
+      return;
+    }
+
+    setBoardError('');
+    setIsTurnOrderProgressPending(true);
+    try {
+      await writeTurnOrderActiveEntry(firstEntry);
+    } catch (error) {
+      console.error('Failed to start turn order:', error);
+      setBoardError('Unable to start the turn order right now.');
+    } finally {
+      setIsTurnOrderProgressPending(false);
+    }
+  };
+
+  const handleAdvanceTurnOrder = async () => {
+    if (!isManager || !user?.uid || !activeBackgroundId || !isTurnOrderStarted) {
+      return;
+    }
+
+    setBoardError('');
+    setIsTurnOrderProgressPending(true);
+    try {
+      const nextEntry = getNextTurnOrderEntry(turnOrderEntries, activeTurnCursor);
+      if (!nextEntry) {
+        await clearTurnOrderActiveState();
+      } else {
+        await writeTurnOrderActiveEntry(nextEntry, { preserveStartedAt: true });
+      }
+    } catch (error) {
+      console.error('Failed to advance turn order:', error);
+      setBoardError('Unable to advance the turn order right now.');
+    } finally {
+      setIsTurnOrderProgressPending(false);
+    }
+  };
+
+  const handleResetTurnOrder = async () => {
+    if (!isManager || !user?.uid || !activeBackgroundId) return;
+
+    const targetPlacements = [...activePlacementsById.values()]
+      .map((placement) => {
+        const resolvedTokenId = placement?.tokenId || placement?.ownerUid || '';
+        if (!resolvedTokenId || placement?.backgroundId !== activeBackgroundId) {
+          return null;
+        }
+
+        const hasTurnOrderState = placement?.isInTurnOrder === true
+          || Number.isInteger(placement?.turnOrderInitiative)
+          || !!placement?.turnOrderJoinedAt
+          || normalizeTurnCounter(placement?.turnCounter, 0) > 0
+          || normalizeTurnEffects(placement?.turnEffects).length > 0;
+        if (!hasTurnOrderState) {
+          return null;
+        }
+
+        const tokenType = boardTokensById.get(resolvedTokenId)?.tokenType || '';
+        const hasShieldTurnEffect = !!getTurnEffectByKind(
+          normalizeTurnEffects(placement?.turnEffects),
+          TURN_EFFECT_KIND_SHIELD,
+        );
+
+        return {
+          tokenId: resolvedTokenId,
+          tokenType,
+          hasShieldTurnEffect,
+          ownerUid: placement.ownerUid,
+          placementId: placement.id || buildPlacementDocId(activeBackgroundId, resolvedTokenId),
+          col: Number.isFinite(placement?.col) ? placement.col : 0,
+          row: Number.isFinite(placement?.row) ? placement.row : 0,
+          isVisibleToPlayers: placement?.isVisibleToPlayers !== false,
+          isDead: placement?.isDead === true,
+          statuses: Array.isArray(placement?.statuses) ? placement.statuses : [],
+        };
+      })
+      .filter(Boolean);
+    const characterOwnerUidsToClearShieldTimers = [...new Set(
+      targetPlacements
+        .filter(({ tokenType }) => tokenType === 'character')
+        .map(({ ownerUid }) => ownerUid)
+        .filter(Boolean)
+    )];
+    const characterOwnerUidsToClearShieldStats = new Set(
+      targetPlacements
+        .filter(({ tokenType, hasShieldTurnEffect }) => tokenType === 'character' && hasShieldTurnEffect)
+        .map(({ ownerUid }) => ownerUid)
+        .filter(Boolean)
+    );
+    const customTokenIdsToClearShieldStats = [...new Set(
+      targetPlacements
+        .filter(({ tokenType, hasShieldTurnEffect }) => tokenType === 'custom' && hasShieldTurnEffect)
+        .map(({ tokenId }) => tokenId)
+        .filter(Boolean)
+    )];
+
+    setBoardError('');
+    setIsTurnOrderResetPending(true);
+    try {
+      for (let index = 0; index < targetPlacements.length; index += PLACEMENT_RULE_SAFE_BATCH_SIZE) {
+        const batch = writeBatch(db);
+
+        targetPlacements.slice(index, index + PLACEMENT_RULE_SAFE_BATCH_SIZE).forEach((placement) => {
+          batch.set(
+            doc(db, 'grigliata_token_placements', placement.placementId),
+            buildTurnOrderRemovalPlacementWrite({
+              backgroundId: activeBackgroundId,
+              tokenId: placement.tokenId,
+              ownerUid: placement.ownerUid,
+              col: placement.col,
+              row: placement.row,
+              isVisibleToPlayers: placement.isVisibleToPlayers,
+              isDead: placement.isDead,
+              statuses: placement.statuses,
+            }),
+            { merge: true }
+          );
+        });
+
+        await batch.commit();
+      }
+
+      for (let index = 0; index < characterOwnerUidsToClearShieldTimers.length; index += FIRESTORE_BATCH_SIZE) {
+        const batch = writeBatch(db);
+
+        characterOwnerUidsToClearShieldTimers
+          .slice(index, index + FIRESTORE_BATCH_SIZE)
+          .forEach((ownerUid) => {
+            batch.set(doc(db, 'users', ownerUid), {
+              ...(characterOwnerUidsToClearShieldStats.has(ownerUid)
+                ? {
+                    stats: {
+                      barrieraCurrent: 0,
+                      barrieraTotal: 0,
+                    },
+                  }
+                : {}),
+              active_turn_effect: {
+                barriera: {
+                  totalTurns: 0,
+                  remainingTurns: 0,
+                },
+              },
+            }, { merge: true });
+          });
+
+        await batch.commit();
+      }
+
+      for (let index = 0; index < customTokenIdsToClearShieldStats.length; index += FIRESTORE_BATCH_SIZE) {
+        const batch = writeBatch(db);
+
+        customTokenIdsToClearShieldStats
+          .slice(index, index + FIRESTORE_BATCH_SIZE)
+          .forEach((tokenId) => {
+            batch.set(doc(db, 'grigliata_tokens', tokenId), {
+              stats: {
+                shieldCurrent: 0,
+                shieldTotal: 0,
+              },
+              updatedAt: serverTimestamp(),
+              updatedBy: currentUserId || null,
+            }, { merge: true });
+          });
+
+        await batch.commit();
+      }
+
+      await clearTurnOrderActiveState();
+    } catch (error) {
+      console.error('Failed to reset turn order:', error);
+      setBoardError('Unable to reset the turn order right now.');
+    } finally {
+      setIsTurnOrderResetPending(false);
+    }
+  };
+
+  const handleJoinTurnOrder = async (tokenId, nextInitiative = 0) => {
+    if (!currentUserId || !activeBackgroundId || !tokenId) {
+      return false;
+    }
+
+    const normalizedInitiative = Number(nextInitiative);
+    if (!Number.isInteger(normalizedInitiative)) {
+      setBoardError('Initiative must be a whole number.');
+      return false;
+    }
+
+    const targetPlacement = getActiveMapPlacementContexts([tokenId])[0];
+    if (
+      !targetPlacement
+      || !canCurrentUserManageTurnOrderPlacement(targetPlacement)
+      || (!isManager && targetPlacement.isVisibleToPlayers === false)
+      || targetPlacement.isInTurnOrder
+    ) {
+      return false;
+    }
+
+    setBoardError('');
+    setTurnOrderActionTokenId(tokenId);
+    try {
+      await setDoc(
+        doc(db, 'grigliata_token_placements', targetPlacement.placementId),
+        buildPlacementWritePayload({
+          backgroundId: activeBackgroundId,
+          tokenId,
+          ownerUid: targetPlacement.ownerUid,
+          col: targetPlacement.col,
+          row: targetPlacement.row,
+          isInTurnOrder: true,
+          turnOrderInitiative: normalizedInitiative,
+          turnOrderJoinedAt: targetPlacement.turnOrderJoinedAt || serverTimestamp(),
+        }),
+        { merge: true }
+      );
+      return true;
+    } catch (error) {
+      console.error('Failed to join turn order:', error);
+      setBoardError(
+        isPermissionDeniedError(error)
+          ? 'The DM is currently controlling that token.'
+          : 'Unable to add that token to the turn order right now.'
+      );
+      return false;
+    } finally {
+      setTurnOrderActionTokenId('');
+    }
+  };
+
+  const handleLeaveTurnOrder = async (tokenId) => {
+    if (!currentUserId || !activeBackgroundId || !tokenId) {
+      return;
+    }
+
+    const targetPlacement = getActiveMapPlacementContexts([tokenId])[0];
+    if (
+      !targetPlacement
+      || !canCurrentUserManageTurnOrderPlacement(targetPlacement)
+      || (!isManager && targetPlacement.isVisibleToPlayers === false)
+      || !targetPlacement.isInTurnOrder
+    ) {
+      return;
+    }
+
+    setBoardError('');
+    setTurnOrderActionTokenId(tokenId);
+    try {
+      await setDoc(
+        doc(db, 'grigliata_token_placements', targetPlacement.placementId),
+        buildTurnOrderRemovalPlacementWrite({
+          backgroundId: activeBackgroundId,
+          tokenId,
+          ownerUid: targetPlacement.ownerUid,
+          col: targetPlacement.col,
+          row: targetPlacement.row,
+          isVisibleToPlayers: targetPlacement.isVisibleToPlayers,
+          isDead: targetPlacement.isDead,
+          statuses: targetPlacement.statuses,
+        }),
+        { merge: true }
+      );
+    } catch (error) {
+      console.error('Failed to leave turn order:', error);
+      setBoardError(
+        isPermissionDeniedError(error)
+          ? 'The DM is currently controlling that token.'
+          : 'Unable to remove that token from the turn order right now.'
+      );
+    } finally {
+      setTurnOrderActionTokenId('');
+    }
+  };
+
+  const handleSaveTurnOrderInitiative = async (tokenId, nextInitiative) => {
+    if (!currentUserId || !activeBackgroundId || !tokenId) {
+      return false;
+    }
+
+    const normalizedInitiative = Number(nextInitiative);
+    if (!Number.isInteger(normalizedInitiative)) {
+      setBoardError('Initiative must be a whole number.');
+      return false;
+    }
+
+    const targetPlacement = getActiveMapPlacementContexts([tokenId])[0];
+    if (
+      !targetPlacement
+      || !targetPlacement.isInTurnOrder
+      || !canCurrentUserManageTurnOrderPlacement(targetPlacement)
+      || (!isManager && targetPlacement.isVisibleToPlayers === false)
+    ) {
+      return false;
+    }
+
+    setBoardError('');
+    setSavingTurnOrderInitiativeTokenId(tokenId);
+    try {
+      await setDoc(
+        doc(db, 'grigliata_token_placements', targetPlacement.placementId),
+        buildPlacementWritePayload({
+          backgroundId: activeBackgroundId,
+          tokenId,
+          ownerUid: targetPlacement.ownerUid,
+          col: targetPlacement.col,
+          row: targetPlacement.row,
+          isInTurnOrder: true,
+          turnOrderInitiative: normalizedInitiative,
+          turnOrderJoinedAt: targetPlacement.turnOrderJoinedAt || serverTimestamp(),
+        }),
+        { merge: true }
+      );
+      return true;
+    } catch (error) {
+      console.error('Failed to save turn order initiative:', error);
+      setBoardError(
+        isPermissionDeniedError(error)
+          ? 'The DM is currently controlling that token.'
+          : 'Unable to save that initiative right now.'
+      );
+      return false;
+    } finally {
+      setSavingTurnOrderInitiativeTokenId('');
+    }
+  };
+
+  useEffect(() => {
+    if (
+      !isManager
+      || !user?.uid
+      || !activeBackgroundId
+      || !isActivePlacementsReady
+      || !isTurnOrderStarted
+      || !!activeTurnEntry
+      || turnOrderRepairPendingRef.current
+      || isTurnOrderResetPending
+    ) {
+      return undefined;
+    }
+
+    let isActive = true;
+
+    const repairTurnOrderState = async () => {
+      setBoardError('');
+      turnOrderRepairPendingRef.current = true;
+      try {
+        if (turnOrderEntries.length < 1) {
+          await clearTurnOrderActiveState();
+          return;
+        }
+
+        const nextEntry = getNextTurnOrderEntry(turnOrderEntries, activeTurnCursor);
+        if (!nextEntry) {
+          await clearTurnOrderActiveState();
+          return;
+        }
+
+        await writeTurnOrderActiveEntry(nextEntry, { preserveStartedAt: true });
+      } catch (error) {
+        console.error('Failed to repair turn order state:', error);
+        if (isActive) {
+          setBoardError('Unable to repair the active turn order right now.');
+        }
+      } finally {
+        turnOrderRepairPendingRef.current = false;
+      }
+    };
+
+    void repairTurnOrderState();
+
+    return () => {
+      isActive = false;
+    };
+  }, [
+    activeBackgroundId,
+    activeTurnCursor,
+    activeTurnEntry,
+    clearTurnOrderActiveState,
+    isActivePlacementsReady,
+    isManager,
+    isTurnOrderResetPending,
+    isTurnOrderStarted,
+    turnOrderEntries,
+    user?.uid,
+    writeTurnOrderActiveEntry,
+  ]);
 
   const handleSetSelectedTokensVisibility = async (tokenIds, nextIsVisibleToPlayers) => {
     if (
@@ -3132,6 +3824,20 @@ export default function GrigliataPage() {
                 isGridVisibilityToggleDisabled={!activeBackgroundId || gridVisibilityUpdateBackgroundId === activeBackgroundId}
                 onDeactivateActiveBackground={isManager ? handleDeactivateActiveBackground : null}
                 isDeactivateActiveBackgroundDisabled={!activeBackgroundId || isActiveBackgroundDeactivationPending}
+                isTurnOrderEnabled={isTurnOrderEnabled}
+                turnOrderEntries={turnOrderEntries}
+                isTurnOrderStarted={isTurnOrderStarted}
+                activeTurnTokenId={activeTurnTokenId}
+                onStartTurnOrder={isManager ? handleStartTurnOrder : null}
+                onAdvanceTurnOrder={isManager ? handleAdvanceTurnOrder : null}
+                isTurnOrderProgressPending={isTurnOrderProgressPending}
+                onResetTurnOrder={isManager ? handleResetTurnOrder : null}
+                isTurnOrderResetPending={isTurnOrderResetPending}
+                onJoinTurnOrder={handleJoinTurnOrder}
+                onLeaveTurnOrder={handleLeaveTurnOrder}
+                turnOrderActionTokenId={turnOrderActionTokenId}
+                onSaveTurnOrderInitiative={handleSaveTurnOrderInitiative}
+                savingTurnOrderInitiativeTokenId={savingTurnOrderInitiativeTokenId}
                 onAdjustGridSize={isManager ? handleAdjustActiveGridSize : null}
                 isGridSizeAdjustmentDisabled={!activeBackgroundId}
                 onMoveTokens={handleMoveTokens}

@@ -13,11 +13,15 @@ import {
 import { FaHandPointer, FaRulerHorizontal } from 'react-icons/fa';
 import { GiHearts, GiMagicSwirl, GiShield } from 'react-icons/gi';
 import {
+  FiClock,
   FiEye,
   FiEyeOff,
   FiImage,
   FiMinus,
+  FiPlay,
   FiPlus,
+  FiRotateCcw,
+  FiSkipForward,
   FiTrash2,
   FiUser,
   FiUsers,
@@ -45,6 +49,7 @@ import {
   getTokenPositionPx,
   normalizeGridConfig,
   snapBoardPointToGrid,
+  timestampToMillis,
 } from './boardUtils';
 import GrigliataTokenActions, { TokenStatusSummaryCard } from './GrigliataTokenActions';
 import {
@@ -66,6 +71,7 @@ import {
   normalizeGrigliataAoEFigureDraft,
   shiftGrigliataAoEFigureCells,
 } from './aoeFigures';
+import { sortTurnOrderEntries } from './turnOrder';
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
 const RULER_LABEL_MIN_WIDTH = 90;
@@ -90,6 +96,10 @@ const DEAD_TOKEN_SECONDARY = 'rgba(248, 113, 113, 0.95)';
 const DEAD_TOKEN_SCRIM = 'rgba(15, 23, 42, 0.34)';
 const DEAD_TOKEN_BANNER_FILL = 'rgba(127, 29, 29, 0.88)';
 const DEAD_TOKEN_LABEL = '#fecaca';
+const ACTIVE_TURN_PRIMARY = 'rgba(251, 191, 36, 0.98)';
+const ACTIVE_TURN_SECONDARY = '#fef3c7';
+const ACTIVE_TURN_GLOW = 'rgba(245, 158, 11, 0.42)';
+const ACTIVE_TURN_FILL = 'rgba(245, 158, 11, 0.16)';
 const DRAW_PICKER_EASE = [0.22, 1, 0.36, 1];
 const BATTLEMAP_IMAGE_FADE_DURATION_MS = 1000;
 const QUICK_CONTROL_NEUTRAL_SURFACE_CLASS = 'border-slate-700/90 bg-slate-950/92 shadow-lg shadow-slate-950/35';
@@ -101,6 +111,10 @@ const QUICK_CONTROL_DRAWER_CLASS = `flex min-h-10 items-center gap-2 overflow-hi
 const AOE_TEMPLATE_OPTION_BASE_CLASS = 'inline-flex h-10 w-10 items-center justify-center rounded-full border transition-transform duration-150 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950';
 const AOE_TEMPLATE_OPTION_IDLE_CLASS = 'border-slate-700 bg-slate-900/96 text-slate-200';
 const AOE_TEMPLATE_OPTION_ACTIVE_CLASS = `${QUICK_CONTROL_NEON_SURFACE_CLASS} text-fuchsia-50`;
+const TURN_ORDER_PANEL_WIDTH_CLASS = 'w-[min(12rem,calc(100vw-2rem))]';
+const TURN_ORDER_PANEL_STORAGE_PREFIX = 'grigliata.turnOrderCollapsed';
+const TURN_ORDER_DRAWER_TRANSITION = { duration: 0.26, ease: DRAW_PICKER_EASE };
+const TURN_ORDER_ENTRY_TRANSITION = { duration: 0.18, ease: DRAW_PICKER_EASE };
 
 const isPrimaryMouseButton = (nativeEvent) => nativeEvent?.button === 0;
 const isSecondaryMouseButton = (nativeEvent) => nativeEvent?.button === 2;
@@ -165,6 +179,37 @@ const buildSelectionActionToolbarPosition = ({ left, top, width, buttonSize, gap
   left: left + width + gap,
   top: top - gap - buttonSize,
 });
+
+const getTurnOrderCollapsedStorageKey = (currentUserId = '') => (
+  `${TURN_ORDER_PANEL_STORAGE_PREFIX}.${currentUserId || 'anonymous'}`
+);
+
+const readStoredTurnOrderCollapsed = (currentUserId = '') => {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    return window.localStorage.getItem(getTurnOrderCollapsedStorageKey(currentUserId)) === 'true';
+  } catch (_) {
+    return false;
+  }
+};
+
+const writeStoredTurnOrderCollapsed = (currentUserId = '', isCollapsed) => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(getTurnOrderCollapsedStorageKey(currentUserId), String(isCollapsed));
+  } catch (_) {}
+};
+
+const canEditTurnOrderEntry = ({ entry, currentUserId = '', isManager = false }) => (
+  !!entry?.tokenId
+  && (
+    isManager
+    || entry.ownerUid === currentUserId
+    || entry.tokenId === currentUserId
+  )
+);
 
 const clampToRange = (value, min, max) => Math.min(max, Math.max(min, value));
 const TOKEN_HUD_EDGE_PADDING = 12;
@@ -479,9 +524,11 @@ const TokenNode = ({
   position,
   canMove,
   isSelected,
+  isActiveTurn = false,
   badgeImages,
   drawTheme = DEFAULT_DRAW_THEME,
   onMouseDown,
+  onContextMenu,
   onOverflowMouseEnter,
   onOverflowMouseLeave,
   onOverflowToggle,
@@ -503,7 +550,9 @@ const TokenNode = ({
     : (isDead ? DEAD_TOKEN_SECONDARY : (canMove ? '#fbbf24' : '#cbd5e1'));
   const labelFill = isHiddenFromPlayers
     ? '#cbd5e1'
-    : (isDead ? DEAD_TOKEN_LABEL : (isSelected ? drawTheme.tokenLabelText : '#e2e8f0'));
+    : (isDead
+      ? DEAD_TOKEN_LABEL
+      : (isSelected ? drawTheme.tokenLabelText : (isActiveTurn ? ACTIVE_TURN_SECONDARY : '#e2e8f0')));
   const hiddenBadgeSize = Math.max(18, Math.round(size * 0.28));
   const hiddenSlashInset = Math.max(8, Math.round(size * 0.18));
   const hiddenSlashStroke = Math.max(5, Math.round(size * 0.1));
@@ -515,8 +564,48 @@ const TokenNode = ({
       x={position.x}
       y={position.y}
       data-testid={token?.tokenId ? `token-node-${token.tokenId}` : undefined}
+      data-active-turn={isActiveTurn ? 'true' : 'false'}
       onMouseDown={(event) => onMouseDown?.(token, event)}
+      onContextMenu={(event) => onContextMenu?.(token, event)}
     >
+      {isActiveTurn && (
+        <>
+          <Circle
+            x={size / 2}
+            y={size / 2}
+            radius={(size / 2) + 18}
+            fill="rgba(245, 158, 11, 0.1)"
+            shadowColor={ACTIVE_TURN_GLOW}
+            shadowBlur={30}
+            shadowOpacity={0.48}
+            listening={false}
+          />
+          <Circle
+            x={size / 2}
+            y={size / 2}
+            radius={(size / 2) + 11}
+            fill={ACTIVE_TURN_FILL}
+            stroke="rgba(254, 243, 199, 0.92)"
+            strokeWidth={Math.max(2.5, size * 0.06)}
+            shadowColor={ACTIVE_TURN_GLOW}
+            shadowBlur={22}
+            shadowOpacity={0.44}
+            listening={false}
+          />
+          <Circle
+            x={size / 2}
+            y={size / 2}
+            radius={(size / 2) + 16}
+            stroke={ACTIVE_TURN_PRIMARY}
+            strokeWidth={Math.max(1.8, size * 0.045)}
+            shadowColor={ACTIVE_TURN_GLOW}
+            shadowBlur={14}
+            shadowOpacity={0.34}
+            listening={false}
+          />
+        </>
+      )}
+
       {isSelected && (
         <>
           <Rect
@@ -1510,6 +1599,204 @@ const AoETemplatePicker = ({ activeFigureType = '', onChange }) => {
   );
 };
 
+const TurnOrderPanel = ({
+  currentUserId = '',
+  entries = [],
+  isManager = false,
+  activeTurnTokenId = '',
+  onSaveTurnOrderInitiative,
+  savingTurnOrderInitiativeTokenId = '',
+}) => {
+  const prefersReducedMotion = useReducedMotion();
+  const [initiativeEditors, setInitiativeEditors] = useState({});
+
+  useEffect(() => {
+    setInitiativeEditors((currentEditors) => entries.reduce((nextEditors, entry) => {
+      const baseValue = Number.isInteger(entry?.initiative) ? entry.initiative : 0;
+      const existingEditor = currentEditors[entry.tokenId];
+
+      if (!existingEditor) {
+        nextEditors[entry.tokenId] = {
+          draft: String(baseValue),
+          base: baseValue,
+        };
+        return nextEditors;
+      }
+
+      const isDirty = existingEditor.draft !== String(existingEditor.base);
+      nextEditors[entry.tokenId] = isDirty
+        ? { ...existingEditor, base: baseValue }
+        : { draft: String(baseValue), base: baseValue };
+      return nextEditors;
+    }, {}));
+  }, [entries]);
+
+  const handleDraftChange = (tokenId, nextValue) => {
+    setInitiativeEditors((currentEditors) => {
+      const existingEditor = currentEditors[tokenId];
+      return {
+        ...currentEditors,
+        [tokenId]: {
+          draft: nextValue,
+          base: existingEditor?.base ?? 0,
+        },
+      };
+    });
+  };
+
+  const handleSaveInitiative = async (tokenId) => {
+    const editor = initiativeEditors[tokenId];
+    const normalizedDraft = typeof editor?.draft === 'string' ? editor.draft.trim() : '';
+    if (!/^-?\d+$/.test(normalizedDraft)) {
+      return;
+    }
+
+    const nextInitiative = Number.parseInt(normalizedDraft, 10);
+    const didSave = await Promise.resolve(onSaveTurnOrderInitiative?.(tokenId, nextInitiative));
+    if (didSave === false) {
+      return;
+    }
+
+    setInitiativeEditors((currentEditors) => ({
+      ...currentEditors,
+      [tokenId]: {
+        draft: String(nextInitiative),
+        base: nextInitiative,
+      },
+    }));
+  };
+
+  const handleDiscardInitiative = (tokenId) => {
+    setInitiativeEditors((currentEditors) => {
+      const existingEditor = currentEditors[tokenId];
+      const baseValue = Number.isInteger(existingEditor?.base) ? existingEditor.base : 0;
+
+      return {
+        ...currentEditors,
+        [tokenId]: {
+          draft: String(baseValue),
+          base: baseValue,
+        },
+      };
+    });
+  };
+
+  return (
+    <div className="pointer-events-auto min-h-0 w-full">
+      <div className="relative flex max-h-[calc(100vh-12rem)] min-h-0 flex-col items-end gap-2 overflow-y-auto pb-8 pl-3 pr-0 pt-1">
+        {entries.length > 0 && (
+          <motion.div
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-0 right-5 top-0 w-px origin-top bg-gradient-to-b from-fuchsia-200/45 via-slate-500/30 to-slate-800/10"
+            initial={prefersReducedMotion ? false : { opacity: 0, scaleY: 0 }}
+            animate={{ opacity: 1, scaleY: 1 }}
+            exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, scaleY: 0 }}
+            transition={prefersReducedMotion ? { duration: 0.01 } : TURN_ORDER_DRAWER_TRANSITION}
+          />
+        )}
+        {entries.length ? entries.map((entry) => {
+          const isActiveTurn = entry.tokenId === activeTurnTokenId;
+          const canEdit = canEditTurnOrderEntry({
+            entry,
+            currentUserId,
+            isManager,
+          });
+          const editor = initiativeEditors[entry.tokenId] || {
+            draft: String(Number.isInteger(entry?.initiative) ? entry.initiative : 0),
+            base: Number.isInteger(entry?.initiative) ? entry.initiative : 0,
+          };
+          const isSaving = savingTurnOrderInitiativeTokenId === entry.tokenId;
+
+          return (
+            <motion.div
+              key={entry.tokenId}
+              data-testid={`turn-order-entry-${entry.tokenId}`}
+              data-active-turn={isActiveTurn ? 'true' : 'false'}
+              className={`relative z-10 flex max-w-full items-center gap-3 ${isActiveTurn
+                ? 'rounded-[1.1rem] bg-gradient-to-l from-fuchsia-500/14 via-fuchsia-500/5 to-transparent px-2 py-2 shadow-[0_0_18px_rgba(217,70,239,0.18)] ring-1 ring-fuchsia-300/25'
+                : 'py-1.5'}`}
+              initial={prefersReducedMotion ? false : { opacity: 0, y: -10, x: 6 }}
+              animate={{ opacity: 1, y: 0, x: 0 }}
+              exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -10, x: 6 }}
+              transition={prefersReducedMotion ? { duration: 0.01 } : TURN_ORDER_ENTRY_TRANSITION}
+            >
+              <div className="min-w-0 max-w-[8.5rem] text-right">
+                <div className={`truncate text-sm font-semibold ${isActiveTurn ? 'text-fuchsia-50' : 'text-slate-100'}`}>{entry.label}</div>
+                {canEdit ? (
+                  <form
+                    className="mt-1 inline-flex items-center justify-end gap-1.5"
+                    onSubmit={async (event) => {
+                      event.preventDefault();
+                      await handleSaveInitiative(entry.tokenId);
+                    }}
+                  >
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="-?[0-9]*"
+                      value={editor.draft}
+                      disabled={isSaving}
+                      data-testid={`turn-order-initiative-input-${entry.tokenId}`}
+                      aria-label={`Initiative for ${entry.label}`}
+                      onChange={(event) => handleDraftChange(entry.tokenId, event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Escape') {
+                          return;
+                        }
+
+                        event.preventDefault();
+                        event.stopPropagation();
+                        handleDiscardInitiative(entry.tokenId);
+                      }}
+                      className={`w-10 rounded-lg bg-slate-950/95 px-1.5 py-1 text-center text-xs font-semibold outline-none transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60 ${isActiveTurn
+                        ? 'border border-fuchsia-300/70 text-fuchsia-50 shadow-[0_0_12px_rgba(217,70,239,0.16)] focus:border-fuchsia-200/85'
+                        : 'border border-slate-700/90 text-slate-100 focus:border-fuchsia-300/75'}`}
+                    />
+                  </form>
+                ) : (
+                  <div
+                    data-testid={`turn-order-initiative-value-${entry.tokenId}`}
+                    className={`mt-1 text-xs font-semibold ${isActiveTurn ? 'text-fuchsia-200' : 'text-slate-400'}`}
+                  >
+                    {entry.initiative}
+                  </div>
+                )}
+              </div>
+
+              {entry.imageUrl ? (
+                <img
+                  src={entry.imageUrl}
+                  alt=""
+                  className={`h-10 w-10 shrink-0 rounded-2xl object-cover ${isActiveTurn
+                    ? 'border border-fuchsia-300/75 shadow-[0_0_16px_rgba(217,70,239,0.22)]'
+                    : 'border border-slate-700/80'}`}
+                />
+              ) : (
+                <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-800/90 text-xs font-bold uppercase tracking-[0.18em] ${isActiveTurn
+                  ? 'border border-fuchsia-300/75 text-fuchsia-50 shadow-[0_0_16px_rgba(217,70,239,0.22)]'
+                  : 'border border-slate-700/80 text-slate-200'}`}>
+                  {getInitials(entry.label)}
+                </div>
+              )}
+            </motion.div>
+          );
+        }) : (
+          <motion.div
+            data-testid="turn-order-empty-state"
+            className="w-full rounded-[1.35rem] border border-dashed border-slate-700/90 bg-slate-900/70 px-4 py-5 text-sm leading-relaxed text-slate-400"
+            initial={prefersReducedMotion ? false : { opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -10 }}
+            transition={prefersReducedMotion ? { duration: 0.01 } : TURN_ORDER_ENTRY_TRANSITION}
+          >
+            No tokens have joined the turn order yet.
+          </motion.div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 export default function GrigliataBoard({
   activeBackground,
   grid,
@@ -1536,6 +1823,20 @@ export default function GrigliataBoard({
   isGridVisibilityToggleDisabled,
   onDeactivateActiveBackground,
   isDeactivateActiveBackgroundDisabled,
+  isTurnOrderEnabled = true,
+  turnOrderEntries = [],
+  isTurnOrderStarted = false,
+  activeTurnTokenId = '',
+  onStartTurnOrder,
+  onAdvanceTurnOrder,
+  isTurnOrderProgressPending = false,
+  onResetTurnOrder,
+  isTurnOrderResetPending = false,
+  onJoinTurnOrder,
+  onLeaveTurnOrder,
+  turnOrderActionTokenId = '',
+  onSaveTurnOrderInitiative,
+  savingTurnOrderInitiativeTokenId = '',
   onAdjustGridSize,
   isGridSizeAdjustmentDisabled,
   onMoveTokens,
@@ -1576,7 +1877,13 @@ export default function GrigliataBoard({
   const [pingAnimationClock, setPingAnimationClock] = useState(() => Date.now());
   const [hoveredOverflowTokenId, setHoveredOverflowTokenId] = useState('');
   const [pinnedOverflowTokenId, setPinnedOverflowTokenId] = useState('');
+  const [isTurnOrderPanelCollapsed, setIsTurnOrderPanelCollapsed] = useState(() => readStoredTurnOrderCollapsed(currentUserId));
+  const turnOrderPanelBodyId = useId();
+  const [turnOrderContextMenu, setTurnOrderContextMenu] = useState(null);
+  const [turnOrderJoinPrompt, setTurnOrderJoinPrompt] = useState(null);
   const backgroundAssetSnapshot = useImageAssetSnapshot(activeBackground?.imageUrl || '');
+  const turnOrderContextMenuRef = useRef(null);
+  const turnOrderJoinInputRef = useRef(null);
   const [battlemapImageTransition, setBattlemapImageTransition] = useState({
     visibleLayer: null,
     fadingOutLayer: null,
@@ -1762,6 +2069,46 @@ export default function GrigliataBoard({
     return nextMap;
   }, [tokenItems]);
 
+  const activeTurnOrderContextToken = useMemo(() => {
+    if (!turnOrderContextMenu?.tokenId) {
+      return null;
+    }
+
+    return tokenItemsById.get(turnOrderContextMenu.tokenId) || null;
+  }, [tokenItemsById, turnOrderContextMenu]);
+
+  const activeTurnOrderJoinToken = useMemo(() => {
+    if (!turnOrderJoinPrompt?.tokenId) {
+      return null;
+    }
+
+    return tokenItemsById.get(turnOrderJoinPrompt.tokenId) || null;
+  }, [tokenItemsById, turnOrderJoinPrompt]);
+
+  useEffect(() => {
+    if (!turnOrderContextMenu) {
+      return;
+    }
+
+    if (!activeTurnOrderContextToken) {
+      setTurnOrderContextMenu(null);
+    }
+  }, [activeTurnOrderContextToken, turnOrderContextMenu]);
+
+  useEffect(() => {
+    if (!turnOrderJoinPrompt) {
+      return;
+    }
+
+    if (
+      !activeTurnOrderJoinToken
+      || !activeTurnOrderJoinToken.canMove
+      || activeTurnOrderJoinToken.isInTurnOrder
+    ) {
+      setTurnOrderJoinPrompt(null);
+    }
+  }, [activeTurnOrderJoinToken, turnOrderJoinPrompt]);
+
   const movableTokenIds = useMemo(
     () => new Set(tokenItems.filter((token) => token.canMove).map((token) => token.tokenId)),
     [tokenItems]
@@ -1815,9 +2162,10 @@ export default function GrigliataBoard({
     () => tokenItems.map((token) => ({
       ...token,
       renderPosition: dragPositionOverrides.get(token.tokenId) || token.position,
+      isActiveTurn: token.tokenId === activeTurnTokenId,
       isSelected: selectedTokenIdSet.has(token.tokenId),
     })),
-    [tokenItems, dragPositionOverrides, selectedTokenIdSet]
+    [activeTurnTokenId, tokenItems, dragPositionOverrides, selectedTokenIdSet]
   );
   const renderedAoEFigures = useMemo(
     () => figureItems.map((figure) => {
@@ -2109,6 +2457,57 @@ export default function GrigliataBoard({
       clearPingBroadcastTimer();
     }
   ), [clearPingBroadcastTimer, clearPingHoldTimer]);
+
+  useEffect(() => {
+    writeStoredTurnOrderCollapsed(currentUserId, isTurnOrderPanelCollapsed);
+  }, [currentUserId, isTurnOrderPanelCollapsed]);
+
+  useEffect(() => {
+    if (!turnOrderContextMenu) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event) => {
+      if (turnOrderContextMenuRef.current?.contains(event.target)) return;
+      setTurnOrderContextMenu(null);
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key !== 'Escape') return;
+      setTurnOrderContextMenu(null);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [turnOrderContextMenu]);
+
+  useEffect(() => {
+    if (!turnOrderJoinPrompt) {
+      return undefined;
+    }
+
+    const focusHandle = window.requestAnimationFrame(() => {
+      turnOrderJoinInputRef.current?.focus();
+      turnOrderJoinInputRef.current?.select();
+    });
+
+    const handleKeyDown = (event) => {
+      if (event.key !== 'Escape') return;
+      setTurnOrderJoinPrompt(null);
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.cancelAnimationFrame(focusHandle);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [turnOrderJoinPrompt]);
 
   useEffect(() => {
     onSharedInteractionChange?.(activeSharedInteraction);
@@ -2894,11 +3293,42 @@ export default function GrigliataBoard({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onDeleteAoEFigures, onDeleteTokens, selectedAoEFigureId, selectedTokenIds]);
 
+  const openTurnOrderContextMenu = useCallback((token, nativeEvent) => {
+    if (!token?.tokenId || !token?.canMove) {
+      setTurnOrderContextMenu(null);
+      return false;
+    }
+
+    const containerRect = containerRef.current?.getBoundingClientRect();
+    if (!containerRect) {
+      return false;
+    }
+
+    nativeEvent?.preventDefault?.();
+    setTurnOrderJoinPrompt(null);
+    setTurnOrderContextMenu({
+      tokenId: token.tokenId,
+      left: clampToRange(
+        (nativeEvent?.clientX || containerRect.left) - containerRect.left,
+        12,
+        Math.max(12, containerRect.width - 196)
+      ),
+      top: clampToRange(
+        (nativeEvent?.clientY || containerRect.top) - containerRect.top,
+        12,
+        Math.max(12, containerRect.height - 72)
+      ),
+    });
+    return true;
+  }, []);
+
   const handleStageMouseDown = (event) => {
     if (isTokenDragActive) return;
     if (event.target !== stageRef.current) return;
 
     const nativeEvent = event.evt;
+    setTurnOrderContextMenu(null);
+    setTurnOrderJoinPrompt(null);
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
 
@@ -3016,6 +3446,8 @@ export default function GrigliataBoard({
   const handleTokenMouseDown = (token, event) => {
     const nativeEvent = event.evt;
     event.cancelBubble = true;
+    setTurnOrderContextMenu(null);
+    setTurnOrderJoinPrompt(null);
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
     clearPingHoldTimer();
@@ -3025,6 +3457,10 @@ export default function GrigliataBoard({
     }
 
     if (isSecondaryMouseButton(nativeEvent)) {
+      if (openTurnOrderContextMenu(token, nativeEvent)) {
+        return;
+      }
+
       nativeEvent.preventDefault();
       if (hasPrimaryMouseButtonPressed(nativeEvent)) {
         commitMeasurementWaypoint(nativeEvent.clientX, nativeEvent.clientY);
@@ -3077,13 +3513,20 @@ export default function GrigliataBoard({
           x: selectedToken.position.x,
           y: selectedToken.position.y,
           size: selectedToken.position.size,
-        })),
+      })),
     };
+  };
+
+  const handleTokenContextMenu = (token, event) => {
+    event.cancelBubble = true;
+    openTurnOrderContextMenu(token, event.evt);
   };
 
   const handleAoEFigureMouseDown = (figure, event) => {
     const nativeEvent = event.evt;
     event.cancelBubble = true;
+    setTurnOrderContextMenu(null);
+    setTurnOrderJoinPrompt(null);
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
     clearPingHoldTimer();
@@ -3466,6 +3909,10 @@ export default function GrigliataBoard({
       minWidth: Math.min(cardWidth, Math.max(160, Math.round(screenSize * 2.2))),
     };
   }, [activeOverflowToken, stageSize.height, stageSize.width, viewport.scale, viewport.x, viewport.y]);
+  const sortedTurnOrderEntries = useMemo(
+    () => sortTurnOrderEntries(turnOrderEntries),
+    [turnOrderEntries]
+  );
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-700 bg-slate-950/80 shadow-2xl">
@@ -3569,54 +4016,125 @@ export default function GrigliataBoard({
           </button>
         </div>
 
-        {isManager && (
-          <div
-            data-testid="grigliata-manager-controls"
-            className="pointer-events-none absolute right-4 top-4 z-30 flex flex-col items-end gap-2"
-          >
+        <div
+          data-testid="grigliata-right-rail"
+          className={`pointer-events-none absolute right-4 top-4 bottom-4 z-30 flex flex-col items-end gap-3 ${TURN_ORDER_PANEL_WIDTH_CLASS}`}
+        >
+          {isManager && (
+            <div
+              data-testid="grigliata-manager-controls"
+              className="pointer-events-none flex w-full flex-col items-end gap-2"
+            >
+                <button
+                  type="button"
+                  onClick={() => onToggleGridVisibility?.(activeBackground?.id || '')}
+                  disabled={isGridVisibilityToggleDisabled}
+                  title={isGridVisible ? 'Hide the shared grid for everyone' : 'Show the shared grid for everyone'}
+                  aria-label={isGridVisible ? 'Hide Grid' : 'Show Grid'}
+                  aria-pressed={isGridVisible}
+                  className={`${getQuickControlButtonClassName(isGridVisible)} disabled:cursor-not-allowed disabled:opacity-60`}
+                >
+                  {isGridVisible ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDeactivateActiveBackground?.()}
+                  disabled={isDeactivateActiveBackgroundDisabled}
+                  title="Deactivate active map"
+                  aria-label="Deactivate active map"
+                  className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
+                >
+                  <FiImage className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onAdjustGridSize?.(1)}
+                  disabled={isGridSizeAdjustmentDisabled}
+                  title="Increase square size"
+                  aria-label="Increase square size"
+                  className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
+                >
+                  <FiPlus className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onAdjustGridSize?.(-1)}
+                  disabled={isGridSizeAdjustmentDisabled}
+                  title="Decrease square size"
+                  aria-label="Decrease square size"
+                  className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
+                >
+                  <FiMinus className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onResetTurnOrder?.()}
+                  disabled={isTurnOrderResetPending || isTurnOrderProgressPending || (turnOrderEntries.length < 1 && !isTurnOrderStarted)}
+                  title="Reset turn order"
+                  aria-label="Reset turn order"
+                  className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
+                >
+                  <FiRotateCcw className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isTurnOrderStarted) {
+                      onAdvanceTurnOrder?.();
+                      return;
+                    }
+
+                    onStartTurnOrder?.();
+                  }}
+                  disabled={isTurnOrderProgressPending || isTurnOrderResetPending || turnOrderEntries.length < 1 || (isTurnOrderStarted ? !onAdvanceTurnOrder : !onStartTurnOrder)}
+                  title={isTurnOrderStarted ? 'Advance turn order' : 'Start turn order'}
+                  aria-label={isTurnOrderStarted ? 'Advance turn order' : 'Start turn order'}
+                  className={`${getQuickControlButtonClassName(isTurnOrderStarted)} disabled:cursor-not-allowed disabled:opacity-60`}
+                >
+                  {isTurnOrderStarted ? <FiSkipForward className="h-4 w-4" /> : <FiPlay className="h-4 w-4" />}
+                </button>
+            </div>
+          )}
+
+          <div className="pointer-events-none flex w-full flex-col items-end gap-2">
             <button
               type="button"
-              onClick={() => onToggleGridVisibility?.(activeBackground?.id || '')}
-              disabled={isGridVisibilityToggleDisabled}
-              title={isGridVisible ? 'Hide the shared grid for everyone' : 'Show the shared grid for everyone'}
-              aria-label={isGridVisible ? 'Hide Grid' : 'Show Grid'}
-              aria-pressed={isGridVisible}
-              className={`${getQuickControlButtonClassName(isGridVisible)} disabled:cursor-not-allowed disabled:opacity-60`}
+              data-testid="turn-order-rail-toggle"
+              onClick={() => setIsTurnOrderPanelCollapsed((currentState) => !currentState)}
+              title={isTurnOrderPanelCollapsed ? 'Expand turn order' : 'Collapse turn order'}
+              aria-label={isTurnOrderPanelCollapsed ? 'Expand turn order' : 'Collapse turn order'}
+              aria-controls={turnOrderPanelBodyId}
+              aria-expanded={!isTurnOrderPanelCollapsed}
+              className={getQuickControlButtonClassName(!isTurnOrderPanelCollapsed)}
             >
-              {isGridVisible ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
-            </button>
-            <button
-              type="button"
-              onClick={() => onDeactivateActiveBackground?.()}
-              disabled={isDeactivateActiveBackgroundDisabled}
-              title="Deactivate active map"
-              aria-label="Deactivate active map"
-              className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
-            >
-              <FiImage className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => onAdjustGridSize?.(1)}
-              disabled={isGridSizeAdjustmentDisabled}
-              title="Increase square size"
-              aria-label="Increase square size"
-              className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
-            >
-              <FiPlus className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => onAdjustGridSize?.(-1)}
-              disabled={isGridSizeAdjustmentDisabled}
-              title="Decrease square size"
-              aria-label="Decrease square size"
-              className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
-            >
-              <FiMinus className="h-4 w-4" />
+              <FiClock className="h-4 w-4" />
             </button>
           </div>
-        )}
+
+          <AnimatePresence initial={false}>
+            {!isTurnOrderPanelCollapsed && (
+              <motion.div
+                key="turn-order-panel"
+                id={turnOrderPanelBodyId}
+                data-testid="turn-order-panel"
+                className="pointer-events-none flex min-h-0 w-full flex-1 items-start overflow-hidden"
+                initial={prefersReducedMotion ? { opacity: 1, height: 'auto' } : { opacity: 0, height: 0, y: -8 }}
+                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                exit={prefersReducedMotion ? { opacity: 0, height: 0 } : { opacity: 0, height: 0, y: -8 }}
+                transition={prefersReducedMotion ? { duration: 0.01 } : TURN_ORDER_DRAWER_TRANSITION}
+              >
+                <TurnOrderPanel
+                  currentUserId={currentUserId}
+                  entries={sortedTurnOrderEntries}
+                  isManager={isManager}
+                  activeTurnTokenId={activeTurnTokenId}
+                  onSaveTurnOrderInitiative={onSaveTurnOrderInitiative}
+                  savingTurnOrderInitiativeTokenId={savingTurnOrderInitiativeTokenId}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
         {stageSize.width > 0 && stageSize.height > 0 && (
           <Stage
@@ -3725,10 +4243,12 @@ export default function GrigliataBoard({
                   token={token}
                   position={token.renderPosition}
                   canMove={token.canMove}
+                  isActiveTurn={token.isActiveTurn}
                   isSelected={token.isSelected}
                   badgeImages={tokenStatusBadgeImages}
                   drawTheme={resolvedDrawTheme}
                   onMouseDown={handleTokenMouseDown}
+                  onContextMenu={handleTokenContextMenu}
                   onOverflowMouseEnter={(tokenId) => setHoveredOverflowTokenId(tokenId || '')}
                   onOverflowMouseLeave={(tokenId) => {
                     setHoveredOverflowTokenId((currentTokenId) => (
@@ -3834,9 +4354,149 @@ export default function GrigliataBoard({
           </div>
         )}
 
-        <GrigliataTokenActions
-          actionState={selectedTokenActionState}
-          viewportSize={stageSize}
+          {turnOrderContextMenu && activeTurnOrderContextToken && (
+            <div className="pointer-events-none absolute inset-0 z-[32]">
+              <div
+                ref={turnOrderContextMenuRef}
+                data-testid="turn-order-context-menu"
+              className="pointer-events-auto absolute min-w-[11rem] overflow-hidden rounded-[1.25rem] border border-slate-700/90 bg-slate-950/96 p-1.5 shadow-2xl shadow-black/55 backdrop-blur-md"
+              style={{
+                left: turnOrderContextMenu.left,
+                top: turnOrderContextMenu.top,
+              }}
+            >
+                <button
+                  type="button"
+                  data-testid={`turn-order-context-action-${activeTurnOrderContextToken.tokenId}`}
+                  disabled={turnOrderActionTokenId === activeTurnOrderContextToken.tokenId}
+                  onClick={async () => {
+                    const tokenId = activeTurnOrderContextToken.tokenId;
+                    setTurnOrderContextMenu(null);
+
+                    if (activeTurnOrderContextToken.isInTurnOrder) {
+                      await Promise.resolve(onLeaveTurnOrder?.(tokenId));
+                      return;
+                    }
+
+                    const baseInitiative = Number.isInteger(activeTurnOrderContextToken.turnOrderInitiative)
+                      ? activeTurnOrderContextToken.turnOrderInitiative
+                      : 0;
+                    setTurnOrderJoinPrompt({
+                      tokenId,
+                      draft: String(baseInitiative),
+                    });
+                  }}
+                  className="flex w-full items-center justify-between rounded-[0.95rem] px-3 py-2 text-left text-sm font-medium text-slate-100 transition-colors duration-150 hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <span>
+                    {activeTurnOrderContextToken.isInTurnOrder ? 'Remove from turn order' : 'Add turn order'}
+                </span>
+                <FiClock className="h-4 w-4 text-slate-400" />
+              </button>
+              </div>
+            </div>
+          )}
+
+          {turnOrderJoinPrompt && activeTurnOrderJoinToken && (
+            <div className="pointer-events-auto absolute inset-0 z-[34] flex items-center justify-center">
+              <button
+                type="button"
+                aria-label="Close initiative prompt"
+                className="absolute inset-0 bg-slate-950/50 backdrop-blur-[2px]"
+                onClick={() => setTurnOrderJoinPrompt(null)}
+              />
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="turn-order-join-title"
+                data-testid="turn-order-join-overlay"
+                className="relative z-10 w-[min(16rem,calc(100vw-2rem))] rounded-[1.5rem] border border-fuchsia-300/30 bg-slate-950/96 p-4 shadow-2xl shadow-black/60 ring-1 ring-fuchsia-200/10 backdrop-blur-md"
+              >
+                <div className="mb-3 min-w-0">
+                  <div
+                    id="turn-order-join-title"
+                    className="text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-slate-400"
+                  >
+                    Initiative
+                  </div>
+                  <div className="mt-1 truncate text-sm font-semibold text-slate-100">
+                    {activeTurnOrderJoinToken.label}
+                  </div>
+                </div>
+                <form
+                  className="space-y-3"
+                  onSubmit={async (event) => {
+                    event.preventDefault();
+
+                    const normalizedDraft = typeof turnOrderJoinPrompt?.draft === 'string'
+                      ? turnOrderJoinPrompt.draft.trim()
+                      : '';
+                    if (!/^-?\d+$/.test(normalizedDraft)) {
+                      return;
+                    }
+
+                    const nextInitiative = Number.parseInt(normalizedDraft, 10);
+                    const didJoin = await Promise.resolve(
+                      onJoinTurnOrder?.(activeTurnOrderJoinToken.tokenId, nextInitiative)
+                    );
+
+                    if (didJoin !== false) {
+                      setTurnOrderJoinPrompt(null);
+                    }
+                  }}
+                >
+                  <input
+                    ref={turnOrderJoinInputRef}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="-?[0-9]*"
+                    value={turnOrderJoinPrompt.draft}
+                    disabled={turnOrderActionTokenId === activeTurnOrderJoinToken.tokenId}
+                    data-testid="turn-order-join-initiative-input"
+                    aria-label={`Initial initiative for ${activeTurnOrderJoinToken.label}`}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setTurnOrderJoinPrompt((currentPrompt) => (
+                        currentPrompt
+                          ? {
+                              ...currentPrompt,
+                              draft: nextValue,
+                            }
+                          : currentPrompt
+                      ));
+                    }}
+                    className="w-full rounded-xl border border-slate-700/90 bg-slate-950/95 px-3 py-2 text-center text-sm font-semibold text-slate-100 outline-none transition-colors duration-150 focus:border-fuchsia-300/75 disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      data-testid="turn-order-join-cancel"
+                      disabled={turnOrderActionTokenId === activeTurnOrderJoinToken.tokenId}
+                      onClick={() => setTurnOrderJoinPrompt(null)}
+                      className="rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-xs font-medium text-slate-300 transition-colors duration-150 hover:border-slate-500/80 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      data-testid="turn-order-join-confirm"
+                      disabled={
+                        turnOrderActionTokenId === activeTurnOrderJoinToken.tokenId
+                        || !/^-?\d+$/.test(typeof turnOrderJoinPrompt?.draft === 'string' ? turnOrderJoinPrompt.draft.trim() : '')
+                      }
+                      className="rounded-xl border border-fuchsia-300/70 bg-gradient-to-br from-fuchsia-500/28 via-violet-500/24 to-pink-500/34 px-3 py-2 text-xs font-semibold text-fuchsia-50 shadow-lg shadow-fuchsia-950/35 transition-colors duration-150 hover:border-fuchsia-200/80 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Confirm
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          <GrigliataTokenActions
+            actionState={selectedTokenActionState}
+            viewportSize={stageSize}
           isTokenVisibilityActionPending={isTokenVisibilityActionPending}
           isTokenDeadActionPending={isTokenDeadActionPending}
           isTokenStatusActionPending={isTokenStatusActionPending}

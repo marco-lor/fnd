@@ -33,6 +33,11 @@ import {
   normalizeGrigliataMusicPlaybackState,
   sortGrigliataMusicTracks,
 } from './music';
+import {
+  normalizeTurnCounter,
+  normalizeTurnEffects,
+  sortTurnOrderEntries,
+} from './turnOrder';
 
 const LIVE_INTERACTION_CLOCK_INTERVAL_MS = 15 * 1000;
 const resolveCustomTokenRole = (token = {}, tokenType = '') => {
@@ -82,6 +87,7 @@ export default function useGrigliataPageData({
   const [foeLibrary, setFoeLibrary] = useState([]);
   const [tokenProfiles, setTokenProfiles] = useState([]);
   const [activePlacements, setActivePlacements] = useState([]);
+  const [isActivePlacementsReady, setIsActivePlacementsReady] = useState(false);
   const [aoeFigureSnapshots, setAoEFigureSnapshots] = useState([]);
   const [liveInteractionSnapshots, setLiveInteractionSnapshots] = useState([]);
   const [musicTracks, setMusicTracks] = useState([]);
@@ -174,8 +180,11 @@ export default function useGrigliataPageData({
   useEffect(() => {
     if (!currentUserId || !activeBackgroundId) {
       setActivePlacements([]);
+      setIsActivePlacementsReady(false);
       return undefined;
     }
+
+    setIsActivePlacementsReady(false);
 
     const placementsQuery = isManager
       ? query(
@@ -196,10 +205,12 @@ export default function useGrigliataPageData({
           ...docSnap.data(),
         }));
         setActivePlacements(nextPlacements);
+        setIsActivePlacementsReady(true);
       },
       (error) => {
         console.error('Failed to load Grigliata token placements:', error);
         setActivePlacements([]);
+        setIsActivePlacementsReady(true);
       }
     );
 
@@ -491,6 +502,13 @@ export default function useGrigliataPageData({
           tokenId,
           label: typeof placement?.label === 'string' ? placement.label : '',
           imageUrl: typeof placement?.imageUrl === 'string' ? placement.imageUrl : '',
+          isInTurnOrder: placement?.isInTurnOrder === true,
+          turnOrderInitiative: Number.isInteger(placement?.turnOrderInitiative)
+            ? placement.turnOrderInitiative
+            : null,
+          turnOrderJoinedAt: placement?.turnOrderJoinedAt || null,
+          turnCounter: normalizeTurnCounter(placement?.turnCounter, 0),
+          turnEffects: normalizeTurnEffects(placement?.turnEffects),
         };
       })
       .filter(Boolean),
@@ -589,6 +607,13 @@ export default function useGrigliataPageData({
           isVisibleToPlayers: placement?.isVisibleToPlayers !== false,
           isDead: placement?.isDead === true,
           statuses: Array.isArray(placement?.statuses) ? placement.statuses : [],
+          isInTurnOrder: placement?.isInTurnOrder === true,
+          turnOrderInitiative: Number.isInteger(placement?.turnOrderInitiative)
+            ? placement.turnOrderInitiative
+            : null,
+          turnOrderJoinedAt: placement?.turnOrderJoinedAt || null,
+          turnCounter: normalizeTurnCounter(placement?.turnCounter, 0),
+          turnEffects: normalizeTurnEffects(placement?.turnEffects),
           placed: true,
         };
       }),
@@ -601,6 +626,22 @@ export default function useGrigliataPageData({
       normalizedActivePlacements,
       tokenProfilesByTokenId,
     ]
+  );
+
+  const turnOrderEntries = useMemo(
+    () => sortTurnOrderEntries([...boardTokens]
+      .filter((token) => token?.isInTurnOrder === true)
+      .map((token) => ({
+        tokenId: token.tokenId,
+        ownerUid: token.ownerUid,
+        label: token.label || token.characterId || token.ownerUid || 'Token',
+        imageUrl: token.imageUrl || '',
+        tokenType: token.tokenType || 'character',
+        initiative: Number.isInteger(token.turnOrderInitiative) ? token.turnOrderInitiative : 0,
+        joinedAt: token.turnOrderJoinedAt || null,
+        joinedAtMs: token.turnOrderJoinedAt ? timestampToMillis(token.turnOrderJoinedAt) : Number.MAX_SAFE_INTEGER,
+      }))),
+    [boardTokens]
   );
 
   const customUserTokenProfiles = useMemo(
@@ -724,6 +765,18 @@ export default function useGrigliataPageData({
     [activeBackground]
   );
   const isGridVisible = activeBackground?.isGridVisible !== false;
+  const isTurnOrderEnabled = true;
+  const turnOrderActiveState = activeBackground?.turnOrderActive && typeof activeBackground.turnOrderActive === 'object'
+    ? activeBackground.turnOrderActive
+    : null;
+  const activeTurnTokenId = typeof turnOrderActiveState?.tokenId === 'string'
+    ? turnOrderActiveState.tokenId
+    : '';
+  const activeTurnEntry = useMemo(
+    () => turnOrderEntries.find((entry) => entry.tokenId === activeTurnTokenId) || null,
+    [activeTurnTokenId, turnOrderEntries]
+  );
+  const isTurnOrderStarted = !!activeTurnTokenId;
 
   const grid = useMemo(() => {
     if (!activeBackgroundId || activeGridSizeOverride?.backgroundId !== activeBackgroundId) {
@@ -749,8 +802,13 @@ export default function useGrigliataPageData({
     customUserTokens,
     foeLibrary,
     grid,
+    isActivePlacementsReady,
     isCurrentUserTokenHiddenOnActiveMap,
     isGridVisible,
+    isTurnOrderEnabled,
+    isTurnOrderStarted,
+    activeTurnEntry,
+    activeTurnTokenId,
     musicPlaybackState,
     musicTracks,
     persistedActiveGrid,
@@ -759,5 +817,6 @@ export default function useGrigliataPageData({
     setSelectedBackgroundId,
     sharedInteractions,
     tokenProfilesByTokenId,
+    turnOrderEntries,
   };
 }

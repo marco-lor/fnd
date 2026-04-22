@@ -257,6 +257,82 @@ service cloud.firestore {
         );
     }
 
+    function isValidGrigliataTurnEffect(effect) {
+      return effect is map
+        && effect.keys().hasAll([
+          "id",
+          "kind",
+          "totalTurns",
+          "remainingTurns",
+          "appliesFromTurnCounter"
+        ])
+        && effect.keys().hasOnly([
+          "id",
+          "kind",
+          "totalTurns",
+          "remainingTurns",
+          "appliesFromTurnCounter"
+        ])
+        && effect.id is string
+        && effect.id.size() > 0
+        && effect.kind is string
+        && effect.kind.size() > 0
+        && effect.totalTurns is int
+        && effect.totalTurns > 0
+        && effect.remainingTurns is int
+        && effect.remainingTurns >= 0
+        && effect.remainingTurns <= effect.totalTurns
+        && effect.appliesFromTurnCounter is int
+        && effect.appliesFromTurnCounter >= 0;
+    }
+
+    function hasValidGrigliataTurnEffects(effects) {
+      return effects is list
+        && effects.size() <= 12
+        && (effects.size() < 1 || isValidGrigliataTurnEffect(effects[0]))
+        && (effects.size() < 2 || isValidGrigliataTurnEffect(effects[1]))
+        && (effects.size() < 3 || isValidGrigliataTurnEffect(effects[2]))
+        && (effects.size() < 4 || isValidGrigliataTurnEffect(effects[3]))
+        && (effects.size() < 5 || isValidGrigliataTurnEffect(effects[4]))
+        && (effects.size() < 6 || isValidGrigliataTurnEffect(effects[5]))
+        && (effects.size() < 7 || isValidGrigliataTurnEffect(effects[6]))
+        && (effects.size() < 8 || isValidGrigliataTurnEffect(effects[7]))
+        && (effects.size() < 9 || isValidGrigliataTurnEffect(effects[8]))
+        && (effects.size() < 10 || isValidGrigliataTurnEffect(effects[9]))
+        && (effects.size() < 11 || isValidGrigliataTurnEffect(effects[10]))
+        && (effects.size() < 12 || isValidGrigliataTurnEffect(effects[11]));
+    }
+
+    function isValidOwnerManagedGrigliataTurnOrderCreate(data) {
+      let hasJoinedAt = data.keys().hasAny(["turnOrderJoinedAt"]);
+      let isInTurnOrder = data.keys().hasAny(["isInTurnOrder"]) && data.isInTurnOrder == true;
+
+      return (
+        !hasJoinedAt && !isInTurnOrder
+      ) || (
+        hasJoinedAt
+        && isInTurnOrder
+        && data.turnOrderJoinedAt == request.time
+      );
+    }
+
+    function isValidOwnerManagedGrigliataTurnOrderUpdate(nextData, prevData) {
+      let nextHasJoinedAt = nextData.keys().hasAny(["turnOrderJoinedAt"]);
+      let prevHasJoinedAt = prevData.keys().hasAny(["turnOrderJoinedAt"]);
+      let nextIsInTurnOrder = nextData.keys().hasAny(["isInTurnOrder"]) && nextData.isInTurnOrder == true;
+
+      return (
+        !nextHasJoinedAt && !nextIsInTurnOrder
+      ) || (
+        nextHasJoinedAt
+        && nextIsInTurnOrder
+        && (
+          (!prevHasJoinedAt && nextData.turnOrderJoinedAt == request.time)
+          || (prevHasJoinedAt && nextData.turnOrderJoinedAt == prevData.turnOrderJoinedAt)
+        )
+      );
+    }
+
     function isValidGrigliataAoEFigureType(figureType) {
       return figureType in ["circle", "square", "cone", "rectangle"];
     }
@@ -302,6 +378,11 @@ service cloud.firestore {
           "isVisibleToPlayers",
           "isDead",
           "statuses",
+          "isInTurnOrder",
+          "turnOrderInitiative",
+          "turnOrderJoinedAt",
+          "turnCounter",
+          "turnEffects",
           "updatedAt",
           "updatedBy"
         ])
@@ -317,6 +398,29 @@ service cloud.firestore {
           || data.isVisibleToPlayers is bool
         )
         && data.isDead is bool
+        && (
+          !data.keys().hasAny(["isInTurnOrder"])
+          || data.isInTurnOrder is bool
+        )
+        && (
+          !data.keys().hasAny(["turnOrderInitiative"])
+          || data.turnOrderInitiative is int
+        )
+        && (
+          !data.keys().hasAny(["turnOrderJoinedAt"])
+          || data.turnOrderJoinedAt is timestamp
+        )
+        && (
+          !data.keys().hasAny(["turnCounter"])
+          || (
+            data.turnCounter is int
+            && data.turnCounter >= 0
+          )
+        )
+        && (
+          !data.keys().hasAny(["turnEffects"])
+          || hasValidGrigliataTurnEffects(data.turnEffects)
+        )
         && (
           !data.keys().hasAny(["statuses"])
           || (
@@ -855,6 +959,8 @@ service cloud.firestore {
             request.auth.uid == request.resource.data.ownerUid
             && isGrigliataPlacementVisibleToPlayers(request.resource.data)
             && !isGrigliataPlacementDead(request.resource.data)
+            && !request.resource.data.keys().hasAny(["turnCounter", "turnEffects"])
+            && isValidOwnerManagedGrigliataTurnOrderCreate(request.resource.data)
           )
         );
 
@@ -871,6 +977,8 @@ service cloud.firestore {
             && isGrigliataPlacementVisibleToPlayers(resource.data)
             && isGrigliataPlacementVisibleToPlayers(request.resource.data)
             && isGrigliataPlacementDead(request.resource.data) == isGrigliataPlacementDead(resource.data)
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["turnCounter", "turnEffects"])
+            && isValidOwnerManagedGrigliataTurnOrderUpdate(request.resource.data, resource.data)
           )
         );
 
