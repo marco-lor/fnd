@@ -1,6 +1,7 @@
+import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
-import { db, storage } from "../firebaseConfig";
+import { auth, db, storage } from "../firebaseConfig";
 
 const COLLECTION_CONFIG = {
   tecniche: {
@@ -16,6 +17,8 @@ const COLLECTION_CONFIG = {
     sizeLimit: 900000,
   },
 };
+
+const AUTH_WAIT_TIMEOUT_MS = 5000;
 
 function sanitizeStorageName(value) {
   const sanitized = String(value || "")
@@ -49,6 +52,70 @@ function extractStoragePathFromUrl(fileUrl) {
   }
 }
 
+function createAuthenticationError() {
+  const error = new Error("You must be logged in to upload media. Please sign in again.");
+  error.code = "auth/not-authenticated";
+  return error;
+}
+
+async function waitForAuthenticatedUser(timeoutMs = AUTH_WAIT_TIMEOUT_MS) {
+  if (auth.currentUser) {
+    return auth.currentUser;
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timeoutId;
+    let unsubscribe = () => {};
+
+    unsubscribe = onAuthStateChanged(
+      auth,
+      (currentUser) => {
+        if (settled || !currentUser) {
+          return;
+        }
+
+        settled = true;
+        clearTimeout(timeoutId);
+        unsubscribe();
+        resolve(currentUser);
+      },
+      (error) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        clearTimeout(timeoutId);
+        unsubscribe();
+        reject(error);
+      }
+    );
+
+    timeoutId = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      unsubscribe();
+      reject(createAuthenticationError());
+    }, timeoutMs);
+  });
+}
+
+async function ensureStorageUploadAuth() {
+  const currentUser = await waitForAuthenticatedUser();
+
+  try {
+    await currentUser.getIdToken(true);
+  } catch (error) {
+    throw createAuthenticationError();
+  }
+
+  return currentUser;
+}
+
 async function deleteStoragePath(storagePath) {
   if (!storagePath) {
     return false;
@@ -72,6 +139,7 @@ async function uploadFile(collectionKey, userId, itemName, suffix, file, folder)
   const safeBase = `${config.prefix}_${userId}_${sanitizeStorageName(itemName)}_${Date.now()}`;
   const storagePath = `${folder}/${safeBase}_${suffix}`;
   const storageRef = ref(storage, storagePath);
+  await ensureStorageUploadAuth();
 
   await uploadBytes(storageRef, file);
   const downloadUrl = await getDownloadURL(storageRef);

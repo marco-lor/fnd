@@ -1,9 +1,9 @@
 // file: ./frontend/src/components/dmDashboard/elements/buttons/addTecnicaPersonale.js
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { db, storage } from '../../../firebaseConfig';
-import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db } from '../../../firebaseConfig';
+import { doc, getDoc } from "firebase/firestore";
+import { saveTecnicaForUser } from '../../../common/userOwnedMedia';
 
 // --- Style definition moved here ---
 const sleekButtonStyle = "w-36 px-2 py-1 bg-gradient-to-r from-blue-800 to-indigo-900 hover:from-blue-700 hover:to-indigo-800 text-white text-xs font-medium rounded-md transition-all duration-150 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 shadow-sm";
@@ -34,6 +34,7 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
   const [videoFile, setVideoFile] = useState(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
   const [userName, setUserName] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -75,9 +76,23 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
     fetchData();
   }, [userId]);
 
+  useEffect(() => {
+    return () => {
+      if (imagePreviewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(imagePreviewUrl);
+      }
+      if (videoPreviewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(videoPreviewUrl);
+      }
+    };
+  }, [imagePreviewUrl, videoPreviewUrl]);
+
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
+      if (imagePreviewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(imagePreviewUrl);
+      }
       setImageFile(file);
       setImagePreviewUrl(URL.createObjectURL(file));
     }
@@ -86,6 +101,9 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
   const handleVideoChange = (e) => {
     const file = e.target.files[0];
     if (file) {
+      if (videoPreviewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(videoPreviewUrl);
+      }
       setVideoFile(file);
       setVideoPreviewUrl(URL.createObjectURL(file));
     }
@@ -93,6 +111,7 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
 
   const handleSaveTecnica = async () => {
     try {
+      setIsSaving(true);
       const tecnicaName = tecnicaFormData.Nome ? tecnicaFormData.Nome.trim() : "";
       if (!tecnicaName) {
         alert("Nome is required");
@@ -107,59 +126,23 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
         Effetto: tecnicaFormData.Effetto || ""
       };
 
-      // Upload media if present
-      const safeFileName = `tecnica_${userId}_${tecnicaName.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}`;
+      await saveTecnicaForUser({
+        userId,
+        originalName: tecnicaName,
+        entryData: tecnicaData,
+        imageFile,
+        videoFile,
+      });
 
-      if (imageFile) {
-        try {
-          const imageRef = ref(storage, 'tecnicas/' + safeFileName + '_image');
-          await uploadBytes(imageRef, imageFile);
-          const downloadURL = await getDownloadURL(imageRef);
-          tecnicaData.image_url = downloadURL;
-        } catch (imageError) {
-          console.error("Error uploading image:", imageError);
-        }
-      }
-
-      if (videoFile) {
-        try {
-          const videoRef = ref(storage, 'tecnicas/videos/' + safeFileName + '_video');
-          await uploadBytes(videoRef, videoFile);
-          const downloadURL = await getDownloadURL(videoRef);
-          tecnicaData.video_url = downloadURL;
-        } catch (videoError) {
-          console.error("Error uploading video:", videoError);
-        }
-      }
-
-      // Update the user's tecniche field
-      const userRef = doc(db, "users", userId);
-      const userDoc = await getDoc(userRef);
-
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        const updatedTecniche = { ...(userData.tecniche || {}) };
-
-        // Add or replace the tecnica
-        updatedTecniche[tecnicaName] = tecnicaData;
-
-        // Check document size (Firestore limit is 1MB)
-        if (JSON.stringify(updatedTecniche).length > 900000) {
-          alert("Data too large. Try using a smaller image or video.");
-          return;
-        }
-
-        await updateDoc(userRef, { tecniche: updatedTecniche });
-        onClose(true);
-      } else {
-        alert("User not found");
-      }
+      onClose(true);
     } catch (error) {
       console.error("Error saving tecnica:", error);
       if (error.code) {
         console.error("Firebase error code:", error.code);
       }
-      alert("Error saving tecnica. Check console for details.");
+      alert(error.message || "Error saving tecnica. Check console for details.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -271,9 +254,10 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
             </button>
             <button
               type="submit"
+              disabled={isSaving}
               className="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-md shadow-md transition-all duration-200"
             >
-              Save
+              {isSaving ? "Saving..." : "Save"}
             </button>
           </div>
         </form>
