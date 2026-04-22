@@ -100,6 +100,9 @@ const ACTIVE_TURN_PRIMARY = 'rgba(251, 191, 36, 0.98)';
 const ACTIVE_TURN_SECONDARY = '#fef3c7';
 const ACTIVE_TURN_GLOW = 'rgba(245, 158, 11, 0.42)';
 const ACTIVE_TURN_FILL = 'rgba(245, 158, 11, 0.16)';
+const MAP_PING_EPIC_ACCENT = '#f97316';
+const MAP_PING_EPIC_HIGHLIGHT = '#fde047';
+const MAP_PING_EPIC_SHADOW = 'rgba(249, 115, 22, 0.58)';
 const DRAW_PICKER_EASE = [0.22, 1, 0.36, 1];
 const BATTLEMAP_IMAGE_FADE_DURATION_MS = 1000;
 const QUICK_CONTROL_NEUTRAL_SURFACE_CLASS = 'border-slate-700/90 bg-slate-950/92 shadow-lg shadow-slate-950/35';
@@ -947,15 +950,19 @@ const MapPingOverlay = ({
   const easedProgress = easeOutCubic(progress);
   const pulseStrength = Math.sin(progress * Math.PI);
   const fadeOpacity = 1 - progress;
-  const outerRadius = prefersReducedMotion ? 42 : 18 + (easedProgress * 108);
-  const innerRadius = prefersReducedMotion ? 24 : 10 + (easedProgress * 54);
-  const sigilRadius = prefersReducedMotion ? 18 : 16 + (pulseStrength * 12);
-  const coreRadius = prefersReducedMotion ? 7 : 7 + (pulseStrength * 6);
-  const rayInnerRadius = prefersReducedMotion ? 12 : 12 + (easedProgress * 12);
-  const rayOuterRadius = prefersReducedMotion ? 34 : 30 + (easedProgress * 42);
-  const rayStrokeWidth = prefersReducedMotion ? 1.5 : Math.max(1.4, 2.4 - progress);
-  const rayAngles = [0, Math.PI / 4, Math.PI / 2, (Math.PI * 3) / 4];
-  const diamondRadius = prefersReducedMotion ? 12 : 10 + (pulseStrength * 8);
+  const haloRadius = prefersReducedMotion ? 42 : 22 + (easedProgress * 76);
+  const flareRadius = prefersReducedMotion ? 68 : 30 + (easedProgress * 138);
+  const outerRadius = prefersReducedMotion ? 60 : 28 + (easedProgress * 128);
+  const innerRadius = prefersReducedMotion ? 34 : 16 + (easedProgress * 66);
+  const sigilRadius = prefersReducedMotion ? 28 : 18 + (pulseStrength * 14);
+  const coreRadius = prefersReducedMotion ? 10 : 9 + (pulseStrength * 7);
+  const rayInnerRadius = prefersReducedMotion ? 16 : 14 + (easedProgress * 14);
+  const rayOuterRadius = prefersReducedMotion ? 62 : 44 + (easedProgress * 62);
+  const rayStrokeWidth = prefersReducedMotion ? 3 : Math.max(2.8, 4.8 - (progress * 1.4));
+  const rayAngles = Array.from({ length: 8 }, (_, index) => (Math.PI / 4) * index);
+  const diamondRadius = prefersReducedMotion ? 18 : 12 + (pulseStrength * 10);
+  const accentOpacity = prefersReducedMotion ? 0.92 : fadeOpacity * 0.92;
+  const glowOpacity = prefersReducedMotion ? 0.86 : fadeOpacity * 0.86;
 
   return (
     <Group
@@ -965,49 +972,85 @@ const MapPingOverlay = ({
       data-testid={overlayId ? `map-ping-overlay-${overlayId}` : undefined}
     >
       <Circle
+        radius={flareRadius}
+        fill={drawTheme.stroke}
+        opacity={prefersReducedMotion ? 0.12 : 0.06 + (fadeOpacity * 0.16)}
+        shadowColor={drawTheme.glow}
+        shadowBlur={prefersReducedMotion ? 18 : 34}
+        shadowOpacity={glowOpacity * 0.46}
+      />
+      <Circle
+        radius={haloRadius}
+        fill={MAP_PING_EPIC_ACCENT}
+        opacity={prefersReducedMotion ? 0.12 : 0.05 + (fadeOpacity * 0.12)}
+        shadowColor={MAP_PING_EPIC_SHADOW}
+        shadowBlur={prefersReducedMotion ? 14 : 26}
+        shadowOpacity={accentOpacity * 0.42}
+      />
+      <Circle
         radius={outerRadius}
         stroke={drawTheme.outlineStroke}
-        strokeWidth={Math.max(3.5, 6 - (progress * 2))}
-        opacity={0.16 + (fadeOpacity * 0.12)}
+        strokeWidth={Math.max(6, 9 - (progress * 2.2))}
+        opacity={0.22 + (fadeOpacity * 0.16)}
       />
       <Circle
         radius={outerRadius}
         stroke={drawTheme.stroke}
-        strokeWidth={Math.max(1.8, 3 - progress)}
-        opacity={fadeOpacity * 0.66}
+        strokeWidth={Math.max(3.6, 6.4 - (progress * 1.6))}
+        opacity={glowOpacity}
         shadowColor={drawTheme.glow}
-        shadowBlur={22}
-        shadowOpacity={fadeOpacity * 0.36}
+        shadowBlur={prefersReducedMotion ? 18 : 34}
+        shadowOpacity={glowOpacity * 0.62}
+      />
+      <Circle
+        radius={Math.max(24, outerRadius - 12)}
+        stroke={MAP_PING_EPIC_ACCENT}
+        strokeWidth={Math.max(2.8, 4.4 - progress)}
+        opacity={accentOpacity * 0.62}
+        shadowColor={MAP_PING_EPIC_SHADOW}
+        shadowBlur={prefersReducedMotion ? 12 : 20}
+        shadowOpacity={accentOpacity * 0.42}
       />
       <Circle
         radius={innerRadius}
-        fill="#f8fafc"
-        opacity={fadeOpacity * 0.08}
+        fill={drawTheme.stroke}
+        opacity={prefersReducedMotion ? 0.12 : 0.08 + (fadeOpacity * 0.16)}
         shadowColor={drawTheme.glow}
-        shadowBlur={28}
-        shadowOpacity={fadeOpacity * 0.3}
+        shadowBlur={prefersReducedMotion ? 18 : 30}
+        shadowOpacity={glowOpacity * 0.38}
+      />
+      <Circle
+        radius={Math.max(14, innerRadius * 0.68)}
+        fill={MAP_PING_EPIC_HIGHLIGHT}
+        opacity={prefersReducedMotion ? 0.16 : 0.05 + (fadeOpacity * 0.14)}
+        shadowColor={MAP_PING_EPIC_SHADOW}
+        shadowBlur={prefersReducedMotion ? 10 : 20}
+        shadowOpacity={accentOpacity * 0.36}
       />
       <Circle
         radius={sigilRadius}
-        stroke="#fef3c7"
-        strokeWidth={1.4}
-        dash={[10, 8]}
-        opacity={fadeOpacity * (prefersReducedMotion ? 0.34 : 0.5)}
+        stroke={MAP_PING_EPIC_HIGHLIGHT}
+        strokeWidth={prefersReducedMotion ? 2.4 : 2.1}
+        dash={prefersReducedMotion ? [14, 10] : [12, 8]}
+        opacity={accentOpacity * (prefersReducedMotion ? 0.84 : 0.74)}
       />
       <Circle
         radius={sigilRadius}
         stroke={drawTheme.stroke}
-        strokeWidth={1.1}
-        dash={[10, 8]}
-        opacity={fadeOpacity * (prefersReducedMotion ? 0.26 : 0.42)}
+        strokeWidth={prefersReducedMotion ? 1.8 : 1.5}
+        dash={prefersReducedMotion ? [14, 10] : [12, 8]}
+        opacity={glowOpacity * (prefersReducedMotion ? 0.76 : 0.62)}
       />
       <Line
         points={[0, -diamondRadius, diamondRadius, 0, 0, diamondRadius, -diamondRadius, 0]}
         closed
-        stroke="#fef3c7"
-        strokeWidth={1.4}
+        stroke={MAP_PING_EPIC_ACCENT}
+        strokeWidth={prefersReducedMotion ? 2.4 : 2}
         lineJoin="round"
-        opacity={fadeOpacity * 0.56}
+        opacity={accentOpacity * 0.82}
+        shadowColor={MAP_PING_EPIC_SHADOW}
+        shadowBlur={prefersReducedMotion ? 10 : 14}
+        shadowOpacity={accentOpacity * 0.34}
       />
       {!prefersReducedMotion && rayAngles.map((angle) => (
         <React.Fragment key={`ping-ray-${angle}`}>
@@ -1019,9 +1062,9 @@ const MapPingOverlay = ({
               Math.sin(angle) * rayOuterRadius,
             ]}
             stroke={drawTheme.outlineStroke}
-            strokeWidth={rayStrokeWidth + 1.6}
+            strokeWidth={rayStrokeWidth + 2.6}
             lineCap="round"
-            opacity={fadeOpacity * 0.22}
+            opacity={fadeOpacity * 0.28}
           />
           <Line
             points={[
@@ -1030,28 +1073,43 @@ const MapPingOverlay = ({
               Math.cos(angle) * rayOuterRadius,
               Math.sin(angle) * rayOuterRadius,
             ]}
-            stroke="#fef3c7"
+            stroke={drawTheme.stroke}
             strokeWidth={rayStrokeWidth}
             lineCap="round"
-            opacity={fadeOpacity * 0.62}
+            opacity={glowOpacity * 0.76}
             shadowColor={drawTheme.stroke}
-            shadowBlur={10}
-            shadowOpacity={fadeOpacity * 0.3}
+            shadowBlur={18}
+            shadowOpacity={glowOpacity * 0.4}
+          />
+          <Line
+            points={[
+              Math.cos(angle) * rayInnerRadius,
+              Math.sin(angle) * rayInnerRadius,
+              Math.cos(angle) * rayOuterRadius,
+              Math.sin(angle) * rayOuterRadius,
+            ]}
+            stroke={MAP_PING_EPIC_ACCENT}
+            strokeWidth={Math.max(1.4, rayStrokeWidth - 1.8)}
+            lineCap="round"
+            opacity={accentOpacity * 0.82}
+            shadowColor={MAP_PING_EPIC_SHADOW}
+            shadowBlur={12}
+            shadowOpacity={accentOpacity * 0.34}
           />
         </React.Fragment>
       ))}
       <Circle
         radius={coreRadius}
-        fill="#fef3c7"
-        opacity={0.22 + (fadeOpacity * 0.72)}
-        shadowColor={drawTheme.stroke}
-        shadowBlur={18}
-        shadowOpacity={fadeOpacity * 0.5}
+        fill={MAP_PING_EPIC_HIGHLIGHT}
+        opacity={prefersReducedMotion ? 0.96 : 0.36 + (fadeOpacity * 0.64)}
+        shadowColor={MAP_PING_EPIC_SHADOW}
+        shadowBlur={prefersReducedMotion ? 14 : 20}
+        shadowOpacity={accentOpacity * 0.46}
       />
       <Circle
         radius={Math.max(2.5, coreRadius * 0.42)}
         fill={drawTheme.stroke}
-        opacity={fadeOpacity * 0.84}
+        opacity={glowOpacity}
       />
     </Group>
   );
@@ -1683,7 +1741,7 @@ const TurnOrderPanel = ({
 
   return (
     <div className="pointer-events-auto min-h-0 w-full">
-      <div className="relative flex max-h-[calc(100vh-12rem)] min-h-0 flex-col items-end gap-2 overflow-y-auto pb-8 pl-3 pr-0 pt-1">
+      <div className="relative flex max-h-[calc(100vh-12rem)] min-h-0 flex-col items-end gap-2 overflow-x-hidden overflow-y-auto pb-8 pl-3 pr-0 pt-1">
         {entries.length > 0 && (
           <motion.div
             aria-hidden="true"
@@ -2741,7 +2799,7 @@ export default function GrigliataBoard({
   const handleWheel = (event) => {
     event.evt.preventDefault();
     const pointer = stageRef.current?.getPointerPosition();
-    const scaleBy = 1.08;
+    const scaleBy = 1.08 ** 3;
     const direction = event.evt.deltaY > 0 ? -1 : 1;
     const nextScale = direction > 0 ? viewport.scale * scaleBy : viewport.scale / scaleBy;
     applyScale(nextScale, pointer);

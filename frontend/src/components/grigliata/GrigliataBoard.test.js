@@ -13,6 +13,8 @@ import {
 import { splitTokenStatusesForDisplay } from './tokenStatuses';
 import useImageAsset, { useImageAssetSnapshot } from './useImageAsset';
 
+const MAP_PING_EPIC_ACCENT = '#f97316';
+
 jest.mock('framer-motion', () => {
   const actual = jest.requireActual('framer-motion');
 
@@ -508,6 +510,24 @@ describe('GrigliataBoard', () => {
     );
 
     expect(screen.getByTestId('mouse-selection-trigger')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('zooms the battlemap three times faster on mouse wheel input', () => {
+    const expectedScaleBy = 1.08 ** 3;
+
+    const { container } = render(
+      <GrigliataBoard {...buildProps()} />
+    );
+
+    const stage = container.querySelector('[data-konva-type="Stage"]');
+    expect(stage).toBeTruthy();
+    const initialScale = Number.parseFloat(stage.getAttribute('data-scalex') || '1');
+    expect(initialScale).toBeGreaterThan(0);
+
+    fireEvent.wheel(stage, { deltaY: -120 });
+
+    expect(Number.parseFloat(stage.getAttribute('data-scalex') || '1')).toBeCloseTo(initialScale * expectedScaleBy, 5);
+    expect(Number.parseFloat(stage.getAttribute('data-scaley') || '1')).toBeCloseTo(initialScale * expectedScaleBy, 5);
   });
 
   test('fires a tray drop only once when the drop lands on the active overlay', () => {
@@ -1208,6 +1228,10 @@ describe('GrigliataBoard', () => {
 
     expect(screen.getByTestId('turn-order-panel')).toBeInTheDocument();
     expect(screen.getByTestId('turn-order-entry-user-1')).toHaveTextContent('Ilya');
+
+    const turnOrderScrollContainer = screen.getByTestId('turn-order-panel').querySelector('.overflow-y-auto');
+    expect(turnOrderScrollContainer).toBeTruthy();
+    expect(turnOrderScrollContainer.className).toContain('overflow-x-hidden');
   });
 
   test('persists the turn order panel collapsed state across remounts', () => {
@@ -1588,8 +1612,11 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    expect(screen.getByTestId('map-ping-overlay-shared-other-user')).toBeInTheDocument();
-    expect(document.querySelector('[data-stroke="#38bdf8"]')).not.toBeNull();
+    const pingOverlay = screen.getByTestId('map-ping-overlay-shared-other-user');
+
+    expect(pingOverlay).toBeInTheDocument();
+    expect(pingOverlay.querySelector('[data-stroke="#38bdf8"]')).not.toBeNull();
+    expect(pingOverlay.querySelector(`[data-stroke="${MAP_PING_EPIC_ACCENT}"]`)).not.toBeNull();
 
     act(() => {
       jest.advanceTimersByTime(MAP_PING_VISIBLE_MS + 64);
@@ -1642,7 +1669,10 @@ describe('GrigliataBoard', () => {
       jest.advanceTimersByTime(MAP_PING_HOLD_DELAY_MS);
     });
 
-    expect(document.querySelectorAll('[data-testid^="map-ping-overlay-local-ping-"]')).toHaveLength(1);
+    const localPingOverlays = document.querySelectorAll('[data-testid^="map-ping-overlay-local-ping-"]');
+    expect(localPingOverlays).toHaveLength(1);
+    expect(localPingOverlays[0].querySelector('[data-stroke="#f472b6"]')).not.toBeNull();
+    expect(localPingOverlays[0].querySelector(`[data-stroke="${MAP_PING_EPIC_ACCENT}"]`)).not.toBeNull();
     expect(onSharedInteractionChange).toHaveBeenCalledWith(expect.objectContaining({
       type: 'ping',
       source: 'free',
@@ -1666,6 +1696,35 @@ describe('GrigliataBoard', () => {
     });
 
     expect(onSharedInteractionChange).toHaveBeenLastCalledWith(null);
+  });
+
+  test('keeps pings bold and theme-aware when reduced motion is enabled', () => {
+    useReducedMotion.mockReturnValue(true);
+    const startedAtMs = Date.now();
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          sharedInteractions: [{
+            backgroundId: 'map-1',
+            ownerUid: 'other-user',
+            type: 'ping',
+            source: 'free',
+            colorKey: 'ion-cyan',
+            point: { x: 280, y: 210 },
+            startedAtMs,
+            updatedAt: { toMillis: () => startedAtMs + 30 },
+            updatedBy: 'other-user',
+          }],
+        })}
+      />
+    );
+
+    const pingOverlay = screen.getByTestId('map-ping-overlay-shared-other-user');
+
+    expect(pingOverlay.querySelector('[data-stroke="#38bdf8"]')).not.toBeNull();
+    expect(pingOverlay.querySelector(`[data-stroke="${MAP_PING_EPIC_ACCENT}"]`)).not.toBeNull();
+    expect(pingOverlay.querySelector('[data-fill="#38bdf8"]')).not.toBeNull();
   });
 
   test('cancels the long-press ping when the pointer moves into a selection drag', () => {
