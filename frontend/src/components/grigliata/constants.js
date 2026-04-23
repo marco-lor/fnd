@@ -92,8 +92,10 @@ export const getGrigliataDrawTheme = (colorKey = DEFAULT_GRIGLIATA_DRAW_COLOR_KE
 
 export const FEET_PER_GRID_SQUARE = 5;
 export const DEFAULT_BOARD_CELLS = 20;
-export const MIN_GRID_CELL_SIZE = 24;
+export const MIN_GRID_CELL_SIZE = 12;
 export const MAX_GRID_CELL_SIZE = 240;
+export const MIN_GRIGLIATA_TOKEN_SIZE_SQUARES = 1;
+export const MAX_GRIGLIATA_TOKEN_SIZE_SQUARES = 9;
 export const BOARD_FIT_PADDING = 48;
 export const MAP_PING_HOLD_DELAY_MS = 500;
 export const MAP_PING_VISIBLE_MS = 1100;

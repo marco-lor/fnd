@@ -375,6 +375,7 @@ service cloud.firestore {
           "imageUrl",
           "col",
           "row",
+          "sizeSquares",
           "isVisibleToPlayers",
           "isDead",
           "statuses",
@@ -393,6 +394,14 @@ service cloud.firestore {
         && (!data.keys().hasAny(["imageUrl"]) || data.imageUrl is string)
         && data.col is int
         && data.row is int
+        && (
+          !data.keys().hasAny(["sizeSquares"])
+          || (
+            data.sizeSquares is int
+            && data.sizeSquares >= 1
+            && data.sizeSquares <= 9
+          )
+        )
         && (
           !data.keys().hasAny(["isVisibleToPlayers"])
           || data.isVisibleToPlayers is bool
@@ -510,7 +519,9 @@ service cloud.firestore {
           "createdAt",
           "createdBy",
           "updatedAt",
-          "updatedBy"
+          "updatedBy",
+          "showMeasurementDetails",
+          "isFilled"
         ])
         && data.backgroundId is string
         && data.ownerUid is string
@@ -521,6 +532,8 @@ service cloud.firestore {
         && data.colorKey is string
         && isValidGrigliataDrawColorKey(data.colorKey)
         && data.isVisibleToPlayers is bool
+        && (!data.keys().hasAny(["showMeasurementDetails"]) || data.showMeasurementDetails is bool)
+        && (!data.keys().hasAny(["isFilled"]) || data.isFilled is bool)
         && (data.createdBy == null || data.createdBy is string)
         && (data.updatedBy == null || data.updatedBy is string)
         && isGrigliataAoEFigureId(data.backgroundId, data.ownerUid, data.figureType, data.slot, figureId);

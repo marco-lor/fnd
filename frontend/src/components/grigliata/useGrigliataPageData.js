@@ -17,6 +17,7 @@ import {
   buildPlacementDocId,
   normalizeGridConfig,
   normalizeHiddenTokenIdsByBackground,
+  normalizeTokenSizeSquares,
   sortBackgrounds,
   timestampToMillis,
 } from './boardUtils';
@@ -513,6 +514,7 @@ export default function useGrigliataPageData({
           tokenId,
           label: typeof placement?.label === 'string' ? placement.label : '',
           imageUrl: typeof placement?.imageUrl === 'string' ? placement.imageUrl : '',
+          sizeSquares: normalizeTokenSizeSquares(placement?.sizeSquares),
           isInTurnOrder: placement?.isInTurnOrder === true,
           turnOrderInitiative: Number.isInteger(placement?.turnOrderInitiative)
             ? placement.turnOrderInitiative
@@ -615,6 +617,7 @@ export default function useGrigliataPageData({
           tecniche: Array.isArray(profile?.tecniche) ? profile.tecniche : [],
           col: Number.isFinite(placement?.col) ? placement.col : 0,
           row: Number.isFinite(placement?.row) ? placement.row : 0,
+          sizeSquares: normalizeTokenSizeSquares(placement?.sizeSquares),
           isVisibleToPlayers: placement?.isVisibleToPlayers !== false,
           isDead: placement?.isDead === true,
           statuses: Array.isArray(placement?.statuses) ? placement.statuses : [],
@@ -721,6 +724,7 @@ export default function useGrigliataPageData({
     placed: !!currentUserPlacement,
     col: Number.isFinite(currentUserPlacement?.col) ? currentUserPlacement.col : 0,
     row: Number.isFinite(currentUserPlacement?.row) ? currentUserPlacement.row : 0,
+    sizeSquares: normalizeTokenSizeSquares(currentUserPlacement?.sizeSquares),
     isVisibleToPlayers: currentUserPlacement?.isVisibleToPlayers !== false,
     isDead: currentUserPlacement?.isDead === true,
     statuses: Array.isArray(currentUserPlacement?.statuses) ? currentUserPlacement.statuses : [],
@@ -756,6 +760,7 @@ export default function useGrigliataPageData({
         activePlacementCount,
         col: 0,
         row: 0,
+        sizeSquares: 1,
         isVisibleToPlayers: true,
         isDead: false,
         statuses: [],

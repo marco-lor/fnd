@@ -1,13 +1,46 @@
 import {
   buildPlacementDocId,
   getHiddenTokenIdsForBackground,
+  getTokenPositionPx,
   isCurrentUserTokenHiddenForViewer,
+  normalizeGridConfig,
   normalizeHiddenTokenIdsByBackground,
+  normalizeTokenSizeSquares,
 } from './boardUtils';
 
 describe('buildPlacementDocId', () => {
   test('serializes the background and token ids with the shared placement format', () => {
     expect(buildPlacementDocId('map-1', 'token-7')).toBe('map-1__token-7');
+  });
+});
+
+describe('normalizeGridConfig', () => {
+  test('clamps the cell size at the new 12px floor and keeps nearby valid values', () => {
+    expect(normalizeGridConfig({ cellSizePx: 1, offsetXPx: 0, offsetYPx: 0 })).toEqual({
+      cellSizePx: 12,
+      offsetXPx: 0,
+      offsetYPx: 0,
+    });
+
+    expect(normalizeGridConfig({ cellSizePx: 12, offsetXPx: 0, offsetYPx: 0 })).toEqual({
+      cellSizePx: 12,
+      offsetXPx: 0,
+      offsetYPx: 0,
+    });
+
+    expect(normalizeGridConfig({ cellSizePx: 13, offsetXPx: 0, offsetYPx: 0 })).toEqual({
+      cellSizePx: 13,
+      offsetXPx: 0,
+      offsetYPx: 0,
+    });
+  });
+
+  test('still clamps the cell size at the existing 240px ceiling', () => {
+    expect(normalizeGridConfig({ cellSizePx: 999, offsetXPx: 0, offsetYPx: 0 })).toEqual({
+      cellSizePx: 240,
+      offsetXPx: 0,
+      offsetYPx: 0,
+    });
   });
 });
 
@@ -19,6 +52,45 @@ describe('normalizeHiddenTokenIdsByBackground', () => {
       'map-2': 'not-an-array',
     })).toEqual({
       'map-1': ['token-1'],
+    });
+  });
+});
+
+describe('normalizeTokenSizeSquares', () => {
+  test('defaults invalid values to one square', () => {
+    expect(normalizeTokenSizeSquares(undefined)).toBe(1);
+    expect(normalizeTokenSizeSquares(null)).toBe(1);
+    expect(normalizeTokenSizeSquares('')).toBe(1);
+  });
+
+  test('clamps values into the supported range', () => {
+    expect(normalizeTokenSizeSquares(0)).toBe(1);
+    expect(normalizeTokenSizeSquares(2)).toBe(2);
+    expect(normalizeTokenSizeSquares(4)).toBe(4);
+    expect(normalizeTokenSizeSquares(99)).toBe(9);
+  });
+});
+
+describe('getTokenPositionPx', () => {
+  test('uses one grid square when sizeSquares is missing', () => {
+    expect(getTokenPositionPx({ col: 2, row: 3 }, { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 })).toEqual({
+      x: 140,
+      y: 210,
+      size: 70,
+    });
+  });
+
+  test('scales the rendered token size by the square footprint', () => {
+    expect(getTokenPositionPx({ col: 2, row: 3, sizeSquares: 2 }, { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 })).toEqual({
+      x: 140,
+      y: 210,
+      size: 140,
+    });
+
+    expect(getTokenPositionPx({ col: 1, row: 1, sizeSquares: 4 }, { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 })).toEqual({
+      x: 70,
+      y: 70,
+      size: 280,
     });
   });
 });

@@ -40,6 +40,10 @@ const normalizeSlot = (slot) => {
   return numericSlot;
 };
 
+const normalizeOptionalBoolean = (value, fallback = true) => (
+  typeof value === 'boolean' ? value : fallback
+);
+
 const getFigureSizeSquares = ({ originCell, targetCell }) => (
   Math.max(
     Math.abs(targetCell.col - originCell.col),
@@ -182,6 +186,8 @@ export const normalizeGrigliataAoEFigure = (figure) => {
     targetCell: draft.targetCell,
     colorKey: resolveGrigliataDrawColorKey(figure?.colorKey),
     isVisibleToPlayers: figure?.isVisibleToPlayers !== false,
+    showMeasurementDetails: normalizeOptionalBoolean(figure?.showMeasurementDetails, true),
+    isFilled: normalizeOptionalBoolean(figure?.isFilled, true),
     createdAt: figure?.createdAt || null,
     createdBy: isNonEmptyString(figure?.createdBy) ? figure.createdBy.trim() : '',
     updatedAt: figure?.updatedAt || null,
@@ -195,6 +201,8 @@ export const buildGrigliataAoEFigureDoc = ({
   slot,
   colorKey,
   isVisibleToPlayers = true,
+  showMeasurementDetails = true,
+  isFilled = true,
   draft,
   createdAt,
   createdBy,
@@ -223,6 +231,8 @@ export const buildGrigliataAoEFigureDoc = ({
     targetCell: normalizedDraft.targetCell,
     colorKey: resolveGrigliataDrawColorKey(colorKey),
     isVisibleToPlayers: isVisibleToPlayers !== false,
+    showMeasurementDetails: normalizeOptionalBoolean(showMeasurementDetails, true),
+    isFilled: normalizeOptionalBoolean(isFilled, true),
     createdAt: createdAt || null,
     createdBy: isNonEmptyString(createdBy) ? createdBy.trim() : '',
     updatedAt: updatedAt || null,
@@ -290,12 +300,16 @@ export const buildRenderableGrigliataAoEFigure = ({ figure, grid }) => {
   const sizeSquares = getFigureSizeSquares(normalizedFigure);
   const originCenter = getGridCellPositionPx(normalizedFigure.originCell, normalizedGrid, 'center');
   const originTopLeft = getGridCellPositionPx(normalizedFigure.originCell, normalizedGrid, 'top-left');
+  const showMeasurementDetails = normalizedFigure.showMeasurementDetails !== false;
+  const isFilled = normalizedFigure.isFilled !== false;
 
   if (normalizedFigure.figureType === 'circle') {
     const radius = sizeSquares * cellSize;
 
     return {
       ...normalizedFigure,
+      showMeasurementDetails,
+      isFilled,
       sizeSquares,
       measurement: buildCircleMeasurement(sizeSquares),
       centerPoint: { x: originCenter.x, y: originCenter.y },
@@ -320,6 +334,8 @@ export const buildRenderableGrigliataAoEFigure = ({ figure, grid }) => {
 
     return {
       ...normalizedFigure,
+      showMeasurementDetails,
+      isFilled,
       sizeSquares,
       measurement: buildSquareMeasurement(sizeSquares),
       x,
@@ -358,6 +374,8 @@ export const buildRenderableGrigliataAoEFigure = ({ figure, grid }) => {
 
     return {
       ...normalizedFigure,
+      showMeasurementDetails,
+      isFilled,
       sizeSquares,
       measurement: buildConeMeasurement(sizeSquares),
       centerPoint: { x: originCenter.x, y: originCenter.y },
@@ -382,6 +400,8 @@ export const buildRenderableGrigliataAoEFigure = ({ figure, grid }) => {
 
     return {
       ...normalizedFigure,
+      showMeasurementDetails,
+      isFilled,
       widthSquares,
       heightSquares,
       measurement: buildRectangleMeasurement({ widthSquares, heightSquares }),

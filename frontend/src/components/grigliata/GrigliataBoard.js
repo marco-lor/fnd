@@ -53,11 +53,9 @@ import {
 } from './boardUtils';
 import GrigliataTokenActions, { TokenStatusSummaryCard } from './GrigliataTokenActions';
 import {
-  getTokenStatusDefinition,
   splitTokenStatusesForDisplay,
   useTokenStatusIconImages,
 } from './tokenStatuses';
-import useImageAsset from './useImageAsset';
 import { useImageAssetSnapshot } from './useImageAsset';
 import {
   buildAoEFigureFromGrigliataLiveInteraction,
@@ -72,6 +70,11 @@ import {
   shiftGrigliataAoEFigureCells,
 } from './aoeFigures';
 import { sortTurnOrderEntries } from './turnOrder';
+import {
+  buildSelectedTokenActionState,
+  GridLayer,
+  TokenNode,
+} from './grigliataBoardTokenUi';
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
 const RULER_LABEL_MIN_WIDTH = 90;
@@ -86,20 +89,32 @@ const AOE_LABEL_EDGE_PADDING = 8;
 const DEFAULT_DRAW_THEME = getGrigliataDrawTheme(DEFAULT_GRIGLIATA_DRAW_COLOR_KEY);
 const MEASUREMENT_OUTLINE_STROKE_WIDTH = 7;
 const SHAPE_OUTLINE_STROKE_WIDTH = 4;
-const TOKEN_RING_OUTLINE_STROKE_WIDTH = 6;
+const SCREEN_RULER_STROKE_WIDTH = 3;
+const SCREEN_RULER_DASH_LENGTH = 10;
+const SCREEN_RULER_DASH_GAP = 6;
+const SCREEN_RULER_MARKER_RADIUS = 6;
+const SCREEN_RULER_LABEL_HEIGHT = 28;
+const SCREEN_RULER_LABEL_FONT_SIZE = 13;
+const SCREEN_RULER_LABEL_OFFSET_X = 12;
+const SCREEN_RULER_LABEL_OFFSET_Y = -14;
+const SCREEN_AOE_OUTLINE_STROKE_WIDTH = 4;
+const SCREEN_AOE_ACCENT_STROKE_WIDTH = 1.75;
+const SCREEN_AOE_GLOW_BLUR = 10;
+const SCREEN_AOE_HIT_STROKE_WIDTH = 18;
+const SCREEN_AOE_ARROW_STROKE_WIDTH = 2.4;
+const SCREEN_AOE_ARROW_HEAD_LENGTH = 12;
+const SCREEN_AOE_ARROW_HEAD_WIDTH = 10;
+const SCREEN_AOE_DOT_RADIUS = 5;
+const SCREEN_AOE_BADGE_MIN_WIDTH = 72;
+const SCREEN_AOE_BADGE_SIDE_PADDING = 10;
+const SCREEN_AOE_BADGE_TOP_PADDING = 7;
+const SCREEN_AOE_BADGE_CORNER_RADIUS = 10;
+const SCREEN_AOE_BADGE_GAP = 12;
+const SCREEN_AOE_BADGE_EDGE_PADDING = 12;
+const SCREEN_AOE_PRIMARY_FONT_SIZE = 16;
+const SCREEN_AOE_SECONDARY_FONT_SIZE = 12;
+const SCREEN_AOE_LINE_GAP = 2;
 const TOKEN_STATUS_VISIBLE_BADGE_COUNT = 3;
-const HIDDEN_TOKEN_PRIMARY = 'rgba(226, 232, 240, 0.96)';
-const HIDDEN_TOKEN_SECONDARY = 'rgba(148, 163, 184, 0.94)';
-const HIDDEN_TOKEN_SCRIM = 'rgba(15, 23, 42, 0.6)';
-const DEAD_TOKEN_PRIMARY = 'rgba(254, 226, 226, 0.96)';
-const DEAD_TOKEN_SECONDARY = 'rgba(248, 113, 113, 0.95)';
-const DEAD_TOKEN_SCRIM = 'rgba(15, 23, 42, 0.34)';
-const DEAD_TOKEN_BANNER_FILL = 'rgba(127, 29, 29, 0.88)';
-const DEAD_TOKEN_LABEL = '#fecaca';
-const ACTIVE_TURN_PRIMARY = 'rgba(251, 191, 36, 0.98)';
-const ACTIVE_TURN_SECONDARY = '#fef3c7';
-const ACTIVE_TURN_GLOW = 'rgba(245, 158, 11, 0.42)';
-const ACTIVE_TURN_FILL = 'rgba(245, 158, 11, 0.16)';
 const MAP_PING_EPIC_ACCENT = '#f97316';
 const MAP_PING_EPIC_HIGHLIGHT = '#fde047';
 const MAP_PING_EPIC_SHADOW = 'rgba(249, 115, 22, 0.58)';
@@ -135,6 +150,11 @@ const isWaypointEligibleInteraction = (interaction) => (
   && (interaction.type === 'measure' || interaction.type === 'token-drag')
   && Array.isArray(interaction.anchorCells)
   && interaction.anchorCells.length > 0
+);
+
+const shouldSuppressTokenTurnOrderMenu = (interaction) => (
+  interaction?.type === 'token-candidate'
+  || isWaypointEligibleInteraction(interaction)
 );
 
 const isAoECreateInteraction = (interaction) => interaction?.type === 'aoe-create';
@@ -215,6 +235,296 @@ const canEditTurnOrderEntry = ({ entry, currentUserId = '', isManager = false })
 );
 
 const clampToRange = (value, min, max) => Math.min(max, Math.max(min, value));
+const normalizeViewportScale = (viewportScale = 1) => (
+  Number.isFinite(viewportScale) && viewportScale > 0 ? viewportScale : 1
+);
+const scaleScreenPxToWorld = (screenPx, viewportScale = 1) => (
+  screenPx / normalizeViewportScale(viewportScale)
+);
+const estimateTextWidth = (text, fontSize) => (
+  Math.round(String(text || '').length * fontSize * 0.62)
+);
+const TOKEN_TOOLTIP_EDGE_PADDING = 12;
+const TOKEN_TOOLTIP_MIN_WIDTH = 96;
+const TOKEN_TOOLTIP_MAX_WIDTH = 240;
+const TOKEN_TOOLTIP_FONT_SIZE = 12;
+const TOKEN_TOOLTIP_HORIZONTAL_PADDING = 28;
+const buildClampedTokenTooltipLayout = ({
+  containerWidth = 0,
+  anchorCenterX = 0,
+  preferredTop = 0,
+  preferredBottom = 0,
+  label = '',
+  forceBelow = false,
+}) => {
+  const maxWidth = Math.max(
+    TOKEN_TOOLTIP_MIN_WIDTH,
+    Math.min(TOKEN_TOOLTIP_MAX_WIDTH, containerWidth - (TOKEN_TOOLTIP_EDGE_PADDING * 2))
+  );
+  const width = Math.min(
+    maxWidth,
+    Math.max(
+      TOKEN_TOOLTIP_MIN_WIDTH,
+      estimateTextWidth(label, TOKEN_TOOLTIP_FONT_SIZE) + TOKEN_TOOLTIP_HORIZONTAL_PADDING
+    )
+  );
+  const left = clampToRange(
+    anchorCenterX,
+    TOKEN_TOOLTIP_EDGE_PADDING + (width / 2),
+    Math.max(
+      TOKEN_TOOLTIP_EDGE_PADDING + (width / 2),
+      containerWidth - TOKEN_TOOLTIP_EDGE_PADDING - (width / 2)
+    )
+  );
+
+  return {
+    left,
+    top: forceBelow ? preferredBottom : preferredTop,
+    width,
+    maxWidth,
+    transform: forceBelow ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
+  };
+};
+const normalizeVector = (deltaX, deltaY, fallback = { x: 1, y: 0 }) => {
+  const magnitude = Math.hypot(deltaX, deltaY);
+  if (!magnitude) {
+    return fallback;
+  }
+
+  return {
+    x: deltaX / magnitude,
+    y: deltaY / magnitude,
+  };
+};
+const buildArrowHeadFlatPoints = (tipPoint, direction, length, width) => {
+  const normalizedDirection = normalizeVector(direction.x, direction.y);
+  const perpendicular = {
+    x: -normalizedDirection.y,
+    y: normalizedDirection.x,
+  };
+  const baseCenter = {
+    x: tipPoint.x - (normalizedDirection.x * length),
+    y: tipPoint.y - (normalizedDirection.y * length),
+  };
+
+  return [
+    tipPoint.x,
+    tipPoint.y,
+    baseCenter.x + (perpendicular.x * (width / 2)),
+    baseCenter.y + (perpendicular.y * (width / 2)),
+    baseCenter.x - (perpendicular.x * (width / 2)),
+    baseCenter.y - (perpendicular.y * (width / 2)),
+  ];
+};
+const midpointBetween = (left, right) => ({
+  x: (left.x + right.x) / 2,
+  y: (left.y + right.y) / 2,
+});
+export const buildZoomNormalizedOverlayMetrics = (viewportScale = 1) => ({
+  rulerOutlineStrokeWidth: scaleScreenPxToWorld(MEASUREMENT_OUTLINE_STROKE_WIDTH, viewportScale),
+  rulerStrokeWidth: scaleScreenPxToWorld(SCREEN_RULER_STROKE_WIDTH, viewportScale),
+  rulerDash: [
+    scaleScreenPxToWorld(SCREEN_RULER_DASH_LENGTH, viewportScale),
+    scaleScreenPxToWorld(SCREEN_RULER_DASH_GAP, viewportScale),
+  ],
+  rulerMarkerRadius: scaleScreenPxToWorld(SCREEN_RULER_MARKER_RADIUS, viewportScale),
+  rulerLabelMinWidth: scaleScreenPxToWorld(RULER_LABEL_MIN_WIDTH, viewportScale),
+  rulerLabelHeight: scaleScreenPxToWorld(SCREEN_RULER_LABEL_HEIGHT, viewportScale),
+  rulerLabelFontSize: scaleScreenPxToWorld(SCREEN_RULER_LABEL_FONT_SIZE, viewportScale),
+  rulerLabelOffsetX: scaleScreenPxToWorld(SCREEN_RULER_LABEL_OFFSET_X, viewportScale),
+  rulerLabelOffsetY: scaleScreenPxToWorld(SCREEN_RULER_LABEL_OFFSET_Y, viewportScale),
+  aoeOutlineStrokeWidth: scaleScreenPxToWorld(SCREEN_AOE_OUTLINE_STROKE_WIDTH, viewportScale),
+  aoeAccentStrokeWidth: scaleScreenPxToWorld(SCREEN_AOE_ACCENT_STROKE_WIDTH, viewportScale),
+  aoeGlowBlur: scaleScreenPxToWorld(SCREEN_AOE_GLOW_BLUR, viewportScale),
+  aoeHitStrokeWidth: scaleScreenPxToWorld(SCREEN_AOE_HIT_STROKE_WIDTH, viewportScale),
+  aoeArrowStrokeWidth: scaleScreenPxToWorld(SCREEN_AOE_ARROW_STROKE_WIDTH, viewportScale),
+  aoeArrowHeadLength: scaleScreenPxToWorld(SCREEN_AOE_ARROW_HEAD_LENGTH, viewportScale),
+  aoeArrowHeadWidth: scaleScreenPxToWorld(SCREEN_AOE_ARROW_HEAD_WIDTH, viewportScale),
+  aoeDotRadius: scaleScreenPxToWorld(SCREEN_AOE_DOT_RADIUS, viewportScale),
+  aoeBadgeMinWidth: scaleScreenPxToWorld(SCREEN_AOE_BADGE_MIN_WIDTH, viewportScale),
+  aoeBadgeSidePadding: scaleScreenPxToWorld(SCREEN_AOE_BADGE_SIDE_PADDING, viewportScale),
+  aoeBadgeTopPadding: scaleScreenPxToWorld(SCREEN_AOE_BADGE_TOP_PADDING, viewportScale),
+  aoeBadgeCornerRadius: scaleScreenPxToWorld(SCREEN_AOE_BADGE_CORNER_RADIUS, viewportScale),
+  aoeBadgeGap: scaleScreenPxToWorld(SCREEN_AOE_BADGE_GAP, viewportScale),
+  aoeBadgeEdgePadding: scaleScreenPxToWorld(SCREEN_AOE_BADGE_EDGE_PADDING, viewportScale),
+  aoePrimaryFontSize: scaleScreenPxToWorld(SCREEN_AOE_PRIMARY_FONT_SIZE, viewportScale),
+  aoeSecondaryFontSize: scaleScreenPxToWorld(SCREEN_AOE_SECONDARY_FONT_SIZE, viewportScale),
+  aoeLineGap: scaleScreenPxToWorld(SCREEN_AOE_LINE_GAP, viewportScale),
+});
+export const getAoEFigureMeasurementTextLines = (figure) => {
+  const measurement = figure?.measurement;
+  if (!measurement || !figure?.figureType) {
+    return null;
+  }
+
+  if (figure.figureType === 'circle') {
+    return {
+      primary: `${measurement.radiusFeet} ft`,
+      secondary: `${figure.sizeSquares} sq`,
+    };
+  }
+
+  if (figure.figureType === 'square') {
+    return {
+      primary: `${measurement.sideFeet} ft`,
+      secondary: `${figure.sizeSquares} sq`,
+    };
+  }
+
+  if (figure.figureType === 'cone') {
+    return {
+      primary: `${measurement.lengthFeet} ft`,
+      secondary: `${figure.sizeSquares} sq`,
+    };
+  }
+
+  if (figure.figureType === 'rectangle') {
+    return {
+      primary: `${measurement.widthFeet} x ${measurement.heightFeet} ft`,
+      secondary: `${figure.widthSquares} x ${figure.heightSquares} sq`,
+    };
+  }
+
+  return null;
+};
+export const buildAoEFigureMeasurementDecorationLayout = ({ figure, viewportScale = 1 }) => {
+  if (!figure?.figureType || figure.showMeasurementDetails === false) {
+    return null;
+  }
+
+  const lines = getAoEFigureMeasurementTextLines(figure);
+  if (!lines) {
+    return null;
+  }
+
+  const metrics = buildZoomNormalizedOverlayMetrics(viewportScale);
+  const width = Math.max(
+    metrics.aoeBadgeMinWidth,
+    estimateTextWidth(lines.primary, metrics.aoePrimaryFontSize),
+    estimateTextWidth(lines.secondary, metrics.aoeSecondaryFontSize)
+  ) + (metrics.aoeBadgeSidePadding * 2);
+  const height = (metrics.aoeBadgeTopPadding * 2)
+    + metrics.aoePrimaryFontSize
+    + metrics.aoeLineGap
+    + metrics.aoeSecondaryFontSize;
+  const buildBadgeCenterAlongLine = (startPoint, endPoint, progress = 0.72) => ({
+    x: startPoint.x + ((endPoint.x - startPoint.x) * progress),
+    y: startPoint.y + ((endPoint.y - startPoint.y) * progress),
+  });
+
+  if (figure.figureType === 'circle') {
+    const arrowEnd = {
+      x: figure.centerPoint.x + figure.radius - metrics.aoeBadgeEdgePadding,
+      y: figure.centerPoint.y,
+    };
+    const badgeCenter = buildBadgeCenterAlongLine(figure.centerPoint, arrowEnd, 0.7);
+    const minX = figure.centerPoint.x - figure.radius + metrics.aoeBadgeEdgePadding;
+    const maxX = figure.centerPoint.x + figure.radius - width - metrics.aoeBadgeEdgePadding;
+    const badgeX = clampToRange(
+      badgeCenter.x - (width / 2),
+      minX,
+      Math.max(minX, maxX)
+    );
+    const badgeY = clampToRange(
+      badgeCenter.y - (height / 2),
+      figure.centerPoint.y - figure.radius + metrics.aoeBadgeEdgePadding,
+      figure.centerPoint.y + figure.radius - height - metrics.aoeBadgeEdgePadding
+    );
+    const direction = normalizeVector(arrowEnd.x - figure.centerPoint.x, arrowEnd.y - figure.centerPoint.y);
+
+    return {
+      lines,
+      width,
+      height,
+      badgeX,
+      badgeY,
+      startDot: figure.centerPoint,
+      arrowPoints: [figure.centerPoint.x, figure.centerPoint.y, arrowEnd.x, arrowEnd.y],
+      arrowHeadPoints: buildArrowHeadFlatPoints(
+        arrowEnd,
+        direction,
+        metrics.aoeArrowHeadLength,
+        metrics.aoeArrowHeadWidth
+      ),
+      metrics,
+    };
+  }
+
+  if (figure.figureType === 'square' || figure.figureType === 'rectangle') {
+    const centerY = figure.y + (figure.height / 2);
+    const arrowStart = {
+      x: figure.x + (figure.width / 2),
+      y: centerY,
+    };
+    const arrowEnd = {
+      x: figure.x + figure.width - metrics.aoeBadgeEdgePadding,
+      y: centerY,
+    };
+    const badgeCenter = buildBadgeCenterAlongLine(arrowStart, arrowEnd, 0.72);
+    const minX = figure.x + metrics.aoeBadgeEdgePadding;
+    const maxX = figure.x + figure.width - width - metrics.aoeBadgeEdgePadding;
+    const badgeX = clampToRange(
+      badgeCenter.x - (width / 2),
+      minX,
+      Math.max(minX, maxX)
+    );
+    const badgeY = clampToRange(
+      badgeCenter.y - (height / 2),
+      figure.y + metrics.aoeBadgeEdgePadding,
+      figure.y + figure.height - height - metrics.aoeBadgeEdgePadding
+    );
+    const direction = normalizeVector(arrowEnd.x - arrowStart.x, arrowEnd.y - arrowStart.y);
+
+    return {
+      lines,
+      width,
+      height,
+      badgeX,
+      badgeY,
+      startDot: arrowStart,
+      arrowPoints: [arrowStart.x, arrowStart.y, arrowEnd.x, arrowEnd.y],
+      arrowHeadPoints: buildArrowHeadFlatPoints(
+        arrowEnd,
+        direction,
+        metrics.aoeArrowHeadLength,
+        metrics.aoeArrowHeadWidth
+      ),
+      metrics,
+    };
+  }
+
+  if (figure.figureType === 'cone' && Array.isArray(figure.points) && figure.points.length === 3) {
+    const apex = figure.points[0];
+    const baseMidpoint = midpointBetween(figure.points[1], figure.points[2]);
+    const direction = normalizeVector(baseMidpoint.x - apex.x, baseMidpoint.y - apex.y);
+    const arrowEnd = {
+      x: baseMidpoint.x - (direction.x * metrics.aoeBadgeEdgePadding),
+      y: baseMidpoint.y - (direction.y * metrics.aoeBadgeEdgePadding),
+    };
+    const badgeCenter = buildBadgeCenterAlongLine(apex, arrowEnd, 0.7);
+    const badgeX = badgeCenter.x - (width / 2);
+    const badgeY = badgeCenter.y - (height / 2);
+
+    return {
+      lines,
+      width,
+      height,
+      badgeX,
+      badgeY,
+      startDot: apex,
+      arrowPoints: [apex.x, apex.y, arrowEnd.x, arrowEnd.y],
+      arrowHeadPoints: buildArrowHeadFlatPoints(
+        arrowEnd,
+        direction,
+        metrics.aoeArrowHeadLength,
+        metrics.aoeArrowHeadWidth
+      ),
+      metrics,
+    };
+  }
+
+  return null;
+};
 const TOKEN_HUD_EDGE_PADDING = 12;
 const TOKEN_HUD_CHIP_GAP = 6;
 const TOKEN_HUD_CHIP_ROW_HEIGHT = 32;
@@ -296,171 +606,6 @@ const isPointWithinBounds = (point, bounds) => (
   && point.y <= bounds.maxY
 );
 
-const HiddenEyeBadge = ({ x, y, size }) => {
-  const half = size / 2;
-  const padding = size * 0.2;
-  const eyeTop = size * 0.38;
-  const eyeBottom = size * 0.62;
-
-  return (
-    <Group x={x} y={y} listening={false}>
-      <Circle
-        x={half}
-        y={half}
-        radius={half}
-        fill="rgba(15, 23, 42, 0.92)"
-        stroke={HIDDEN_TOKEN_PRIMARY}
-        strokeWidth={Math.max(1.5, size * 0.07)}
-      />
-      <Line
-        points={[
-          padding,
-          half,
-          half,
-          eyeTop,
-          size - padding,
-          half,
-          half,
-          eyeBottom,
-          padding,
-          half,
-        ]}
-        stroke={HIDDEN_TOKEN_PRIMARY}
-        strokeWidth={Math.max(1.3, size * 0.06)}
-        lineCap="round"
-        lineJoin="round"
-      />
-      <Circle
-        x={half}
-        y={half}
-        radius={Math.max(1.5, size * 0.1)}
-        fill={HIDDEN_TOKEN_PRIMARY}
-      />
-      <Line
-        points={[
-          padding * 0.85,
-          size - (padding * 0.85),
-          size - (padding * 0.85),
-          padding * 0.85,
-        ]}
-        stroke="#f87171"
-        strokeWidth={Math.max(1.6, size * 0.08)}
-        lineCap="round"
-      />
-    </Group>
-  );
-};
-
-const TokenStatusBadges = ({
-  token,
-  size,
-  badgeImages,
-  onOverflowMouseEnter,
-  onOverflowMouseLeave,
-  onOverflowToggle,
-}) => {
-  const { visibleStatuses, overflowCount } = splitTokenStatusesForDisplay(
-    token?.statuses,
-    TOKEN_STATUS_VISIBLE_BADGE_COUNT
-  );
-  if (!visibleStatuses.length && overflowCount < 1) {
-    return null;
-  }
-
-  const badgeSize = Math.max(18, Math.round(size * 0.24));
-  const badgeRadius = badgeSize / 2;
-  const iconSize = Math.max(10, Math.round(badgeSize * 0.56));
-  const inset = Math.max(3, Math.round(size * 0.04));
-  const badgePositions = [
-    { x: inset + badgeRadius, y: inset + badgeRadius },
-    { x: size - inset - badgeRadius, y: inset + badgeRadius },
-    { x: size - inset - badgeRadius, y: size - inset - badgeRadius },
-  ];
-  const overflowPosition = {
-    x: inset + badgeRadius,
-    y: size - inset - badgeRadius,
-  };
-
-  return (
-    <>
-      {visibleStatuses.map((statusId, index) => {
-        const status = getTokenStatusDefinition(statusId);
-        const position = badgePositions[index];
-        if (!status || !position) {
-          return null;
-        }
-
-        return (
-          <Group key={`${token?.tokenId || token?.ownerUid || 'token'}-status-${statusId}`} listening={false}>
-            <Circle
-              x={position.x}
-              y={position.y}
-              radius={badgeRadius}
-              fill={status.badgeFill}
-              stroke={status.badgeStroke}
-              strokeWidth={Math.max(1.4, badgeSize * 0.08)}
-              shadowColor="#020617"
-              shadowBlur={6}
-              shadowOpacity={0.45}
-            />
-            {badgeImages?.[statusId] && (
-              <KonvaImage
-                image={badgeImages[statusId]}
-                x={position.x - (iconSize / 2)}
-                y={position.y - (iconSize / 2)}
-                width={iconSize}
-                height={iconSize}
-                listening={false}
-              />
-            )}
-          </Group>
-        );
-      })}
-
-      {overflowCount > 0 && (
-        <Group
-          onMouseDown={(event) => {
-            event.cancelBubble = true;
-          }}
-          onMouseEnter={() => onOverflowMouseEnter?.(token?.tokenId)}
-          onMouseLeave={() => onOverflowMouseLeave?.(token?.tokenId)}
-          onClick={(event) => {
-            event.cancelBubble = true;
-            onOverflowToggle?.(token?.tokenId);
-          }}
-          onTap={(event) => {
-            event.cancelBubble = true;
-            onOverflowToggle?.(token?.tokenId);
-          }}
-        >
-          <Circle
-            x={overflowPosition.x}
-            y={overflowPosition.y}
-            radius={badgeRadius}
-            fill="rgba(2, 6, 23, 0.94)"
-            stroke="rgba(251, 191, 36, 0.92)"
-            strokeWidth={Math.max(1.5, badgeSize * 0.08)}
-            shadowColor="#020617"
-            shadowBlur={6}
-            shadowOpacity={0.45}
-          />
-          <Text
-            x={overflowPosition.x - badgeRadius}
-            y={overflowPosition.y - (badgeRadius * 0.68)}
-            width={badgeSize}
-            align="center"
-            fontSize={Math.max(9, Math.round(badgeSize * 0.48))}
-            fontStyle="bold"
-            fill="#fef3c7"
-            text={`+${overflowCount}`}
-            listening={false}
-          />
-        </Group>
-      )}
-    </>
-  );
-};
-
 const SelectedTokenResourceHud = ({
   token,
   hudState,
@@ -522,325 +667,11 @@ const SelectedTokenResourceHud = ({
   );
 };
 
-const TokenNode = ({
-  token,
-  position,
-  canMove,
-  isSelected,
-  isActiveTurn = false,
-  badgeImages,
-  drawTheme = DEFAULT_DRAW_THEME,
-  onMouseDown,
-  onContextMenu,
-  onOverflowMouseEnter,
-  onOverflowMouseLeave,
-  onOverflowToggle,
-}) => {
-  const image = useImageAsset(token?.imageUrl || '');
-  const size = position.size;
-  const label = token?.label || token?.characterId || token?.ownerUid || 'Player';
-  const initials = getInitials(label);
-  const isHiddenFromPlayers = token?.isVisibleToPlayers === false;
-  const isDead = token?.isDead === true;
-  const selectedStroke = isHiddenFromPlayers
-    ? HIDDEN_TOKEN_SECONDARY
-    : (isDead ? DEAD_TOKEN_SECONDARY : drawTheme.stroke);
-  const selectedGlow = isHiddenFromPlayers
-    ? 'rgba(148, 163, 184, 0.45)'
-    : (isDead ? 'rgba(248, 113, 113, 0.35)' : drawTheme.glow);
-  const idleRingStroke = isHiddenFromPlayers
-    ? HIDDEN_TOKEN_SECONDARY
-    : (isDead ? DEAD_TOKEN_SECONDARY : (canMove ? '#fbbf24' : '#cbd5e1'));
-  const labelFill = isHiddenFromPlayers
-    ? '#cbd5e1'
-    : (isDead
-      ? DEAD_TOKEN_LABEL
-      : (isSelected ? drawTheme.tokenLabelText : (isActiveTurn ? ACTIVE_TURN_SECONDARY : '#e2e8f0')));
-  const hiddenBadgeSize = Math.max(18, Math.round(size * 0.28));
-  const hiddenSlashInset = Math.max(8, Math.round(size * 0.18));
-  const hiddenSlashStroke = Math.max(5, Math.round(size * 0.1));
-  const deadBannerHeight = Math.max(15, Math.round(size * 0.24));
-  const deadBannerY = size - deadBannerHeight - Math.max(6, Math.round(size * 0.1));
-
-  return (
-    <Group
-      x={position.x}
-      y={position.y}
-      data-testid={token?.tokenId ? `token-node-${token.tokenId}` : undefined}
-      data-active-turn={isActiveTurn ? 'true' : 'false'}
-      onMouseDown={(event) => onMouseDown?.(token, event)}
-      onContextMenu={(event) => onContextMenu?.(token, event)}
-    >
-      {isActiveTurn && (
-        <>
-          <Circle
-            x={size / 2}
-            y={size / 2}
-            radius={(size / 2) + 18}
-            fill="rgba(245, 158, 11, 0.1)"
-            shadowColor={ACTIVE_TURN_GLOW}
-            shadowBlur={30}
-            shadowOpacity={0.48}
-            listening={false}
-          />
-          <Circle
-            x={size / 2}
-            y={size / 2}
-            radius={(size / 2) + 11}
-            fill={ACTIVE_TURN_FILL}
-            stroke="rgba(254, 243, 199, 0.92)"
-            strokeWidth={Math.max(2.5, size * 0.06)}
-            shadowColor={ACTIVE_TURN_GLOW}
-            shadowBlur={22}
-            shadowOpacity={0.44}
-            listening={false}
-          />
-          <Circle
-            x={size / 2}
-            y={size / 2}
-            radius={(size / 2) + 16}
-            stroke={ACTIVE_TURN_PRIMARY}
-            strokeWidth={Math.max(1.8, size * 0.045)}
-            shadowColor={ACTIVE_TURN_GLOW}
-            shadowBlur={14}
-            shadowOpacity={0.34}
-            listening={false}
-          />
-        </>
-      )}
-
-      {isSelected && (
-        <>
-          <Rect
-            x={-6}
-            y={-6}
-            width={size + 12}
-            height={size + 12}
-            cornerRadius={10}
-            stroke={drawTheme.outlineStroke}
-            strokeWidth={SHAPE_OUTLINE_STROKE_WIDTH}
-            dash={[7, 4]}
-            listening={false}
-          />
-          <Rect
-            x={-6}
-            y={-6}
-            width={size + 12}
-            height={size + 12}
-            cornerRadius={10}
-            stroke={selectedStroke}
-            strokeWidth={2}
-            dash={[7, 4]}
-            shadowColor={selectedGlow}
-            shadowBlur={10}
-            shadowOpacity={0.35}
-            listening={false}
-          />
-        </>
-      )}
-
-      <Circle
-        x={size / 2}
-        y={size / 2}
-        radius={(size / 2) - 1}
-        fill="rgba(15, 23, 42, 0.9)"
-        shadowColor="#000000"
-        shadowBlur={14}
-        shadowOpacity={0.45}
-      />
-
-      <Group
-        clipFunc={(context) => {
-          context.beginPath();
-          context.arc(size / 2, size / 2, (size / 2) - 2, 0, Math.PI * 2, false);
-        }}
-      >
-        {image ? (
-          <KonvaImage image={image} width={size} height={size} />
-        ) : (
-          <Rect width={size} height={size} fill="#475569" />
-        )}
-        {isDead && (
-          <Rect width={size} height={size} fill={DEAD_TOKEN_SCRIM} />
-        )}
-        {isHiddenFromPlayers && (
-          <Rect width={size} height={size} fill={HIDDEN_TOKEN_SCRIM} />
-        )}
-      </Group>
-
-      {isSelected ? (
-        <>
-          <Circle
-            x={size / 2}
-            y={size / 2}
-            radius={(size / 2) - 1}
-            stroke={drawTheme.outlineStroke}
-            strokeWidth={TOKEN_RING_OUTLINE_STROKE_WIDTH}
-          />
-          <Circle
-            x={size / 2}
-            y={size / 2}
-            radius={(size / 2) - 1}
-            stroke={selectedStroke}
-            strokeWidth={3}
-          />
-        </>
-      ) : (
-        <Circle
-          x={size / 2}
-          y={size / 2}
-          radius={(size / 2) - 1}
-          stroke={idleRingStroke}
-          strokeWidth={2}
-        />
-      )}
-
-      {isHiddenFromPlayers && (
-        <>
-          <Line
-            points={[
-              hiddenSlashInset,
-              size - hiddenSlashInset,
-              size - hiddenSlashInset,
-              hiddenSlashInset,
-            ]}
-            stroke="rgba(15, 23, 42, 0.92)"
-            strokeWidth={hiddenSlashStroke + 3}
-            lineCap="round"
-            listening={false}
-          />
-          <Line
-            points={[
-              hiddenSlashInset,
-              size - hiddenSlashInset,
-              size - hiddenSlashInset,
-              hiddenSlashInset,
-            ]}
-            stroke={HIDDEN_TOKEN_PRIMARY}
-            strokeWidth={hiddenSlashStroke}
-            lineCap="round"
-            listening={false}
-          />
-          <HiddenEyeBadge
-            x={size - hiddenBadgeSize - 2}
-            y={2}
-            size={hiddenBadgeSize}
-          />
-        </>
-      )}
-
-      {isDead && (
-        <Group
-          clipFunc={(context) => {
-            context.beginPath();
-            context.arc(size / 2, size / 2, (size / 2) - 2, 0, Math.PI * 2, false);
-          }}
-          listening={false}
-        >
-          <Rect
-            x={0}
-            y={deadBannerY}
-            width={size}
-            height={deadBannerHeight}
-            fill={DEAD_TOKEN_BANNER_FILL}
-          />
-          <Text
-            x={0}
-            y={deadBannerY + Math.max(1, Math.round(deadBannerHeight * 0.1))}
-            width={size}
-            align="center"
-            fontSize={Math.max(10, Math.round(size * 0.18))}
-            fontStyle="bold"
-            fill={DEAD_TOKEN_PRIMARY}
-            text="DEAD"
-          />
-        </Group>
-      )}
-
-      <TokenStatusBadges
-        token={token}
-        size={size}
-        badgeImages={badgeImages}
-        onOverflowMouseEnter={onOverflowMouseEnter}
-        onOverflowMouseLeave={onOverflowMouseLeave}
-        onOverflowToggle={onOverflowToggle}
-      />
-
-      {!image && (
-        <Text
-          x={0}
-          y={(size / 2) - 10}
-          width={size}
-          align="center"
-          fontSize={Math.max(12, Math.round(size * 0.26))}
-          fontStyle="bold"
-          fill="#f8fafc"
-          text={initials}
-          listening={false}
-        />
-      )}
-
-      <Text
-        x={-Math.round(size * 0.3)}
-        y={size + 4}
-        width={Math.round(size * 1.6)}
-        align="center"
-        fontSize={Math.max(10, Math.round(size * 0.18))}
-        fill={labelFill}
-        text={label}
-        ellipsis
-        listening={false}
-      />
-    </Group>
-  );
-};
-
-const GridLayer = ({ bounds, grid }) => {
-  const normalizedGrid = normalizeGridConfig(grid);
-  const verticalStart = Math.floor((bounds.minX - normalizedGrid.offsetXPx) / normalizedGrid.cellSizePx) - 1;
-  const verticalEnd = Math.ceil((bounds.maxX - normalizedGrid.offsetXPx) / normalizedGrid.cellSizePx) + 1;
-  const horizontalStart = Math.floor((bounds.minY - normalizedGrid.offsetYPx) / normalizedGrid.cellSizePx) - 1;
-  const horizontalEnd = Math.ceil((bounds.maxY - normalizedGrid.offsetYPx) / normalizedGrid.cellSizePx) + 1;
-
-  const lines = [];
-
-  for (let index = verticalStart; index <= verticalEnd; index += 1) {
-    const x = normalizedGrid.offsetXPx + (index * normalizedGrid.cellSizePx);
-    lines.push(
-      <Line
-        key={`v-${index}`}
-        points={[x, bounds.minY - normalizedGrid.cellSizePx, x, bounds.maxY + normalizedGrid.cellSizePx]}
-        stroke={index % 5 === 0 ? 'rgba(248, 250, 252, 0.38)' : 'rgba(248, 250, 252, 0.18)'}
-        strokeWidth={index % 5 === 0 ? 1.4 : 1}
-        listening={false}
-      />
-    );
-  }
-
-  for (let index = horizontalStart; index <= horizontalEnd; index += 1) {
-    const y = normalizedGrid.offsetYPx + (index * normalizedGrid.cellSizePx);
-    lines.push(
-      <Line
-        key={`h-${index}`}
-        points={[bounds.minX - normalizedGrid.cellSizePx, y, bounds.maxX + normalizedGrid.cellSizePx, y]}
-        stroke={index % 5 === 0 ? 'rgba(248, 250, 252, 0.38)' : 'rgba(248, 250, 252, 0.18)'}
-        strokeWidth={index % 5 === 0 ? 1.4 : 1}
-        listening={false}
-      />
-    );
-  }
-
-  return (
-    <Group listening={false} data-testid="grid-layer">
-      {lines}
-    </Group>
-  );
-};
-
 const MeasurementOverlay = ({
   measurement,
   drawTheme = DEFAULT_DRAW_THEME,
   overlayId = '',
+  viewportScale = 1,
 }) => {
   if (!measurement?.pathPoints?.length || measurement.pathPoints.length < 2 || !measurement?.endPoint || !measurement?.label) {
     return null;
@@ -848,34 +679,73 @@ const MeasurementOverlay = ({
 
   const linePoints = measurement.pathPoints.flatMap((point) => [point.x, point.y]);
   const markerPoints = measurement.markerPoints || measurement.pathPoints;
+  const metrics = buildZoomNormalizedOverlayMetrics(viewportScale);
+  const segmentLabelFontSize = metrics.rulerLabelFontSize * 0.9;
+  const segmentLabelHeight = metrics.rulerLabelHeight * 0.86;
+  const segmentLabelVerticalInset = Math.max(
+    metrics.aoeBadgeTopPadding * 0.8,
+    segmentLabelHeight - segmentLabelFontSize - metrics.aoeBadgeTopPadding
+  );
+  const segmentLabelOffset = metrics.rulerMarkerRadius + metrics.aoeBadgeTopPadding;
 
   const labelWidth = Math.max(
-    RULER_LABEL_MIN_WIDTH,
-    Math.round((measurement.label.length * 7.2) + 16)
+    metrics.rulerLabelMinWidth,
+    estimateTextWidth(measurement.label, metrics.rulerLabelFontSize) + (metrics.aoeBadgeSidePadding * 2)
   );
-  const labelHeight = 28;
-  const labelX = measurement.endPoint.x + 12;
-  const labelY = measurement.endPoint.y - 14;
+  const labelHeight = metrics.rulerLabelHeight;
+  const labelX = measurement.endPoint.x + metrics.rulerLabelOffsetX;
+  const labelY = measurement.endPoint.y + metrics.rulerLabelOffsetY;
+  const segmentLabelLayouts = (measurement.segments?.length || 0) > 1
+    ? measurement.segments.map((segment, index) => {
+      const segmentLabel = `${segment.feet} ft`;
+      const midpoint = midpointBetween(segment.startPoint, segment.endPoint);
+      const direction = normalizeVector(
+        segment.endPoint.x - segment.startPoint.x,
+        segment.endPoint.y - segment.startPoint.y,
+        { x: 1, y: 0 }
+      );
+      const perpendicular = {
+        x: -direction.y,
+        y: direction.x,
+      };
+      const preferredDirection = perpendicular.y > 0 ? -1 : 1;
+      const offsetX = perpendicular.x * segmentLabelOffset * preferredDirection;
+      const offsetY = perpendicular.y * segmentLabelOffset * preferredDirection;
+      const segmentLabelWidth = Math.max(
+        metrics.rulerLabelMinWidth * 0.66,
+        estimateTextWidth(segmentLabel, segmentLabelFontSize) + (metrics.aoeBadgeSidePadding * 2)
+      );
+
+      return {
+        key: `${segment.startCell?.col ?? 's'}:${segment.startCell?.row ?? 's'}:${segment.endCell?.col ?? 'e'}:${segment.endCell?.row ?? 'e'}:${index}`,
+        text: segmentLabel,
+        width: segmentLabelWidth,
+        height: segmentLabelHeight,
+        x: midpoint.x + offsetX - (segmentLabelWidth / 2),
+        y: midpoint.y + offsetY - (segmentLabelHeight / 2),
+      };
+    })
+    : [];
 
   return (
     <Group listening={false} data-testid={overlayId ? `measurement-overlay-${overlayId}` : undefined}>
       <Line
         points={linePoints}
         stroke={drawTheme.outlineStroke}
-        strokeWidth={MEASUREMENT_OUTLINE_STROKE_WIDTH}
-        dash={[10, 6]}
+        strokeWidth={metrics.rulerOutlineStrokeWidth}
+        dash={metrics.rulerDash}
         lineCap="round"
         lineJoin="round"
       />
       <Line
         points={linePoints}
         stroke={drawTheme.stroke}
-        strokeWidth={3}
-        dash={[10, 6]}
+        strokeWidth={metrics.rulerStrokeWidth}
+        dash={metrics.rulerDash}
         lineCap="round"
         lineJoin="round"
         shadowColor={drawTheme.glow}
-        shadowBlur={10}
+        shadowBlur={metrics.aoeGlowBlur}
         shadowOpacity={0.28}
       />
 
@@ -884,47 +754,86 @@ const MeasurementOverlay = ({
           <Circle
             x={point.x}
             y={point.y}
-            radius={6}
+            radius={metrics.rulerMarkerRadius}
             fill="#0f172a"
             stroke={drawTheme.outlineStroke}
-            strokeWidth={TOKEN_RING_OUTLINE_STROKE_WIDTH}
+            strokeWidth={metrics.rulerOutlineStrokeWidth}
           />
           <Circle
             x={point.x}
             y={point.y}
-            radius={6}
+            radius={metrics.rulerMarkerRadius}
             fill="#0f172a"
             stroke={drawTheme.stroke}
-            strokeWidth={2}
+            strokeWidth={metrics.rulerStrokeWidth}
           />
         </React.Fragment>
+      ))}
+
+      {segmentLabelLayouts.map((segmentLabel) => (
+        <Group
+          key={segmentLabel.key}
+          x={segmentLabel.x}
+          y={segmentLabel.y}
+          listening={false}
+          data-testid={overlayId ? `measurement-segment-label-${overlayId}` : undefined}
+        >
+          <Rect
+            width={segmentLabel.width}
+            height={segmentLabel.height}
+            cornerRadius={metrics.aoeBadgeCornerRadius}
+            stroke={drawTheme.outlineStroke}
+            strokeWidth={metrics.aoeOutlineStrokeWidth}
+          />
+          <Rect
+            width={segmentLabel.width}
+            height={segmentLabel.height}
+            cornerRadius={metrics.aoeBadgeCornerRadius}
+            fill="rgba(2, 6, 23, 0.84)"
+            stroke={drawTheme.labelBorder}
+            strokeWidth={metrics.aoeAccentStrokeWidth}
+            shadowColor={drawTheme.glow}
+            shadowBlur={metrics.aoeGlowBlur}
+            shadowOpacity={0.18}
+          />
+          <Text
+            x={0}
+            y={segmentLabelVerticalInset}
+            width={segmentLabel.width}
+            align="center"
+            fontSize={segmentLabelFontSize}
+            fontStyle="bold"
+            fill={drawTheme.labelText}
+            text={segmentLabel.text}
+          />
+        </Group>
       ))}
 
       <Group x={labelX} y={labelY}>
         <Rect
           width={labelWidth}
           height={labelHeight}
-          cornerRadius={9}
+          cornerRadius={metrics.aoeBadgeCornerRadius}
           stroke={drawTheme.outlineStroke}
-          strokeWidth={SHAPE_OUTLINE_STROKE_WIDTH}
+          strokeWidth={metrics.aoeOutlineStrokeWidth}
         />
         <Rect
           width={labelWidth}
           height={labelHeight}
-          cornerRadius={9}
+          cornerRadius={metrics.aoeBadgeCornerRadius}
           fill="rgba(2, 6, 23, 0.92)"
           stroke={drawTheme.labelBorder}
-          strokeWidth={1.5}
+          strokeWidth={metrics.aoeAccentStrokeWidth}
           shadowColor={drawTheme.glow}
-          shadowBlur={8}
+          shadowBlur={metrics.aoeGlowBlur}
           shadowOpacity={0.2}
         />
         <Text
           x={0}
-          y={6}
+          y={metrics.aoeBadgeTopPadding}
           width={labelWidth}
           align="center"
-          fontSize={13}
+          fontSize={metrics.rulerLabelFontSize}
           fontStyle="bold"
           fill={drawTheme.labelText}
           text={measurement.label}
@@ -1357,6 +1266,222 @@ const AoEFigureOverlay = ({
   return null;
 };
 
+const EnhancedAoEFigureOverlay = ({
+  figure,
+  drawTheme = DEFAULT_DRAW_THEME,
+  overlayId = '',
+  isSelected = false,
+  onMouseDown,
+  listening = true,
+  viewportScale = 1,
+}) => {
+  if (!figure?.figureType) {
+    return null;
+  }
+
+  const overlayProps = {
+    listening,
+    onMouseDown,
+    'data-testid': overlayId ? `aoe-figure-overlay-${overlayId}` : undefined,
+  };
+  const metrics = buildZoomNormalizedOverlayMetrics(viewportScale);
+  const outlineStroke = isSelected ? 'rgba(248, 250, 252, 0.96)' : drawTheme.outlineStroke;
+  const accentStroke = isSelected ? '#ffffff' : drawTheme.stroke;
+  const outlineStrokeWidth = isSelected ? metrics.aoeOutlineStrokeWidth * 1.25 : metrics.aoeOutlineStrokeWidth;
+  const accentStrokeWidth = isSelected ? metrics.aoeAccentStrokeWidth * 1.3 : metrics.aoeAccentStrokeWidth;
+  const shadowBlur = isSelected ? metrics.aoeGlowBlur * 1.5 : metrics.aoeGlowBlur;
+  const hitFill = 'rgba(255, 255, 255, 0.001)';
+  const visibleFill = figure.isFilled === false ? 'rgba(255, 255, 255, 0)' : drawTheme.fill;
+  const measurementLayout = buildAoEFigureMeasurementDecorationLayout({ figure, viewportScale });
+
+  const measurementDecoration = measurementLayout ? (
+    <Group listening={false} data-testid={overlayId ? `aoe-figure-measurement-${overlayId}` : undefined}>
+      <Line
+        points={measurementLayout.arrowPoints}
+        stroke={accentStroke}
+        strokeWidth={measurementLayout.metrics.aoeArrowStrokeWidth}
+        lineCap="round"
+        lineJoin="round"
+      />
+      <Line
+        points={measurementLayout.arrowHeadPoints}
+        closed
+        fill={accentStroke}
+        stroke={accentStroke}
+        strokeWidth={measurementLayout.metrics.aoeArrowStrokeWidth * 0.65}
+        lineJoin="round"
+      />
+      <Circle
+        x={measurementLayout.startDot.x}
+        y={measurementLayout.startDot.y}
+        radius={measurementLayout.metrics.aoeDotRadius}
+        fill={accentStroke}
+        shadowColor={drawTheme.glow}
+        shadowBlur={measurementLayout.metrics.aoeGlowBlur}
+        shadowOpacity={0.2}
+      />
+      <Rect
+        x={measurementLayout.badgeX}
+        y={measurementLayout.badgeY}
+        width={measurementLayout.width}
+        height={measurementLayout.height}
+        cornerRadius={measurementLayout.metrics.aoeBadgeCornerRadius}
+        stroke={outlineStroke}
+        strokeWidth={measurementLayout.metrics.aoeOutlineStrokeWidth}
+      />
+      <Rect
+        x={measurementLayout.badgeX}
+        y={measurementLayout.badgeY}
+        width={measurementLayout.width}
+        height={measurementLayout.height}
+        cornerRadius={measurementLayout.metrics.aoeBadgeCornerRadius}
+        fill="rgba(2, 6, 23, 0.72)"
+        stroke={drawTheme.labelBorder}
+        strokeWidth={measurementLayout.metrics.aoeAccentStrokeWidth}
+        shadowColor={drawTheme.glow}
+        shadowBlur={measurementLayout.metrics.aoeGlowBlur}
+        shadowOpacity={0.24}
+      />
+      <Text
+        x={measurementLayout.badgeX + measurementLayout.metrics.aoeBadgeSidePadding}
+        y={measurementLayout.badgeY + measurementLayout.metrics.aoeBadgeTopPadding}
+        width={measurementLayout.width - (measurementLayout.metrics.aoeBadgeSidePadding * 2)}
+        align="center"
+        fontSize={measurementLayout.metrics.aoePrimaryFontSize}
+        fontStyle="bold"
+        fill={drawTheme.labelText}
+        text={measurementLayout.lines.primary}
+      />
+      <Text
+        x={measurementLayout.badgeX + measurementLayout.metrics.aoeBadgeSidePadding}
+        y={measurementLayout.badgeY + measurementLayout.metrics.aoeBadgeTopPadding + measurementLayout.metrics.aoePrimaryFontSize + measurementLayout.metrics.aoeLineGap}
+        width={measurementLayout.width - (measurementLayout.metrics.aoeBadgeSidePadding * 2)}
+        align="center"
+        fontSize={measurementLayout.metrics.aoeSecondaryFontSize}
+        fontStyle="bold"
+        fill={drawTheme.labelText}
+        text={measurementLayout.lines.secondary}
+      />
+      {figure.measurement?.label && (
+        <Text
+          x={measurementLayout.badgeX}
+          y={measurementLayout.badgeY}
+          width={measurementLayout.width}
+          opacity={0}
+          text={figure.measurement.label}
+        />
+      )}
+    </Group>
+  ) : null;
+
+  if (figure.figureType === 'circle') {
+    return (
+      <Group {...overlayProps}>
+        <Circle
+          x={figure.centerPoint.x}
+          y={figure.centerPoint.y}
+          radius={figure.radius}
+          fill={hitFill}
+          stroke="rgba(255,255,255,0)"
+          strokeWidth={metrics.aoeHitStrokeWidth}
+        />
+        <Circle
+          x={figure.centerPoint.x}
+          y={figure.centerPoint.y}
+          radius={figure.radius}
+          stroke={outlineStroke}
+          strokeWidth={outlineStrokeWidth}
+        />
+        <Circle
+          x={figure.centerPoint.x}
+          y={figure.centerPoint.y}
+          radius={figure.radius}
+          fill={visibleFill}
+          stroke={accentStroke}
+          strokeWidth={accentStrokeWidth}
+          shadowColor={drawTheme.glow}
+          shadowBlur={shadowBlur}
+          shadowOpacity={0.24}
+        />
+        {measurementDecoration}
+      </Group>
+    );
+  }
+
+  if (figure.figureType === 'square' || figure.figureType === 'rectangle') {
+    return (
+      <Group {...overlayProps}>
+        <Rect
+          x={figure.x}
+          y={figure.y}
+          width={figure.width}
+          height={figure.height}
+          fill={hitFill}
+          stroke="rgba(255,255,255,0)"
+          strokeWidth={metrics.aoeHitStrokeWidth}
+        />
+        <Rect
+          x={figure.x}
+          y={figure.y}
+          width={figure.width}
+          height={figure.height}
+          stroke={outlineStroke}
+          strokeWidth={outlineStrokeWidth}
+        />
+        <Rect
+          x={figure.x}
+          y={figure.y}
+          width={figure.width}
+          height={figure.height}
+          fill={visibleFill}
+          stroke={accentStroke}
+          strokeWidth={accentStrokeWidth}
+          shadowColor={drawTheme.glow}
+          shadowBlur={shadowBlur}
+          shadowOpacity={0.24}
+        />
+        {measurementDecoration}
+      </Group>
+    );
+  }
+
+  if (figure.figureType === 'cone') {
+    return (
+      <Group {...overlayProps}>
+        <Line
+          points={figure.flatPoints}
+          closed
+          fill={hitFill}
+          stroke="rgba(255,255,255,0)"
+          strokeWidth={metrics.aoeHitStrokeWidth}
+          lineJoin="round"
+        />
+        <Line
+          points={figure.flatPoints}
+          closed
+          stroke={outlineStroke}
+          strokeWidth={outlineStrokeWidth}
+          lineJoin="round"
+        />
+        <Line
+          points={figure.flatPoints}
+          closed
+          fill={visibleFill}
+          stroke={accentStroke}
+          strokeWidth={accentStrokeWidth}
+          lineJoin="round"
+          shadowColor={drawTheme.glow}
+          shadowBlur={shadowBlur}
+          shadowOpacity={0.24}
+        />
+        {measurementDecoration}
+      </Group>
+    );
+  }
+
+  return null;
+};
+
 const getDrawSwatchStyle = (theme, isActive = false) => ({
   background: theme.swatchBackground,
   borderColor: isActive ? theme.swatchBorder : 'rgba(71, 85, 105, 0.9)',
@@ -1698,6 +1823,8 @@ const TurnOrderPanel = ({
 }) => {
   const prefersReducedMotion = useReducedMotion();
   const [initiativeEditors, setInitiativeEditors] = useState({});
+  const panelRef = useRef(null);
+  const [hoveredEntryTooltip, setHoveredEntryTooltip] = useState(null);
 
   useEffect(() => {
     setInitiativeEditors((currentEditors) => entries.reduce((nextEditors, entry) => {
@@ -1770,8 +1897,54 @@ const TurnOrderPanel = ({
     });
   };
 
+  const showEntryTooltip = useCallback((tokenId, label, element) => {
+    const panelRect = panelRef.current?.getBoundingClientRect();
+    const chipRect = element?.getBoundingClientRect?.();
+    if (!panelRect || !chipRect || !tokenId || !label) {
+      return;
+    }
+
+    const tooltipLayout = buildClampedTokenTooltipLayout({
+      containerWidth: panelRect.width,
+      anchorCenterX: chipRect.left - panelRect.left + (chipRect.width / 2),
+      preferredTop: chipRect.top - panelRect.top - 8,
+      preferredBottom: chipRect.bottom - panelRect.top + 8,
+      label,
+      forceBelow: false,
+    });
+
+    setHoveredEntryTooltip({
+      tokenId,
+      label,
+      ...tooltipLayout,
+    });
+  }, []);
+
+  const clearEntryTooltip = useCallback((tokenId = '') => {
+    setHoveredEntryTooltip((currentTooltip) => (
+      !currentTooltip || (tokenId && currentTooltip.tokenId !== tokenId)
+        ? currentTooltip
+        : null
+    ));
+  }, []);
+
   return (
-    <div className="pointer-events-auto min-h-0 w-full">
+    <div ref={panelRef} className="pointer-events-auto relative min-h-0 w-full overflow-visible">
+      {hoveredEntryTooltip && (
+        <div
+          data-testid={`turn-order-tooltip-${hoveredEntryTooltip.tokenId}`}
+          className="pointer-events-none absolute z-[36] overflow-hidden text-center text-ellipsis whitespace-nowrap rounded-xl border border-slate-700/90 bg-slate-950/96 px-3 py-1.5 text-xs font-semibold text-slate-100 shadow-lg shadow-black/45 backdrop-blur-sm"
+          style={{
+            left: hoveredEntryTooltip.left,
+            top: hoveredEntryTooltip.top,
+            width: hoveredEntryTooltip.width,
+            maxWidth: hoveredEntryTooltip.maxWidth,
+            transform: hoveredEntryTooltip.transform,
+          }}
+        >
+          {hoveredEntryTooltip.label}
+        </div>
+      )}
       <div className="relative flex max-h-[calc(100vh-12rem)] min-h-0 flex-col items-end gap-2 overflow-x-hidden overflow-y-auto pb-8 pl-3 pr-0 pt-1">
         {entries.length > 0 && (
           <motion.div
@@ -1809,8 +1982,7 @@ const TurnOrderPanel = ({
               exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -10, x: 6 }}
               transition={prefersReducedMotion ? { duration: 0.01 } : TURN_ORDER_ENTRY_TRANSITION}
             >
-              <div className="min-w-0 max-w-[8.5rem] text-right">
-                <div className={`truncate text-sm font-semibold ${isActiveTurn ? 'text-fuchsia-50' : 'text-slate-100'}`}>{entry.label}</div>
+              <div className="min-w-0 text-right">
                 {canEdit ? (
                   <form
                     className="mt-1 inline-flex items-center justify-end gap-1.5"
@@ -1852,21 +2024,30 @@ const TurnOrderPanel = ({
                 )}
               </div>
 
-              {entry.imageUrl ? (
-                <img
-                  src={entry.imageUrl}
-                  alt=""
-                  className={`h-10 w-10 shrink-0 rounded-2xl object-cover ${isActiveTurn
-                    ? 'border border-fuchsia-300/75 shadow-[0_0_16px_rgba(217,70,239,0.22)]'
-                    : 'border border-slate-700/80'}`}
-                />
-              ) : (
-                <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-800/90 text-xs font-bold uppercase tracking-[0.18em] ${isActiveTurn
-                  ? 'border border-fuchsia-300/75 text-fuchsia-50 shadow-[0_0_16px_rgba(217,70,239,0.22)]'
-                  : 'border border-slate-700/80 text-slate-200'}`}>
-                  {getInitials(entry.label)}
-                </div>
-              )}
+              <div
+                className="relative shrink-0"
+                data-testid={`turn-order-chip-${entry.tokenId}`}
+                onMouseEnter={(event) => showEntryTooltip(entry.tokenId, entry.label, event.currentTarget)}
+                onMouseLeave={() => clearEntryTooltip(entry.tokenId)}
+                onFocus={(event) => showEntryTooltip(entry.tokenId, entry.label, event.currentTarget)}
+                onBlur={() => clearEntryTooltip(entry.tokenId)}
+              >
+                {entry.imageUrl ? (
+                  <img
+                    src={entry.imageUrl}
+                    alt=""
+                    className={`h-10 w-10 shrink-0 rounded-2xl object-cover ${isActiveTurn
+                      ? 'border border-fuchsia-300/75 shadow-[0_0_16px_rgba(217,70,239,0.22)]'
+                      : 'border border-slate-700/80'}`}
+                  />
+                ) : (
+                  <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-800/90 text-xs font-bold uppercase tracking-[0.18em] ${isActiveTurn
+                    ? 'border border-fuchsia-300/75 text-fuchsia-50 shadow-[0_0_16px_rgba(217,70,239,0.22)]'
+                    : 'border border-slate-700/80 text-slate-200'}`}>
+                    {getInitials(entry.label)}
+                  </div>
+                )}
+              </div>
             </motion.div>
           );
         }) : (
@@ -1933,6 +2114,7 @@ export default function GrigliataBoard({
   onDeleteTokens,
   onCreateAoEFigure,
   onMoveAoEFigure,
+  onUpdateAoEFigurePresentation,
   onDeleteAoEFigures,
   onSetSelectedTokensVisibility,
   isTokenVisibilityActionPending,
@@ -1940,6 +2122,8 @@ export default function GrigliataBoard({
   isTokenDeadActionPending,
   onUpdateTokenStatuses,
   isTokenStatusActionPending,
+  onSetSelectedTokenSize,
+  isTokenSizeActionPending = false,
   selectedTokenDetails = null,
   onDropCurrentToken,
   onSelectedTokenIdsChange,
@@ -1968,6 +2152,7 @@ export default function GrigliataBoard({
   const [pingAnimationClock, setPingAnimationClock] = useState(() => Date.now());
   const [hoveredOverflowTokenId, setHoveredOverflowTokenId] = useState('');
   const [pinnedOverflowTokenId, setPinnedOverflowTokenId] = useState('');
+  const [hoveredTokenTooltipId, setHoveredTokenTooltipId] = useState('');
   const [isTurnOrderPanelCollapsed, setIsTurnOrderPanelCollapsed] = useState(() => readStoredTurnOrderCollapsed(currentUserId));
   const turnOrderPanelBodyId = useId();
   const [turnOrderContextMenu, setTurnOrderContextMenu] = useState(null);
@@ -2529,6 +2714,7 @@ export default function GrigliataBoard({
     clearActiveSharedInteraction();
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
+    setHoveredTokenTooltipId('');
   }, [clearActiveSharedInteraction, clearPingBroadcastTimer, clearPingHoldTimer, fitKey]);
 
   useEffect(() => {
@@ -2541,6 +2727,7 @@ export default function GrigliataBoard({
     setSelectedTokenIds([]);
     setSelectedAoEFigureId('');
     clearActiveSharedInteraction();
+    setHoveredTokenTooltipId('');
   }, [clearActiveSharedInteraction, isNarrationOverlayActive]);
 
   useEffect(() => {
@@ -2680,6 +2867,7 @@ export default function GrigliataBoard({
     if (!selectionBox && !tokenDragState && !isTokenDragActive) return;
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
+    setHoveredTokenTooltipId('');
   }, [isTokenDragActive, selectionBox, tokenDragState]);
 
   const getWorldPointFromClient = useCallback((clientX, clientY) => {
@@ -3136,6 +3324,7 @@ export default function GrigliataBoard({
               backgroundId: originToken.backgroundId,
               col: originToken.col + colDelta,
               row: originToken.row + rowDelta,
+              sizeSquares: originToken.sizeSquares,
               isVisibleToPlayers: originToken.isVisibleToPlayers,
               isDead: originToken.isDead,
               statuses: originToken.statuses,
@@ -3606,14 +3795,23 @@ export default function GrigliataBoard({
     }
 
     if (isSecondaryMouseButton(nativeEvent)) {
+      nativeEvent.preventDefault();
+      const activeInteraction = interactionRef.current;
+
+      if (hasPrimaryMouseButtonPressed(nativeEvent)) {
+        if (commitMeasurementWaypoint(nativeEvent.clientX, nativeEvent.clientY)) {
+          return;
+        }
+
+        if (shouldSuppressTokenTurnOrderMenu(activeInteraction)) {
+          return;
+        }
+      }
+
       if (openTurnOrderContextMenu(token, nativeEvent)) {
         return;
       }
 
-      nativeEvent.preventDefault();
-      if (hasPrimaryMouseButtonPressed(nativeEvent)) {
-        commitMeasurementWaypoint(nativeEvent.clientX, nativeEvent.clientY);
-      }
       return;
     }
 
@@ -3656,6 +3854,7 @@ export default function GrigliataBoard({
           backgroundId: selectedToken.backgroundId,
           col: selectedToken.col,
           row: selectedToken.row,
+          sizeSquares: selectedToken.sizeSquares,
           isVisibleToPlayers: selectedToken.isVisibleToPlayers,
           isDead: selectedToken.isDead,
           statuses: selectedToken.statuses,
@@ -3668,6 +3867,15 @@ export default function GrigliataBoard({
 
   const handleTokenContextMenu = (token, event) => {
     event.cancelBubble = true;
+    event.evt?.preventDefault?.();
+
+    const activeInteraction = interactionRef.current;
+
+    if (isRulerEnabled && shouldSuppressTokenTurnOrderMenu(activeInteraction)) {
+      commitMeasurementWaypoint(event.evt?.clientX, event.evt?.clientY);
+      return;
+    }
+
     openTurnOrderContextMenu(token, event.evt);
   };
 
@@ -3754,97 +3962,12 @@ export default function GrigliataBoard({
       return null;
     }
 
-    const selectionBounds = selectedTokens.reduce((accumulator, token) => {
-      const left = token.renderPosition.x;
-      const top = token.renderPosition.y;
-      const right = token.renderPosition.x + token.renderPosition.size;
-      const bottom = token.renderPosition.y + token.renderPosition.size;
-
-      return {
-        minX: Math.min(accumulator.minX, left),
-        minY: Math.min(accumulator.minY, top),
-        maxX: Math.max(accumulator.maxX, right),
-        maxY: Math.max(accumulator.maxY, bottom),
-      };
-    }, {
-      minX: Number.POSITIVE_INFINITY,
-      minY: Number.POSITIVE_INFINITY,
-      maxX: Number.NEGATIVE_INFINITY,
-      maxY: Number.NEGATIVE_INFINITY,
+    return buildSelectedTokenActionState({
+      selectedTokens,
+      isManager,
+      stageSize,
+      viewport,
     });
-
-    if (!Number.isFinite(selectionBounds.minX) || !Number.isFinite(selectionBounds.minY)) {
-      return null;
-    }
-
-    const screenWidth = (selectionBounds.maxX - selectionBounds.minX) * viewport.scale;
-    const referenceScreenSize = Math.max(
-      ...selectedTokens.map((token) => token.renderPosition.size * viewport.scale),
-      36
-    );
-    const buttonSize = Math.max(36, Math.min(84, Math.round(referenceScreenSize)));
-    const gap = Math.max(14, Math.round(buttonSize * 0.22));
-    const normalizedTokenIds = [...new Set(
-      selectedTokens
-        .map((token) => token.tokenId)
-        .filter(Boolean)
-    )];
-    if (!normalizedTokenIds.length) {
-      return null;
-    }
-
-    const statusToken = selectedTokens.length === 1
-      ? {
-        tokenId: selectedTokens[0].tokenId,
-        label: selectedTokens[0].label || 'token',
-        statuses: selectedTokens[0].statuses || [],
-      }
-      : null;
-    const actionCount = (isManager ? 2 : 0) + (statusToken ? 1 : 0);
-    if (actionCount < 1) {
-      return null;
-    }
-
-    const toolbarWidth = (buttonSize * actionCount) + (Math.max(0, actionCount - 1) * 8) + 16;
-    const toolbarHeight = buttonSize + 16;
-    const allSelectedTokensHidden = selectedTokens.every((token) => token.isVisibleToPlayers === false);
-    const allSelectedTokensDead = selectedTokens.every((token) => token.isDead === true);
-    const selectionLabel = normalizedTokenIds.length === 1 ? 'token' : 'tokens';
-    const rawToolbarPosition = buildSelectionActionToolbarPosition({
-      left: viewport.x + (selectionBounds.minX * viewport.scale),
-      top: viewport.y + (selectionBounds.minY * viewport.scale),
-      width: screenWidth,
-      buttonSize,
-      gap,
-    });
-
-    return {
-      tokenIds: normalizedTokenIds,
-      buttonSize,
-      toolbarWidth,
-      toolbarHeight,
-      showVisibilityAction: isManager,
-      showDeadAction: isManager,
-      statusToken,
-      nextIsVisibleToPlayers: allSelectedTokensHidden,
-      nextIsDead: !allSelectedTokensDead,
-      visibilityTitle: allSelectedTokensHidden
-        ? `Show selected ${selectionLabel} to players`
-        : `Hide selected ${selectionLabel} from players`,
-      deadStateTitle: allSelectedTokensDead
-        ? `Mark selected ${selectionLabel} as alive`
-        : `Mark selected ${selectionLabel} as dead`,
-      toolbarPosition: {
-        left: Math.min(
-          Math.max(12, rawToolbarPosition.left),
-          Math.max(12, stageSize.width - toolbarWidth - 12)
-        ),
-        top: Math.min(
-          Math.max(12, rawToolbarPosition.top),
-          Math.max(12, stageSize.height - toolbarHeight - 12)
-        ),
-      },
-    };
   }, [
     activeAoeFigureType,
     isManager,
@@ -3983,8 +4106,10 @@ export default function GrigliataBoard({
     );
     const buttonSize = Math.max(36, Math.min(72, Math.round(referenceScreenSize * 0.28)));
     const gap = Math.max(14, Math.round(buttonSize * 0.22));
+    const actionCount = 3;
+    const toolbarInnerGap = Math.max(8, Math.round(buttonSize * 0.18));
     const toolbarWidth = buttonSize + 16;
-    const toolbarHeight = buttonSize + 16;
+    const toolbarHeight = (buttonSize * actionCount) + (toolbarInnerGap * (actionCount - 1)) + 16;
     const rawToolbarPosition = buildSelectionActionToolbarPosition({
       left: viewport.x + (figureBounds.minX * viewport.scale),
       top: viewport.y + (figureBounds.minY * viewport.scale),
@@ -3996,6 +4121,9 @@ export default function GrigliataBoard({
     return {
       figureId: selectedAoEFigure.id,
       buttonSize,
+      toolbarInnerGap,
+      showMeasurementDetails: selectedAoEFigure.showMeasurementDetails !== false,
+      isFilled: selectedAoEFigure.isFilled !== false,
       toolbarPosition: {
         left: Math.min(
           Math.max(12, rawToolbarPosition.left),
@@ -4035,6 +4163,33 @@ export default function GrigliataBoard({
 
     return token;
   }, [activeOverflowTokenId, renderedTokens, tokenStatusDisplayById]);
+  const hoveredTokenTooltip = useMemo(() => {
+    if (!hoveredTokenTooltipId) {
+      return null;
+    }
+
+    return renderedTokens.find((entry) => entry.tokenId === hoveredTokenTooltipId) || null;
+  }, [hoveredTokenTooltipId, renderedTokens]);
+  const hoveredTokenTooltipStyle = useMemo(() => {
+    if (!hoveredTokenTooltip) {
+      return null;
+    }
+
+    const tokenScreenLeft = viewport.x + (hoveredTokenTooltip.renderPosition.x * viewport.scale);
+    const tokenScreenTop = viewport.y + (hoveredTokenTooltip.renderPosition.y * viewport.scale);
+    const tokenScreenSize = hoveredTokenTooltip.renderPosition.size * viewport.scale;
+    const tokenCenterX = tokenScreenLeft + (tokenScreenSize / 2);
+    const preferredTop = tokenScreenTop - 10;
+    const shouldOpenBelow = preferredTop < 40;
+    return buildClampedTokenTooltipLayout({
+      containerWidth: stageSize.width,
+      anchorCenterX: tokenCenterX,
+      preferredTop,
+      preferredBottom: tokenScreenTop + tokenScreenSize + 10,
+      label: hoveredTokenTooltip.label || hoveredTokenTooltip.characterId || hoveredTokenTooltip.ownerUid || 'Token',
+      forceBelow: shouldOpenBelow,
+    });
+  }, [hoveredTokenTooltip, stageSize.width, viewport.scale, viewport.x, viewport.y]);
   const activeOverflowCardStyle = useMemo(() => {
     if (!activeOverflowToken) {
       return null;
@@ -4077,6 +4232,7 @@ export default function GrigliataBoard({
   const visibleAoEPreviewState = isNarrationOverlayActive ? null : aoePreviewState;
   const visibleSelectedTokenHud = isNarrationOverlayActive ? null : selectedSingleTokenHudState;
   const visibleOverflowToken = isNarrationOverlayActive ? null : activeOverflowToken;
+  const visibleHoveredTokenTooltip = isNarrationOverlayActive ? null : hoveredTokenTooltip;
   const visibleSelectedAoEFigureActionState = isNarrationOverlayActive ? null : selectedAoEFigureActionState;
   const visibleSelectedTokenActionState = isNarrationOverlayActive ? null : selectedTokenActionState;
 
@@ -4299,7 +4455,7 @@ export default function GrigliataBoard({
                 key="turn-order-panel"
                 id={turnOrderPanelBodyId}
                 data-testid="turn-order-panel"
-                className="pointer-events-none flex min-h-0 w-full flex-1 items-start overflow-hidden"
+                className="pointer-events-none flex min-h-0 w-full flex-1 items-start overflow-visible"
                 initial={prefersReducedMotion ? { opacity: 1, height: 'auto' } : { opacity: 0, height: 0, y: -8 }}
                 animate={{ opacity: 1, height: 'auto', y: 0 }}
                 exit={prefersReducedMotion ? { opacity: 0, height: 0 } : { opacity: 0, height: 0, y: -8 }}
@@ -4409,13 +4565,13 @@ export default function GrigliataBoard({
               )}
 
               {visibleRenderedAoEFigures.map((figure) => (
-                <AoEFigureOverlay
+                <EnhancedAoEFigureOverlay
                   key={figure.id}
                   figure={figure.renderable}
                   drawTheme={getGrigliataDrawTheme(figure.colorKey)}
                   overlayId={figure.id}
                   isSelected={figure.isSelected}
-                  boardBounds={boardBounds}
+                  viewportScale={viewport.scale}
                   onMouseDown={(event) => handleAoEFigureMouseDown(figure, event)}
                 />
               ))}
@@ -4432,6 +4588,15 @@ export default function GrigliataBoard({
                   drawTheme={resolvedDrawTheme}
                   onMouseDown={handleTokenMouseDown}
                   onContextMenu={handleTokenContextMenu}
+                  onHoverChange={(tokenId, isHovered) => {
+                    setHoveredTokenTooltipId((currentTokenId) => {
+                      if (!isHovered) {
+                        return currentTokenId === tokenId ? '' : currentTokenId;
+                      }
+
+                      return tokenId || '';
+                    });
+                  }}
                   onOverflowMouseEnter={(tokenId) => setHoveredOverflowTokenId(tokenId || '')}
                   onOverflowMouseLeave={(tokenId) => {
                     setHoveredOverflowTokenId((currentTokenId) => (
@@ -4457,16 +4622,17 @@ export default function GrigliataBoard({
                       measurement={sharedInteraction.measurement}
                       drawTheme={sharedInteraction.drawTheme}
                       overlayId={`shared-${sharedInteraction.ownerUid}`}
+                      viewportScale={viewport.scale}
                     />
                   )
                   : sharedInteraction.kind === 'aoe'
                     ? (
-                    <AoEFigureOverlay
+                    <EnhancedAoEFigureOverlay
                       key={`shared-aoe-${sharedInteraction.ownerUid}`}
                       figure={sharedInteraction.figure}
                       drawTheme={sharedInteraction.drawTheme}
                       overlayId={`shared-${sharedInteraction.ownerUid}`}
-                      boardBounds={boardBounds}
+                      viewportScale={viewport.scale}
                       listening={false}
                     />
                     )
@@ -4498,15 +4664,16 @@ export default function GrigliataBoard({
                   measurement={visibleMeasurementState}
                   drawTheme={resolvedDrawTheme}
                   overlayId="local"
+                  viewportScale={viewport.scale}
                 />
               )}
 
               {visibleAoEPreviewState && (
-                <AoEFigureOverlay
+                <EnhancedAoEFigureOverlay
                   figure={visibleAoEPreviewState}
                   drawTheme={resolvedDrawTheme}
                   overlayId="local"
-                  boardBounds={boardBounds}
+                  viewportScale={viewport.scale}
                   listening={false}
                 />
               )}
@@ -4519,6 +4686,18 @@ export default function GrigliataBoard({
             token={selectedTokenDetails}
             hudState={visibleSelectedTokenHud}
           />
+        )}
+
+        {visibleHoveredTokenTooltip && hoveredTokenTooltipStyle && (
+          <div className="pointer-events-none absolute inset-0 z-[18]">
+            <div
+              data-testid={`battlemap-tooltip-${visibleHoveredTokenTooltip.tokenId}`}
+              className="absolute overflow-hidden text-center text-ellipsis whitespace-nowrap rounded-xl border border-slate-700/90 bg-slate-950/96 px-3 py-1.5 text-xs font-semibold text-slate-100 shadow-lg shadow-black/45 backdrop-blur-sm"
+              style={hoveredTokenTooltipStyle}
+            >
+              {visibleHoveredTokenTooltip.label || visibleHoveredTokenTooltip.characterId || visibleHoveredTokenTooltip.ownerUid || 'Token'}
+            </div>
+          </div>
         )}
 
         {visibleOverflowToken && activeOverflowCardStyle && (
@@ -4683,9 +4862,11 @@ export default function GrigliataBoard({
           isTokenVisibilityActionPending={isTokenVisibilityActionPending}
           isTokenDeadActionPending={isTokenDeadActionPending}
           isTokenStatusActionPending={isTokenStatusActionPending}
+          isTokenSizeActionPending={isTokenSizeActionPending}
           onSetSelectedTokensVisibility={onSetSelectedTokensVisibility}
           onSetSelectedTokensDeadState={onSetSelectedTokensDeadState}
           onUpdateTokenStatuses={onUpdateTokenStatuses}
+          onSetSelectedTokenSize={onSetSelectedTokenSize}
         />
 
         {visibleSelectedAoEFigureActionState && (
@@ -4697,7 +4878,68 @@ export default function GrigliataBoard({
                 top: visibleSelectedAoEFigureActionState.toolbarPosition.top,
               }}
             >
-              <div className="rounded-[1.4rem] border border-rose-300/40 bg-slate-950/88 p-2 shadow-2xl backdrop-blur-sm">
+              <div
+                className="flex flex-col rounded-[1.4rem] border border-slate-700/70 bg-slate-950/88 p-2 shadow-2xl backdrop-blur-sm"
+                style={{ gap: visibleSelectedAoEFigureActionState.toolbarInnerGap }}
+              >
+                <button
+                  type="button"
+                  aria-label={visibleSelectedAoEFigureActionState.showMeasurementDetails ? 'Hide size details' : 'Show size details'}
+                  title={visibleSelectedAoEFigureActionState.showMeasurementDetails ? 'Hide size details' : 'Show size details'}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={async (event) => {
+                    event.stopPropagation();
+
+                    try {
+                      await Promise.resolve(onUpdateAoEFigurePresentation?.(
+                        visibleSelectedAoEFigureActionState.figureId,
+                        {
+                          showMeasurementDetails: !visibleSelectedAoEFigureActionState.showMeasurementDetails,
+                        }
+                      ));
+                    } catch {
+                      // keep selection unchanged if update fails
+                    }
+                  }}
+                  className="flex items-center justify-center rounded-[1.15rem] border border-sky-300/50 bg-sky-500/20 text-slate-50 shadow-lg transition-transform duration-150 hover:scale-[1.03]"
+                  style={{
+                    width: visibleSelectedAoEFigureActionState.buttonSize,
+                    height: visibleSelectedAoEFigureActionState.buttonSize,
+                  }}
+                >
+                  {visibleSelectedAoEFigureActionState.showMeasurementDetails
+                    ? <FiEyeOff className="h-[42%] w-[42%]" />
+                    : <FiEye className="h-[42%] w-[42%]" />}
+                </button>
+                <button
+                  type="button"
+                  aria-label={visibleSelectedAoEFigureActionState.isFilled ? 'Show border only' : 'Fill selected AoE figure'}
+                  title={visibleSelectedAoEFigureActionState.isFilled ? 'Show border only' : 'Fill selected AoE figure'}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={async (event) => {
+                    event.stopPropagation();
+
+                    try {
+                      await Promise.resolve(onUpdateAoEFigurePresentation?.(
+                        visibleSelectedAoEFigureActionState.figureId,
+                        {
+                          isFilled: !visibleSelectedAoEFigureActionState.isFilled,
+                        }
+                      ));
+                    } catch {
+                      // keep selection unchanged if update fails
+                    }
+                  }}
+                  className="flex items-center justify-center rounded-[1.15rem] border border-amber-300/50 bg-amber-500/20 text-slate-50 shadow-lg transition-transform duration-150 hover:scale-[1.03]"
+                  style={{
+                    width: visibleSelectedAoEFigureActionState.buttonSize,
+                    height: visibleSelectedAoEFigureActionState.buttonSize,
+                  }}
+                >
+                  <span className="text-[0.6rem] font-semibold uppercase tracking-[0.16em]">
+                    {visibleSelectedAoEFigureActionState.isFilled ? 'Line' : 'Fill'}
+                  </span>
+                </button>
                 <button
                   type="button"
                   aria-label="Delete selected AoE figure"

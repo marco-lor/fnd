@@ -263,6 +263,7 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-turn-order-order">{(props.turnOrderEntries || []).map((entry) => entry.tokenId).join(',')}</div>
       <div data-testid="board-aoe-tool">{props.activeAoeFigureType || ''}</div>
       <div data-testid="board-draw-color">{props.drawTheme?.key || ''}</div>
+      <div data-testid="board-grid-size">{String(props.grid?.cellSizePx || '')}</div>
         <button type="button" onClick={() => props.onSelectMouseTool?.()}>
           select mouse tool
         </button>
@@ -303,6 +304,20 @@ jest.mock('./GrigliataBoard', () => {
           onClick={() => props.onToggleMusicMuted?.()}
         >
           {props.isMusicMuted ? 'Unmute Music' : 'Mute Music'}
+        </button>
+        <button
+          type="button"
+          disabled={props.isGridSizeAdjustmentDisabled}
+          onClick={() => props.onAdjustGridSize?.(1)}
+        >
+          increase square size
+        </button>
+        <button
+          type="button"
+          disabled={props.isGridSizeAdjustmentDisabled}
+          onClick={() => props.onAdjustGridSize?.(-1)}
+        >
+          decrease square size
         </button>
         <button type="button" onClick={() => props.onChangeAoeFigureType?.('circle')}>
           activate circle tool
@@ -361,6 +376,24 @@ jest.mock('./GrigliataBoard', () => {
           }
         )}>
           move aoe rectangle
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onUpdateAoEFigurePresentation?.(
+            'map-1__user-1__circle__1',
+            { showMeasurementDetails: false }
+          )}
+        >
+          hide aoe size details
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onUpdateAoEFigurePresentation?.(
+            'map-1__user-1__circle__1',
+            { isFilled: false }
+          )}
+        >
+          show aoe border only
         </button>
         <button type="button" onClick={() => props.onDeleteAoEFigures?.(['map-1__user-1__circle__1'])}>
           delete aoe circle
@@ -445,6 +478,9 @@ jest.mock('./GrigliataBoard', () => {
         </button>
         <button type="button" onClick={() => props.onUpdateTokenStatuses?.('user-1', ['burning', 'marked'])}>
           update selected token statuses
+        </button>
+        <button type="button" onClick={() => props.onSetSelectedTokenSize?.('user-2', 3)}>
+          resize selected token
         </button>
         <button type="button" onClick={() => props.onJoinTurnOrder?.('user-1', 13)}>
           join self turn order
@@ -950,6 +986,7 @@ describe('GrigliataPage', () => {
         ownerUid: 'user-1',
         label: 'user-1',
         imageUrl: 'https://example.com/token.png',
+        sizeSquares: 1,
         isVisibleToPlayers: true,
         isDead: false,
         updatedBy: 'user-1',
@@ -967,6 +1004,7 @@ describe('GrigliataPage', () => {
           ownerUid: 'user-1',
           col: 1,
           row: 2,
+          sizeSquares: 3,
           isVisibleToPlayers: true,
           isDead: true,
           statuses: ['burning'],
@@ -995,6 +1033,7 @@ describe('GrigliataPage', () => {
         imageUrl: '',
         col: 4,
         row: 5,
+        sizeSquares: 3,
         isVisibleToPlayers: true,
         isDead: true,
         statuses: ['burning'],
@@ -1057,6 +1096,7 @@ describe('GrigliataPage', () => {
           ownerUid: 'user-2',
           col: 3,
           row: 4,
+          sizeSquares: 4,
           isVisibleToPlayers: true,
           isDead: true,
           statuses: ['burning'],
@@ -1089,6 +1129,7 @@ describe('GrigliataPage', () => {
         imageUrl: '',
         col: 3,
         row: 4,
+        sizeSquares: 4,
         isVisibleToPlayers: false,
         isDead: true,
         statuses: ['burning'],
@@ -1166,6 +1207,7 @@ describe('GrigliataPage', () => {
           ownerUid: 'user-2',
           col: 5,
           row: 6,
+          sizeSquares: 2,
           isVisibleToPlayers: false,
           isDead: false,
           statuses: ['sleeping'],
@@ -1198,6 +1240,7 @@ describe('GrigliataPage', () => {
         imageUrl: '',
         col: 5,
         row: 6,
+        sizeSquares: 2,
         isVisibleToPlayers: false,
         isDead: true,
         statuses: ['sleeping'],
@@ -1218,6 +1261,7 @@ describe('GrigliataPage', () => {
           ownerUid: 'user-1',
           col: 2,
           row: 3,
+          sizeSquares: 5,
           isVisibleToPlayers: false,
           isDead: true,
           statuses: ['sleeping'],
@@ -1238,17 +1282,69 @@ describe('GrigliataPage', () => {
     await waitFor(() => {
       expect(firestore.setDoc).toHaveBeenCalledWith(
         expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-1' }),
-        expect.objectContaining({
+          expect.objectContaining({
+            backgroundId: 'map-1',
+            tokenId: 'user-1',
+            ownerUid: 'user-1',
+            label: 'user-1',
+            imageUrl: '',
+            col: 2,
+            row: 3,
+            sizeSquares: 5,
+            isVisibleToPlayers: false,
+            isDead: true,
+            statuses: ['burning', 'marked'],
+            updatedBy: 'user-1',
+          }),
+        { merge: true }
+      );
+    });
+  });
+
+  test('updates the selected token footprint size without dropping placement state', async () => {
+    setManagerAuth();
+
+    act(() => {
+      setCollectionData('grigliata_token_placements', [
+        {
+          id: 'map-1__user-2',
           backgroundId: 'map-1',
-          tokenId: 'user-1',
-          ownerUid: 'user-1',
-          label: 'user-1',
-          imageUrl: '',
-          col: 2,
-          row: 3,
+          ownerUid: 'user-2',
+          col: 6,
+          row: 2,
+          sizeSquares: 1,
           isVisibleToPlayers: false,
           isDead: true,
-          statuses: ['burning', 'marked'],
+          statuses: ['sleeping'],
+        },
+      ]);
+    });
+
+    render(<GrigliataPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('board-token-count')).toHaveTextContent('1');
+    });
+    firestore.setDoc.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /resize selected token/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+        expect.objectContaining({
+          backgroundId: 'map-1',
+          tokenId: 'user-2',
+          ownerUid: 'user-2',
+          label: 'user-2',
+          imageUrl: '',
+          col: 6,
+          row: 2,
+          sizeSquares: 3,
+          isVisibleToPlayers: false,
+          isDead: true,
+          statuses: ['sleeping'],
           updatedBy: 'user-1',
         }),
         { merge: true }
@@ -5001,6 +5097,62 @@ describe('GrigliataPage', () => {
     );
   });
 
+  test('lets the DM decrease the active grid size down to 12px without persisting a smaller value', async () => {
+    setManagerAuth();
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 13, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+      }, {
+        id: 'map-2',
+        name: 'Iron Keep',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        isTurnOrderEnabled: false,
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-grid-size')).toHaveTextContent('13');
+    });
+
+    firestore.updateDoc.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: /decrease square size/i }));
+    expect(screen.getByTestId('board-grid-size')).toHaveTextContent('12');
+
+    fireEvent.click(screen.getByRole('button', { name: /decrease square size/i }));
+    expect(screen.getByTestId('board-grid-size')).toHaveTextContent('12');
+    expect(firestore.updateDoc).not.toHaveBeenCalled();
+
+    await act(async () => {
+      jest.advanceTimersByTime(299);
+    });
+    expect(firestore.updateDoc).not.toHaveBeenCalled();
+
+    await act(async () => {
+      jest.advanceTimersByTime(1);
+    });
+
+    await waitFor(() => {
+      expect(firestore.updateDoc).toHaveBeenCalledTimes(1);
+    });
+
+    expect(firestore.updateDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+      expect.objectContaining({
+        'grid.cellSizePx': 12,
+        updatedAt: { __type: 'serverTimestamp' },
+        updatedBy: 'user-1',
+      })
+    );
+  });
+
   test('returns to mouse selection when the board requests the default tool', () => {
     render(<GrigliataPage />);
 
@@ -5154,6 +5306,8 @@ describe('GrigliataPage', () => {
           targetCell: { col: 3, row: 1 },
           colorKey: 'ion-cyan',
           isVisibleToPlayers: false,
+          showMeasurementDetails: true,
+          isFilled: true,
           createdBy: 'user-1',
           updatedBy: 'user-1',
         })
@@ -5185,6 +5339,8 @@ describe('GrigliataPage', () => {
           targetCell: { col: 4, row: 2 },
           colorKey: 'ion-cyan',
           isVisibleToPlayers: false,
+          showMeasurementDetails: true,
+          isFilled: true,
           createdBy: 'user-1',
           updatedBy: 'user-1',
         })
@@ -5239,6 +5395,50 @@ describe('GrigliataPage', () => {
     });
   });
 
+  test('updates AoE presentation toggles through page handlers', async () => {
+    act(() => {
+      setCollectionData('grigliata_aoe_figures', [
+        {
+          id: 'map-1__user-1__circle__1',
+          backgroundId: 'map-1',
+          ownerUid: 'user-1',
+          figureType: 'circle',
+          slot: 1,
+          originCell: { col: 1, row: 1 },
+          targetCell: { col: 3, row: 1 },
+          colorKey: 'ion-cyan',
+          isVisibleToPlayers: false,
+        },
+      ]);
+    });
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: /hide aoe size details/i }));
+
+    await waitFor(() => {
+      expect(firestore.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_aoe_figures/map-1__user-1__circle__1' }),
+        expect.objectContaining({
+          showMeasurementDetails: false,
+          updatedBy: 'user-1',
+        })
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /show aoe border only/i }));
+
+    await waitFor(() => {
+      expect(firestore.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_aoe_figures/map-1__user-1__circle__1' }),
+        expect.objectContaining({
+          isFilled: false,
+          updatedBy: 'user-1',
+        })
+      );
+    });
+  });
+
   test('moves and deletes an existing rectangle AoE figure through page handlers', async () => {
     act(() => {
       setCollectionData('grigliata_aoe_figures', [
@@ -5278,6 +5478,39 @@ describe('GrigliataPage', () => {
       const lastBatch = mockBatchInstances[mockBatchInstances.length - 1];
       expect(lastBatch.delete).toHaveBeenCalledWith(
         expect.objectContaining({ path: 'grigliata_aoe_figures/map-1__user-1__rectangle__1' })
+      );
+    });
+  });
+
+  test('moves legacy AoE figures that do not yet store presentation fields', async () => {
+    act(() => {
+      setCollectionData('grigliata_aoe_figures', [
+        {
+          id: 'map-1__user-1__rectangle__1',
+          backgroundId: 'map-1',
+          ownerUid: 'user-1',
+          figureType: 'rectangle',
+          slot: 1,
+          originCell: { col: 1, row: 1 },
+          targetCell: { col: 4, row: 2 },
+          colorKey: 'ion-cyan',
+          isVisibleToPlayers: false,
+        },
+      ]);
+    });
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: /move aoe rectangle/i }));
+
+    await waitFor(() => {
+      expect(firestore.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_aoe_figures/map-1__user-1__rectangle__1' }),
+        expect.objectContaining({
+          originCell: { col: 2, row: 2 },
+          targetCell: { col: 5, row: 3 },
+          updatedBy: 'user-1',
+        })
       );
     });
   });

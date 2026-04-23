@@ -1,7 +1,11 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useReducedMotion } from 'framer-motion';
-import GrigliataBoard from './GrigliataBoard';
+import GrigliataBoard, {
+  buildAoEFigureMeasurementDecorationLayout,
+  buildZoomNormalizedOverlayMetrics,
+  getAoEFigureMeasurementTextLines,
+} from './GrigliataBoard';
 import {
   FOE_LIBRARY_DRAG_TYPE,
   getGrigliataDrawTheme,
@@ -10,10 +14,20 @@ import {
   MAP_PING_VISIBLE_MS,
   TRAY_DRAG_MIME,
 } from './constants';
-import { splitTokenStatusesForDisplay } from './tokenStatuses';
+import { buildRenderableGrigliataAoEFigure } from './aoeFigures';
+import {
+  getTokenStatusDefinition,
+  splitTokenStatusesForDisplay,
+  useTokenStatusIconImages,
+} from './tokenStatuses';
 import useImageAsset, { useImageAssetSnapshot } from './useImageAsset';
 
 const MAP_PING_EPIC_ACCENT = '#f97316';
+const STATUS_BADGE_FILL = '#7c3aed';
+const STATUS_BADGE_STROKE = '#f8fafc';
+const OVERFLOW_BADGE_FILL = 'rgba(2, 6, 23, 0.94)';
+const HIDDEN_BADGE_STROKE = 'rgba(226, 232, 240, 0.96)';
+const DEAD_BANNER_FILL = 'rgba(127, 29, 29, 0.88)';
 
 jest.mock('framer-motion', () => {
   const actual = jest.requireActual('framer-motion');
@@ -59,6 +73,10 @@ jest.mock('react-konva', () => {
 
       Object.entries(props).forEach(([key, value]) => {
         if (value == null) {
+          return;
+        }
+
+        if (key === 'onTap') {
           return;
         }
 
@@ -203,6 +221,7 @@ const buildProps = (overrides = {}) => ({
   onDeleteTokens: jest.fn(),
   onCreateAoEFigure: jest.fn(),
   onMoveAoEFigure: jest.fn(),
+  onUpdateAoEFigurePresentation: jest.fn(),
   onDeleteAoEFigures: jest.fn(),
   onSetSelectedTokensVisibility: null,
   isTokenVisibilityActionPending: false,
@@ -236,6 +255,178 @@ const buildKonvaEvent = (event) => {
 
   return konvaEvent;
 };
+
+const getNumericKonvaProp = (element, attributeName) => Number.parseFloat(element?.getAttribute(attributeName) || '0');
+
+const getTokenOverlayMetrics = (tokenNode) => {
+  const statusBadge = tokenNode.querySelector(
+    `[data-konva-type="Circle"][data-fill="${STATUS_BADGE_FILL}"][data-stroke="${STATUS_BADGE_STROKE}"]`
+  );
+  const overflowBadge = tokenNode.querySelector(
+    `[data-konva-type="Circle"][data-fill="${OVERFLOW_BADGE_FILL}"]`
+  );
+  const hiddenBadge = tokenNode.querySelector(
+    `[data-konva-type="Circle"][data-stroke="${HIDDEN_BADGE_STROKE}"]`
+  );
+  const deadBanner = tokenNode.querySelector(
+    `[data-konva-type="Rect"][data-fill="${DEAD_BANNER_FILL}"]`
+  );
+  const textNodes = [...tokenNode.querySelectorAll('[data-konva-type="Text"]')];
+  const overflowText = textNodes.find((node) => node.textContent === '+1');
+  const deadText = textNodes.find((node) => node.textContent === 'DEAD');
+  const statusIcon = tokenNode.querySelector('[data-konva-type="Image"]');
+
+  expect(statusBadge).toBeTruthy();
+  expect(statusIcon).toBeTruthy();
+  expect(overflowBadge).toBeTruthy();
+  expect(overflowText).toBeTruthy();
+  expect(hiddenBadge).toBeTruthy();
+  expect(deadBanner).toBeTruthy();
+  expect(deadText).toBeTruthy();
+
+  return {
+    statusBadgeRadius: getNumericKonvaProp(statusBadge, 'data-radius'),
+    statusIconWidth: getNumericKonvaProp(statusIcon, 'data-width'),
+    overflowBadgeRadius: getNumericKonvaProp(overflowBadge, 'data-radius'),
+    overflowFontSize: getNumericKonvaProp(overflowText, 'data-fontsize'),
+    hiddenBadgeRadius: getNumericKonvaProp(hiddenBadge, 'data-radius'),
+    deadBannerHeight: getNumericKonvaProp(deadBanner, 'data-height'),
+    deadFontSize: getNumericKonvaProp(deadText, 'data-fontsize'),
+  };
+};
+
+const buildGridConfig = (cellSizePx) => ({
+  cellSizePx,
+  offsetXPx: 0,
+  offsetYPx: 0,
+});
+
+const buildOverlayToken = () => ({
+  tokenId: 'user-1',
+  id: 'user-1',
+  ownerUid: 'user-1',
+  tokenType: 'character',
+  label: 'Aldor',
+  imageUrl: '',
+  placed: true,
+  col: 2,
+  row: 2,
+  isVisibleToPlayers: false,
+  isDead: true,
+  statuses: ['burning', 'sleeping', 'marked', 'poisoned'],
+});
+
+const buildBoardPropsWithGrid = (cellSizePx) => {
+  const boardGrid = buildGridConfig(cellSizePx);
+
+  return buildProps({
+    grid: boardGrid,
+    activeBackground: {
+      id: 'map-1',
+      name: 'Sunken Ruins',
+      grid: boardGrid,
+      imageWidth: 0,
+      imageHeight: 0,
+    },
+    currentUserId: 'user-1',
+    tokens: [buildOverlayToken()],
+  });
+};
+
+describe('GrigliataBoard helpers', () => {
+  test('normalizes overlay chrome against zoom', () => {
+    const nearMetrics = buildZoomNormalizedOverlayMetrics(1);
+    const farMetrics = buildZoomNormalizedOverlayMetrics(2);
+
+    expect(farMetrics.rulerStrokeWidth).toBeCloseTo(nearMetrics.rulerStrokeWidth / 2);
+    expect(farMetrics.aoePrimaryFontSize).toBeCloseTo(nearMetrics.aoePrimaryFontSize / 2);
+  });
+
+  test('formats rectangle measurement text lines', () => {
+    expect(getAoEFigureMeasurementTextLines({
+      figureType: 'rectangle',
+      widthSquares: 3,
+      heightSquares: 2,
+      measurement: {
+        widthFeet: 15,
+        heightFeet: 10,
+      },
+    })).toEqual({
+      primary: '15 x 10 ft',
+      secondary: '3 x 2 sq',
+    });
+  });
+
+  test('builds internal measurement decoration layouts for every AoE figure type', () => {
+    ['circle', 'square', 'cone', 'rectangle'].forEach((figureType) => {
+      const renderableFigure = buildRenderableGrigliataAoEFigure({
+        figure: (
+          figureType === 'rectangle'
+            ? {
+                figureType,
+                originCell: { col: 1, row: 1 },
+                targetCell: { col: 3, row: 2 },
+              }
+            : {
+                figureType,
+                originCell: { col: 2, row: 2 },
+                targetCell: { col: 5, row: 4 },
+              }
+        ),
+        grid,
+      });
+
+      const layout = buildAoEFigureMeasurementDecorationLayout({
+        figure: renderableFigure,
+        viewportScale: 1,
+      });
+
+      expect(layout).toEqual(expect.objectContaining({
+        width: expect.any(Number),
+        height: expect.any(Number),
+        badgeX: expect.any(Number),
+        badgeY: expect.any(Number),
+        arrowPoints: expect.any(Array),
+        arrowHeadPoints: expect.any(Array),
+      }));
+      expect(layout.lines.primary).toMatch(/ft$/);
+      expect(layout.lines.secondary).toMatch(/sq$/);
+    });
+  });
+
+  test('keeps the measurement arrow extending past the badge toward the border', () => {
+    const circleFigure = buildRenderableGrigliataAoEFigure({
+      figure: {
+        figureType: 'circle',
+        originCell: { col: 2, row: 2 },
+        targetCell: { col: 5, row: 2 },
+      },
+      grid,
+    });
+    const circleLayout = buildAoEFigureMeasurementDecorationLayout({
+      figure: circleFigure,
+      viewportScale: 1,
+    });
+
+    expect(circleLayout.arrowPoints[2]).toBeGreaterThan(circleLayout.badgeX + circleLayout.width);
+
+    const coneFigure = buildRenderableGrigliataAoEFigure({
+      figure: {
+        figureType: 'cone',
+        originCell: { col: 2, row: 2 },
+        targetCell: { col: 5, row: 4 },
+      },
+      grid,
+    });
+    const coneLayout = buildAoEFigureMeasurementDecorationLayout({
+      figure: coneFigure,
+      viewportScale: 1,
+    });
+
+    expect(coneLayout.arrowPoints[2]).toBeGreaterThan(coneLayout.badgeX);
+    expect(coneLayout.arrowPoints[3]).toBeGreaterThan(coneLayout.badgeY + (coneLayout.height * 0.4));
+  });
+});
 
 describe('GrigliataBoard', () => {
   const mockBattlemapImage = {
@@ -287,6 +478,8 @@ describe('GrigliataBoard', () => {
       overflowStatuses: [],
       overflowCount: 0,
     }));
+    getTokenStatusDefinition.mockImplementation(() => null);
+    useTokenStatusIconImages.mockImplementation(() => ({}));
     useReducedMotion.mockReturnValue(false);
     useImageAsset.mockImplementation(() => null);
     useImageAssetSnapshot.mockImplementation(() => ({
@@ -889,6 +1082,311 @@ describe('GrigliataBoard', () => {
     expect(onSelectedTokenIdsChange).toHaveBeenLastCalledWith(['foe-token-1']);
   });
 
+  test('shows token names only while hovering the token', () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Hoverling',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    const tokenNode = screen.getByTestId('token-node-user-1');
+
+    expect(screen.queryByText('Hoverling')).not.toBeInTheDocument();
+
+    fireEvent.mouseEnter(tokenNode);
+    expect(screen.getByText('Hoverling')).toBeInTheDocument();
+
+    fireEvent.mouseLeave(tokenNode);
+    expect(screen.queryByText('Hoverling')).not.toBeInTheDocument();
+  });
+
+  test('renders tokens without a permanent image ring', () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    const tokenNode = screen.getByTestId('token-node-user-1');
+
+    expect(tokenNode.querySelector('[data-konva-type="Circle"][data-stroke]')).toBeNull();
+  });
+
+  test('renders larger token footprints from sizeSquares', () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'token-2',
+            id: 'token-2',
+            ownerUid: 'user-1',
+            tokenType: 'custom',
+            label: 'Wolf',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            sizeSquares: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    const tokenNode = screen.getByTestId('token-node-token-2');
+    const tokenFootprint = tokenNode.querySelector('[data-konva-type="Rect"][data-width="140"][data-height="140"]');
+
+    expect(tokenFootprint).toBeTruthy();
+  });
+
+  test('scales status and overflow badges down on compact 1x1 tokens', () => {
+    splitTokenStatusesForDisplay.mockImplementation((statuses = []) => ({
+      visibleStatuses: statuses.slice(0, 3),
+      overflowStatuses: statuses.slice(3),
+      overflowCount: Math.max(0, statuses.length - 3),
+    }));
+    getTokenStatusDefinition.mockImplementation((statusId) => ({
+      id: statusId,
+      badgeFill: STATUS_BADGE_FILL,
+      badgeStroke: STATUS_BADGE_STROKE,
+    }));
+    useTokenStatusIconImages.mockImplementation((statusIds = []) => statusIds.reduce((images, statusId) => ({
+      ...images,
+      [statusId]: { statusId },
+    }), {}));
+
+    const { rerender } = render(<GrigliataBoard {...buildBoardPropsWithGrid(24)} />);
+    const compactMetrics = getTokenOverlayMetrics(screen.getByTestId('token-node-user-1'));
+
+    rerender(<GrigliataBoard {...buildBoardPropsWithGrid(70)} />);
+    const standardMetrics = getTokenOverlayMetrics(screen.getByTestId('token-node-user-1'));
+
+    expect(compactMetrics.statusBadgeRadius).toBeLessThan(9);
+    expect(compactMetrics.statusIconWidth).toBeLessThan(10);
+    expect(compactMetrics.overflowBadgeRadius).toBeLessThan(9);
+    expect(compactMetrics.overflowFontSize).toBeLessThan(9);
+    expect(compactMetrics.statusBadgeRadius).toBeLessThan(standardMetrics.statusBadgeRadius);
+    expect(compactMetrics.statusIconWidth).toBeLessThan(standardMetrics.statusIconWidth);
+    expect(compactMetrics.overflowBadgeRadius).toBeLessThan(standardMetrics.overflowBadgeRadius);
+    expect(compactMetrics.overflowFontSize).toBeLessThan(standardMetrics.overflowFontSize);
+  });
+
+  test('scales hidden and dead overlays down on compact 1x1 tokens', () => {
+    splitTokenStatusesForDisplay.mockImplementation((statuses = []) => ({
+      visibleStatuses: statuses.slice(0, 3),
+      overflowStatuses: statuses.slice(3),
+      overflowCount: Math.max(0, statuses.length - 3),
+    }));
+    getTokenStatusDefinition.mockImplementation((statusId) => ({
+      id: statusId,
+      badgeFill: STATUS_BADGE_FILL,
+      badgeStroke: STATUS_BADGE_STROKE,
+    }));
+    useTokenStatusIconImages.mockImplementation((statusIds = []) => statusIds.reduce((images, statusId) => ({
+      ...images,
+      [statusId]: { statusId },
+    }), {}));
+
+    const { rerender } = render(<GrigliataBoard {...buildBoardPropsWithGrid(24)} />);
+    const compactMetrics = getTokenOverlayMetrics(screen.getByTestId('token-node-user-1'));
+
+    rerender(<GrigliataBoard {...buildBoardPropsWithGrid(70)} />);
+    const standardMetrics = getTokenOverlayMetrics(screen.getByTestId('token-node-user-1'));
+
+    expect(compactMetrics.hiddenBadgeRadius).toBeLessThan(9);
+    expect(compactMetrics.deadBannerHeight).toBeLessThan(15);
+    expect(compactMetrics.deadFontSize).toBeLessThan(10);
+    expect(compactMetrics.hiddenBadgeRadius).toBeLessThan(standardMetrics.hiddenBadgeRadius);
+    expect(compactMetrics.deadBannerHeight).toBeLessThan(standardMetrics.deadBannerHeight);
+    expect(compactMetrics.deadFontSize).toBeLessThan(standardMetrics.deadFontSize);
+  });
+
+  test('shows the resize control for a selected single token and anchors hud layout to the enlarged footprint', async () => {
+    const { container } = render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 8,
+            row: 1,
+            sizeSquares: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          selectedTokenDetails: {
+            tokenId: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            hpCurrent: 18,
+            manaCurrent: 9,
+            shieldCurrent: 4,
+            hasShield: true,
+          },
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 600,
+      clientY: 80,
+    });
+
+    expect(await screen.findByRole('button', { name: /resize aldor/i })).toBeInTheDocument();
+
+    const chipCluster = await screen.findByTestId('selected-token-resource-chip-cluster');
+    const stage = container.querySelector('[data-konva-type="Stage"]');
+    const tokenNode = screen.getByTestId('token-node-user-1');
+    const viewportTop = Number.parseFloat(stage.getAttribute('data-y') || '0');
+    const viewportScale = Number.parseFloat(stage.getAttribute('data-scaley') || '1');
+    const tokenWorldTop = Number.parseFloat(tokenNode.getAttribute('data-y') || '0');
+    const tokenScreenTop = viewportTop + (tokenWorldTop * viewportScale);
+    const tokenScreenSize = 140 * viewportScale;
+    const chipTop = Number.parseFloat(chipCluster.style.top);
+
+    expect(chipTop).toBeGreaterThanOrEqual((tokenScreenTop + tokenScreenSize) - 0.5);
+  });
+
+  test('preserves sizeSquares when dragging a token', async () => {
+    const onMoveTokens = jest.fn();
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          onMoveTokens,
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            sizeSquares: 3,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+    fireEvent.mouseMove(window, {
+      button: 0,
+      buttons: 1,
+      clientX: 210,
+      clientY: 140,
+    });
+    fireEvent.mouseUp(window, {
+      button: 0,
+      buttons: 1,
+      clientX: 210,
+      clientY: 140,
+    });
+
+    await waitFor(() => {
+      expect(onMoveTokens).toHaveBeenCalledWith([
+        expect.objectContaining({
+          tokenId: 'user-1',
+          sizeSquares: 3,
+        }),
+      ]);
+    });
+  });
+
+  test('keeps only the external dashed outline when a token is selected', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    const tokenNode = screen.getByTestId('token-node-user-1');
+
+    fireEvent.mouseDown(tokenNode, {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+
+    await waitFor(() => {
+      expect(tokenNode.querySelectorAll('[data-konva-type="Rect"][data-dash="[7,4]"]')).toHaveLength(2);
+    });
+    expect(tokenNode.querySelector('[data-konva-type="Circle"][data-stroke]')).toBeNull();
+  });
+
   test('shows the single-token resource hud for selected character tokens', async () => {
     render(
       <GrigliataBoard
@@ -1473,7 +1971,14 @@ describe('GrigliataBoard', () => {
     );
 
     expect(screen.getByTestId('turn-order-panel')).toBeInTheDocument();
-    expect(screen.getByTestId('turn-order-entry-user-1')).toHaveTextContent('Ilya');
+    expect(screen.queryByText('Ilya')).not.toBeInTheDocument();
+
+    const chip = screen.getByTestId('turn-order-chip-user-1');
+    fireEvent.mouseEnter(chip);
+    expect(screen.getByTestId('turn-order-tooltip-user-1')).toHaveTextContent('Ilya');
+
+    fireEvent.mouseLeave(chip);
+    expect(screen.queryByTestId('turn-order-tooltip-user-1')).not.toBeInTheDocument();
 
     const turnOrderScrollContainer = screen.getByTestId('turn-order-panel').querySelector('.overflow-y-auto');
     expect(turnOrderScrollContainer).toBeTruthy();
@@ -1590,6 +2095,178 @@ describe('GrigliataBoard', () => {
     });
 
     expect(screen.getByTestId('turn-order-context-action-user-1')).toHaveTextContent('Remove from turn order');
+  });
+
+  test('does not open the token turn-order menu while adding a ruler waypoint during token movement', async () => {
+    const { container } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isRulerEnabled: true,
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            label: 'Ilya',
+            tokenType: 'character',
+            imageUrl: '',
+            placed: true,
+            col: 1,
+            row: 1,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+            isInTurnOrder: false,
+          }],
+        })}
+      />
+    );
+
+    const tokenNode = screen.getByTestId('token-node-user-1');
+    const stage = container.querySelector('[data-konva-type="Stage"]');
+    const viewportLeft = getNumericKonvaProp(stage, 'data-x');
+    const viewportTop = getNumericKonvaProp(stage, 'data-y');
+    const viewportScale = getNumericKonvaProp(stage, 'data-scalex') || 1;
+    const tokenWorldX = getNumericKonvaProp(tokenNode, 'data-x');
+    const tokenWorldY = getNumericKonvaProp(tokenNode, 'data-y');
+    const toClientPoint = (worldX, worldY) => ({
+      clientX: viewportLeft + (worldX * viewportScale),
+      clientY: viewportTop + (worldY * viewportScale),
+    });
+
+    const dragStart = toClientPoint(tokenWorldX, tokenWorldY);
+    const firstWaypoint = toClientPoint(tokenWorldX + (grid.cellSizePx * 2), tokenWorldY);
+    const secondMove = toClientPoint(tokenWorldX + (grid.cellSizePx * 5), tokenWorldY);
+
+    fireEvent.mouseDown(tokenNode, {
+      button: 0,
+      buttons: 1,
+      ...dragStart,
+    });
+    fireEvent.mouseMove(window, {
+      button: 0,
+      buttons: 1,
+      ...firstWaypoint,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('measurement-overlay-local')).toBeInTheDocument();
+    });
+
+    fireEvent.mouseDown(tokenNode, {
+      button: 2,
+      buttons: 3,
+      ...firstWaypoint,
+    });
+    fireEvent.contextMenu(tokenNode, {
+      button: 2,
+      buttons: 1,
+      ...firstWaypoint,
+    });
+
+    expect(screen.queryByTestId('turn-order-context-menu')).not.toBeInTheDocument();
+
+    fireEvent.mouseMove(window, {
+      button: 0,
+      buttons: 1,
+      ...secondMove,
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('turn-order-context-menu')).not.toBeInTheDocument();
+      expect(screen.getByTestId('measurement-overlay-local')).toHaveTextContent('25 ft (5 squares)');
+
+      const segmentLabels = screen.getAllByTestId('measurement-segment-label-local');
+      expect(segmentLabels).toHaveLength(2);
+      expect(segmentLabels[0]).toHaveTextContent('10 ft');
+      expect(segmentLabels[1]).toHaveTextContent('15 ft');
+    });
+  });
+
+  test('does not open the token turn-order menu while adding a ruler waypoint from a stage-started measurement', async () => {
+    const { container } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isRulerEnabled: true,
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            label: 'Ilya',
+            tokenType: 'character',
+            imageUrl: '',
+            placed: true,
+            col: 4,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+            isInTurnOrder: false,
+          }],
+        })}
+      />
+    );
+
+    const tokenNode = screen.getByTestId('token-node-user-1');
+    const stage = container.querySelector('[data-konva-type="Stage"]');
+    const viewportLeft = getNumericKonvaProp(stage, 'data-x');
+    const viewportTop = getNumericKonvaProp(stage, 'data-y');
+    const viewportScale = getNumericKonvaProp(stage, 'data-scalex') || 1;
+    const tokenWorldX = getNumericKonvaProp(tokenNode, 'data-x');
+    const tokenWorldY = getNumericKonvaProp(tokenNode, 'data-y');
+    const toClientPoint = (worldX, worldY) => ({
+      clientX: viewportLeft + (worldX * viewportScale),
+      clientY: viewportTop + (worldY * viewportScale),
+    });
+
+    const measureStart = toClientPoint(tokenWorldX - (grid.cellSizePx * 2), tokenWorldY);
+    const firstWaypoint = toClientPoint(tokenWorldX, tokenWorldY);
+    const secondMove = toClientPoint(tokenWorldX + (grid.cellSizePx * 3), tokenWorldY);
+
+    fireEvent.mouseDown(stage, {
+      button: 0,
+      buttons: 1,
+      ...measureStart,
+    });
+    fireEvent.mouseMove(window, {
+      button: 0,
+      buttons: 1,
+      ...firstWaypoint,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('measurement-overlay-local')).toBeInTheDocument();
+    });
+
+    fireEvent.mouseDown(tokenNode, {
+      button: 2,
+      buttons: 3,
+      ...firstWaypoint,
+    });
+    fireEvent.contextMenu(tokenNode, {
+      button: 2,
+      buttons: 1,
+      ...firstWaypoint,
+    });
+
+    expect(screen.queryByTestId('turn-order-context-menu')).not.toBeInTheDocument();
+
+    fireEvent.mouseMove(window, {
+      button: 0,
+      buttons: 1,
+      ...secondMove,
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('turn-order-context-menu')).not.toBeInTheDocument();
+      expect(screen.getByTestId('measurement-overlay-local')).toHaveTextContent('25 ft (5 squares)');
+
+      const segmentLabels = screen.getAllByTestId('measurement-segment-label-local');
+      expect(segmentLabels).toHaveLength(2);
+      expect(segmentLabels[0]).toHaveTextContent('10 ft');
+      expect(segmentLabels[1]).toHaveTextContent('15 ft');
+    });
   });
 
   test('renders sorted turn order rows and respects edit permissions', () => {
@@ -1834,6 +2511,34 @@ describe('GrigliataBoard', () => {
     expect(screen.getByTestId('measurement-overlay-shared-other-user')).toBeInTheDocument();
     expect(screen.getByText('10 ft (2 squares)')).toBeInTheDocument();
     expect(document.querySelector('[data-stroke="#38bdf8"]')).not.toBeNull();
+  });
+
+  test('renders per-step feet labels for a multi-step shared ruler and keeps the total at the end', () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          sharedInteractions: [{
+            backgroundId: 'map-1',
+            ownerUid: 'other-user',
+            type: 'measure',
+            source: 'free',
+            colorKey: 'ion-cyan',
+            anchorCells: [
+              { col: 1, row: 1 },
+              { col: 3, row: 1 },
+            ],
+            liveEndCell: { col: 6, row: 1 },
+            updatedAt: { toMillis: () => Date.now() },
+            updatedBy: 'other-user',
+          }],
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('measurement-overlay-shared-other-user')).toBeInTheDocument();
+    expect(screen.getByText('10 ft')).toBeInTheDocument();
+    expect(screen.getByText('15 ft')).toBeInTheDocument();
+    expect(screen.getByText('25 ft (5 squares)')).toBeInTheDocument();
   });
 
   test('renders a remote shared ping with the broadcaster color and lets it expire locally', () => {
@@ -2207,7 +2912,7 @@ describe('GrigliataBoard', () => {
     fireEvent.mouseMove(window, { clientX: 350, clientY: 210, buttons: 1 });
 
     expect(screen.getByTestId('aoe-figure-overlay-local')).toBeInTheDocument();
-    expect(screen.getByTestId('aoe-figure-measurement-local')).toHaveTextContent(/^W \d+ ft • H \d+ ft$/);
+    expect(screen.getByTestId('aoe-figure-measurement-local')).toHaveTextContent(/^\d+ x \d+ ft\s*\d+ x \d+ sq/);
 
     fireEvent.mouseUp(window, { button: 0, clientX: 350, clientY: 210, buttons: 0 });
 
@@ -2404,6 +3109,87 @@ describe('GrigliataBoard', () => {
     });
   });
 
+  test('shows the detail and fill actions for selected editable AoE figures', async () => {
+    const onUpdateAoEFigurePresentation = jest.fn(() => Promise.resolve());
+    const figureId = 'map-1__current-user__circle__1';
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          aoeFigures: [{
+            id: figureId,
+            backgroundId: 'map-1',
+            ownerUid: 'current-user',
+            figureType: 'circle',
+            slot: 1,
+            originCell: { col: 2, row: 2 },
+            targetCell: { col: 3, row: 2 },
+            colorKey: 'ion-cyan',
+            isVisibleToPlayers: true,
+          }],
+          onUpdateAoEFigurePresentation,
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+      button: 0,
+      clientX: 175,
+      clientY: 175,
+      buttons: 1,
+    });
+    fireEvent.mouseUp(window, { button: 0, clientX: 175, clientY: 175, buttons: 0 });
+
+    fireEvent.click(screen.getByRole('button', { name: /hide size details/i }));
+
+    await waitFor(() => {
+      expect(onUpdateAoEFigurePresentation).toHaveBeenCalledWith(figureId, {
+        showMeasurementDetails: false,
+      });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /show border only/i }));
+
+    await waitFor(() => {
+      expect(onUpdateAoEFigurePresentation).toHaveBeenCalledWith(figureId, {
+        isFilled: false,
+      });
+    });
+  });
+
+  test('keeps border-only AoE figures selectable', () => {
+    const figureId = 'map-1__current-user__square__1';
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          aoeFigures: [{
+            id: figureId,
+            backgroundId: 'map-1',
+            ownerUid: 'current-user',
+            figureType: 'square',
+            slot: 1,
+            originCell: { col: 2, row: 2 },
+            targetCell: { col: 4, row: 4 },
+            colorKey: 'nova-teal',
+            isVisibleToPlayers: true,
+            isFilled: false,
+          }],
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+      button: 0,
+      clientX: 210,
+      clientY: 210,
+      buttons: 1,
+    });
+    fireEvent.mouseUp(window, { button: 0, clientX: 210, clientY: 210, buttons: 0 });
+
+    expect(screen.getByRole('button', { name: /fill selected aoe figure/i })).toBeInTheDocument();
+  });
+
   test('moves an editable AoE figure when dragged', async () => {
     const onMoveAoEFigure = jest.fn(() => Promise.resolve());
     const figureId = 'map-1__current-user__square__1';
@@ -2572,5 +3358,7 @@ describe('GrigliataBoard', () => {
     fireEvent.mouseUp(window, { button: 0, clientX: 175, clientY: 175, buttons: 0 });
 
     expect(screen.queryByRole('button', { name: /delete selected aoe figure/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /hide size details/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /show border only/i })).not.toBeInTheDocument();
   });
 });
