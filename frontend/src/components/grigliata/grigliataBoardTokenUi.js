@@ -38,6 +38,33 @@ const ACTIVE_TURN_SECONDARY = '#fef3c7';
 const ACTIVE_TURN_GLOW = 'rgba(245, 158, 11, 0.42)';
 const ACTIVE_TURN_FILL = 'rgba(245, 158, 11, 0.16)';
 
+const scaleTokenMetric = (size, ratio, minimum = 1) => Math.max(minimum, Math.round(size * ratio));
+const scaleTokenStroke = (size, ratio, minimum = 0.75) => Math.max(minimum, size * ratio);
+
+const buildTokenChromeMetrics = (tokenSize) => {
+  const size = Number.isFinite(tokenSize) ? tokenSize : 0;
+  const badgeSize = scaleTokenMetric(size, 0.24, 5);
+  const hiddenBadgeSize = scaleTokenMetric(size, 0.28, 6);
+  const deadBannerHeight = scaleTokenMetric(size, 0.24, 4);
+
+  return {
+    badgeSize,
+    badgeRadius: badgeSize / 2,
+    badgeIconSize: scaleTokenMetric(badgeSize, 0.56, 3),
+    badgeInset: scaleTokenMetric(size, 0.04, 2),
+    badgeStrokeWidth: scaleTokenStroke(badgeSize, 0.08),
+    badgeShadowBlur: Math.max(2, badgeSize * 0.33),
+    overflowFontSize: scaleTokenMetric(badgeSize, 0.48, 4),
+    hiddenBadgeSize,
+    hiddenSlashInset: scaleTokenMetric(size, 0.18, 2),
+    hiddenSlashStroke: scaleTokenStroke(size, 0.1, 1),
+    deadBannerHeight,
+    deadBannerOffset: scaleTokenMetric(size, 0.1, 3),
+    deadLabelFontSize: scaleTokenMetric(size, 0.18, 5),
+    deadLabelOffset: scaleTokenMetric(deadBannerHeight, 0.1, 1),
+  };
+};
+
 const buildSelectionActionToolbarPosition = ({ left, top, width, buttonSize, gap }) => ({
   left: left + width + gap,
   top: top - gap - buttonSize,
@@ -48,6 +75,10 @@ const HiddenEyeBadge = ({ x, y, size }) => {
   const padding = size * 0.2;
   const eyeTop = size * 0.38;
   const eyeBottom = size * 0.62;
+  const outlineStrokeWidth = scaleTokenStroke(size, 0.07, 0.8);
+  const eyeStrokeWidth = scaleTokenStroke(size, 0.06, 0.75);
+  const pupilRadius = Math.max(1, size * 0.1);
+  const slashStrokeWidth = scaleTokenStroke(size, 0.08, 0.9);
 
   return (
     <Group x={x} y={y} listening={false}>
@@ -57,7 +88,7 @@ const HiddenEyeBadge = ({ x, y, size }) => {
         radius={half}
         fill="rgba(15, 23, 42, 0.92)"
         stroke={HIDDEN_TOKEN_PRIMARY}
-        strokeWidth={Math.max(1.5, size * 0.07)}
+        strokeWidth={outlineStrokeWidth}
       />
       <Line
         points={[
@@ -73,14 +104,14 @@ const HiddenEyeBadge = ({ x, y, size }) => {
           half,
         ]}
         stroke={HIDDEN_TOKEN_PRIMARY}
-        strokeWidth={Math.max(1.3, size * 0.06)}
+        strokeWidth={eyeStrokeWidth}
         lineCap="round"
         lineJoin="round"
       />
       <Circle
         x={half}
         y={half}
-        radius={Math.max(1.5, size * 0.1)}
+        radius={pupilRadius}
         fill={HIDDEN_TOKEN_PRIMARY}
       />
       <Line
@@ -91,7 +122,7 @@ const HiddenEyeBadge = ({ x, y, size }) => {
           padding * 0.85,
         ]}
         stroke="#f87171"
-        strokeWidth={Math.max(1.6, size * 0.08)}
+        strokeWidth={slashStrokeWidth}
         lineCap="round"
       />
     </Group>
@@ -114,18 +145,23 @@ const TokenStatusBadges = ({
     return null;
   }
 
-  const badgeSize = Math.max(18, Math.round(size * 0.24));
-  const badgeRadius = badgeSize / 2;
-  const iconSize = Math.max(10, Math.round(badgeSize * 0.56));
-  const inset = Math.max(3, Math.round(size * 0.04));
+  const {
+    badgeSize,
+    badgeRadius,
+    badgeIconSize,
+    badgeInset,
+    badgeShadowBlur,
+    badgeStrokeWidth,
+    overflowFontSize,
+  } = buildTokenChromeMetrics(size);
   const badgePositions = [
-    { x: inset + badgeRadius, y: inset + badgeRadius },
-    { x: size - inset - badgeRadius, y: inset + badgeRadius },
-    { x: size - inset - badgeRadius, y: size - inset - badgeRadius },
+    { x: badgeInset + badgeRadius, y: badgeInset + badgeRadius },
+    { x: size - badgeInset - badgeRadius, y: badgeInset + badgeRadius },
+    { x: size - badgeInset - badgeRadius, y: size - badgeInset - badgeRadius },
   ];
   const overflowPosition = {
-    x: inset + badgeRadius,
-    y: size - inset - badgeRadius,
+    x: badgeInset + badgeRadius,
+    y: size - badgeInset - badgeRadius,
   };
 
   return (
@@ -145,18 +181,18 @@ const TokenStatusBadges = ({
               radius={badgeRadius}
               fill={status.badgeFill}
               stroke={status.badgeStroke}
-              strokeWidth={Math.max(1.4, badgeSize * 0.08)}
+              strokeWidth={badgeStrokeWidth}
               shadowColor="#020617"
-              shadowBlur={6}
+              shadowBlur={badgeShadowBlur}
               shadowOpacity={0.45}
             />
             {badgeImages?.[statusId] && (
               <KonvaImage
                 image={badgeImages[statusId]}
-                x={position.x - (iconSize / 2)}
-                y={position.y - (iconSize / 2)}
-                width={iconSize}
-                height={iconSize}
+                x={position.x - (badgeIconSize / 2)}
+                y={position.y - (badgeIconSize / 2)}
+                width={badgeIconSize}
+                height={badgeIconSize}
                 listening={false}
               />
             )}
@@ -186,9 +222,9 @@ const TokenStatusBadges = ({
             radius={badgeRadius}
             fill="rgba(2, 6, 23, 0.94)"
             stroke="rgba(251, 191, 36, 0.92)"
-            strokeWidth={Math.max(1.5, badgeSize * 0.08)}
+            strokeWidth={badgeStrokeWidth}
             shadowColor="#020617"
-            shadowBlur={6}
+            shadowBlur={badgeShadowBlur}
             shadowOpacity={0.45}
           />
           <Text
@@ -196,7 +232,7 @@ const TokenStatusBadges = ({
             y={overflowPosition.y - (badgeRadius * 0.68)}
             width={badgeSize}
             align="center"
-            fontSize={Math.max(9, Math.round(badgeSize * 0.48))}
+            fontSize={overflowFontSize}
             fontStyle="bold"
             fill="#fef3c7"
             text={`+${overflowCount}`}
@@ -235,11 +271,16 @@ export const TokenNode = ({
   const selectedGlow = isHiddenFromPlayers
     ? 'rgba(148, 163, 184, 0.45)'
     : (isDead ? 'rgba(248, 113, 113, 0.35)' : drawTheme.glow);
-  const hiddenBadgeSize = Math.max(18, Math.round(size * 0.28));
-  const hiddenSlashInset = Math.max(8, Math.round(size * 0.18));
-  const hiddenSlashStroke = Math.max(5, Math.round(size * 0.1));
-  const deadBannerHeight = Math.max(15, Math.round(size * 0.24));
-  const deadBannerY = size - deadBannerHeight - Math.max(6, Math.round(size * 0.1));
+  const {
+    hiddenBadgeSize,
+    hiddenSlashInset,
+    hiddenSlashStroke,
+    deadBannerHeight,
+    deadBannerOffset,
+    deadLabelFontSize,
+    deadLabelOffset,
+  } = buildTokenChromeMetrics(size);
+  const deadBannerY = size - deadBannerHeight - deadBannerOffset;
 
   return (
     <Group
@@ -400,10 +441,10 @@ export const TokenNode = ({
           />
           <Text
             x={0}
-            y={deadBannerY + Math.max(1, Math.round(deadBannerHeight * 0.1))}
+            y={deadBannerY + deadLabelOffset}
             width={size}
             align="center"
-            fontSize={Math.max(10, Math.round(size * 0.18))}
+            fontSize={deadLabelFontSize}
             fontStyle="bold"
             fill={DEAD_TOKEN_PRIMARY}
             text="DEAD"

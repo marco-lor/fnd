@@ -15,10 +15,19 @@ import {
   TRAY_DRAG_MIME,
 } from './constants';
 import { buildRenderableGrigliataAoEFigure } from './aoeFigures';
-import { splitTokenStatusesForDisplay } from './tokenStatuses';
+import {
+  getTokenStatusDefinition,
+  splitTokenStatusesForDisplay,
+  useTokenStatusIconImages,
+} from './tokenStatuses';
 import useImageAsset, { useImageAssetSnapshot } from './useImageAsset';
 
 const MAP_PING_EPIC_ACCENT = '#f97316';
+const STATUS_BADGE_FILL = '#7c3aed';
+const STATUS_BADGE_STROKE = '#f8fafc';
+const OVERFLOW_BADGE_FILL = 'rgba(2, 6, 23, 0.94)';
+const HIDDEN_BADGE_STROKE = 'rgba(226, 232, 240, 0.96)';
+const DEAD_BANNER_FILL = 'rgba(127, 29, 29, 0.88)';
 
 jest.mock('framer-motion', () => {
   const actual = jest.requireActual('framer-motion');
@@ -64,6 +73,10 @@ jest.mock('react-konva', () => {
 
       Object.entries(props).forEach(([key, value]) => {
         if (value == null) {
+          return;
+        }
+
+        if (key === 'onTap') {
           return;
         }
 
@@ -243,6 +256,83 @@ const buildKonvaEvent = (event) => {
   return konvaEvent;
 };
 
+const getNumericKonvaProp = (element, attributeName) => Number.parseFloat(element?.getAttribute(attributeName) || '0');
+
+const getTokenOverlayMetrics = (tokenNode) => {
+  const statusBadge = tokenNode.querySelector(
+    `[data-konva-type="Circle"][data-fill="${STATUS_BADGE_FILL}"][data-stroke="${STATUS_BADGE_STROKE}"]`
+  );
+  const overflowBadge = tokenNode.querySelector(
+    `[data-konva-type="Circle"][data-fill="${OVERFLOW_BADGE_FILL}"]`
+  );
+  const hiddenBadge = tokenNode.querySelector(
+    `[data-konva-type="Circle"][data-stroke="${HIDDEN_BADGE_STROKE}"]`
+  );
+  const deadBanner = tokenNode.querySelector(
+    `[data-konva-type="Rect"][data-fill="${DEAD_BANNER_FILL}"]`
+  );
+  const textNodes = [...tokenNode.querySelectorAll('[data-konva-type="Text"]')];
+  const overflowText = textNodes.find((node) => node.textContent === '+1');
+  const deadText = textNodes.find((node) => node.textContent === 'DEAD');
+  const statusIcon = tokenNode.querySelector('[data-konva-type="Image"]');
+
+  expect(statusBadge).toBeTruthy();
+  expect(statusIcon).toBeTruthy();
+  expect(overflowBadge).toBeTruthy();
+  expect(overflowText).toBeTruthy();
+  expect(hiddenBadge).toBeTruthy();
+  expect(deadBanner).toBeTruthy();
+  expect(deadText).toBeTruthy();
+
+  return {
+    statusBadgeRadius: getNumericKonvaProp(statusBadge, 'data-radius'),
+    statusIconWidth: getNumericKonvaProp(statusIcon, 'data-width'),
+    overflowBadgeRadius: getNumericKonvaProp(overflowBadge, 'data-radius'),
+    overflowFontSize: getNumericKonvaProp(overflowText, 'data-fontsize'),
+    hiddenBadgeRadius: getNumericKonvaProp(hiddenBadge, 'data-radius'),
+    deadBannerHeight: getNumericKonvaProp(deadBanner, 'data-height'),
+    deadFontSize: getNumericKonvaProp(deadText, 'data-fontsize'),
+  };
+};
+
+const buildGridConfig = (cellSizePx) => ({
+  cellSizePx,
+  offsetXPx: 0,
+  offsetYPx: 0,
+});
+
+const buildOverlayToken = () => ({
+  tokenId: 'user-1',
+  id: 'user-1',
+  ownerUid: 'user-1',
+  tokenType: 'character',
+  label: 'Aldor',
+  imageUrl: '',
+  placed: true,
+  col: 2,
+  row: 2,
+  isVisibleToPlayers: false,
+  isDead: true,
+  statuses: ['burning', 'sleeping', 'marked', 'poisoned'],
+});
+
+const buildBoardPropsWithGrid = (cellSizePx) => {
+  const boardGrid = buildGridConfig(cellSizePx);
+
+  return buildProps({
+    grid: boardGrid,
+    activeBackground: {
+      id: 'map-1',
+      name: 'Sunken Ruins',
+      grid: boardGrid,
+      imageWidth: 0,
+      imageHeight: 0,
+    },
+    currentUserId: 'user-1',
+    tokens: [buildOverlayToken()],
+  });
+};
+
 describe('GrigliataBoard helpers', () => {
   test('normalizes overlay chrome against zoom', () => {
     const nearMetrics = buildZoomNormalizedOverlayMetrics(1);
@@ -388,6 +478,8 @@ describe('GrigliataBoard', () => {
       overflowStatuses: [],
       overflowCount: 0,
     }));
+    getTokenStatusDefinition.mockImplementation(() => null);
+    useTokenStatusIconImages.mockImplementation(() => ({}));
     useReducedMotion.mockReturnValue(false);
     useImageAsset.mockImplementation(() => null);
     useImageAssetSnapshot.mockImplementation(() => ({
@@ -1080,6 +1172,68 @@ describe('GrigliataBoard', () => {
     const tokenFootprint = tokenNode.querySelector('[data-konva-type="Rect"][data-width="140"][data-height="140"]');
 
     expect(tokenFootprint).toBeTruthy();
+  });
+
+  test('scales status and overflow badges down on compact 1x1 tokens', () => {
+    splitTokenStatusesForDisplay.mockImplementation((statuses = []) => ({
+      visibleStatuses: statuses.slice(0, 3),
+      overflowStatuses: statuses.slice(3),
+      overflowCount: Math.max(0, statuses.length - 3),
+    }));
+    getTokenStatusDefinition.mockImplementation((statusId) => ({
+      id: statusId,
+      badgeFill: STATUS_BADGE_FILL,
+      badgeStroke: STATUS_BADGE_STROKE,
+    }));
+    useTokenStatusIconImages.mockImplementation((statusIds = []) => statusIds.reduce((images, statusId) => ({
+      ...images,
+      [statusId]: { statusId },
+    }), {}));
+
+    const { rerender } = render(<GrigliataBoard {...buildBoardPropsWithGrid(24)} />);
+    const compactMetrics = getTokenOverlayMetrics(screen.getByTestId('token-node-user-1'));
+
+    rerender(<GrigliataBoard {...buildBoardPropsWithGrid(70)} />);
+    const standardMetrics = getTokenOverlayMetrics(screen.getByTestId('token-node-user-1'));
+
+    expect(compactMetrics.statusBadgeRadius).toBeLessThan(9);
+    expect(compactMetrics.statusIconWidth).toBeLessThan(10);
+    expect(compactMetrics.overflowBadgeRadius).toBeLessThan(9);
+    expect(compactMetrics.overflowFontSize).toBeLessThan(9);
+    expect(compactMetrics.statusBadgeRadius).toBeLessThan(standardMetrics.statusBadgeRadius);
+    expect(compactMetrics.statusIconWidth).toBeLessThan(standardMetrics.statusIconWidth);
+    expect(compactMetrics.overflowBadgeRadius).toBeLessThan(standardMetrics.overflowBadgeRadius);
+    expect(compactMetrics.overflowFontSize).toBeLessThan(standardMetrics.overflowFontSize);
+  });
+
+  test('scales hidden and dead overlays down on compact 1x1 tokens', () => {
+    splitTokenStatusesForDisplay.mockImplementation((statuses = []) => ({
+      visibleStatuses: statuses.slice(0, 3),
+      overflowStatuses: statuses.slice(3),
+      overflowCount: Math.max(0, statuses.length - 3),
+    }));
+    getTokenStatusDefinition.mockImplementation((statusId) => ({
+      id: statusId,
+      badgeFill: STATUS_BADGE_FILL,
+      badgeStroke: STATUS_BADGE_STROKE,
+    }));
+    useTokenStatusIconImages.mockImplementation((statusIds = []) => statusIds.reduce((images, statusId) => ({
+      ...images,
+      [statusId]: { statusId },
+    }), {}));
+
+    const { rerender } = render(<GrigliataBoard {...buildBoardPropsWithGrid(24)} />);
+    const compactMetrics = getTokenOverlayMetrics(screen.getByTestId('token-node-user-1'));
+
+    rerender(<GrigliataBoard {...buildBoardPropsWithGrid(70)} />);
+    const standardMetrics = getTokenOverlayMetrics(screen.getByTestId('token-node-user-1'));
+
+    expect(compactMetrics.hiddenBadgeRadius).toBeLessThan(9);
+    expect(compactMetrics.deadBannerHeight).toBeLessThan(15);
+    expect(compactMetrics.deadFontSize).toBeLessThan(10);
+    expect(compactMetrics.hiddenBadgeRadius).toBeLessThan(standardMetrics.hiddenBadgeRadius);
+    expect(compactMetrics.deadBannerHeight).toBeLessThan(standardMetrics.deadBannerHeight);
+    expect(compactMetrics.deadFontSize).toBeLessThan(standardMetrics.deadFontSize);
   });
 
   test('shows the resize control for a selected single token and anchors hud layout to the enlarged footprint', async () => {
