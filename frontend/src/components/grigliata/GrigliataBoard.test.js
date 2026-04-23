@@ -2097,6 +2097,178 @@ describe('GrigliataBoard', () => {
     expect(screen.getByTestId('turn-order-context-action-user-1')).toHaveTextContent('Remove from turn order');
   });
 
+  test('does not open the token turn-order menu while adding a ruler waypoint during token movement', async () => {
+    const { container } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isRulerEnabled: true,
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            label: 'Ilya',
+            tokenType: 'character',
+            imageUrl: '',
+            placed: true,
+            col: 1,
+            row: 1,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+            isInTurnOrder: false,
+          }],
+        })}
+      />
+    );
+
+    const tokenNode = screen.getByTestId('token-node-user-1');
+    const stage = container.querySelector('[data-konva-type="Stage"]');
+    const viewportLeft = getNumericKonvaProp(stage, 'data-x');
+    const viewportTop = getNumericKonvaProp(stage, 'data-y');
+    const viewportScale = getNumericKonvaProp(stage, 'data-scalex') || 1;
+    const tokenWorldX = getNumericKonvaProp(tokenNode, 'data-x');
+    const tokenWorldY = getNumericKonvaProp(tokenNode, 'data-y');
+    const toClientPoint = (worldX, worldY) => ({
+      clientX: viewportLeft + (worldX * viewportScale),
+      clientY: viewportTop + (worldY * viewportScale),
+    });
+
+    const dragStart = toClientPoint(tokenWorldX, tokenWorldY);
+    const firstWaypoint = toClientPoint(tokenWorldX + (grid.cellSizePx * 2), tokenWorldY);
+    const secondMove = toClientPoint(tokenWorldX + (grid.cellSizePx * 5), tokenWorldY);
+
+    fireEvent.mouseDown(tokenNode, {
+      button: 0,
+      buttons: 1,
+      ...dragStart,
+    });
+    fireEvent.mouseMove(window, {
+      button: 0,
+      buttons: 1,
+      ...firstWaypoint,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('measurement-overlay-local')).toBeInTheDocument();
+    });
+
+    fireEvent.mouseDown(tokenNode, {
+      button: 2,
+      buttons: 3,
+      ...firstWaypoint,
+    });
+    fireEvent.contextMenu(tokenNode, {
+      button: 2,
+      buttons: 1,
+      ...firstWaypoint,
+    });
+
+    expect(screen.queryByTestId('turn-order-context-menu')).not.toBeInTheDocument();
+
+    fireEvent.mouseMove(window, {
+      button: 0,
+      buttons: 1,
+      ...secondMove,
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('turn-order-context-menu')).not.toBeInTheDocument();
+      expect(screen.getByTestId('measurement-overlay-local')).toHaveTextContent('25 ft (5 squares)');
+
+      const segmentLabels = screen.getAllByTestId('measurement-segment-label-local');
+      expect(segmentLabels).toHaveLength(2);
+      expect(segmentLabels[0]).toHaveTextContent('10 ft');
+      expect(segmentLabels[1]).toHaveTextContent('15 ft');
+    });
+  });
+
+  test('does not open the token turn-order menu while adding a ruler waypoint from a stage-started measurement', async () => {
+    const { container } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isRulerEnabled: true,
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            label: 'Ilya',
+            tokenType: 'character',
+            imageUrl: '',
+            placed: true,
+            col: 4,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+            isInTurnOrder: false,
+          }],
+        })}
+      />
+    );
+
+    const tokenNode = screen.getByTestId('token-node-user-1');
+    const stage = container.querySelector('[data-konva-type="Stage"]');
+    const viewportLeft = getNumericKonvaProp(stage, 'data-x');
+    const viewportTop = getNumericKonvaProp(stage, 'data-y');
+    const viewportScale = getNumericKonvaProp(stage, 'data-scalex') || 1;
+    const tokenWorldX = getNumericKonvaProp(tokenNode, 'data-x');
+    const tokenWorldY = getNumericKonvaProp(tokenNode, 'data-y');
+    const toClientPoint = (worldX, worldY) => ({
+      clientX: viewportLeft + (worldX * viewportScale),
+      clientY: viewportTop + (worldY * viewportScale),
+    });
+
+    const measureStart = toClientPoint(tokenWorldX - (grid.cellSizePx * 2), tokenWorldY);
+    const firstWaypoint = toClientPoint(tokenWorldX, tokenWorldY);
+    const secondMove = toClientPoint(tokenWorldX + (grid.cellSizePx * 3), tokenWorldY);
+
+    fireEvent.mouseDown(stage, {
+      button: 0,
+      buttons: 1,
+      ...measureStart,
+    });
+    fireEvent.mouseMove(window, {
+      button: 0,
+      buttons: 1,
+      ...firstWaypoint,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('measurement-overlay-local')).toBeInTheDocument();
+    });
+
+    fireEvent.mouseDown(tokenNode, {
+      button: 2,
+      buttons: 3,
+      ...firstWaypoint,
+    });
+    fireEvent.contextMenu(tokenNode, {
+      button: 2,
+      buttons: 1,
+      ...firstWaypoint,
+    });
+
+    expect(screen.queryByTestId('turn-order-context-menu')).not.toBeInTheDocument();
+
+    fireEvent.mouseMove(window, {
+      button: 0,
+      buttons: 1,
+      ...secondMove,
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('turn-order-context-menu')).not.toBeInTheDocument();
+      expect(screen.getByTestId('measurement-overlay-local')).toHaveTextContent('25 ft (5 squares)');
+
+      const segmentLabels = screen.getAllByTestId('measurement-segment-label-local');
+      expect(segmentLabels).toHaveLength(2);
+      expect(segmentLabels[0]).toHaveTextContent('10 ft');
+      expect(segmentLabels[1]).toHaveTextContent('15 ft');
+    });
+  });
+
   test('renders sorted turn order rows and respects edit permissions', () => {
     const turnOrderEntries = [{
       tokenId: 'other-user',

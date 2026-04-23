@@ -152,6 +152,11 @@ const isWaypointEligibleInteraction = (interaction) => (
   && interaction.anchorCells.length > 0
 );
 
+const shouldSuppressTokenTurnOrderMenu = (interaction) => (
+  interaction?.type === 'token-candidate'
+  || isWaypointEligibleInteraction(interaction)
+);
+
 const isAoECreateInteraction = (interaction) => interaction?.type === 'aoe-create';
 const isAoEDragInteraction = (interaction) => (
   interaction?.type === 'aoe-drag-candidate'
@@ -3790,14 +3795,23 @@ export default function GrigliataBoard({
     }
 
     if (isSecondaryMouseButton(nativeEvent)) {
+      nativeEvent.preventDefault();
+      const activeInteraction = interactionRef.current;
+
+      if (hasPrimaryMouseButtonPressed(nativeEvent)) {
+        if (commitMeasurementWaypoint(nativeEvent.clientX, nativeEvent.clientY)) {
+          return;
+        }
+
+        if (shouldSuppressTokenTurnOrderMenu(activeInteraction)) {
+          return;
+        }
+      }
+
       if (openTurnOrderContextMenu(token, nativeEvent)) {
         return;
       }
 
-      nativeEvent.preventDefault();
-      if (hasPrimaryMouseButtonPressed(nativeEvent)) {
-        commitMeasurementWaypoint(nativeEvent.clientX, nativeEvent.clientY);
-      }
       return;
     }
 
@@ -3853,6 +3867,15 @@ export default function GrigliataBoard({
 
   const handleTokenContextMenu = (token, event) => {
     event.cancelBubble = true;
+    event.evt?.preventDefault?.();
+
+    const activeInteraction = interactionRef.current;
+
+    if (isRulerEnabled && shouldSuppressTokenTurnOrderMenu(activeInteraction)) {
+      commitMeasurementWaypoint(event.evt?.clientX, event.evt?.clientY);
+      return;
+    }
+
     openTurnOrderContextMenu(token, event.evt);
   };
 
