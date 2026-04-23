@@ -479,6 +479,9 @@ jest.mock('./GrigliataBoard', () => {
         <button type="button" onClick={() => props.onUpdateTokenStatuses?.('user-1', ['burning', 'marked'])}>
           update selected token statuses
         </button>
+        <button type="button" onClick={() => props.onSetSelectedTokenSize?.('user-2', 3)}>
+          resize selected token
+        </button>
         <button type="button" onClick={() => props.onJoinTurnOrder?.('user-1', 13)}>
           join self turn order
         </button>
@@ -983,6 +986,7 @@ describe('GrigliataPage', () => {
         ownerUid: 'user-1',
         label: 'user-1',
         imageUrl: 'https://example.com/token.png',
+        sizeSquares: 1,
         isVisibleToPlayers: true,
         isDead: false,
         updatedBy: 'user-1',
@@ -1000,6 +1004,7 @@ describe('GrigliataPage', () => {
           ownerUid: 'user-1',
           col: 1,
           row: 2,
+          sizeSquares: 3,
           isVisibleToPlayers: true,
           isDead: true,
           statuses: ['burning'],
@@ -1028,6 +1033,7 @@ describe('GrigliataPage', () => {
         imageUrl: '',
         col: 4,
         row: 5,
+        sizeSquares: 3,
         isVisibleToPlayers: true,
         isDead: true,
         statuses: ['burning'],
@@ -1090,6 +1096,7 @@ describe('GrigliataPage', () => {
           ownerUid: 'user-2',
           col: 3,
           row: 4,
+          sizeSquares: 4,
           isVisibleToPlayers: true,
           isDead: true,
           statuses: ['burning'],
@@ -1122,6 +1129,7 @@ describe('GrigliataPage', () => {
         imageUrl: '',
         col: 3,
         row: 4,
+        sizeSquares: 4,
         isVisibleToPlayers: false,
         isDead: true,
         statuses: ['burning'],
@@ -1199,6 +1207,7 @@ describe('GrigliataPage', () => {
           ownerUid: 'user-2',
           col: 5,
           row: 6,
+          sizeSquares: 2,
           isVisibleToPlayers: false,
           isDead: false,
           statuses: ['sleeping'],
@@ -1231,6 +1240,7 @@ describe('GrigliataPage', () => {
         imageUrl: '',
         col: 5,
         row: 6,
+        sizeSquares: 2,
         isVisibleToPlayers: false,
         isDead: true,
         statuses: ['sleeping'],
@@ -1251,6 +1261,7 @@ describe('GrigliataPage', () => {
           ownerUid: 'user-1',
           col: 2,
           row: 3,
+          sizeSquares: 5,
           isVisibleToPlayers: false,
           isDead: true,
           statuses: ['sleeping'],
@@ -1271,17 +1282,69 @@ describe('GrigliataPage', () => {
     await waitFor(() => {
       expect(firestore.setDoc).toHaveBeenCalledWith(
         expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-1' }),
-        expect.objectContaining({
+          expect.objectContaining({
+            backgroundId: 'map-1',
+            tokenId: 'user-1',
+            ownerUid: 'user-1',
+            label: 'user-1',
+            imageUrl: '',
+            col: 2,
+            row: 3,
+            sizeSquares: 5,
+            isVisibleToPlayers: false,
+            isDead: true,
+            statuses: ['burning', 'marked'],
+            updatedBy: 'user-1',
+          }),
+        { merge: true }
+      );
+    });
+  });
+
+  test('updates the selected token footprint size without dropping placement state', async () => {
+    setManagerAuth();
+
+    act(() => {
+      setCollectionData('grigliata_token_placements', [
+        {
+          id: 'map-1__user-2',
           backgroundId: 'map-1',
-          tokenId: 'user-1',
-          ownerUid: 'user-1',
-          label: 'user-1',
-          imageUrl: '',
-          col: 2,
-          row: 3,
+          ownerUid: 'user-2',
+          col: 6,
+          row: 2,
+          sizeSquares: 1,
           isVisibleToPlayers: false,
           isDead: true,
-          statuses: ['burning', 'marked'],
+          statuses: ['sleeping'],
+        },
+      ]);
+    });
+
+    render(<GrigliataPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('board-token-count')).toHaveTextContent('1');
+    });
+    firestore.setDoc.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /resize selected token/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+        expect.objectContaining({
+          backgroundId: 'map-1',
+          tokenId: 'user-2',
+          ownerUid: 'user-2',
+          label: 'user-2',
+          imageUrl: '',
+          col: 6,
+          row: 2,
+          sizeSquares: 3,
+          isVisibleToPlayers: false,
+          isDead: true,
+          statuses: ['sleeping'],
           updatedBy: 'user-1',
         }),
         { merge: true }

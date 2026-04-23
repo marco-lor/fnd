@@ -18,6 +18,11 @@ const buildActionState = (overrides = {}) => ({
     label: 'Aldor',
     statuses: [],
   },
+  sizeToken: {
+    tokenId: 'token-1',
+    label: 'Aldor',
+    sizeSquares: 1,
+  },
   ...overrides,
 });
 
@@ -33,6 +38,17 @@ describe('GrigliataTokenActions', () => {
     expect(screen.getByRole('button', { name: /edit statuses for aldor/i })).toBeInTheDocument();
   });
 
+  test('shows the size button for a single selected token', () => {
+    render(
+      <GrigliataTokenActions
+        actionState={buildActionState()}
+        viewportSize={{ width: 1000, height: 700 }}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /resize aldor/i })).toBeInTheDocument();
+  });
+
   test('does not show status editing for multi-select manager actions', () => {
     render(
       <GrigliataTokenActions
@@ -41,12 +57,14 @@ describe('GrigliataTokenActions', () => {
           showVisibilityAction: true,
           showDeadAction: true,
           statusToken: null,
+          sizeToken: null,
         })}
         viewportSize={{ width: 1000, height: 700 }}
       />
     );
 
     expect(screen.queryByRole('button', { name: /edit statuses/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /resize/i })).not.toBeInTheDocument();
   });
 
   test('toggling a status calls onUpdateTokenStatuses with the next status order', () => {
@@ -172,6 +190,86 @@ describe('GrigliataTokenActions', () => {
       bottom: '70px',
       maxHeight: '248px',
     });
+  });
+
+  test('preset size buttons call onSetSelectedTokenSize with the requested footprint', () => {
+    const handleSetSelectedTokenSize = jest.fn();
+
+    render(
+      <GrigliataTokenActions
+        actionState={buildActionState()}
+        viewportSize={{ width: 1000, height: 700 }}
+        onSetSelectedTokenSize={handleSetSelectedTokenSize}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /resize aldor/i }));
+    fireEvent.click(screen.getByRole('button', { name: /set token size to 3 by 3/i }));
+
+    expect(handleSetSelectedTokenSize).toHaveBeenCalledWith('token-1', 3);
+  });
+
+  test('custom size input clamps values into the supported range', () => {
+    const handleSetSelectedTokenSize = jest.fn();
+
+    render(
+      <GrigliataTokenActions
+        actionState={buildActionState()}
+        viewportSize={{ width: 1000, height: 700 }}
+        onSetSelectedTokenSize={handleSetSelectedTokenSize}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /resize aldor/i }));
+    fireEvent.change(screen.getByRole('spinbutton', { name: /token size in squares/i }), {
+      target: { value: '12' },
+    });
+    fireEvent.blur(screen.getByRole('spinbutton', { name: /token size in squares/i }));
+
+    expect(handleSetSelectedTokenSize).toHaveBeenCalledWith('token-1', 9);
+  });
+
+  test('commits a typed custom size before outside dismissal closes the popover', () => {
+    const handleSetSelectedTokenSize = jest.fn();
+
+    render(
+      <GrigliataTokenActions
+        actionState={buildActionState()}
+        viewportSize={{ width: 1000, height: 700 }}
+        onSetSelectedTokenSize={handleSetSelectedTokenSize}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /resize aldor/i }));
+
+    const input = screen.getByRole('spinbutton', { name: /token size in squares/i });
+    fireEvent.change(input, {
+      target: { value: '6' },
+    });
+    fireEvent.pointerDown(document.body);
+
+    expect(handleSetSelectedTokenSize).toHaveBeenCalledWith('token-1', 6);
+    expect(handleSetSelectedTokenSize).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('token-size-popover')).not.toBeInTheDocument();
+  });
+
+  test('keeps the size controls in a scrollable body when height is capped', () => {
+    render(
+      <GrigliataTokenActions
+        actionState={buildActionState({
+          toolbarPosition: { left: 180, top: 270 },
+        })}
+        viewportSize={{ width: 640, height: 360 }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /resize aldor/i }));
+
+    expect(screen.getByTestId('token-size-popover')).toHaveStyle({
+      bottom: '70px',
+      maxHeight: '248px',
+    });
+    expect(screen.getByTestId('token-size-popover-body')).toHaveClass('overflow-y-auto');
   });
 });
 

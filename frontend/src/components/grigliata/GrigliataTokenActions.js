@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FiEye, FiEyeOff } from 'react-icons/fi';
+import { FiEye, FiEyeOff, FiMaximize, FiMinus, FiPlus } from 'react-icons/fi';
 import { GiAura, GiDeathSkull } from 'react-icons/gi';
+import { normalizeTokenSizeSquares } from './boardUtils';
 import {
   GRIGLIATA_TOKEN_STATUSES,
   GRIGLIATA_TOKEN_STATUS_GROUPS,
@@ -171,6 +172,163 @@ export function TokenStatusPopover({
   );
 }
 
+export function TokenSizePopover({
+  open,
+  sizeSquares = 1,
+  isPending = false,
+  onCommitSize,
+  onRequestClose,
+  withinRef,
+  placementStyle,
+}) {
+  const popoverRef = useRef(null);
+  const lastCommittedSizeRef = useRef(normalizeTokenSizeSquares(sizeSquares));
+  const [draftSizeSquares, setDraftSizeSquares] = useState(() => normalizeTokenSizeSquares(sizeSquares));
+  const normalizedDraftSize = normalizeTokenSizeSquares(draftSizeSquares);
+  const presetSizes = [1, 2, 3, 4];
+
+  const commitSize = (nextSizeSquares) => {
+    const normalizedSizeSquares = normalizeTokenSizeSquares(nextSizeSquares);
+    setDraftSizeSquares(normalizedSizeSquares);
+    if (lastCommittedSizeRef.current !== normalizedSizeSquares) {
+      lastCommittedSizeRef.current = normalizedSizeSquares;
+      onCommitSize?.(normalizedSizeSquares);
+    }
+    return normalizedSizeSquares;
+  };
+
+  const handleClose = ({ commitDraft = false } = {}) => {
+    if (commitDraft) {
+      commitSize(draftSizeSquares);
+    }
+    onRequestClose?.();
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const normalizedSizeSquares = normalizeTokenSizeSquares(sizeSquares);
+    lastCommittedSizeRef.current = normalizedSizeSquares;
+    setDraftSizeSquares(normalizedSizeSquares);
+  }, [open, sizeSquares]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (withinRef?.current?.contains(event.target) || popoverRef.current?.contains(event.target)) return;
+      handleClose({ commitDraft: true });
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      handleClose();
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [draftSizeSquares, onRequestClose, open, withinRef, onCommitSize]);
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div
+      data-testid="token-size-popover"
+      ref={popoverRef}
+      className="absolute z-10 flex w-full max-w-[15.5rem] flex-col overflow-hidden rounded-2xl border border-slate-700/80 bg-slate-950/96 p-3 shadow-2xl backdrop-blur-md"
+      style={placementStyle}
+      onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <div className="border-b border-slate-800/90 pb-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Footprint</p>
+        <p className="mt-1 text-sm text-slate-300">
+          Keep `1x1` for normal tokens. Resize only when this piece should cover more squares.
+        </p>
+      </div>
+
+      <div className="mt-3 min-h-0 space-y-3 overflow-y-auto pr-1" data-testid="token-size-popover-body">
+        <div className="grid grid-cols-4 gap-2">
+          {presetSizes.map((presetSize) => {
+            const isActive = normalizedDraftSize === presetSize;
+
+            return (
+              <button
+                key={presetSize}
+                type="button"
+                aria-label={`Set token size to ${presetSize} by ${presetSize}`}
+                disabled={isPending}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={() => commitSize(presetSize)}
+                className={`rounded-xl border px-2 py-2 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
+                  isActive
+                    ? 'border-amber-300/70 bg-amber-500/25 text-amber-50'
+                    : 'border-slate-700 bg-slate-900/85 text-slate-200 hover:border-slate-500 hover:bg-slate-800'
+                }`}
+              >
+                {presetSize}x{presetSize}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="rounded-2xl border border-slate-800/90 bg-slate-900/80 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Custom Size</p>
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              aria-label="Decrease token size"
+              disabled={isPending || normalizedDraftSize <= 1}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={() => commitSize(normalizedDraftSize - 1)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700 bg-slate-950 text-slate-100 transition-colors hover:border-slate-500 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              <FiMinus className="h-4 w-4" />
+            </button>
+
+            <input
+              aria-label="Token size in squares"
+              type="number"
+              min={1}
+              max={9}
+              step={1}
+              value={draftSizeSquares}
+              disabled={isPending}
+              onMouseDown={(event) => event.stopPropagation()}
+              onChange={(event) => setDraftSizeSquares(event.target.value)}
+              onBlur={() => commitSize(draftSizeSquares)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                commitSize(draftSizeSquares);
+              }}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-center text-sm font-semibold text-slate-100 outline-none focus:border-amber-300"
+            />
+
+            <button
+              type="button"
+              aria-label="Increase token size"
+              disabled={isPending || normalizedDraftSize >= 9}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={() => commitSize(normalizedDraftSize + 1)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700 bg-slate-950 text-slate-100 transition-colors hover:border-slate-500 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              <FiPlus className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function TokenStatusSummaryCard({
   statuses,
   className = '',
@@ -236,14 +394,19 @@ export default function GrigliataTokenActions({
   isTokenVisibilityActionPending = false,
   isTokenDeadActionPending = false,
   isTokenStatusActionPending = false,
+  isTokenSizeActionPending = false,
   onSetSelectedTokensVisibility,
   onSetSelectedTokensDeadState,
   onUpdateTokenStatuses,
+  onSetSelectedTokenSize,
 }) {
   const [isStatusPopoverOpen, setIsStatusPopoverOpen] = useState(false);
+  const [isSizePopoverOpen, setIsSizePopoverOpen] = useState(false);
   const statusControlRef = useRef(null);
   const statusTokenId = actionState?.statusToken?.tokenId || '';
+  const sizeTokenId = actionState?.sizeToken?.tokenId || '';
   const hasStatusToken = !!actionState?.statusToken;
+  const hasSizeToken = !!actionState?.sizeToken;
   const statusPopoverPlacement = useMemo(() => {
     if (!actionState || !viewportSize?.width || !viewportSize?.height) {
       return null;
@@ -281,15 +444,58 @@ export default function GrigliataTokenActions({
         : { top: `${toolbarHeight + gap}px` }),
     };
   }, [actionState, viewportSize]);
+  const sizePopoverPlacement = useMemo(() => {
+    if (!actionState || !viewportSize?.width || !viewportSize?.height) {
+      return null;
+    }
+
+    const edgePadding = 12;
+    const gap = 10;
+    const toolbarWidth = actionState.toolbarWidth || 0;
+    const toolbarHeight = actionState.toolbarHeight || (actionState.buttonSize + 16);
+    const popoverWidth = Math.min(248, Math.max(220, viewportSize.width - (edgePadding * 2)));
+    const absoluteLeft = Math.min(
+      Math.max(actionState.toolbarPosition.left + toolbarWidth - popoverWidth, edgePadding),
+      Math.max(edgePadding, viewportSize.width - popoverWidth - edgePadding)
+    );
+    const availableBelow = Math.max(
+      0,
+      viewportSize.height - actionState.toolbarPosition.top - toolbarHeight - gap - edgePadding
+    );
+    const availableAbove = Math.max(
+      0,
+      actionState.toolbarPosition.top - gap - edgePadding
+    );
+    const shouldOpenUpwards = availableBelow < 248 && availableAbove > availableBelow;
+    const popoverMaxHeight = Math.max(
+      0,
+      Math.min(shouldOpenUpwards ? availableAbove : availableBelow, viewportSize.height - (edgePadding * 2))
+    );
+
+    return {
+      left: `${absoluteLeft - actionState.toolbarPosition.left}px`,
+      width: `${popoverWidth}px`,
+      maxHeight: `${popoverMaxHeight}px`,
+      ...(shouldOpenUpwards
+        ? { bottom: `${toolbarHeight + gap}px` }
+        : { top: `${toolbarHeight + gap}px` }),
+    };
+  }, [actionState, viewportSize]);
 
   useEffect(() => {
     if (!hasStatusToken) {
       setIsStatusPopoverOpen(false);
+    }
+  }, [hasStatusToken, statusTokenId]);
+
+  useEffect(() => {
+    if (!hasSizeToken) {
+      setIsSizePopoverOpen(false);
       return;
     }
 
-    setIsStatusPopoverOpen(false);
-  }, [hasStatusToken, statusTokenId]);
+    setIsSizePopoverOpen(false);
+  }, [hasSizeToken, sizeTokenId]);
 
   if (!actionState) {
     return null;
@@ -314,6 +520,9 @@ export default function GrigliataTokenActions({
   const statusTitle = actionState.statusToken
     ? `Edit statuses for ${actionState.statusToken.label || 'token'}`
     : 'Edit token statuses';
+  const sizeTitle = actionState.sizeToken
+    ? `Resize ${actionState.sizeToken.label || 'token'}`
+    : 'Resize token';
   const VisibilityIcon = actionState.nextIsVisibleToPlayers ? FiEye : FiEyeOff;
 
   return (
@@ -392,6 +601,7 @@ export default function GrigliataTokenActions({
                 onMouseDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
+                  setIsSizePopoverOpen(false);
                   setIsStatusPopoverOpen((currentValue) => !currentValue);
                 }}
                 className={`flex items-center justify-center rounded-[1.15rem] border text-slate-50 shadow-lg transition-transform duration-150 hover:scale-[1.03] disabled:cursor-not-allowed disabled:opacity-60 ${
@@ -407,6 +617,32 @@ export default function GrigliataTokenActions({
                 <GiAura className="h-[48%] w-[48%]" />
               </button>
             )}
+
+            {actionState.sizeToken && (
+              <button
+                type="button"
+                aria-label={sizeTitle}
+                title={sizeTitle}
+                disabled={isTokenSizeActionPending}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsStatusPopoverOpen(false);
+                  setIsSizePopoverOpen((currentValue) => !currentValue);
+                }}
+                className={`flex items-center justify-center rounded-[1.15rem] border text-slate-50 shadow-lg transition-transform duration-150 hover:scale-[1.03] disabled:cursor-not-allowed disabled:opacity-60 ${
+                  isSizePopoverOpen
+                    ? 'border-amber-300/70 bg-amber-500/30'
+                    : 'border-violet-300/45 bg-violet-500/18'
+                }`}
+                style={{
+                  width: actionState.buttonSize,
+                  height: actionState.buttonSize,
+                }}
+              >
+                <FiMaximize className="h-[44%] w-[44%]" />
+              </button>
+            )}
           </div>
 
           <TokenStatusPopover
@@ -418,6 +654,19 @@ export default function GrigliataTokenActions({
             onRequestClose={() => setIsStatusPopoverOpen(false)}
             withinRef={statusControlRef}
             placementStyle={statusPopoverPlacement}
+          />
+
+          <TokenSizePopover
+            open={isSizePopoverOpen && !!actionState.sizeToken}
+            sizeSquares={actionState.sizeToken?.sizeSquares || 1}
+            isPending={isTokenSizeActionPending}
+            onCommitSize={(nextSizeSquares) => onSetSelectedTokenSize?.(
+              actionState.sizeToken?.tokenId,
+              nextSizeSquares
+            )}
+            onRequestClose={() => setIsSizePopoverOpen(false)}
+            withinRef={statusControlRef}
+            placementStyle={sizePopoverPlacement}
           />
         </div>
       </div>

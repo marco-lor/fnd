@@ -990,6 +990,149 @@ describe('GrigliataBoard', () => {
     expect(onSelectedTokenIdsChange).toHaveBeenLastCalledWith(['foe-token-1']);
   });
 
+  test('renders larger token footprints from sizeSquares', () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'token-2',
+            id: 'token-2',
+            ownerUid: 'user-1',
+            tokenType: 'custom',
+            label: 'Wolf',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            sizeSquares: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    const tokenNode = screen.getByTestId('token-node-token-2');
+    const tokenFootprint = tokenNode.querySelector('[data-konva-type="Rect"][data-width="140"][data-height="140"]');
+
+    expect(tokenFootprint).toBeTruthy();
+  });
+
+  test('shows the resize control for a selected single token and anchors hud layout to the enlarged footprint', async () => {
+    const { container } = render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 8,
+            row: 1,
+            sizeSquares: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          selectedTokenDetails: {
+            tokenId: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            hpCurrent: 18,
+            manaCurrent: 9,
+            shieldCurrent: 4,
+            hasShield: true,
+          },
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 600,
+      clientY: 80,
+    });
+
+    expect(await screen.findByRole('button', { name: /resize aldor/i })).toBeInTheDocument();
+
+    const chipCluster = await screen.findByTestId('selected-token-resource-chip-cluster');
+    const stage = container.querySelector('[data-konva-type="Stage"]');
+    const tokenNode = screen.getByTestId('token-node-user-1');
+    const viewportTop = Number.parseFloat(stage.getAttribute('data-y') || '0');
+    const viewportScale = Number.parseFloat(stage.getAttribute('data-scaley') || '1');
+    const tokenWorldTop = Number.parseFloat(tokenNode.getAttribute('data-y') || '0');
+    const tokenScreenTop = viewportTop + (tokenWorldTop * viewportScale);
+    const tokenScreenSize = 140 * viewportScale;
+    const chipTop = Number.parseFloat(chipCluster.style.top);
+
+    expect(chipTop).toBeGreaterThanOrEqual((tokenScreenTop + tokenScreenSize) - 0.5);
+  });
+
+  test('preserves sizeSquares when dragging a token', async () => {
+    const onMoveTokens = jest.fn();
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          onMoveTokens,
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            sizeSquares: 3,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+    fireEvent.mouseMove(window, {
+      button: 0,
+      buttons: 1,
+      clientX: 210,
+      clientY: 140,
+    });
+    fireEvent.mouseUp(window, {
+      button: 0,
+      buttons: 1,
+      clientX: 210,
+      clientY: 140,
+    });
+
+    await waitFor(() => {
+      expect(onMoveTokens).toHaveBeenCalledWith([
+        expect.objectContaining({
+          tokenId: 'user-1',
+          sizeSquares: 3,
+        }),
+      ]);
+    });
+  });
+
   test('shows the single-token resource hud for selected character tokens', async () => {
     render(
       <GrigliataBoard

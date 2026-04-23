@@ -3,7 +3,9 @@ import {
   DEFAULT_BOARD_CELLS,
   DEFAULT_GRID,
   FEET_PER_GRID_SQUARE,
+  MAX_GRIGLIATA_TOKEN_SIZE_SQUARES,
   MAX_GRID_CELL_SIZE,
+  MIN_GRIGLIATA_TOKEN_SIZE_SQUARES,
   MIN_GRID_CELL_SIZE,
 } from './constants';
 
@@ -29,6 +31,25 @@ export const normalizeGridConfig = (grid) => ({
   offsetXPx: Math.round(clamp(asFiniteNumber(grid?.offsetXPx, DEFAULT_GRID.offsetXPx), -5000, 5000)),
   offsetYPx: Math.round(clamp(asFiniteNumber(grid?.offsetYPx, DEFAULT_GRID.offsetYPx), -5000, 5000)),
 });
+
+export const normalizeTokenSizeSquares = (sizeSquares, fallback = MIN_GRIGLIATA_TOKEN_SIZE_SQUARES) => {
+  const normalizedFallback = clamp(
+    Math.round(asFiniteNumber(fallback, MIN_GRIGLIATA_TOKEN_SIZE_SQUARES)),
+    MIN_GRIGLIATA_TOKEN_SIZE_SQUARES,
+    MAX_GRIGLIATA_TOKEN_SIZE_SQUARES
+  );
+  const numericValue = Number(sizeSquares);
+
+  if (!Number.isFinite(numericValue)) {
+    return normalizedFallback;
+  }
+
+  return clamp(
+    Math.round(numericValue),
+    MIN_GRIGLIATA_TOKEN_SIZE_SQUARES,
+    MAX_GRIGLIATA_TOKEN_SIZE_SQUARES
+  );
+};
 
 export const getTokenLabel = ({ user, userData }) => {
   const characterId = typeof userData?.characterId === 'string' ? userData.characterId.trim() : '';
@@ -189,11 +210,11 @@ export const getTokenPositionPx = (token, grid) => {
   const normalizedGrid = normalizeGridConfig(grid);
   const col = asFiniteNumber(token?.col, 0);
   const row = asFiniteNumber(token?.row, 0);
-  const size = normalizedGrid.cellSizePx;
+  const size = normalizedGrid.cellSizePx * normalizeTokenSizeSquares(token?.sizeSquares);
 
   return {
-    x: normalizedGrid.offsetXPx + (col * size),
-    y: normalizedGrid.offsetYPx + (row * size),
+    x: normalizedGrid.offsetXPx + (col * normalizedGrid.cellSizePx),
+    y: normalizedGrid.offsetYPx + (row * normalizedGrid.cellSizePx),
     size,
   };
 };

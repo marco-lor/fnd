@@ -89,6 +89,7 @@ import {
   TURN_EFFECT_KIND_SHIELD,
 } from './turnOrder';
 import useGrigliataPageData from './useGrigliataPageData';
+import useGrigliataPlacementActions from './useGrigliataPlacementActions';
 
 const MAX_BACKGROUND_FILE_BYTES = 15 * 1024 * 1024;
 const MAX_CUSTOM_TOKEN_FILE_BYTES = 8 * 1024 * 1024;
@@ -328,6 +329,7 @@ export default function GrigliataPage() {
   const [isTokenVisibilityActionPending, setIsTokenVisibilityActionPending] = useState(false);
   const [isTokenDeadActionPending, setIsTokenDeadActionPending] = useState(false);
   const [isTokenStatusActionPending, setIsTokenStatusActionPending] = useState(false);
+  const [isTokenSizeActionPending, setIsTokenSizeActionPending] = useState(false);
   const [isCreatingCustomToken, setIsCreatingCustomToken] = useState(false);
   const [updatingCustomTokenId, setUpdatingCustomTokenId] = useState('');
   const [deletingCustomTokenId, setDeletingCustomTokenId] = useState('');
@@ -417,6 +419,32 @@ export default function GrigliataPage() {
       .filter((token) => token?.tokenId && token?.ownerUid === currentUserId)
       .map((token) => [token.tokenId, token])
   ), [currentUserId, currentUserToken, customUserTokens]);
+  const {
+    buildPlacementWritePayload,
+    buildTurnOrderRemovalPlacementWrite,
+    getActiveMapPlacementContexts,
+    canCurrentUserManageTurnOrderPlacement,
+    upsertTokenPlacement,
+    commitPlacementMoves,
+    deleteActiveMapPlacements,
+    setSelectedTokensVisibility,
+    setSelectedTokensDeadState,
+    updateTokenStatuses,
+    setSelectedTokenSize,
+  } = useGrigliataPlacementActions({
+    activeBackgroundId,
+    activePlacementsById,
+    currentUserId,
+    isManager,
+    ownedTrayTokensById,
+    buildHiddenPlacementSettingsPayload,
+    isLegacyHiddenPlacementToken,
+    isCustomTokenInstance,
+    deleteCustomToken: deleteGrigliataCustomTokenCallable,
+    placementRuleSafeBatchSize: PLACEMENT_RULE_SAFE_BATCH_SIZE,
+    placementAndUserSettingsBatchSize: PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE,
+    placementDeleteBatchSize: PLACEMENT_DELETE_BATCH_SIZE,
+  });
   const boardTokensById = useMemo(() => new Map(
     boardTokens
       .filter((token) => token?.tokenId)
@@ -1877,301 +1905,6 @@ export default function GrigliataPage() {
     }
   ), [activeBackgroundId, flushPendingDrawColorAutosave, flushPendingGridSizeAutosave]);
 
-  const buildPlacementWritePayload = useCallback(({
-    backgroundId,
-    tokenId,
-    ownerUid,
-    col,
-    row,
-    isVisibleToPlayers,
-    isDead,
-    statuses,
-    isInTurnOrder,
-    turnOrderInitiative,
-    turnOrderJoinedAt,
-    turnCounter,
-    turnEffects,
-  }) => {
-    const resolvedTokenId = typeof tokenId === 'string' && tokenId ? tokenId : ownerUid;
-    const placementId = buildPlacementDocId(backgroundId, resolvedTokenId);
-    const existingPlacement = activePlacementsById.get(placementId);
-    const resolvedIsVisibleToPlayers = typeof isVisibleToPlayers === 'boolean'
-      ? isVisibleToPlayers
-      : existingPlacement?.isVisibleToPlayers !== false;
-    const resolvedIsDead = typeof isDead === 'boolean'
-      ? isDead
-      : existingPlacement?.isDead === true;
-    const resolvedStatuses = Array.isArray(statuses)
-      ? statuses
-      : (Array.isArray(existingPlacement?.statuses) ? existingPlacement.statuses : null);
-    const resolvedIsInTurnOrder = typeof isInTurnOrder === 'boolean'
-      ? isInTurnOrder
-      : existingPlacement?.isInTurnOrder === true;
-    const resolvedTurnOrderInitiative = Number.isInteger(turnOrderInitiative)
-      ? turnOrderInitiative
-      : (Number.isInteger(existingPlacement?.turnOrderInitiative) ? existingPlacement.turnOrderInitiative : null);
-    const resolvedTurnOrderJoinedAt = turnOrderJoinedAt === undefined
-      ? (existingPlacement?.turnOrderJoinedAt || null)
-      : turnOrderJoinedAt;
-    const resolvedTurnCounter = turnCounter === undefined
-      ? normalizeTurnCounter(existingPlacement?.turnCounter, 0)
-      : normalizeTurnCounter(turnCounter, 0);
-    const resolvedTurnEffects = turnEffects === undefined
-      ? normalizeTurnEffects(existingPlacement?.turnEffects)
-      : normalizeTurnEffects(turnEffects);
-    const ownedTrayToken = ownedTrayTokensById.get(resolvedTokenId) || null;
-    const existingLabel = typeof existingPlacement?.label === 'string' ? existingPlacement.label.trim() : '';
-    const ownedLabel = typeof ownedTrayToken?.label === 'string' ? ownedTrayToken.label.trim() : '';
-    const existingImageUrl = typeof existingPlacement?.imageUrl === 'string' ? existingPlacement.imageUrl.trim() : '';
-    const ownedImageUrl = typeof ownedTrayToken?.imageUrl === 'string' ? ownedTrayToken.imageUrl.trim() : '';
-    const resolvedLabel = existingLabel || ownedLabel || ownerUid || 'Player';
-    const resolvedImageUrl = existingImageUrl || ownedImageUrl;
-
-    return {
-      backgroundId,
-      tokenId: resolvedTokenId,
-      ownerUid,
-      label: resolvedLabel,
-      imageUrl: resolvedImageUrl,
-      col,
-      row,
-      isVisibleToPlayers: resolvedIsVisibleToPlayers,
-      isDead: resolvedIsDead,
-      ...(resolvedStatuses !== null ? { statuses: resolvedStatuses } : {}),
-      ...(resolvedIsInTurnOrder ? { isInTurnOrder: true } : {}),
-      ...(resolvedIsInTurnOrder && Number.isInteger(resolvedTurnOrderInitiative)
-        ? { turnOrderInitiative: resolvedTurnOrderInitiative }
-        : {}),
-      ...(resolvedIsInTurnOrder && resolvedTurnOrderJoinedAt
-        ? { turnOrderJoinedAt: resolvedTurnOrderJoinedAt }
-        : {}),
-      ...(resolvedIsInTurnOrder && resolvedTurnCounter > 0 ? { turnCounter: resolvedTurnCounter } : {}),
-      ...(resolvedIsInTurnOrder && resolvedTurnEffects.length ? { turnEffects: resolvedTurnEffects } : {}),
-      updatedAt: serverTimestamp(),
-      updatedBy: currentUserId || null,
-    };
-  }, [activePlacementsById, currentUserId, ownedTrayTokensById]);
-
-  const buildTurnOrderRemovalPlacementWrite = useCallback(({
-    backgroundId,
-    tokenId,
-    ownerUid,
-    col,
-    row,
-    isVisibleToPlayers,
-    isDead,
-    statuses,
-  }) => ({
-    ...buildPlacementWritePayload({
-      backgroundId,
-      tokenId,
-      ownerUid,
-      col,
-      row,
-      isVisibleToPlayers,
-      isDead,
-      statuses,
-      isInTurnOrder: false,
-      turnCounter: 0,
-      turnEffects: [],
-    }),
-    isInTurnOrder: deleteField(),
-    turnOrderInitiative: deleteField(),
-    turnOrderJoinedAt: deleteField(),
-    turnCounter: deleteField(),
-    turnEffects: deleteField(),
-  }), [buildPlacementWritePayload]);
-
-  const upsertTokenPlacement = async ({
-    backgroundId,
-    tokenId,
-    ownerUid,
-    col,
-    row,
-    isVisibleToPlayers,
-    isDead,
-    statuses,
-  }) => {
-    const resolvedTokenId = typeof tokenId === 'string' && tokenId ? tokenId : ownerUid;
-    const placementId = buildPlacementDocId(backgroundId, resolvedTokenId);
-    const placementPayload = buildPlacementWritePayload({
-      backgroundId,
-      tokenId: resolvedTokenId,
-      ownerUid,
-      col,
-      row,
-      isVisibleToPlayers,
-      isDead,
-      statuses,
-    });
-    const isHidden = placementPayload.isVisibleToPlayers === false;
-    const batch = writeBatch(db);
-
-    batch.set(doc(db, 'grigliata_token_placements', placementId), placementPayload, { merge: true });
-    batch.set(
-      doc(db, 'users', ownerUid),
-      buildHiddenPlacementSettingsPayload({
-        backgroundId,
-        tokenId: resolvedTokenId,
-        isHidden,
-        includeLegacyBackgroundFallback: isLegacyHiddenPlacementToken({
-          tokenId: resolvedTokenId,
-          ownerUid,
-        }),
-      }),
-      { merge: true }
-    );
-
-    await batch.commit();
-  };
-
-  const getActiveMapPlacementContexts = (tokenIds) => {
-    if (!activeBackgroundId) {
-      return [];
-    }
-
-    return [...new Set((tokenIds || []).filter(Boolean))]
-      .map((tokenId) => {
-        const placementId = buildPlacementDocId(activeBackgroundId, tokenId);
-        const placement = activePlacementsById.get(placementId);
-        if (!placement) {
-          return null;
-        }
-
-        return {
-          tokenId,
-          ownerUid: placement.ownerUid,
-          placementId,
-          col: Number.isFinite(placement?.col) ? placement.col : 0,
-          row: Number.isFinite(placement?.row) ? placement.row : 0,
-          isVisibleToPlayers: placement?.isVisibleToPlayers !== false,
-          isDead: placement?.isDead === true,
-          isInTurnOrder: placement?.isInTurnOrder === true,
-          turnOrderInitiative: Number.isInteger(placement?.turnOrderInitiative)
-            ? placement.turnOrderInitiative
-            : null,
-          turnOrderJoinedAt: placement?.turnOrderJoinedAt || null,
-          turnCounter: normalizeTurnCounter(placement?.turnCounter, 0),
-          turnEffects: normalizeTurnEffects(placement?.turnEffects),
-        };
-      })
-      .filter(Boolean);
-  };
-
-  const canCurrentUserManageTurnOrderPlacement = useCallback((placementContext) => {
-    if (!placementContext || !currentUserId) {
-      return false;
-    }
-
-    return isManager
-      || placementContext.ownerUid === currentUserId
-      || placementContext.tokenId === currentUserId;
-  }, [currentUserId, isManager]);
-
-  const commitPlacementMoves = async (moves) => {
-    const normalizedMoves = [...new Map(
-      (moves || [])
-        .map((move) => {
-          const resolvedTokenId = move?.tokenId || move?.ownerUid || '';
-          if (!move?.backgroundId || !move?.ownerUid || !resolvedTokenId) {
-            return null;
-          }
-
-          return [
-            buildPlacementDocId(move.backgroundId, resolvedTokenId),
-            {
-              ...move,
-              tokenId: resolvedTokenId,
-            },
-          ];
-        })
-        .filter(Boolean)
-    ).values()];
-
-    for (let index = 0; index < normalizedMoves.length; index += PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE) {
-      const batch = writeBatch(db);
-      normalizedMoves.slice(index, index + PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE).forEach((move) => {
-        const placementPayload = buildPlacementWritePayload(move);
-        const isHidden = placementPayload.isVisibleToPlayers === false;
-        batch.set(
-          doc(db, 'grigliata_token_placements', buildPlacementDocId(move.backgroundId, move.tokenId)),
-          placementPayload,
-          { merge: true }
-        );
-        batch.set(
-          doc(db, 'users', move.ownerUid),
-          buildHiddenPlacementSettingsPayload({
-            backgroundId: move.backgroundId,
-            tokenId: move.tokenId,
-            isHidden,
-            includeLegacyBackgroundFallback: isLegacyHiddenPlacementToken({
-              tokenId: move.tokenId,
-              ownerUid: move.ownerUid,
-            }),
-          }),
-          { merge: true }
-        );
-      });
-      await batch.commit();
-    }
-  };
-
-  const deleteActiveMapPlacements = async (tokenIds) => {
-    const targetPlacements = getActiveMapPlacementContexts(tokenIds);
-    if (!targetPlacements.length) return;
-
-    for (let index = 0; index < targetPlacements.length; index += PLACEMENT_DELETE_BATCH_SIZE) {
-      const placementChunk = targetPlacements.slice(index, index + PLACEMENT_DELETE_BATCH_SIZE);
-      const tokenProfileEntries = await Promise.all(
-        placementChunk
-          .filter(({ tokenId, ownerUid }) => tokenId && tokenId !== ownerUid)
-          .map(async ({ tokenId }) => {
-            const tokenSnapshot = await getDoc(doc(db, 'grigliata_tokens', tokenId));
-            return [tokenId, tokenSnapshot.exists() ? tokenSnapshot.data() : null];
-          })
-      );
-      const deleteTargetTokenProfiles = new Map(tokenProfileEntries);
-      const customInstanceTokenIds = [...new Set(
-        placementChunk
-          .filter(({ tokenId }) => isCustomTokenInstance(deleteTargetTokenProfiles.get(tokenId) || null))
-          .map(({ tokenId }) => tokenId)
-      )];
-
-      for (const customInstanceTokenId of customInstanceTokenIds) {
-        await deleteGrigliataCustomTokenCallable({ tokenId: customInstanceTokenId });
-      }
-
-      const customInstanceTokenIdSet = new Set(customInstanceTokenIds);
-      const directDeletePlacements = placementChunk.filter(
-        ({ tokenId }) => !customInstanceTokenIdSet.has(tokenId)
-      );
-
-      if (!directDeletePlacements.length) {
-        continue;
-      }
-
-      const batch = writeBatch(db);
-      directDeletePlacements.forEach(({ ownerUid, placementId, tokenId }) => {
-        const tokenProfile = deleteTargetTokenProfiles.get(tokenId) || null;
-        batch.delete(doc(db, 'grigliata_token_placements', placementId));
-        if (tokenProfile?.tokenType === 'foe') {
-          batch.delete(doc(db, 'grigliata_tokens', tokenId));
-        }
-        batch.set(
-          doc(db, 'users', ownerUid),
-          buildHiddenPlacementSettingsPayload({
-            backgroundId: activeBackgroundId,
-            tokenId,
-            isHidden: false,
-            includeLegacyBackgroundFallback: isLegacyHiddenPlacementToken({ tokenId, ownerUid }),
-          }),
-          { merge: true }
-        );
-      });
-      await batch.commit();
-    }
-  };
-
   const validateCustomTokenImageFile = (file) => {
     if (!file) {
       return 'Select an image for the custom token.';
@@ -3335,53 +3068,14 @@ export default function GrigliataPage() {
   ]);
 
   const handleSetSelectedTokensVisibility = async (tokenIds, nextIsVisibleToPlayers) => {
-    if (
-      !isManager
-      || !currentUserId
-      || !activeBackgroundId
-      || typeof nextIsVisibleToPlayers !== 'boolean'
-    ) {
-      return;
-    }
-
-    const targetPlacements = getActiveMapPlacementContexts(tokenIds);
-    if (!targetPlacements.length) {
+    if (typeof nextIsVisibleToPlayers !== 'boolean') {
       return;
     }
 
     setBoardError('');
     setIsTokenVisibilityActionPending(true);
     try {
-      for (let index = 0; index < targetPlacements.length; index += PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE) {
-        const batch = writeBatch(db);
-
-        targetPlacements.slice(index, index + PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE).forEach(({ ownerUid, placementId, tokenId, col, row }) => {
-          batch.set(
-            doc(db, 'grigliata_token_placements', placementId),
-            buildPlacementWritePayload({
-              backgroundId: activeBackgroundId,
-              tokenId,
-              ownerUid,
-              col,
-              row,
-              isVisibleToPlayers: nextIsVisibleToPlayers,
-            }),
-            { merge: true }
-          );
-          batch.set(
-            doc(db, 'users', ownerUid),
-            buildHiddenPlacementSettingsPayload({
-              backgroundId: activeBackgroundId,
-              tokenId,
-              isHidden: nextIsVisibleToPlayers === false,
-              includeLegacyBackgroundFallback: isLegacyHiddenPlacementToken({ tokenId, ownerUid }),
-            }),
-            { merge: true }
-          );
-        });
-
-        await batch.commit();
-      }
+      await setSelectedTokensVisibility(tokenIds, nextIsVisibleToPlayers);
     } catch (error) {
       console.error('Failed to update selected token visibility:', error);
       setBoardError('Unable to update the selected token visibility.');
@@ -3391,43 +3085,14 @@ export default function GrigliataPage() {
   };
 
   const handleSetSelectedTokensDeadState = async (tokenIds, nextIsDead) => {
-    if (
-      !isManager
-      || !currentUserId
-      || !activeBackgroundId
-      || typeof nextIsDead !== 'boolean'
-    ) {
-      return;
-    }
-
-    const targetPlacements = getActiveMapPlacementContexts(tokenIds);
-    if (!targetPlacements.length) {
+    if (typeof nextIsDead !== 'boolean') {
       return;
     }
 
     setBoardError('');
     setIsTokenDeadActionPending(true);
     try {
-      for (let index = 0; index < targetPlacements.length; index += PLACEMENT_RULE_SAFE_BATCH_SIZE) {
-        const batch = writeBatch(db);
-
-        targetPlacements.slice(index, index + PLACEMENT_RULE_SAFE_BATCH_SIZE).forEach(({ ownerUid, placementId, tokenId, col, row }) => {
-          batch.set(
-            doc(db, 'grigliata_token_placements', placementId),
-            buildPlacementWritePayload({
-              backgroundId: activeBackgroundId,
-              tokenId,
-              ownerUid,
-              col,
-              row,
-              isDead: nextIsDead,
-            }),
-            { merge: true }
-          );
-        });
-
-        await batch.commit();
-      }
+      await setSelectedTokensDeadState(tokenIds, nextIsDead);
     } catch (error) {
       console.error('Failed to update selected token dead state:', error);
       setBoardError('Unable to update the selected token dead state.');
@@ -3437,32 +3102,14 @@ export default function GrigliataPage() {
   };
 
   const handleUpdateTokenStatuses = async (tokenId, nextStatuses) => {
-    if (!currentUserId || !activeBackgroundId || !tokenId || !Array.isArray(nextStatuses)) {
+    if (!tokenId || !Array.isArray(nextStatuses)) {
       return;
     }
-
-    const targetPlacement = getActiveMapPlacementContexts([tokenId])[0];
-    if (!targetPlacement) {
-      return;
-    }
-
-    const normalizedStatuses = nextStatuses.filter((statusId) => typeof statusId === 'string' && statusId);
 
     setBoardError('');
     setIsTokenStatusActionPending(true);
     try {
-      await setDoc(
-        doc(db, 'grigliata_token_placements', targetPlacement.placementId),
-        buildPlacementWritePayload({
-          backgroundId: activeBackgroundId,
-          tokenId,
-          ownerUid: targetPlacement.ownerUid,
-          col: targetPlacement.col,
-          row: targetPlacement.row,
-          statuses: normalizedStatuses,
-        }),
-        { merge: true }
-      );
+      await updateTokenStatuses(tokenId, nextStatuses);
     } catch (error) {
       console.error('Failed to update token statuses:', error);
       setBoardError(
@@ -3472,6 +3119,28 @@ export default function GrigliataPage() {
       );
     } finally {
       setIsTokenStatusActionPending(false);
+    }
+  };
+
+  const handleSetSelectedTokenSize = async (tokenId, sizeSquares) => {
+    if (!tokenId) {
+      return false;
+    }
+
+    setBoardError('');
+    setIsTokenSizeActionPending(true);
+    try {
+      return await setSelectedTokenSize(tokenId, sizeSquares);
+    } catch (error) {
+      console.error('Failed to update token size:', error);
+      setBoardError(
+        isPermissionDeniedError(error)
+          ? 'The DM is currently hiding or controlling that token.'
+          : 'Unable to resize that token right now.'
+      );
+      return false;
+    } finally {
+      setIsTokenSizeActionPending(false);
     }
   };
 
@@ -4093,6 +3762,8 @@ export default function GrigliataPage() {
                 isTokenDeadActionPending={isTokenDeadActionPending}
                 onUpdateTokenStatuses={isNarrationOverlayActive ? null : handleUpdateTokenStatuses}
                 isTokenStatusActionPending={isTokenStatusActionPending}
+                onSetSelectedTokenSize={isNarrationOverlayActive ? null : handleSetSelectedTokenSize}
+                isTokenSizeActionPending={isTokenSizeActionPending}
                 selectedTokenDetails={isNarrationOverlayActive ? null : selectedTokenDetails}
                 sharedInteractions={visibleSharedInteractions}
                 onSharedInteractionChange={isNarrationOverlayActive ? null : handleSharedInteractionChange}

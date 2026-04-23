@@ -375,6 +375,7 @@ service cloud.firestore {
           "imageUrl",
           "col",
           "row",
+          "sizeSquares",
           "isVisibleToPlayers",
           "isDead",
           "statuses",
@@ -393,6 +394,14 @@ service cloud.firestore {
         && (!data.keys().hasAny(["imageUrl"]) || data.imageUrl is string)
         && data.col is int
         && data.row is int
+        && (
+          !data.keys().hasAny(["sizeSquares"])
+          || (
+            data.sizeSquares is int
+            && data.sizeSquares >= 1
+            && data.sizeSquares <= 9
+          )
+        )
         && (
           !data.keys().hasAny(["isVisibleToPlayers"])
           || data.isVisibleToPlayers is bool
