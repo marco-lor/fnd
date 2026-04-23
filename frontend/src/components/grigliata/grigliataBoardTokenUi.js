@@ -23,7 +23,6 @@ import {
 import useImageAsset from './useImageAsset';
 
 const SHAPE_OUTLINE_STROKE_WIDTH = 4;
-const TOKEN_RING_OUTLINE_STROKE_WIDTH = 6;
 const TOKEN_STATUS_VISIBLE_BADGE_COUNT = 3;
 const DEFAULT_DRAW_THEME = getGrigliataDrawTheme(DEFAULT_GRIGLIATA_DRAW_COLOR_KEY);
 const HIDDEN_TOKEN_PRIMARY = 'rgba(226, 232, 240, 0.96)';
@@ -219,6 +218,7 @@ export const TokenNode = ({
   drawTheme = DEFAULT_DRAW_THEME,
   onMouseDown,
   onContextMenu,
+  onHoverChange,
   onOverflowMouseEnter,
   onOverflowMouseLeave,
   onOverflowToggle,
@@ -235,14 +235,6 @@ export const TokenNode = ({
   const selectedGlow = isHiddenFromPlayers
     ? 'rgba(148, 163, 184, 0.45)'
     : (isDead ? 'rgba(248, 113, 113, 0.35)' : drawTheme.glow);
-  const idleRingStroke = isHiddenFromPlayers
-    ? HIDDEN_TOKEN_SECONDARY
-    : (isDead ? DEAD_TOKEN_SECONDARY : (canMove ? '#fbbf24' : '#cbd5e1'));
-  const labelFill = isHiddenFromPlayers
-    ? '#cbd5e1'
-    : (isDead
-      ? DEAD_TOKEN_LABEL
-      : (isSelected ? drawTheme.tokenLabelText : (isActiveTurn ? ACTIVE_TURN_SECONDARY : '#e2e8f0')));
   const hiddenBadgeSize = Math.max(18, Math.round(size * 0.28));
   const hiddenSlashInset = Math.max(8, Math.round(size * 0.18));
   const hiddenSlashStroke = Math.max(5, Math.round(size * 0.1));
@@ -257,6 +249,8 @@ export const TokenNode = ({
       data-active-turn={isActiveTurn ? 'true' : 'false'}
       onMouseDown={(event) => onMouseDown?.(token, event)}
       onContextMenu={(event) => onContextMenu?.(token, event)}
+      onMouseEnter={() => onHoverChange?.(token?.tokenId || '', true)}
+      onMouseLeave={() => onHoverChange?.(token?.tokenId || '', false)}
     >
       {isActiveTurn && (
         <>
@@ -355,33 +349,6 @@ export const TokenNode = ({
         )}
       </Group>
 
-      {isSelected ? (
-        <>
-          <Circle
-            x={size / 2}
-            y={size / 2}
-            radius={(size / 2) - 1}
-            stroke={drawTheme.outlineStroke}
-            strokeWidth={TOKEN_RING_OUTLINE_STROKE_WIDTH}
-          />
-          <Circle
-            x={size / 2}
-            y={size / 2}
-            radius={(size / 2) - 1}
-            stroke={selectedStroke}
-            strokeWidth={3}
-          />
-        </>
-      ) : (
-        <Circle
-          x={size / 2}
-          y={size / 2}
-          radius={(size / 2) - 1}
-          stroke={idleRingStroke}
-          strokeWidth={2}
-        />
-      )}
-
       {isHiddenFromPlayers && (
         <>
           <Line
@@ -467,17 +434,6 @@ export const TokenNode = ({
         />
       )}
 
-      <Text
-        x={-Math.round(size * 0.3)}
-        y={size + 4}
-        width={Math.round(size * 1.6)}
-        align="center"
-        fontSize={Math.max(10, Math.round(size * 0.18))}
-        fill={labelFill}
-        text={label}
-        ellipsis
-        listening={false}
-      />
     </Group>
   );
 };

@@ -239,6 +239,47 @@ const scaleScreenPxToWorld = (screenPx, viewportScale = 1) => (
 const estimateTextWidth = (text, fontSize) => (
   Math.round(String(text || '').length * fontSize * 0.62)
 );
+const TOKEN_TOOLTIP_EDGE_PADDING = 12;
+const TOKEN_TOOLTIP_MIN_WIDTH = 96;
+const TOKEN_TOOLTIP_MAX_WIDTH = 240;
+const TOKEN_TOOLTIP_FONT_SIZE = 12;
+const TOKEN_TOOLTIP_HORIZONTAL_PADDING = 28;
+const buildClampedTokenTooltipLayout = ({
+  containerWidth = 0,
+  anchorCenterX = 0,
+  preferredTop = 0,
+  preferredBottom = 0,
+  label = '',
+  forceBelow = false,
+}) => {
+  const maxWidth = Math.max(
+    TOKEN_TOOLTIP_MIN_WIDTH,
+    Math.min(TOKEN_TOOLTIP_MAX_WIDTH, containerWidth - (TOKEN_TOOLTIP_EDGE_PADDING * 2))
+  );
+  const width = Math.min(
+    maxWidth,
+    Math.max(
+      TOKEN_TOOLTIP_MIN_WIDTH,
+      estimateTextWidth(label, TOKEN_TOOLTIP_FONT_SIZE) + TOKEN_TOOLTIP_HORIZONTAL_PADDING
+    )
+  );
+  const left = clampToRange(
+    anchorCenterX,
+    TOKEN_TOOLTIP_EDGE_PADDING + (width / 2),
+    Math.max(
+      TOKEN_TOOLTIP_EDGE_PADDING + (width / 2),
+      containerWidth - TOKEN_TOOLTIP_EDGE_PADDING - (width / 2)
+    )
+  );
+
+  return {
+    left,
+    top: forceBelow ? preferredBottom : preferredTop,
+    width,
+    maxWidth,
+    transform: forceBelow ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
+  };
+};
 const normalizeVector = (deltaX, deltaY, fallback = { x: 1, y: 0 }) => {
   const magnitude = Math.hypot(deltaX, deltaY);
   if (!magnitude) {
@@ -1777,6 +1818,8 @@ const TurnOrderPanel = ({
 }) => {
   const prefersReducedMotion = useReducedMotion();
   const [initiativeEditors, setInitiativeEditors] = useState({});
+  const panelRef = useRef(null);
+  const [hoveredEntryTooltip, setHoveredEntryTooltip] = useState(null);
 
   useEffect(() => {
     setInitiativeEditors((currentEditors) => entries.reduce((nextEditors, entry) => {
@@ -1849,8 +1892,54 @@ const TurnOrderPanel = ({
     });
   };
 
+  const showEntryTooltip = useCallback((tokenId, label, element) => {
+    const panelRect = panelRef.current?.getBoundingClientRect();
+    const chipRect = element?.getBoundingClientRect?.();
+    if (!panelRect || !chipRect || !tokenId || !label) {
+      return;
+    }
+
+    const tooltipLayout = buildClampedTokenTooltipLayout({
+      containerWidth: panelRect.width,
+      anchorCenterX: chipRect.left - panelRect.left + (chipRect.width / 2),
+      preferredTop: chipRect.top - panelRect.top - 8,
+      preferredBottom: chipRect.bottom - panelRect.top + 8,
+      label,
+      forceBelow: false,
+    });
+
+    setHoveredEntryTooltip({
+      tokenId,
+      label,
+      ...tooltipLayout,
+    });
+  }, []);
+
+  const clearEntryTooltip = useCallback((tokenId = '') => {
+    setHoveredEntryTooltip((currentTooltip) => (
+      !currentTooltip || (tokenId && currentTooltip.tokenId !== tokenId)
+        ? currentTooltip
+        : null
+    ));
+  }, []);
+
   return (
-    <div className="pointer-events-auto min-h-0 w-full">
+    <div ref={panelRef} className="pointer-events-auto relative min-h-0 w-full overflow-visible">
+      {hoveredEntryTooltip && (
+        <div
+          data-testid={`turn-order-tooltip-${hoveredEntryTooltip.tokenId}`}
+          className="pointer-events-none absolute z-[36] overflow-hidden text-center text-ellipsis whitespace-nowrap rounded-xl border border-slate-700/90 bg-slate-950/96 px-3 py-1.5 text-xs font-semibold text-slate-100 shadow-lg shadow-black/45 backdrop-blur-sm"
+          style={{
+            left: hoveredEntryTooltip.left,
+            top: hoveredEntryTooltip.top,
+            width: hoveredEntryTooltip.width,
+            maxWidth: hoveredEntryTooltip.maxWidth,
+            transform: hoveredEntryTooltip.transform,
+          }}
+        >
+          {hoveredEntryTooltip.label}
+        </div>
+      )}
       <div className="relative flex max-h-[calc(100vh-12rem)] min-h-0 flex-col items-end gap-2 overflow-x-hidden overflow-y-auto pb-8 pl-3 pr-0 pt-1">
         {entries.length > 0 && (
           <motion.div
@@ -1888,8 +1977,7 @@ const TurnOrderPanel = ({
               exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -10, x: 6 }}
               transition={prefersReducedMotion ? { duration: 0.01 } : TURN_ORDER_ENTRY_TRANSITION}
             >
-              <div className="min-w-0 max-w-[8.5rem] text-right">
-                <div className={`truncate text-sm font-semibold ${isActiveTurn ? 'text-fuchsia-50' : 'text-slate-100'}`}>{entry.label}</div>
+              <div className="min-w-0 text-right">
                 {canEdit ? (
                   <form
                     className="mt-1 inline-flex items-center justify-end gap-1.5"
@@ -1931,21 +2019,30 @@ const TurnOrderPanel = ({
                 )}
               </div>
 
-              {entry.imageUrl ? (
-                <img
-                  src={entry.imageUrl}
-                  alt=""
-                  className={`h-10 w-10 shrink-0 rounded-2xl object-cover ${isActiveTurn
-                    ? 'border border-fuchsia-300/75 shadow-[0_0_16px_rgba(217,70,239,0.22)]'
-                    : 'border border-slate-700/80'}`}
-                />
-              ) : (
-                <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-800/90 text-xs font-bold uppercase tracking-[0.18em] ${isActiveTurn
-                  ? 'border border-fuchsia-300/75 text-fuchsia-50 shadow-[0_0_16px_rgba(217,70,239,0.22)]'
-                  : 'border border-slate-700/80 text-slate-200'}`}>
-                  {getInitials(entry.label)}
-                </div>
-              )}
+              <div
+                className="relative shrink-0"
+                data-testid={`turn-order-chip-${entry.tokenId}`}
+                onMouseEnter={(event) => showEntryTooltip(entry.tokenId, entry.label, event.currentTarget)}
+                onMouseLeave={() => clearEntryTooltip(entry.tokenId)}
+                onFocus={(event) => showEntryTooltip(entry.tokenId, entry.label, event.currentTarget)}
+                onBlur={() => clearEntryTooltip(entry.tokenId)}
+              >
+                {entry.imageUrl ? (
+                  <img
+                    src={entry.imageUrl}
+                    alt=""
+                    className={`h-10 w-10 shrink-0 rounded-2xl object-cover ${isActiveTurn
+                      ? 'border border-fuchsia-300/75 shadow-[0_0_16px_rgba(217,70,239,0.22)]'
+                      : 'border border-slate-700/80'}`}
+                  />
+                ) : (
+                  <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-800/90 text-xs font-bold uppercase tracking-[0.18em] ${isActiveTurn
+                    ? 'border border-fuchsia-300/75 text-fuchsia-50 shadow-[0_0_16px_rgba(217,70,239,0.22)]'
+                    : 'border border-slate-700/80 text-slate-200'}`}>
+                    {getInitials(entry.label)}
+                  </div>
+                )}
+              </div>
             </motion.div>
           );
         }) : (
@@ -2050,6 +2147,7 @@ export default function GrigliataBoard({
   const [pingAnimationClock, setPingAnimationClock] = useState(() => Date.now());
   const [hoveredOverflowTokenId, setHoveredOverflowTokenId] = useState('');
   const [pinnedOverflowTokenId, setPinnedOverflowTokenId] = useState('');
+  const [hoveredTokenTooltipId, setHoveredTokenTooltipId] = useState('');
   const [isTurnOrderPanelCollapsed, setIsTurnOrderPanelCollapsed] = useState(() => readStoredTurnOrderCollapsed(currentUserId));
   const turnOrderPanelBodyId = useId();
   const [turnOrderContextMenu, setTurnOrderContextMenu] = useState(null);
@@ -2611,6 +2709,7 @@ export default function GrigliataBoard({
     clearActiveSharedInteraction();
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
+    setHoveredTokenTooltipId('');
   }, [clearActiveSharedInteraction, clearPingBroadcastTimer, clearPingHoldTimer, fitKey]);
 
   useEffect(() => {
@@ -2623,6 +2722,7 @@ export default function GrigliataBoard({
     setSelectedTokenIds([]);
     setSelectedAoEFigureId('');
     clearActiveSharedInteraction();
+    setHoveredTokenTooltipId('');
   }, [clearActiveSharedInteraction, isNarrationOverlayActive]);
 
   useEffect(() => {
@@ -2762,6 +2862,7 @@ export default function GrigliataBoard({
     if (!selectionBox && !tokenDragState && !isTokenDragActive) return;
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
+    setHoveredTokenTooltipId('');
   }, [isTokenDragActive, selectionBox, tokenDragState]);
 
   const getWorldPointFromClient = useCallback((clientX, clientY) => {
@@ -4039,6 +4140,33 @@ export default function GrigliataBoard({
 
     return token;
   }, [activeOverflowTokenId, renderedTokens, tokenStatusDisplayById]);
+  const hoveredTokenTooltip = useMemo(() => {
+    if (!hoveredTokenTooltipId) {
+      return null;
+    }
+
+    return renderedTokens.find((entry) => entry.tokenId === hoveredTokenTooltipId) || null;
+  }, [hoveredTokenTooltipId, renderedTokens]);
+  const hoveredTokenTooltipStyle = useMemo(() => {
+    if (!hoveredTokenTooltip) {
+      return null;
+    }
+
+    const tokenScreenLeft = viewport.x + (hoveredTokenTooltip.renderPosition.x * viewport.scale);
+    const tokenScreenTop = viewport.y + (hoveredTokenTooltip.renderPosition.y * viewport.scale);
+    const tokenScreenSize = hoveredTokenTooltip.renderPosition.size * viewport.scale;
+    const tokenCenterX = tokenScreenLeft + (tokenScreenSize / 2);
+    const preferredTop = tokenScreenTop - 10;
+    const shouldOpenBelow = preferredTop < 40;
+    return buildClampedTokenTooltipLayout({
+      containerWidth: stageSize.width,
+      anchorCenterX: tokenCenterX,
+      preferredTop,
+      preferredBottom: tokenScreenTop + tokenScreenSize + 10,
+      label: hoveredTokenTooltip.label || hoveredTokenTooltip.characterId || hoveredTokenTooltip.ownerUid || 'Token',
+      forceBelow: shouldOpenBelow,
+    });
+  }, [hoveredTokenTooltip, stageSize.width, viewport.scale, viewport.x, viewport.y]);
   const activeOverflowCardStyle = useMemo(() => {
     if (!activeOverflowToken) {
       return null;
@@ -4081,6 +4209,7 @@ export default function GrigliataBoard({
   const visibleAoEPreviewState = isNarrationOverlayActive ? null : aoePreviewState;
   const visibleSelectedTokenHud = isNarrationOverlayActive ? null : selectedSingleTokenHudState;
   const visibleOverflowToken = isNarrationOverlayActive ? null : activeOverflowToken;
+  const visibleHoveredTokenTooltip = isNarrationOverlayActive ? null : hoveredTokenTooltip;
   const visibleSelectedAoEFigureActionState = isNarrationOverlayActive ? null : selectedAoEFigureActionState;
   const visibleSelectedTokenActionState = isNarrationOverlayActive ? null : selectedTokenActionState;
 
@@ -4303,7 +4432,7 @@ export default function GrigliataBoard({
                 key="turn-order-panel"
                 id={turnOrderPanelBodyId}
                 data-testid="turn-order-panel"
-                className="pointer-events-none flex min-h-0 w-full flex-1 items-start overflow-hidden"
+                className="pointer-events-none flex min-h-0 w-full flex-1 items-start overflow-visible"
                 initial={prefersReducedMotion ? { opacity: 1, height: 'auto' } : { opacity: 0, height: 0, y: -8 }}
                 animate={{ opacity: 1, height: 'auto', y: 0 }}
                 exit={prefersReducedMotion ? { opacity: 0, height: 0 } : { opacity: 0, height: 0, y: -8 }}
@@ -4436,6 +4565,15 @@ export default function GrigliataBoard({
                   drawTheme={resolvedDrawTheme}
                   onMouseDown={handleTokenMouseDown}
                   onContextMenu={handleTokenContextMenu}
+                  onHoverChange={(tokenId, isHovered) => {
+                    setHoveredTokenTooltipId((currentTokenId) => {
+                      if (!isHovered) {
+                        return currentTokenId === tokenId ? '' : currentTokenId;
+                      }
+
+                      return tokenId || '';
+                    });
+                  }}
                   onOverflowMouseEnter={(tokenId) => setHoveredOverflowTokenId(tokenId || '')}
                   onOverflowMouseLeave={(tokenId) => {
                     setHoveredOverflowTokenId((currentTokenId) => (
@@ -4525,6 +4663,18 @@ export default function GrigliataBoard({
             token={selectedTokenDetails}
             hudState={visibleSelectedTokenHud}
           />
+        )}
+
+        {visibleHoveredTokenTooltip && hoveredTokenTooltipStyle && (
+          <div className="pointer-events-none absolute inset-0 z-[18]">
+            <div
+              data-testid={`battlemap-tooltip-${visibleHoveredTokenTooltip.tokenId}`}
+              className="absolute overflow-hidden text-center text-ellipsis whitespace-nowrap rounded-xl border border-slate-700/90 bg-slate-950/96 px-3 py-1.5 text-xs font-semibold text-slate-100 shadow-lg shadow-black/45 backdrop-blur-sm"
+              style={hoveredTokenTooltipStyle}
+            >
+              {visibleHoveredTokenTooltip.label || visibleHoveredTokenTooltip.characterId || visibleHoveredTokenTooltip.ownerUid || 'Token'}
+            </div>
+          </div>
         )}
 
         {visibleOverflowToken && activeOverflowCardStyle && (

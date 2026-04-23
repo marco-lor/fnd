@@ -990,6 +990,68 @@ describe('GrigliataBoard', () => {
     expect(onSelectedTokenIdsChange).toHaveBeenLastCalledWith(['foe-token-1']);
   });
 
+  test('shows token names only while hovering the token', () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Hoverling',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    const tokenNode = screen.getByTestId('token-node-user-1');
+
+    expect(screen.queryByText('Hoverling')).not.toBeInTheDocument();
+
+    fireEvent.mouseEnter(tokenNode);
+    expect(screen.getByText('Hoverling')).toBeInTheDocument();
+
+    fireEvent.mouseLeave(tokenNode);
+    expect(screen.queryByText('Hoverling')).not.toBeInTheDocument();
+  });
+
+  test('renders tokens without a permanent image ring', () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    const tokenNode = screen.getByTestId('token-node-user-1');
+
+    expect(tokenNode.querySelector('[data-konva-type="Circle"][data-stroke]')).toBeNull();
+  });
+
   test('renders larger token footprints from sizeSquares', () => {
     render(
       <GrigliataBoard
@@ -1131,6 +1193,44 @@ describe('GrigliataBoard', () => {
         }),
       ]);
     });
+  });
+
+  test('keeps only the external dashed outline when a token is selected', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    const tokenNode = screen.getByTestId('token-node-user-1');
+
+    fireEvent.mouseDown(tokenNode, {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+
+    await waitFor(() => {
+      expect(tokenNode.querySelectorAll('[data-konva-type="Rect"][data-dash="[7,4]"]')).toHaveLength(2);
+    });
+    expect(tokenNode.querySelector('[data-konva-type="Circle"][data-stroke]')).toBeNull();
   });
 
   test('shows the single-token resource hud for selected character tokens', async () => {
@@ -1717,7 +1817,14 @@ describe('GrigliataBoard', () => {
     );
 
     expect(screen.getByTestId('turn-order-panel')).toBeInTheDocument();
-    expect(screen.getByTestId('turn-order-entry-user-1')).toHaveTextContent('Ilya');
+    expect(screen.queryByText('Ilya')).not.toBeInTheDocument();
+
+    const chip = screen.getByTestId('turn-order-chip-user-1');
+    fireEvent.mouseEnter(chip);
+    expect(screen.getByTestId('turn-order-tooltip-user-1')).toHaveTextContent('Ilya');
+
+    fireEvent.mouseLeave(chip);
+    expect(screen.queryByTestId('turn-order-tooltip-user-1')).not.toBeInTheDocument();
 
     const turnOrderScrollContainer = screen.getByTestId('turn-order-panel').querySelector('.overflow-y-auto');
     expect(turnOrderScrollContainer).toBeTruthy();
