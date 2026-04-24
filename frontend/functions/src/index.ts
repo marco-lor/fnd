@@ -18,6 +18,7 @@ import {deleteUser} from "./deleteUser";
 import {updateAnimaModifier} from "./updateAnimaModifier";
 import {levelUpAll} from "./levelUpAll";
 import {levelUpUser} from "./levelUpUser";
+import {updateUserRole} from "./updateUserRole";
 import {duplicateFoeWithAssets} from "./duplicateFoeWithAssets";
 import {expireBarriera} from "./expireBarriera";
 import {cleanupGrigliataMusicTrack} from "./cleanupGrigliataMusicTrack";
@@ -42,6 +43,7 @@ export {
   updateAnimaModifier,
   levelUpAll,
   levelUpUser,
+  updateUserRole,
   duplicateFoeWithAssets,
   expireBarriera,
   cleanupGrigliataMusicTrack,

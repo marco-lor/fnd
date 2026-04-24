@@ -16,7 +16,7 @@ const safeName = (s: string, max = 60) =>
   (s || "")
     .toString()
     .normalize("NFKD")
-    .replace(/[^A-Za-z0-9_\-]+/g, "_")
+    .replace(/[^A-Za-z0-9_-]+/g, "_")
     .replace(/_+/g, "_")
     .replace(/^_+|_+$/g, "")
     .slice(0, max) || "foe";
@@ -54,6 +54,10 @@ export const duplicateFoeWithAssets = onCall<DuplicatePayload>(
     }
 
     const db = admin.firestore();
+    const requesterSnap = await db.doc(`users/${ctx.uid}`).get();
+    if (requesterSnap.get("role") !== "dm") {
+      throw new HttpsError("permission-denied", "Only DMs can duplicate foes.");
+    }
 
     // Idempotency
     let idemDocRef: FirebaseFirestore.DocumentReference | null = null;

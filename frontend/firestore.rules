@@ -42,12 +42,64 @@ service cloud.firestore {
       return isDM();
     }
 
-    function isProtectedGrigliataDocument(documentPath) {
-      return documentPath.matches('^(grigliata_state|grigliata_backgrounds|grigliata_music_tracks|grigliata_music_playback|grigliata_tokens|grigliata_token_placements|grigliata_live_interactions|grigliata_aoe_figures)(/.*)?$');
+    function mapOrEmpty(data, fieldName) {
+      return data.keys().hasAny([fieldName]) && data[fieldName] is map
+        ? data[fieldName]
+        : {};
     }
 
-    function isUserDiceRollDocument(documentPath) {
-      return documentPath.matches('^users/[^/]+/diceRolls(/.*)?$');
+    function stableMapField(nextMap, prevMap, fieldName) {
+      return nextMap.get(fieldName, null) == prevMap.get(fieldName, null);
+    }
+
+    function isCharacterCreationOpen(data) {
+      return mapOrEmpty(data, "flags").get("characterCreationDone", false) != true;
+    }
+
+    function hasStableStatsSystemFields(nextData, existingData) {
+      let nextStats = mapOrEmpty(nextData, "stats");
+      let existingStats = mapOrEmpty(existingData, "stats");
+      return stableMapField(nextStats, existingStats, "level")
+        && stableMapField(nextStats, existingStats, "hpTotal")
+        && stableMapField(nextStats, existingStats, "manaTotal")
+        && stableMapField(nextStats, existingStats, "essenzaTotal")
+        && stableMapField(nextStats, existingStats, "basePointsAvailable")
+        && stableMapField(nextStats, existingStats, "basePointsSpent")
+        && stableMapField(nextStats, existingStats, "combatTokensAvailable")
+        && stableMapField(nextStats, existingStats, "combatTokensSpent")
+        && stableMapField(nextStats, existingStats, "negativeBaseStatCount");
+    }
+
+    function hasStableUserIdentityAndRole(nextData, existingData) {
+      return nextData.get("role", null) == existingData.get("role", null)
+        && nextData.get("email", null) == existingData.get("email", null)
+        && nextData.get("created_at", null) == existingData.get("created_at", null)
+        && nextData.get("createdAt", null) == existingData.get("createdAt", null)
+        && !nextData.diff(existingData).affectedKeys().hasAny([
+          "roleUpdatedAt",
+          "roleUpdatedBy"
+        ]);
+    }
+
+    function isSafeOwnerUserCreate(userId) {
+      return request.auth.uid == userId
+        && request.resource.data.get("role", null) == "player"
+        && request.resource.data.get("email", "") is string
+        && !request.resource.data.keys().hasAny(["roleUpdatedAt", "roleUpdatedBy"]);
+    }
+
+    function isSafeOwnerUserUpdate(userId) {
+      return request.auth.uid == userId
+        && hasStableUserIdentityAndRole(request.resource.data, resource.data)
+        && (
+          isCharacterCreationOpen(resource.data)
+          || hasStableStatsSystemFields(request.resource.data, resource.data)
+        );
+    }
+
+    function isSafePrivilegedUserUpdate() {
+      return (isDM() || isWebmaster())
+        && hasStableUserIdentityAndRole(request.resource.data, resource.data);
     }
 
     function grigliataTokenDocPath(tokenId) {
@@ -802,20 +854,17 @@ service cloud.firestore {
            );
     }
 
-    // DMs can read any non-protected document and write any non-protected document except user dice rolls.
-    match /{document=**} {
-      allow read: if isDM() && !isProtectedGrigliataDocument(document);
-      allow write: if isDM()
-        && !isProtectedGrigliataDocument(document)
-        && !isUserDiceRollDocument(document);
-    }
-
     // Users
     match /users/{userId} {
       // Owner read, plus webmaster read. (Note: players cannot read other users.)
       allow read: if isSignedIn() && (request.auth.uid == userId || isWebmaster() || isDM());
-      // Owner write or webmaster write (DM already covered by global rule)
-      allow write: if isSignedIn() && (request.auth.uid == userId || isWebmaster() || isDM());
+      allow create: if isSignedIn() && isSafeOwnerUserCreate(userId);
+      allow update: if isSignedIn()
+        && (
+          isSafeOwnerUserUpdate(userId)
+          || isSafePrivilegedUserUpdate()
+        );
+      allow delete: if false;
 
       // Dice roll logs subcollection: each user can manage ONLY their own dice rolls
       match /diceRolls/{rollId} {
@@ -833,14 +882,26 @@ service cloud.firestore {
     // Items
     match /items/{docId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if isDM() || isWebmaster();
+    }
+
+    match /tecniche/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isDM() || isWebmaster();
+    }
+
+    match /spells/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isDM() || isWebmaster();
     }
 
     // Utils
     match /utils/{docId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow write: if isWebmaster() || (isDM() && docId == "codex");
       match /Razze/{raceId} {
         allow read: if isSignedIn();
+        allow write: if isWebmaster();
       }
     }
 
@@ -879,8 +940,14 @@ service cloud.firestore {
       // Shared logs — OPEN TO ALL SIGNED-IN USERS (any role)
       match /logs/{logId} {
         // Read & Write for any authenticated user; DM still has global allow.
-        allow read, write: if isSignedIn();
+        allow read: if isDM() || isWebmaster() || canReadEncounterById(encounterId);
+        allow write: if isDM() || canReadEncounterById(encounterId);
       }
+    }
+
+    match /security_audit/{auditId} {
+      allow read: if isWebmaster();
+      allow write: if false;
     }
 
     // Map Markers

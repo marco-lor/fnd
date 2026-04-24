@@ -3,7 +3,32 @@
 import {onCall, HttpsError, CallableRequest} from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 
-// Do NOT call admin.initializeApp() here — it’s already been done in index.ts
+// Do NOT call admin.initializeApp() here; it is already done in index.ts.
+
+const parseStoragePathFromUrl = (value: unknown): string => {
+  if (!value || typeof value !== "string") {
+    return "";
+  }
+
+  try {
+    const encodedPath = value.split("/o/")[1]?.split("?")[0];
+    return encodedPath ? decodeURIComponent(encodedPath) : "";
+  } catch {
+    return "";
+  }
+};
+
+const resolveProfileImagePath = (imagePath: unknown, imageUrl: unknown): string => {
+  if (
+    typeof imagePath === "string" &&
+    imagePath &&
+    !imagePath.includes("://")
+  ) {
+    return imagePath;
+  }
+
+  return parseStoragePathFromUrl(imageUrl);
+};
 
 /**
  * Callable Cloud Function to delete a user and their Firestore document.
@@ -30,12 +55,12 @@ export const deleteUser = onCall(
     if (!userToDeleteUid || typeof userToDeleteUid !== "string") {
       throw new HttpsError(
         "invalid-argument",
-        "A valid “userId” must be provided."
+        "A valid userId must be provided."
       );
     }
 
     try {
-      // 3. Load requesting user’s Firestore doc
+      // 3. Load requesting user's Firestore doc
       const reqUserRef = admin.firestore().doc(`users/${requestingUserUid}`);
       const reqUserSnap = await reqUserRef.get();
       if (!reqUserSnap.exists) {
@@ -49,10 +74,22 @@ export const deleteUser = onCall(
         );
       }
 
-      // 4. Delete target user’s Firestore document (if it exists)
+      // 4. Delete target user's Firestore document (if it exists)
       const targetUserRef = admin.firestore().doc(`users/${userToDeleteUid}`);
       const targetUserSnap = await targetUserRef.get();
       if (targetUserSnap.exists) {
+        const imagePath = resolveProfileImagePath(
+          targetUserSnap.get("imagePath"),
+          targetUserSnap.get("imageUrl")
+        );
+        if (imagePath) {
+          try {
+            await admin.storage().bucket().file(imagePath)
+              .delete({ignoreNotFound: true});
+          } catch (storageErr) {
+            console.warn("Failed to delete user profile image:", storageErr);
+          }
+        }
         await targetUserRef.delete();
       }
 
@@ -63,7 +100,7 @@ export const deleteUser = onCall(
     } catch (err: any) {
       console.error("Error deleting user:", err);
       // eslint-disable-next-line max-len
-      // If it’s already an HttpsError, rethrow it so the client sees the proper code
+      // If it is already an HttpsError, rethrow it so the client sees the proper code.
       if (err instanceof HttpsError) {
         throw err;
       }

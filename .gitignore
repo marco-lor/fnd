@@ -1,6 +1,29 @@
-backend/__pycache__/fast_api.cpython-310.pyc
-backend/__pycache__/firebase_conn.cpython-310.pyc
-backend/__pycache__/main.cpython-310.pyc
-backend/__pycache__/firebase_conn.cpython-311.pyc
-backend/__pycache__/backfill_npc_nome.cpython-311.pyc.2168957159440
-frontend/.firebase/hosting.YnVpbGQ.cache
+# Python
+__pycache__/
+*.py[cod]
+
+# Local credentials and secrets
+backend/firestoreServiceAccountKey.json
+**/*ServiceAccountKey*.json
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Local Firestore exports/backups
+backend/firestore_backup_*.json
+backend/backups/
+
+# Frontend generated output and deploy cache
+frontend/build/
+frontend/.firebase/
+frontend/pglite-debug.log
+frontend/functions/pglite-debug.log
+
+# Dependencies
+frontend/node_modules/
+frontend/functions/node_modules/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
