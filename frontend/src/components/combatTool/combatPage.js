@@ -7,9 +7,11 @@ import EncounterDetails from "./elements/EncounterDetails";
 import EncounterLog from "./elements/EncounterLog";
 import { Section } from "./elements/ui";
 import AddFoesOverlay from "./elements/AddFoesOverlay";
+import { useShellLayout } from "../common/shellLayout";
 
 const CombatPage = () => {
 	const { user, userData } = useAuth();
+	const { navInlineSize, topInset } = useShellLayout();
 	const isDM = (userData?.role || "") === "dm"; // Webmaster is NOT treated as DM here
 
 	const [selectedEncounter, setSelectedEncounter] = useState(null);
@@ -30,6 +32,8 @@ const CombatPage = () => {
 	}, [leftCollapsed]);
 
 	const toggleLeft = () => setLeftCollapsed((v) => !v);
+	const stickyTop = topInset + 16;
+	const stickyMaxHeight = `calc(100vh - ${stickyTop + 16}px)`;
 
 	const gridCols = useMemo(() => {
 		// Smoothly animate the grid template when collapsing the left panel.
@@ -55,9 +59,10 @@ const CombatPage = () => {
 							>
 								{/* Left sidebar: creator (DM) + encounters list */}
 								<div
-									className={`md:sticky md:top-0 md:self-start md:max-h-[calc(100vh-5rem)] overflow-y-auto pr-1 ${
+									className={`md:sticky md:self-start overflow-y-auto pr-1 ${
 										leftCollapsed ? "opacity-0 pointer-events-none -translate-x-2" : "opacity-100 translate-x-0"
 									} transition-all duration-300 ease-in-out`}
+									style={{ top: `${stickyTop}px`, maxHeight: stickyMaxHeight }}
 								>
 									{isDM && (
 										<EncounterCreator
@@ -115,7 +120,10 @@ const CombatPage = () => {
 								</div>
 
 								{/* Right sidebar: encounter log */}
-								<div className="md:sticky md:top-0 md:self-start md:max-h-[calc(100vh-5rem)] overflow-y-auto pr-1">
+								<div
+									className="md:sticky md:self-start overflow-y-auto pr-1"
+									style={{ top: `${stickyTop}px`, maxHeight: stickyMaxHeight }}
+								>
 									<EncounterLog encounterId={selectedEncounter?.id} />
 								</div>
 							</div>
@@ -127,8 +135,10 @@ const CombatPage = () => {
 			{user && leftCollapsed && (
                 <button
                     onClick={toggleLeft}
-                    className="flex items-center gap-2 fixed left-2 top-40 z-[60] px-3 py-2 rounded-xl bg-gradient-to-br from-indigo-600/80 to-violet-600/80 text-white shadow-lg hover:shadow-indigo-900/30 transition"
+					className="fixed z-[60] flex items-center gap-2 rounded-xl bg-gradient-to-br from-indigo-600/80 to-violet-600/80 px-3 py-2 text-white shadow-lg transition hover:shadow-indigo-900/30"
+					style={{ left: `${navInlineSize + 8}px`, top: `${stickyTop + 8}px` }}
                     title="Mostra pannello incontri"
+					data-testid="combat-left-reopen"
                 >
                     <GoSidebarExpand />
                 </button>

@@ -9,6 +9,7 @@ import { library } from "@fortawesome/fontawesome-svg-core";
 import { faLock, faLockOpen } from "@fortawesome/free-solid-svg-icons";
 import PlayerInfo from "./elements/playerInfo";
 import LockSettingsTable from "./elements/LockSettingsTable";
+import { useShellLayout } from "../common/shellLayout";
 
 // Add icons to library
 library.add(faLock, faLockOpen);
@@ -25,6 +26,7 @@ const DMDashboard = () => {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
   const [selectedUserIds, setSelectedUserIds] = useState([]);
+  const { topInset } = useShellLayout();
   // Collapsible sections state
   const [sectionsOpen, setSectionsOpen] = useState({
     players: true,
@@ -234,7 +236,10 @@ const DMDashboard = () => {
       {/* Full-width, left-aligned wrapper (no centered container)  */}
       <div className="w-full max-w-none mx-0 p-4">
         {/* Sticky top bar with global actions */}
-        <div className="sticky top-0 z-20 -mx-4 mb-6 border-b border-slate-800/60 bg-gray-900/80 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-gray-900/60">
+        <div
+          className="sticky z-20 -mx-4 mb-6 border-b border-slate-800/60 bg-gray-900/80 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-gray-900/60"
+          style={{ top: `${topInset}px` }}
+        >
           <div className="flex items-center justify-between">
             <h1 className="text-2xl sm:text-3xl font-bold text-slate-100 tracking-tight">DM Dashboard</h1>
             <button

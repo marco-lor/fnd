@@ -582,7 +582,11 @@ export default function NpcSidebar({
       }
     );
 
-    return () => unsubscribe();
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    };
   }, [user]);
 
   useEffect(() => {
@@ -617,6 +621,10 @@ export default function NpcSidebar({
       }
     };
   }, []);
+
+  useEffect(() => {
+    onHoverStateChange?.(isListHovered);
+  }, [isListHovered, onHoverStateChange]);
 
   useEffect(() => () => onHoverStateChange?.(false), [onHoverStateChange]);
 
@@ -671,11 +679,7 @@ export default function NpcSidebar({
   const sidebarOffset = `${sidebarTop + SIDEBAR_BOTTOM_GAP}px`;
 
   const setListHoverState = (nextState) => {
-    setIsListHovered((prevState) => {
-      if (prevState === nextState) return prevState;
-      onHoverStateChange?.(nextState);
-      return nextState;
-    });
+    setIsListHovered((prevState) => (prevState === nextState ? prevState : nextState));
   };
 
   const clearHoverCloseTimer = () => {

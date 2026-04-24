@@ -29,6 +29,7 @@ export default function FiltersSection({
   onlyAffordable,
   setOnlyAffordable,
   onResetFilters,
+  stickyTop = 0,
 }) {
   const [dropdownOpen, setDropdownOpen] = useState({
     itemType: false,
@@ -107,7 +108,7 @@ export default function FiltersSection({
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -10, scale: 0.95 }}
                   transition={{ duration: 0.2 }}
-                  className="absolute top-full left-0 right-0 z-50 mt-1 bg-gray-800 border border-gray-600 rounded-md shadow-xl max-h-40 overflow-y-auto"
+                  className="bazaar-filter-scroll absolute top-full left-0 right-0 z-50 mt-1 max-h-40 overflow-y-auto rounded-md border border-gray-600 bg-gray-800 shadow-xl"
                 >
                   {unselectedOptions.map(option => (
                     <button
@@ -136,7 +137,14 @@ export default function FiltersSection({
   };
 
   return (
-    <div className="sticky top-0 p-3 overflow-y-auto h-screen bg-gradient-to-b from-gray-900/95 to-gray-800/95 backdrop-blur-sm border-r border-gray-700/50" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="bazaar-filter-scroll xl:sticky xl:self-start overflow-y-auto rounded-2xl border border-gray-700/50 bg-gradient-to-b from-gray-900/95 to-gray-800/95 p-3 shadow-xl backdrop-blur-sm"
+      style={{
+        top: `${stickyTop}px`,
+        maxHeight: `calc(100vh - ${stickyTop + 24}px)`,
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
       <div className="mb-6">
         <h2 className="text-xl font-bold text-white mb-3 flex items-center gap-2">
           <span className="text-blue-400">⚙️</span>

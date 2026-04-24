@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import GrigliataPage from './GrigliataPage';
 import { useAuth } from '../../AuthContext';
+import { useShellLayout } from '../common/shellLayout';
 import {
   GRIGLIATA_LIVE_INTERACTION_STALE_MS,
   GRIGLIATA_LIVE_INTERACTION_THROTTLE_MS,
@@ -143,6 +144,10 @@ const setDocData = (path, value) => {
 
 jest.mock('../../AuthContext', () => ({
   useAuth: jest.fn(),
+}));
+
+jest.mock('../common/shellLayout', () => ({
+  useShellLayout: jest.fn(),
 }));
 
 jest.mock('../firebaseConfig', () => ({
@@ -652,6 +657,9 @@ describe('GrigliataPage', () => {
       },
       loading: false,
     });
+    useShellLayout.mockReturnValue({
+      topInset: 0,
+    });
 
     firestore = require('firebase/firestore');
     firestore.addDoc.mockClear().mockResolvedValue(undefined);
@@ -741,6 +749,20 @@ describe('GrigliataPage', () => {
   const getCommittedBatches = () => (
     [...mockBatchInstances].filter((batch) => batch.commit.mock.calls.length > 0)
   );
+
+  test('derives the workspace height from shell metrics without querying the legacy navbar', async () => {
+    useShellLayout.mockReturnValue({
+      topInset: 96,
+    });
+    const querySelectorSpy = jest.spyOn(document, 'querySelector');
+    const { container } = render(<GrigliataPage />);
+
+    expect(await screen.findByTestId('board-background-name')).toHaveTextContent('Sunken Ruins');
+    expect(container.firstChild).toHaveStyle('--grigliata-workspace-height: calc(100vh - 96px)');
+    expect(querySelectorSpy).not.toHaveBeenCalledWith('[data-navbar]');
+
+    querySelectorSpy.mockRestore();
+  });
 
   test('preloads the active battlemap, visible board tokens, and the tray portrait for players', async () => {
     mockFirestoreState.collections.grigliata_backgrounds = [

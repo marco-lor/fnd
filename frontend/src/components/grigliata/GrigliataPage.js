@@ -90,6 +90,7 @@ import {
 } from './turnOrder';
 import useGrigliataPageData from './useGrigliataPageData';
 import useGrigliataPlacementActions from './useGrigliataPlacementActions';
+import { useShellLayout } from '../common/shellLayout';
 
 const MAX_BACKGROUND_FILE_BYTES = 15 * 1024 * 1024;
 const MAX_CUSTOM_TOKEN_FILE_BYTES = 8 * 1024 * 1024;
@@ -254,6 +255,7 @@ const normalizeFoeParametri = (value, fallback = {}) => {
 
 export default function GrigliataPage() {
   const { user, userData, loading } = useAuth();
+  const { topInset } = useShellLayout();
   const currentUserId = user?.uid || '';
   const currentUserEmail = user?.email || '';
   const currentCharacterId = typeof userData?.characterId === 'string' ? userData.characterId.trim() : '';
@@ -263,7 +265,6 @@ export default function GrigliataPage() {
   const persistedDrawColorKey = resolveGrigliataDrawColorKey(userData?.settings?.grigliata_draw_color);
   const persistedInteractionSharingEnabled = userData?.settings?.[GRIGLIATA_SHARE_INTERACTIONS_FIELD] === true;
   const isMusicMuted = userData?.settings?.[GRIGLIATA_MUSIC_MUTED_FIELD] === true;
-  const [navbarOffset, setNavbarOffset] = useState(0);
   const [localLiveInteraction, setLocalLiveInteraction] = useState(null);
   const [isInteractionSharingEnabled, setIsInteractionSharingEnabled] = useState(persistedInteractionSharingEnabled);
 
@@ -913,27 +914,6 @@ export default function GrigliataPage() {
   }, [deferredGalleryImageUrls]);
 
   useEffect(() => {
-    const navbar = document.querySelector('[data-navbar]');
-    if (!navbar) return undefined;
-
-    const updateOffset = () => {
-      const { height } = navbar.getBoundingClientRect();
-      setNavbarOffset(Math.ceil(height));
-    };
-
-    updateOffset();
-
-    if (typeof ResizeObserver !== 'undefined') {
-      const observer = new ResizeObserver(updateOffset);
-      observer.observe(navbar);
-      return () => observer.disconnect();
-    }
-
-    window.addEventListener('resize', updateOffset);
-    return () => window.removeEventListener('resize', updateOffset);
-  }, []);
-
-  useEffect(() => {
     setLocalLiveInteraction(null);
   }, [activeBackgroundId]);
 
@@ -1214,8 +1194,8 @@ export default function GrigliataPage() {
     runPaginatedWriteBatch,
   ]);
 
-  const workspaceHeight = navbarOffset
-    ? `calc(100vh - ${navbarOffset}px)`
+  const workspaceHeight = topInset
+    ? `calc(100vh - ${topInset}px)`
     : '100vh';
 
   const clearDrawColorAutosaveTimer = useCallback(() => {
