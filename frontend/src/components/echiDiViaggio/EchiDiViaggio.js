@@ -4,10 +4,10 @@ import { collection, onSnapshot } from 'firebase/firestore';
 import { useAuth } from '../../AuthContext';
 import mappaArt from '../../assets/images/maps/mappa_art.png';
 import mappaPrecisa from '../../assets/images/maps/mappa_precisa.png';
-import GlobalAuroraBackground from '../backgrounds/GlobalAuroraBackground';
 import { useMapEditing, MapEditorControls, MapMarkerModal, renderMarkerIcon } from './MapEditor';
 import NpcSidebar from './NpcSidebar';
 import { db } from '../firebaseConfig';
+import { useShellLayout } from '../common/shellLayout';
 
 const getNormalizedText = (value, fallback) => {
   const trimmed = typeof value === 'string' ? value.trim() : '';
@@ -299,34 +299,13 @@ const MapMarkerItem = ({
 
 function EchiDiViaggio() {
   const { user, userData, loading } = useAuth();
-  const [navbarOffset, setNavbarOffset] = useState(0);
+  const { topInset } = useShellLayout();
   const [isDragging, setIsDragging] = useState(false);
   const [isNpcListHovered, setIsNpcListHovered] = useState(false);
   const [npcById, setNpcById] = useState({});
   const [pendingNpcMove, setPendingNpcMove] = useState(null);
   const [npcMoveError, setNpcMoveError] = useState('');
   const [isSavingNpcMove, setIsSavingNpcMove] = useState(false);
-
-  useEffect(() => {
-    const navbar = document.querySelector('[data-navbar]');
-    if (!navbar) return undefined;
-
-    const updateOffset = () => {
-      const { height } = navbar.getBoundingClientRect();
-      setNavbarOffset(Math.ceil(height));
-    };
-
-    updateOffset();
-
-    if (typeof ResizeObserver !== 'undefined') {
-      const observer = new ResizeObserver(updateOffset);
-      observer.observe(navbar);
-      return () => observer.disconnect();
-    }
-
-    window.addEventListener('resize', updateOffset);
-    return () => window.removeEventListener('resize', updateOffset);
-  }, []);
 
   useEffect(() => {
     if (!user?.uid) {
@@ -355,7 +334,11 @@ function EchiDiViaggio() {
       }
     );
 
-    return () => unsubscribe();
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    };
   }, [user?.uid]);
 
   // Check permissions
@@ -401,7 +384,7 @@ function EchiDiViaggio() {
     handleMoveMarker: handlePrivateMoveMarker
   } = useMapEditing({ user, canEdit: canEditPrivate, collectionPath: privateCollectionPath });
 
-  const stickyOffset = navbarOffset ? navbarOffset + 8 : 0;
+  const stickyOffset = topInset + 8;
 
   const handlePinDragStart = () => setIsDragging(true);
   const handlePinDragEnd = () => setIsDragging(false);
@@ -606,7 +589,6 @@ function EchiDiViaggio() {
 
   return (
     <div className="echi-di-viaggio-page-container relative min-h-screen text-white">
-      <GlobalAuroraBackground />
       <main className="relative z-10 p-2 w-full">
         <div className="grid grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)] gap-4 items-start">
           <NpcSidebar

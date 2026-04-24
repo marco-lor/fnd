@@ -1,78 +1,106 @@
 # Navbar and Layout Architecture
 
-This document describes the implementation and relationship between the Navbar, the main Layout component, and the top section of the pages in the frontend application.
+This document describes the authenticated application shell after the left-sidebar redesign.
 
 ## 1. Overview
 
-The application uses a centralized `Layout` component to ensure a consistent look and feel across most authenticated pages. This layout manages the positioning of the `Navbar`, the background effects, and the main page content.
+Authenticated routes now render inside a shared app shell composed of:
+
+1. `GlobalAuroraBackground`
+2. `GlobalGrigliataMusicPlayer`
+3. a shared navigation shell from `Layout`
+4. route content rendered inside the shell content area
+
+The shell keeps navigation behavior centralized while exposing layout metrics to pages that need sticky offsets or viewport-aware workspace sizing.
 
 ## 2. Navbar Component
 
 **Location:** `frontend/src/components/common/navbar.js`
 
-The Navbar is the primary navigation element. It is designed to be always visible (sticky) and adapts based on the user's role and current route.
+The `Navbar` export now renders two variants:
 
-### Structure
-The component renders a responsive 3-area header layout:
-1.  **Left (User Profile):** Displays the user's avatar, name, race, and level. It includes functionality for uploading and previewing the profile image.
-2.  **Center (Navigation):** Contains navigation buttons (Home, Bazaar, Combat, etc.).
-3.  **Right (Actions):** Contains the Logout button.
+- **Desktop (`xl+`)**: a persistent left sidebar
+- **Mobile / tablet (`< xl`)**: a compact top utility bar plus an overlay drawer
 
-On smaller screens, the header stacks into a single column so each section can wrap cleanly. On desktop, the left and right areas size to their content while the center navigation expands to fill the remaining width.
+### Desktop sidebar
 
-### Styling & Positioning
--   **Sticky Positioning:** Uses `sticky top-0` to remain at the top of the viewport during scrolling.
--   **Z-Index:** Uses `z-50` to ensure it floats above all other page content.
--   **Visuals:** Uses a semi-transparent background (`bg-[rgba(40,40,60,0.8)]`) with `backdrop-blur-sm` to create a glass-morphism effect over the scrolling content.
+- Uses a persistent width controlled by shell state.
+- Expanded width is `16rem`.
+- Collapsed width is `5.5rem`.
+- Collapse state is persisted in local storage under `layout.sidebarCollapsed`.
+- Collapsed mode shows navigation icons only; labels remain available through accessibility attributes and tooltips.
 
-### Logic & Behavior
--   **Routing:** Uses `NavLink` for route navigation and active state styling. `useNavigate` is still used for logout redirects.
--   **Active State:** `NavLink` applies the active styles when its route matches the current path.
--   **Role-Based Rendering:**
-    -   **DMs:** See additional buttons for "DM Dashboard" and "Foes Hub".
-    -   **Webmasters:** See an "Admin" button.
-    -   **Standard Users:** See the standard set of player tools.
+### Mobile shell
 
-The navigation items are driven by a single configuration list in the Navbar, which keeps the markup consistent and reduces duplication.
+- Renders a top utility bar with the current route label, avatar, and menu trigger.
+- Opens a `16rem` left drawer with the same navigation, profile actions, and logout action.
+- The drawer closes on:
+  - backdrop click
+  - `Escape`
+  - route navigation
+
+### Shared behavior
+
+- Navigation uses `NavLink`.
+- Role-gated items still apply exactly as before:
+  - DMs see `DM Dashboard` and `Foes Hub`
+  - Webmasters see `Admin`
+- Profile image preview/upload remains in the shared navigation shell.
+- Logout still signs out through Firebase Auth and redirects to `/`.
 
 ## 3. Layout Component
 
 **Location:** `frontend/src/components/common/Layout.js`
 
-The `Layout` component acts as the wrapper for most pages in the application. It orchestrates the stacking context and structural relationship between the background, the navbar, and the page content.
+`Layout` now wraps authenticated pages with `ShellLayoutProvider`.
 
-### Composition
-The Layout renders elements in the following order:
-1.  **`GlobalAuroraBackground`:** A fixed background effect rendered at the lowest z-index.
-2.  **`Navbar`:** Rendered at the top of the flex container.
-3.  **`children`:** The specific page content passed to the Layout, rendered immediately below the Navbar.
+### Shell structure
 
 ```jsx
-// Conceptual Structure
-<div className="min-h-screen flex flex-col ...">
-  <GlobalAuroraBackground />
-  <Navbar />
-  <main className="flex-grow ...">
-    {children}
-  </main>
-</div>
+<ShellLayoutProvider>
+  <div style={{ '--app-shell-nav-width': ..., '--app-shell-top-inset': ... }}>
+    <GlobalAuroraBackground />
+    <GlobalGrigliataMusicPlayer />
+    <div className="shell">
+      <Navbar />
+      <main>{children}</main>
+    </div>
+  </div>
+</ShellLayoutProvider>
 ```
 
-## 4. Interaction with Page Content ("Top Part")
+### Layout metrics contract
 
-The "top part of the page" refers to how the content interacts with the Navbar immediately upon rendering.
+The shell provider exposes `useShellLayout()` with:
 
-### Standard Pages (e.g., Home, Bazaar)
--   **Container:** These pages are wrapped in the `Layout` component.
--   **Flow:** Because the Navbar is `sticky` (not `fixed` in a way that removes it from flow) and part of the flex column, the page content naturally starts *below* the Navbar.
--   **Overlap:** The Navbar's `z-50` ensures that if the page content scrolls up, it slides *underneath* the semi-transparent Navbar.
+- `isNavCollapsed`
+- `toggleNav`
+- `isMobileNavOpen`
+- `openMobileNav`
+- `closeMobileNav`
+- `navInlineSize`
+- `topInset`
 
-### Standalone Pages (e.g., CharacterCreation)
--   **Exception:** The `CharacterCreation` page does **not** use the `Layout` component.
--   **Structure:** It defines its own container and header structure, independent of the main application navigation.
+The layout also mirrors those metrics onto CSS variables:
 
-## 5. Data Flow & State
+- `--app-shell-nav-width`
+- `--app-shell-top-inset`
 
-There is no direct prop drilling between the Navbar and the pages. Instead, synchronization is handled via Context:
+`navInlineSize` is the inline width consumed by the desktop sidebar. On mobile it is `0`.
 
--   **`AuthContext`:** Both the Navbar (for profile info) and the Pages (for content logic) subscribe to `AuthContext`. This ensures that if a user updates their character data or levels up on a page, the Navbar reflects these changes immediately without complex parent-child communication.
+`topInset` is the vertical space reserved for the mobile top utility bar. On desktop it is `0`.
+
+## 4. Page Integration
+
+Pages that previously measured `[data-navbar]` directly now consume shell metrics through `useShellLayout()`.
+
+Current shell-aware consumers include:
+
+- `GrigliataPage`
+- `EchiDiViaggio`
+- `Bazaar`
+- `CombatPage`
+- `Codex`
+- `DMDashboard`
+
+These pages use `topInset` for sticky offsets and workspace height calculations, which keeps them aligned with both the desktop sidebar shell and the mobile drawer/top-bar shell.

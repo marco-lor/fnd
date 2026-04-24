@@ -11,6 +11,7 @@ import AggiungiCategoriaButton from './buttons/AggiungiCategoriaButton';
 import DeleteCategoriaButton from './buttons/DeleteCategoriaButton';
 import EditItemButton from './buttons/EditItemButton';
 import DeleteItemButton from './buttons/DeleteItemButton';
+import { useShellLayout } from '../common/shellLayout';
 
 // Helper function to capitalize first letter only
 const capitalize = (s) => {
@@ -49,11 +50,14 @@ const deriveSingularName = (key) => {
 
 function Codex() {
   const { user, userData, loading: authLoading } = useAuth();
+  const { topInset } = useShellLayout();
   const [codexData, setCodexData] = useState({});
   const [activeSection, setActiveSection] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const isInitialLoad = useRef(true);
+  const stickyTop = topInset + 24;
+  const stickyMaxHeight = `calc(100vh - ${stickyTop + 24}px)`;
 
   // --- Effect for fetching Codex data ---
   useEffect(() => {
@@ -180,10 +184,10 @@ function Codex() {
             w-full md:w-1/4 lg:w-1/5
             bg-gray-800 p-4 rounded-lg shadow-lg
             self-start
-            md:sticky md:top-32              /*  keeps the column fixed after the page header  */
-            md:max-h-[calc(100vh-7rem)]      /*  allow menu to scroll if it grows taller than viewport  */
+            md:sticky
             md:overflow-y-auto
           "
+          style={{ top: `${stickyTop}px`, maxHeight: stickyMaxHeight }}
         >
           <h2 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">
             Categorie

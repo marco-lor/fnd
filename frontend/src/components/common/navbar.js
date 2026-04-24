@@ -1,15 +1,24 @@
 // file: ./frontend/src/components/common/navbar.js
-import React, { useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import React, { useMemo, useState } from 'react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
 import { HiMagnifyingGlassPlus } from 'react-icons/hi2';
 import { LuImageUp } from 'react-icons/lu';
-import { GiSpikedDragonHead } from 'react-icons/gi';
+import {
+  GiBarbecue,
+  GiCrossedSwords,
+  GiDeathSkull,
+  GiSpikedDragonHead,
+  GiSpellBook,
+} from 'react-icons/gi';
+import { FiBookOpen, FiCompass, FiLogOut, FiMenu, FiSettings, FiShield, FiShoppingBag, FiX } from 'react-icons/fi';
+import { GoSidebarCollapse, GoSidebarExpand } from 'react-icons/go';
 import { storage, db } from '../firebaseConfig';
 import { ref as storageRef, deleteObject, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, updateDoc } from 'firebase/firestore';
+import { useShellLayout } from './shellLayout';
 
 const NAV_ITEMS = [
   {
@@ -22,61 +31,322 @@ const NAV_ITEMS = [
   {
     label: 'Bazaar',
     path: '/bazaar',
+    icon: FiShoppingBag,
     end: true,
   },
   {
     label: 'Combat',
     path: '/combat',
+    icon: GiCrossedSwords,
     end: true,
   },
   {
     label: 'Tecniche | Spell',
     path: '/tecniche-spell',
+    icon: GiSpellBook,
     end: true,
   },
   {
     label: 'Codex',
     path: '/codex',
+    icon: FiBookOpen,
     end: true,
   },
   {
     label: 'Echi di Viaggio',
     path: '/echi-di-viaggio',
+    icon: FiCompass,
     end: true,
   },
   {
     label: 'Grigliata',
     path: '/grigliata',
+    icon: GiBarbecue,
     end: true,
   },
   {
     label: 'DM Dashboard',
     path: '/dm-dashboard',
+    icon: FiShield,
     roles: ['dm'],
     end: true,
   },
   {
     label: 'Foes Hub',
     path: '/foes-hub',
+    icon: GiDeathSkull,
     roles: ['dm'],
     end: true,
   },
   {
     label: 'Admin',
     path: '/admin',
+    icon: FiSettings,
     roles: ['webmaster'],
     end: true,
   },
 ];
 
-const BASE_NAV_ITEM_CLASS =
-  'inline-flex items-center justify-center gap-2 px-3 py-1 md:px-4 md:py-2 rounded-md transition-colors text-sm md:text-base';
-const ACTIVE_NAV_ITEM_CLASS = 'bg-[#FFA500] text-white font-semibold shadow-md';
-const INACTIVE_NAV_ITEM_CLASS = 'bg-transparent text-white hover:bg-[#e69500]';
+const BASE_NAV_ITEM_CLASS = 'group flex w-full items-center overflow-hidden rounded-2xl border text-sm transition-all duration-[280ms] ease-out motion-reduce:transition-none';
+const ACTIVE_NAV_ITEM_CLASS = 'border-amber-300/80 bg-amber-400/25 text-white shadow-lg shadow-amber-500/10';
+const INACTIVE_NAV_ITEM_CLASS = 'border-transparent bg-transparent text-slate-200 hover:border-amber-200/30 hover:bg-white/5 hover:text-white';
+const ACTION_BUTTON_CLASS = 'inline-flex items-center justify-center rounded-full border border-slate-500/40 bg-slate-900/70 text-slate-100 transition-colors duration-200 hover:border-amber-300/60 hover:bg-amber-400/10 disabled:cursor-not-allowed disabled:opacity-45';
+const COLLAPSIBLE_TEXT_CLASS = 'min-w-0 truncate transition-[max-width,opacity,transform] duration-[240ms] ease-out motion-reduce:transition-none';
+const noop = () => {};
+
+const buildProfileImageLabel = (user, userData) => (
+  userData?.characterId || user?.email || 'User'
+);
+
+const Avatar = ({ user, userData, className = '', imageClassName = '' }) => {
+  const fallbackLabel = buildProfileImageLabel(user, userData);
+
+  return (
+    <>
+      {userData?.stats?.level ? (
+        <div className="absolute -bottom-1 -left-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-slate-950 bg-sky-500 text-xs font-semibold text-white shadow-lg">
+          {userData.stats.level}
+        </div>
+      ) : null}
+      {userData?.imageUrl ? (
+        <img
+          src={userData.imageUrl}
+          alt="Character Avatar"
+          className={`rounded-full border-2 border-white/90 object-cover shadow-lg ${className} ${imageClassName}`.trim()}
+        />
+      ) : (
+        <div
+          className={`flex items-center justify-center rounded-full border-2 border-dashed border-slate-400/55 bg-slate-700 text-[11px] font-semibold text-slate-100 ${className}`.trim()}
+        >
+          {fallbackLabel.slice(0, 2).toUpperCase()}
+        </div>
+      )}
+    </>
+  );
+};
+
+const ProfileActions = ({
+  canPreview,
+  compact,
+  onOpenPreview,
+  onOpenUpload,
+  className = '',
+  buttonClassName = '',
+  iconClassName = '',
+}) => (
+  <div className={`flex ${compact ? 'flex-col items-center' : 'items-center'} gap-2 ${className}`.trim()}>
+    <button
+      type="button"
+      onClick={onOpenPreview}
+      disabled={!canPreview}
+      className={`${ACTION_BUTTON_CLASS} ${compact ? 'h-10 w-10' : 'h-9 w-9'} ${buttonClassName}`.trim()}
+      aria-label="Preview profile image"
+      title={canPreview ? 'Preview profile image' : 'No image to preview'}
+    >
+      <HiMagnifyingGlassPlus className={`${compact ? 'text-lg' : 'text-base'} ${iconClassName}`.trim()} />
+    </button>
+    <button
+      type="button"
+      onClick={onOpenUpload}
+      className={`${ACTION_BUTTON_CLASS} ${compact ? 'h-10 w-10' : 'h-9 w-9'} ${buttonClassName}`.trim()}
+      aria-label="Upload profile image"
+      title="Upload profile image"
+    >
+      <LuImageUp className={`${compact ? 'text-lg' : 'text-base'} ${iconClassName}`.trim()} />
+    </button>
+  </div>
+);
+
+const NavList = ({ collapsed, navItems, onNavigate }) => (
+  <nav className="flex-1 overflow-y-auto pr-1" aria-label="Primary">
+    <ul className="space-y-2">
+      {navItems.map((item) => {
+        const Icon = item.icon;
+
+        return (
+          <li key={item.path}>
+            <NavLink
+              to={item.path}
+              end={item.end}
+              onClick={onNavigate}
+              className={({ isActive }) => [
+                BASE_NAV_ITEM_CLASS,
+                isActive ? ACTIVE_NAV_ITEM_CLASS : INACTIVE_NAV_ITEM_CLASS,
+                collapsed ? 'justify-center px-3 py-3' : 'gap-3 px-4 py-3',
+              ].join(' ')}
+              aria-label={collapsed || item.iconOnly ? item.label : undefined}
+              title={collapsed || item.iconOnly ? item.label : undefined}
+            >
+              {Icon ? <Icon className="shrink-0 text-[1.2rem] transition-transform duration-[280ms] ease-out group-hover:scale-105 motion-reduce:transition-none" aria-hidden="true" /> : null}
+              <span
+                className={[
+                  COLLAPSIBLE_TEXT_CLASS,
+                  'font-medium',
+                  collapsed ? 'max-w-0 -translate-x-2 opacity-0' : 'max-w-[11rem] translate-x-0 opacity-100',
+                ].join(' ')}
+                aria-hidden={collapsed}
+              >
+                {item.label}
+              </span>
+            </NavLink>
+          </li>
+        );
+      })}
+    </ul>
+  </nav>
+);
+
+const SidebarProfileCard = ({
+  collapsed,
+  user,
+  userData,
+  onOpenPreview,
+  onOpenUpload,
+  onToggleNav,
+}) => {
+  if (!userData) {
+    return (
+      <div className={`overflow-hidden rounded-3xl border border-white/10 bg-slate-900/65 px-3 py-3 shadow-xl transition-all duration-[280ms] ease-out motion-reduce:transition-none ${collapsed ? 'flex flex-col items-center gap-3' : 'space-y-3'}`}>
+        <div className="flex items-center justify-between gap-3">
+          <div className={`${collapsed ? 'h-16 w-16' : 'h-16 w-16'} animate-pulse rounded-full bg-slate-600`} />
+          {!collapsed ? (
+            <div className="flex-1 space-y-2">
+              <div className="h-5 w-24 animate-pulse rounded bg-slate-600" />
+              <div className="h-3.5 w-16 animate-pulse rounded bg-slate-700" />
+            </div>
+          ) : null}
+          {!collapsed ? (
+            <div className="shrink-0 flex flex-col items-end gap-2">
+              <button
+                type="button"
+                onClick={onToggleNav}
+                className={`${ACTION_BUTTON_CLASS} h-9 w-9 shrink-0`}
+                aria-label="Collapse navigation"
+                title="Collapse navigation"
+                data-testid="layout-sidebar-toggle"
+              >
+                <GoSidebarCollapse className="text-base" />
+              </button>
+              <ProfileActions
+                canPreview={false}
+                compact={false}
+                onOpenPreview={onOpenPreview}
+                onOpenUpload={onOpenUpload}
+                className="justify-end"
+                buttonClassName="h-8 w-8"
+                iconClassName="text-sm"
+              />
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onToggleNav}
+              className={`${ACTION_BUTTON_CLASS} h-10 w-10 shrink-0`}
+              aria-label="Expand navigation"
+              title="Expand navigation"
+              data-testid="layout-sidebar-toggle"
+            >
+              <GoSidebarExpand className="text-lg" />
+            </button>
+          )}
+        </div>
+        {collapsed ? (
+          <ProfileActions canPreview={false} compact onOpenPreview={onOpenPreview} onOpenUpload={onOpenUpload} />
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`overflow-hidden rounded-3xl border border-white/10 bg-slate-900/65 px-3 py-3 shadow-xl shadow-black/30 backdrop-blur-sm transition-all duration-[280ms] ease-out motion-reduce:transition-none ${collapsed ? 'flex flex-col items-center gap-3' : 'space-y-3'}`}>
+      <div className={`flex ${collapsed ? 'w-full flex-col items-center gap-3 text-center' : 'items-start justify-between gap-3'}`}>
+        <div className={`flex min-w-0 ${collapsed ? 'flex-col items-center gap-3' : 'flex-col items-center gap-2'}`}>
+          <div className="relative shrink-0">
+            <Avatar
+              user={user}
+              userData={userData}
+              className={collapsed ? 'h-16 w-16' : 'h-20 w-20'}
+            />
+          </div>
+          {!collapsed ? (
+            <ProfileActions
+              canPreview={!!userData?.imageUrl}
+              compact={false}
+              onOpenPreview={onOpenPreview}
+              onOpenUpload={onOpenUpload}
+              className="justify-center"
+              buttonClassName="h-8 w-8"
+              iconClassName="text-sm"
+            />
+          ) : null}
+        </div>
+        {!collapsed ? (
+          <div className="shrink-0 flex flex-col items-end gap-2">
+            <button
+              type="button"
+              onClick={onToggleNav}
+              className={`${ACTION_BUTTON_CLASS} h-9 w-9 shrink-0`}
+              aria-label="Collapse navigation"
+              title="Collapse navigation"
+              data-testid="layout-sidebar-toggle"
+            >
+              <GoSidebarCollapse className="text-base" />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={onToggleNav}
+            className={`${ACTION_BUTTON_CLASS} h-10 w-10 shrink-0`}
+            aria-label="Expand navigation"
+            title="Expand navigation"
+            data-testid="layout-sidebar-toggle"
+          >
+            <GoSidebarExpand className="text-lg" />
+          </button>
+        )}
+      </div>
+      <div
+        className={[
+          COLLAPSIBLE_TEXT_CLASS,
+          'w-full text-center',
+          collapsed ? 'max-h-0 max-w-0 -translate-y-2 opacity-0' : 'max-h-16 max-w-full translate-y-0 opacity-100',
+        ].join(' ')}
+        aria-hidden={collapsed}
+      >
+        <h1 className="truncate text-xl font-bold leading-tight text-white" title={buildProfileImageLabel(user, userData)}>
+          {buildProfileImageLabel(user, userData)}
+        </h1>
+        <p className="mt-0.5 truncate text-sm text-slate-300">
+          {userData?.race || 'No Race'}
+        </p>
+      </div>
+      {collapsed ? (
+        <ProfileActions
+          canPreview={!!userData?.imageUrl}
+          compact
+          onOpenPreview={onOpenPreview}
+          onOpenUpload={onOpenUpload}
+        />
+      ) : null}
+    </div>
+  );
+};
 
 const Navbar = () => {
+  const location = useLocation();
   const navigate = useNavigate();
   const { user, userData } = useAuth();
+  const {
+    closeMobileNav,
+    dimensions,
+    isDesktop,
+    isMobileNavOpen,
+    isNavCollapsed,
+    navInlineSize,
+    openMobileNav,
+    toggleNav,
+  } = useShellLayout();
 
   // Loading state for logout operations
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -87,107 +357,38 @@ const Navbar = () => {
   const [uploadError, setUploadError] = useState('');
   const role = userData?.role;
   const navItems = NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(role));
+  const activeRouteLabel = useMemo(() => (
+    NAV_ITEMS.find((item) => item.path === location.pathname)?.label || 'Navigation'
+  ), [location.pathname]);
 
   const handleLogout = async () => {
     try {
       setIsLoggingOut(true);
+      closeMobileNav();
       await signOut(auth);
       // AuthContext will handle clearing localStorage and state
-      navigate("/");
+      navigate('/');
     } catch (error) {
-      console.error("Logout failed:", error);
+      console.error('Logout failed:', error);
     } finally {
       setIsLoggingOut(false);
     }
   };
 
   const openUploadModal = () => {
+    closeMobileNav();
     setUploadError('');
     setSelectedFile(null);
     setIsUploadOpen(true);
   };
 
-  // Rendering profile info based on userData from AuthContext
-  const renderProfileInfo = () => {
-    if (!userData) {
-      return (
-        <>
-          <div className="w-20 h-20 rounded-full bg-gray-600 animate-pulse mr-3"></div>
-          <div className="flex min-w-0 flex-col">
-            <div className="h-6 w-32 bg-gray-600 animate-pulse rounded mb-1"></div>
-            <div className="h-4 w-24 bg-gray-600 animate-pulse rounded"></div>
-          </div>
-        </>
-      );
+  const openPreviewModal = () => {
+    if (!userData?.imageUrl) {
+      return;
     }
 
-    return (
-      <>
-        {userData.imageUrl ? (
-          <div className="relative mr-3 group">
-            {/* level badge outside circle to avoid clipping */}
-            {userData?.stats?.level && (
-              <div className="absolute bottom-0 left-0 bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm border-2 border-white">
-                {userData.stats.level}
-              </div>
-            )}
-            <div className="overflow-hidden rounded-full">
-              <img
-                src={userData.imageUrl}
-                alt="Character Avatar"
-                className="w-20 h-20 rounded-full object-cover border-2 border-white"
-              />
-              <div className="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition-opacity flex rounded-full">
-                <div
-                  onClick={() => setIsPreviewOpen(true)}
-                  className="w-1/2 flex justify-center items-center cursor-pointer"
-                >
-                  <HiMagnifyingGlassPlus className="text-white text-2xl" />
-                </div>
-                <div
-                  onClick={openUploadModal}
-                  className="w-1/2 flex justify-center items-center cursor-pointer"
-                >
-                  <LuImageUp className="text-white text-2xl" />
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="relative mr-3 group">
-            {userData?.stats?.level && (
-              <div className="absolute bottom-0 left-0 bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm border-2 border-white">
-                {userData.stats.level}
-              </div>
-            )}
-            <div className="overflow-hidden rounded-full">
-              <div className="w-20 h-20 rounded-full bg-gray-500 flex items-center justify-center text-white text-xs border-2 border-white">
-                No Img
-              </div>
-              <div className="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition-opacity flex rounded-full">
-                <div className="w-1/2 flex justify-center items-center cursor-not-allowed opacity-60" title="No image to preview">
-                  <HiMagnifyingGlassPlus className="text-white text-2xl" />
-                </div>
-                <div
-                  onClick={openUploadModal}
-                  className="w-1/2 flex justify-center items-center cursor-pointer"
-                >
-                  <LuImageUp className="text-white text-2xl" />
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-        <div className="flex min-w-0 flex-col">
-          <h1 className="truncate text-xl md:text-2xl font-bold text-white">
-            {userData?.characterId || (user && user.email) || "User"}
-          </h1>
-          <p className="truncate text-sm text-gray-300">
-            {userData?.race || 'No Race'}
-          </p>
-        </div>
-      </>
-    );
+    closeMobileNav();
+    setIsPreviewOpen(true);
   };
 
   const handleFileChange = (e) => {
@@ -230,53 +431,163 @@ const Navbar = () => {
 
   return (
     <>
-      <header data-navbar className="w-full bg-[rgba(40,40,60,0.8)] p-3 grid grid-cols-1 md:grid-cols-[max-content_minmax(0,1fr)_max-content] items-center sticky top-0 z-50 backdrop-blur-sm">
-        {/* Left Column: Profile Picture and Character Name */}
-        <div className="flex max-w-full items-center justify-center mb-4 md:mb-0 md:max-w-[24rem] md:justify-start">
-          {renderProfileInfo()}
-        </div>
+      {isDesktop ? (
+        <aside
+          data-navbar
+          className="sticky top-0 flex h-screen flex-col overflow-hidden border-r border-white/10 bg-[rgba(20,20,32,0.88)] backdrop-blur-md transition-[width] duration-[280ms] ease-out motion-reduce:transition-none"
+          style={{
+            width: `${navInlineSize}px`,
+          }}
+        >
+        <div className="flex h-full flex-col gap-4 px-2.5 py-4 transition-[width] duration-[280ms] ease-out motion-reduce:transition-none">
+            <SidebarProfileCard
+              collapsed={isNavCollapsed}
+              user={user}
+              userData={userData}
+              onOpenPreview={openPreviewModal}
+              onOpenUpload={openUploadModal}
+              onToggleNav={toggleNav}
+            />
 
-        {/* Center Column: Navigation Buttons */}
-        <nav className="flex min-w-0 w-full justify-center" aria-label="Primary">
-          <ul className="flex w-full max-w-full flex-wrap justify-center gap-2 md:gap-4">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <li key={item.path}>
-                  <NavLink
-                    to={item.path}
-                    end={item.end}
-                    className={({ isActive }) =>
-                      `${BASE_NAV_ITEM_CLASS} ${
-                        isActive ? ACTIVE_NAV_ITEM_CLASS : INACTIVE_NAV_ITEM_CLASS
-                      }`
-                    }
-                    aria-label={item.iconOnly ? item.label : undefined}
-                    title={item.iconOnly ? item.label : undefined}
-                  >
-                    {Icon ? <Icon className="text-2xl" aria-hidden="true" /> : null}
-                    <span className={item.iconOnly ? 'sr-only' : undefined}>{item.label}</span>
-                  </NavLink>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
+            <NavList collapsed={isNavCollapsed} navItems={navItems} onNavigate={noop} />
 
-        {/* Right Column: Logout Button */}
-        <div className="flex items-center justify-center md:justify-end gap-3 mt-4 md:mt-0">
-          <button
-            className="bg-[#8B0000] text-white px-3 py-1 md:px-4 md:py-2 rounded-[5px] cursor-pointer transition-colors duration-300 hover:bg-[#B22222] text-sm md:text-base font-medium disabled:opacity-75"
-            onClick={handleLogout}
-            disabled={isLoggingOut}
+            <button
+              type="button"
+              className={[
+                BASE_NAV_ITEM_CLASS,
+                'mt-auto',
+                'border-red-400/25 bg-red-500/10 text-red-100 hover:border-red-300/50 hover:bg-red-500/20',
+                isNavCollapsed ? 'justify-center px-3 py-3' : 'gap-3 px-4 py-3',
+              ].join(' ')}
+              onClick={handleLogout}
+              disabled={isLoggingOut}
+              title={isNavCollapsed ? 'Logout' : undefined}
+              aria-label={isNavCollapsed ? 'Logout' : undefined}
+            >
+              <FiLogOut className="shrink-0 text-[1.2rem]" aria-hidden="true" />
+              <span
+                className={[
+                  COLLAPSIBLE_TEXT_CLASS,
+                  'font-medium',
+                  isNavCollapsed ? 'max-w-0 -translate-x-2 opacity-0' : 'max-w-[10rem] translate-x-0 opacity-100',
+                ].join(' ')}
+                aria-hidden={isNavCollapsed}
+              >
+                {isLoggingOut ? 'Logging out...' : 'Logout'}
+              </span>
+            </button>
+          </div>
+        </aside>
+      ) : (
+        <>
+          <header
+            data-navbar
+            className="sticky top-0 z-50 border-b border-white/10 bg-[rgba(22,22,36,0.92)] backdrop-blur-md"
+            style={{ height: `${dimensions.mobileTopInset}px` }}
           >
-            {isLoggingOut ? 'Logging out...' : 'Logout'}
-          </button>
-        </div>
-      </header>
+            <div className="flex h-full items-center justify-between gap-3 px-4">
+              <div className="min-w-0 flex items-center gap-3">
+                <div className="relative shrink-0">
+                  <Avatar user={user} userData={userData} className="h-11 w-11" imageClassName="shadow-md" />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-xs uppercase tracking-[0.24em] text-slate-400">
+                    {activeRouteLabel}
+                  </p>
+                  <p className="truncate text-sm font-semibold text-white">
+                    {buildProfileImageLabel(user, userData)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={openMobileNav}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white transition-colors duration-200 hover:bg-white/10"
+                aria-label="Open navigation menu"
+                title="Open navigation menu"
+                data-testid="mobile-nav-trigger"
+              >
+                <FiMenu className="text-xl" />
+              </button>
+            </div>
+          </header>
+
+          <div
+            className={`fixed inset-0 z-[70] ${isMobileNavOpen ? '' : 'pointer-events-none'}`}
+            aria-hidden={!isMobileNavOpen}
+            hidden={!isMobileNavOpen}
+          >
+            <button
+              type="button"
+              onClick={closeMobileNav}
+              className={`absolute inset-0 bg-slate-950/70 backdrop-blur-sm transition-opacity duration-[280ms] ease-out motion-reduce:transition-none ${
+                isMobileNavOpen ? 'opacity-100' : 'opacity-0'
+              }`}
+              aria-label="Close navigation menu"
+              data-testid="mobile-nav-backdrop"
+            />
+            <aside
+              className={`relative flex h-full max-w-[88vw] flex-col border-r border-white/10 bg-[rgba(20,20,32,0.97)] px-3 py-4 shadow-2xl transition-transform duration-[280ms] ease-out motion-reduce:transition-none ${
+                isMobileNavOpen ? 'translate-x-0' : '-translate-x-full'
+              }`}
+              style={{ width: `${dimensions.mobileDrawerWidth}px` }}
+              data-testid="mobile-nav-drawer"
+            >
+              <div className="flex items-start justify-between gap-3 rounded-3xl border border-white/10 bg-slate-900/65 px-4 py-4 shadow-xl shadow-black/30 backdrop-blur-sm">
+                <div className="min-w-0 flex items-center gap-3">
+                  <div className="relative shrink-0">
+                    <Avatar user={user} userData={userData} className="h-14 w-14" />
+                  </div>
+                  <div className="min-w-0">
+                    <h1 className="truncate text-lg font-bold text-white">
+                      {buildProfileImageLabel(user, userData)}
+                    </h1>
+                    <p className="truncate text-sm text-slate-300">
+                      {userData?.race || 'No Race'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeMobileNav}
+                  className={`${ACTION_BUTTON_CLASS} h-10 w-10 shrink-0`}
+                  aria-label="Close navigation menu"
+                  title="Close navigation menu"
+                >
+                  <FiX className="text-lg" />
+                </button>
+              </div>
+
+              <div className="mt-3 flex justify-end rounded-2xl border border-white/10 bg-slate-900/50 px-4 py-3">
+                <ProfileActions
+                  canPreview={!!userData?.imageUrl}
+                  compact={false}
+                  onOpenPreview={openPreviewModal}
+                  onOpenUpload={openUploadModal}
+                />
+              </div>
+
+              <div className="mt-4 flex flex-1 flex-col">
+                <NavList collapsed={false} navItems={navItems} onNavigate={closeMobileNav} />
+
+                <button
+                  type="button"
+                  className="mt-auto flex w-full items-center gap-3 rounded-2xl border border-red-400/25 bg-red-500/10 px-4 py-3 text-red-100 transition-colors duration-200 hover:border-red-300/50 hover:bg-red-500/20"
+                  onClick={handleLogout}
+                  disabled={isLoggingOut}
+                >
+                  <FiLogOut className="shrink-0 text-[1.2rem]" aria-hidden="true" />
+                  <span className="truncate font-medium">{isLoggingOut ? 'Logging out...' : 'Logout'}</span>
+                </button>
+              </div>
+            </aside>
+          </div>
+        </>
+      )}
+
       {isPreviewOpen && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black bg-opacity-75"
           onClick={() => setIsPreviewOpen(false)}
         >
           <img
@@ -287,7 +598,7 @@ const Navbar = () => {
         </div>
       )}
       {isUploadOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black bg-opacity-75">
           <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-sm">
             <h2 className="text-xl text-white mb-4">Upload New Profile Image</h2>
             <div className="bg-red-900 bg-opacity-25 border border-red-700 rounded p-4 mb-4">

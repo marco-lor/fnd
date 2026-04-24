@@ -13,6 +13,8 @@ import { acquireItem } from './elements/acquireItem';
 import PurchaseConfirmModal from './elements/PurchaseConfirmModal';
 import FiltersSection from './elements/FiltersSection';
 import { SPECIAL_PARAM_SCHEMA_IDS } from '../common/paramMetadata';
+import { useShellLayout } from '../common/shellLayout';
+import { FiShoppingBag } from 'react-icons/fi';
 
 function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purchasing, userGold }) {
   const [imageError, setImageError] = useState(false);
@@ -34,64 +36,105 @@ function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purch
 
   return (
     <motion.div
-      className={`flex items-center p-2 bg-gray-800 bg-opacity-80 shadow rounded-lg transition-colors cursor-pointer relative group
-        ${isLocked ? 'border-2 border-blue-500' : 'border border-gray-700/60'}
-        ${!affordable && price > 0 ? 'opacity-60 grayscale-[35%] hover:opacity-75' : 'hover:bg-gray-700'}
+      className={`group relative flex h-full min-h-[18rem] cursor-pointer flex-col overflow-hidden rounded-2xl border bg-gray-800/80 p-3 shadow-lg backdrop-blur-sm transition-colors
+        ${isLocked ? 'border-2 border-blue-500 shadow-blue-500/10' : 'border border-gray-700/60'}
+        ${!affordable && price > 0 ? 'opacity-60 grayscale-[35%] hover:opacity-75' : 'hover:bg-gray-700/90 hover:border-gray-500/70'}
       `}
+      data-testid={`bazaar-item-card-${item.id}`}
       whileHover={{ scale: 1.02 }}
       onMouseEnter={() => onHoverItem(item)}
       onMouseLeave={() => onHoverItem(null)}
       onClick={onLockToggle}
     >
-      {imageUrl && !imageError ? (
-        <img
-          src={imageUrl}
-          alt={title}
-          className="w-16 h-16 object-cover rounded-lg mr-4"
-          onError={() => {
-               console.warn(`Failed to load image in ItemCard: ${imageUrl}`);
-               setImageError(true);
-          }}
-        />
-      ) : (
-        <div className="w-16 h-16 bg-gray-600 rounded-lg mr-4 flex items-center justify-center text-white text-xs text-center font-bold">
-          {title?.charAt(0)?.toUpperCase() || "?"}
-        </div>
-      )}
-      <div className="flex-grow pr-3">
-        <div className="flex items-center gap-2">
-          <h2 className="text-lg font-bold text-white truncate" title={title}>{title}</h2>
-          {price > 0 && (
-            <span className={`text-xs px-2 py-0.5 rounded-full border
-              ${affordable ? 'bg-emerald-600/30 border-emerald-400/40 text-emerald-200' : 'bg-rose-700/30 border-rose-500/40 text-rose-200'}
-            `} title={affordable ? 'Puoi permettertelo' : 'Oro insufficiente'}>
-              {price}
-            </span>
-          )}
-        </div>
-        <p className="text-xs mt-0.5 text-gray-300">
-          Slot: {slot} | Tipo: {tipo} | Hands: {hands}
-        </p>
+      <div className="relative mb-3 aspect-[4/3] overflow-hidden rounded-xl border border-gray-700/70 bg-gray-900/70">
+        {imageUrl && !imageError ? (
+          <img
+            src={imageUrl}
+            alt={title}
+            className="h-full w-full object-cover"
+            onError={() => {
+              console.warn(`Failed to load image in ItemCard: ${imageUrl}`);
+              setImageError(true);
+            }}
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-gray-700/80 text-4xl font-bold text-white/70">
+            {title?.charAt(0)?.toUpperCase() || '?'}
+          </div>
+        )}
+        {price > 0 && (
+          <span className={`absolute right-2 top-2 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold shadow-sm
+            ${affordable ? 'bg-emerald-600/85 border-emerald-400/50 text-white' : 'bg-rose-700/85 border-rose-400/50 text-white'}
+          `} title={affordable ? 'Puoi permettertelo' : 'Oro insufficiente'}>
+            {price}
+          </span>
+        )}
+        {isLocked && (
+          <span className="absolute left-2 top-2 inline-flex rounded-full border border-blue-300/50 bg-blue-600/75 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white">
+            Locked
+          </span>
+        )}
       </div>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          if (!purchasing && affordable) onPurchase(item);
-        }}
-        disabled={purchasing || (!affordable && price > 0)}
-        className={`px-3 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap
-          ${purchasing ? 'bg-gray-500 cursor-not-allowed opacity-60 text-white'
-            : !affordable && price > 0 ? 'bg-gray-700/60 text-gray-300 cursor-not-allowed border border-gray-600'
-            : 'bg-[rgba(25,50,128,0.55)] text-white hover:bg-[rgba(35,60,148,0.7)]'}
-        `}
-        title={purchasing ? 'Acquisto in corso...' : (!affordable && price > 0 ? 'Oro insufficiente' : 'Acquista')}
-      >
-        {purchasing ? '...' : (!affordable && price > 0 ? 'No Gold' : 'Acquire')}
-      </button>
+
+      <div className="flex flex-1 flex-col">
+        <div className="mb-3">
+          <h2 className="truncate text-base font-bold text-white" title={title}>{title}</h2>
+          <p className="mt-1 text-xs leading-relaxed text-gray-300">
+            Slot: {slot}
+          </p>
+          <p className="text-xs leading-relaxed text-gray-300">
+            Tipo: {tipo}
+          </p>
+          <p className="text-xs leading-relaxed text-gray-300">
+            Hands: {hands}
+          </p>
+        </div>
+
+        <div className="mt-auto">
+          {price > 0 && (
+            <p className={`mb-2 text-xs font-medium ${affordable ? 'text-emerald-300' : 'text-rose-300'}`}>
+              {affordable ? 'Disponibile' : 'Oro insufficiente'}
+            </p>
+          )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!purchasing && affordable) onPurchase(item);
+            }}
+            disabled={purchasing || (!affordable && price > 0)}
+            className={`w-full rounded-xl px-3 py-2 text-sm font-medium transition-colors
+              ${purchasing ? 'bg-gray-500 cursor-not-allowed opacity-60 text-white'
+                : !affordable && price > 0 ? 'bg-gray-700/60 text-gray-300 cursor-not-allowed border border-gray-600'
+                : 'bg-[rgba(25,50,128,0.7)] text-white hover:bg-[rgba(35,60,148,0.85)]'}
+            `}
+            title={purchasing ? 'Acquisto in corso...' : (!affordable && price > 0 ? 'Oro insufficiente' : 'Acquista')}
+          >
+            {purchasing ? '...' : (!affordable && price > 0 ? 'No Gold' : 'Acquire')}
+          </button>
+        </div>
+      </div>
+
       {!affordable && price > 0 && (
-        <div className="absolute inset-0 pointer-events-none rounded-lg border border-rose-600/20" />
+        <div className="pointer-events-none absolute inset-0 rounded-2xl border border-rose-600/20" />
       )}
     </motion.div>
+  );
+}
+
+function BazaarDetailPlaceholder() {
+  return (
+    <div
+      className="flex h-full min-h-[22rem] flex-col items-center justify-center rounded-l-lg border-l border-gray-700 bg-gray-900/95 px-6 py-8 text-center"
+      data-testid="bazaar-detail-placeholder"
+    >
+      <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full border border-dashed border-slate-500/60 bg-slate-800/70 text-slate-300">
+        <FiShoppingBag className="text-3xl" />
+      </div>
+      <h3 className="text-lg font-semibold text-white">Item Detail</h3>
+      <p className="mt-2 max-w-xs text-sm leading-relaxed text-slate-400">
+        Hover an item to inspect it. Click a tile to pin its details while you browse the Bazaar.
+      </p>
+    </div>
   );
 }
 
@@ -183,6 +226,7 @@ const loadBazaarFilters = () => {
 
 
 export default function Bazaar() {
+  const { topInset } = useShellLayout();
   const [items, setItems] = useState([]);
   const [savedFilters] = useState(() => loadBazaarFilters());
   const [searchTerm, setSearchTerm] = useState(savedFilters.searchTerm);
@@ -267,7 +311,11 @@ export default function Bazaar() {
     };
 
     const unsubscribe = buildUnsubscribe();
-    return () => unsubscribe();
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    };
   }, [user, isDM]);
 
   useEffect(() => {
@@ -439,15 +487,17 @@ export default function Bazaar() {
     }
   };
 
-   const handleLockToggle = (itemToToggle) => {
-       if (lockedItem && lockedItem.id === itemToToggle.id) {
-           setLockedItem(null);
-           setHoveredItem(itemToToggle);
-       } else {
-           setLockedItem(itemToToggle);
-           setHoveredItem(null);
-       }
-   };   const filteredItems = items.filter((item) => {
+  const handleLockToggle = (itemToToggle) => {
+    if (lockedItem && lockedItem.id === itemToToggle.id) {
+      setLockedItem(null);
+      setHoveredItem(itemToToggle);
+    } else {
+      setLockedItem(itemToToggle);
+      setHoveredItem(null);
+    }
+  };
+
+  const filteredItems = items.filter((item) => {
     const matchesSearch = searchTerm.trim() === '' ||
       (item.General?.Nome && item.General.Nome.toLowerCase().includes(searchTerm.toLowerCase()));
 
@@ -617,17 +667,13 @@ export default function Bazaar() {
   };
 
   const panelItem = lockedItem || hoveredItem;
-
-  // Define width for the comparison panel (used by the fixed motion.div)
-  // const comparisonPanelWidth = "w-[80vw] max-w-[98vw] sm:w-[60vw] sm:max-w-[400px] md:w-[38vw] md:max-w-[550px]";
-  const comparisonPanelWidth = "w-[95vw] max-w-[99vw] sm:w-[80vw] sm:max-w-[400px] md:w-[38vw] md:max-w-[550px] lg:w-[28vw] lg:max-w-[750px]";
+  const stickyTop = topInset + 24;
+  const comparisonPanelHeight = `calc(100vh - ${stickyTop + 24}px)`;
+  const layoutColumnsClassName = 'xl:grid-cols-[18rem_minmax(0,1fr)_minmax(20rem,28vw)]';
 
   return (
     <div className="relative w-full min-h-screen flex flex-col">
-
-      {/* Main content area using CSS Grid */}
-      {/* Grid columns: Filters (dynamic), Item List (700px), Comparison Panel Area (450px) */}
-      <div className="relative z-10 grid grid-cols-[15%_55%_30%] flex-grow items-start">        {/* Filters Panel (Column 1) */}
+      <div className={`relative z-10 grid flex-grow items-start gap-6 px-4 py-4 md:px-6 md:py-6 ${layoutColumnsClassName}`}>
         <FiltersSection
           slots={slots}
           hands={hands}
@@ -653,10 +699,9 @@ export default function Bazaar() {
           onlyAffordable={onlyAffordable}
           setOnlyAffordable={setOnlyAffordable}
           onResetFilters={handleResetFilters}
+          stickyTop={stickyTop}
         />
-        {/* Items List Panel (Column 2) */}
-        {/* Width (700px) is controlled by grid-cols. Removed flex-grow, mr-*, and transition classes for width. */}
-        <div className="p-6 overflow-y-auto h-screen scrollbar-hidden">
+        <div className="min-w-0 rounded-2xl border border-gray-700/40 bg-slate-950/20 p-4 shadow-xl backdrop-blur-sm md:p-6">
           {isAdmin && (
             <div className="mb-4">
               <div className="flex flex-wrap gap-2">                <button
@@ -697,53 +742,49 @@ export default function Bazaar() {
             />
           </div>
 
-          <div className="flex flex-col gap-3">
-             {filteredItems.length > 0 ? (
-                 filteredItems.map((item) => (
-           <ItemCard
-             key={item.id}
-             item={item}
-                         onPurchase={startPurchaseFlow}
-             onHoverItem={handleHoverItem}
-             onLockToggle={() => handleLockToggle(item)}
-             isLocked={lockedItem && lockedItem.id === item.id}
-             purchasing={purchasingItemId === item.id}
-             userGold={userData?.stats?.gold ?? 0}
-           />
-                 ))
-             ) : (
-                 <p className="text-center text-gray-400 mt-8">Nessun oggetto trovato corrispondente ai filtri.</p>
-             )}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 xl:auto-rows-fr">
+            {filteredItems.length > 0 ? (
+              filteredItems.map((item) => (
+                <ItemCard
+                  key={item.id}
+                  item={item}
+                  onPurchase={startPurchaseFlow}
+                  onHoverItem={handleHoverItem}
+                  onLockToggle={() => handleLockToggle(item)}
+                  isLocked={lockedItem && lockedItem.id === item.id}
+                  purchasing={purchasingItemId === item.id}
+                  userGold={userData?.stats?.gold ?? 0}
+                />
+              ))
+            ) : (
+              <p className="col-span-full mt-8 text-center text-gray-400">Nessun oggetto trovato corrispondente ai filtri.</p>
+            )}
           </div>
         </div>
 
-        {/* Comparison Panel Container (Column 3) */}
-        {/* This div occupies the 450px grid column. The ComparisonPanel is fixed-positioned within it. */}
-        {/* It needs h-screen to ensure grid row height is consistent if other columns are h-screen. */}
-        <div className="h-screen"> {/* Width (450px) is controlled by grid-cols */}
-          <AnimatePresence>
-            {panelItem && (
-              <motion.div
-                className={`fixed right-0 top-[16rem] bottom-0 ${comparisonPanelWidth} z-40`} // comparisonPanelWidth defines w-[28vw] max-w-[450px]
-                initial={{ x: "100%" }}
-                animate={{ x: 0 }}
-                exit={{ x: "100%" }}
-                transition={{ duration: 0.3, ease: "easeInOut" }}
-                style={{
-                  height: "calc(100vh - 6rem)", // Specific height for the panel
-                  overflowY: "auto"
-                }}
-              >
+        <div
+          className="min-w-0 xl:sticky xl:self-start"
+          data-testid="bazaar-comparison-panel"
+          style={{
+            '--bazaar-comparison-panel-height': comparisonPanelHeight,
+            top: `${stickyTop}px`,
+          }}
+        >
+          <div className="overflow-hidden rounded-2xl shadow-2xl">
+            <div className="xl:h-[var(--bazaar-comparison-panel-height)]">
+              {panelItem ? (
                 <ComparisonPanel
                   item={panelItem}
                   showMessage={displayConfirmation}
-                  key={`comparisonPanel-${panelItem.id}`} // Ensure re-render on item change
+                  key={`comparisonPanel-${panelItem.id}`}
                 />
-              </motion.div>
-            )}
-          </AnimatePresence>
+              ) : (
+                <BazaarDetailPlaceholder />
+              )}
+            </div>
+          </div>
         </div>
-  </div>
+      </div>
 
       {showOverlay && (
         <AddWeaponOverlay
