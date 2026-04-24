@@ -20,8 +20,8 @@ Provide a browser-based tabletop/RPG‑style character sheet and rules engine fe
 | Character param totals | Firestore triggers recompute Tot & derived HP/Mana | VALID | `updateTotParameters`, `updateHpTotal`, `updateManaTotal` active. |
 | Points economy | Callable validates spend/refund & creation credits | VALID | `spendCharacterPoint` logic matches description (still region-misaligned). |
 | Admin user deletion | Webmaster-only callable | VALID | `deleteUser` enforces role === "webmaster". |
-| Bulk utilities | Update-all & full export endpoints | VALID | `/update-all-users`, `/all-data` present. |
-| Schema writers | Endpoints seed multiple schemas | PARTIAL | Only `/test-endpoint` currently exposed (writes `schema_consumabili`). Other schema copy helpers exist but endpoints are commented out. |
+| Bulk utilities | Update-all & full export endpoints | LOCAL-ONLY | Public HTTP routes removed; use the local CLI with dry-run defaults. |
+| Schema writers | Endpoints seed multiple schemas | LOCAL-ONLY | Schema seeding is available only through the local CLI with `--execute`. |
 | Level-up flows | Bulk & single level-up callables | VALID | `levelUpAll`, `levelUpUser` present with DM role check. |
 | Anima modifier recalculation | (Not previously documented) | NEW | `updateAnimaModifier` trigger updates `Parametri.*.Anima`. |
 | Foe duplication with asset cloning | (Not previously documented) | NEW | `duplicateFoeWithAssets` callable (region europe-west1) duplicates Firestore doc + Storage assets. |
@@ -57,12 +57,8 @@ Provide a browser-based tabletop/RPG‑style character sheet and rules engine fe
 Local base: http://127.0.0.1:8000
 
 Active endpoints:
-- GET `/` – Healthcheck.
-- GET `/characters` – List character document IDs (collection: `characters`).
-- POST `/characters` – Create new character document.
-- GET `/update-all-users` – Normalizes `stats` structure across all `users/*` documents (resets base & token counts per helper logic).
-- GET `/all-data` – Firestore dump (selective) persisted as timestamped JSON backup inside `backend/`.
-- GET `/test-endpoint` – Currently seeds `utils/schema_consumabili` only. (Armatura/Weapon/Accessorio helpers exist but not routed.)
+- GET `/` - Healthcheck only.
+- Local-only admin utilities are now exposed through `python main.py` commands with dry-run defaults.
 
 Notes:
 - CORS origins configured: `https://fatins.web.app`, `https://fatins.firebaseapp.com/` (trailing slash), `http://localhost:3000`. Consider removing trailing slash for consistency.
@@ -116,30 +112,31 @@ Primary collections / docs:
 4. Foe Duplication:
   Callable clones Firestore doc + Storage assets → returns new foe ID + asset URLs → UI refreshes foe list.
 5. Admin Maintenance:
-  Web endpoints (`/update-all-users`, `/all-data`) or callable (`deleteUser`) adjust or export state.
+  Local CLI commands perform Firestore export/schema maintenance; callables handle production admin actions.
 
 ## 10. Development Workflow
 
-- Frontend: `npm start` (CRA dev server), `npm run build` for production bundle.
-- Backend: From `backend/` run `uvicorn main:app --reload` (defaults to 127.0.0.1:8000).
+- Frontend: `npm start` for local CRA dev; production deploys should use `npm run build:production`, which disables source maps and verifies no public debug artifacts remain.
+- Backend: From `backend/` run `python main.py --serve-local` for the healthcheck-only local API.
 - Functions: Deploy via Firebase CLI; recommend local emulators for iterative testing (Firestore + Functions) especially for spend/level-up logic.
-- Backups: Run `/all-data` to produce timestamped `firestore_backup_YYYYMMDD_HHMMSS.json` files.
+- Backups: Run `python main.py --export-data --output-dir backend/backups`; backup files are ignored.
+- App Check: set `REACT_APP_RECAPTCHA_V3_SITE_KEY` from Firebase App Check reCAPTCHA v3 registration before production hosting deploys.
 
 Preconditions for Functions:
 - Ensure `utils/varie` includes: `hpMultByLevel`, `manaMultByLevel`, `cost_params_combat`, `modAnima`, `levelUpAnimaBonus` (absence may cause silent early exits / zero multipliers).
 
 ## 11. Security & Permissions
 
-- Role checks inside callables: `deleteUser` (webmaster), `levelUp*` (dm), others currently only require authentication (`duplicateFoeWithAssets` could optionally restrict to dm).
+- Role checks inside callables: `deleteUser` and `updateUserRole` require webmaster; `levelUp*` and `duplicateFoeWithAssets` require dm.
 - Negative stat credits limited & frozen post creation (`flags.characterCreationDone`).
-- Firestore security rules (not included here) must enforce server-side invariants (e.g., disallow manual Tot overwrite, restrict role elevation, prevent unauthorized deletions).
+- Firestore security rules enforce server-side invariants including role immutability, generated stat field immutability after creation, catalog write restrictions, and local-only destructive maintenance.
+- Restrict the public Firebase API key in Google Cloud by HTTP referrer and API allowlist, then enable App Check enforcement after monitor-mode validation.
 
 ## 12. Known Gaps / Recommended Next Steps
 
 Technical / Infrastructure:
 - Consolidate all functions to europe-west8 (or chosen primary region) for latency coherence.
-- Expose dedicated endpoints for `schema_armatura`, `schema_weapon`, `schema_accessorio` (separate routes or a parameterized one) instead of overloading `/test-endpoint`.
-- Add OpenAPI docs (FastAPI auto docs) and consider auth / API key for destructive admin routes.
+- Keep destructive/export maintenance as local CLI commands or migrate them to Firebase callables with role checks and audit logs.
 
 Gameplay / Logic:
 - Implement enforcement in UI for `settings.lock_param_base` & `settings.lock_param_combat` (currently just documented).

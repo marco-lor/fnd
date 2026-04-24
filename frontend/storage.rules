@@ -1,4 +1,5 @@
 rules_version = '2';
+
 service firebase.storage {
   match /b/{bucket}/o {
     function isSignedIn() {
@@ -9,45 +10,148 @@ service firebase.storage {
       return /databases/(default)/documents/users/$(uid);
     }
 
+    function userRole() {
+      return isSignedIn() && firestore.exists(userDocPath(request.auth.uid))
+        ? firestore.get(userDocPath(request.auth.uid)).data.role
+        : null;
+    }
+
     function isDM() {
-      return isSignedIn()
-        && firestore.exists(userDocPath(request.auth.uid))
-        && firestore.get(userDocPath(request.auth.uid)).data.role == "dm";
+      return userRole() == "dm";
     }
 
-    match /grigliata/backgrounds/{allPaths=**} {
+    function isWebmaster() {
+      return userRole() == "webmaster";
+    }
+
+    function isCatalogManager() {
+      return isDM() || isWebmaster();
+    }
+
+    function filenameBelongsToCaller(fileName) {
+      return isSignedIn() && fileName.matches('^.*' + request.auth.uid + '.*$');
+    }
+
+    function isCallerOwnedVarieFile(fileName) {
+      return isSignedIn() && fileName.matches('^varie_' + request.auth.uid + '_.*$');
+    }
+
+    function isImage(maxBytes) {
+      return request.resource != null
+        && request.resource.size <= maxBytes
+        && request.resource.contentType.matches('^image/.+$');
+    }
+
+    function isAudio(maxBytes) {
+      return request.resource != null
+        && request.resource.size <= maxBytes
+        && request.resource.contentType.matches('^audio/.+$');
+    }
+
+    function isVideo(maxBytes) {
+      return request.resource != null
+        && request.resource.size <= maxBytes
+        && request.resource.contentType.matches('^video/.+$');
+    }
+
+    match /characters/{fileName} {
       allow read: if isSignedIn();
-      allow write: if isDM();
+      allow create, update: if filenameBelongsToCaller(fileName)
+        && isImage(8 * 1024 * 1024);
+      allow delete: if filenameBelongsToCaller(fileName) || isWebmaster();
     }
 
-    match /grigliata/music/{allPaths=**} {
+    match /items/{fileName} {
       allow read: if isSignedIn();
-      allow write: if isDM();
+      allow create, update: if (
+          isCatalogManager()
+          || isCallerOwnedVarieFile(fileName)
+        )
+        && isImage(8 * 1024 * 1024);
+      allow delete: if isCatalogManager()
+        || isCallerOwnedVarieFile(fileName);
     }
 
-    match /grigliata/tokens/{userId}/{allPaths=**} {
-      allow read: if isSignedIn() && (request.auth.uid == userId || isDM());
-      allow write: if isSignedIn() && request.auth.uid == userId;
+    match /tecnicas/videos/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if filenameBelongsToCaller(fileName)
+        && isVideo(25 * 1024 * 1024);
+      allow delete: if filenameBelongsToCaller(fileName);
     }
 
-    match /tecnicas/{allPaths=**} {
-      allow read, write: if isSignedIn();
+    match /tecnicas/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if filenameBelongsToCaller(fileName)
+        && isImage(8 * 1024 * 1024);
+      allow delete: if filenameBelongsToCaller(fileName);
     }
 
-    match /spells/{allPaths=**} {
-      allow read, write: if isSignedIn();
+    match /spells/videos/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if (
+          isCatalogManager()
+          || filenameBelongsToCaller(fileName)
+        )
+        && isVideo(25 * 1024 * 1024);
+      allow delete: if isCatalogManager() || filenameBelongsToCaller(fileName);
+    }
+
+    match /spells/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if (
+          isCatalogManager()
+          || filenameBelongsToCaller(fileName)
+        )
+        && isImage(8 * 1024 * 1024);
+      allow delete: if isCatalogManager() || filenameBelongsToCaller(fileName);
+    }
+
+    match /spell_images/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isCatalogManager() && isImage(8 * 1024 * 1024);
+      allow delete: if isCatalogManager();
+    }
+
+    match /spell_videos/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isCatalogManager() && isVideo(25 * 1024 * 1024);
+      allow delete: if isCatalogManager();
     }
 
     match /foes/{allPaths=**} {
       allow read, write: if isDM();
     }
 
-    match /{root} {
-      allow read, write: if isSignedIn() && root != "grigliata" && root != "foes";
+    match /echi_npcs/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isCatalogManager()
+        && request.auth.uid == userId
+        && isImage(8 * 1024 * 1024);
+      allow delete: if isCatalogManager();
     }
 
-    match /{root}/{allPaths=**} {
-      allow read, write: if isSignedIn() && root != "grigliata" && root != "foes";
+    match /grigliata/backgrounds/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isDM()
+        && request.auth.uid == userId
+        && isImage(12 * 1024 * 1024);
+      allow delete: if isDM();
+    }
+
+    match /grigliata/music/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isDM()
+        && request.auth.uid == userId
+        && isAudio(25 * 1024 * 1024);
+      allow delete: if isDM();
+    }
+
+    match /grigliata/tokens/{userId}/{fileName} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isDM());
+      allow create, update: if isSignedIn()
+        && request.auth.uid == userId
+        && isImage(8 * 1024 * 1024);
+      allow delete: if (isSignedIn() && request.auth.uid == userId) || isDM();
     }
   }
 }

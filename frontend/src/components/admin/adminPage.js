@@ -1,9 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../AuthContext'; // Assuming this provides logged-in user info
-import { db, app, storage } from '../firebaseConfig';
-import { collection, doc, getDocs, getDoc, updateDoc } from 'firebase/firestore';
+import { db, app } from '../firebaseConfig';
+import { collection, doc, getDocs, getDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { ref, deleteObject } from 'firebase/storage';
+
+const DEFAULT_ROLES = ['player', 'dm', 'webmaster'];
+const PLAYER_ROLE_ALIASES = new Set(['player', 'players']);
+
+const normalizeStoredRole = (role) => {
+  const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
+  return PLAYER_ROLE_ALIASES.has(normalizedRole) ? 'player' : role;
+};
+
+const normalizeRoleOption = (role) => {
+  const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
+  return PLAYER_ROLE_ALIASES.has(normalizedRole) ? 'player' : normalizedRole;
+};
+
+const normalizeRoleList = (roleValues) => roleValues.reduce((nextRoles, roleValue) => {
+  const normalizedRole = normalizeRoleOption(roleValue);
+  if (DEFAULT_ROLES.includes(normalizedRole) && !nextRoles.includes(normalizedRole)) {
+    nextRoles.push(normalizedRole);
+  }
+  return nextRoles;
+}, []);
 
 const AdminPage = () => {
   const [users, setUsers] = useState({}); // Store users as an object { userId: userData, ... }
@@ -19,6 +39,7 @@ const AdminPage = () => {
   // Initialize Firebase Functions
   const functions = getFunctions(app, "europe-west8");
   const deleteUserFunction = httpsCallable(functions, 'deleteUser');
+  const updateUserRoleFunction = httpsCallable(functions, 'updateUserRole');
 
   // Fetch users and possible roles from Firestore on component mount
   useEffect(() => {
@@ -37,7 +58,12 @@ const AdminPage = () => {
         if (!usersSnapshot.empty) {
           const usersData = {};
           usersSnapshot.forEach((doc) => {
-            usersData[doc.id] = doc.data();
+            const userDocData = doc.data();
+            const normalizedRole = normalizeStoredRole(userDocData.role);
+            usersData[doc.id] = {
+              ...userDocData,
+              role: normalizedRole || userDocData.role,
+            };
           });
           setUsers(usersData);
         } else {
@@ -48,21 +74,22 @@ const AdminPage = () => {
         if (rolesSnapshot.exists()) {
           const rolesData = rolesSnapshot.data();
           if (rolesData && rolesData.ruoli && Array.isArray(rolesData.ruoli)) {
-            setRoles(rolesData.ruoli);
+            const normalizedRoles = normalizeRoleList(rolesData.ruoli);
+            setRoles(normalizedRoles.length > 0 ? normalizedRoles : DEFAULT_ROLES);
           } else {
             console.error("Firestore document 'utils/possible_lists' exists but does not contain a valid 'ruoli' array field!");
-            setRoles([]);
+            setRoles(DEFAULT_ROLES);
           }
         } else {
           console.error("Firestore document 'utils/possible_lists' does not exist!");
-          setRoles([]);
+          setRoles(DEFAULT_ROLES);
         }
 
       } catch (err) {
         console.error("Firestore fetch error:", err);
         setError("Failed to load data. Please check console for details.");
         setUsers({});
-        setRoles([]);
+        setRoles(DEFAULT_ROLES);
       } finally {
         setLoading(false);
       }
@@ -73,18 +100,18 @@ const AdminPage = () => {
   }, []);
 
   const handleRoleChange = async (userId, newRole) => {
-    const userDocRef = doc(db, 'users', userId);
+    const normalizedRole = normalizeRoleOption(newRole);
     try {
-      await updateDoc(userDocRef, { role: newRole });
+      await updateUserRoleFunction({ userId, role: normalizedRole });
 
       setUsers(prevUsers => ({
         ...prevUsers,
         [userId]: {
           ...prevUsers[userId],
-          role: newRole
+          role: normalizedRole
         }
       }));
-      alert(`Ruolo per ${users[userId]?.username || userId} aggiornato a ${newRole}`);
+      alert(`Ruolo per ${users[userId]?.username || userId} aggiornato a ${normalizedRole}`);
     } catch (err) {
       console.error(`Failed to update role for user ${userId} in Firestore:`, err);
       setError(`Failed to update role for ${users[userId]?.username || userId}.`);
@@ -110,21 +137,9 @@ const AdminPage = () => {
     if (!userToDelete) return;
     
     setIsDeleting(true);
-    // Delete user profile image from Firebase Storage if it exists
-    const imageUrl = users[userToDelete]?.imageUrl;
-    if (imageUrl) {
-      try {
-        const imgRef = ref(storage, imageUrl);
-        await deleteObject(imgRef);
-        console.log(`Deleted profile image for user ${userToDelete}`);
-      } catch (storageError) {
-        console.error(`Failed to delete image for user ${userToDelete}:`, storageError);
-      }
-    }
-
     try {
       // Call the Cloud Function to delete both the Authentication account and Firestore document
-      const result = await deleteUserFunction({ userId: userToDelete });
+      await deleteUserFunction({ userId: userToDelete });
       
       // Update the local state by removing the deleted user
       setUsers(prevUsers => {
@@ -189,20 +204,24 @@ const AdminPage = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.entries(users).map(([userId, user]) => (
+                  {Object.entries(users).map(([userId, user]) => {
+                    const currentRole = normalizeStoredRole(user.role) || user.role || '';
+                    const selectedRole = roles.includes(currentRole) ? currentRole : '';
+
+                    return (
                     <tr key={userId} className="hover:bg-gray-750 transition-colors duration-150">
                       <td className="border border-gray-600 px-4 py-2">{user.characterId || 'N/A'}</td>
                       <td className="border border-gray-600 px-4 py-2">{user.username || 'N/A'}</td>
                       <td className="border border-gray-600 px-4 py-2">{user.email || 'N/A'}</td>
-                      <td className="border border-gray-600 px-4 py-2">{user.role || 'N/A'}</td>
+                      <td className="border border-gray-600 px-4 py-2">{currentRole || 'N/A'}</td>
                       <td className="border border-gray-600 px-4 py-2">
                         <select
-                          value={user.role || ''}
+                          value={selectedRole}
                           onChange={(e) => handleRoleChange(userId, e.target.value)}
                           className="bg-gray-600 border border-gray-500 rounded px-2 py-1 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                           disabled={roles.length === 0}
                         >
-                          <option value="" disabled hidden>{user.role ? 'Seleziona...' : 'Nessun ruolo'}</option>
+                          <option value="" disabled hidden>{currentRole ? 'Seleziona...' : 'Nessun ruolo'}</option>
                           {roles.map(roleOption => (
                             <option key={roleOption} value={roleOption}>
                               {roleOption}
@@ -221,7 +240,8 @@ const AdminPage = () => {
                         </td>
                       )}
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

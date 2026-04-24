@@ -24,7 +24,7 @@ const EncounterCreator = ({ isDM, currentUid, collapseControl }) => {
     useEffect(() => {
         if (!isDM) return; // Fetch list only for DM UI
         const usersCol = collection(db, "users");
-        const qUsers = query(usersCol, where("role", "in", ["player", "webmaster"]));
+        const qUsers = query(usersCol, where("role", "in", ["player", "players", "webmaster"]));
         const unsub = onSnapshot(qUsers, (snap) => {
             const list = [];
             snap.forEach((d) => {

@@ -6,6 +6,29 @@ import { auth, db } from './components/firebaseConfig';
 
 export const AuthContext = createContext();
 
+const PLAYER_ROLE_ALIASES = new Set(['player', 'players']);
+
+const normalizeStoredRole = (role) => {
+  const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
+  return PLAYER_ROLE_ALIASES.has(normalizedRole) ? 'player' : role;
+};
+
+const normalizeUserData = (data) => {
+  if (!data || typeof data !== 'object') {
+    return data;
+  }
+
+  const normalizedRole = normalizeStoredRole(data.role);
+  if (normalizedRole === data.role) {
+    return data;
+  }
+
+  return {
+    ...data,
+    role: normalizedRole,
+  };
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [userData, setUserData] = useState(null);
@@ -29,7 +52,7 @@ export const AuthProvider = ({ children }) => {
           userRef,
           (docSnap) => {
             if (docSnap.exists()) {
-              const data = docSnap.data();
+              const data = normalizeUserData(docSnap.data());
               setUserData(data);
               // Cache user data for faster page loads
               localStorage.setItem('userData', JSON.stringify(data));
@@ -59,7 +82,7 @@ export const AuthProvider = ({ children }) => {
     const cachedUserData = localStorage.getItem('userData');
     if (cachedUserData) {
       try {
-        setUserData(JSON.parse(cachedUserData));
+        setUserData(normalizeUserData(JSON.parse(cachedUserData)));
       } catch (e) {
         console.error("Error parsing cached user data");
         localStorage.removeItem('userData');

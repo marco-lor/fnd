@@ -12,6 +12,19 @@ import AnimaShardSelection from "./elements/AnimaShardSelection";
 import PointsDistribution from "./elements/PointsDistribution";
 import CharacterDetails from "./elements/CharacterDetails";
 
+const parseStoragePathFromUrl = (url) => {
+  if (!url || typeof url !== "string") {
+    return "";
+  }
+
+  try {
+    const encodedPath = url.split('/o/')[1]?.split('?')[0];
+    return encodedPath ? decodeURIComponent(encodedPath) : "";
+  } catch {
+    return "";
+  }
+};
+
 function CharacterCreation() {
   // Basic state
   const [currentStep, setCurrentStep] = useState(1); // Track the current step
@@ -244,7 +257,12 @@ function CharacterCreation() {
         characterUpdateData.imageUrl = imageUrl;
         characterUpdateData.imagePath = imagePath;
       } else if (userDocSnap.exists() && userDocSnap.data()?.imageUrl) {
-         characterUpdateData.imageUrl = userDocSnap.data()?.imageUrl; // Keep existing
+         const existingImageUrl = userDocSnap.data()?.imageUrl;
+         const existingImagePath = userDocSnap.data()?.imagePath || parseStoragePathFromUrl(existingImageUrl);
+         characterUpdateData.imageUrl = existingImageUrl; // Keep existing
+         if (existingImagePath) {
+           characterUpdateData.imagePath = existingImagePath;
+         }
       }
 
       // Check if user document exists to decide between set (create) or update
