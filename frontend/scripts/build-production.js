@@ -42,26 +42,31 @@ function verifyHardenedBuild() {
   }
 
   const files = walkFiles(buildDir);
+  const textFiles = files.filter((filePath) => /\.(css|js|html)$/.test(filePath));
   const forbiddenFiles = files.filter((filePath) => (
     filePath.endsWith(".map")
     || path.basename(filePath) === "asset-manifest.json"
   ));
 
-  const sourceMappingReferences = files.filter((filePath) => {
-    if (!/\.(css|js|html)$/.test(filePath)) {
-      return false;
-    }
+  const sourceMappingReferences = textFiles.filter((filePath) => (
+    fs.readFileSync(filePath, "utf8").includes("sourceMappingURL")
+  ));
 
-    return fs.readFileSync(filePath, "utf8").includes("sourceMappingURL");
-  });
+  const googleApiKeyPattern = /\bAIza[0-9A-Za-z_-]{35}\b/;
+  const leakedApiKeyFiles = textFiles.filter((filePath) => (
+    googleApiKeyPattern.test(fs.readFileSync(filePath, "utf8"))
+  ));
 
-  if (forbiddenFiles.length || sourceMappingReferences.length) {
-    console.error("Production build contains public debug artifacts.");
+  if (forbiddenFiles.length || sourceMappingReferences.length || leakedApiKeyFiles.length) {
+    console.error("Production build contains public debug artifacts or API key material.");
     for (const filePath of forbiddenFiles) {
       console.error(` - ${path.relative(projectRoot, filePath)}`);
     }
     for (const filePath of sourceMappingReferences) {
       console.error(` - ${path.relative(projectRoot, filePath)} contains sourceMappingURL`);
+    }
+    for (const filePath of leakedApiKeyFiles) {
+      console.error(` - ${path.relative(projectRoot, filePath)} contains a Google API key pattern`);
     }
     process.exit(1);
   }
