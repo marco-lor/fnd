@@ -690,6 +690,32 @@ service cloud.firestore {
         );
     }
 
+    function isValidGrigliataPagePresence(data, presenceId) {
+      return data.keys().hasAll([
+          "ownerUid",
+          "characterId",
+          "colorKey",
+          "lastSeenAt",
+          "updatedBy"
+        ])
+        && data.keys().hasOnly([
+          "ownerUid",
+          "characterId",
+          "colorKey",
+          "lastSeenAt",
+          "updatedBy"
+        ])
+        && data.ownerUid is string
+        && data.ownerUid.size() > 0
+        && presenceId == data.ownerUid
+        && data.characterId is string
+        && data.characterId.size() > 0
+        && data.colorKey is string
+        && isValidGrigliataDrawColorKey(data.colorKey)
+        && data.lastSeenAt is timestamp
+        && (data.updatedBy == null || data.updatedBy is string);
+    }
+
     function isValidGrigliataMusicTrack(data) {
       return data.keys().hasAll([
           "name",
@@ -1110,6 +1136,24 @@ service cloud.firestore {
           isGrigliataManager()
           || request.auth.uid == resource.data.ownerUid
         );
+    }
+
+    match /grigliata_page_presence/{presenceId} {
+      allow read: if isSignedIn();
+
+      allow create, update: if isSignedIn()
+        && !isGrigliataManager()
+        && isValidGrigliataPagePresence(request.resource.data, presenceId)
+        && request.auth.uid == request.resource.data.ownerUid
+        && (
+          request.resource.data.updatedBy == null
+          || request.resource.data.updatedBy == request.auth.uid
+        );
+
+      allow delete: if isSignedIn()
+        && !isGrigliataManager()
+        && isValidGrigliataPagePresence(resource.data, presenceId)
+        && request.auth.uid == resource.data.ownerUid;
     }
 
     match /grigliata_aoe_figures/{figureId} {

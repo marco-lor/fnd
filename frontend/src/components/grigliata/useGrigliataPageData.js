@@ -35,12 +35,17 @@ import {
   sortGrigliataMusicTracks,
 } from './music';
 import {
+  filterActiveGrigliataPagePresence,
+  GRIGLIATA_PAGE_PRESENCE_COLLECTION,
+} from './presence';
+import {
   normalizeTurnCounter,
   normalizeTurnEffects,
   sortTurnOrderEntries,
 } from './turnOrder';
 
 const LIVE_INTERACTION_CLOCK_INTERVAL_MS = 15 * 1000;
+const PAGE_PRESENCE_CLOCK_INTERVAL_MS = 15 * 1000;
 const resolveCustomTokenRole = (token = {}, tokenType = '') => {
   if (tokenType !== 'custom') {
     return '';
@@ -91,10 +96,12 @@ export default function useGrigliataPageData({
   const [isActivePlacementsReady, setIsActivePlacementsReady] = useState(false);
   const [aoeFigureSnapshots, setAoEFigureSnapshots] = useState([]);
   const [liveInteractionSnapshots, setLiveInteractionSnapshots] = useState([]);
+  const [pagePresenceSnapshots, setPagePresenceSnapshots] = useState([]);
   const [musicTracks, setMusicTracks] = useState([]);
   const [musicPlaybackState, setMusicPlaybackState] = useState(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
   const [selectedBackgroundId, setSelectedBackgroundId] = useState('');
   const [liveInteractionClock, setLiveInteractionClock] = useState(() => Date.now());
+  const [pagePresenceClock, setPagePresenceClock] = useState(() => Date.now());
 
   useEffect(() => {
     if (!currentUserId) {
@@ -102,6 +109,7 @@ export default function useGrigliataPageData({
       setBoardState({});
       setFoeLibrary([]);
       setTokenProfiles([]);
+      setPagePresenceSnapshots([]);
       return undefined;
     }
 
@@ -166,11 +174,27 @@ export default function useGrigliataPageData({
         return () => {};
       })();
 
+    const unsubscribePagePresence = onSnapshot(
+      collection(db, GRIGLIATA_PAGE_PRESENCE_COLLECTION),
+      (snapshot) => {
+        const nextPagePresence = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
+        setPagePresenceSnapshots(nextPagePresence);
+      },
+      (error) => {
+        console.error('Failed to load Grigliata page presence:', error);
+        setPagePresenceSnapshots([]);
+      }
+    );
+
     return () => {
       unsubscribeBackgrounds();
       unsubscribeState();
       unsubscribeFoes();
       unsubscribeTokenProfiles();
+      unsubscribePagePresence();
     };
   }, [currentUserId, isManager]);
 
@@ -408,6 +432,17 @@ export default function useGrigliataPageData({
     return () => window.clearInterval(intervalId);
   }, [activeBackgroundId]);
 
+  useEffect(() => {
+    setPagePresenceClock(Date.now());
+    if (!currentUserId) return undefined;
+
+    const intervalId = window.setInterval(() => {
+      setPagePresenceClock(Date.now());
+    }, PAGE_PRESENCE_CLOCK_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [currentUserId]);
+
   const activeBackground = useMemo(
     () => backgrounds.find((background) => background.id === activeBackgroundId) || null,
     [backgrounds, activeBackgroundId]
@@ -425,6 +460,11 @@ export default function useGrigliataPageData({
       GRIGLIATA_LIVE_INTERACTION_STALE_MS
     ),
     [liveInteractionClock, liveInteractionSnapshots]
+  );
+
+  const activePageViewers = useMemo(
+    () => filterActiveGrigliataPagePresence(pagePresenceSnapshots, pagePresenceClock),
+    [pagePresenceClock, pagePresenceSnapshots]
   );
 
   const selectedBackground = useMemo(
@@ -808,6 +848,7 @@ export default function useGrigliataPageData({
   return {
     activeBackground,
     activeBackgroundId,
+    activePageViewers,
     activePlacementsById,
     aoeFigureSnapshots,
     backgrounds,
