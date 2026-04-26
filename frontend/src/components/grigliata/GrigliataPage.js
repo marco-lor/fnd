@@ -76,6 +76,10 @@ import {
   normalizeGrigliataMusicPlaybackState,
   readAudioFileMetadata,
 } from './music';
+import {
+  GRIGLIATA_PAGE_PRESENCE_COLLECTION,
+  GRIGLIATA_PAGE_PRESENCE_HEARTBEAT_MS,
+} from './presence';
 import { preloadImageAssets, scheduleImageAssetPreload } from './imageAssetRegistry';
 import {
   buildTurnOrderActiveState,
@@ -375,6 +379,7 @@ export default function GrigliataPage() {
   const {
     activeBackground: combatBackground,
     activeBackgroundId,
+    activePageViewers,
     activePlacementsById,
     aoeFigureSnapshots,
     backgrounds,
@@ -415,6 +420,43 @@ export default function GrigliataPage() {
     currentUserId,
     isManager,
   });
+
+  useEffect(() => {
+    if (!currentUserId || isManager || !currentCharacterId) {
+      return undefined;
+    }
+
+    const presenceDocRef = doc(db, GRIGLIATA_PAGE_PRESENCE_COLLECTION, currentUserId);
+    let isActive = true;
+
+    const writePresenceHeartbeat = async () => {
+      try {
+        await setDoc(presenceDocRef, {
+          ownerUid: currentUserId,
+          characterId: currentCharacterId,
+          colorKey: drawColorKey,
+          lastSeenAt: serverTimestamp(),
+          updatedBy: currentUserId,
+        }, { merge: true });
+      } catch (error) {
+        if (isActive) {
+          console.error('Failed to update Grigliata page presence:', error);
+        }
+      }
+    };
+
+    void writePresenceHeartbeat();
+    const intervalId = window.setInterval(writePresenceHeartbeat, GRIGLIATA_PAGE_PRESENCE_HEARTBEAT_MS);
+
+    return () => {
+      isActive = false;
+      window.clearInterval(intervalId);
+      void deleteDoc(presenceDocRef).catch((error) => {
+        console.error('Failed to clear Grigliata page presence:', error);
+      });
+    };
+  }, [currentCharacterId, currentUserId, drawColorKey, isManager]);
+
   const ownedTrayTokensById = useMemo(() => new Map(
     [currentUserToken, ...customUserTokens]
       .filter((token) => token?.tokenId && token?.ownerUid === currentUserId)
@@ -3746,6 +3788,7 @@ export default function GrigliataPage() {
                 isTokenSizeActionPending={isTokenSizeActionPending}
                 selectedTokenDetails={isNarrationOverlayActive ? null : selectedTokenDetails}
                 sharedInteractions={visibleSharedInteractions}
+                activeViewers={activePageViewers}
                 onSharedInteractionChange={isNarrationOverlayActive ? null : handleSharedInteractionChange}
                 onSelectedTokenIdsChange={setSelectedBoardTokenIds}
                 onDropCurrentToken={isNarrationOverlayActive ? null : ((payload, worldPoint) => {

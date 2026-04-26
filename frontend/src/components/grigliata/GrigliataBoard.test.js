@@ -233,6 +233,7 @@ const buildProps = (overrides = {}) => ({
   onDropCurrentToken: jest.fn(),
   onSelectedTokenIdsChange: jest.fn(),
   sharedInteractions: [],
+  activeViewers: [],
   onSharedInteractionChange: jest.fn(),
   isNarrationOverlayActive: false,
   ...overrides,
@@ -1039,6 +1040,43 @@ describe('GrigliataBoard', () => {
     );
 
     expect(screen.getByTestId('music-mute-trigger')).toBeDisabled();
+  });
+
+  test('renders active viewer names with drawing color swatches', () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          activeViewers: [
+            {
+              ownerUid: 'user-2',
+              characterId: 'Nyra',
+              colorKey: 'ion-cyan',
+            },
+            {
+              ownerUid: 'user-3',
+              characterId: 'Bran',
+              colorKey: 'solar-amber',
+            },
+          ],
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('grigliata-active-viewers')).toBeInTheDocument();
+    expect(screen.getByTestId('grigliata-active-viewer-user-2')).toHaveTextContent('Nyra');
+    expect(screen.getByTestId('grigliata-active-viewer-swatch-user-2')).toHaveStyle({
+      backgroundColor: '#38bdf8',
+    });
+    expect(screen.getByTestId('grigliata-active-viewer-user-3')).toHaveTextContent('Bran');
+    expect(screen.getByTestId('grigliata-active-viewer-swatch-user-3')).toHaveStyle({
+      backgroundColor: '#fbbf24',
+    });
+  });
+
+  test('does not render the active viewers overlay when the list is empty', () => {
+    render(<GrigliataBoard {...buildProps({ activeViewers: [] })} />);
+
+    expect(screen.queryByTestId('grigliata-active-viewers')).not.toBeInTheDocument();
   });
 
   test('shows only the map metadata in the top board header', () => {

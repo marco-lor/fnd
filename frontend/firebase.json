@@ -93,6 +93,13 @@
         "destination": "/index.html"
       },
       {
+        "source": "/fatins-runtime/firebase-client",
+        "function": {
+          "functionId": "clientFirebaseConfig",
+          "region": "europe-west1"
+        }
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

@@ -259,6 +259,7 @@ jest.mock('./GrigliataBoard', () => {
         <div data-testid="board-narration-active">{String(props.isNarrationOverlayActive)}</div>
         <div data-testid="board-sharing-state">{String(props.isInteractionSharingEnabled)}</div>
         <div data-testid="board-shared-count">{String(props.sharedInteractions?.length || 0)}</div>
+      <div data-testid="board-active-viewers">{(props.activeViewers || []).map((viewer) => viewer.characterId).join(',')}</div>
       <div data-testid="board-aoe-count">{String(props.aoeFigures?.length || 0)}</div>
       <div data-testid="board-token-count">{String(props.tokens?.length || 0)}</div>
       <div data-testid="board-turn-order-enabled">{String(props.isTurnOrderEnabled)}</div>
@@ -620,6 +621,7 @@ describe('GrigliataPage', () => {
       grigliata_token_placements: [],
       grigliata_aoe_figures: [],
       grigliata_live_interactions: [],
+      grigliata_page_presence: [],
       grigliata_music_tracks: [],
       foes: [],
     };
@@ -762,6 +764,132 @@ describe('GrigliataPage', () => {
     expect(querySelectorSpy).not.toHaveBeenCalledWith('[data-navbar]');
 
     querySelectorSpy.mockRestore();
+  });
+
+  test('writes and refreshes non-DM page presence for users with character names', async () => {
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'player',
+        characterId: 'Kael',
+        settings: {
+          grigliata_draw_color: 'ion-cyan',
+          grigliata_share_interactions: false,
+        },
+        imageUrl: '',
+        imagePath: '',
+      },
+      loading: false,
+    });
+
+    const { unmount } = render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_page_presence/user-1' }),
+        expect.objectContaining({
+          ownerUid: 'user-1',
+          characterId: 'Kael',
+          colorKey: 'ion-cyan',
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
+
+    firestore.setDoc.mockClear();
+
+    await act(async () => {
+      jest.advanceTimersByTime(25_000);
+      await Promise.resolve();
+    });
+
+    expect(firestore.setDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_page_presence/user-1' }),
+      expect.objectContaining({
+        ownerUid: 'user-1',
+        characterId: 'Kael',
+        colorKey: 'ion-cyan',
+      }),
+      { merge: true }
+    );
+
+    unmount();
+
+    await waitFor(() => {
+      expect(firestore.deleteDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_page_presence/user-1' })
+      );
+    });
+  });
+
+  test('does not write page presence for DM users', async () => {
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'dm-1',
+        email: 'dm-1@example.com',
+      },
+      userData: {
+        role: 'dm',
+        characterId: 'Dungeon Master',
+        settings: {
+          grigliata_draw_color: 'ion-cyan',
+          grigliata_share_interactions: false,
+        },
+        imageUrl: '',
+        imagePath: '',
+      },
+      loading: false,
+    });
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(firestore.setDoc.mock.calls.some(([target]) => (
+      target?.path === 'grigliata_page_presence/dm-1'
+    ))).toBe(false);
+  });
+
+  test('passes active page viewers to the board', async () => {
+    const now = Date.UTC(2026, 3, 25, 12, 0, 0);
+    jest.setSystemTime(new Date(now));
+    setCollectionData('grigliata_page_presence', [
+      {
+        id: 'user-3',
+        ownerUid: 'user-3',
+        characterId: 'Nyra',
+        colorKey: 'solar-amber',
+        lastSeenAt: { toMillis: () => now - 10_000 },
+        updatedBy: 'user-3',
+      },
+      {
+        id: 'user-2',
+        ownerUid: 'user-2',
+        characterId: 'Bran',
+        colorKey: 'ion-cyan',
+        lastSeenAt: { toMillis: () => now - 5_000 },
+        updatedBy: 'user-2',
+      },
+      {
+        id: 'user-4',
+        ownerUid: 'user-4',
+        characterId: 'Old Watcher',
+        colorKey: 'nova-teal',
+        lastSeenAt: { toMillis: () => now - 90_000 },
+        updatedBy: 'user-4',
+      },
+    ]);
+
+    render(<GrigliataPage />);
+
+    expect(await screen.findByTestId('board-active-viewers')).toHaveTextContent('Bran,Nyra');
+    expect(screen.getByTestId('board-active-viewers')).not.toHaveTextContent('Old Watcher');
   });
 
   test('preloads the active battlemap, visible board tokens, and the tray portrait for players', async () => {

@@ -26,6 +26,7 @@ import {deleteGrigliataCustomToken} from "./deleteGrigliataCustomToken";
 import {spawnGrigliataCustomTokenInstance} from "./spawnGrigliataCustomTokenInstance";
 import {spawnGrigliataFoeToken} from "./spawnGrigliataFoeToken";
 import {updateGrigliataCustomTokenTemplate} from "./updateGrigliataCustomTokenTemplate";
+import {clientFirebaseConfig} from "./clientFirebaseConfig";
 import {
   cleanupDeletedGrigliataTokenImage,
   cleanupReplacedGrigliataTokenImage,
@@ -51,6 +52,7 @@ export {
   spawnGrigliataCustomTokenInstance,
   spawnGrigliataFoeToken,
   updateGrigliataCustomTokenTemplate,
+  clientFirebaseConfig,
   cleanupDeletedGrigliataTokenImage,
   cleanupReplacedGrigliataTokenImage,
 };

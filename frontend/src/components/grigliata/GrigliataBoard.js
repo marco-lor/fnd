@@ -1694,6 +1694,44 @@ const AoETemplateIcon = ({ figureType }) => {
   return null;
 };
 
+const ActiveViewersOverlay = ({ viewers = [] }) => {
+  if (!viewers.length) {
+    return null;
+  }
+
+  return (
+    <div
+      data-testid="grigliata-active-viewers"
+      className="pointer-events-none absolute bottom-4 left-4 z-30 flex max-w-[min(24rem,calc(100%-2rem))] flex-wrap items-end gap-2"
+      aria-label="Active Grigliata viewers"
+    >
+      {viewers.map((viewer) => {
+        const viewerTheme = getGrigliataDrawTheme(viewer.colorKey);
+
+        return (
+          <div
+            key={viewer.ownerUid}
+            data-testid={`grigliata-active-viewer-${viewer.ownerUid}`}
+            className="flex min-w-0 max-w-[12rem] items-center gap-2 rounded-lg border border-slate-700/80 bg-slate-950/88 px-2.5 py-1.5 text-xs font-semibold text-slate-100 shadow-lg shadow-black/35 backdrop-blur-md"
+            title={viewer.characterId}
+          >
+            <span
+              data-testid={`grigliata-active-viewer-swatch-${viewer.ownerUid}`}
+              aria-hidden="true"
+              className="h-3 w-3 shrink-0 rounded-[2px] border border-slate-950/80 shadow-sm"
+              style={{
+                backgroundColor: viewerTheme.hex,
+                boxShadow: `0 0 10px ${viewerTheme.hex}`,
+              }}
+            />
+            <span className="min-w-0 truncate">{viewer.characterId}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 const AoETemplatePicker = ({ activeFigureType = '', onChange, disabled = false }) => {
   const [isOpen, setIsOpen] = useState(false);
   const pickerRef = useRef(null);
@@ -2128,6 +2166,7 @@ export default function GrigliataBoard({
   onDropCurrentToken,
   onSelectedTokenIdsChange,
   sharedInteractions = [],
+  activeViewers = [],
   onSharedInteractionChange,
   isNarrationOverlayActive = false,
 }) {
@@ -4699,6 +4738,8 @@ export default function GrigliataBoard({
             </div>
           </div>
         )}
+
+        <ActiveViewersOverlay viewers={activeViewers} />
 
         {visibleOverflowToken && activeOverflowCardStyle && (
           <div className="pointer-events-none absolute inset-0 z-[18]">
