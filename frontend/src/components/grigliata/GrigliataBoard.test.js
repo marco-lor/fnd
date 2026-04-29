@@ -502,6 +502,23 @@ describe('GrigliataBoard', () => {
     window.cancelAnimationFrame = originalCancelAnimationFrame;
   });
 
+  test('renders uniform subtle grid lines without major-line emphasis', async () => {
+    render(<GrigliataBoard {...buildProps()} />);
+
+    const gridLayer = await screen.findByTestId('grid-layer');
+    const gridLines = Array.from(gridLayer.querySelectorAll('[data-konva-type="Line"]'));
+
+    expect(gridLines.length).toBeGreaterThan(0);
+    expect(new Set(gridLines.map((line) => line.getAttribute('data-stroke')))).toEqual(
+      new Set(['rgba(248, 250, 252, 0.14)'])
+    );
+    expect(new Set(gridLines.map((line) => line.getAttribute('data-strokewidth')))).toEqual(
+      new Set(['1'])
+    );
+    expect(gridLayer.querySelector('[data-stroke="rgba(248, 250, 252, 0.38)"]')).toBeNull();
+    expect(gridLayer.querySelector('[data-strokewidth="1.4"]')).toBeNull();
+  });
+
   test('fades in the battlemap image when activating from grid only', async () => {
     jest.useFakeTimers();
 
