@@ -134,7 +134,10 @@ service firebase.storage {
       allow read: if isSignedIn();
       allow create, update: if isDM()
         && request.auth.uid == userId
-        && isImage(12 * 1024 * 1024);
+        && (
+          isImage(15 * 1024 * 1024)
+          || isVideo(25 * 1024 * 1024)
+        );
       allow delete: if isDM();
     }
 
