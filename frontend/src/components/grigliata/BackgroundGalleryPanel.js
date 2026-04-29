@@ -1,4 +1,5 @@
 import React from 'react';
+import { isVideoBackground } from './boardUtils';
 
 export default function BackgroundGalleryPanel({
   backgrounds,
@@ -50,7 +51,7 @@ export default function BackgroundGalleryPanel({
 
             <input
               type="file"
-              accept="image/*"
+              accept="image/*,video/mp4"
               onChange={onUploadFileChange}
               className="block w-full text-sm text-slate-200 file:mr-3 file:rounded-md file:border-0 file:bg-slate-800 file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-200 hover:file:bg-slate-700"
             />
@@ -91,6 +92,7 @@ export default function BackgroundGalleryPanel({
                 const isActive = background.id === activeBackgroundId;
                 const isNarrated = background.id === presentationBackgroundId;
                 const isSelected = background.id === selectedBackgroundId;
+                const isVideo = isVideoBackground(background);
                 const isUsePending = activatingBackgroundId === background.id;
                 const isNarrationPending = narrationActionBackgroundId === background.id;
                 const isDestructiveActionLocked = destructiveActionLockedBackgroundIdSet.has(background.id);
@@ -111,7 +113,18 @@ export default function BackgroundGalleryPanel({
                       <div className="flex gap-3">
                         <div className="w-20 h-14 rounded-lg overflow-hidden border border-slate-700 bg-slate-950 shrink-0">
                           {background.imageUrl ? (
-                            <img src={background.imageUrl} alt={background.name} className="w-full h-full object-cover" />
+                            isVideo ? (
+                              <video
+                                src={background.imageUrl}
+                                aria-label={background.name || 'Video map'}
+                                className="w-full h-full object-cover"
+                                muted
+                                playsInline
+                                preload="metadata"
+                              />
+                            ) : (
+                              <img src={background.imageUrl} alt={background.name} className="w-full h-full object-cover" />
+                            )
                           ) : null}
                         </div>
 
@@ -131,7 +144,7 @@ export default function BackgroundGalleryPanel({
                           </div>
 
                           <p className="mt-1 text-xs text-slate-400">
-                            {background.imageWidth || '?'} x {background.imageHeight || '?'} px
+                            {background.imageWidth || '?'} x {background.imageHeight || '?'} px{isVideo ? ' | Video' : ''}
                           </p>
                           <p className="mt-1 text-[11px] text-slate-500">
                             Grid {background.grid?.cellSizePx || 70}px | offset {background.grid?.offsetXPx || 0}, {background.grid?.offsetYPx || 0}

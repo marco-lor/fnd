@@ -91,4 +91,26 @@ describe('BackgroundGalleryPanel', () => {
     expect(screen.getByRole('button', { name: 'Closing...' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Narrate' })).toBeDisabled();
   });
+
+  test('accepts MP4 uploads and renders video map thumbnails', () => {
+    const { container } = render(
+      <BackgroundGalleryPanel
+        {...buildProps({
+          backgrounds: [{
+            id: 'map-video',
+            name: 'Dungeon Alchemist Loop',
+            imageUrl: 'https://example.com/map.mp4',
+            imageWidth: 2040,
+            imageHeight: 1620,
+            assetType: 'video',
+            grid: { cellSizePx: 60, offsetXPx: 0, offsetYPx: 0 },
+          }],
+        })}
+      />
+    );
+
+    expect(container.querySelector('input[type="file"]')).toHaveAttribute('accept', 'image/*,video/mp4');
+    expect(container.querySelector('video')).toHaveAttribute('src', 'https://example.com/map.mp4');
+    expect(screen.getByText(/2040 x 1620 px \| Video/i)).toBeInTheDocument();
+  });
 });

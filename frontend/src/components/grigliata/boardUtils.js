@@ -12,11 +12,16 @@ import {
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const CONTENT_TYPE_EXTENSION_ALIASES = {
-  mpeg: 'mp3',
-  mp4: 'm4a',
-  'x-flac': 'flac',
-  'x-m4a': 'm4a',
-  'x-wav': 'wav',
+  audio: {
+    mpeg: 'mp3',
+    mp4: 'm4a',
+    'x-flac': 'flac',
+    'x-m4a': 'm4a',
+    'x-wav': 'wav',
+  },
+  video: {
+    mp4: 'mp4',
+  },
 };
 
 const asFiniteNumber = (value, fallback = 0) => {
@@ -101,6 +106,12 @@ export const sortBackgrounds = (backgrounds) => (
 
 export const buildPlacementDocId = (backgroundId, tokenId) => `${backgroundId}__${tokenId}`;
 
+export const getBackgroundAssetType = (background) => (
+  background?.assetType === 'video' ? 'video' : 'image'
+);
+
+export const isVideoBackground = (background) => getBackgroundAssetType(background) === 'video';
+
 export const normalizeHiddenTokenIdsByBackground = (value) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return {};
@@ -158,7 +169,7 @@ export const getFileExtensionFromContentType = (contentType) => {
   const [type = '', subtype = ''] = safeContentType.split('/');
   if (!type || !subtype) return '';
 
-  const normalizedSubtype = CONTENT_TYPE_EXTENSION_ALIASES[subtype] || subtype;
+  const normalizedSubtype = CONTENT_TYPE_EXTENSION_ALIASES[type]?.[subtype] || subtype;
   const safeExtension = normalizedSubtype.replace(/[^a-z0-9]+/g, '');
   return safeExtension ? `.${safeExtension}` : '';
 };
@@ -483,4 +494,37 @@ export const readFileImageDimensions = (file) => new Promise((resolve, reject) =
   };
 
   image.src = objectUrl;
+});
+
+export const readFileVideoMetadata = (file) => new Promise((resolve, reject) => {
+  const objectUrl = URL.createObjectURL(file);
+  const video = document.createElement('video');
+
+  const cleanup = () => {
+    video.onloadedmetadata = null;
+    video.onerror = null;
+    URL.revokeObjectURL(objectUrl);
+  };
+
+  video.preload = 'metadata';
+  video.muted = true;
+  video.playsInline = true;
+
+  video.onloadedmetadata = () => {
+    const width = video.videoWidth || 0;
+    const height = video.videoHeight || 0;
+    const durationMs = Number.isFinite(video.duration)
+      ? Math.max(0, Math.round(video.duration * 1000))
+      : 0;
+
+    cleanup();
+    resolve({ width, height, durationMs });
+  };
+
+  video.onerror = () => {
+    cleanup();
+    reject(new Error('Unable to read video metadata.'));
+  };
+
+  video.src = objectUrl;
 });

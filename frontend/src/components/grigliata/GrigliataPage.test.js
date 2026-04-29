@@ -1030,6 +1030,137 @@ describe('GrigliataPage', () => {
     expect(lastScheduledUrls).not.toContain('https://example.com/map-1.png');
   });
 
+  test('does not send video backgrounds through the image preload registry', async () => {
+    setManagerAuth();
+    mockFirestoreState.collections.grigliata_backgrounds = [
+      {
+        id: 'map-1',
+        name: 'Animated Dungeon',
+        imageUrl: 'https://example.com/animated-dungeon.mp4',
+        assetType: 'video',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+      },
+      {
+        id: 'map-2',
+        name: 'Iron Keep',
+        imageUrl: 'https://example.com/map-2.png',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+      },
+      {
+        id: 'map-3',
+        name: 'Animated Courtyard',
+        imageUrl: 'https://example.com/animated-courtyard.mp4',
+        assetType: 'video',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+      },
+    ];
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+
+    await waitFor(() => {
+      expect(scheduleImageAssetPreload).toHaveBeenCalledWith(['https://example.com/map-2.png']);
+    });
+
+    const preloadedUrls = preloadImageAssets.mock.calls.flatMap(([urls]) => urls || []);
+    const deferredUrls = scheduleImageAssetPreload.mock.calls.flatMap(([urls]) => urls || []);
+    expect([...preloadedUrls, ...deferredUrls]).not.toContain('https://example.com/animated-dungeon.mp4');
+    expect([...preloadedUrls, ...deferredUrls]).not.toContain('https://example.com/animated-courtyard.mp4');
+  });
+
+  test('uploads an MP4 background and persists video metadata', async () => {
+    setManagerAuth();
+    const storageApi = require('firebase/storage');
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    const originalCreateElement = document.createElement.bind(document);
+    const mockVideoElement = {
+      videoWidth: 2040,
+      videoHeight: 1620,
+      duration: 4.25,
+      muted: false,
+      playsInline: false,
+      preload: '',
+      onloadedmetadata: null,
+      onerror: null,
+      _src: '',
+      set src(value) {
+        this._src = value;
+        this.onloadedmetadata?.();
+      },
+      get src() {
+        return this._src;
+      },
+    };
+    const createElementSpy = jest
+      .spyOn(document, 'createElement')
+      .mockImplementation((tagName, options) => (
+        tagName === 'video'
+          ? mockVideoElement
+          : originalCreateElement(tagName, options)
+      ));
+
+    URL.createObjectURL = jest.fn(() => 'blob:uploaded-video');
+    URL.revokeObjectURL = jest.fn();
+
+    try {
+      render(<GrigliataPage />);
+
+      fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+
+      const file = new File(['video-bytes'], 'dungeon-alchemist-loop.mp4', { type: 'video/mp4' });
+      Object.defineProperty(file, 'size', { value: 807_085 });
+
+      await act(async () => {
+        BackgroundGalleryPanelMock.mock.calls.at(-1)[0].onUploadFileChange({
+          target: { files: [file] },
+        });
+      });
+
+      await act(async () => {
+        await BackgroundGalleryPanelMock.mock.calls.at(-1)[0].onUploadBackground();
+      });
+
+      expect(URL.createObjectURL).toHaveBeenCalledWith(file);
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:uploaded-video');
+      expect(storageApi.ref).toHaveBeenCalledWith(
+        {},
+        expect.stringMatching(/^grigliata\/backgrounds\/user-1\/dungeon_alchemist_loop_\d+\.mp4$/)
+      );
+      expect(storageApi.uploadBytes).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: expect.stringMatching(/^grigliata\/backgrounds\/user-1\/dungeon_alchemist_loop_\d+\.mp4$/),
+        }),
+        file
+      );
+      expect(firestore.addDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_backgrounds' }),
+        expect.objectContaining({
+          name: 'dungeon alchemist loop',
+          imageUrl: 'https://example.com/uploaded-map.png',
+          imagePath: expect.stringMatching(/^grigliata\/backgrounds\/user-1\/dungeon_alchemist_loop_\d+\.mp4$/),
+          imageWidth: 2040,
+          imageHeight: 1620,
+          assetType: 'video',
+          contentType: 'video/mp4',
+          fileName: 'dungeon-alchemist-loop.mp4',
+          sizeBytes: 807_085,
+          durationMs: 4250,
+          createdBy: 'user-1',
+          updatedBy: 'user-1',
+        })
+      );
+    } finally {
+      createElementSpy.mockRestore();
+      URL.createObjectURL = originalCreateObjectURL;
+      URL.revokeObjectURL = originalRevokeObjectURL;
+    }
+  });
+
   test('publishes only when sharing is enabled and a live interaction exists', async () => {
     render(<GrigliataPage />);
 

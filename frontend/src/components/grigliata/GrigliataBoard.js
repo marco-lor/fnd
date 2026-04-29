@@ -44,6 +44,7 @@ import {
 import {
   buildGridMeasurementPath,
   fitViewportToBounds,
+  getBackgroundAssetType,
   getBoardBounds,
   getInitials,
   getTokenPositionPx,
@@ -575,17 +576,137 @@ const cancelAnimationFrameSafe = (handle) => {
 
   window.clearTimeout(handle.id);
 };
+const EMPTY_VIDEO_ASSET_SNAPSHOT = {
+  status: 'idle',
+  image: null,
+  error: null,
+};
+const useVideoBackgroundAssetSnapshot = (src) => {
+  const normalizedSrc = typeof src === 'string' ? src.trim() : '';
+  const [snapshot, setSnapshot] = useState(EMPTY_VIDEO_ASSET_SNAPSHOT);
+
+  useEffect(() => {
+    if (!normalizedSrc) {
+      setSnapshot(EMPTY_VIDEO_ASSET_SNAPSHOT);
+      return undefined;
+    }
+
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+      setSnapshot({
+        status: 'error',
+        image: null,
+        error: new Error('Video loading is not available in this environment.'),
+      });
+      return undefined;
+    }
+
+    let isActive = true;
+    let didLoad = false;
+    const video = document.createElement('video');
+
+    const cleanupListeners = () => {
+      if (typeof video.removeEventListener === 'function') {
+        video.removeEventListener('loadeddata', handleLoaded);
+        video.removeEventListener('canplay', handleLoaded);
+        video.removeEventListener('error', handleError);
+      } else {
+        video.onloadeddata = null;
+        video.oncanplay = null;
+        video.onerror = null;
+      }
+    };
+
+    function handleLoaded() {
+      if (!isActive || didLoad) return;
+      didLoad = true;
+
+      setSnapshot({
+        status: 'loaded',
+        image: video,
+        error: null,
+      });
+
+      const playPromise = typeof video.play === 'function' ? video.play() : null;
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch(() => null);
+      }
+    }
+
+    function handleError(errorEvent) {
+      if (!isActive) return;
+
+      setSnapshot({
+        status: 'error',
+        image: null,
+        error: errorEvent instanceof Error
+          ? errorEvent
+          : new Error(`Failed to load video background: ${normalizedSrc}`),
+      });
+    }
+
+    setSnapshot({
+      status: 'loading',
+      image: null,
+      error: null,
+    });
+
+    video.muted = true;
+    video.defaultMuted = true;
+    video.loop = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    video.preload = 'auto';
+
+    if (typeof video.addEventListener === 'function') {
+      video.addEventListener('loadeddata', handleLoaded);
+      video.addEventListener('canplay', handleLoaded);
+      video.addEventListener('error', handleError);
+    } else {
+      video.onloadeddata = handleLoaded;
+      video.oncanplay = handleLoaded;
+      video.onerror = handleError;
+    }
+
+    video.src = normalizedSrc;
+    if (typeof video.load === 'function') {
+      try {
+        video.load();
+      } catch (_) {}
+    }
+
+    return () => {
+      isActive = false;
+      cleanupListeners();
+      if (typeof video.pause === 'function') {
+        video.pause();
+      }
+      if (typeof video.removeAttribute === 'function') {
+        video.removeAttribute('src');
+      }
+      if (typeof video.load === 'function') {
+        try {
+          video.load();
+        } catch (_) {}
+      }
+    };
+  }, [normalizedSrc]);
+
+  return snapshot;
+};
 const buildBattlemapImageLayer = ({ background, image, opacity = 1 }) => {
   if (!background?.imageUrl || !image) {
     return null;
   }
 
+  const assetType = getBackgroundAssetType(background);
+
   return {
     key: `${background.id || background.imageUrl}::${background.imageUrl}`,
     src: background.imageUrl,
+    assetType,
     image,
-    imageWidth: background.imageWidth || image.naturalWidth || image.width || 0,
-    imageHeight: background.imageHeight || image.naturalHeight || image.height || 0,
+    imageWidth: background.imageWidth || image.naturalWidth || image.videoWidth || image.width || 0,
+    imageHeight: background.imageHeight || image.naturalHeight || image.videoHeight || image.height || 0,
     opacity,
   };
 };
@@ -2196,7 +2317,16 @@ export default function GrigliataBoard({
   const turnOrderPanelBodyId = useId();
   const [turnOrderContextMenu, setTurnOrderContextMenu] = useState(null);
   const [turnOrderJoinPrompt, setTurnOrderJoinPrompt] = useState(null);
-  const backgroundAssetSnapshot = useImageAssetSnapshot(activeBackground?.imageUrl || '');
+  const activeBackgroundAssetType = getBackgroundAssetType(activeBackground);
+  const backgroundImageAssetSnapshot = useImageAssetSnapshot(
+    activeBackgroundAssetType === 'image' ? activeBackground?.imageUrl || '' : ''
+  );
+  const backgroundVideoAssetSnapshot = useVideoBackgroundAssetSnapshot(
+    activeBackgroundAssetType === 'video' ? activeBackground?.imageUrl || '' : ''
+  );
+  const backgroundAssetSnapshot = activeBackgroundAssetType === 'video'
+    ? backgroundVideoAssetSnapshot
+    : backgroundImageAssetSnapshot;
   const turnOrderContextMenuRef = useRef(null);
   const turnOrderJoinInputRef = useRef(null);
   const lastReportedSelectedTokenIdsRef = useRef([]);
@@ -2206,6 +2336,7 @@ export default function GrigliataBoard({
   });
   const battlemapImageTransitionRef = useRef(battlemapImageTransition);
   const battlemapImageAnimationHandleRef = useRef(null);
+  const battlemapVideoFrameAnimationHandleRef = useRef(null);
   const previousNarrationOverlayActiveRef = useRef(isNarrationOverlayActive);
   const lastFitKeyRef = useRef('');
   const resolvedDrawTheme = drawTheme || DEFAULT_DRAW_THEME;
@@ -2219,6 +2350,10 @@ export default function GrigliataBoard({
     cancelAnimationFrameSafe(battlemapImageAnimationHandleRef.current);
     battlemapImageAnimationHandleRef.current = null;
   }, []);
+  const cancelBattlemapVideoFrameAnimation = useCallback(() => {
+    cancelAnimationFrameSafe(battlemapVideoFrameAnimationHandleRef.current);
+    battlemapVideoFrameAnimationHandleRef.current = null;
+  }, []);
 
   useEffect(() => {
     battlemapImageTransitionRef.current = battlemapImageTransition;
@@ -2230,6 +2365,12 @@ export default function GrigliataBoard({
     }
   ), [cancelBattlemapImageAnimation]);
 
+  useEffect(() => (
+    () => {
+      cancelBattlemapVideoFrameAnimation();
+    }
+  ), [cancelBattlemapVideoFrameAnimation]);
+
   const normalizedGrid = useMemo(() => normalizeGridConfig(grid), [grid]);
 
   const resolvedBackground = useMemo(() => {
@@ -2237,8 +2378,8 @@ export default function GrigliataBoard({
 
     return {
       ...activeBackground,
-      imageWidth: activeBackground.imageWidth || backgroundAssetSnapshot.image?.naturalWidth || backgroundAssetSnapshot.image?.width || 0,
-      imageHeight: activeBackground.imageHeight || backgroundAssetSnapshot.image?.naturalHeight || backgroundAssetSnapshot.image?.height || 0,
+      imageWidth: activeBackground.imageWidth || backgroundAssetSnapshot.image?.naturalWidth || backgroundAssetSnapshot.image?.videoWidth || backgroundAssetSnapshot.image?.width || 0,
+      imageHeight: activeBackground.imageHeight || backgroundAssetSnapshot.image?.naturalHeight || backgroundAssetSnapshot.image?.videoHeight || backgroundAssetSnapshot.image?.height || 0,
     };
   }, [activeBackground, backgroundAssetSnapshot.image]);
 
@@ -2377,6 +2518,51 @@ export default function GrigliataBoard({
     runBattlemapImageTransition,
     targetBattlemapImageLayer,
   ]);
+
+  const battlemapVideoFrameKey = useMemo(() => ([
+    battlemapImageTransition.visibleLayer,
+    battlemapImageTransition.fadingOutLayer,
+  ]
+    .filter((layer) => layer?.assetType === 'video' && layer?.src)
+    .map((layer) => layer.src)
+    .join('|')), [
+    battlemapImageTransition.fadingOutLayer,
+    battlemapImageTransition.visibleLayer,
+  ]);
+
+  useEffect(() => {
+    cancelBattlemapVideoFrameAnimation();
+
+    if (!battlemapVideoFrameKey) {
+      return undefined;
+    }
+
+    let isActive = true;
+    const drawFrame = () => {
+      if (!isActive) return;
+
+      const stage = stageRef.current;
+      if (typeof stage?.batchDraw === 'function') {
+        stage.batchDraw();
+      }
+      if (typeof stage?.getLayers === 'function') {
+        stage.getLayers().forEach((layer) => {
+          if (typeof layer?.batchDraw === 'function') {
+            layer.batchDraw();
+          }
+        });
+      }
+
+      battlemapVideoFrameAnimationHandleRef.current = requestAnimationFrameSafe(drawFrame);
+    };
+
+    battlemapVideoFrameAnimationHandleRef.current = requestAnimationFrameSafe(drawFrame);
+
+    return () => {
+      isActive = false;
+      cancelBattlemapVideoFrameAnimation();
+    };
+  }, [battlemapVideoFrameKey, cancelBattlemapVideoFrameAnimation]);
 
   const placedTokens = useMemo(
     () => (tokens || []).filter((token) => token?.placed),
@@ -4540,6 +4726,7 @@ export default function GrigliataBoard({
               {battlemapImageTransition.fadingOutLayer && battlemapImageTransition.fadingOutLayer.imageWidth > 0 && battlemapImageTransition.fadingOutLayer.imageHeight > 0 && (
                 <KonvaImage
                   data-testid="battlemap-image-outgoing"
+                  data-asset-type={battlemapImageTransition.fadingOutLayer.assetType}
                   image={battlemapImageTransition.fadingOutLayer.image}
                   x={0}
                   y={0}
@@ -4553,6 +4740,7 @@ export default function GrigliataBoard({
               {battlemapImageTransition.visibleLayer && battlemapImageTransition.visibleLayer.imageWidth > 0 && battlemapImageTransition.visibleLayer.imageHeight > 0 && (
                 <KonvaImage
                   data-testid="battlemap-image-active"
+                  data-asset-type={battlemapImageTransition.visibleLayer.assetType}
                   image={battlemapImageTransition.visibleLayer.image}
                   x={0}
                   y={0}

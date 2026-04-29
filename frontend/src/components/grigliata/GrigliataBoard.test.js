@@ -540,6 +540,74 @@ describe('GrigliataBoard', () => {
     expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
   });
 
+  test('renders video battlemap backgrounds through the existing Konva image layer', async () => {
+    useReducedMotion.mockReturnValue(true);
+    const originalCreateElement = document.createElement.bind(document);
+    const listeners = {};
+    const mockVideo = {
+      videoWidth: 2040,
+      videoHeight: 1620,
+      muted: false,
+      defaultMuted: false,
+      loop: false,
+      playsInline: false,
+      autoplay: false,
+      preload: '',
+      src: '',
+      addEventListener: jest.fn((eventName, handler) => {
+        listeners[eventName] = handler;
+      }),
+      removeEventListener: jest.fn(),
+      play: jest.fn(() => Promise.resolve()),
+      pause: jest.fn(),
+      load: jest.fn(),
+      removeAttribute: jest.fn(),
+    };
+    const createElementSpy = jest
+      .spyOn(document, 'createElement')
+      .mockImplementation((tagName, options) => (
+        tagName === 'video'
+          ? mockVideo
+          : originalCreateElement(tagName, options)
+      ));
+
+    try {
+      render(
+        <GrigliataBoard
+          {...buildProps({
+            activeBackground: {
+              id: 'map-video',
+              name: 'Dungeon Alchemist Loop',
+              imageUrl: 'https://example.com/map.mp4',
+              imageWidth: 2040,
+              imageHeight: 1620,
+              assetType: 'video',
+            },
+          })}
+        />
+      );
+
+      await act(async () => {
+        listeners.loadeddata();
+      });
+
+      expect(useImageAssetSnapshot).toHaveBeenCalledWith('');
+      expect(mockVideo.muted).toBe(true);
+      expect(mockVideo.defaultMuted).toBe(true);
+      expect(mockVideo.loop).toBe(true);
+      expect(mockVideo.playsInline).toBe(true);
+      expect(mockVideo.autoplay).toBe(true);
+      expect(mockVideo.play).toHaveBeenCalled();
+
+      const activeVideoLayer = screen.getByTestId('battlemap-image-active');
+      expect(activeVideoLayer).toHaveAttribute('data-asset-type', 'video');
+      expect(activeVideoLayer).toHaveAttribute('data-width', '2040');
+      expect(activeVideoLayer).toHaveAttribute('data-height', '1620');
+    } finally {
+      createElementSpy.mockRestore();
+    }
+  });
+
   test('keeps the old battlemap briefly while fading it out on deactivation', async () => {
     jest.useFakeTimers();
 

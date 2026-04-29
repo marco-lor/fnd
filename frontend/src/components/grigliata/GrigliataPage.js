@@ -33,9 +33,11 @@ import {
   getDisplayNameFromFileName,
   getFileExtension,
   getFileExtensionFromContentType,
+  isVideoBackground,
   isManagerRole,
   normalizeGridConfig,
   readFileImageDimensions,
+  readFileVideoMetadata,
   snapBoardPointToGrid,
 } from './boardUtils';
 import {
@@ -96,7 +98,8 @@ import useGrigliataPageData from './useGrigliataPageData';
 import useGrigliataPlacementActions from './useGrigliataPlacementActions';
 import { useShellLayout } from '../common/shellLayout';
 
-const MAX_BACKGROUND_FILE_BYTES = 15 * 1024 * 1024;
+const MAX_BACKGROUND_IMAGE_FILE_BYTES = 15 * 1024 * 1024;
+const MAX_BACKGROUND_VIDEO_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_CUSTOM_TOKEN_FILE_BYTES = 8 * 1024 * 1024;
 const FIRESTORE_BATCH_SIZE = 450;
 // Firestore batched writes are capped at 20 rule access calls. Grigliata
@@ -161,6 +164,15 @@ const MAX_DEFERRED_GALLERY_IMAGE_PRELOADS = 6;
 const collectUniqueImageUrls = (urls) => [...new Set(
   (urls || []).map((url) => (typeof url === 'string' ? url.trim() : '')).filter(Boolean)
 )];
+const getBackgroundImageUrlForPreload = (background) => (
+  background && !isVideoBackground(background) ? background.imageUrl : ''
+);
+const getBackgroundUploadAssetType = (file) => {
+  const contentType = typeof file?.type === 'string' ? file.type.trim().toLowerCase() : '';
+  if (contentType.startsWith('image/')) return 'image';
+  if (contentType === 'video/mp4') return 'video';
+  return '';
+};
 const normalizeNumericDraftValue = (value, fallback = 0) => {
   const numericValue = Number(value);
   return Number.isFinite(numericValue) ? numericValue : fallback;
@@ -827,17 +839,17 @@ export default function GrigliataPage() {
     || DEFAULT_SIDEBAR_TAB_GRID_CLASS_NAME;
   const isGallerySidebarActive = isManager && activeSidebarTab === 'gallery';
   const immediateImageUrls = useMemo(() => collectUniqueImageUrls([
-    combatBackground?.imageUrl,
-    displayBackground?.imageUrl,
+    getBackgroundImageUrlForPreload(combatBackground),
+    getBackgroundImageUrlForPreload(displayBackground),
     currentUserToken?.imageUrl,
     ...customUserTokens.map((token) => token?.imageUrl),
     ...boardTokens.map((token) => token?.imageUrl),
   ]), [
     boardTokens,
-    combatBackground?.imageUrl,
+    combatBackground,
     currentUserToken?.imageUrl,
     customUserTokens,
-    displayBackground?.imageUrl,
+    displayBackground,
   ]);
   const deferredGalleryImageUrls = useMemo(() => {
     if (!isGallerySidebarActive) {
@@ -847,7 +859,7 @@ export default function GrigliataPage() {
     const immediateImageUrlSet = new Set(immediateImageUrls);
     return collectUniqueImageUrls(
       backgrounds
-        .map((background) => background?.imageUrl)
+        .map(getBackgroundImageUrlForPreload)
         .filter((imageUrl) => !immediateImageUrlSet.has(imageUrl))
         .slice(0, MAX_DEFERRED_GALLERY_IMAGE_PRELOADS)
     );
@@ -2316,54 +2328,75 @@ export default function GrigliataPage() {
     const file = selectedFile;
 
     if (!file) {
-      setUploadError('Select an image file first.');
+      setUploadError('Select an image or MP4 video file first.');
       return;
     }
 
-    if (!file.type?.startsWith('image/')) {
-      setUploadError('The selected file must be an image.');
+    const assetType = getBackgroundUploadAssetType(file);
+
+    if (!assetType) {
+      setUploadError('The selected file must be an image or MP4 video.');
       return;
     }
 
-    if (file.size > MAX_BACKGROUND_FILE_BYTES) {
+    if (assetType === 'image' && file.size > MAX_BACKGROUND_IMAGE_FILE_BYTES) {
       setUploadError('Background images must be 15 MB or smaller.');
+      return;
+    }
+
+    if (assetType === 'video' && file.size > MAX_BACKGROUND_VIDEO_FILE_BYTES) {
+      setUploadError('Background videos must be 25 MB or smaller.');
       return;
     }
 
     const mapName = (uploadName || getDisplayNameFromFileName(file.name)).trim();
     const safeName = buildStorageSafeName(mapName, 'grigliata_map');
-    const fileExtension = getFileExtension(file.name) || '.png';
+    const fileExtension = getFileExtension(file.name)
+      || getFileExtensionFromContentType(file.type)
+      || (assetType === 'video' ? '.mp4' : '.png');
     const storagePath = `grigliata/backgrounds/${user.uid}/${safeName}_${Date.now()}${fileExtension}`;
     let uploadedPath = '';
 
     setIsUploading(true);
     try {
-      const { width, height } = await readFileImageDimensions(file);
+      const mediaMetadata = assetType === 'video'
+        ? await readFileVideoMetadata(file)
+        : await readFileImageDimensions(file);
       const fileRef = storageRef(storage, storagePath);
       await uploadBytes(fileRef, file);
       uploadedPath = storagePath;
       const imageUrl = await getDownloadURL(fileRef);
 
-      await addDoc(collection(db, 'grigliata_backgrounds'), {
+      const backgroundPayload = {
         name: mapName || 'Untitled Map',
         imageUrl,
         imagePath: storagePath,
-        imageWidth: width,
-        imageHeight: height,
+        imageWidth: mediaMetadata.width,
+        imageHeight: mediaMetadata.height,
+        assetType,
+        contentType: file.type || '',
+        fileName: file.name || '',
+        sizeBytes: file.size || 0,
         grid: normalizeGridConfig(DEFAULT_GRID),
         isGridVisible: true,
         createdAt: serverTimestamp(),
         createdBy: user.uid,
         updatedAt: serverTimestamp(),
         updatedBy: user.uid,
-      });
+      };
+
+      if (assetType === 'video') {
+        backgroundPayload.durationMs = mediaMetadata.durationMs || 0;
+      }
+
+      await addDoc(collection(db, 'grigliata_backgrounds'), backgroundPayload);
 
       setSelectedFile(null);
       setUploadName('');
       setUploadError('');
     } catch (error) {
       console.error('Failed to upload background:', error);
-      setUploadError('Failed to upload the selected image.');
+      setUploadError('Failed to upload the selected background.');
 
       if (uploadedPath) {
         try {
@@ -2418,7 +2451,7 @@ export default function GrigliataPage() {
     setIsNarrationClosePending(false);
     setNarrationActionBackgroundId(background.id);
     try {
-      if (background.imageUrl) {
+      if (background.imageUrl && !isVideoBackground(background)) {
         await preloadImageAssets([background.imageUrl]);
       }
 
