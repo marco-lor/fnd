@@ -1,4 +1,5 @@
 import React from 'react';
+import { FiZap } from 'react-icons/fi';
 import { isVideoBackground } from './boardUtils';
 
 export default function BackgroundGalleryPanel({
@@ -97,6 +98,7 @@ export default function BackgroundGalleryPanel({
                 const isNarrationPending = narrationActionBackgroundId === background.id;
                 const isDestructiveActionLocked = destructiveActionLockedBackgroundIdSet.has(background.id);
                 const isBusy = isUsePending || isNarrationPending || deletingBackgroundId === background.id || clearingTokensBackgroundId === background.id;
+                const hasLightingMetadata = !!background.lightingSummary;
 
                 return (
                   <div
@@ -139,6 +141,15 @@ export default function BackgroundGalleryPanel({
                             {isNarrated && (
                               <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200">
                                 Narration
+                              </span>
+                            )}
+                            {hasLightingMetadata && (
+                              <span
+                                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-cyan-300/50 bg-cyan-500/15 text-cyan-200"
+                                title="Lighting metadata imported"
+                                aria-label="Lighting metadata imported"
+                              >
+                                <FiZap aria-hidden="true" className="h-3 w-3" />
                               </span>
                             )}
                           </div>

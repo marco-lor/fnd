@@ -625,6 +625,46 @@ describe('GrigliataBoard', () => {
     }
   });
 
+  test('renders the DM lighting debug overlay above the map and below tokens', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          tokens: [buildOverlayToken()],
+          lightingMetadata: {
+            backgroundId: 'map-1',
+            walls: [{
+              id: 'wall-1',
+              x1: 10,
+              y1: 20,
+              x2: 80,
+              y2: 20,
+              blocksSight: true,
+              doorType: 0,
+            }],
+            lights: [{
+              id: 'light-1',
+              x: 45,
+              y: 55,
+              brightRadiusPx: 30,
+              dimRadiusPx: 60,
+              color: '#FFAD00',
+            }],
+          },
+          showLightingDebugOverlay: true,
+        })}
+      />
+    );
+
+    const overlay = await screen.findByTestId('lighting-debug-overlay');
+    const token = screen.getByTestId('token-node-user-1');
+
+    expect(screen.getByTestId('lighting-debug-wall')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-debug-light-point')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-debug-light-bright')).toHaveAttribute('data-radius', '30');
+    expect(overlay.compareDocumentPosition(token) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   test('keeps the old battlemap briefly while fading it out on deactivation', async () => {
     jest.useFakeTimers();
 

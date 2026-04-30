@@ -270,6 +270,9 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-aoe-tool">{props.activeAoeFigureType || ''}</div>
       <div data-testid="board-draw-color">{props.drawTheme?.key || ''}</div>
       <div data-testid="board-grid-size">{String(props.grid?.cellSizePx || '')}</div>
+      <div data-testid="board-grid-offset">{`${props.grid?.offsetXPx || 0},${props.grid?.offsetYPx || 0}`}</div>
+      <div data-testid="board-lighting-count">{String(props.lightingMetadata?.lights?.length || 0)}</div>
+      <div data-testid="board-lighting-debug">{String(props.showLightingDebugOverlay)}</div>
         <button type="button" onClick={() => props.onSelectMouseTool?.()}>
           select mouse tool
         </button>
@@ -1159,6 +1162,222 @@ describe('GrigliataPage', () => {
       URL.createObjectURL = originalCreateObjectURL;
       URL.revokeObjectURL = originalRevokeObjectURL;
     }
+  });
+
+  test('imports Dungeon Alchemist lighting metadata for a selected DM background', async () => {
+    setManagerAuth();
+    const storageApi = require('firebase/storage');
+    setCollectionData('grigliata_backgrounds', [{
+      id: 'map-1',
+      name: 'Dungeon Alchemist Loop',
+      imageUrl: 'https://example.com/map.mp4',
+      imageWidth: 2040,
+      imageHeight: 1620,
+      assetType: 'video',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+      isGridVisible: true,
+    }]);
+    const lightingJson = JSON.stringify({
+      width: 2040,
+      height: 1620,
+      grid: 60,
+      shiftX: 0,
+      shiftY: 0,
+      gridDistance: 5,
+      gridUnits: 'ft',
+      globalLight: true,
+      darkness: 0.6,
+      lights: [{
+        x: 1231,
+        y: 913,
+        dim: 20,
+        bright: 10,
+        tintColor: '#FFAD00',
+        tintAlpha: 0,
+      }],
+      walls: [{
+        c: [1201, 1080, 1261, 1080],
+        move: 1,
+        sense: 1,
+        sound: 1,
+        door: 0,
+      }],
+    });
+    const file = new File([lightingJson], 'dungeon-alchemist.json', { type: 'application/json' });
+    Object.defineProperty(file, 'text', {
+      value: jest.fn(() => Promise.resolve(lightingJson)),
+    });
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+    expect(screen.getByRole('heading', { name: /lighting import/i })).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText(/dungeon alchemist json/i), {
+        target: { files: [file] },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/parsed 1 walls and 1 lights/i)).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /import lighting metadata/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_background_lighting/map-1' }),
+        expect.any(Object),
+        { merge: true }
+      );
+    });
+
+    expect(storageApi.uploadBytes).not.toHaveBeenCalled();
+    expect(firestore.setDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_background_lighting/map-1' }),
+      expect.objectContaining({
+        schemaVersion: 1,
+        backgroundId: 'map-1',
+        source: expect.objectContaining({
+          type: 'dungeon-alchemist-foundry',
+          fileName: 'dungeon-alchemist.json',
+          importedBy: 'user-1',
+          widthPx: 2040,
+          heightPx: 1620,
+        }),
+        grid: expect.objectContaining({
+          cellSizePx: 60,
+          distance: 5,
+          units: 'ft',
+        }),
+        scene: {
+          darkness: 0.6,
+          globalLight: true,
+        },
+        alignment: expect.objectContaining({
+          status: 'match',
+        }),
+        walls: expect.arrayContaining([
+          expect.objectContaining({ blocksMovement: true, blocksSight: true, blocksSound: true }),
+        ]),
+        lights: expect.arrayContaining([
+          expect.objectContaining({ color: '#FFAD00', brightRadiusPx: 120, dimRadiusPx: 240 }),
+        ]),
+        updatedBy: 'user-1',
+      }),
+      { merge: true }
+    );
+    expect(firestore.updateDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+      expect.objectContaining({
+        lightingSummary: expect.objectContaining({
+          sourceType: 'dungeon-alchemist-foundry',
+          schemaVersion: 1,
+          wallCount: 1,
+          lightCount: 1,
+          alignmentStatus: 'match',
+        }),
+        updatedBy: 'user-1',
+      })
+    );
+  });
+
+  test('lets the DM hide and show the active lighting debug overlay', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_backgrounds', [{
+      id: 'map-1',
+      name: 'Sunken Ruins',
+      imageWidth: 2040,
+      imageHeight: 1620,
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+      lightingSummary: {
+        sourceType: 'dungeon-alchemist-foundry',
+        schemaVersion: 1,
+        wallCount: 0,
+        lightCount: 1,
+        alignmentStatus: 'match',
+      },
+      isGridVisible: true,
+    }]);
+    setDocData('grigliata_background_lighting/map-1', {
+      backgroundId: 'map-1',
+      grid: { cellSizePx: 60, offsetXPx: 0, offsetYPx: 0 },
+      lights: [{ id: 'light-1', x: 100, y: 100 }],
+      walls: [],
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-lighting-count')).toHaveTextContent('1');
+      expect(screen.getByTestId('board-lighting-debug')).toHaveTextContent('true');
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+    fireEvent.click(screen.getByRole('button', { name: /hide debug overlay/i }));
+
+    expect(screen.getByTestId('board-lighting-debug')).toHaveTextContent('false');
+    fireEvent.click(screen.getByRole('button', { name: /show debug overlay/i }));
+    expect(screen.getByTestId('board-lighting-debug')).toHaveTextContent('true');
+  });
+
+  test('applies Dungeon Alchemist grid calibration to the active selected map', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_backgrounds', [{
+      id: 'map-1',
+      name: 'Sunken Ruins',
+      imageWidth: 2040,
+      imageHeight: 1620,
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+      lightingSummary: {
+        sourceType: 'dungeon-alchemist-foundry',
+        schemaVersion: 1,
+        wallCount: 0,
+        lightCount: 1,
+        alignmentStatus: 'match',
+      },
+      isGridVisible: true,
+    }]);
+    setDocData('grigliata_background_lighting/map-1', {
+      backgroundId: 'map-1',
+      grid: { cellSizePx: 60, offsetXPx: 5, offsetYPx: 7 },
+      lights: [{ id: 'light-1', x: 100, y: 100 }],
+      walls: [],
+    });
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /apply json calibration/i })).toBeEnabled();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /apply json calibration/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+        expect.objectContaining({
+          grid: { cellSizePx: 60, offsetXPx: 5, offsetYPx: 7 },
+          updatedBy: 'user-1',
+        })
+      );
+    });
+    expect(screen.getByTestId('board-grid-size')).toHaveTextContent('60');
+    expect(screen.getByTestId('board-grid-offset')).toHaveTextContent('5,7');
+  });
+
+  test('does not expose lighting import controls to players', () => {
+    render(<GrigliataPage />);
+
+    expect(screen.queryByRole('tab', { name: /lighting/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /lighting import/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId('board-lighting-debug')).toHaveTextContent('false');
   });
 
   test('publishes only when sharing is enabled and a live interaction exists', async () => {
@@ -3849,6 +4068,60 @@ describe('GrigliataPage', () => {
           updatedBy: 'user-1',
         }),
         { merge: true }
+      );
+    });
+
+    confirmSpy.mockRestore();
+  });
+
+  test('deletes lighting metadata with the gallery background', async () => {
+    setManagerAuth();
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+      }, {
+        id: 'map-2',
+        name: 'Iron Keep',
+        imagePath: 'grigliata/backgrounds/map-2.png',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        lightingSummary: {
+          sourceType: 'dungeon-alchemist-foundry',
+          schemaVersion: 1,
+          wallCount: 20,
+          lightCount: 7,
+          alignmentStatus: 'match',
+        },
+        isGridVisible: true,
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+    });
+
+    firestore.deleteDoc.mockClear();
+
+    const latestBackgroundGalleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+    await act(async () => {
+      await latestBackgroundGalleryProps.onDeleteBackground({
+        id: 'map-2',
+        name: 'Iron Keep',
+        imagePath: 'grigliata/backgrounds/map-2.png',
+      });
+    });
+
+    await waitFor(() => {
+      expect(firestore.deleteDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_background_lighting/map-2' })
+      );
+      expect(firestore.deleteDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_backgrounds/map-2' })
       );
     });
 

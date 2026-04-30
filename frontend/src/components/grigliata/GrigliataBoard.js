@@ -76,6 +76,7 @@ import {
   GridLayer,
   TokenNode,
 } from './grigliataBoardTokenUi';
+import GrigliataLightingDebugOverlay from './GrigliataLightingDebugOverlay';
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
 const RULER_LABEL_MIN_WIDTH = 90;
@@ -2289,6 +2290,8 @@ export default function GrigliataBoard({
   sharedInteractions = [],
   activeViewers = [],
   onSharedInteractionChange,
+  lightingMetadata = null,
+  showLightingDebugOverlay = false,
   isNarrationOverlayActive = false,
 }) {
   const containerRef = useRef(null);
@@ -4761,6 +4764,13 @@ export default function GrigliataBoard({
               />
 
               {!isNarrationOverlayActive && isGridVisible && <GridLayer bounds={boardBounds} grid={normalizedGrid} />}
+
+              {!isNarrationOverlayActive && isManager && showLightingDebugOverlay && lightingMetadata && (
+                <GrigliataLightingDebugOverlay
+                  metadata={lightingMetadata}
+                  viewportScale={viewport.scale}
+                />
+              )}
 
               {normalizedSelectionRect && (
                 <>

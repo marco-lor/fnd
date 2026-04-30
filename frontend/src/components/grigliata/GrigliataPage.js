@@ -26,7 +26,14 @@ import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from 'fi
 import { useAuth } from '../../AuthContext';
 import { db, functions, storage } from '../firebaseConfig';
 import BackgroundGalleryPanel from './BackgroundGalleryPanel';
+import GrigliataLightingImportPanel from './GrigliataLightingImportPanel';
 import MusicLibraryPanel from './MusicLibraryPanel';
+import {
+  buildGrigliataLightingSummary,
+  GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION,
+  normalizeDungeonAlchemistLightingMetadata,
+  parseDungeonAlchemistLightingJson,
+} from './dungeonAlchemistLighting';
 import {
   buildPlacementDocId,
   buildStorageSafeName,
@@ -95,6 +102,7 @@ import {
   TURN_EFFECT_KIND_SHIELD,
 } from './turnOrder';
 import useGrigliataPageData from './useGrigliataPageData';
+import useGrigliataLightingMetadata from './useGrigliataLightingMetadata';
 import useGrigliataPlacementActions from './useGrigliataPlacementActions';
 import { useShellLayout } from '../common/shellLayout';
 
@@ -158,6 +166,7 @@ const SIDEBAR_TAB_GRID_CLASS_NAMES = {
   2: 'grid grid-cols-2 gap-2',
   3: 'grid grid-cols-3 gap-2',
   4: 'grid grid-cols-2 gap-2',
+  5: 'grid grid-cols-2 gap-2',
 };
 const DEFAULT_SIDEBAR_TAB_GRID_CLASS_NAME = SIDEBAR_TAB_GRID_CLASS_NAMES[3];
 const MAX_DEFERRED_GALLERY_IMAGE_PRELOADS = 6;
@@ -183,6 +192,14 @@ const normalizeNonNegativeNumericValue = (value, fallback = 0) => (
 const normalizeCurrentResourceValue = (value, fallback = 0) => (
   normalizeNonNegativeNumericValue(value, fallback)
 );
+const areGridConfigsEqual = (leftGrid, rightGrid) => {
+  const left = normalizeGridConfig(leftGrid);
+  const right = normalizeGridConfig(rightGrid);
+
+  return left.cellSizePx === right.cellSizePx
+    && left.offsetXPx === right.offsetXPx
+    && left.offsetYPx === right.offsetYPx;
+};
 const normalizeTokenNotesValue = (value) => (typeof value === 'string' ? value : '');
 const resolveCustomTokenRole = (token = {}) => (
   token?.tokenType === 'custom'
@@ -305,6 +322,12 @@ export default function GrigliataPage() {
   const [calibrationDraft, setCalibrationDraft] = useState(DEFAULT_GRID);
   const [calibrationError, setCalibrationError] = useState('');
   const [isSavingCalibration, setIsSavingCalibration] = useState(false);
+  const [lightingSelectedFile, setLightingSelectedFile] = useState(null);
+  const [lightingImportDraft, setLightingImportDraft] = useState(null);
+  const [lightingImportError, setLightingImportError] = useState('');
+  const [isImportingLighting, setIsImportingLighting] = useState(false);
+  const [isApplyingLightingCalibration, setIsApplyingLightingCalibration] = useState(false);
+  const [isLightingDebugOverlayVisible, setIsLightingDebugOverlayVisible] = useState(true);
   const [boardError, setBoardError] = useState('');
   const [activeTrayDragType, setActiveTrayDragType] = useState('');
   const [isRulerEnabled, setIsRulerEnabled] = useState(false);
@@ -429,6 +452,13 @@ export default function GrigliataPage() {
     currentTokenLabel,
     currentUserHiddenBackgroundIds,
     currentUserHiddenTokenIdsByBackground,
+    currentUserId,
+    isManager,
+  });
+  const {
+    lightingMetadata,
+  } = useGrigliataLightingMetadata({
+    backgroundId: activeBackgroundId,
     currentUserId,
     isManager,
   });
@@ -832,6 +862,7 @@ export default function GrigliataPage() {
         { key: 'gallery', label: 'DM Gallery' },
         { key: 'music', label: 'Music' },
         { key: 'calibration', label: 'Map Calibration' },
+        { key: 'lighting', label: 'Lighting' },
       ]
       : [{ key: 'tokens', label: 'Tokens' }]
   ), [isManager]);
@@ -972,6 +1003,10 @@ export default function GrigliataPage() {
   }, [activeBackgroundId]);
 
   useEffect(() => {
+    setIsLightingDebugOverlayVisible(true);
+  }, [activeBackgroundId]);
+
+  useEffect(() => {
     const nextCalibrationBackgroundId = selectedBackground?.id || '';
     if (calibrationSelectionRef.current === nextCalibrationBackgroundId) return;
 
@@ -979,6 +1014,12 @@ export default function GrigliataPage() {
     setCalibrationDraft(normalizeGridConfig(selectedBackground?.grid));
     setCalibrationError('');
   }, [selectedBackground?.grid, selectedBackground?.id]);
+
+  useEffect(() => {
+    setLightingSelectedFile(null);
+    setLightingImportDraft(null);
+    setLightingImportError('');
+  }, [selectedBackgroundId]);
 
   useEffect(() => {
     if (!currentUserId) return undefined;
@@ -1927,10 +1968,18 @@ export default function GrigliataPage() {
       return;
     }
 
-    if (persistedActiveGrid.cellSizePx === activeGridSizeOverride.cellSizePx) {
+    const overrideGrid = normalizeGridConfig({
+      ...persistedActiveGrid,
+      ...activeGridSizeOverride.grid,
+      ...(Number.isFinite(activeGridSizeOverride.cellSizePx)
+        ? { cellSizePx: activeGridSizeOverride.cellSizePx }
+        : {}),
+    });
+
+    if (areGridConfigsEqual(persistedActiveGrid, overrideGrid)) {
       setActiveGridSizeOverride(null);
     }
-  }, [activeBackgroundId, activeGridSizeOverride, persistedActiveGrid.cellSizePx]);
+  }, [activeBackgroundId, activeGridSizeOverride, persistedActiveGrid]);
 
   useEffect(() => (
     () => {
@@ -3262,6 +3311,7 @@ export default function GrigliataPage() {
       }
 
       await clearPlacementsForBackground(background.id);
+      await deleteDoc(doc(db, GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION, background.id));
 
       if (background.imagePath) {
         try {
@@ -3322,7 +3372,7 @@ export default function GrigliataPage() {
       if (selectedBackgroundId === activeBackgroundId) {
         setActiveGridSizeOverride({
           backgroundId: selectedBackgroundId,
-          cellSizePx: normalizedCalibration.cellSizePx,
+          grid: normalizedCalibration,
         });
       }
     } catch (error) {
@@ -3330,6 +3380,133 @@ export default function GrigliataPage() {
       setCalibrationError('Unable to save calibration changes.');
     } finally {
       setIsSavingCalibration(false);
+    }
+  };
+
+  const buildLightingMetadataFromFile = async (file, {
+    importedAt = null,
+    updatedAt = null,
+  } = {}) => {
+    if (!selectedBackground?.id) {
+      throw new Error('Select a background before importing lighting metadata.');
+    }
+
+    if (!file || typeof file.text !== 'function') {
+      throw new Error('Select a Dungeon Alchemist JSON file first.');
+    }
+
+    const rawJson = await file.text();
+    const parsedJson = parseDungeonAlchemistLightingJson(rawJson);
+    return normalizeDungeonAlchemistLightingMetadata(parsedJson, {
+      background: selectedBackground,
+      fileName: file.name || '',
+      importedAt,
+      importedBy: user?.uid || '',
+      updatedAt,
+      updatedBy: user?.uid || '',
+    });
+  };
+
+  const handleLightingFileChange = async (event) => {
+    const file = event.target.files?.[0] || null;
+    setLightingSelectedFile(file);
+    setLightingImportDraft(null);
+    setLightingImportError('');
+
+    if (!file) {
+      return;
+    }
+
+    try {
+      const metadataDraft = await buildLightingMetadataFromFile(file);
+      setLightingImportDraft(metadataDraft);
+    } catch (error) {
+      setLightingImportError(error?.message || 'Unable to parse that lighting metadata file.');
+    }
+  };
+
+  const handleImportLightingMetadata = async () => {
+    if (!isManager || !user?.uid || !selectedBackground?.id) return;
+
+    setLightingImportError('');
+    setBoardError('');
+    setIsImportingLighting(true);
+
+    try {
+      const importedAt = serverTimestamp();
+      const updatedAt = serverTimestamp();
+      const metadata = await buildLightingMetadataFromFile(lightingSelectedFile, {
+        importedAt,
+        updatedAt,
+      });
+      const summary = buildGrigliataLightingSummary(metadata, importedAt);
+
+      await setDoc(
+        doc(db, GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION, selectedBackground.id),
+        metadata,
+        { merge: true }
+      );
+      await updateDoc(doc(db, 'grigliata_backgrounds', selectedBackground.id), {
+        lightingSummary: summary,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+
+      setLightingImportDraft(metadata);
+    } catch (error) {
+      console.error('Failed to import Grigliata lighting metadata:', error);
+      setLightingImportError(error?.message || 'Unable to import lighting metadata.');
+    } finally {
+      setIsImportingLighting(false);
+    }
+  };
+
+  const handleToggleLightingDebugOverlay = () => {
+    setIsLightingDebugOverlayVisible((currentValue) => !currentValue);
+  };
+
+  const handleApplyLightingCalibration = async () => {
+    if (!isManager || !user?.uid || !selectedBackground?.id) return;
+
+    const calibrationSource = lightingImportDraft
+      || (selectedBackground.id === activeBackgroundId ? lightingMetadata : null);
+
+    if (!calibrationSource?.grid) {
+      setLightingImportError('Import lighting metadata for this background before applying JSON calibration.');
+      return;
+    }
+
+    setLightingImportError('');
+    setCalibrationError('');
+    setBoardError('');
+    setIsApplyingLightingCalibration(true);
+
+    try {
+      const normalizedCalibration = normalizeGridConfig(calibrationSource.grid);
+
+      if (selectedBackground.id === activeBackgroundId) {
+        await flushPendingGridSizeAutosave();
+      }
+
+      await updateDoc(doc(db, 'grigliata_backgrounds', selectedBackground.id), {
+        grid: normalizedCalibration,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+
+      setCalibrationDraft(normalizedCalibration);
+
+      if (selectedBackground.id === activeBackgroundId) {
+        setActiveGridSizeOverride({
+          backgroundId: selectedBackground.id,
+          grid: normalizedCalibration,
+        });
+      }
+    } catch (error) {
+      console.error('Failed to apply lighting calibration:', error);
+      setLightingImportError('Unable to apply JSON calibration.');
+    } finally {
+      setIsApplyingLightingCalibration(false);
     }
   };
 
@@ -3822,6 +3999,8 @@ export default function GrigliataPage() {
                 selectedTokenDetails={isNarrationOverlayActive ? null : selectedTokenDetails}
                 sharedInteractions={visibleSharedInteractions}
                 activeViewers={activePageViewers}
+                lightingMetadata={lightingMetadata}
+                showLightingDebugOverlay={isManager && isLightingDebugOverlayVisible && !!lightingMetadata}
                 onSharedInteractionChange={isNarrationOverlayActive ? null : handleSharedInteractionChange}
                 onSelectedTokenIdsChange={setSelectedBoardTokenIds}
                 onDropCurrentToken={isNarrationOverlayActive ? null : ((payload, worldPoint) => {
@@ -3978,6 +4157,25 @@ export default function GrigliataPage() {
                     }}
                     onSaveCalibration={handleSaveCalibration}
                     onResetCalibration={() => setCalibrationDraft(DEFAULT_GRID)}
+                  />
+                )}
+
+                {isManager && activeSidebarTab === 'lighting' && (
+                  <GrigliataLightingImportPanel
+                    selectedBackground={selectedBackground}
+                    selectedFileName={lightingSelectedFile?.name || ''}
+                    importError={lightingImportError}
+                    importWarnings={lightingImportDraft?.importWarnings || null}
+                    isImporting={isImportingLighting}
+                    isApplyingCalibration={isApplyingLightingCalibration}
+                    isDebugOverlayVisible={isLightingDebugOverlayVisible}
+                    hasLightingMetadata={!!lightingMetadata}
+                    lightingMetadataDraft={lightingImportDraft}
+                    lightingMetadata={selectedBackground?.id === activeBackgroundId ? lightingMetadata : null}
+                    onLightingFileChange={handleLightingFileChange}
+                    onImportLightingMetadata={handleImportLightingMetadata}
+                    onApplyLightingCalibration={handleApplyLightingCalibration}
+                    onToggleDebugOverlay={handleToggleLightingDebugOverlay}
                   />
                 )}
               </div>

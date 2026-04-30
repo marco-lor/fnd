@@ -841,7 +841,10 @@ export default function useGrigliataPageData({
 
     return normalizeGridConfig({
       ...persistedActiveGrid,
-      cellSizePx: activeGridSizeOverride.cellSizePx,
+      ...activeGridSizeOverride.grid,
+      ...(Number.isFinite(activeGridSizeOverride.cellSizePx)
+        ? { cellSizePx: activeGridSizeOverride.cellSizePx }
+        : {}),
     });
   }, [activeBackgroundId, activeGridSizeOverride, persistedActiveGrid]);
 
