@@ -77,6 +77,7 @@ import {
   TokenNode,
 } from './grigliataBoardTokenUi';
 import GrigliataLightingDebugOverlay from './GrigliataLightingDebugOverlay';
+import GrigliataLightingMask from './GrigliataLightingMask';
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
 const RULER_LABEL_MIN_WIDTH = 90;
@@ -4764,7 +4765,20 @@ export default function GrigliataBoard({
               />
 
               {!isNarrationOverlayActive && isGridVisible && <GridLayer bounds={boardBounds} grid={normalizedGrid} />}
+            </Layer>
 
+            {!isNarrationOverlayActive && isManager && lightingMetadata && (
+              <Layer listening={false}>
+                <GrigliataLightingMask
+                  bounds={boardBounds}
+                  grid={normalizedGrid}
+                  metadata={lightingMetadata}
+                  tokens={visibleRenderedTokens}
+                />
+              </Layer>
+            )}
+
+            <Layer>
               {!isNarrationOverlayActive && isManager && showLightingDebugOverlay && lightingMetadata && (
                 <GrigliataLightingDebugOverlay
                   metadata={lightingMetadata}

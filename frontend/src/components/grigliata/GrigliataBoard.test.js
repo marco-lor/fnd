@@ -665,6 +665,124 @@ describe('GrigliataBoard', () => {
     expect(overlay.compareDocumentPosition(token) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  test('renders the computed lighting mask only for DMs with metadata outside narration', async () => {
+    const lightingMetadata = {
+      backgroundId: 'map-1',
+      scene: {
+        darkness: 0.6,
+        globalLight: false,
+      },
+      walls: [{
+        id: 'wall-1',
+        x1: 120,
+        y1: 0,
+        x2: 120,
+        y2: 220,
+        blocksSight: true,
+      }],
+      lights: [{
+        id: 'light-1',
+        x: 80,
+        y: 80,
+        brightRadiusPx: 60,
+        dimRadiusPx: 140,
+        color: '#FFAD00',
+      }],
+    };
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          tokens: [buildOverlayToken()],
+          lightingMetadata,
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('lighting-mask-layer')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-darkness-overlay')).toHaveAttribute('data-opacity', '0.6');
+    expect(screen.getByTestId('lighting-token-vision-cutout')).toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: false,
+          tokens: [buildOverlayToken()],
+          lightingMetadata,
+        })}
+      />
+    );
+
+    expect(screen.queryByTestId('lighting-mask-layer')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          tokens: [buildOverlayToken()],
+          lightingMetadata,
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
+
+    expect(screen.queryByTestId('lighting-mask-layer')).not.toBeInTheDocument();
+  });
+
+  test('keeps the lighting debug overlay toggle independent from the computed mask', async () => {
+    const lightingMetadata = {
+      backgroundId: 'map-1',
+      scene: {
+        darkness: 0.5,
+        globalLight: false,
+      },
+      walls: [{
+        id: 'wall-1',
+        x1: 10,
+        y1: 20,
+        x2: 80,
+        y2: 20,
+        blocksSight: true,
+        doorType: 0,
+      }],
+      lights: [{
+        id: 'light-1',
+        x: 45,
+        y: 55,
+        brightRadiusPx: 30,
+        dimRadiusPx: 60,
+        color: '#FFAD00',
+      }],
+    };
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightingMetadata,
+          showLightingDebugOverlay: false,
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('lighting-mask-layer')).toBeInTheDocument();
+    expect(screen.queryByTestId('lighting-debug-overlay')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightingMetadata,
+          showLightingDebugOverlay: true,
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('lighting-mask-layer')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-debug-overlay')).toBeInTheDocument();
+  });
+
   test('keeps the old battlemap briefly while fading it out on deactivation', async () => {
     jest.useFakeTimers();
 
