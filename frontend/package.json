@@ -12,7 +12,7 @@
     "cannon": "^0.6.2",
     "cra-template": "1.2.0",
     "expr-eval": "^2.0.2",
-    "firebase": "^11.2.0",
+    "firebase": "^12.12.1",
     "firebase-admin": "^13.0.2",
     "firebase-functions": "^6.3.2",
     "framer-motion": "^12.4.5",
@@ -65,7 +65,7 @@
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.4",
     "@testing-library/react": "^16.3.0",
-    "firebase-tools": "^13.29.3",
+    "firebase-tools": "^15.16.0",
     "autoprefixer": "^10.4.16",
     "postcss": "^8.4.31",
     "tailwindcss": "^3.3.5",
