@@ -43,6 +43,10 @@ import {
   normalizeTurnEffects,
   sortTurnOrderEntries,
 } from './turnOrder';
+import {
+  normalizeTokenVisionRadiusSquares,
+  normalizeTokenVisionSettings,
+} from './lightingVisibility';
 
 const LIVE_INTERACTION_CLOCK_INTERVAL_MS = 15 * 1000;
 const PAGE_PRESENCE_CLOCK_INTERVAL_MS = 15 * 1000;
@@ -76,6 +80,17 @@ const sortFoesLibrary = (foes) => (
     return (left.name || '').localeCompare(right.name || '');
   })
 );
+
+const normalizeOptionalVisionEnabled = (visionEnabled) => (
+  typeof visionEnabled === 'boolean' ? visionEnabled : undefined
+);
+
+const normalizeOptionalVisionRadiusSquares = (visionRadiusSquares) => {
+  const numericValue = Number(visionRadiusSquares);
+  return Number.isFinite(numericValue)
+    ? normalizeTokenVisionRadiusSquares(numericValue)
+    : undefined;
+};
 
 export default function useGrigliataPageData({
   currentUserId = '',
@@ -555,6 +570,12 @@ export default function useGrigliataPageData({
           label: typeof placement?.label === 'string' ? placement.label : '',
           imageUrl: typeof placement?.imageUrl === 'string' ? placement.imageUrl : '',
           sizeSquares: normalizeTokenSizeSquares(placement?.sizeSquares),
+          ...(normalizeOptionalVisionEnabled(placement?.visionEnabled) !== undefined
+            ? { visionEnabled: normalizeOptionalVisionEnabled(placement.visionEnabled) }
+            : {}),
+          ...(normalizeOptionalVisionRadiusSquares(placement?.visionRadiusSquares) !== undefined
+            ? { visionRadiusSquares: normalizeOptionalVisionRadiusSquares(placement.visionRadiusSquares) }
+            : {}),
           isInTurnOrder: placement?.isInTurnOrder === true,
           turnOrderInitiative: Number.isInteger(placement?.turnOrderInitiative)
             ? placement.turnOrderInitiative
@@ -629,6 +650,7 @@ export default function useGrigliataPageData({
             ? 'foesHub'
             : (tokenType === 'custom' ? 'uploaded' : 'profile')
         );
+        const tokenVisionSettings = normalizeTokenVisionSettings(placement);
 
         return {
           ...(profile || {}),
@@ -661,6 +683,8 @@ export default function useGrigliataPageData({
           isVisibleToPlayers: placement?.isVisibleToPlayers !== false,
           isDead: placement?.isDead === true,
           statuses: Array.isArray(placement?.statuses) ? placement.statuses : [],
+          visionEnabled: tokenVisionSettings.visionEnabled,
+          visionRadiusSquares: tokenVisionSettings.visionRadiusSquares,
           isInTurnOrder: placement?.isInTurnOrder === true,
           turnOrderInitiative: Number.isInteger(placement?.turnOrderInitiative)
             ? placement.turnOrderInitiative
@@ -751,25 +775,31 @@ export default function useGrigliataPageData({
     ]
   );
 
-  const currentUserToken = useMemo(() => ({
-    id: currentUserId,
-    tokenId: currentUserId,
-    ownerUid: currentUserId,
-    characterId: currentCharacterId,
-    tokenType: 'character',
-    imageSource: currentUserTokenProfileDoc?.imageSource || 'profile',
-    label: currentUserTokenProfileDoc?.label || currentTokenLabel,
-    imageUrl: currentUserTokenProfileDoc?.imageUrl || currentImageUrl,
-    imagePath: currentUserTokenProfileDoc?.imagePath || currentImagePath,
-    placed: !!currentUserPlacement,
-    col: Number.isFinite(currentUserPlacement?.col) ? currentUserPlacement.col : 0,
-    row: Number.isFinite(currentUserPlacement?.row) ? currentUserPlacement.row : 0,
-    sizeSquares: normalizeTokenSizeSquares(currentUserPlacement?.sizeSquares),
-    isVisibleToPlayers: currentUserPlacement?.isVisibleToPlayers !== false,
-    isDead: currentUserPlacement?.isDead === true,
-    statuses: Array.isArray(currentUserPlacement?.statuses) ? currentUserPlacement.statuses : [],
-    isHiddenByManager: isCurrentUserTokenHiddenOnActiveMap,
-  }), [
+  const currentUserToken = useMemo(() => {
+    const tokenVisionSettings = normalizeTokenVisionSettings(currentUserPlacement);
+
+    return {
+      id: currentUserId,
+      tokenId: currentUserId,
+      ownerUid: currentUserId,
+      characterId: currentCharacterId,
+      tokenType: 'character',
+      imageSource: currentUserTokenProfileDoc?.imageSource || 'profile',
+      label: currentUserTokenProfileDoc?.label || currentTokenLabel,
+      imageUrl: currentUserTokenProfileDoc?.imageUrl || currentImageUrl,
+      imagePath: currentUserTokenProfileDoc?.imagePath || currentImagePath,
+      placed: !!currentUserPlacement,
+      col: Number.isFinite(currentUserPlacement?.col) ? currentUserPlacement.col : 0,
+      row: Number.isFinite(currentUserPlacement?.row) ? currentUserPlacement.row : 0,
+      sizeSquares: normalizeTokenSizeSquares(currentUserPlacement?.sizeSquares),
+      isVisibleToPlayers: currentUserPlacement?.isVisibleToPlayers !== false,
+      isDead: currentUserPlacement?.isDead === true,
+      statuses: Array.isArray(currentUserPlacement?.statuses) ? currentUserPlacement.statuses : [],
+      visionEnabled: tokenVisionSettings.visionEnabled,
+      visionRadiusSquares: tokenVisionSettings.visionRadiusSquares,
+      isHiddenByManager: isCurrentUserTokenHiddenOnActiveMap,
+    };
+  }, [
     currentCharacterId,
     currentImagePath,
     currentImageUrl,

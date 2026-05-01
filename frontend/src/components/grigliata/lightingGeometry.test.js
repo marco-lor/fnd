@@ -157,4 +157,31 @@ describe('lightingGeometry', () => {
     expect(vision.origin).toEqual({ x: 105, y: 175 });
     expect(maxDistanceFrom(vision.origin, vision.polygon)).toBeCloseTo(140, 3);
   });
+
+  test('uses a per-token vision radius when one is supplied', () => {
+    const [firstVision, secondVision] = buildTokenVisionPolygons({
+      tokens: [{
+        tokenId: 'token-1',
+        renderPosition: {
+          x: 70,
+          y: 140,
+          size: 70,
+        },
+        visionRadiusPx: 210,
+      }, {
+        tokenId: 'token-2',
+        renderPosition: {
+          x: 210,
+          y: 140,
+          size: 70,
+        },
+      }],
+      visionRadiusPx: 140,
+      rayCount: 16,
+      segments: [],
+    });
+
+    expect(maxDistanceFrom(firstVision.origin, firstVision.polygon)).toBeCloseTo(210, 3);
+    expect(maxDistanceFrom(secondVision.origin, secondVision.polygon)).toBeCloseTo(140, 3);
+  });
 });

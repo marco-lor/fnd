@@ -491,6 +491,12 @@ jest.mock('./GrigliataBoard', () => {
         <button type="button" onClick={() => props.onSetSelectedTokenSize?.('user-2', 3)}>
           resize selected token
         </button>
+        <button type="button" onClick={() => props.onSetSelectedTokenVision?.('user-2', {
+          visionEnabled: false,
+          visionRadiusSquares: 9,
+        })}>
+          set selected token vision
+        </button>
         <button type="button" onClick={() => props.onJoinTurnOrder?.('user-1', 13)}>
           join self turn order
         </button>
@@ -1378,6 +1384,9 @@ describe('GrigliataPage', () => {
     expect(screen.queryByRole('tab', { name: /lighting/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /lighting import/i })).not.toBeInTheDocument();
     expect(screen.getByTestId('board-lighting-debug')).toHaveTextContent('false');
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.path === 'grigliata_background_lighting/map-1'
+    ))).toBe(false);
   });
 
   test('publishes only when sharing is enabled and a live interaction exists', async () => {
@@ -1845,6 +1854,79 @@ describe('GrigliataPage', () => {
           isVisibleToPlayers: false,
           isDead: true,
           statuses: ['sleeping'],
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
+  });
+
+  test('updates selected token vision settings without dropping placement state', async () => {
+    setManagerAuth();
+
+    act(() => {
+      setCollectionData('grigliata_token_placements', [
+        {
+          id: 'map-1__user-2',
+          backgroundId: 'map-1',
+          ownerUid: 'user-2',
+          col: 6,
+          row: 2,
+          sizeSquares: 4,
+          isVisibleToPlayers: false,
+          isDead: true,
+          statuses: ['sleeping'],
+          isInTurnOrder: true,
+          turnOrderInitiative: 15,
+          turnCounter: 2,
+          turnEffects: [{
+            id: 'shield',
+            kind: 'shield',
+            totalTurns: 3,
+            remainingTurns: 2,
+            appliesFromTurnCounter: 0,
+          }],
+        },
+      ]);
+    });
+
+    render(<GrigliataPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('board-token-count')).toHaveTextContent('1');
+    });
+    firestore.setDoc.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /set selected token vision/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+        expect.objectContaining({
+          backgroundId: 'map-1',
+          tokenId: 'user-2',
+          ownerUid: 'user-2',
+          label: 'user-2',
+          imageUrl: '',
+          col: 6,
+          row: 2,
+          sizeSquares: 4,
+          isVisibleToPlayers: false,
+          isDead: true,
+          statuses: ['sleeping'],
+          isInTurnOrder: true,
+          turnOrderInitiative: 15,
+          turnCounter: 2,
+          turnEffects: [{
+            id: 'shield',
+            kind: 'shield',
+            totalTurns: 3,
+            remainingTurns: 2,
+            appliesFromTurnCounter: 0,
+          }],
+          visionEnabled: false,
+          visionRadiusSquares: 9,
           updatedBy: 'user-1',
         }),
         { merge: true }

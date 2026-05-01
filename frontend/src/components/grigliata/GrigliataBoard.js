@@ -78,6 +78,7 @@ import {
 } from './grigliataBoardTokenUi';
 import GrigliataLightingDebugOverlay from './GrigliataLightingDebugOverlay';
 import GrigliataLightingMask from './GrigliataLightingMask';
+import { resolveViewerTokenVisionSources } from './lightingVisibility';
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
 const RULER_LABEL_MIN_WIDTH = 90;
@@ -2285,6 +2286,8 @@ export default function GrigliataBoard({
   isTokenStatusActionPending,
   onSetSelectedTokenSize,
   isTokenSizeActionPending = false,
+  onSetSelectedTokenVision,
+  isTokenVisionActionPending = false,
   selectedTokenDetails = null,
   onDropCurrentToken,
   onSelectedTokenIdsChange,
@@ -4464,6 +4467,21 @@ export default function GrigliataBoard({
   const visibleHoveredTokenTooltip = isNarrationOverlayActive ? null : hoveredTokenTooltip;
   const visibleSelectedAoEFigureActionState = isNarrationOverlayActive ? null : selectedAoEFigureActionState;
   const visibleSelectedTokenActionState = isNarrationOverlayActive ? null : selectedTokenActionState;
+  const visibleTokenVisionSources = useMemo(
+    () => (isNarrationOverlayActive ? [] : resolveViewerTokenVisionSources({
+      tokens: visibleRenderedTokens,
+      currentUserId,
+      isManager,
+      cellSizePx: normalizedGrid.cellSizePx,
+    })),
+    [
+      currentUserId,
+      isManager,
+      isNarrationOverlayActive,
+      normalizedGrid.cellSizePx,
+      visibleRenderedTokens,
+    ]
+  );
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-700 bg-slate-950/80 shadow-2xl">
@@ -4767,13 +4785,14 @@ export default function GrigliataBoard({
               {!isNarrationOverlayActive && isGridVisible && <GridLayer bounds={boardBounds} grid={normalizedGrid} />}
             </Layer>
 
-            {!isNarrationOverlayActive && isManager && lightingMetadata && (
+            {!isNarrationOverlayActive && lightingMetadata && (
               <Layer listening={false}>
                 <GrigliataLightingMask
                   bounds={boardBounds}
                   grid={normalizedGrid}
                   metadata={lightingMetadata}
                   tokens={visibleRenderedTokens}
+                  visionSources={visibleTokenVisionSources}
                 />
               </Layer>
             )}
@@ -5120,6 +5139,8 @@ export default function GrigliataBoard({
           onSetSelectedTokensDeadState={onSetSelectedTokensDeadState}
           onUpdateTokenStatuses={onUpdateTokenStatuses}
           onSetSelectedTokenSize={onSetSelectedTokenSize}
+          isTokenVisionActionPending={isTokenVisionActionPending}
+          onSetSelectedTokenVision={onSetSelectedTokenVision}
         />
 
         {visibleSelectedAoEFigureActionState && (

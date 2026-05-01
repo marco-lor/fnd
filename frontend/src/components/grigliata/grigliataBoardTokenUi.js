@@ -21,6 +21,7 @@ import {
   splitTokenStatusesForDisplay,
 } from './tokenStatuses';
 import useImageAsset from './useImageAsset';
+import { normalizeTokenVisionSettings } from './lightingVisibility';
 
 const SHAPE_OUTLINE_STROKE_WIDTH = 4;
 const TOKEN_STATUS_VISIBLE_BADGE_COUNT = 3;
@@ -583,7 +584,17 @@ export const buildSelectedTokenActionState = ({
       sizeSquares: normalizeTokenSizeSquares(selectedToken.sizeSquares),
     }
     : null;
-  const actionCount = (isManager ? 2 : 0) + (statusToken ? 1 : 0) + (sizeToken ? 1 : 0);
+  const visionToken = selectedToken && isManager
+    ? {
+      tokenId: selectedToken.tokenId,
+      label: selectedToken.label || 'token',
+      ...normalizeTokenVisionSettings(selectedToken),
+    }
+    : null;
+  const actionCount = (isManager ? 2 : 0)
+    + (statusToken ? 1 : 0)
+    + (sizeToken ? 1 : 0)
+    + (visionToken ? 1 : 0);
   if (actionCount < 1) {
     return null;
   }
@@ -610,6 +621,7 @@ export const buildSelectedTokenActionState = ({
     showDeadAction: isManager,
     statusToken,
     sizeToken,
+    visionToken,
     nextIsVisibleToPlayers: allSelectedTokensHidden,
     nextIsDead: !allSelectedTokensDead,
     visibilityTitle: allSelectedTokensHidden

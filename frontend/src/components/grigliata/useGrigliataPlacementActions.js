@@ -12,6 +12,7 @@ import {
   buildPlacementDocId,
   normalizeTokenSizeSquares,
 } from './boardUtils';
+import { normalizeTokenVisionRadiusSquares } from './lightingVisibility';
 import {
   normalizeTurnCounter,
   normalizeTurnEffects,
@@ -22,6 +23,17 @@ const normalizeStatuses = (statuses) => (
     ? statuses.filter((statusId) => typeof statusId === 'string' && statusId)
     : null
 );
+
+const normalizeOptionalVisionEnabled = (visionEnabled) => (
+  typeof visionEnabled === 'boolean' ? visionEnabled : undefined
+);
+
+const normalizeOptionalVisionRadiusSquares = (visionRadiusSquares) => {
+  const numericValue = Number(visionRadiusSquares);
+  return Number.isFinite(numericValue)
+    ? normalizeTokenVisionRadiusSquares(numericValue)
+    : undefined;
+};
 
 export default function useGrigliataPlacementActions({
   activeBackgroundId = '',
@@ -47,6 +59,8 @@ export default function useGrigliataPlacementActions({
     isVisibleToPlayers,
     isDead,
     statuses,
+    visionEnabled,
+    visionRadiusSquares,
     isInTurnOrder,
     turnOrderInitiative,
     turnOrderJoinedAt,
@@ -82,6 +96,12 @@ export default function useGrigliataPlacementActions({
     const resolvedSizeSquares = sizeSquares === undefined
       ? normalizeTokenSizeSquares(existingPlacement?.sizeSquares)
       : normalizeTokenSizeSquares(sizeSquares);
+    const resolvedVisionEnabled = visionEnabled === undefined
+      ? normalizeOptionalVisionEnabled(existingPlacement?.visionEnabled)
+      : normalizeOptionalVisionEnabled(visionEnabled);
+    const resolvedVisionRadiusSquares = visionRadiusSquares === undefined
+      ? normalizeOptionalVisionRadiusSquares(existingPlacement?.visionRadiusSquares)
+      : normalizeTokenVisionRadiusSquares(visionRadiusSquares);
     const ownedTrayToken = ownedTrayTokensById.get(resolvedTokenId) || null;
     const existingLabel = typeof existingPlacement?.label === 'string' ? existingPlacement.label.trim() : '';
     const ownedLabel = typeof ownedTrayToken?.label === 'string' ? ownedTrayToken.label.trim() : '';
@@ -102,6 +122,8 @@ export default function useGrigliataPlacementActions({
       isVisibleToPlayers: resolvedIsVisibleToPlayers,
       isDead: resolvedIsDead,
       ...(resolvedStatuses !== null ? { statuses: resolvedStatuses } : {}),
+      ...(resolvedVisionEnabled !== undefined ? { visionEnabled: resolvedVisionEnabled } : {}),
+      ...(resolvedVisionRadiusSquares !== undefined ? { visionRadiusSquares: resolvedVisionRadiusSquares } : {}),
       ...(resolvedIsInTurnOrder ? { isInTurnOrder: true } : {}),
       ...(resolvedIsInTurnOrder && Number.isInteger(resolvedTurnOrderInitiative)
         ? { turnOrderInitiative: resolvedTurnOrderInitiative }
@@ -171,6 +193,8 @@ export default function useGrigliataPlacementActions({
           isVisibleToPlayers: placement?.isVisibleToPlayers !== false,
           isDead: placement?.isDead === true,
           statuses: normalizeStatuses(placement?.statuses) || [],
+          visionEnabled: normalizeOptionalVisionEnabled(placement?.visionEnabled),
+          visionRadiusSquares: normalizeOptionalVisionRadiusSquares(placement?.visionRadiusSquares),
           isInTurnOrder: placement?.isInTurnOrder === true,
           turnOrderInitiative: Number.isInteger(placement?.turnOrderInitiative)
             ? placement.turnOrderInitiative
@@ -531,6 +555,46 @@ export default function useGrigliataPlacementActions({
     isManager,
   ]);
 
+  const setSelectedTokenVision = useCallback(async (tokenId, visionSettings) => {
+    if (
+      !isManager
+      || !currentUserId
+      || !activeBackgroundId
+      || !tokenId
+      || typeof visionSettings?.visionEnabled !== 'boolean'
+    ) {
+      return false;
+    }
+
+    const targetPlacement = getActiveMapPlacementContexts([tokenId])[0];
+    if (!targetPlacement) {
+      return false;
+    }
+
+    await setDoc(
+      doc(db, 'grigliata_token_placements', targetPlacement.placementId),
+      buildPlacementWritePayload({
+        backgroundId: activeBackgroundId,
+        tokenId,
+        ownerUid: targetPlacement.ownerUid,
+        col: targetPlacement.col,
+        row: targetPlacement.row,
+        sizeSquares: targetPlacement.sizeSquares,
+        visionEnabled: visionSettings.visionEnabled,
+        visionRadiusSquares: visionSettings.visionRadiusSquares,
+      }),
+      { merge: true }
+    );
+
+    return true;
+  }, [
+    activeBackgroundId,
+    buildPlacementWritePayload,
+    currentUserId,
+    getActiveMapPlacementContexts,
+    isManager,
+  ]);
+
   return {
     buildPlacementWritePayload,
     buildTurnOrderRemovalPlacementWrite,
@@ -543,5 +607,6 @@ export default function useGrigliataPlacementActions({
     setSelectedTokensDeadState,
     updateTokenStatuses,
     setSelectedTokenSize,
+    setSelectedTokenVision,
   };
 }

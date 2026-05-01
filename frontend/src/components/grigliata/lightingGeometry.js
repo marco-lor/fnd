@@ -311,7 +311,10 @@ export const buildTokenVisionPolygon = ({
     return null;
   }
 
-  const radius = normalizeRadius(visionRadiusPx);
+  const tokenVisionRadiusPx = token?.visionRadiusPx === undefined
+    ? visionRadiusPx
+    : token.visionRadiusPx;
+  const radius = normalizeRadius(tokenVisionRadiusPx);
   if (radius <= 0) {
     return null;
   }

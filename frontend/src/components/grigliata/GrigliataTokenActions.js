@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FiEye, FiEyeOff, FiMaximize, FiMinus, FiPlus } from 'react-icons/fi';
+import { FiEye, FiEyeOff, FiMaximize, FiMinus, FiPlus, FiSun } from 'react-icons/fi';
 import { GiAura, GiDeathSkull } from 'react-icons/gi';
 import { normalizeTokenSizeSquares } from './boardUtils';
+import GrigliataTokenVisionPopover from './GrigliataTokenVisionPopover';
 import {
   GRIGLIATA_TOKEN_STATUSES,
   GRIGLIATA_TOKEN_STATUS_GROUPS,
@@ -395,18 +396,23 @@ export default function GrigliataTokenActions({
   isTokenDeadActionPending = false,
   isTokenStatusActionPending = false,
   isTokenSizeActionPending = false,
+  isTokenVisionActionPending = false,
   onSetSelectedTokensVisibility,
   onSetSelectedTokensDeadState,
   onUpdateTokenStatuses,
   onSetSelectedTokenSize,
+  onSetSelectedTokenVision,
 }) {
   const [isStatusPopoverOpen, setIsStatusPopoverOpen] = useState(false);
   const [isSizePopoverOpen, setIsSizePopoverOpen] = useState(false);
+  const [isVisionPopoverOpen, setIsVisionPopoverOpen] = useState(false);
   const statusControlRef = useRef(null);
   const statusTokenId = actionState?.statusToken?.tokenId || '';
   const sizeTokenId = actionState?.sizeToken?.tokenId || '';
+  const visionTokenId = actionState?.visionToken?.tokenId || '';
   const hasStatusToken = !!actionState?.statusToken;
   const hasSizeToken = !!actionState?.sizeToken;
+  const hasVisionToken = !!actionState?.visionToken;
   const statusPopoverPlacement = useMemo(() => {
     if (!actionState || !viewportSize?.width || !viewportSize?.height) {
       return null;
@@ -497,6 +503,15 @@ export default function GrigliataTokenActions({
     setIsSizePopoverOpen(false);
   }, [hasSizeToken, sizeTokenId]);
 
+  useEffect(() => {
+    if (!hasVisionToken) {
+      setIsVisionPopoverOpen(false);
+      return;
+    }
+
+    setIsVisionPopoverOpen(false);
+  }, [hasVisionToken, visionTokenId]);
+
   if (!actionState) {
     return null;
   }
@@ -523,6 +538,9 @@ export default function GrigliataTokenActions({
   const sizeTitle = actionState.sizeToken
     ? `Resize ${actionState.sizeToken.label || 'token'}`
     : 'Resize token';
+  const visionTitle = actionState.visionToken
+    ? `Edit vision for ${actionState.visionToken.label || 'token'}`
+    : 'Edit token vision';
   const VisibilityIcon = actionState.nextIsVisibleToPlayers ? FiEye : FiEyeOff;
 
   return (
@@ -602,6 +620,7 @@ export default function GrigliataTokenActions({
                 onClick={(event) => {
                   event.stopPropagation();
                   setIsSizePopoverOpen(false);
+                  setIsVisionPopoverOpen(false);
                   setIsStatusPopoverOpen((currentValue) => !currentValue);
                 }}
                 className={`flex items-center justify-center rounded-[1.15rem] border text-slate-50 shadow-lg transition-transform duration-150 hover:scale-[1.03] disabled:cursor-not-allowed disabled:opacity-60 ${
@@ -628,6 +647,7 @@ export default function GrigliataTokenActions({
                 onClick={(event) => {
                   event.stopPropagation();
                   setIsStatusPopoverOpen(false);
+                  setIsVisionPopoverOpen(false);
                   setIsSizePopoverOpen((currentValue) => !currentValue);
                 }}
                 className={`flex items-center justify-center rounded-[1.15rem] border text-slate-50 shadow-lg transition-transform duration-150 hover:scale-[1.03] disabled:cursor-not-allowed disabled:opacity-60 ${
@@ -641,6 +661,33 @@ export default function GrigliataTokenActions({
                 }}
               >
                 <FiMaximize className="h-[44%] w-[44%]" />
+              </button>
+            )}
+
+            {actionState.visionToken && (
+              <button
+                type="button"
+                aria-label={visionTitle}
+                title={visionTitle}
+                disabled={isTokenVisionActionPending}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsStatusPopoverOpen(false);
+                  setIsSizePopoverOpen(false);
+                  setIsVisionPopoverOpen((currentValue) => !currentValue);
+                }}
+                className={`flex items-center justify-center rounded-[1.15rem] border text-slate-50 shadow-lg transition-transform duration-150 hover:scale-[1.03] disabled:cursor-not-allowed disabled:opacity-60 ${
+                  isVisionPopoverOpen
+                    ? 'border-cyan-200/75 bg-cyan-400/28'
+                    : 'border-cyan-300/45 bg-cyan-500/18'
+                }`}
+                style={{
+                  width: actionState.buttonSize,
+                  height: actionState.buttonSize,
+                }}
+              >
+                <FiSun className="h-[44%] w-[44%]" />
               </button>
             )}
           </div>
@@ -665,6 +712,20 @@ export default function GrigliataTokenActions({
               nextSizeSquares
             )}
             onRequestClose={() => setIsSizePopoverOpen(false)}
+            withinRef={statusControlRef}
+            placementStyle={sizePopoverPlacement}
+          />
+
+          <GrigliataTokenVisionPopover
+            open={isVisionPopoverOpen && !!actionState.visionToken}
+            visionEnabled={actionState.visionToken?.visionEnabled}
+            visionRadiusSquares={actionState.visionToken?.visionRadiusSquares}
+            isPending={isTokenVisionActionPending}
+            onCommitVision={(nextVisionSettings) => onSetSelectedTokenVision?.(
+              actionState.visionToken?.tokenId,
+              nextVisionSettings
+            )}
+            onRequestClose={() => setIsVisionPopoverOpen(false)}
             withinRef={statusControlRef}
             placementStyle={sizePopoverPlacement}
           />

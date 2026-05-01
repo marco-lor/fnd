@@ -10,8 +10,9 @@ import {
   buildTokenVisionPolygons,
   normalizeLightingWallSegments,
 } from './lightingGeometry';
+import { DEFAULT_TOKEN_VISION_RADIUS_SQUARES } from './lightingVisibility';
 
-export const DEFAULT_TOKEN_VISION_RADIUS_SQUARES = 12;
+export { DEFAULT_TOKEN_VISION_RADIUS_SQUARES };
 
 const DARKNESS_FILL = '#020617';
 const DIM_LIGHT_CUTOUT_OPACITY = 0.42;
@@ -80,21 +81,23 @@ export default function GrigliataLightingMask({
   grid,
   metadata,
   tokens = [],
+  visionSources = null,
   rayCount,
 }) {
   const normalizedGrid = useMemo(() => normalizeGridConfig(grid), [grid]);
+  const resolvedVisionSources = Array.isArray(visionSources) ? visionSources : tokens;
   const wallSegments = useMemo(
     () => normalizeLightingWallSegments(metadata?.walls),
     [metadata?.walls]
   );
   const tokenVisionPolygons = useMemo(
     () => buildTokenVisionPolygons({
-      tokens,
+      tokens: resolvedVisionSources,
       visionRadiusPx: normalizedGrid.cellSizePx * DEFAULT_TOKEN_VISION_RADIUS_SQUARES,
       segments: wallSegments,
       rayCount,
     }),
-    [normalizedGrid.cellSizePx, rayCount, tokens, wallSegments]
+    [normalizedGrid.cellSizePx, rayCount, resolvedVisionSources, wallSegments]
   );
   const lightPolygons = useMemo(
     () => (Array.isArray(metadata?.lights) ? metadata.lights : [])
@@ -147,6 +150,7 @@ export default function GrigliataLightingMask({
           <Line
             key={`token-vision-${vision.tokenId || `${vision.origin.x}-${vision.origin.y}`}`}
             data-testid="lighting-token-vision-cutout"
+            data-tokenid={vision.tokenId || ''}
             points={polygonToPoints(vision.polygon)}
             closed
             fill="#ffffff"

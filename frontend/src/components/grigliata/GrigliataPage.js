@@ -370,6 +370,7 @@ export default function GrigliataPage() {
   const [isTokenDeadActionPending, setIsTokenDeadActionPending] = useState(false);
   const [isTokenStatusActionPending, setIsTokenStatusActionPending] = useState(false);
   const [isTokenSizeActionPending, setIsTokenSizeActionPending] = useState(false);
+  const [isTokenVisionActionPending, setIsTokenVisionActionPending] = useState(false);
   const [isCreatingCustomToken, setIsCreatingCustomToken] = useState(false);
   const [updatingCustomTokenId, setUpdatingCustomTokenId] = useState('');
   const [deletingCustomTokenId, setDeletingCustomTokenId] = useState('');
@@ -516,6 +517,7 @@ export default function GrigliataPage() {
     setSelectedTokensDeadState,
     updateTokenStatuses,
     setSelectedTokenSize,
+    setSelectedTokenVision,
   } = useGrigliataPlacementActions({
     activeBackgroundId,
     activePlacementsById,
@@ -3248,6 +3250,28 @@ export default function GrigliataPage() {
     }
   };
 
+  const handleSetSelectedTokenVision = async (tokenId, visionSettings) => {
+    if (!tokenId || typeof visionSettings?.visionEnabled !== 'boolean') {
+      return false;
+    }
+
+    setBoardError('');
+    setIsTokenVisionActionPending(true);
+    try {
+      return await setSelectedTokenVision(tokenId, visionSettings);
+    } catch (error) {
+      console.error('Failed to update token vision settings:', error);
+      setBoardError(
+        isPermissionDeniedError(error)
+          ? 'Only the DM can update token vision settings.'
+          : 'Unable to update that token vision right now.'
+      );
+      return false;
+    } finally {
+      setIsTokenVisionActionPending(false);
+    }
+  };
+
   const handleClearTokensForBackground = async (background) => {
     if (!isManager || !user?.uid || !background?.id) return;
 
@@ -3996,6 +4020,8 @@ export default function GrigliataPage() {
                 isTokenStatusActionPending={isTokenStatusActionPending}
                 onSetSelectedTokenSize={isNarrationOverlayActive ? null : handleSetSelectedTokenSize}
                 isTokenSizeActionPending={isTokenSizeActionPending}
+                onSetSelectedTokenVision={isManager && !isNarrationOverlayActive ? handleSetSelectedTokenVision : null}
+                isTokenVisionActionPending={isTokenVisionActionPending}
                 selectedTokenDetails={isNarrationOverlayActive ? null : selectedTokenDetails}
                 sharedInteractions={visibleSharedInteractions}
                 activeViewers={activePageViewers}

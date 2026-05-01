@@ -665,7 +665,7 @@ describe('GrigliataBoard', () => {
     expect(overlay.compareDocumentPosition(token) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  test('renders the computed lighting mask only for DMs with metadata outside narration', async () => {
+  test('renders the computed lighting mask with viewer-safe token vision outside narration', async () => {
     const lightingMetadata = {
       backgroundId: 'map-1',
       scene: {
@@ -694,7 +694,35 @@ describe('GrigliataBoard', () => {
       <GrigliataBoard
         {...buildProps({
           isManager: true,
-          tokens: [buildOverlayToken()],
+          currentUserId: 'dm-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+            visionRadiusSquares: 4,
+          }, {
+            tokenId: 'user-2',
+            id: 'user-2',
+            ownerUid: 'user-2',
+            tokenType: 'character',
+            label: 'Bryn',
+            imageUrl: '',
+            placed: true,
+            col: 4,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
           lightingMetadata,
         })}
       />
@@ -702,19 +730,51 @@ describe('GrigliataBoard', () => {
 
     expect(await screen.findByTestId('lighting-mask-layer')).toBeInTheDocument();
     expect(screen.getByTestId('lighting-darkness-overlay')).toHaveAttribute('data-opacity', '0.6');
-    expect(screen.getByTestId('lighting-token-vision-cutout')).toBeInTheDocument();
+    expect(screen.getAllByTestId('lighting-token-vision-cutout').map((node) => (
+      node.getAttribute('data-tokenid')
+    ))).toEqual(['user-1', 'user-2']);
 
     rerender(
       <GrigliataBoard
         {...buildProps({
           isManager: false,
-          tokens: [buildOverlayToken()],
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }, {
+            tokenId: 'user-2',
+            id: 'user-2',
+            ownerUid: 'user-2',
+            tokenType: 'character',
+            label: 'Bryn',
+            imageUrl: '',
+            placed: true,
+            col: 4,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
           lightingMetadata,
         })}
       />
     );
 
-    expect(screen.queryByTestId('lighting-mask-layer')).not.toBeInTheDocument();
+    expect(screen.getByTestId('lighting-mask-layer')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-light-bright-polygon')).toBeInTheDocument();
+    expect(screen.getAllByTestId('lighting-token-vision-cutout')).toHaveLength(1);
+    expect(screen.getByTestId('lighting-token-vision-cutout')).toHaveAttribute('data-tokenid', 'user-1');
 
     rerender(
       <GrigliataBoard
@@ -1572,6 +1632,63 @@ describe('GrigliataBoard', () => {
     const chipTop = Number.parseFloat(chipCluster.style.top);
 
     expect(chipTop).toBeGreaterThanOrEqual((tokenScreenTop + tokenScreenSize) - 0.5);
+  });
+
+  test('shows selected-token vision controls only for DMs', async () => {
+    const token = {
+      tokenId: 'user-2',
+      id: 'user-2',
+      ownerUid: 'user-2',
+      tokenType: 'character',
+      label: 'Bryn',
+      imageUrl: '',
+      placed: true,
+      col: 2,
+      row: 2,
+      sizeSquares: 1,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    };
+    const { unmount } = render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'dm-1',
+          isManager: true,
+          tokens: [token],
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-2'), {
+      button: 0,
+      buttons: 1,
+      clientX: 160,
+      clientY: 160,
+    });
+
+    expect(await screen.findByRole('button', { name: /edit vision for bryn/i })).toBeInTheDocument();
+
+    unmount();
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-2',
+          isManager: false,
+          tokens: [token],
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-2'), {
+      button: 0,
+      buttons: 1,
+      clientX: 160,
+      clientY: 160,
+    });
+
+    expect(screen.queryByRole('button', { name: /edit vision/i })).not.toBeInTheDocument();
   });
 
   test('preserves sizeSquares when dragging a token', async () => {

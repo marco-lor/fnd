@@ -106,6 +106,31 @@ describe('GrigliataLightingMask', () => {
     expect(screen.getByTestId('lighting-light-dim-polygon')).toBeInTheDocument();
   });
 
+  test('renders only the provided viewer-safe token vision sources', () => {
+    render(
+      <GrigliataLightingMask
+        bounds={bounds}
+        grid={grid}
+        metadata={metadata}
+        tokens={[token, {
+          tokenId: 'token-2',
+          renderPosition: {
+            x: 210,
+            y: 70,
+            size: 70,
+          },
+        }]}
+        visionSources={[{
+          ...token,
+          visionRadiusPx: 210,
+        }]}
+      />
+    );
+
+    expect(screen.getAllByTestId('lighting-token-vision-cutout')).toHaveLength(1);
+    expect(screen.getByTestId('lighting-token-vision-cutout')).toHaveAttribute('data-tokenid', 'token-1');
+  });
+
   test('skips darkness in global light scenes while showing clipped light contribution', () => {
     render(
       <GrigliataLightingMask

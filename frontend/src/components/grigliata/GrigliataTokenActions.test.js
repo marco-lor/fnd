@@ -49,6 +49,37 @@ describe('GrigliataTokenActions', () => {
     expect(screen.getByRole('button', { name: /resize aldor/i })).toBeInTheDocument();
   });
 
+  test('shows the vision button for a DM-selected single token', () => {
+    render(
+      <GrigliataTokenActions
+        actionState={buildActionState({
+          visionToken: {
+            tokenId: 'token-1',
+            label: 'Aldor',
+            visionEnabled: true,
+            visionRadiusSquares: 12,
+          },
+        })}
+        viewportSize={{ width: 1000, height: 700 }}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /edit vision for aldor/i })).toBeInTheDocument();
+  });
+
+  test('does not show vision editing when the action state has no DM vision token', () => {
+    render(
+      <GrigliataTokenActions
+        actionState={buildActionState({
+          visionToken: null,
+        })}
+        viewportSize={{ width: 1000, height: 700 }}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: /edit vision/i })).not.toBeInTheDocument();
+  });
+
   test('does not show status editing for multi-select manager actions', () => {
     render(
       <GrigliataTokenActions
@@ -207,6 +238,43 @@ describe('GrigliataTokenActions', () => {
     fireEvent.click(screen.getByRole('button', { name: /set token size to 3 by 3/i }));
 
     expect(handleSetSelectedTokenSize).toHaveBeenCalledWith('token-1', 3);
+  });
+
+  test('changing token vision settings calls onSetSelectedTokenVision', () => {
+    const handleSetSelectedTokenVision = jest.fn();
+
+    render(
+      <GrigliataTokenActions
+        actionState={buildActionState({
+          visionToken: {
+            tokenId: 'token-1',
+            label: 'Aldor',
+            visionEnabled: true,
+            visionRadiusSquares: 12,
+          },
+        })}
+        viewportSize={{ width: 1000, height: 700 }}
+        onSetSelectedTokenVision={handleSetSelectedTokenVision}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /edit vision for aldor/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /vision enabled/i }));
+
+    expect(handleSetSelectedTokenVision).toHaveBeenCalledWith('token-1', {
+      visionEnabled: false,
+      visionRadiusSquares: 12,
+    });
+
+    fireEvent.change(screen.getByRole('spinbutton', { name: /token vision radius in squares/i }), {
+      target: { value: '7' },
+    });
+    fireEvent.blur(screen.getByRole('spinbutton', { name: /token vision radius in squares/i }));
+
+    expect(handleSetSelectedTokenVision).toHaveBeenLastCalledWith('token-1', {
+      visionEnabled: false,
+      visionRadiusSquares: 7,
+    });
   });
 
   test('custom size input clamps values into the supported range', () => {
