@@ -33,6 +33,9 @@ export default function GrigliataLightingImportPanel({
   isApplyingCalibration = false,
   isLightingEnabled = true,
   isLightingEnabledPending = false,
+  isFogOfWarEnabled = true,
+  isFogOfWarEnabledPending = false,
+  isFogResetPending = false,
   isDebugOverlayVisible = true,
   hasLightingMetadata = false,
   lightingMetadataDraft = null,
@@ -41,6 +44,8 @@ export default function GrigliataLightingImportPanel({
   onImportLightingMetadata,
   onApplyLightingCalibration,
   onToggleLightingEnabled,
+  onToggleFogOfWarEnabled,
+  onResetFogOfWar,
   onToggleDebugOverlay,
 }) {
   const summaryText = formatSummaryText(selectedBackground?.lightingSummary);
@@ -81,6 +86,17 @@ export default function GrigliataLightingImportPanel({
             checked={isLightingEnabled}
             onChange={onToggleLightingEnabled}
             disabled={!hasSelectedBackground || isLightingEnabledPending}
+            className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-cyan-400 focus:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+          />
+        </label>
+
+        <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-3">
+          <span className="text-sm font-medium text-slate-100">Fog of war enabled</span>
+          <input
+            type="checkbox"
+            checked={isFogOfWarEnabled}
+            onChange={onToggleFogOfWarEnabled}
+            disabled={!hasSelectedBackground || isFogOfWarEnabledPending}
             className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-cyan-400 focus:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
           />
         </label>
@@ -154,6 +170,14 @@ export default function GrigliataLightingImportPanel({
             className="rounded-lg border border-amber-500/40 px-3 py-2 text-xs font-semibold text-amber-100 transition-colors hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isApplyingCalibration ? 'Applying...' : 'Apply JSON Calibration'}
+          </button>
+          <button
+            type="button"
+            onClick={onResetFogOfWar}
+            disabled={!hasSelectedBackground || isFogResetPending}
+            className="rounded-lg border border-red-500/40 px-3 py-2 text-xs font-semibold text-red-100 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50 sm:col-span-2"
+          >
+            {isFogResetPending ? 'Resetting Fog...' : 'Reset Fog'}
           </button>
         </div>
       </div>

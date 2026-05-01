@@ -185,10 +185,16 @@ jest.mock('firebase/storage', () => ({
   uploadBytes: jest.fn(() => Promise.resolve()),
 }));
 
+const mockArrayUnionSentinel = (...values) => (
+  values.length === 1
+    ? { __type: 'arrayUnion', value: values[0] }
+    : { __type: 'arrayUnion', values }
+);
+
 jest.mock('firebase/firestore', () => ({
   addDoc: jest.fn(() => Promise.resolve()),
   arrayRemove: jest.fn((value) => ({ __type: 'arrayRemove', value })),
-  arrayUnion: jest.fn((value) => ({ __type: 'arrayUnion', value })),
+  arrayUnion: jest.fn((...values) => mockArrayUnionSentinel(...values)),
   collection: jest.fn((db, path) => mockBuildCollectionTarget(path)),
   deleteDoc: jest.fn(() => Promise.resolve()),
   deleteField: jest.fn(() => ({ __type: 'deleteField' })),
@@ -274,6 +280,9 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-lighting-count">{String(props.lightingRenderInput?.lights?.length || 0)}</div>
       <div data-testid="board-lighting-debug-count">{String(props.lightingDebugMetadata?.lights?.length || 0)}</div>
       <div data-testid="board-lighting-debug">{String(props.showLightingDebugOverlay)}</div>
+      <div data-testid="board-fog-enabled">{String(!!props.fogOfWar)}</div>
+      <div data-testid="board-fog-cell-count">{String(props.fogOfWar?.exploredCells?.length || 0)}</div>
+      <div data-testid="board-fog-current-count">{String(props.fogOfWar?.currentVisibleCells?.length || 0)}</div>
         <button type="button" onClick={() => props.onSelectMouseTool?.()}>
           select mouse tool
         </button>
@@ -676,7 +685,7 @@ describe('GrigliataPage', () => {
     firestore = require('firebase/firestore');
     firestore.addDoc.mockClear().mockResolvedValue(undefined);
     firestore.arrayRemove.mockClear().mockImplementation((value) => ({ __type: 'arrayRemove', value }));
-    firestore.arrayUnion.mockClear().mockImplementation((value) => ({ __type: 'arrayUnion', value }));
+    firestore.arrayUnion.mockClear().mockImplementation((...values) => mockArrayUnionSentinel(...values));
     firestore.collection.mockClear().mockImplementation((db, path) => mockBuildCollectionTarget(path));
     firestore.deleteDoc.mockClear().mockResolvedValue(undefined);
     firestore.deleteField.mockClear().mockImplementation(() => ({ __type: 'deleteField' }));
@@ -1558,6 +1567,269 @@ describe('GrigliataPage', () => {
     expect(firestore.onSnapshot.mock.calls.some(([target]) => (
       target?.path === 'grigliata_background_lighting/map-1'
     ))).toBe(false);
+  });
+
+  test('subscribes to own fog and writes exploration only to the current player doc', async () => {
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [],
+    });
+    setDocData('grigliata_fog_of_war/map-1__user-2', {
+      backgroundId: 'map-1',
+      ownerUid: 'user-2',
+      cellSizePx: 70,
+      exploredCells: ['9:9'],
+      updatedBy: 'user-2',
+    });
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-1',
+      backgroundId: 'map-1',
+      tokenId: 'user-1',
+      ownerUid: 'user-1',
+      col: 0,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+      visionRadiusSquares: 1,
+    }, {
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      tokenId: 'user-2',
+      ownerUid: 'user-2',
+      col: 8,
+      row: 8,
+      isVisibleToPlayers: true,
+      isDead: false,
+      visionRadiusSquares: 1,
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('true');
+      expect(Number(screen.getByTestId('board-fog-current-count').textContent)).toBeGreaterThan(0);
+    });
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.path === 'grigliata_fog_of_war/map-1__user-1'
+    ))).toBe(true);
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.path === 'grigliata_fog_of_war/map-1__user-2'
+    ))).toBe(false);
+
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_fog_of_war/map-1__user-1' }),
+        expect.objectContaining({
+          backgroundId: 'map-1',
+          ownerUid: 'user-1',
+          cellSizePx: 70,
+          updatedBy: 'user-1',
+        }),
+        expect.any(Object)
+      );
+    });
+    expect(firestore.setDoc.mock.calls.some(([target]) => (
+      target?.path === 'grigliata_fog_of_war/map-1__user-2'
+    ))).toBe(false);
+  });
+
+  test('does not reveal fog from custom, foe, or other player tokens', async () => {
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [],
+    });
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__custom-1',
+      backgroundId: 'map-1',
+      tokenId: 'custom-1',
+      ownerUid: 'user-1',
+      col: 0,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+      visionRadiusSquares: 6,
+    }, {
+      id: 'map-1__foe-1',
+      backgroundId: 'map-1',
+      tokenId: 'foe-1',
+      ownerUid: 'dm-1',
+      col: 3,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+      visionRadiusSquares: 6,
+    }, {
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      tokenId: 'user-2',
+      ownerUid: 'user-2',
+      col: 6,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+      visionRadiusSquares: 6,
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('true');
+      expect(screen.getByTestId('board-fog-current-count')).toHaveTextContent('0');
+    });
+
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+    });
+
+    expect(firestore.setDoc.mock.calls.some(([target]) => (
+      target?.path?.startsWith('grigliata_fog_of_war/')
+    ))).toBe(false);
+  });
+
+  test('does not render another player fog for the current player', async () => {
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [],
+    });
+    setDocData('grigliata_fog_of_war/map-1__user-2', {
+      backgroundId: 'map-1',
+      ownerUid: 'user-2',
+      cellSizePx: 70,
+      exploredCells: ['4:4', '5:4'],
+      updatedBy: 'user-2',
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('true');
+    });
+    expect(screen.getByTestId('board-fog-cell-count')).toHaveTextContent('0');
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.path === 'grigliata_fog_of_war/map-1__user-2'
+    ))).toBe(false);
+  });
+
+  test('keeps fog active when computed lighting is disabled', async () => {
+    setCollectionData('grigliata_backgrounds', [{
+      id: 'map-1',
+      name: 'Sunken Ruins',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+      isGridVisible: true,
+      isTurnOrderEnabled: false,
+      lightingEnabled: false,
+    }]);
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [{ x: 35, y: 35, brightRadiusPx: 70, dimRadiusPx: 140, color: '#FFFFFF' }],
+    });
+    setDocData('grigliata_fog_of_war/map-1__user-1', {
+      backgroundId: 'map-1',
+      ownerUid: 'user-1',
+      cellSizePx: 70,
+      exploredCells: ['0:0'],
+      updatedBy: 'user-1',
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-lighting-count')).toHaveTextContent('0');
+      expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('true');
+      expect(screen.getByTestId('board-fog-cell-count')).toHaveTextContent('1');
+    });
+  });
+
+  test('suppresses fog rendering and fog writes during narration', async () => {
+    setDocData('grigliata_state/current', {
+      activeBackgroundId: 'map-1',
+      presentationBackgroundId: 'map-2',
+    });
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [],
+    });
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-1',
+      backgroundId: 'map-1',
+      tokenId: 'user-1',
+      ownerUid: 'user-1',
+      col: 0,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+      visionRadiusSquares: 4,
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-narration-active')).toHaveTextContent('true');
+      expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('false');
+    });
+
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+    });
+
+    expect(firestore.setDoc.mock.calls.some(([target]) => (
+      target?.path?.startsWith('grigliata_fog_of_war/')
+    ))).toBe(false);
+  });
+
+  test('lets the DM reset fog docs for the selected map', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_fog_of_war', [{
+      id: 'map-1__user-1',
+      backgroundId: 'map-1',
+      ownerUid: 'user-1',
+      cellSizePx: 70,
+      exploredCells: ['0:0'],
+      updatedBy: 'user-1',
+    }, {
+      id: 'map-2__user-2',
+      backgroundId: 'map-2',
+      ownerUid: 'user-2',
+      cellSizePx: 70,
+      exploredCells: ['9:9'],
+      updatedBy: 'user-2',
+    }]);
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /reset fog/i }));
+    });
+
+    await waitFor(() => {
+      expect(getCommittedBatches()).toHaveLength(1);
+    });
+    const [batch] = getCommittedBatches();
+    expect(batch.delete).toHaveBeenCalledWith(expect.objectContaining({
+      path: 'grigliata_fog_of_war/map-1__user-1',
+    }));
+    expect(batch.delete).not.toHaveBeenCalledWith(expect.objectContaining({
+      path: 'grigliata_fog_of_war/map-2__user-2',
+    }));
+
+    confirmSpy.mockRestore();
   });
 
   test('publishes only when sharing is enabled and a live interaction exists', async () => {

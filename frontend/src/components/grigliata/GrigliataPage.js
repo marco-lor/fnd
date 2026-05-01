@@ -108,7 +108,10 @@ import {
 import useGrigliataPageData from './useGrigliataPageData';
 import useGrigliataLightingMetadata from './useGrigliataLightingMetadata';
 import useGrigliataLightingRenderInput from './useGrigliataLightingRenderInput';
+import useGrigliataFogOfWar from './useGrigliataFogOfWar';
+import useGrigliataFogOfWarPersistence from './useGrigliataFogOfWarPersistence';
 import useGrigliataPlacementActions from './useGrigliataPlacementActions';
+import { GRIGLIATA_FOG_OF_WAR_COLLECTION } from './fogOfWar';
 import { useShellLayout } from '../common/shellLayout';
 
 const MAX_BACKGROUND_IMAGE_FILE_BYTES = 15 * 1024 * 1024;
@@ -333,6 +336,8 @@ export default function GrigliataPage() {
   const [isImportingLighting, setIsImportingLighting] = useState(false);
   const [isApplyingLightingCalibration, setIsApplyingLightingCalibration] = useState(false);
   const [isLightingEnabledPending, setIsLightingEnabledPending] = useState(false);
+  const [isFogOfWarEnabledPending, setIsFogOfWarEnabledPending] = useState(false);
+  const [isFogResetPending, setIsFogResetPending] = useState(false);
   const [isLightingDebugOverlayVisible, setIsLightingDebugOverlayVisible] = useState(true);
   const [boardError, setBoardError] = useState('');
   const [activeTrayDragType, setActiveTrayDragType] = useState('');
@@ -474,6 +479,13 @@ export default function GrigliataPage() {
   } = useGrigliataLightingRenderInput({
     backgroundId: activeBackgroundId,
     currentUserId,
+  });
+  const {
+    fogOfWar,
+  } = useGrigliataFogOfWar({
+    backgroundId: activeBackgroundId,
+    currentUserId,
+    isManager,
   });
   const dmPreviewLightingRenderInput = useMemo(() => {
     if (lightingRenderInput) {
@@ -873,6 +885,49 @@ export default function GrigliataPage() {
     () => (isNarrationOverlayActive ? [] : sharedInteractions),
     [isNarrationOverlayActive, sharedInteractions]
   );
+  const isFogOfWarEnabled = combatBackground?.fogOfWarEnabled !== false;
+  const fogLightingRenderInput = isFogOfWarEnabled ? dmPreviewLightingRenderInput : null;
+  const normalizedFogGrid = useMemo(
+    () => normalizeGridConfig(grid),
+    [grid]
+  );
+  const {
+    currentVisibleCells: fogCurrentVisibleCells,
+  } = useGrigliataFogOfWarPersistence({
+    backgroundId: activeBackgroundId,
+    currentUserId,
+    isManager,
+    grid: normalizedFogGrid,
+    tokens: visibleBoardTokens,
+    lightingRenderInput: fogLightingRenderInput,
+    fogOfWar,
+    isEnabled: isFogOfWarEnabled && !isNarrationOverlayActive,
+  });
+  const boardFogOfWar = useMemo(() => {
+    if (
+      isManager
+      || isNarrationOverlayActive
+      || !isFogOfWarEnabled
+      || !fogLightingRenderInput
+    ) {
+      return null;
+    }
+
+    return {
+      exploredCells: fogOfWar?.cellSizePx === normalizedFogGrid.cellSizePx
+        ? fogOfWar.exploredCells
+        : [],
+      currentVisibleCells: fogCurrentVisibleCells,
+    };
+  }, [
+    fogCurrentVisibleCells,
+    fogLightingRenderInput,
+    fogOfWar,
+    isFogOfWarEnabled,
+    isManager,
+    isNarrationOverlayActive,
+    normalizedFogGrid.cellSizePx,
+  ]);
   const normalizedMusicPlaybackState = useMemo(
     () => normalizeGrigliataMusicPlaybackState(musicPlaybackState),
     [musicPlaybackState]
@@ -3371,6 +3426,14 @@ export default function GrigliataPage() {
       await clearPlacementsForBackground(background.id);
       await deleteDoc(doc(db, GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION, background.id));
       await deleteDoc(doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, background.id));
+      await runPaginatedWriteBatch({
+        collectionName: GRIGLIATA_FOG_OF_WAR_COLLECTION,
+        baseConstraints: [where('backgroundId', '==', background.id)],
+        applyDocument: ({ batch, docSnap }) => {
+          batch.delete(docSnap.ref);
+          return 1;
+        },
+      });
 
       if (background.imagePath) {
         try {
@@ -3552,6 +3615,54 @@ export default function GrigliataPage() {
       setLightingImportError('Unable to update computed lighting right now.');
     } finally {
       setIsLightingEnabledPending(false);
+    }
+  };
+
+  const handleToggleFogOfWarEnabled = async () => {
+    if (!isManager || !user?.uid || !selectedBackground?.id || isFogOfWarEnabledPending) return;
+
+    setLightingImportError('');
+    setBoardError('');
+    setIsFogOfWarEnabledPending(true);
+
+    try {
+      await updateDoc(doc(db, 'grigliata_backgrounds', selectedBackground.id), {
+        fogOfWarEnabled: selectedBackground.fogOfWarEnabled === false,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+    } catch (error) {
+      console.error('Failed to update Grigliata fog of war enabled state:', error);
+      setLightingImportError('Unable to update fog of war right now.');
+    } finally {
+      setIsFogOfWarEnabledPending(false);
+    }
+  };
+
+  const handleResetFogOfWar = async () => {
+    if (!isManager || !user?.uid || !selectedBackground?.id || isFogResetPending) return;
+
+    const confirmed = window.confirm(`Reset explored fog for "${selectedBackground.name || 'Untitled Map'}"?`);
+    if (!confirmed) return;
+
+    setLightingImportError('');
+    setBoardError('');
+    setIsFogResetPending(true);
+
+    try {
+      await runPaginatedWriteBatch({
+        collectionName: GRIGLIATA_FOG_OF_WAR_COLLECTION,
+        baseConstraints: [where('backgroundId', '==', selectedBackground.id)],
+        applyDocument: ({ batch, docSnap }) => {
+          batch.delete(docSnap.ref);
+          return 1;
+        },
+      });
+    } catch (error) {
+      console.error('Failed to reset Grigliata fog of war:', error);
+      setLightingImportError('Unable to reset fog of war right now.');
+    } finally {
+      setIsFogResetPending(false);
     }
   };
 
@@ -4108,6 +4219,7 @@ export default function GrigliataPage() {
                 lightingRenderInput={enabledLightingRenderInput}
                 lightingDebugMetadata={lightingMetadata}
                 showLightingDebugOverlay={isManager && isLightingDebugOverlayVisible && !!lightingMetadata}
+                fogOfWar={boardFogOfWar}
                 onSharedInteractionChange={isNarrationOverlayActive ? null : handleSharedInteractionChange}
                 onSelectedTokenIdsChange={setSelectedBoardTokenIds}
                 onDropCurrentToken={isNarrationOverlayActive ? null : ((payload, worldPoint) => {
@@ -4277,6 +4389,9 @@ export default function GrigliataPage() {
                     isApplyingCalibration={isApplyingLightingCalibration}
                     isLightingEnabled={selectedBackground?.lightingEnabled !== false}
                     isLightingEnabledPending={isLightingEnabledPending}
+                    isFogOfWarEnabled={selectedBackground?.fogOfWarEnabled !== false}
+                    isFogOfWarEnabledPending={isFogOfWarEnabledPending}
+                    isFogResetPending={isFogResetPending}
                     isDebugOverlayVisible={isLightingDebugOverlayVisible}
                     hasLightingMetadata={!!lightingMetadata}
                     lightingMetadataDraft={lightingImportDraft}
@@ -4285,6 +4400,8 @@ export default function GrigliataPage() {
                     onImportLightingMetadata={handleImportLightingMetadata}
                     onApplyLightingCalibration={handleApplyLightingCalibration}
                     onToggleLightingEnabled={handleToggleLightingEnabled}
+                    onToggleFogOfWarEnabled={handleToggleFogOfWarEnabled}
+                    onResetFogOfWar={handleResetFogOfWar}
                     onToggleDebugOverlay={handleToggleLightingDebugOverlay}
                   />
                 )}

@@ -836,6 +836,53 @@ describe('GrigliataBoard', () => {
     expect(screen.queryByTestId('lighting-token-vision-cutout')).not.toBeInTheDocument();
   });
 
+  test('renders fog states after lighting and suppresses fog during narration', async () => {
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          fogOfWar: {
+            exploredCells: ['0:0', '1:0'],
+            currentVisibleCells: ['1:0', '2:0'],
+          },
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('fog-of-war-mask-layer')).toBeInTheDocument();
+    expect(screen.getByTestId('fog-unexplored-overlay')).toBeInTheDocument();
+    expect(screen.getAllByTestId('fog-explored-cell-cutout')).toHaveLength(1);
+    expect(screen.getAllByTestId('fog-current-cell-cutout')).toHaveLength(2);
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          fogOfWar: {
+            exploredCells: ['0:0'],
+            currentVisibleCells: [],
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('fog-of-war-mask-layer')).toBeInTheDocument();
+    expect(screen.getAllByTestId('fog-explored-cell-cutout')).toHaveLength(1);
+    expect(screen.queryByTestId('fog-current-cell-cutout')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          fogOfWar: {
+            exploredCells: ['0:0'],
+            currentVisibleCells: ['0:0'],
+          },
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
+
+    expect(screen.queryByTestId('fog-of-war-mask-layer')).not.toBeInTheDocument();
+  });
+
   test('keeps the lighting debug overlay toggle independent from the computed mask', async () => {
     const lightingRenderInput = {
       backgroundId: 'map-1',

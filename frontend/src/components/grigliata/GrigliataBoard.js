@@ -78,6 +78,7 @@ import {
 } from './grigliataBoardTokenUi';
 import GrigliataLightingDebugOverlay from './GrigliataLightingDebugOverlay';
 import GrigliataLightingMask from './GrigliataLightingMask';
+import GrigliataFogOfWarMask from './GrigliataFogOfWarMask';
 import { resolveViewerTokenVisionSources } from './lightingVisibility';
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
@@ -2297,6 +2298,7 @@ export default function GrigliataBoard({
   lightingRenderInput = null,
   lightingDebugMetadata = null,
   showLightingDebugOverlay = false,
+  fogOfWar = null,
   isNarrationOverlayActive = false,
 }) {
   const containerRef = useRef(null);
@@ -4794,6 +4796,17 @@ export default function GrigliataBoard({
                   metadata={lightingRenderInput}
                   tokens={visibleRenderedTokens}
                   visionSources={visibleTokenVisionSources}
+                />
+              </Layer>
+            )}
+
+            {!isNarrationOverlayActive && fogOfWar && (
+              <Layer listening={false}>
+                <GrigliataFogOfWarMask
+                  bounds={boardBounds}
+                  grid={normalizedGrid}
+                  exploredCells={fogOfWar.exploredCells}
+                  currentVisibleCells={fogOfWar.currentVisibleCells}
                 />
               </Layer>
             )}
