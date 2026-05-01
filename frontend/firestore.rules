@@ -730,6 +730,90 @@ service cloud.firestore {
         && (data.updatedBy == null || data.updatedBy is string);
     }
 
+    function isGrigliataFogOfWarId(backgroundId, ownerUid, fogId) {
+      return backgroundId is string
+        && backgroundId.size() > 0
+        && ownerUid is string
+        && ownerUid.size() > 0
+        && fogId == backgroundId + "__" + ownerUid;
+    }
+
+    function isOwnGrigliataFogOfWarProbeId(fogId) {
+      return isSignedIn()
+        && fogId is string
+        && fogId.matches('^.+__' + request.auth.uid + '$');
+    }
+
+    function isValidGrigliataFogCellKey(cellKey) {
+      return cellKey is string
+        && cellKey.matches('^-?[0-9]+:-?[0-9]+$');
+    }
+
+    function hasValidGrigliataFogCellKeys(cells) {
+      return cells is list
+        && cells.size() <= 5000
+        && (cells.size() < 1 || isValidGrigliataFogCellKey(cells[0]))
+        && (cells.size() < 2 || isValidGrigliataFogCellKey(cells[1]))
+        && (cells.size() < 3 || isValidGrigliataFogCellKey(cells[2]))
+        && (cells.size() < 4 || isValidGrigliataFogCellKey(cells[3]))
+        && (cells.size() < 5 || isValidGrigliataFogCellKey(cells[4]))
+        && (cells.size() < 6 || isValidGrigliataFogCellKey(cells[5]))
+        && (cells.size() < 7 || isValidGrigliataFogCellKey(cells[6]))
+        && (cells.size() < 8 || isValidGrigliataFogCellKey(cells[7]))
+        && (cells.size() < 9 || isValidGrigliataFogCellKey(cells[8]))
+        && (cells.size() < 10 || isValidGrigliataFogCellKey(cells[9]))
+        && (cells.size() < 11 || isValidGrigliataFogCellKey(cells[10]))
+        && (cells.size() < 12 || isValidGrigliataFogCellKey(cells[11]))
+        && (cells.size() < 13 || isValidGrigliataFogCellKey(cells[12]))
+        && (cells.size() < 14 || isValidGrigliataFogCellKey(cells[13]))
+        && (cells.size() < 15 || isValidGrigliataFogCellKey(cells[14]))
+        && (cells.size() < 16 || isValidGrigliataFogCellKey(cells[15]))
+        && (cells.size() < 17 || isValidGrigliataFogCellKey(cells[16]))
+        && (cells.size() < 18 || isValidGrigliataFogCellKey(cells[17]))
+        && (cells.size() < 19 || isValidGrigliataFogCellKey(cells[18]))
+        && (cells.size() < 20 || isValidGrigliataFogCellKey(cells[19]))
+        && (cells.size() < 21 || isValidGrigliataFogCellKey(cells[20]))
+        && (cells.size() < 22 || isValidGrigliataFogCellKey(cells[21]))
+        && (cells.size() < 23 || isValidGrigliataFogCellKey(cells[22]))
+        && (cells.size() < 24 || isValidGrigliataFogCellKey(cells[23]))
+        && (cells.size() < 25 || isValidGrigliataFogCellKey(cells[24]))
+        && (cells.size() < 26 || isValidGrigliataFogCellKey(cells[25]))
+        && (cells.size() < 27 || isValidGrigliataFogCellKey(cells[26]))
+        && (cells.size() < 28 || isValidGrigliataFogCellKey(cells[27]))
+        && (cells.size() < 29 || isValidGrigliataFogCellKey(cells[28]))
+        && (cells.size() < 30 || isValidGrigliataFogCellKey(cells[29]))
+        && (cells.size() < 31 || isValidGrigliataFogCellKey(cells[30]))
+        && (cells.size() < 32 || isValidGrigliataFogCellKey(cells[31]));
+    }
+
+    function isValidGrigliataFogOfWar(data, fogId) {
+      return data.keys().hasAll([
+          "backgroundId",
+          "ownerUid",
+          "cellSizePx",
+          "exploredCells",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.keys().hasOnly([
+          "schemaVersion",
+          "backgroundId",
+          "ownerUid",
+          "cellSizePx",
+          "exploredCells",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && (!data.keys().hasAny(["schemaVersion"]) || data.schemaVersion is int)
+        && isGrigliataFogOfWarId(data.backgroundId, data.ownerUid, fogId)
+        && data.cellSizePx is int
+        && data.cellSizePx > 0
+        && data.cellSizePx <= 500
+        && hasValidGrigliataFogCellKeys(data.exploredCells)
+        && data.updatedAt is timestamp
+        && (data.updatedBy == null || data.updatedBy is string);
+    }
+
     function isValidGrigliataMusicTrack(data) {
       return data.keys().hasAll([
           "name",
@@ -1013,6 +1097,53 @@ service cloud.firestore {
     match /grigliata_lighting_render_inputs/{backgroundId} {
       allow read: if isSignedIn();
       allow create, update, delete: if isGrigliataManager();
+    }
+
+    match /grigliata_fog_of_war/{fogId} {
+      allow get: if isSignedIn()
+        && (
+          isGrigliataManager()
+          || (
+            resource == null
+            && isOwnGrigliataFogOfWarProbeId(fogId)
+          )
+          || (
+            resource != null
+            && request.auth.uid == resource.data.ownerUid
+          )
+        );
+
+      allow list: if isGrigliataManager();
+
+      allow create: if isSignedIn()
+        && isValidGrigliataFogOfWar(request.resource.data, fogId)
+        && (
+          isGrigliataManager()
+          || (
+            request.auth.uid == request.resource.data.ownerUid
+            && (
+              request.resource.data.updatedBy == null
+              || request.resource.data.updatedBy == request.auth.uid
+            )
+          )
+        );
+
+      allow update: if isSignedIn()
+        && isValidGrigliataFogOfWar(request.resource.data, fogId)
+        && request.resource.data.backgroundId == resource.data.backgroundId
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && (
+          isGrigliataManager()
+          || (
+            request.auth.uid == resource.data.ownerUid
+            && (
+              request.resource.data.updatedBy == null
+              || request.resource.data.updatedBy == request.auth.uid
+            )
+          )
+        );
+
+      allow delete: if isGrigliataManager();
     }
 
     match /grigliata_music_tracks/{trackId} {
