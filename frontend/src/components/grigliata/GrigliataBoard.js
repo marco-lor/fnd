@@ -2294,7 +2294,8 @@ export default function GrigliataBoard({
   sharedInteractions = [],
   activeViewers = [],
   onSharedInteractionChange,
-  lightingMetadata = null,
+  lightingRenderInput = null,
+  lightingDebugMetadata = null,
   showLightingDebugOverlay = false,
   isNarrationOverlayActive = false,
 }) {
@@ -4785,12 +4786,12 @@ export default function GrigliataBoard({
               {!isNarrationOverlayActive && isGridVisible && <GridLayer bounds={boardBounds} grid={normalizedGrid} />}
             </Layer>
 
-            {!isNarrationOverlayActive && lightingMetadata && (
+            {!isNarrationOverlayActive && lightingRenderInput && (
               <Layer listening={false}>
                 <GrigliataLightingMask
                   bounds={boardBounds}
                   grid={normalizedGrid}
-                  metadata={lightingMetadata}
+                  metadata={lightingRenderInput}
                   tokens={visibleRenderedTokens}
                   visionSources={visibleTokenVisionSources}
                 />
@@ -4798,9 +4799,9 @@ export default function GrigliataBoard({
             )}
 
             <Layer>
-              {!isNarrationOverlayActive && isManager && showLightingDebugOverlay && lightingMetadata && (
+              {!isNarrationOverlayActive && isManager && showLightingDebugOverlay && lightingDebugMetadata && (
                 <GrigliataLightingDebugOverlay
-                  metadata={lightingMetadata}
+                  metadata={lightingDebugMetadata}
                   viewportScale={viewport.scale}
                 />
               )}

@@ -631,7 +631,7 @@ describe('GrigliataBoard', () => {
         {...buildProps({
           isManager: true,
           tokens: [buildOverlayToken()],
-          lightingMetadata: {
+          lightingDebugMetadata: {
             backgroundId: 'map-1',
             walls: [{
               id: 'wall-1',
@@ -666,7 +666,7 @@ describe('GrigliataBoard', () => {
   });
 
   test('renders the computed lighting mask with viewer-safe token vision outside narration', async () => {
-    const lightingMetadata = {
+    const lightingRenderInput = {
       backgroundId: 'map-1',
       scene: {
         darkness: 0.6,
@@ -723,7 +723,7 @@ describe('GrigliataBoard', () => {
             isDead: false,
             statuses: [],
           }],
-          lightingMetadata,
+          lightingRenderInput,
         })}
       />
     );
@@ -766,7 +766,7 @@ describe('GrigliataBoard', () => {
             isDead: false,
             statuses: [],
           }],
-          lightingMetadata,
+          lightingRenderInput,
         })}
       />
     );
@@ -781,7 +781,7 @@ describe('GrigliataBoard', () => {
         {...buildProps({
           isManager: true,
           tokens: [buildOverlayToken()],
-          lightingMetadata,
+          lightingRenderInput,
           isNarrationOverlayActive: true,
         })}
       />
@@ -790,8 +790,54 @@ describe('GrigliataBoard', () => {
     expect(screen.queryByTestId('lighting-mask-layer')).not.toBeInTheDocument();
   });
 
+  test('renders imported lights for a player even without an eligible vision token', async () => {
+    const lightingRenderInput = {
+      backgroundId: 'map-1',
+      scene: {
+        darkness: 0.6,
+        globalLight: false,
+      },
+      walls: [],
+      lights: [{
+        x: 80,
+        y: 80,
+        brightRadiusPx: 60,
+        dimRadiusPx: 140,
+        color: '#FFAD00',
+      }],
+    };
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: false,
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-2',
+            id: 'user-2',
+            ownerUid: 'user-2',
+            tokenType: 'character',
+            label: 'Bryn',
+            imageUrl: '',
+            placed: true,
+            col: 4,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          lightingRenderInput,
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('lighting-mask-layer')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-light-bright-polygon')).toBeInTheDocument();
+    expect(screen.queryByTestId('lighting-token-vision-cutout')).not.toBeInTheDocument();
+  });
+
   test('keeps the lighting debug overlay toggle independent from the computed mask', async () => {
-    const lightingMetadata = {
+    const lightingRenderInput = {
       backgroundId: 'map-1',
       scene: {
         darkness: 0.5,
@@ -815,12 +861,27 @@ describe('GrigliataBoard', () => {
         color: '#FFAD00',
       }],
     };
+    const lightingDebugMetadata = {
+      ...lightingRenderInput,
+      walls: lightingRenderInput.walls.map((wall) => ({
+        ...wall,
+        id: 'raw-wall-id',
+        doorType: 1,
+        source: { sense: 1, door: 1 },
+      })),
+      lights: lightingRenderInput.lights.map((light) => ({
+        ...light,
+        id: 'raw-light-id',
+        source: { tintAlpha: 0.25 },
+      })),
+    };
 
     const { rerender } = render(
       <GrigliataBoard
         {...buildProps({
           isManager: true,
-          lightingMetadata,
+          lightingRenderInput,
+          lightingDebugMetadata,
           showLightingDebugOverlay: false,
         })}
       />
@@ -833,7 +894,8 @@ describe('GrigliataBoard', () => {
       <GrigliataBoard
         {...buildProps({
           isManager: true,
-          lightingMetadata,
+          lightingRenderInput,
+          lightingDebugMetadata,
           showLightingDebugOverlay: true,
         })}
       />

@@ -35,6 +35,10 @@ import {
   parseDungeonAlchemistLightingJson,
 } from './dungeonAlchemistLighting';
 import {
+  buildGrigliataLightingRenderInput,
+  GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION,
+} from './lightingRenderInput';
+import {
   buildPlacementDocId,
   buildStorageSafeName,
   getDisplayNameFromFileName,
@@ -103,6 +107,7 @@ import {
 } from './turnOrder';
 import useGrigliataPageData from './useGrigliataPageData';
 import useGrigliataLightingMetadata from './useGrigliataLightingMetadata';
+import useGrigliataLightingRenderInput from './useGrigliataLightingRenderInput';
 import useGrigliataPlacementActions from './useGrigliataPlacementActions';
 import { useShellLayout } from '../common/shellLayout';
 
@@ -327,6 +332,7 @@ export default function GrigliataPage() {
   const [lightingImportError, setLightingImportError] = useState('');
   const [isImportingLighting, setIsImportingLighting] = useState(false);
   const [isApplyingLightingCalibration, setIsApplyingLightingCalibration] = useState(false);
+  const [isLightingEnabledPending, setIsLightingEnabledPending] = useState(false);
   const [isLightingDebugOverlayVisible, setIsLightingDebugOverlayVisible] = useState(true);
   const [boardError, setBoardError] = useState('');
   const [activeTrayDragType, setActiveTrayDragType] = useState('');
@@ -463,6 +469,34 @@ export default function GrigliataPage() {
     currentUserId,
     isManager,
   });
+  const {
+    lightingRenderInput,
+  } = useGrigliataLightingRenderInput({
+    backgroundId: activeBackgroundId,
+    currentUserId,
+  });
+  const dmPreviewLightingRenderInput = useMemo(() => {
+    if (lightingRenderInput) {
+      return lightingRenderInput;
+    }
+
+    if (!isManager || !lightingMetadata) {
+      return null;
+    }
+
+    try {
+      return buildGrigliataLightingRenderInput(lightingMetadata, {
+        updatedAt: lightingMetadata.updatedAt || null,
+        updatedBy: lightingMetadata.updatedBy || '',
+      });
+    } catch (error) {
+      console.error('Failed to build DM lighting preview input:', error);
+      return null;
+    }
+  }, [isManager, lightingMetadata, lightingRenderInput]);
+  const enabledLightingRenderInput = combatBackground?.lightingEnabled === false
+    ? null
+    : dmPreviewLightingRenderInput;
 
   useEffect(() => {
     if (!currentUserId || isManager || !currentCharacterId) {
@@ -3336,6 +3370,7 @@ export default function GrigliataPage() {
 
       await clearPlacementsForBackground(background.id);
       await deleteDoc(doc(db, GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION, background.id));
+      await deleteDoc(doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, background.id));
 
       if (background.imagePath) {
         try {
@@ -3464,14 +3499,24 @@ export default function GrigliataPage() {
         updatedAt,
       });
       const summary = buildGrigliataLightingSummary(metadata, importedAt);
+      const renderInput = buildGrigliataLightingRenderInput(metadata, {
+        updatedAt,
+        updatedBy: user.uid,
+      });
 
       await setDoc(
         doc(db, GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION, selectedBackground.id),
         metadata,
         { merge: true }
       );
+      await setDoc(
+        doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, selectedBackground.id),
+        renderInput,
+        { merge: true }
+      );
       await updateDoc(doc(db, 'grigliata_backgrounds', selectedBackground.id), {
         lightingSummary: summary,
+        lightingEnabled: true,
         updatedAt: serverTimestamp(),
         updatedBy: user.uid,
       });
@@ -3487,6 +3532,27 @@ export default function GrigliataPage() {
 
   const handleToggleLightingDebugOverlay = () => {
     setIsLightingDebugOverlayVisible((currentValue) => !currentValue);
+  };
+
+  const handleToggleLightingEnabled = async () => {
+    if (!isManager || !user?.uid || !selectedBackground?.id || isLightingEnabledPending) return;
+
+    setLightingImportError('');
+    setBoardError('');
+    setIsLightingEnabledPending(true);
+
+    try {
+      await updateDoc(doc(db, 'grigliata_backgrounds', selectedBackground.id), {
+        lightingEnabled: selectedBackground.lightingEnabled === false,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+    } catch (error) {
+      console.error('Failed to update Grigliata lighting enabled state:', error);
+      setLightingImportError('Unable to update computed lighting right now.');
+    } finally {
+      setIsLightingEnabledPending(false);
+    }
   };
 
   const handleApplyLightingCalibration = async () => {
@@ -3507,6 +3573,13 @@ export default function GrigliataPage() {
 
     try {
       const normalizedCalibration = normalizeGridConfig(calibrationSource.grid);
+      const updatedAt = serverTimestamp();
+      const renderInput = selectedBackground.id === activeBackgroundId && lightingMetadata
+        ? buildGrigliataLightingRenderInput(lightingMetadata, {
+          updatedAt,
+          updatedBy: user.uid,
+        })
+        : null;
 
       if (selectedBackground.id === activeBackgroundId) {
         await flushPendingGridSizeAutosave();
@@ -3514,9 +3587,16 @@ export default function GrigliataPage() {
 
       await updateDoc(doc(db, 'grigliata_backgrounds', selectedBackground.id), {
         grid: normalizedCalibration,
-        updatedAt: serverTimestamp(),
+        updatedAt,
         updatedBy: user.uid,
       });
+      if (renderInput) {
+        await setDoc(
+          doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, selectedBackground.id),
+          renderInput,
+          { merge: true }
+        );
+      }
 
       setCalibrationDraft(normalizedCalibration);
 
@@ -4025,7 +4105,8 @@ export default function GrigliataPage() {
                 selectedTokenDetails={isNarrationOverlayActive ? null : selectedTokenDetails}
                 sharedInteractions={visibleSharedInteractions}
                 activeViewers={activePageViewers}
-                lightingMetadata={lightingMetadata}
+                lightingRenderInput={enabledLightingRenderInput}
+                lightingDebugMetadata={lightingMetadata}
                 showLightingDebugOverlay={isManager && isLightingDebugOverlayVisible && !!lightingMetadata}
                 onSharedInteractionChange={isNarrationOverlayActive ? null : handleSharedInteractionChange}
                 onSelectedTokenIdsChange={setSelectedBoardTokenIds}
@@ -4194,6 +4275,8 @@ export default function GrigliataPage() {
                     importWarnings={lightingImportDraft?.importWarnings || null}
                     isImporting={isImportingLighting}
                     isApplyingCalibration={isApplyingLightingCalibration}
+                    isLightingEnabled={selectedBackground?.lightingEnabled !== false}
+                    isLightingEnabledPending={isLightingEnabledPending}
                     isDebugOverlayVisible={isLightingDebugOverlayVisible}
                     hasLightingMetadata={!!lightingMetadata}
                     lightingMetadataDraft={lightingImportDraft}
@@ -4201,6 +4284,7 @@ export default function GrigliataPage() {
                     onLightingFileChange={handleLightingFileChange}
                     onImportLightingMetadata={handleImportLightingMetadata}
                     onApplyLightingCalibration={handleApplyLightingCalibration}
+                    onToggleLightingEnabled={handleToggleLightingEnabled}
                     onToggleDebugOverlay={handleToggleLightingDebugOverlay}
                   />
                 )}

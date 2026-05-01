@@ -31,6 +31,8 @@ export default function GrigliataLightingImportPanel({
   importWarnings = null,
   isImporting = false,
   isApplyingCalibration = false,
+  isLightingEnabled = true,
+  isLightingEnabledPending = false,
   isDebugOverlayVisible = true,
   hasLightingMetadata = false,
   lightingMetadataDraft = null,
@@ -38,6 +40,7 @@ export default function GrigliataLightingImportPanel({
   onLightingFileChange,
   onImportLightingMetadata,
   onApplyLightingCalibration,
+  onToggleLightingEnabled,
   onToggleDebugOverlay,
 }) {
   const summaryText = formatSummaryText(selectedBackground?.lightingSummary);
@@ -70,6 +73,17 @@ export default function GrigliataLightingImportPanel({
             Select a background from the gallery before importing lighting metadata.
           </div>
         )}
+
+        <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-3">
+          <span className="text-sm font-medium text-slate-100">Computed lighting enabled</span>
+          <input
+            type="checkbox"
+            checked={isLightingEnabled}
+            onChange={onToggleLightingEnabled}
+            disabled={!hasSelectedBackground || isLightingEnabledPending}
+            className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-cyan-400 focus:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+          />
+        </label>
 
         <label className="block">
           <span className="text-xs text-slate-300">Dungeon Alchemist JSON</span>

@@ -1010,6 +1010,11 @@ service cloud.firestore {
       allow read, write: if isGrigliataManager();
     }
 
+    match /grigliata_lighting_render_inputs/{backgroundId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isGrigliataManager();
+    }
+
     match /grigliata_music_tracks/{trackId} {
       allow read: if isGrigliataManager();
 
