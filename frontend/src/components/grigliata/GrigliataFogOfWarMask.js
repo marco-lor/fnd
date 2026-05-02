@@ -10,7 +10,7 @@ import {
 } from './fogOfWar';
 
 const FOG_FILL = '#020617';
-const UNEXPLORED_OPACITY = 0.86;
+const UNEXPLORED_OPACITY = 1;
 const EXPLORED_CUTOUT_OPACITY = 0.54;
 
 const asFiniteNumber = (value, fallback = 0) => {

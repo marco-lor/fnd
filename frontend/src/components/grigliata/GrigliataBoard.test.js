@@ -883,6 +883,187 @@ describe('GrigliataBoard', () => {
     expect(screen.queryByTestId('fog-of-war-mask-layer')).not.toBeInTheDocument();
   });
 
+  test('uses player fog to hide tokens outside current visibility while keeping the main token usable', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 9,
+            row: 9,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }, {
+            tokenId: 'user-2',
+            id: 'user-2',
+            ownerUid: 'user-2',
+            tokenType: 'character',
+            label: 'Bryn',
+            imageUrl: '',
+            placed: true,
+            col: 8,
+            row: 8,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }, {
+            tokenId: 'foe-1',
+            id: 'foe-1',
+            ownerUid: 'dm-1',
+            tokenType: 'foe',
+            label: 'Skeleton',
+            imageUrl: '',
+            placed: true,
+            col: 1,
+            row: 0,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          fogOfWar: {
+            exploredCells: ['8:8'],
+            currentVisibleCells: ['1:0'],
+          },
+        })}
+      />
+    );
+
+    const mainToken = await screen.findByTestId('token-node-user-1');
+    const foeToken = screen.getByTestId('token-node-foe-1');
+    const fog = screen.getByTestId('fog-of-war-mask-layer');
+    expect(mainToken).toBeInTheDocument();
+    expect(foeToken).toBeInTheDocument();
+    expect(screen.queryByTestId('token-node-user-2')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('fog-current-cell-cutout').map((node) => (
+      node.getAttribute('data-cellkey')
+    ))).toEqual(['1:0']);
+    expect(foeToken.compareDocumentPosition(fog) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(fog.compareDocumentPosition(mainToken) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test('keeps shared AoE and live drawing overlays visible outside memory fog', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          aoeFigures: [{
+            id: 'memory-figure',
+            backgroundId: 'map-1',
+            ownerUid: 'user-2',
+            figureType: 'circle',
+            slot: 1,
+            originCell: { col: 8, row: 8 },
+            targetCell: { col: 9, row: 8 },
+            colorKey: 'ion-cyan',
+            isVisibleToPlayers: true,
+          }],
+          sharedInteractions: [{
+            backgroundId: 'map-1',
+            ownerUid: 'user-2',
+            type: 'ping',
+            source: 'free',
+            colorKey: 'ion-cyan',
+            point: { x: 595, y: 595 },
+            startedAtMs: Date.now(),
+          }],
+          fogOfWar: {
+            exploredCells: ['8:8'],
+            currentVisibleCells: ['0:0'],
+          },
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('fog-of-war-mask-layer')).toBeInTheDocument();
+    expect(screen.getByTestId('aoe-figure-overlay-memory-figure')).toBeInTheDocument();
+    expect(screen.getByTestId('aoe-figure-overlay-memory-figure')).toHaveAttribute('data-listening', 'false');
+    expect(screen.getByTestId('map-ping-overlay-shared-user-2')).toBeInTheDocument();
+  });
+
+  test('renders player fog above tokens but below shared drawing overlays', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-2',
+            id: 'user-2',
+            ownerUid: 'user-2',
+            tokenType: 'character',
+            label: 'Bryn',
+            imageUrl: '',
+            placed: true,
+            col: 1,
+            row: 0,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          sharedInteractions: [{
+            backgroundId: 'map-1',
+            ownerUid: 'user-3',
+            type: 'measure',
+            source: 'free',
+            colorKey: 'ion-cyan',
+            anchorCells: [{ col: 8, row: 8 }],
+            liveEndCell: { col: 9, row: 8 },
+            updatedAt: Date.now(),
+            updatedBy: 'user-3',
+          }],
+          fogOfWar: {
+            exploredCells: ['1:0'],
+            currentVisibleCells: ['1:0'],
+          },
+        })}
+      />
+    );
+
+    const token = await screen.findByTestId('token-node-user-2');
+    const fog = screen.getByTestId('fog-of-war-mask-layer');
+    const sharedRuler = screen.getByTestId('measurement-overlay-shared-user-3');
+    expect(token.compareDocumentPosition(fog) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(fog.compareDocumentPosition(sharedRuler) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test('does not expose selected custom token controls for a player token hidden by fog', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'custom-1',
+            id: 'custom-1',
+            ownerUid: 'user-1',
+            tokenType: 'custom',
+            label: 'Familiar',
+            imageUrl: '',
+            placed: true,
+            col: 8,
+            row: 8,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          fogOfWar: {
+            exploredCells: ['8:8'],
+            currentVisibleCells: ['0:0'],
+          },
+        })}
+      />
+    );
+
+    expect(screen.queryByTestId('token-node-custom-1')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /edit statuses for familiar/i })).not.toBeInTheDocument();
+  });
+
   test('keeps the lighting debug overlay toggle independent from the computed mask', async () => {
     const lightingRenderInput = {
       backgroundId: 'map-1',
@@ -3385,7 +3566,7 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-hit-target-${figureId}`), {
       button: 0,
       clientX: 315,
       clientY: 175,
@@ -3660,7 +3841,7 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-hit-target-${figureId}`), {
       button: 0,
       clientX: 175,
       clientY: 175,
@@ -3698,7 +3879,7 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-hit-target-${figureId}`), {
       button: 0,
       clientX: 175,
       clientY: 175,
@@ -3745,7 +3926,7 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-hit-target-${figureId}`), {
       button: 0,
       clientX: 210,
       clientY: 210,
@@ -3779,7 +3960,7 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-hit-target-${figureId}`), {
       button: 0,
       clientX: 175,
       clientY: 175,
@@ -3826,7 +4007,7 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-hit-target-${figureId}`), {
       button: 0,
       clientX: 210,
       clientY: 175,
@@ -3880,7 +4061,7 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-hit-target-${figureId}`), {
       button: 0,
       clientX: 175,
       clientY: 175,
@@ -3914,6 +4095,9 @@ describe('GrigliataBoard', () => {
         })}
       />
     );
+
+    expect(screen.queryByTestId(`aoe-figure-hit-target-${figureId}`)).not.toBeInTheDocument();
+    expect(screen.getByTestId(`aoe-figure-overlay-${figureId}`)).toHaveAttribute('data-listening', 'false');
 
     fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
       button: 0,

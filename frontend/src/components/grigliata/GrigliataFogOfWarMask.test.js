@@ -65,7 +65,7 @@ describe('GrigliataFogOfWarMask', () => {
     );
 
     expect(screen.getByTestId('fog-of-war-mask-layer')).toBeInTheDocument();
-    expect(screen.getByTestId('fog-unexplored-overlay')).toHaveAttribute('data-opacity', '0.86');
+    expect(screen.getByTestId('fog-unexplored-overlay')).toHaveAttribute('data-opacity', '1');
     expect(screen.getAllByTestId('fog-explored-cell-cutout')).toHaveLength(1);
     expect(screen.getByTestId('fog-explored-cell-cutout')).toHaveAttribute('data-cellkey', '0:0');
     expect(screen.getByTestId('fog-explored-cell-cutout')).toHaveAttribute('data-opacity', '0.54');

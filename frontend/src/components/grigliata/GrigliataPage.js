@@ -117,6 +117,10 @@ import useGrigliataFogOfWar from './useGrigliataFogOfWar';
 import useGrigliataFogOfWarPersistence from './useGrigliataFogOfWarPersistence';
 import useGrigliataPlacementActions from './useGrigliataPlacementActions';
 import { GRIGLIATA_FOG_OF_WAR_COLLECTION } from './fogOfWar';
+import {
+  filterFogVisibleTokens,
+  filterFogVisibleTurnOrderEntries,
+} from './fogVisibilityFiltering';
 import { useShellLayout } from '../common/shellLayout';
 
 const MAX_BACKGROUND_IMAGE_FILE_BYTES = 15 * 1024 * 1024;
@@ -943,6 +947,74 @@ export default function GrigliataPage() {
     isNarrationOverlayActive,
     normalizedFogGrid.cellSizePx,
   ]);
+  const boardRenderTokens = useMemo(
+    () => filterFogVisibleTokens({
+      tokens: visibleBoardTokens,
+      currentUserId,
+      isManager,
+      grid: normalizedFogGrid,
+      fogOfWar: boardFogOfWar,
+    }),
+    [
+      boardFogOfWar,
+      currentUserId,
+      isManager,
+      normalizedFogGrid,
+      visibleBoardTokens,
+    ]
+  );
+  const boardRenderAoEFigures = visibleAoeFigures;
+  const boardRenderSharedInteractions = visibleSharedInteractions;
+  const boardRenderTurnOrderEntries = useMemo(
+    () => filterFogVisibleTurnOrderEntries({
+      entries: turnOrderEntries,
+      tokens: boardRenderTokens,
+      isManager,
+      fogOfWar: boardFogOfWar,
+    }),
+    [
+      boardFogOfWar,
+      boardRenderTokens,
+      isManager,
+      turnOrderEntries,
+    ]
+  );
+  const boardRenderActiveTurnTokenId = useMemo(
+    () => (
+      activeTurnTokenId
+      && boardRenderTurnOrderEntries.some((entry) => entry.tokenId === activeTurnTokenId)
+        ? activeTurnTokenId
+        : ''
+    ),
+    [activeTurnTokenId, boardRenderTurnOrderEntries]
+  );
+  const boardRenderTokenIdSet = useMemo(
+    () => new Set(boardRenderTokens.map((token) => token.tokenId).filter(Boolean)),
+    [boardRenderTokens]
+  );
+  const boardRenderSelectedTokenDetails = useMemo(() => {
+    if (!boardFogOfWar || isManager || !selectedTokenDetails?.tokenId) {
+      return selectedTokenDetails;
+    }
+
+    return boardRenderTokenIdSet.has(selectedTokenDetails.tokenId)
+      ? selectedTokenDetails
+      : null;
+  }, [boardFogOfWar, boardRenderTokenIdSet, isManager, selectedTokenDetails]);
+  useEffect(() => {
+    if (!boardFogOfWar || isManager) {
+      return;
+    }
+
+    setSelectedBoardTokenIds((currentTokenIds) => {
+      if (!currentTokenIds.length) {
+        return currentTokenIds;
+      }
+
+      const nextTokenIds = currentTokenIds.filter((tokenId) => boardRenderTokenIdSet.has(tokenId));
+      return nextTokenIds.length === currentTokenIds.length ? currentTokenIds : nextTokenIds;
+    });
+  }, [boardFogOfWar, boardRenderTokenIdSet, isManager]);
   const normalizedMusicPlaybackState = useMemo(
     () => normalizeGrigliataMusicPlaybackState(musicPlaybackState),
     [musicPlaybackState]
@@ -4226,8 +4298,8 @@ export default function GrigliataPage() {
                 combatBackgroundName={combatBackground?.name || ''}
                 grid={grid}
                 isGridVisible={isNarrationOverlayActive ? false : isGridVisible}
-                tokens={visibleBoardTokens}
-                aoeFigures={visibleAoeFigures}
+                tokens={boardRenderTokens}
+                aoeFigures={boardRenderAoEFigures}
                 currentUserId={user.uid}
                 isManager={isManager}
                 isTokenDragActive={isTrayDragging && !isNarrationOverlayActive}
@@ -4249,9 +4321,9 @@ export default function GrigliataPage() {
                 onDeactivateActiveBackground={isManager ? handleDeactivateActiveBackground : null}
                 isDeactivateActiveBackgroundDisabled={!activeBackgroundId || isActiveBackgroundDeactivationPending || isCombatMapChangeLocked}
                 isTurnOrderEnabled={isTurnOrderEnabled}
-                turnOrderEntries={turnOrderEntries}
+                turnOrderEntries={boardRenderTurnOrderEntries}
                 isTurnOrderStarted={isTurnOrderStarted}
-                activeTurnTokenId={activeTurnTokenId}
+                activeTurnTokenId={boardRenderActiveTurnTokenId}
                 onStartTurnOrder={isManager && !isNarrationOverlayActive ? handleStartTurnOrder : null}
                 onAdvanceTurnOrder={isManager && !isNarrationOverlayActive ? handleAdvanceTurnOrder : null}
                 isTurnOrderProgressPending={isTurnOrderProgressPending}
@@ -4280,8 +4352,8 @@ export default function GrigliataPage() {
                 isTokenSizeActionPending={isTokenSizeActionPending}
                 onSetSelectedTokenVision={isManager && !isNarrationOverlayActive ? handleSetSelectedTokenVision : null}
                 isTokenVisionActionPending={isTokenVisionActionPending}
-                selectedTokenDetails={isNarrationOverlayActive ? null : selectedTokenDetails}
-                sharedInteractions={visibleSharedInteractions}
+                selectedTokenDetails={isNarrationOverlayActive ? null : boardRenderSelectedTokenDetails}
+                sharedInteractions={boardRenderSharedInteractions}
                 activeViewers={activePageViewers}
                 lightingRenderInput={enabledLightingRenderInput}
                 lightingDebugMetadata={lightingMetadata}
@@ -4344,7 +4416,7 @@ export default function GrigliataPage() {
                     currentUserToken={trayCurrentUserToken}
                     customTokens={customUserTokens}
                     foeLibrary={foeLibrary}
-                    selectedTokenDetails={selectedTokenDetails}
+                    selectedTokenDetails={isNarrationOverlayActive ? null : boardRenderSelectedTokenDetails}
                     activeMapName={combatBackground?.name || ''}
                     hasActiveMap={!!activeBackgroundId}
                     onDragStart={(payload) => setActiveTrayDragType(payload?.type || 'grigliata-token')}

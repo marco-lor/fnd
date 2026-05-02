@@ -268,6 +268,8 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-active-viewers">{(props.activeViewers || []).map((viewer) => viewer.characterId).join(',')}</div>
       <div data-testid="board-aoe-count">{String(props.aoeFigures?.length || 0)}</div>
       <div data-testid="board-token-count">{String(props.tokens?.length || 0)}</div>
+      <div data-testid="board-token-ids">{(props.tokens || []).map((token) => token.tokenId).join(',')}</div>
+      <div data-testid="board-aoe-ids">{(props.aoeFigures || []).map((figure) => figure.id).join(',')}</div>
       <div data-testid="board-turn-order-enabled">{String(props.isTurnOrderEnabled)}</div>
       <div data-testid="board-turn-order-started">{String(props.isTurnOrderStarted)}</div>
       <div data-testid="board-turn-order-count">{String(props.turnOrderEntries?.length || 0)}</div>
@@ -1835,6 +1837,159 @@ describe('GrigliataPage', () => {
     expect(firestore.setDoc.mock.calls.some(([target]) => (
       target?.path === 'grigliata_fog_of_war/map-1__user-2'
     ))).toBe(false);
+  });
+
+  test('passes only fog-current active render inputs to the player board', async () => {
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [],
+    });
+    setDocData('grigliata_fog_of_war/map-1__user-1', {
+      backgroundId: 'map-1',
+      ownerUid: 'user-1',
+      cellSizePx: 70,
+      exploredCells: ['8:8'],
+      updatedBy: 'user-1',
+    });
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-1',
+      backgroundId: 'map-1',
+      tokenId: 'user-1',
+      ownerUid: 'user-1',
+      col: 0,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+      visionRadiusSquares: 1,
+    }, {
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      tokenId: 'user-2',
+      ownerUid: 'user-2',
+      col: 8,
+      row: 8,
+      isVisibleToPlayers: true,
+      isDead: false,
+      isInTurnOrder: true,
+      turnOrderInitiative: 12,
+      visionRadiusSquares: 1,
+    }]);
+    setCollectionData('grigliata_aoe_figures', [{
+      id: 'memory-figure',
+      backgroundId: 'map-1',
+      ownerUid: 'user-2',
+      figureType: 'circle',
+      slot: 1,
+      originCell: { col: 8, row: 8 },
+      targetCell: { col: 9, row: 8 },
+      colorKey: 'ion-cyan',
+      isVisibleToPlayers: true,
+    }]);
+    setCollectionData('grigliata_live_interactions', [{
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      ownerUid: 'user-2',
+      type: 'ping',
+      source: 'free',
+      colorKey: 'ion-cyan',
+      point: { x: 595, y: 595 },
+      startedAtMs: Date.now(),
+      updatedAt: Date.now(),
+      updatedBy: 'user-2',
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('true');
+      expect(screen.getByTestId('board-token-ids')).toHaveTextContent('user-1');
+    });
+    expect(screen.getByTestId('board-token-ids')).not.toHaveTextContent('user-2');
+    expect(screen.getByTestId('board-aoe-count')).toHaveTextContent('1');
+    expect(screen.getByTestId('board-aoe-ids')).toHaveTextContent('memory-figure');
+    expect(screen.getByTestId('board-shared-count')).toHaveTextContent('1');
+    expect(screen.getByTestId('board-turn-order-count')).toHaveTextContent('0');
+    expect(screen.getByTestId('board-active-turn-token')).toHaveTextContent('');
+  });
+
+  test('does not pass fog-hidden selected custom token details to the tray', async () => {
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [],
+    });
+    setDocData('grigliata_fog_of_war/map-1__user-1', {
+      backgroundId: 'map-1',
+      ownerUid: 'user-1',
+      cellSizePx: 70,
+      exploredCells: ['8:8'],
+      updatedBy: 'user-1',
+    });
+    setCollectionData('grigliata_tokens', [{
+      id: 'token-2',
+      ownerUid: 'user-1',
+      tokenType: 'custom',
+      customTokenRole: 'instance',
+      customTemplateId: 'template-2',
+      imageSource: 'uploaded',
+      label: 'Fog Familiar',
+      imageUrl: '',
+      imagePath: '',
+      notes: 'Waits in the mist',
+      stats: {
+        hpTotal: 12,
+        hpCurrent: 12,
+        manaTotal: 4,
+        manaCurrent: 4,
+        shieldTotal: 5,
+        shieldCurrent: 5,
+      },
+    }]);
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-1',
+      backgroundId: 'map-1',
+      tokenId: 'user-1',
+      ownerUid: 'user-1',
+      tokenType: 'character',
+      col: 0,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+      visionRadiusSquares: 1,
+      statuses: [],
+    }, {
+      id: 'map-1__token-2',
+      backgroundId: 'map-1',
+      tokenId: 'token-2',
+      ownerUid: 'user-1',
+      tokenType: 'custom',
+      label: 'Fog Familiar',
+      col: 8,
+      row: 8,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('true');
+      expect(screen.getByTestId('board-token-ids')).toHaveTextContent('user-1');
+    });
+    expect(screen.getByTestId('board-token-ids')).not.toHaveTextContent('token-2');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /select custom token/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Selected Custom Token')).not.toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /save details/i })).not.toBeInTheDocument();
   });
 
   test('does not reveal fog from custom, foe, or other player tokens', async () => {

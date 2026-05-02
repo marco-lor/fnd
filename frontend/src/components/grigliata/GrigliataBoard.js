@@ -81,6 +81,10 @@ import GrigliataLightingMask from './GrigliataLightingMask';
 import GrigliataFogOfWarMask from './GrigliataFogOfWarMask';
 import GrigliataWallRuntimeControls from './GrigliataWallRuntimeControls';
 import { resolveViewerTokenVisionSources } from './lightingVisibility';
+import {
+  filterFogVisibleTokens,
+  splitFogVisibleTokenRenderLayers,
+} from './fogVisibilityFiltering';
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
 const RULER_LABEL_MIN_WIDTH = 90;
@@ -1400,6 +1404,7 @@ const EnhancedAoEFigureOverlay = ({
   onMouseDown,
   listening = true,
   viewportScale = 1,
+  hitTargetOnly = false,
 }) => {
   if (!figure?.figureType) {
     return null;
@@ -1408,7 +1413,9 @@ const EnhancedAoEFigureOverlay = ({
   const overlayProps = {
     listening,
     onMouseDown,
-    'data-testid': overlayId ? `aoe-figure-overlay-${overlayId}` : undefined,
+    'data-testid': overlayId
+      ? `aoe-figure-${hitTargetOnly ? 'hit-target' : 'overlay'}-${overlayId}`
+      : undefined,
   };
   const metrics = buildZoomNormalizedOverlayMetrics(viewportScale);
   const outlineStroke = isSelected ? 'rgba(248, 250, 252, 0.96)' : drawTheme.outlineStroke;
@@ -1511,6 +1518,8 @@ const EnhancedAoEFigureOverlay = ({
           stroke="rgba(255,255,255,0)"
           strokeWidth={metrics.aoeHitStrokeWidth}
         />
+        {hitTargetOnly ? null : (
+          <>
         <Circle
           x={figure.centerPoint.x}
           y={figure.centerPoint.y}
@@ -1530,6 +1539,8 @@ const EnhancedAoEFigureOverlay = ({
           shadowOpacity={0.24}
         />
         {measurementDecoration}
+          </>
+        )}
       </Group>
     );
   }
@@ -1546,6 +1557,8 @@ const EnhancedAoEFigureOverlay = ({
           stroke="rgba(255,255,255,0)"
           strokeWidth={metrics.aoeHitStrokeWidth}
         />
+        {hitTargetOnly ? null : (
+          <>
         <Rect
           x={figure.x}
           y={figure.y}
@@ -1567,6 +1580,8 @@ const EnhancedAoEFigureOverlay = ({
           shadowOpacity={0.24}
         />
         {measurementDecoration}
+          </>
+        )}
       </Group>
     );
   }
@@ -1582,6 +1597,8 @@ const EnhancedAoEFigureOverlay = ({
           strokeWidth={metrics.aoeHitStrokeWidth}
           lineJoin="round"
         />
+        {hitTargetOnly ? null : (
+          <>
         <Line
           points={figure.flatPoints}
           closed
@@ -1601,6 +1618,8 @@ const EnhancedAoEFigureOverlay = ({
           shadowOpacity={0.24}
         />
         {measurementDecoration}
+          </>
+        )}
       </Group>
     );
   }
@@ -2815,6 +2834,16 @@ export default function GrigliataBoard({
   const visibleLocalPings = useMemo(
     () => localPings.filter((ping) => (pingAnimationClock - ping.startedAtMs) < MAP_PING_VISIBLE_MS),
     [localPings, pingAnimationClock]
+  );
+  const fogVisibleRenderedTokens = useMemo(
+    () => filterFogVisibleTokens({
+      tokens: renderedTokens,
+      currentUserId,
+      isManager,
+      grid: normalizedGrid,
+      fogOfWar,
+    }),
+    [currentUserId, fogOfWar, isManager, normalizedGrid, renderedTokens]
   );
   const hasVisibleRemotePing = useMemo(
     () => renderedSharedInteractions.some((interaction) => interaction.kind === 'ping'),
@@ -4175,8 +4204,8 @@ export default function GrigliataBoard({
     [renderedAoEFigures, selectedAoEFigureId]
   );
   const selectedTokens = useMemo(
-    () => renderedTokens.filter((token) => selectedTokenIdSet.has(token.tokenId)),
-    [renderedTokens, selectedTokenIdSet]
+    () => fogVisibleRenderedTokens.filter((token) => selectedTokenIdSet.has(token.tokenId)),
+    [fogVisibleRenderedTokens, selectedTokenIdSet]
   );
   useEffect(() => {
     const nextSelectedTokenIds = selectedTokens.map((token) => token.tokenId);
@@ -4393,21 +4422,21 @@ export default function GrigliataBoard({
       return null;
     }
 
-    const token = renderedTokens.find((entry) => entry.tokenId === activeOverflowTokenId);
+    const token = fogVisibleRenderedTokens.find((entry) => entry.tokenId === activeOverflowTokenId);
     const overflowCount = tokenStatusDisplayById.get(activeOverflowTokenId)?.overflowCount || 0;
     if (!token || overflowCount < 1) {
       return null;
     }
 
     return token;
-  }, [activeOverflowTokenId, renderedTokens, tokenStatusDisplayById]);
+  }, [activeOverflowTokenId, fogVisibleRenderedTokens, tokenStatusDisplayById]);
   const hoveredTokenTooltip = useMemo(() => {
     if (!hoveredTokenTooltipId) {
       return null;
     }
 
-    return renderedTokens.find((entry) => entry.tokenId === hoveredTokenTooltipId) || null;
-  }, [hoveredTokenTooltipId, renderedTokens]);
+    return fogVisibleRenderedTokens.find((entry) => entry.tokenId === hoveredTokenTooltipId) || null;
+  }, [fogVisibleRenderedTokens, hoveredTokenTooltipId]);
   const hoveredTokenTooltipStyle = useMemo(() => {
     if (!hoveredTokenTooltip) {
       return null;
@@ -4463,7 +4492,19 @@ export default function GrigliataBoard({
   );
   const areTurnOrderControlsDisabled = isNarrationOverlayActive;
   const visibleRenderedAoEFigures = isNarrationOverlayActive ? [] : renderedAoEFigures;
-  const visibleRenderedTokens = isNarrationOverlayActive ? [] : renderedTokens;
+  const visibleRenderedTokens = isNarrationOverlayActive ? [] : fogVisibleRenderedTokens;
+  const visibleTokenRenderLayers = useMemo(
+    () => splitFogVisibleTokenRenderLayers({
+      tokens: visibleRenderedTokens,
+      currentUserId,
+      isManager,
+      grid: normalizedGrid,
+      fogOfWar,
+    }),
+    [currentUserId, fogOfWar, isManager, normalizedGrid, visibleRenderedTokens]
+  );
+  const visibleRenderedTokensBelowFog = visibleTokenRenderLayers.belowFogTokens;
+  const visibleRenderedTokensAboveFog = visibleTokenRenderLayers.aboveFogTokens;
   const visibleRenderedSharedInteractions = isNarrationOverlayActive ? [] : renderedSharedInteractions;
   const visibleLocalPingsForRender = isNarrationOverlayActive ? [] : visibleLocalPings;
   const visibleMeasurementState = isNarrationOverlayActive ? null : measurementState;
@@ -4803,17 +4844,6 @@ export default function GrigliataBoard({
               </Layer>
             )}
 
-            {!isNarrationOverlayActive && fogOfWar && (
-              <Layer listening={false}>
-                <GrigliataFogOfWarMask
-                  bounds={boardBounds}
-                  grid={normalizedGrid}
-                  exploredCells={fogOfWar.exploredCells}
-                  currentVisibleCells={fogOfWar.currentVisibleCells}
-                />
-              </Layer>
-            )}
-
             <Layer>
               {!isNarrationOverlayActive && isManager && onToggleWallRuntimeSegment && (
                 <GrigliataWallRuntimeControls
@@ -4859,19 +4889,18 @@ export default function GrigliataBoard({
                 </>
               )}
 
-              {visibleRenderedAoEFigures.map((figure) => (
+              {visibleRenderedAoEFigures.filter((figure) => figure.canEdit).map((figure) => (
                 <EnhancedAoEFigureOverlay
-                  key={figure.id}
+                  key={`aoe-hit-target-${figure.id}`}
                   figure={figure.renderable}
-                  drawTheme={getGrigliataDrawTheme(figure.colorKey)}
                   overlayId={figure.id}
-                  isSelected={figure.isSelected}
                   viewportScale={viewport.scale}
+                  hitTargetOnly
                   onMouseDown={(event) => handleAoEFigureMouseDown(figure, event)}
                 />
               ))}
 
-              {visibleRenderedTokens.map((token) => (
+              {visibleRenderedTokensBelowFog.map((token) => (
                 <TokenNode
                   key={token.tokenId}
                   token={token}
@@ -4906,6 +4935,69 @@ export default function GrigliataBoard({
                       currentTokenId === tokenId ? '' : tokenId
                     ));
                   }}
+                />
+              ))}
+            </Layer>
+
+            {!isNarrationOverlayActive && fogOfWar && (
+              <Layer listening={false}>
+                <GrigliataFogOfWarMask
+                  bounds={boardBounds}
+                  grid={normalizedGrid}
+                  exploredCells={fogOfWar.exploredCells}
+                  currentVisibleCells={fogOfWar.currentVisibleCells}
+                />
+              </Layer>
+            )}
+
+            <Layer>
+              {visibleRenderedTokensAboveFog.map((token) => (
+                <TokenNode
+                  key={token.tokenId}
+                  token={token}
+                  position={token.renderPosition}
+                  canMove={token.canMove}
+                  isActiveTurn={token.isActiveTurn}
+                  isSelected={token.isSelected}
+                  badgeImages={tokenStatusBadgeImages}
+                  drawTheme={resolvedDrawTheme}
+                  onMouseDown={handleTokenMouseDown}
+                  onContextMenu={handleTokenContextMenu}
+                  onHoverChange={(tokenId, isHovered) => {
+                    setHoveredTokenTooltipId((currentTokenId) => {
+                      if (!isHovered) {
+                        return currentTokenId === tokenId ? '' : currentTokenId;
+                      }
+
+                      return tokenId || '';
+                    });
+                  }}
+                  onOverflowMouseEnter={(tokenId) => setHoveredOverflowTokenId(tokenId || '')}
+                  onOverflowMouseLeave={(tokenId) => {
+                    setHoveredOverflowTokenId((currentTokenId) => (
+                      currentTokenId === tokenId ? '' : currentTokenId
+                    ));
+                  }}
+                  onOverflowToggle={(tokenId) => {
+                    if (!tokenId) return;
+
+                    setHoveredOverflowTokenId(tokenId);
+                    setPinnedOverflowTokenId((currentTokenId) => (
+                      currentTokenId === tokenId ? '' : tokenId
+                    ));
+                  }}
+                />
+              ))}
+
+              {visibleRenderedAoEFigures.map((figure) => (
+                <EnhancedAoEFigureOverlay
+                  key={figure.id}
+                  figure={figure.renderable}
+                  drawTheme={getGrigliataDrawTheme(figure.colorKey)}
+                  overlayId={figure.id}
+                  isSelected={figure.isSelected}
+                  viewportScale={viewport.scale}
+                  listening={false}
                 />
               ))}
 
