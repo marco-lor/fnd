@@ -952,6 +952,65 @@ describe('GrigliataBoard', () => {
     expect(screen.getByTestId('lighting-debug-overlay')).toBeInTheDocument();
   });
 
+  test('renders DM wall runtime controls outside narration and forwards toggles', async () => {
+    const onToggleWallRuntimeSegment = jest.fn();
+    const lightingRenderInput = {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.5, globalLight: false },
+      walls: [{
+        id: 'wall-1',
+        x1: 0,
+        y1: 0,
+        x2: 70,
+        y2: 0,
+        wallType: 'door',
+        isOpen: false,
+        blocksSight: true,
+      }],
+      lights: [],
+    };
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightingRenderInput,
+          onToggleWallRuntimeSegment,
+        })}
+      />
+    );
+
+    const toggle = await screen.findByTestId('wall-runtime-toggle');
+    fireEvent.click(toggle);
+    expect(onToggleWallRuntimeSegment).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'wall-1',
+      isOpen: false,
+    }));
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: false,
+          lightingRenderInput,
+          onToggleWallRuntimeSegment,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('wall-runtime-toggle')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightingRenderInput,
+          onToggleWallRuntimeSegment,
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('wall-runtime-toggle')).not.toBeInTheDocument();
+  });
+
   test('keeps the old battlemap briefly while fading it out on deactivation', async () => {
     jest.useFakeTimers();
 

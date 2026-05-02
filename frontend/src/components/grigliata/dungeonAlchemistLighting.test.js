@@ -77,17 +77,24 @@ describe('Dungeon Alchemist lighting normalization', () => {
       color: '#FFAD00',
     }));
     expect(metadata.walls[0]).toEqual(expect.objectContaining({
+      id: 'wall-1',
       x1: 1201,
       y1: 1080,
       x2: 1261,
       y2: 1080,
+      wallType: 'wall',
       blocksMovement: true,
       blocksSight: true,
+      blocksVision: true,
+      blocksLight: true,
       blocksSound: true,
       doorType: 0,
     }));
     expect(metadata.walls.find((wall) => wall.doorType === 1)).toEqual(expect.objectContaining({
+      wallType: 'door',
       blocksSight: true,
+      blocksVision: true,
+      blocksLight: true,
     }));
     expect(metadata.walls.find((wall) => wall.blocksSight === false)).toEqual(expect.objectContaining({
       blocksMovement: true,

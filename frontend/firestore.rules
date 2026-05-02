@@ -814,6 +814,79 @@ service cloud.firestore {
         && (data.updatedBy == null || data.updatedBy is string);
     }
 
+    function isValidGrigliataWallRuntimeSegment(segment) {
+      return segment is map
+        && segment.keys().hasAll([
+          "isOpen",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && segment.keys().hasOnly([
+          "isOpen",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && segment.isOpen is bool
+        && segment.updatedAt is timestamp
+        && (segment.updatedBy == null || segment.updatedBy is string);
+    }
+
+    function hasValidGrigliataWallRuntimeSegments(segments, segmentIds) {
+      return segments is map
+        && segmentIds.size() <= 500
+        && (segmentIds.size() < 1 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[0]]))
+        && (segmentIds.size() < 2 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[1]]))
+        && (segmentIds.size() < 3 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[2]]))
+        && (segmentIds.size() < 4 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[3]]))
+        && (segmentIds.size() < 5 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[4]]))
+        && (segmentIds.size() < 6 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[5]]))
+        && (segmentIds.size() < 7 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[6]]))
+        && (segmentIds.size() < 8 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[7]]))
+        && (segmentIds.size() < 9 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[8]]))
+        && (segmentIds.size() < 10 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[9]]))
+        && (segmentIds.size() < 11 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[10]]))
+        && (segmentIds.size() < 12 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[11]]))
+        && (segmentIds.size() < 13 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[12]]))
+        && (segmentIds.size() < 14 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[13]]))
+        && (segmentIds.size() < 15 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[14]]))
+        && (segmentIds.size() < 16 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[15]]))
+        && (segmentIds.size() < 17 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[16]]))
+        && (segmentIds.size() < 18 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[17]]))
+        && (segmentIds.size() < 19 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[18]]))
+        && (segmentIds.size() < 20 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[19]]))
+        && (segmentIds.size() < 21 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[20]]))
+        && (segmentIds.size() < 22 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[21]]))
+        && (segmentIds.size() < 23 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[22]]))
+        && (segmentIds.size() < 24 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[23]]))
+        && (segmentIds.size() < 25 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[24]]))
+        && (segmentIds.size() < 26 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[25]]))
+        && (segmentIds.size() < 27 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[26]]))
+        && (segmentIds.size() < 28 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[27]]))
+        && (segmentIds.size() < 29 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[28]]))
+        && (segmentIds.size() < 30 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[29]]))
+        && (segmentIds.size() < 31 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[30]]))
+        && (segmentIds.size() < 32 || isValidGrigliataWallRuntimeSegment(segments[segmentIds[31]]));
+    }
+
+    function isValidGrigliataWallRuntimeState(data, backgroundId) {
+      return data.keys().hasAll([
+          "backgroundId",
+          "segments",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.keys().hasOnly([
+          "backgroundId",
+          "segments",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.backgroundId == backgroundId
+        && hasValidGrigliataWallRuntimeSegments(data.segments, data.segments.keys())
+        && data.updatedAt is timestamp
+        && (data.updatedBy == null || data.updatedBy is string);
+    }
+
     function isValidGrigliataMusicTrack(data) {
       return data.keys().hasAll([
           "name",
@@ -1097,6 +1170,13 @@ service cloud.firestore {
     match /grigliata_lighting_render_inputs/{backgroundId} {
       allow read: if isSignedIn();
       allow create, update, delete: if isGrigliataManager();
+    }
+
+    match /grigliata_wall_state/{backgroundId} {
+      allow read: if isSignedIn();
+      allow create, update: if isGrigliataManager()
+        && isValidGrigliataWallRuntimeState(request.resource.data, backgroundId);
+      allow delete: if isGrigliataManager();
     }
 
     match /grigliata_fog_of_war/{fogId} {

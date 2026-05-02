@@ -39,6 +39,10 @@ import {
   GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION,
 } from './lightingRenderInput';
 import {
+  buildEffectiveLightingRenderInput,
+  GRIGLIATA_WALL_STATE_COLLECTION,
+} from './wallRuntimeState';
+import {
   buildPlacementDocId,
   buildStorageSafeName,
   getDisplayNameFromFileName,
@@ -108,6 +112,7 @@ import {
 import useGrigliataPageData from './useGrigliataPageData';
 import useGrigliataLightingMetadata from './useGrigliataLightingMetadata';
 import useGrigliataLightingRenderInput from './useGrigliataLightingRenderInput';
+import useGrigliataWallRuntimeState from './useGrigliataWallRuntimeState';
 import useGrigliataFogOfWar from './useGrigliataFogOfWar';
 import useGrigliataFogOfWarPersistence from './useGrigliataFogOfWarPersistence';
 import useGrigliataPlacementActions from './useGrigliataPlacementActions';
@@ -481,6 +486,12 @@ export default function GrigliataPage() {
     currentUserId,
   });
   const {
+    wallRuntimeState,
+  } = useGrigliataWallRuntimeState({
+    backgroundId: activeBackgroundId,
+    currentUserId,
+  });
+  const {
     fogOfWar,
   } = useGrigliataFogOfWar({
     backgroundId: activeBackgroundId,
@@ -506,9 +517,13 @@ export default function GrigliataPage() {
       return null;
     }
   }, [isManager, lightingMetadata, lightingRenderInput]);
+  const effectiveLightingRenderInput = useMemo(() => buildEffectiveLightingRenderInput({
+    lightingRenderInput: dmPreviewLightingRenderInput,
+    wallRuntimeState,
+  }), [dmPreviewLightingRenderInput, wallRuntimeState]);
   const enabledLightingRenderInput = combatBackground?.lightingEnabled === false
     ? null
-    : dmPreviewLightingRenderInput;
+    : effectiveLightingRenderInput;
 
   useEffect(() => {
     if (!currentUserId || isManager || !currentCharacterId) {
@@ -886,7 +901,7 @@ export default function GrigliataPage() {
     [isNarrationOverlayActive, sharedInteractions]
   );
   const isFogOfWarEnabled = combatBackground?.fogOfWarEnabled !== false;
-  const fogLightingRenderInput = isFogOfWarEnabled ? dmPreviewLightingRenderInput : null;
+  const fogLightingRenderInput = isFogOfWarEnabled ? effectiveLightingRenderInput : null;
   const normalizedFogGrid = useMemo(
     () => normalizeGridConfig(grid),
     [grid]
@@ -3394,6 +3409,16 @@ export default function GrigliataPage() {
     }
   };
 
+  const deleteOptionalWallRuntimeState = async (backgroundId) => {
+    if (!backgroundId) return;
+
+    const wallStateDocRef = doc(db, GRIGLIATA_WALL_STATE_COLLECTION, backgroundId);
+    const wallStateSnapshot = await getDoc(wallStateDocRef);
+    if (wallStateSnapshot.exists()) {
+      await deleteDoc(wallStateDocRef);
+    }
+  };
+
   const handleDeleteBackground = async (background) => {
     if (!isManager || !user?.uid || !background?.id) return;
 
@@ -3426,6 +3451,7 @@ export default function GrigliataPage() {
       await clearPlacementsForBackground(background.id);
       await deleteDoc(doc(db, GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION, background.id));
       await deleteDoc(doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, background.id));
+      await deleteOptionalWallRuntimeState(background.id);
       await runPaginatedWriteBatch({
         collectionName: GRIGLIATA_FOG_OF_WAR_COLLECTION,
         baseConstraints: [where('backgroundId', '==', background.id)],
@@ -3577,6 +3603,15 @@ export default function GrigliataPage() {
         renderInput,
         { merge: true }
       );
+      await setDoc(
+        doc(db, GRIGLIATA_WALL_STATE_COLLECTION, selectedBackground.id),
+        {
+          backgroundId: selectedBackground.id,
+          segments: {},
+          updatedAt,
+          updatedBy: user.uid,
+        }
+      );
       await updateDoc(doc(db, 'grigliata_backgrounds', selectedBackground.id), {
         lightingSummary: summary,
         lightingEnabled: true,
@@ -3636,6 +3671,38 @@ export default function GrigliataPage() {
       setLightingImportError('Unable to update fog of war right now.');
     } finally {
       setIsFogOfWarEnabledPending(false);
+    }
+  };
+
+  const handleToggleWallRuntimeSegment = async (wall) => {
+    if (!isManager || !user?.uid || !activeBackgroundId || !wall?.id) return;
+
+    const wallType = wall.wallType === 'window' ? 'window' : (wall.wallType === 'door' ? 'door' : '');
+    if (!wallType) return;
+
+    setBoardError('');
+
+    try {
+      const updatedAt = serverTimestamp();
+      await setDoc(
+        doc(db, GRIGLIATA_WALL_STATE_COLLECTION, activeBackgroundId),
+        {
+          backgroundId: activeBackgroundId,
+          segments: {
+            [wall.id]: {
+              isOpen: wall.isOpen !== true,
+              updatedAt,
+              updatedBy: user.uid,
+            },
+          },
+          updatedAt,
+          updatedBy: user.uid,
+        },
+        { merge: true }
+      );
+    } catch (error) {
+      console.error('Failed to update Grigliata wall runtime state:', error);
+      setBoardError('Unable to update that door or window right now.');
     }
   };
 
@@ -4220,6 +4287,8 @@ export default function GrigliataPage() {
                 lightingDebugMetadata={lightingMetadata}
                 showLightingDebugOverlay={isManager && isLightingDebugOverlayVisible && !!lightingMetadata}
                 fogOfWar={boardFogOfWar}
+                wallRuntimeSegments={effectiveLightingRenderInput?.walls || []}
+                onToggleWallRuntimeSegment={isManager && !isNarrationOverlayActive ? handleToggleWallRuntimeSegment : null}
                 onSharedInteractionChange={isNarrationOverlayActive ? null : handleSharedInteractionChange}
                 onSelectedTokenIdsChange={setSelectedBoardTokenIds}
                 onDropCurrentToken={isNarrationOverlayActive ? null : ((payload, worldPoint) => {

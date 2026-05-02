@@ -79,6 +79,7 @@ import {
 import GrigliataLightingDebugOverlay from './GrigliataLightingDebugOverlay';
 import GrigliataLightingMask from './GrigliataLightingMask';
 import GrigliataFogOfWarMask from './GrigliataFogOfWarMask';
+import GrigliataWallRuntimeControls from './GrigliataWallRuntimeControls';
 import { resolveViewerTokenVisionSources } from './lightingVisibility';
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
@@ -2299,6 +2300,8 @@ export default function GrigliataBoard({
   lightingDebugMetadata = null,
   showLightingDebugOverlay = false,
   fogOfWar = null,
+  wallRuntimeSegments = null,
+  onToggleWallRuntimeSegment = null,
   isNarrationOverlayActive = false,
 }) {
   const containerRef = useRef(null);
@@ -4812,6 +4815,14 @@ export default function GrigliataBoard({
             )}
 
             <Layer>
+              {!isNarrationOverlayActive && isManager && onToggleWallRuntimeSegment && (
+                <GrigliataWallRuntimeControls
+                  walls={wallRuntimeSegments || lightingRenderInput?.walls}
+                  viewportScale={viewport.scale}
+                  onToggleWallRuntimeSegment={onToggleWallRuntimeSegment}
+                />
+              )}
+
               {!isNarrationOverlayActive && isManager && showLightingDebugOverlay && lightingDebugMetadata && (
                 <GrigliataLightingDebugOverlay
                   metadata={lightingDebugMetadata}

@@ -31,6 +31,18 @@ const normalizeBoolean = (value, fallback = false) => (
   typeof value === 'boolean' ? value : fallback
 );
 
+const classifyWallType = (wall, doorType) => {
+  if (wall?.wallType === 'door' || wall?.type === 'door') {
+    return 'door';
+  }
+
+  if (wall?.wallType === 'window' || wall?.type === 'window' || wall?.isWindow === true) {
+    return 'window';
+  }
+
+  return doorType === 1 ? 'door' : 'wall';
+};
+
 export const parseDungeonAlchemistLightingJson = (rawJson) => {
   if (typeof rawJson !== 'string') {
     throw new Error('Dungeon Alchemist lighting import must be a JSON string.');
@@ -105,6 +117,9 @@ const normalizeWall = (wall, index) => {
   const sense = asFiniteNumber(wall.sense, 0);
   const sound = asFiniteNumber(wall.sound, 0);
   const door = asFiniteNumber(wall.door, 0);
+  const light = Number.isFinite(Number(wall.light)) ? asFiniteNumber(wall.light, sense) : sense;
+  const blocksVision = sense !== 0;
+  const blocksLight = light !== 0;
 
   return {
     id: `wall-${index + 1}`,
@@ -112,13 +127,17 @@ const normalizeWall = (wall, index) => {
     y1: asFiniteNumber(coordinates[1], 0),
     x2: asFiniteNumber(coordinates[2], 0),
     y2: asFiniteNumber(coordinates[3], 0),
+    wallType: classifyWallType(wall, door),
     blocksMovement: move !== 0,
-    blocksSight: sense !== 0,
+    blocksSight: blocksVision || blocksLight,
+    blocksVision,
+    blocksLight,
     blocksSound: sound !== 0,
     doorType: door,
     source: {
       move,
       sense,
+      light,
       sound,
       door,
     },
@@ -248,4 +267,3 @@ export const buildGrigliataLightingSummary = (metadata, importedAt = null) => ({
   alignmentStatus: metadata?.alignment?.status || '',
   importedAt,
 });
-

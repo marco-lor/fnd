@@ -47,7 +47,7 @@ describe('lighting render input sanitization', () => {
     expect(renderInput).not.toHaveProperty('importWarnings');
   });
 
-  test('keeps only finite sight-blocking wall segments and strips wall diagnostics', () => {
+  test('keeps only finite wall segments with sanitized runtime-safe fields and strips diagnostics', () => {
     const renderInput = buildGrigliataLightingRenderInput({
       schemaVersion: 1,
       backgroundId: 'map-1',
@@ -63,6 +63,16 @@ describe('lighting render input sanitization', () => {
         blocksSound: true,
         doorType: 1,
         source: { move: 1, sense: 1, sound: 1, door: 1 },
+      }, {
+        id: 'window-source-id',
+        x1: 5,
+        y1: 5,
+        x2: 80,
+        y2: 5,
+        wallType: 'window',
+        blocksSight: false,
+        blocksVision: false,
+        blocksLight: false,
       }, {
         x1: 5,
         y1: 5,
@@ -86,12 +96,28 @@ describe('lighting render input sanitization', () => {
     });
 
     expect(renderInput.walls).toEqual([{
+      id: 'wall-source-id',
       x1: 10,
       y1: 20,
       x2: 90,
       y2: 20,
+      wallType: 'door',
       blocksSight: true,
+      blocksVision: true,
+      blocksLight: true,
+    }, {
+      id: 'window-source-id',
+      x1: 5,
+      y1: 5,
+      x2: 80,
+      y2: 5,
+      wallType: 'window',
+      blocksSight: false,
+      blocksVision: false,
+      blocksLight: false,
     }]);
+    expect(renderInput.walls[0]).not.toHaveProperty('source');
+    expect(renderInput.walls[0]).not.toHaveProperty('doorType');
   });
 
   test('keeps renderable finite scene lights and strips source-only light fields', () => {
@@ -158,6 +184,7 @@ describe('lighting render input sanitization', () => {
         globalLight: 'yes',
       },
       walls: [{
+        id: 'wall-1',
         x1: '0',
         y1: 0,
         x2: 70,
@@ -188,11 +215,15 @@ describe('lighting render input sanitization', () => {
         globalLight: false,
       },
       walls: [{
+        id: 'wall-1',
         x1: 0,
         y1: 0,
         x2: 70,
         y2: 0,
+        wallType: 'door',
         blocksSight: true,
+        blocksVision: true,
+        blocksLight: true,
       }],
       lights: [{
         x: 35,

@@ -280,6 +280,8 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-lighting-count">{String(props.lightingRenderInput?.lights?.length || 0)}</div>
       <div data-testid="board-lighting-debug-count">{String(props.lightingDebugMetadata?.lights?.length || 0)}</div>
       <div data-testid="board-lighting-debug">{String(props.showLightingDebugOverlay)}</div>
+      <div data-testid="board-wall-controls-count">{String(props.onToggleWallRuntimeSegment ? (props.wallRuntimeSegments || []).filter((wall) => wall.wallType === 'door' || wall.wallType === 'window').length : 0)}</div>
+      <div data-testid="board-wall-states">{(props.lightingRenderInput?.walls || []).map((wall) => `${wall.id}:${wall.wallType || ''}:${String(wall.isOpen === true)}:${String(wall.blocksSight === true)}:${String(!!wall.doorType)}:${String(!!wall.source)}`).join('|')}</div>
       <div data-testid="board-fog-enabled">{String(!!props.fogOfWar)}</div>
       <div data-testid="board-fog-cell-count">{String(props.fogOfWar?.exploredCells?.length || 0)}</div>
       <div data-testid="board-fog-current-count">{String(props.fogOfWar?.currentVisibleCells?.length || 0)}</div>
@@ -337,6 +339,16 @@ jest.mock('./GrigliataBoard', () => {
           onClick={() => props.onAdjustGridSize?.(-1)}
         >
           decrease square size
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onToggleWallRuntimeSegment?.({
+            id: 'wall-2',
+            wallType: 'door',
+            isOpen: false,
+          })}
+        >
+          toggle wall wall-2
         </button>
         <button type="button" onClick={() => props.onChangeAoeFigureType?.('circle')}>
           activate circle tool
@@ -1298,7 +1310,17 @@ describe('GrigliataPage', () => {
         globalLight: true,
       },
       walls: [
-        { x1: 1201, y1: 1080, x2: 1261, y2: 1080, blocksSight: true },
+        {
+          id: 'wall-1',
+          x1: 1201,
+          y1: 1080,
+          x2: 1261,
+          y2: 1080,
+          wallType: 'wall',
+          blocksSight: true,
+          blocksVision: true,
+          blocksLight: true,
+        },
       ],
       lights: [
         { x: 1231, y: 913, brightRadiusPx: 120, dimRadiusPx: 240, color: '#FFAD00' },
@@ -1309,6 +1331,14 @@ describe('GrigliataPage', () => {
     expect(sanitizedRenderInputCall[1]).not.toHaveProperty('alignment');
     expect(sanitizedRenderInputCall[1]).not.toHaveProperty('importWarnings');
     expect(sanitizedRenderInputCall[1].walls[0]).not.toHaveProperty('doorType');
+    expect(firestore.setDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_wall_state/map-1' }),
+      expect.objectContaining({
+        backgroundId: 'map-1',
+        segments: {},
+        updatedBy: 'user-1',
+      })
+    );
     expect(firestore.updateDoc).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
       expect.objectContaining({
@@ -1567,6 +1597,174 @@ describe('GrigliataPage', () => {
     expect(firestore.onSnapshot.mock.calls.some(([target]) => (
       target?.path === 'grigliata_background_lighting/map-1'
     ))).toBe(false);
+  });
+
+  test('subscribes to runtime wall state and passes effective lighting input to the DM board', async () => {
+    setManagerAuth();
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [{
+        id: 'wall-2',
+        x1: 0,
+        y1: 0,
+        x2: 70,
+        y2: 0,
+        wallType: 'door',
+        blocksSight: true,
+        blocksVision: true,
+        blocksLight: true,
+      }],
+      lights: [],
+    });
+    setDocData('grigliata_wall_state/map-1', {
+      backgroundId: 'map-1',
+      segments: {
+        'wall-2': {
+          isOpen: true,
+          updatedBy: 'user-1',
+        },
+      },
+      updatedBy: 'user-1',
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-wall-states')).toHaveTextContent('wall-2:door:true:false:false:false');
+    });
+    expect(screen.getByTestId('board-wall-controls-count')).toHaveTextContent('1');
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.path === 'grigliata_wall_state/map-1'
+    ))).toBe(true);
+  });
+
+  test('keeps player wall state render input sanitized and read-only', async () => {
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [{
+        id: 'wall-2',
+        x1: 0,
+        y1: 0,
+        x2: 70,
+        y2: 0,
+        blocksSight: true,
+        doorType: 1,
+        source: { door: 1, sense: 1 },
+      }],
+      lights: [],
+    });
+    setDocData('grigliata_wall_state/map-1', {
+      backgroundId: 'map-1',
+      segments: {
+        'wall-2': {
+          isOpen: true,
+          updatedBy: 'dm-1',
+        },
+      },
+      updatedBy: 'dm-1',
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-wall-states')).toHaveTextContent('wall-2:door:true:false:false:false');
+    });
+    expect(screen.getByTestId('board-wall-controls-count')).toHaveTextContent('0');
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.path === 'grigliata_wall_state/map-1'
+    ))).toBe(true);
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.path === 'grigliata_background_lighting/map-1'
+    ))).toBe(false);
+
+    firestore.setDoc.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: /toggle wall wall-2/i }));
+    expect(firestore.setDoc).not.toHaveBeenCalled();
+  });
+
+  test('lets the DM toggle one runtime door segment without rewriting render input', async () => {
+    setManagerAuth();
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [{
+        id: 'wall-2',
+        x1: 0,
+        y1: 0,
+        x2: 70,
+        y2: 0,
+        wallType: 'door',
+        blocksSight: true,
+        blocksVision: true,
+        blocksLight: true,
+      }],
+      lights: [],
+    });
+
+    render(<GrigliataPage />);
+    firestore.setDoc.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /toggle wall wall-2/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_wall_state/map-1' }),
+        expect.objectContaining({
+          backgroundId: 'map-1',
+          segments: {
+            'wall-2': expect.objectContaining({
+              isOpen: true,
+              updatedBy: 'user-1',
+            }),
+          },
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
+    expect(firestore.setDoc.mock.calls.some(([target]) => (
+      target?.path === 'grigliata_lighting_render_inputs/map-1'
+    ))).toBe(false);
+  });
+
+  test('keeps DM runtime wall controls available when computed lighting is disabled', async () => {
+    setManagerAuth();
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        lightingEnabled: false,
+        isGridVisible: true,
+      }]);
+    });
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [{
+        id: 'wall-2',
+        x1: 0,
+        y1: 0,
+        x2: 70,
+        y2: 0,
+        wallType: 'door',
+        blocksSight: true,
+        blocksVision: true,
+        blocksLight: true,
+      }],
+      lights: [],
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-lighting-count')).toHaveTextContent('0');
+      expect(screen.getByTestId('board-wall-controls-count')).toHaveTextContent('1');
+    });
   });
 
   test('subscribes to own fog and writes exploration only to the current player doc', async () => {
@@ -4622,6 +4820,11 @@ describe('GrigliataPage', () => {
         },
         isGridVisible: true,
       }]);
+      setDocData('grigliata_wall_state/map-2', {
+        backgroundId: 'map-2',
+        segments: {},
+        updatedBy: 'user-1',
+      });
     });
 
     render(<GrigliataPage />);
@@ -4649,9 +4852,62 @@ describe('GrigliataPage', () => {
         expect.objectContaining({ path: 'grigliata_lighting_render_inputs/map-2' })
       );
       expect(firestore.deleteDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_wall_state/map-2' })
+      );
+      expect(firestore.deleteDoc).toHaveBeenCalledWith(
         expect.objectContaining({ path: 'grigliata_backgrounds/map-2' })
       );
     });
+
+    confirmSpy.mockRestore();
+  });
+
+  test('skips optional wall runtime cleanup when the background has no wall state doc', async () => {
+    setManagerAuth();
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+      }, {
+        id: 'map-2',
+        name: 'Iron Keep',
+        imagePath: 'grigliata/backgrounds/map-2.png',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+    });
+
+    firestore.deleteDoc.mockClear();
+
+    const latestBackgroundGalleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+    await act(async () => {
+      await latestBackgroundGalleryProps.onDeleteBackground({
+        id: 'map-2',
+        name: 'Iron Keep',
+        imagePath: 'grigliata/backgrounds/map-2.png',
+      });
+    });
+
+    await waitFor(() => {
+      expect(firestore.getDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_wall_state/map-2' })
+      );
+      expect(firestore.deleteDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_backgrounds/map-2' })
+      );
+    });
+    expect(firestore.deleteDoc).not.toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_wall_state/map-2' })
+    );
 
     confirmSpy.mockRestore();
   });

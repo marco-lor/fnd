@@ -1,6 +1,22 @@
 export const GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION = 'grigliata_lighting_render_inputs';
 export const GRIGLIATA_LIGHTING_RENDER_INPUT_SCHEMA_VERSION = 1;
 
+const classifyImportedWallSegment = (wall = {}) => {
+  if (wall?.wallType === 'door' || wall?.type === 'door') {
+    return 'door';
+  }
+
+  if (wall?.wallType === 'window' || wall?.type === 'window' || wall?.isWindow === true) {
+    return 'window';
+  }
+
+  if (Number(wall?.doorType) === 1 || Number(wall?.door) === 1) {
+    return 'door';
+  }
+
+  return 'wall';
+};
+
 const DEFAULT_LIGHT_COLOR = '#FFFFFF';
 const GEOMETRY_EPSILON = 1e-6;
 
@@ -30,10 +46,6 @@ const normalizeHexColor = (value, fallback = DEFAULT_LIGHT_COLOR) => {
 };
 
 const normalizeWallSegment = (wall) => {
-  if (wall?.blocksSight !== true) {
-    return null;
-  }
-
   const x1 = Number(wall.x1);
   const y1 = Number(wall.y1);
   const x2 = Number(wall.x2);
@@ -47,12 +59,26 @@ const normalizeWallSegment = (wall) => {
     return null;
   }
 
+  const blocksVision = typeof wall.blocksVision === 'boolean'
+    ? wall.blocksVision
+    : wall.blocksSight === true;
+  const blocksLight = typeof wall.blocksLight === 'boolean'
+    ? wall.blocksLight
+    : wall.blocksSight === true;
+  if (!blocksVision && !blocksLight && classifyImportedWallSegment(wall) !== 'window') {
+    return null;
+  }
+
   return {
+    id: typeof wall.id === 'string' && wall.id ? wall.id : '',
     x1,
     y1,
     x2,
     y2,
-    blocksSight: true,
+    wallType: classifyImportedWallSegment(wall),
+    blocksSight: blocksVision || blocksLight,
+    blocksVision,
+    blocksLight,
   };
 };
 
