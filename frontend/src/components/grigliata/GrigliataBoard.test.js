@@ -1192,6 +1192,282 @@ describe('GrigliataBoard', () => {
     expect(screen.queryByTestId('wall-runtime-toggle')).not.toBeInTheDocument();
   });
 
+  test('renders DM light source controls outside narration only', async () => {
+    const lightSourceControls = {
+      lights: [{
+        id: 'light-1',
+        label: 'Torch',
+        enabled: true,
+        x: 140,
+        y: 140,
+        brightRadiusPx: 280,
+        dimRadiusPx: 560,
+        color: '#FFAD00',
+      }],
+      selectedLightId: 'light-1',
+      onSelectLight: jest.fn(),
+    };
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightSourceControls,
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('light-source-handle')).toHaveAttribute('data-lightid', 'light-1');
+    expect(screen.getByTestId('selected-light-panel')).toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: false,
+          lightSourceControls,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('light-source-handle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('selected-light-panel')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightSourceControls,
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('light-source-handle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('selected-light-panel')).not.toBeInTheDocument();
+  });
+
+  test('clears controlled light selection when selectedLightId becomes empty', async () => {
+    const lightSourceControls = {
+      lights: [{
+        id: 'light-1',
+        label: 'Torch',
+        enabled: true,
+        x: 140,
+        y: 140,
+        brightRadiusPx: 280,
+        dimRadiusPx: 560,
+        color: '#FFAD00',
+      }],
+      selectedLightId: 'light-1',
+      onSelectLight: jest.fn(),
+    };
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightSourceControls,
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('selected-light-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('light-source-handle')).toHaveAttribute('data-selected', 'true');
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightSourceControls: {
+            ...lightSourceControls,
+            selectedLightId: '',
+          },
+        })}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('selected-light-panel')).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('light-source-handle')).toHaveAttribute('data-selected', 'false');
+  });
+
+  test('creates and drags light sources from the DM board controls', async () => {
+    const onCreateLightSource = jest.fn(() => Promise.resolve(true));
+    const onMoveLightSource = jest.fn(() => Promise.resolve(true));
+    const onSelectLight = jest.fn();
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightSourceControls: {
+            isLightToolActive: true,
+            lights: [],
+            onCreateLightSource,
+          },
+        })}
+      />
+    );
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 140, clientY: 140, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onCreateLightSource).toHaveBeenCalledWith(expect.objectContaining({
+        x: expect.any(Number),
+        y: expect.any(Number),
+      }));
+    });
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightSourceControls: {
+            lights: [{
+              id: 'light-1',
+              label: 'Torch',
+              enabled: true,
+              x: 140,
+              y: 140,
+              brightRadiusPx: 280,
+              dimRadiusPx: 560,
+              color: '#FFAD00',
+            }],
+            onSelectLight,
+            onMoveLightSource,
+          },
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('light-source-handle'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+    fireEvent.mouseMove(window, { clientX: 210, clientY: 210, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 210, clientY: 210, buttons: 0 });
+
+    expect(onSelectLight).toHaveBeenCalledWith('light-1');
+    await waitFor(() => {
+      expect(onMoveLightSource).toHaveBeenCalledWith('light-1', expect.objectContaining({
+        x: expect.any(Number),
+        y: expect.any(Number),
+      }));
+    });
+  });
+
+  test('blocks light source create, drag, and delete while a mutation is pending', async () => {
+    const onCreateLightSource = jest.fn(() => Promise.resolve(true));
+    const onMoveLightSource = jest.fn(() => Promise.resolve(true));
+    const onDeleteLightSource = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightSourceControls: {
+            isLightToolActive: true,
+            isPending: true,
+            selectedLightId: 'light-1',
+            lights: [{
+              id: 'light-1',
+              label: 'Torch',
+              enabled: true,
+              x: 140,
+              y: 140,
+              brightRadiusPx: 280,
+              dimRadiusPx: 560,
+              color: '#FFAD00',
+            }],
+            onCreateLightSource,
+            onMoveLightSource,
+            onDeleteLightSource,
+          },
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('selected-light-panel')).toBeInTheDocument();
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 140, clientY: 140, buttons: 0 });
+
+    fireEvent.mouseDown(screen.getByTestId('light-source-handle'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+    fireEvent.mouseMove(window, { clientX: 210, clientY: 210, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 210, clientY: 210, buttons: 0 });
+
+    fireEvent.keyDown(window, { key: 'Delete', code: 'Delete' });
+
+    expect(onCreateLightSource).not.toHaveBeenCalled();
+    expect(onMoveLightSource).not.toHaveBeenCalled();
+    expect(onDeleteLightSource).not.toHaveBeenCalled();
+    expect(screen.getByTestId('selected-light-panel')).toBeInTheDocument();
+  });
+
+  test('keeps token dragging above overlapping light handles', async () => {
+    const onMoveTokens = jest.fn(() => Promise.resolve(true));
+    const onMoveLightSource = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          currentUserId: 'dm-1',
+          onMoveTokens,
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          lightSourceControls: {
+            lights: [{
+              id: 'light-1',
+              label: 'Torch',
+              enabled: true,
+              x: 175,
+              y: 175,
+              brightRadiusPx: 280,
+              dimRadiusPx: 560,
+              color: '#FFAD00',
+            }],
+            onMoveLightSource,
+          },
+        })}
+      />
+    );
+
+    const lightHandle = await screen.findByTestId('light-source-handle');
+    const token = screen.getByTestId('token-node-user-1');
+    expect(lightHandle.compareDocumentPosition(token) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.mouseDown(token, { button: 0, buttons: 1, clientX: 175, clientY: 175 });
+    fireEvent.mouseMove(window, { clientX: 245, clientY: 245, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 245, clientY: 245, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onMoveTokens).toHaveBeenCalled();
+    });
+    expect(onMoveLightSource).not.toHaveBeenCalled();
+  });
+
   test('keeps the old battlemap briefly while fading it out on deactivation', async () => {
     jest.useFakeTimers();
 

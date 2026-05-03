@@ -175,6 +175,49 @@ describe('lighting render input sanitization', () => {
     }]);
   });
 
+  test('omits disabled editable lights and strips DM-only authoring fields', () => {
+    const renderInput = buildGrigliataLightingRenderInput({
+      schemaVersion: 1,
+      backgroundId: 'map-1',
+      scene: { darkness: 0.5, globalLight: false },
+      walls: [],
+      lights: [{
+        id: 'light-1',
+        label: 'Torch',
+        enabled: true,
+        x: 100,
+        y: 120,
+        brightRadiusPx: 60,
+        dimRadiusPx: 140,
+        color: '#ffad00',
+        source: { authoringOnly: true },
+        updatedBy: 'dm-1',
+      }, {
+        id: 'light-2',
+        label: 'Hidden lamp',
+        enabled: false,
+        x: 220,
+        y: 120,
+        brightRadiusPx: 60,
+        dimRadiusPx: 140,
+        color: '#ffffff',
+      }],
+    });
+
+    expect(renderInput.lights).toEqual([{
+      x: 100,
+      y: 120,
+      brightRadiusPx: 60,
+      dimRadiusPx: 140,
+      color: '#FFAD00',
+    }]);
+    expect(renderInput.lights[0]).not.toHaveProperty('id');
+    expect(renderInput.lights[0]).not.toHaveProperty('label');
+    expect(renderInput.lights[0]).not.toHaveProperty('enabled');
+    expect(renderInput.lights[0]).not.toHaveProperty('source');
+    expect(renderInput.lights[0]).not.toHaveProperty('updatedBy');
+  });
+
   test('normalizes snapshot render input defensively before rendering', () => {
     const renderInput = normalizeGrigliataLightingRenderInput({
       schemaVersion: '2',

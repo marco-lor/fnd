@@ -83,6 +83,10 @@ const normalizeWallSegment = (wall) => {
 };
 
 const normalizeLight = (light) => {
+  if (light?.enabled === false) {
+    return null;
+  }
+
   const x = Number(light?.x);
   const y = Number(light?.y);
   const brightRadiusPx = Math.max(0, asFiniteNumber(light?.brightRadiusPx, 0));

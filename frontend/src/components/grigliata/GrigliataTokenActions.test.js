@@ -277,6 +277,33 @@ describe('GrigliataTokenActions', () => {
     });
   });
 
+  test('token vision quick radius presets commit the selected radius', () => {
+    const handleSetSelectedTokenVision = jest.fn();
+
+    render(
+      <GrigliataTokenActions
+        actionState={buildActionState({
+          visionToken: {
+            tokenId: 'token-1',
+            label: 'Aldor',
+            visionEnabled: true,
+            visionRadiusSquares: 8,
+          },
+        })}
+        viewportSize={{ width: 1000, height: 700 }}
+        onSetSelectedTokenVision={handleSetSelectedTokenVision}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /edit vision for aldor/i }));
+    fireEvent.click(screen.getByRole('button', { name: /set token vision radius to 18 squares/i }));
+
+    expect(handleSetSelectedTokenVision).toHaveBeenCalledWith('token-1', {
+      visionEnabled: true,
+      visionRadiusSquares: 18,
+    });
+  });
+
   test('custom size input clamps values into the supported range', () => {
     const handleSetSelectedTokenSize = jest.fn();
 

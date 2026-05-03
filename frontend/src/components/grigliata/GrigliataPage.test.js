@@ -282,6 +282,8 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-lighting-count">{String(props.lightingRenderInput?.lights?.length || 0)}</div>
       <div data-testid="board-lighting-debug-count">{String(props.lightingDebugMetadata?.lights?.length || 0)}</div>
       <div data-testid="board-lighting-debug">{String(props.showLightingDebugOverlay)}</div>
+      <div data-testid="board-light-source-count">{String(props.lightSourceControls?.lights?.length || 0)}</div>
+      <div data-testid="board-light-tool-active">{String(!!props.lightSourceControls?.isLightToolActive)}</div>
       <div data-testid="board-wall-controls-count">{String(props.onToggleWallRuntimeSegment ? (props.wallRuntimeSegments || []).filter((wall) => wall.wallType === 'door' || wall.wallType === 'window').length : 0)}</div>
       <div data-testid="board-wall-states">{(props.lightingRenderInput?.walls || []).map((wall) => `${wall.id}:${wall.wallType || ''}:${String(wall.isOpen === true)}:${String(wall.blocksSight === true)}:${String(!!wall.doorType)}:${String(!!wall.source)}`).join('|')}</div>
       <div data-testid="board-fog-enabled">{String(!!props.fogOfWar)}</div>
@@ -354,6 +356,32 @@ jest.mock('./GrigliataBoard', () => {
         </button>
         <button type="button" onClick={() => props.onChangeAoeFigureType?.('circle')}>
           activate circle tool
+        </button>
+        <button type="button" onClick={() => props.lightSourceControls?.onToggleLightTool?.()}>
+          toggle light source tool
+        </button>
+        <button type="button" onClick={() => props.lightSourceControls?.onCreateLightSource?.({ x: 140, y: 140 })}>
+          create light source
+        </button>
+        <button type="button" onClick={() => props.lightSourceControls?.onMoveLightSource?.('light-1', { x: 210, y: 280 })}>
+          move light source
+        </button>
+        <button type="button" onClick={() => props.lightSourceControls?.onUpdateLightSource?.('light-1', {
+          label: 'Lantern',
+          color: '#ffffff',
+          brightRadiusPx: 350,
+          dimRadiusPx: 630,
+        })}>
+          update light source
+        </button>
+        <button type="button" onClick={() => props.lightSourceControls?.onUpdateLightSource?.('light-1', { enabled: false })}>
+          toggle light source off
+        </button>
+        <button type="button" onClick={() => props.lightSourceControls?.onDuplicateLightSource?.('light-1')}>
+          duplicate light source
+        </button>
+        <button type="button" onClick={() => props.lightSourceControls?.onDeleteLightSource?.('light-1')}>
+          delete light source
         </button>
         <button type="button" onClick={() => props.onChangeAoeFigureType?.('rectangle')}>
           activate rectangle tool
@@ -1464,6 +1492,253 @@ describe('GrigliataPage', () => {
     expect(firestore.onSnapshot.mock.calls.some(([target]) => (
       target?.path === 'grigliata_lighting_render_inputs/map-1'
     ))).toBe(true);
+  });
+
+  test('passes editable light sources only to the DM board', async () => {
+    setManagerAuth();
+    setDocData('grigliata_background_lighting/map-1', {
+      schemaVersion: 1,
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [{
+        id: 'light-1',
+        label: 'Torch',
+        enabled: false,
+        x: 140,
+        y: 140,
+        brightRadiusPx: 280,
+        dimRadiusPx: 560,
+        color: '#FFAD00',
+        source: { imported: true },
+      }],
+    });
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [],
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-light-source-count')).toHaveTextContent('1');
+      expect(screen.getByTestId('board-lighting-count')).toHaveTextContent('0');
+    });
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.path === 'grigliata_background_lighting/map-1'
+    ))).toBe(true);
+  });
+
+  test('does not pass editable light controls or raw lighting metadata to players', () => {
+    setDocData('grigliata_background_lighting/map-1', {
+      backgroundId: 'map-1',
+      lights: [{
+        id: 'light-1',
+        label: 'Torch',
+        enabled: true,
+        x: 140,
+        y: 140,
+        brightRadiusPx: 280,
+        dimRadiusPx: 560,
+        color: '#FFAD00',
+        source: { imported: true },
+      }],
+      walls: [],
+    });
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [{ x: 140, y: 140, brightRadiusPx: 280, dimRadiusPx: 560, color: '#FFAD00' }],
+    });
+
+    render(<GrigliataPage />);
+
+    expect(screen.getByTestId('board-light-source-count')).toHaveTextContent('0');
+    expect(screen.getByTestId('board-lighting-count')).toHaveTextContent('1');
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.path === 'grigliata_background_lighting/map-1'
+    ))).toBe(false);
+  });
+
+  test('persists DM light source edits as raw metadata plus sanitized render input', async () => {
+    setManagerAuth();
+    setDocData('grigliata_background_lighting/map-1', {
+      schemaVersion: 1,
+      backgroundId: 'map-1',
+      source: { type: 'dungeon-alchemist-foundry', importedAt: 'old-import' },
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0, distance: 5, units: 'ft' },
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [{
+        id: 'light-1',
+        label: 'Torch',
+        enabled: true,
+        x: 140,
+        y: 140,
+        brightRadiusPx: 280,
+        dimRadiusPx: 560,
+        color: '#FFAD00',
+        source: { imported: true },
+      }],
+    });
+
+    render(<GrigliataPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('board-light-source-count')).toHaveTextContent('1');
+    });
+    firestore.setDoc.mockClear();
+    firestore.updateDoc.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /update light source/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_background_lighting/map-1' }),
+        expect.objectContaining({
+          backgroundId: 'map-1',
+          grid: expect.objectContaining({
+            cellSizePx: 70,
+            distance: 5,
+            units: 'ft',
+          }),
+          lights: [expect.objectContaining({
+            id: 'light-1',
+            label: 'Lantern',
+            enabled: true,
+            color: '#FFFFFF',
+            brightRadiusPx: 350,
+            dimRadiusPx: 630,
+          })],
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
+    const updateRenderInputCall = firestore.setDoc.mock.calls.find(([target]) => (
+      target?.path === 'grigliata_lighting_render_inputs/map-1'
+    ));
+    expect(updateRenderInputCall?.[1]).toEqual(expect.objectContaining({
+      backgroundId: 'map-1',
+      lights: [{ x: 140, y: 140, brightRadiusPx: 350, dimRadiusPx: 630, color: '#FFFFFF' }],
+      updatedBy: 'user-1',
+    }));
+    const rawMetadataCall = firestore.setDoc.mock.calls.find(([target]) => (
+      target?.path === 'grigliata_background_lighting/map-1'
+    ));
+    expect(rawMetadataCall[1]).not.toHaveProperty('id');
+    expect(updateRenderInputCall[1].lights[0]).not.toHaveProperty('label');
+    expect(updateRenderInputCall[1].lights[0]).not.toHaveProperty('source');
+    expect(updateRenderInputCall[1].lights[0]).not.toHaveProperty('enabled');
+
+    firestore.setDoc.mockClear();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /toggle light source off/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_lighting_render_inputs/map-1' }),
+        expect.objectContaining({
+          backgroundId: 'map-1',
+          lights: [],
+          updatedBy: 'user-1',
+        }),
+        { merge: true }
+      );
+    });
+  });
+
+  test('persists DM light create, move, duplicate, and delete actions from the board', async () => {
+    setManagerAuth();
+    setDocData('grigliata_background_lighting/map-1', {
+      schemaVersion: 1,
+      backgroundId: 'map-1',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [{
+        id: 'light-1',
+        label: 'Torch',
+        enabled: true,
+        x: 140,
+        y: 140,
+        brightRadiusPx: 280,
+        dimRadiusPx: 560,
+        color: '#FFAD00',
+      }],
+    });
+
+    render(<GrigliataPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('board-light-source-count')).toHaveTextContent('1');
+    });
+
+    firestore.setDoc.mockClear();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /create light source/i }));
+    });
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_background_lighting/map-1' }),
+        expect.objectContaining({
+          lights: expect.arrayContaining([
+            expect.objectContaining({ id: 'manual-light-2', label: 'Light 2', x: 140, y: 140 }),
+          ]),
+        }),
+        { merge: true }
+      );
+    });
+    expect(firestore.updateDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+      expect.objectContaining({ lightingEnabled: true, updatedBy: 'user-1' })
+    );
+
+    firestore.setDoc.mockClear();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /move light source/i }));
+    });
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_background_lighting/map-1' }),
+        expect.objectContaining({
+          lights: [expect.objectContaining({ id: 'light-1', x: 210, y: 280 })],
+        }),
+        { merge: true }
+      );
+    });
+
+    firestore.setDoc.mockClear();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /duplicate light source/i }));
+    });
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_background_lighting/map-1' }),
+        expect.objectContaining({
+          lights: expect.arrayContaining([
+            expect.objectContaining({ id: 'manual-light-2', label: 'Torch Copy', x: 210, y: 210 }),
+          ]),
+        }),
+        { merge: true }
+      );
+    });
+
+    firestore.setDoc.mockClear();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /delete light source/i }));
+    });
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_background_lighting/map-1' }),
+        expect.objectContaining({ lights: [] }),
+        { merge: true }
+      );
+    });
   });
 
   test('lets the DM enable and disable computed scene lighting independently from debug overlay', async () => {

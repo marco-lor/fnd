@@ -7,6 +7,7 @@ import {
 } from './lightingVisibility';
 
 const normalizeVisionEnabled = (visionEnabled) => visionEnabled !== false;
+const TOKEN_VISION_RADIUS_PRESETS = [6, 12, 18];
 
 const areVisionSettingsEqual = (left, right) => (
   normalizeVisionEnabled(left?.visionEnabled) === normalizeVisionEnabled(right?.visionEnabled)
@@ -105,9 +106,6 @@ export default function GrigliataTokenVisionPopover({
     >
       <div className="border-b border-slate-800/90 pb-3">
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Vision</p>
-        <p className="mt-1 text-sm text-slate-300">
-          Configure the selected token as a dynamic lighting vision source.
-        </p>
       </div>
 
       <div className="mt-3 space-y-3">
@@ -129,7 +127,28 @@ export default function GrigliataTokenVisionPopover({
         </label>
 
         <div className="rounded-2xl border border-slate-800/90 bg-slate-900/80 p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Radius</p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Radius</p>
+            <div className="flex items-center gap-1">
+              {TOKEN_VISION_RADIUS_PRESETS.map((radiusSquares) => (
+                <button
+                  key={radiusSquares}
+                  type="button"
+                  aria-label={`Set token vision radius to ${radiusSquares} squares`}
+                  disabled={isPending}
+                  data-active={normalizeTokenVisionRadiusSquares(draftRadiusSquares) === radiusSquares}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={() => commitVision({
+                    visionEnabled: draftVisionEnabled,
+                    visionRadiusSquares: radiusSquares,
+                  })}
+                  className="min-w-8 rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs font-semibold text-slate-100 transition-colors hover:border-cyan-300/70 disabled:cursor-not-allowed disabled:opacity-55 data-[active=true]:border-cyan-300 data-[active=true]:bg-cyan-400/18 data-[active=true]:text-cyan-50"
+                >
+                  {radiusSquares}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="mt-2 flex items-center gap-2">
             <button
               type="button"

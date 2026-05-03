@@ -39,6 +39,14 @@ import {
   GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION,
 } from './lightingRenderInput';
 import {
+  createManualLightSource,
+  deleteLightSource,
+  duplicateLightSource,
+  moveLightSource,
+  normalizeEditableLightSources,
+  updateLightSource,
+} from './lightSources';
+import {
   buildEffectiveLightingRenderInput,
   GRIGLIATA_WALL_STATE_COLLECTION,
 } from './wallRuntimeState';
@@ -345,6 +353,7 @@ export default function GrigliataPage() {
   const [isImportingLighting, setIsImportingLighting] = useState(false);
   const [isApplyingLightingCalibration, setIsApplyingLightingCalibration] = useState(false);
   const [isLightingEnabledPending, setIsLightingEnabledPending] = useState(false);
+  const [isLightSourceMutationPending, setIsLightSourceMutationPending] = useState(false);
   const [isFogOfWarEnabledPending, setIsFogOfWarEnabledPending] = useState(false);
   const [isFogResetPending, setIsFogResetPending] = useState(false);
   const [isLightingDebugOverlayVisible, setIsLightingDebugOverlayVisible] = useState(true);
@@ -352,6 +361,7 @@ export default function GrigliataPage() {
   const [activeTrayDragType, setActiveTrayDragType] = useState('');
   const [isRulerEnabled, setIsRulerEnabled] = useState(false);
   const [activeAoeFigureType, setActiveAoeFigureType] = useState('');
+  const [isLightToolActive, setIsLightToolActive] = useState(false);
   const [drawColorKey, setDrawColorKey] = useState(persistedDrawColorKey);
   const [activeGridSizeOverride, setActiveGridSizeOverride] = useState(null);
   const [activeSidebarTab, setActiveSidebarTab] = useState('tokens');
@@ -528,6 +538,10 @@ export default function GrigliataPage() {
   const enabledLightingRenderInput = combatBackground?.lightingEnabled === false
     ? null
     : effectiveLightingRenderInput;
+  const editableLightSources = useMemo(
+    () => (isManager ? normalizeEditableLightSources(lightingMetadata?.lights) : []),
+    [isManager, lightingMetadata?.lights]
+  );
 
   useEffect(() => {
     if (!currentUserId || isManager || !currentCharacterId) {
@@ -887,6 +901,7 @@ export default function GrigliataPage() {
   const trayCurrentUserToken = isManager ? null : currentUserToken;
   useEffect(() => {
     setSelectedBoardTokenIds([]);
+    setIsLightToolActive(false);
   }, [activeBackgroundId, isNarrationOverlayActive]);
   const drawTheme = useMemo(
     () => getGrigliataDrawTheme(drawColorKey),
@@ -1154,6 +1169,7 @@ export default function GrigliataPage() {
 
     setActiveTrayDragType('');
     setActiveAoeFigureType('');
+    setIsLightToolActive(false);
     setIsRulerEnabled(false);
     setSelectedBoardTokenIds([]);
     setLocalLiveInteraction(null);
@@ -3778,6 +3794,155 @@ export default function GrigliataPage() {
     }
   };
 
+  const buildLightingMetadataForLightSources = useCallback((nextLights, updatedAt) => {
+    if (!activeBackgroundId) {
+      throw new Error('Select a background before editing light sources.');
+    }
+
+    const snapshotMetadata = lightingMetadata && typeof lightingMetadata === 'object'
+      ? lightingMetadata
+      : {};
+    const baseMetadata = { ...snapshotMetadata };
+    delete baseMetadata.id;
+    const normalizedLights = normalizeEditableLightSources(nextLights);
+    const normalizedGrid = normalizeGridConfig(baseMetadata.grid || grid);
+    const metadataGrid = {
+      ...(baseMetadata.grid && typeof baseMetadata.grid === 'object' ? baseMetadata.grid : {}),
+      ...normalizedGrid,
+    };
+    const scene = baseMetadata.scene || lightingRenderInput?.scene || {
+      darkness: 0.6,
+      globalLight: false,
+    };
+    const walls = Array.isArray(baseMetadata.walls)
+      ? baseMetadata.walls
+      : (Array.isArray(lightingRenderInput?.walls) ? lightingRenderInput.walls : []);
+
+    return {
+      ...baseMetadata,
+      schemaVersion: baseMetadata.schemaVersion || 1,
+      backgroundId: activeBackgroundId,
+      source: baseMetadata.source || {
+        type: 'manual',
+        importedAt: null,
+        importedBy: user?.uid || '',
+      },
+      grid: metadataGrid,
+      scene: {
+        darkness: Number.isFinite(Number(scene?.darkness)) ? Number(scene.darkness) : 0.6,
+        globalLight: scene?.globalLight === true,
+      },
+      walls,
+      lights: normalizedLights,
+      updatedAt,
+      updatedBy: user?.uid || '',
+    };
+  }, [activeBackgroundId, grid, lightingMetadata, lightingRenderInput?.scene, lightingRenderInput?.walls, user?.uid]);
+
+  const persistLightSources = useCallback(async (nextLights, {
+    enableLighting = false,
+  } = {}) => {
+    if (!isManager || !user?.uid || !activeBackgroundId || isLightSourceMutationPending) {
+      return false;
+    }
+
+    setBoardError('');
+    setLightingImportError('');
+    setIsLightSourceMutationPending(true);
+
+    try {
+      const updatedAt = serverTimestamp();
+      const metadata = buildLightingMetadataForLightSources(nextLights, updatedAt);
+      const renderInput = buildGrigliataLightingRenderInput(metadata, {
+        updatedAt,
+        updatedBy: user.uid,
+      });
+      const summary = buildGrigliataLightingSummary(metadata, metadata.source?.importedAt || null);
+
+      await setDoc(
+        doc(db, GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION, activeBackgroundId),
+        metadata,
+        { merge: true }
+      );
+      await setDoc(
+        doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, activeBackgroundId),
+        renderInput,
+        { merge: true }
+      );
+      await updateDoc(doc(db, 'grigliata_backgrounds', activeBackgroundId), {
+        lightingSummary: summary,
+        ...(enableLighting ? { lightingEnabled: true } : {}),
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to update Grigliata light sources:', error);
+      setBoardError('Unable to update that light source right now.');
+      throw error;
+    } finally {
+      setIsLightSourceMutationPending(false);
+    }
+  }, [
+    activeBackgroundId,
+    buildLightingMetadataForLightSources,
+    isLightSourceMutationPending,
+    isManager,
+    user?.uid,
+  ]);
+
+  const handleToggleLightTool = useCallback(() => {
+    if (!isManager || !activeBackgroundId) return;
+
+    setBoardError('');
+    setIsLightToolActive((currentValue) => !currentValue);
+    setActiveAoeFigureType('');
+    setIsRulerEnabled(false);
+  }, [activeBackgroundId, isManager]);
+
+  const handleCreateLightSource = useCallback(async (point) => {
+    if (!isManager || !activeBackgroundId) return false;
+
+    const currentLights = normalizeEditableLightSources(lightingMetadata?.lights);
+    const nextLight = createManualLightSource({
+      existingLights: currentLights,
+      point,
+      grid,
+    });
+
+    if (!nextLight) return false;
+
+    return persistLightSources([...currentLights, nextLight], { enableLighting: true });
+  }, [activeBackgroundId, grid, isManager, lightingMetadata?.lights, persistLightSources]);
+
+  const handleMoveLightSource = useCallback(async (lightId, point) => {
+    if (!isManager || !activeBackgroundId || !lightId) return false;
+
+    const nextLights = moveLightSource(lightingMetadata?.lights, lightId, point);
+    return persistLightSources(nextLights);
+  }, [activeBackgroundId, isManager, lightingMetadata?.lights, persistLightSources]);
+
+  const handleUpdateLightSource = useCallback(async (lightId, patch) => {
+    if (!isManager || !activeBackgroundId || !lightId) return false;
+
+    const nextLights = updateLightSource(lightingMetadata?.lights, lightId, patch);
+    return persistLightSources(nextLights);
+  }, [activeBackgroundId, isManager, lightingMetadata?.lights, persistLightSources]);
+
+  const handleDuplicateLightSource = useCallback(async (lightId) => {
+    if (!isManager || !activeBackgroundId || !lightId) return false;
+
+    const nextLights = duplicateLightSource(lightingMetadata?.lights, lightId, { grid });
+    return persistLightSources(nextLights);
+  }, [activeBackgroundId, grid, isManager, lightingMetadata?.lights, persistLightSources]);
+
+  const handleDeleteLightSource = useCallback(async (lightId) => {
+    if (!isManager || !activeBackgroundId || !lightId) return false;
+
+    const nextLights = deleteLightSource(lightingMetadata?.lights, lightId);
+    return persistLightSources(nextLights);
+  }, [activeBackgroundId, isManager, lightingMetadata?.lights, persistLightSources]);
+
   const handleResetFogOfWar = async () => {
     if (!isManager || !user?.uid || !selectedBackground?.id || isFogResetPending) return;
 
@@ -4004,12 +4169,14 @@ export default function GrigliataPage() {
   const handleSelectMouseTool = useCallback(() => {
     setBoardError('');
     setActiveAoeFigureType('');
+    setIsLightToolActive(false);
     setIsRulerEnabled(false);
   }, []);
 
   const handleToggleRuler = useCallback(() => {
     setBoardError('');
     setActiveAoeFigureType('');
+    setIsLightToolActive(false);
     setIsRulerEnabled((currentValue) => !currentValue);
   }, []);
 
@@ -4017,6 +4184,7 @@ export default function GrigliataPage() {
     setBoardError('');
     setActiveAoeFigureType(nextFigureType || '');
     if (nextFigureType) {
+      setIsLightToolActive(false);
       setIsRulerEnabled(false);
     }
   }, []);
@@ -4358,6 +4526,17 @@ export default function GrigliataPage() {
                 lightingRenderInput={enabledLightingRenderInput}
                 lightingDebugMetadata={lightingMetadata}
                 showLightingDebugOverlay={isManager && isLightingDebugOverlayVisible && !!lightingMetadata}
+                lightSourceControls={isManager && !isNarrationOverlayActive ? {
+                  isLightToolActive,
+                  isPending: isLightSourceMutationPending,
+                  lights: editableLightSources,
+                  onToggleLightTool: handleToggleLightTool,
+                  onCreateLightSource: handleCreateLightSource,
+                  onMoveLightSource: handleMoveLightSource,
+                  onUpdateLightSource: handleUpdateLightSource,
+                  onDuplicateLightSource: handleDuplicateLightSource,
+                  onDeleteLightSource: handleDeleteLightSource,
+                } : null}
                 fogOfWar={boardFogOfWar}
                 wallRuntimeSegments={effectiveLightingRenderInput?.walls || []}
                 onToggleWallRuntimeSegment={isManager && !isNarrationOverlayActive ? handleToggleWallRuntimeSegment : null}

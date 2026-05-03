@@ -22,6 +22,7 @@ import {
   FiPlus,
   FiRotateCcw,
   FiSkipForward,
+  FiSun,
   FiTrash2,
   FiUser,
   FiUsers,
@@ -80,6 +81,8 @@ import GrigliataLightingDebugOverlay from './GrigliataLightingDebugOverlay';
 import GrigliataLightingMask from './GrigliataLightingMask';
 import GrigliataFogOfWarMask from './GrigliataFogOfWarMask';
 import GrigliataWallRuntimeControls from './GrigliataWallRuntimeControls';
+import GrigliataLightControls, { GrigliataSelectedLightPanel } from './GrigliataLightControls';
+import { normalizeEditableLightSources } from './lightSources';
 import { resolveViewerTokenVisionSources } from './lightingVisibility';
 import {
   filterFogVisibleTokens,
@@ -171,6 +174,10 @@ const isAoECreateInteraction = (interaction) => interaction?.type === 'aoe-creat
 const isAoEDragInteraction = (interaction) => (
   interaction?.type === 'aoe-drag-candidate'
   || interaction?.type === 'aoe-drag'
+);
+const isLightDragInteraction = (interaction) => (
+  interaction?.type === 'light-drag-candidate'
+  || interaction?.type === 'light-drag'
 );
 const isPingHoldInteraction = (interaction) => interaction?.type === 'ping-hold';
 
@@ -2321,6 +2328,7 @@ export default function GrigliataBoard({
   fogOfWar = null,
   wallRuntimeSegments = null,
   onToggleWallRuntimeSegment = null,
+  lightSourceControls = null,
   isNarrationOverlayActive = false,
 }) {
   const containerRef = useRef(null);
@@ -2339,6 +2347,12 @@ export default function GrigliataBoard({
   const [aoePreviewState, setAoEPreviewState] = useState(null);
   const [selectedAoEFigureId, setSelectedAoEFigureId] = useState('');
   const [aoeFigureDragState, setAoEFigureDragState] = useState(null);
+  const [selectedLightId, setSelectedLightId] = useState(() => (
+    typeof lightSourceControls?.selectedLightId === 'string'
+      ? lightSourceControls.selectedLightId
+      : ''
+  ));
+  const [lightDragState, setLightDragState] = useState(null);
   const [activeSharedInteraction, setActiveSharedInteraction] = useState(null);
   const [localPings, setLocalPings] = useState([]);
   const [pingAnimationClock, setPingAnimationClock] = useState(() => Date.now());
@@ -2372,7 +2386,9 @@ export default function GrigliataBoard({
   const previousNarrationOverlayActiveRef = useRef(isNarrationOverlayActive);
   const lastFitKeyRef = useRef('');
   const resolvedDrawTheme = drawTheme || DEFAULT_DRAW_THEME;
-  const isMouseSelectionActive = !isRulerEnabled && !activeAoeFigureType;
+  const isLightToolActive = !!(isManager && lightSourceControls?.isLightToolActive);
+  const isLightSourcePending = !!lightSourceControls?.isPending;
+  const isMouseSelectionActive = !isRulerEnabled && !activeAoeFigureType && !isLightToolActive;
   const isMusicEnabled = !isMusicMuted;
   const musicToggleActionLabel = isMusicEnabled ? 'Mute Music' : 'Unmute Music';
   const musicToggleStateLabel = isMusicEnabled ? 'Shared music enabled' : 'Shared music muted';
@@ -2741,6 +2757,26 @@ export default function GrigliataBoard({
     }).filter((figure) => !!figure.renderable),
     [aoeFigureDragState, figureItems, normalizedGrid, selectedAoEFigureId]
   );
+  const editableLightSources = useMemo(
+    () => normalizeEditableLightSources(lightSourceControls?.lights),
+    [lightSourceControls?.lights]
+  );
+  const renderedLightSources = useMemo(
+    () => editableLightSources.map((light) => (
+      lightDragState?.lightId === light.id
+        ? {
+          ...light,
+          x: lightDragState.originLight.x + lightDragState.deltaWorld.x,
+          y: lightDragState.originLight.y + lightDragState.deltaWorld.y,
+        }
+        : light
+    )),
+    [editableLightSources, lightDragState]
+  );
+  const selectedLight = useMemo(
+    () => renderedLightSources.find((light) => light.id === selectedLightId) || null,
+    [renderedLightSources, selectedLightId]
+  );
   const tokenStatusDisplayById = useMemo(() => {
     const nextMap = new Map();
 
@@ -2976,6 +3012,8 @@ export default function GrigliataBoard({
     setAoEPreviewState(null);
     setSelectedAoEFigureId('');
     setAoEFigureDragState(null);
+    setSelectedLightId('');
+    setLightDragState(null);
     setLocalPings([]);
     setPingAnimationClock(Date.now());
     clearActiveSharedInteraction();
@@ -2993,6 +3031,8 @@ export default function GrigliataBoard({
     setTurnOrderJoinPrompt(null);
     setSelectedTokenIds([]);
     setSelectedAoEFigureId('');
+    setSelectedLightId('');
+    setLightDragState(null);
     clearActiveSharedInteraction();
     setHoveredTokenTooltipId('');
   }, [clearActiveSharedInteraction, isNarrationOverlayActive]);
@@ -3004,10 +3044,10 @@ export default function GrigliataBoard({
     if (!activeAoeFigureType) {
       setAoEPreviewState(null);
     }
-    if (!isRulerEnabled && !activeAoeFigureType) {
+    if (!isRulerEnabled && !activeAoeFigureType && !isLightToolActive) {
       clearActiveSharedInteraction();
     }
-  }, [activeAoeFigureType, clearActiveSharedInteraction, isRulerEnabled]);
+  }, [activeAoeFigureType, clearActiveSharedInteraction, isLightToolActive, isRulerEnabled]);
 
   useEffect(() => {
     if (visibleLocalPings.length === localPings.length) {
@@ -3116,6 +3156,19 @@ export default function GrigliataBoard({
   }, [figureItemsById, selectedAoEFigureId]);
 
   useEffect(() => {
+    if (!selectedLightId) return;
+    if (!editableLightSources.some((light) => light.id === selectedLightId)) {
+      setSelectedLightId('');
+    }
+  }, [editableLightSources, selectedLightId]);
+
+  useEffect(() => {
+    const controlledSelectedLightId = lightSourceControls?.selectedLightId;
+    if (typeof controlledSelectedLightId !== 'string') return;
+    setSelectedLightId(controlledSelectedLightId);
+  }, [lightSourceControls?.selectedLightId]);
+
+  useEffect(() => {
     const tokenIdsWithOverflow = new Set(
       renderedTokens
         .filter((token) => (tokenStatusDisplayById.get(token.tokenId)?.overflowCount || 0) > 0)
@@ -3208,6 +3261,25 @@ export default function GrigliataBoard({
       draft,
     };
   }, [normalizedGrid]);
+
+  const getDraggedLightPoint = useCallback((interaction, pointerWorld) => {
+    if (!pointerWorld || !interaction?.originLight || !interaction?.startWorld) {
+      return null;
+    }
+
+    const deltaWorld = {
+      x: pointerWorld.x - interaction.startWorld.x,
+      y: pointerWorld.y - interaction.startWorld.y,
+    };
+
+    return {
+      deltaWorld,
+      point: {
+        x: interaction.originLight.x + deltaWorld.x,
+        y: interaction.originLight.y + deltaWorld.y,
+      },
+    };
+  }, []);
 
   const syncSharedMeasureInteraction = useCallback((interaction, liveEndCell) => {
     if (!Array.isArray(interaction?.anchorCells) || !interaction.anchorCells.length || !liveEndCell) {
@@ -3478,6 +3550,25 @@ export default function GrigliataBoard({
       return;
     }
 
+    if (activeInteraction.type === 'light-create') {
+      if (isLightSourcePending) {
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      let didCreateLight = false;
+      try {
+        didCreateLight = !!(await Promise.resolve(lightSourceControls?.onCreateLightSource?.(activeInteraction.point)));
+      } finally {
+        clearActiveSharedInteraction();
+      }
+
+      if (didCreateLight) {
+        setSelectedLightId('');
+      }
+      return;
+    }
+
     if (activeInteraction.type === 'selection-box') {
       const finalSelectionBox = pointerWorld
         ? { start: activeInteraction.startWorld, end: pointerWorld }
@@ -3515,6 +3606,50 @@ export default function GrigliataBoard({
     }
 
     if (activeInteraction.type === 'pan') {
+      return;
+    }
+
+    if (isLightDragInteraction(activeInteraction)) {
+      if (activeInteraction.type === 'light-drag-candidate') {
+        setLightDragState(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      if (isLightSourcePending) {
+        setLightDragState(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      const dragPoint = pointerWorld
+        ? getDraggedLightPoint(activeInteraction, pointerWorld)
+        : null;
+      const nextPoint = dragPoint?.point || (
+        lightDragState
+          ? {
+            x: lightDragState.originLight.x + lightDragState.deltaWorld.x,
+            y: lightDragState.originLight.y + lightDragState.deltaWorld.y,
+          }
+          : activeInteraction.originLight
+      );
+      const hasMoved = !!(
+        nextPoint
+        && activeInteraction.originLight
+        && (
+          Math.abs(nextPoint.x - activeInteraction.originLight.x) >= 0.5
+          || Math.abs(nextPoint.y - activeInteraction.originLight.y) >= 0.5
+        )
+      );
+
+      try {
+        if (hasMoved && activeInteraction.lightId && nextPoint) {
+          await Promise.resolve(lightSourceControls?.onMoveLightSource?.(activeInteraction.lightId, nextPoint));
+        }
+      } finally {
+        setLightDragState(null);
+        clearActiveSharedInteraction();
+      }
       return;
     }
 
@@ -3608,8 +3743,12 @@ export default function GrigliataBoard({
     aoeFigureDragState,
     clearActiveSharedInteraction,
     getDraggedAoEFigureDraft,
+    getDraggedLightPoint,
     getDraggedTokenMeasurement,
     getWorldPointFromClient,
+    isLightSourcePending,
+    lightDragState,
+    lightSourceControls,
     normalizedGrid,
     onCreateAoEFigure,
     onMoveAoEFigure,
@@ -3740,6 +3879,28 @@ export default function GrigliataBoard({
         return;
       }
 
+      if (isLightDragInteraction(activeInteraction)) {
+        if (activeInteraction.type === 'light-drag-candidate' && !hasMovedBeyondThreshold) return;
+
+        const dragPoint = getDraggedLightPoint(activeInteraction, pointerWorld);
+        if (!dragPoint) return;
+
+        if (activeInteraction.type === 'light-drag-candidate') {
+          interactionRef.current = {
+            ...activeInteraction,
+            type: 'light-drag',
+          };
+        }
+
+        setLightDragState({
+          lightId: activeInteraction.lightId,
+          originLight: activeInteraction.originLight,
+          deltaWorld: dragPoint.deltaWorld,
+        });
+        clearActiveSharedInteraction();
+        return;
+      }
+
       if (isAoEDragInteraction(activeInteraction)) {
         if (activeInteraction.type === 'aoe-drag-candidate' && !hasMovedBeyondThreshold) return;
 
@@ -3842,6 +4003,7 @@ export default function GrigliataBoard({
     buildAoEFigureForDraft,
     buildMeasurementForCells,
     getDraggedAoEFigureDraft,
+    getDraggedLightPoint,
     clearActiveSharedInteraction,
     syncSharedAoEInteraction,
     finalizeInteraction,
@@ -3859,9 +4021,25 @@ export default function GrigliataBoard({
 
       if (event.key !== 'Delete' && event.code !== 'Delete') return;
 
-      if (!selectedAoEFigureId && !selectedTokenIds.length) return;
+      if (!selectedLightId && !selectedAoEFigureId && !selectedTokenIds.length) return;
 
       event.preventDefault();
+
+      if (selectedLightId) {
+        if (isLightSourcePending) {
+          return;
+        }
+
+        try {
+          const didDeleteLight = !!(await Promise.resolve(lightSourceControls?.onDeleteLightSource?.(selectedLightId)));
+          if (didDeleteLight) {
+            setSelectedLightId('');
+          }
+        } catch {
+          // preserve selection if deletion fails
+        }
+        return;
+      }
 
       if (selectedAoEFigureId) {
         try {
@@ -3885,7 +4063,7 @@ export default function GrigliataBoard({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onDeleteAoEFigures, onDeleteTokens, selectedAoEFigureId, selectedTokenIds]);
+  }, [isLightSourcePending, lightSourceControls, onDeleteAoEFigures, onDeleteTokens, selectedAoEFigureId, selectedLightId, selectedTokenIds]);
 
   const openTurnOrderContextMenu = useCallback((token, nativeEvent) => {
     if (!token?.tokenId || !token?.canMove) {
@@ -3915,6 +4093,70 @@ export default function GrigliataBoard({
     });
     return true;
   }, []);
+
+  const handleSelectLightSource = useCallback((lightId) => {
+    const nextLightId = lightId || '';
+    setSelectedLightId(nextLightId);
+    lightSourceControls?.onSelectLight?.(nextLightId);
+
+    if (nextLightId) {
+      setSelectedTokenIds([]);
+      setSelectedAoEFigureId('');
+      setSelectionBox(null);
+    }
+  }, [lightSourceControls]);
+
+  const handleLightSourceMouseDown = useCallback((light, event) => {
+    const nativeEvent = event.evt;
+    event.cancelBubble = true;
+    setTurnOrderContextMenu(null);
+    setTurnOrderJoinPrompt(null);
+    setHoveredOverflowTokenId('');
+    setPinnedOverflowTokenId('');
+    clearPingHoldTimer();
+
+    if (!light?.id || isNarrationOverlayActive || activeAoeFigureType || isRulerEnabled || isLightSourcePending) {
+      return;
+    }
+
+    if (!isPrimaryMouseButton(nativeEvent)) {
+      return;
+    }
+
+    const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
+    if (!pointerWorld) return;
+
+    handleSelectLightSource(light.id);
+    setMeasurementState(null);
+    setAoEPreviewState(null);
+    setSelectedAoEFigureId('');
+    setSelectedTokenIds([]);
+    setSelectionBox(null);
+    clearActiveSharedInteraction();
+
+    interactionRef.current = {
+      type: 'light-drag-candidate',
+      lightId: light.id,
+      startClient: {
+        x: nativeEvent.clientX,
+        y: nativeEvent.clientY,
+      },
+      startWorld: pointerWorld,
+      originLight: {
+        x: light.x,
+        y: light.y,
+      },
+    };
+  }, [
+    activeAoeFigureType,
+    clearActiveSharedInteraction,
+    clearPingHoldTimer,
+    getWorldPointFromClient,
+    handleSelectLightSource,
+    isNarrationOverlayActive,
+    isLightSourcePending,
+    isRulerEnabled,
+  ]);
 
   const handleStageMouseDown = (event) => {
     if (isTokenDragActive) return;
@@ -3967,10 +4209,31 @@ export default function GrigliataBoard({
 
     clearPingHoldTimer();
 
+    if (isLightToolActive && lightSourceControls?.onCreateLightSource && isLightSourcePending) {
+      return;
+    }
+
     setMeasurementState(null);
     setAoEPreviewState(null);
     setSelectedAoEFigureId('');
     clearActiveSharedInteraction();
+
+    if (isLightToolActive && lightSourceControls?.onCreateLightSource) {
+      setSelectedTokenIds([]);
+      setSelectionBox(null);
+      interactionRef.current = {
+        type: 'light-create',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startWorld: pointerWorld,
+        point: pointerWorld,
+      };
+      return;
+    }
+
+    setSelectedLightId('');
 
     if (activeAoeFigureType) {
       setSelectedTokenIds([]);
@@ -4087,6 +4350,7 @@ export default function GrigliataBoard({
     setMeasurementState(null);
     setAoEPreviewState(null);
     setSelectedAoEFigureId('');
+    setSelectedLightId('');
     clearActiveSharedInteraction();
 
     if (!token?.canMove) {
@@ -4168,6 +4432,7 @@ export default function GrigliataBoard({
     clearActiveSharedInteraction();
     setSelectedTokenIds([]);
     setSelectionBox(null);
+    setSelectedLightId('');
 
     if (!figure?.canEdit) {
       setSelectedAoEFigureId('');
@@ -4225,6 +4490,8 @@ export default function GrigliataBoard({
       || isRulerEnabled
       || !!activeAoeFigureType
       || !!selectedAoEFigureId
+      || !!selectedLight
+      || lightDragState
     ) {
       return null;
     }
@@ -4240,7 +4507,9 @@ export default function GrigliataBoard({
     isManager,
     isTokenDragActive,
     isRulerEnabled,
+    lightDragState,
     selectedAoEFigureId,
+    selectedLight,
     selectedTokens,
     selectionBox,
     stageSize.height,
@@ -4261,6 +4530,8 @@ export default function GrigliataBoard({
       || isRulerEnabled
       || !!activeAoeFigureType
       || !!selectedAoEFigureId
+      || !!selectedLight
+      || lightDragState
     ) {
       return null;
     }
@@ -4335,7 +4606,9 @@ export default function GrigliataBoard({
     activeAoeFigureType,
     isTokenDragActive,
     isRulerEnabled,
+    lightDragState,
     selectedAoEFigureId,
+    selectedLight,
     selectedTokenActionState,
     selectedTokenDetails,
     selectedTokens,
@@ -4356,6 +4629,8 @@ export default function GrigliataBoard({
       || !!activeAoeFigureType
       || selectionBox
       || tokenDragState
+      || !!selectedLight
+      || lightDragState
     ) {
       return null;
     }
@@ -4407,7 +4682,9 @@ export default function GrigliataBoard({
     aoeFigureDragState,
     isRulerEnabled,
     isTokenDragActive,
+    lightDragState,
     selectedAoEFigure,
+    selectedLight,
     selectionBox,
     stageSize.height,
     stageSize.width,
@@ -4613,6 +4890,20 @@ export default function GrigliataBoard({
               disabled={isNarrationOverlayActive}
             />
           </div>
+          {isManager && lightSourceControls?.onCreateLightSource && (
+            <button
+              type="button"
+              onClick={() => lightSourceControls?.onToggleLightTool?.()}
+              disabled={isNarrationOverlayActive || isLightSourcePending || !lightSourceControls?.onToggleLightTool}
+              title={isLightToolActive ? 'Disable light source tool' : 'Enable light source tool'}
+              aria-label={isLightToolActive ? 'Disable light source tool' : 'Enable light source tool'}
+              aria-pressed={isLightToolActive}
+              data-testid="light-source-tool-trigger"
+              className={`${getQuickControlButtonClassName(isLightToolActive)} disabled:cursor-not-allowed disabled:opacity-60`}
+            >
+              <FiSun className="h-4 w-4" />
+            </button>
+          )}
           <button
             type="button"
             onClick={onToggleInteractionSharing}
@@ -4900,6 +5191,16 @@ export default function GrigliataBoard({
                 />
               ))}
 
+              {!isNarrationOverlayActive && isManager && renderedLightSources.length > 0 && (
+                <GrigliataLightControls
+                  lights={renderedLightSources}
+                  selectedLightId={selectedLightId}
+                  viewportScale={viewport.scale}
+                  onSelectLight={handleSelectLightSource}
+                  onBeginLightDrag={handleLightSourceMouseDown}
+                />
+              )}
+
               {visibleRenderedTokensBelowFog.map((token) => (
                 <TokenNode
                   key={token.tokenId}
@@ -5088,6 +5389,32 @@ export default function GrigliataBoard({
         )}
 
         <ActiveViewersOverlay viewers={activeViewers} />
+
+        {!isNarrationOverlayActive && isManager && selectedLight && (
+          <div className="pointer-events-none absolute inset-0 z-[28]">
+            <div className="pointer-events-auto absolute left-16 top-4">
+              <GrigliataSelectedLightPanel
+                light={selectedLight}
+                grid={normalizedGrid}
+                isPending={!!lightSourceControls?.isPending}
+                onUpdateLight={lightSourceControls?.onUpdateLightSource}
+                onDuplicateLight={lightSourceControls?.onDuplicateLightSource}
+                onDeleteLight={async (lightId) => {
+                  if (isLightSourcePending) {
+                    return false;
+                  }
+
+                  const didDeleteLight = !!(await Promise.resolve(lightSourceControls?.onDeleteLightSource?.(lightId)));
+                  if (didDeleteLight) {
+                    setSelectedLightId('');
+                  }
+                  return didDeleteLight;
+                }}
+                onRequestClose={() => setSelectedLightId('')}
+              />
+            </div>
+          </div>
+        )}
 
         {visibleOverflowToken && activeOverflowCardStyle && (
           <div className="pointer-events-none absolute inset-0 z-[18]">
