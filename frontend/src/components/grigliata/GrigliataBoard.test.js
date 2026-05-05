@@ -1190,6 +1190,65 @@ describe('GrigliataBoard', () => {
       />
     );
     expect(screen.queryByTestId('wall-runtime-toggle')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightingRenderInput,
+          onToggleWallRuntimeSegment,
+          wallSourceControls: {
+            isWallToolActive: true,
+            walls: [],
+            onToggleWallTool: jest.fn(),
+          },
+        })}
+      />
+    );
+    expect(screen.queryByTestId('wall-runtime-toggle')).not.toBeInTheDocument();
+  });
+
+  test('renders DM wall authoring tool outside narration only', async () => {
+    const onToggleWallTool = jest.fn();
+    const wallSourceControls = {
+      isWallToolActive: false,
+      walls: [],
+      onToggleWallTool,
+    };
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          wallSourceControls,
+        })}
+      />
+    );
+
+    const trigger = await screen.findByTestId('wall-source-tool-trigger');
+    fireEvent.click(trigger);
+    expect(onToggleWallTool).toHaveBeenCalled();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: false,
+          wallSourceControls,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('wall-source-tool-trigger')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          wallSourceControls,
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('wall-source-tool-trigger')).not.toBeInTheDocument();
   });
 
   test('renders DM light source controls outside narration only', async () => {
@@ -1242,6 +1301,82 @@ describe('GrigliataBoard', () => {
     );
     expect(screen.queryByTestId('light-source-handle')).not.toBeInTheDocument();
     expect(screen.queryByTestId('selected-light-panel')).not.toBeInTheDocument();
+  });
+
+  test('renders DM lighting diagnostics outside narration only', async () => {
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          selectedTokenDetails: {
+            tokenId: 'token-1',
+            visionEnabled: true,
+            visionRadiusSquares: 8,
+          },
+          activeViewers: [{
+            ownerUid: 'user-2',
+            characterId: 'Nyx',
+            colorKey: 'aurora-fuchsia',
+          }],
+          lightSourceControls: {
+            lights: [{
+              id: 'light-1',
+              label: 'Torch',
+              enabled: true,
+              x: 140,
+              y: 140,
+              brightRadiusPx: 280,
+              dimRadiusPx: 560,
+              color: '#FFAD00',
+            }, {
+              id: 'light-2',
+              label: 'Hidden lamp',
+              enabled: false,
+              x: 210,
+              y: 140,
+              brightRadiusPx: 280,
+              dimRadiusPx: 560,
+              color: '#FFFFFF',
+            }],
+          },
+          wallSourceControls: {
+            walls: [{
+              id: 'wall-1',
+              label: 'Door',
+              x1: 0,
+              y1: 0,
+              x2: 70,
+              y2: 0,
+              wallType: 'door',
+              blocksSight: true,
+            }],
+          },
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('lighting-diagnostics-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-diagnostics-active-lights')).toHaveTextContent('1');
+    expect(screen.getByTestId('lighting-diagnostics-disabled-lights')).toHaveTextContent('1');
+    expect(screen.getByTestId('lighting-diagnostics-token-vision')).toHaveTextContent('Enabled, 8 squares');
+    expect(screen.getByTestId('grigliata-active-viewers')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-diagnostics-anchor')).toHaveClass('bottom-20', 'left-4');
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          isNarrationOverlayActive: true,
+          lightSourceControls: {
+            lights: [{ id: 'light-1', enabled: true, x: 140, y: 140, brightRadiusPx: 280, dimRadiusPx: 560 }],
+          },
+          wallSourceControls: {
+            walls: [{ id: 'wall-1', x1: 0, y1: 0, x2: 70, y2: 0, blocksSight: true }],
+          },
+        })}
+      />
+    );
+    expect(screen.queryByTestId('lighting-diagnostics-panel')).not.toBeInTheDocument();
   });
 
   test('clears controlled light selection when selectedLightId becomes empty', async () => {
@@ -1359,6 +1494,98 @@ describe('GrigliataBoard', () => {
     });
   });
 
+  test('creates and drags wall sources from the DM board controls', async () => {
+    const onCreateWallSegment = jest.fn(() => Promise.resolve(true));
+    const onMoveWallEndpoint = jest.fn(() => Promise.resolve(true));
+    const onMoveWallSegment = jest.fn(() => Promise.resolve(true));
+    const onSelectWall = jest.fn();
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          wallSourceControls: {
+            isWallToolActive: true,
+            walls: [],
+            onCreateWallSegment,
+          },
+        })}
+      />
+    );
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+    fireEvent.mouseMove(window, { clientX: 280, clientY: 140, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 280, clientY: 140, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onCreateWallSegment).toHaveBeenCalledWith(
+        expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
+        expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) })
+      );
+    });
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          wallSourceControls: {
+            isWallToolActive: true,
+            selectedWallId: 'wall-1',
+            walls: [{
+              id: 'wall-1',
+              label: 'Wall',
+              x1: 140,
+              y1: 140,
+              x2: 280,
+              y2: 140,
+              wallType: 'wall',
+              blocksSight: true,
+              blocksVision: true,
+              blocksLight: true,
+            }],
+            onSelectWall,
+            onMoveWallEndpoint,
+            onMoveWallSegment,
+          },
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('wall-source-end-handle'), {
+      button: 0,
+      buttons: 1,
+      clientX: 280,
+      clientY: 140,
+    });
+    fireEvent.mouseMove(window, { clientX: 350, clientY: 210, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 350, clientY: 210, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onMoveWallEndpoint).toHaveBeenCalledWith(
+        'wall-1',
+        'end',
+        expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) })
+      );
+    });
+
+    fireEvent.mouseDown(screen.getByTestId('wall-source-hit-target-line'), {
+      button: 0,
+      buttons: 1,
+      clientX: 210,
+      clientY: 140,
+    });
+    fireEvent.mouseMove(window, { clientX: 280, clientY: 210, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 280, clientY: 210, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onMoveWallSegment).toHaveBeenCalledWith(
+        'wall-1',
+        expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) })
+      );
+    });
+  });
+
   test('blocks light source create, drag, and delete while a mutation is pending', async () => {
     const onCreateLightSource = jest.fn(() => Promise.resolve(true));
     const onMoveLightSource = jest.fn(() => Promise.resolve(true));
@@ -1466,6 +1693,65 @@ describe('GrigliataBoard', () => {
       expect(onMoveTokens).toHaveBeenCalled();
     });
     expect(onMoveLightSource).not.toHaveBeenCalled();
+  });
+
+  test('keeps token dragging above overlapping wall handles', async () => {
+    const onMoveTokens = jest.fn(() => Promise.resolve(true));
+    const onMoveWallSegment = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          currentUserId: 'dm-1',
+          onMoveTokens,
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          wallSourceControls: {
+            isWallToolActive: true,
+            selectedWallId: 'wall-1',
+            walls: [{
+              id: 'wall-1',
+              label: 'Wall',
+              x1: 140,
+              y1: 175,
+              x2: 245,
+              y2: 175,
+              wallType: 'wall',
+              blocksSight: true,
+              blocksVision: true,
+              blocksLight: true,
+            }],
+            onMoveWallSegment,
+          },
+        })}
+      />
+    );
+
+    const wallHandle = await screen.findByTestId('wall-source-hit-target-line');
+    const token = screen.getByTestId('token-node-user-1');
+    expect(wallHandle.compareDocumentPosition(token) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.mouseDown(token, { button: 0, buttons: 1, clientX: 175, clientY: 175 });
+    fireEvent.mouseMove(window, { clientX: 245, clientY: 245, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 245, clientY: 245, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onMoveTokens).toHaveBeenCalled();
+    });
+    expect(onMoveWallSegment).not.toHaveBeenCalled();
   });
 
   test('keeps the old battlemap briefly while fading it out on deactivation', async () => {

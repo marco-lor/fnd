@@ -81,8 +81,11 @@ import GrigliataLightingDebugOverlay from './GrigliataLightingDebugOverlay';
 import GrigliataLightingMask from './GrigliataLightingMask';
 import GrigliataFogOfWarMask from './GrigliataFogOfWarMask';
 import GrigliataWallRuntimeControls from './GrigliataWallRuntimeControls';
+import GrigliataWallAuthoringControls, { GrigliataSelectedWallPanel } from './GrigliataWallAuthoringControls';
+import GrigliataLightingDiagnostics from './GrigliataLightingDiagnostics';
 import GrigliataLightControls, { GrigliataSelectedLightPanel } from './GrigliataLightControls';
 import { normalizeEditableLightSources } from './lightSources';
+import { normalizeEditableWallSegments } from './wallSources';
 import { resolveViewerTokenVisionSources } from './lightingVisibility';
 import {
   filterFogVisibleTokens,
@@ -2329,6 +2332,7 @@ export default function GrigliataBoard({
   wallRuntimeSegments = null,
   onToggleWallRuntimeSegment = null,
   lightSourceControls = null,
+  wallSourceControls = null,
   isNarrationOverlayActive = false,
 }) {
   const containerRef = useRef(null);
@@ -2353,6 +2357,13 @@ export default function GrigliataBoard({
       : ''
   ));
   const [lightDragState, setLightDragState] = useState(null);
+  const [selectedWallId, setSelectedWallId] = useState(() => (
+    typeof wallSourceControls?.selectedWallId === 'string'
+      ? wallSourceControls.selectedWallId
+      : ''
+  ));
+  const [wallDragState, setWallDragState] = useState(null);
+  const [wallCreatePreview, setWallCreatePreview] = useState(null);
   const [activeSharedInteraction, setActiveSharedInteraction] = useState(null);
   const [localPings, setLocalPings] = useState([]);
   const [pingAnimationClock, setPingAnimationClock] = useState(() => Date.now());
@@ -2388,7 +2399,9 @@ export default function GrigliataBoard({
   const resolvedDrawTheme = drawTheme || DEFAULT_DRAW_THEME;
   const isLightToolActive = !!(isManager && lightSourceControls?.isLightToolActive);
   const isLightSourcePending = !!lightSourceControls?.isPending;
-  const isMouseSelectionActive = !isRulerEnabled && !activeAoeFigureType && !isLightToolActive;
+  const isWallToolActive = !!(isManager && wallSourceControls?.isWallToolActive);
+  const isWallSourcePending = !!wallSourceControls?.isPending;
+  const isMouseSelectionActive = !isRulerEnabled && !activeAoeFigureType && !isLightToolActive && !isWallToolActive;
   const isMusicEnabled = !isMusicMuted;
   const musicToggleActionLabel = isMusicEnabled ? 'Mute Music' : 'Unmute Music';
   const musicToggleStateLabel = isMusicEnabled ? 'Shared music enabled' : 'Shared music muted';
@@ -2777,6 +2790,43 @@ export default function GrigliataBoard({
     () => renderedLightSources.find((light) => light.id === selectedLightId) || null,
     [renderedLightSources, selectedLightId]
   );
+  const editableWallSources = useMemo(
+    () => normalizeEditableWallSegments(wallSourceControls?.walls),
+    [wallSourceControls?.walls]
+  );
+  const renderedWallSources = useMemo(
+    () => editableWallSources.map((wall) => {
+      if (wallDragState?.wallId !== wall.id) {
+        return wall;
+      }
+
+      if (wallDragState.type === 'endpoint') {
+        return {
+          ...wall,
+          ...(wallDragState.endpoint === 'start'
+            ? { x1: wallDragState.point.x, y1: wallDragState.point.y }
+            : { x2: wallDragState.point.x, y2: wallDragState.point.y }),
+        };
+      }
+
+      if (wallDragState.type === 'segment') {
+        return {
+          ...wall,
+          x1: wall.x1 + wallDragState.deltaWorld.x,
+          y1: wall.y1 + wallDragState.deltaWorld.y,
+          x2: wall.x2 + wallDragState.deltaWorld.x,
+          y2: wall.y2 + wallDragState.deltaWorld.y,
+        };
+      }
+
+      return wall;
+    }),
+    [editableWallSources, wallDragState]
+  );
+  const selectedWall = useMemo(
+    () => renderedWallSources.find((wall) => wall.id === selectedWallId) || null,
+    [renderedWallSources, selectedWallId]
+  );
   const tokenStatusDisplayById = useMemo(() => {
     const nextMap = new Map();
 
@@ -3014,6 +3064,9 @@ export default function GrigliataBoard({
     setAoEFigureDragState(null);
     setSelectedLightId('');
     setLightDragState(null);
+    setSelectedWallId('');
+    setWallDragState(null);
+    setWallCreatePreview(null);
     setLocalPings([]);
     setPingAnimationClock(Date.now());
     clearActiveSharedInteraction();
@@ -3033,6 +3086,9 @@ export default function GrigliataBoard({
     setSelectedAoEFigureId('');
     setSelectedLightId('');
     setLightDragState(null);
+    setSelectedWallId('');
+    setWallDragState(null);
+    setWallCreatePreview(null);
     clearActiveSharedInteraction();
     setHoveredTokenTooltipId('');
   }, [clearActiveSharedInteraction, isNarrationOverlayActive]);
@@ -3044,10 +3100,10 @@ export default function GrigliataBoard({
     if (!activeAoeFigureType) {
       setAoEPreviewState(null);
     }
-    if (!isRulerEnabled && !activeAoeFigureType && !isLightToolActive) {
+    if (!isRulerEnabled && !activeAoeFigureType && !isLightToolActive && !isWallToolActive) {
       clearActiveSharedInteraction();
     }
-  }, [activeAoeFigureType, clearActiveSharedInteraction, isLightToolActive, isRulerEnabled]);
+  }, [activeAoeFigureType, clearActiveSharedInteraction, isLightToolActive, isRulerEnabled, isWallToolActive]);
 
   useEffect(() => {
     if (visibleLocalPings.length === localPings.length) {
@@ -3163,10 +3219,23 @@ export default function GrigliataBoard({
   }, [editableLightSources, selectedLightId]);
 
   useEffect(() => {
+    if (!selectedWallId) return;
+    if (!editableWallSources.some((wall) => wall.id === selectedWallId)) {
+      setSelectedWallId('');
+    }
+  }, [editableWallSources, selectedWallId]);
+
+  useEffect(() => {
     const controlledSelectedLightId = lightSourceControls?.selectedLightId;
     if (typeof controlledSelectedLightId !== 'string') return;
     setSelectedLightId(controlledSelectedLightId);
   }, [lightSourceControls?.selectedLightId]);
+
+  useEffect(() => {
+    const controlledSelectedWallId = wallSourceControls?.selectedWallId;
+    if (typeof controlledSelectedWallId !== 'string') return;
+    setSelectedWallId(controlledSelectedWallId);
+  }, [wallSourceControls?.selectedWallId]);
 
   useEffect(() => {
     const tokenIdsWithOverflow = new Set(
@@ -3278,6 +3347,28 @@ export default function GrigliataBoard({
         x: interaction.originLight.x + deltaWorld.x,
         y: interaction.originLight.y + deltaWorld.y,
       },
+    };
+  }, []);
+
+  const getDraggedWallEndpointPoint = useCallback((interaction, pointerWorld) => {
+    if (!pointerWorld || !interaction?.startWorld) {
+      return null;
+    }
+
+    return {
+      x: pointerWorld.x,
+      y: pointerWorld.y,
+    };
+  }, []);
+
+  const getDraggedWallSegmentDelta = useCallback((interaction, pointerWorld) => {
+    if (!pointerWorld || !interaction?.startWorld) {
+      return null;
+    }
+
+    return {
+      x: pointerWorld.x - interaction.startWorld.x,
+      y: pointerWorld.y - interaction.startWorld.y,
     };
   }, []);
 
@@ -3569,6 +3660,31 @@ export default function GrigliataBoard({
       return;
     }
 
+    if (activeInteraction.type === 'wall-create') {
+      if (isWallSourcePending) {
+        setWallCreatePreview(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      const endPoint = pointerWorld || wallCreatePreview?.endPoint || activeInteraction.endPoint;
+      const startPoint = activeInteraction.startWorld;
+      const hasLength = !!(
+        endPoint
+        && Math.hypot(endPoint.x - startPoint.x, endPoint.y - startPoint.y) >= 0.5
+      );
+
+      try {
+        if (hasLength) {
+          await Promise.resolve(wallSourceControls?.onCreateWallSegment?.(startPoint, endPoint));
+        }
+      } finally {
+        setWallCreatePreview(null);
+        clearActiveSharedInteraction();
+      }
+      return;
+    }
+
     if (activeInteraction.type === 'selection-box') {
       const finalSelectionBox = pointerWorld
         ? { start: activeInteraction.startWorld, end: pointerWorld }
@@ -3648,6 +3764,69 @@ export default function GrigliataBoard({
         }
       } finally {
         setLightDragState(null);
+        clearActiveSharedInteraction();
+      }
+      return;
+    }
+
+    if (activeInteraction.type === 'wall-endpoint-drag-candidate' || activeInteraction.type === 'wall-endpoint-drag') {
+      if (activeInteraction.type === 'wall-endpoint-drag-candidate') {
+        setWallDragState(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      if (isWallSourcePending) {
+        setWallDragState(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      const nextPoint = pointerWorld
+        ? getDraggedWallEndpointPoint(activeInteraction, pointerWorld)
+        : wallDragState?.point;
+
+      try {
+        if (nextPoint && activeInteraction.wallId && activeInteraction.endpoint) {
+          await Promise.resolve(wallSourceControls?.onMoveWallEndpoint?.(
+            activeInteraction.wallId,
+            activeInteraction.endpoint,
+            nextPoint
+          ));
+        }
+      } finally {
+        setWallDragState(null);
+        clearActiveSharedInteraction();
+      }
+      return;
+    }
+
+    if (activeInteraction.type === 'wall-segment-drag-candidate' || activeInteraction.type === 'wall-segment-drag') {
+      if (activeInteraction.type === 'wall-segment-drag-candidate') {
+        setWallDragState(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      if (isWallSourcePending) {
+        setWallDragState(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      const deltaWorld = pointerWorld
+        ? getDraggedWallSegmentDelta(activeInteraction, pointerWorld)
+        : wallDragState?.deltaWorld;
+
+      try {
+        if (deltaWorld && activeInteraction.wallId) {
+          await Promise.resolve(wallSourceControls?.onMoveWallSegment?.(
+            activeInteraction.wallId,
+            deltaWorld
+          ));
+        }
+      } finally {
+        setWallDragState(null);
         clearActiveSharedInteraction();
       }
       return;
@@ -3745,8 +3924,11 @@ export default function GrigliataBoard({
     getDraggedAoEFigureDraft,
     getDraggedLightPoint,
     getDraggedTokenMeasurement,
+    getDraggedWallEndpointPoint,
+    getDraggedWallSegmentDelta,
     getWorldPointFromClient,
     isLightSourcePending,
+    isWallSourcePending,
     lightDragState,
     lightSourceControls,
     normalizedGrid,
@@ -3757,6 +3939,9 @@ export default function GrigliataBoard({
     tokenDragState,
     tokenItems,
     clearPingHoldTimer,
+    wallCreatePreview,
+    wallDragState,
+    wallSourceControls,
   ]);
 
   useEffect(() => {
@@ -3860,6 +4045,20 @@ export default function GrigliataBoard({
         return;
       }
 
+      if (activeInteraction.type === 'wall-create') {
+        const nextInteraction = {
+          ...activeInteraction,
+          endPoint: pointerWorld,
+        };
+        interactionRef.current = nextInteraction;
+        setWallCreatePreview({
+          startPoint: activeInteraction.startWorld,
+          endPoint: pointerWorld,
+        });
+        clearActiveSharedInteraction();
+        return;
+      }
+
       if (activeInteraction.type === 'selection-box') {
         setSelectionBox({
           start: activeInteraction.startWorld,
@@ -3896,6 +4095,51 @@ export default function GrigliataBoard({
           lightId: activeInteraction.lightId,
           originLight: activeInteraction.originLight,
           deltaWorld: dragPoint.deltaWorld,
+        });
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      if (activeInteraction.type === 'wall-endpoint-drag-candidate' || activeInteraction.type === 'wall-endpoint-drag') {
+        if (activeInteraction.type === 'wall-endpoint-drag-candidate' && !hasMovedBeyondThreshold) return;
+
+        const point = getDraggedWallEndpointPoint(activeInteraction, pointerWorld);
+        if (!point) return;
+
+        if (activeInteraction.type === 'wall-endpoint-drag-candidate') {
+          interactionRef.current = {
+            ...activeInteraction,
+            type: 'wall-endpoint-drag',
+          };
+        }
+
+        setWallDragState({
+          type: 'endpoint',
+          wallId: activeInteraction.wallId,
+          endpoint: activeInteraction.endpoint,
+          point,
+        });
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      if (activeInteraction.type === 'wall-segment-drag-candidate' || activeInteraction.type === 'wall-segment-drag') {
+        if (activeInteraction.type === 'wall-segment-drag-candidate' && !hasMovedBeyondThreshold) return;
+
+        const deltaWorld = getDraggedWallSegmentDelta(activeInteraction, pointerWorld);
+        if (!deltaWorld) return;
+
+        if (activeInteraction.type === 'wall-segment-drag-candidate') {
+          interactionRef.current = {
+            ...activeInteraction,
+            type: 'wall-segment-drag',
+          };
+        }
+
+        setWallDragState({
+          type: 'segment',
+          wallId: activeInteraction.wallId,
+          deltaWorld,
         });
         clearActiveSharedInteraction();
         return;
@@ -4004,6 +4248,8 @@ export default function GrigliataBoard({
     buildMeasurementForCells,
     getDraggedAoEFigureDraft,
     getDraggedLightPoint,
+    getDraggedWallEndpointPoint,
+    getDraggedWallSegmentDelta,
     clearActiveSharedInteraction,
     syncSharedAoEInteraction,
     finalizeInteraction,
@@ -4021,7 +4267,7 @@ export default function GrigliataBoard({
 
       if (event.key !== 'Delete' && event.code !== 'Delete') return;
 
-      if (!selectedLightId && !selectedAoEFigureId && !selectedTokenIds.length) return;
+      if (!selectedLightId && !selectedWallId && !selectedAoEFigureId && !selectedTokenIds.length) return;
 
       event.preventDefault();
 
@@ -4034,6 +4280,22 @@ export default function GrigliataBoard({
           const didDeleteLight = !!(await Promise.resolve(lightSourceControls?.onDeleteLightSource?.(selectedLightId)));
           if (didDeleteLight) {
             setSelectedLightId('');
+          }
+        } catch {
+          // preserve selection if deletion fails
+        }
+        return;
+      }
+
+      if (selectedWallId) {
+        if (isWallSourcePending) {
+          return;
+        }
+
+        try {
+          const didDeleteWall = !!(await Promise.resolve(wallSourceControls?.onDeleteWallSegment?.(selectedWallId)));
+          if (didDeleteWall) {
+            setSelectedWallId('');
           }
         } catch {
           // preserve selection if deletion fails
@@ -4063,7 +4325,7 @@ export default function GrigliataBoard({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isLightSourcePending, lightSourceControls, onDeleteAoEFigures, onDeleteTokens, selectedAoEFigureId, selectedLightId, selectedTokenIds]);
+  }, [isLightSourcePending, isWallSourcePending, lightSourceControls, onDeleteAoEFigures, onDeleteTokens, selectedAoEFigureId, selectedLightId, selectedTokenIds, selectedWallId, wallSourceControls]);
 
   const openTurnOrderContextMenu = useCallback((token, nativeEvent) => {
     if (!token?.tokenId || !token?.canMove) {
@@ -4102,6 +4364,7 @@ export default function GrigliataBoard({
     if (nextLightId) {
       setSelectedTokenIds([]);
       setSelectedAoEFigureId('');
+      setSelectedWallId('');
       setSelectionBox(null);
     }
   }, [lightSourceControls]);
@@ -4158,6 +4421,116 @@ export default function GrigliataBoard({
     isRulerEnabled,
   ]);
 
+  const handleSelectWallSource = useCallback((wallId) => {
+    const nextWallId = wallId || '';
+    setSelectedWallId(nextWallId);
+    wallSourceControls?.onSelectWall?.(nextWallId);
+
+    if (nextWallId) {
+      setSelectedTokenIds([]);
+      setSelectedAoEFigureId('');
+      setSelectedLightId('');
+      setSelectionBox(null);
+    }
+  }, [wallSourceControls]);
+
+  const handleWallEndpointMouseDown = useCallback((wall, endpoint, event) => {
+    const nativeEvent = event.evt;
+    event.cancelBubble = true;
+    setTurnOrderContextMenu(null);
+    setTurnOrderJoinPrompt(null);
+    setHoveredOverflowTokenId('');
+    setPinnedOverflowTokenId('');
+    clearPingHoldTimer();
+
+    if (!wall?.id || isNarrationOverlayActive || !isWallToolActive || isWallSourcePending) {
+      return;
+    }
+
+    if (!isPrimaryMouseButton(nativeEvent)) {
+      return;
+    }
+
+    const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
+    if (!pointerWorld) return;
+
+    handleSelectWallSource(wall.id);
+    setMeasurementState(null);
+    setAoEPreviewState(null);
+    setSelectedAoEFigureId('');
+    setSelectedLightId('');
+    setSelectedTokenIds([]);
+    setSelectionBox(null);
+    clearActiveSharedInteraction();
+
+    interactionRef.current = {
+      type: 'wall-endpoint-drag-candidate',
+      wallId: wall.id,
+      endpoint,
+      startClient: {
+        x: nativeEvent.clientX,
+        y: nativeEvent.clientY,
+      },
+      startWorld: pointerWorld,
+    };
+  }, [
+    clearActiveSharedInteraction,
+    clearPingHoldTimer,
+    getWorldPointFromClient,
+    handleSelectWallSource,
+    isNarrationOverlayActive,
+    isWallSourcePending,
+    isWallToolActive,
+  ]);
+
+  const handleWallSegmentMouseDown = useCallback((wall, event) => {
+    const nativeEvent = event.evt;
+    event.cancelBubble = true;
+    setTurnOrderContextMenu(null);
+    setTurnOrderJoinPrompt(null);
+    setHoveredOverflowTokenId('');
+    setPinnedOverflowTokenId('');
+    clearPingHoldTimer();
+
+    if (!wall?.id || isNarrationOverlayActive || !isWallToolActive || isWallSourcePending) {
+      return;
+    }
+
+    if (!isPrimaryMouseButton(nativeEvent)) {
+      return;
+    }
+
+    const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
+    if (!pointerWorld) return;
+
+    handleSelectWallSource(wall.id);
+    setMeasurementState(null);
+    setAoEPreviewState(null);
+    setSelectedAoEFigureId('');
+    setSelectedLightId('');
+    setSelectedTokenIds([]);
+    setSelectionBox(null);
+    clearActiveSharedInteraction();
+
+    interactionRef.current = {
+      type: 'wall-segment-drag-candidate',
+      wallId: wall.id,
+      startClient: {
+        x: nativeEvent.clientX,
+        y: nativeEvent.clientY,
+      },
+      startWorld: pointerWorld,
+    };
+  }, [
+    clearActiveSharedInteraction,
+    clearPingHoldTimer,
+    getWorldPointFromClient,
+    handleSelectWallSource,
+    isNarrationOverlayActive,
+    isWallSourcePending,
+    isWallToolActive,
+  ]);
+
   const handleStageMouseDown = (event) => {
     if (isTokenDragActive) return;
     if (event.target !== stageRef.current) return;
@@ -4209,6 +4582,10 @@ export default function GrigliataBoard({
 
     clearPingHoldTimer();
 
+    if (isWallToolActive && wallSourceControls?.onCreateWallSegment && isWallSourcePending) {
+      return;
+    }
+
     if (isLightToolActive && lightSourceControls?.onCreateLightSource && isLightSourcePending) {
       return;
     }
@@ -4218,9 +4595,32 @@ export default function GrigliataBoard({
     setSelectedAoEFigureId('');
     clearActiveSharedInteraction();
 
+    if (isWallToolActive && wallSourceControls?.onCreateWallSegment) {
+      setSelectedTokenIds([]);
+      setSelectedLightId('');
+      setSelectedWallId('');
+      setSelectionBox(null);
+      const preview = {
+        startPoint: pointerWorld,
+        endPoint: pointerWorld,
+      };
+      setWallCreatePreview(preview);
+      interactionRef.current = {
+        type: 'wall-create',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startWorld: pointerWorld,
+        endPoint: pointerWorld,
+      };
+      return;
+    }
+
     if (isLightToolActive && lightSourceControls?.onCreateLightSource) {
       setSelectedTokenIds([]);
       setSelectionBox(null);
+      setSelectedWallId('');
       interactionRef.current = {
         type: 'light-create',
         startClient: {
@@ -4234,6 +4634,7 @@ export default function GrigliataBoard({
     }
 
     setSelectedLightId('');
+    setSelectedWallId('');
 
     if (activeAoeFigureType) {
       setSelectedTokenIds([]);
@@ -4351,6 +4752,7 @@ export default function GrigliataBoard({
     setAoEPreviewState(null);
     setSelectedAoEFigureId('');
     setSelectedLightId('');
+    setSelectedWallId('');
     clearActiveSharedInteraction();
 
     if (!token?.canMove) {
@@ -4433,6 +4835,7 @@ export default function GrigliataBoard({
     setSelectedTokenIds([]);
     setSelectionBox(null);
     setSelectedLightId('');
+    setSelectedWallId('');
 
     if (!figure?.canEdit) {
       setSelectedAoEFigureId('');
@@ -4492,6 +4895,8 @@ export default function GrigliataBoard({
       || !!selectedAoEFigureId
       || !!selectedLight
       || lightDragState
+      || !!selectedWall
+      || wallDragState
     ) {
       return null;
     }
@@ -4510,11 +4915,13 @@ export default function GrigliataBoard({
     lightDragState,
     selectedAoEFigureId,
     selectedLight,
+    selectedWall,
     selectedTokens,
     selectionBox,
     stageSize.height,
     stageSize.width,
     tokenDragState,
+    wallDragState,
     viewport.scale,
     viewport.x,
     viewport.y,
@@ -4532,6 +4939,8 @@ export default function GrigliataBoard({
       || !!selectedAoEFigureId
       || !!selectedLight
       || lightDragState
+      || !!selectedWall
+      || wallDragState
     ) {
       return null;
     }
@@ -4609,6 +5018,7 @@ export default function GrigliataBoard({
     lightDragState,
     selectedAoEFigureId,
     selectedLight,
+    selectedWall,
     selectedTokenActionState,
     selectedTokenDetails,
     selectedTokens,
@@ -4616,6 +5026,7 @@ export default function GrigliataBoard({
     stageSize.height,
     stageSize.width,
     tokenDragState,
+    wallDragState,
     viewport.scale,
     viewport.x,
     viewport.y,
@@ -4631,6 +5042,8 @@ export default function GrigliataBoard({
       || tokenDragState
       || !!selectedLight
       || lightDragState
+      || !!selectedWall
+      || wallDragState
     ) {
       return null;
     }
@@ -4685,10 +5098,12 @@ export default function GrigliataBoard({
     lightDragState,
     selectedAoEFigure,
     selectedLight,
+    selectedWall,
     selectionBox,
     stageSize.height,
     stageSize.width,
     tokenDragState,
+    wallDragState,
     viewport.scale,
     viewport.x,
     viewport.y,
@@ -4890,7 +5305,7 @@ export default function GrigliataBoard({
               disabled={isNarrationOverlayActive}
             />
           </div>
-          {isManager && lightSourceControls?.onCreateLightSource && (
+          {!isNarrationOverlayActive && isManager && lightSourceControls?.onCreateLightSource && (
             <button
               type="button"
               onClick={() => lightSourceControls?.onToggleLightTool?.()}
@@ -4902,6 +5317,20 @@ export default function GrigliataBoard({
               className={`${getQuickControlButtonClassName(isLightToolActive)} disabled:cursor-not-allowed disabled:opacity-60`}
             >
               <FiSun className="h-4 w-4" />
+            </button>
+          )}
+          {!isNarrationOverlayActive && isManager && wallSourceControls?.onToggleWallTool && (
+            <button
+              type="button"
+              onClick={() => wallSourceControls?.onToggleWallTool?.()}
+              disabled={isNarrationOverlayActive || isWallSourcePending || !wallSourceControls?.onToggleWallTool}
+              title={isWallToolActive ? 'Disable wall authoring tool' : 'Enable wall authoring tool'}
+              aria-label={isWallToolActive ? 'Disable wall authoring tool' : 'Enable wall authoring tool'}
+              aria-pressed={isWallToolActive}
+              data-testid="wall-source-tool-trigger"
+              className={`${getQuickControlButtonClassName(isWallToolActive)} disabled:cursor-not-allowed disabled:opacity-60`}
+            >
+              <FiMinus className="h-4 w-4" />
             </button>
           )}
           <button
@@ -5136,7 +5565,28 @@ export default function GrigliataBoard({
             )}
 
             <Layer>
-              {!isNarrationOverlayActive && isManager && onToggleWallRuntimeSegment && (
+              {!isNarrationOverlayActive && isManager && isWallToolActive && wallSourceControls && (
+                <GrigliataWallAuthoringControls
+                  walls={renderedWallSources}
+                  selectedWallId={selectedWallId}
+                  draftWall={wallCreatePreview ? {
+                    x1: wallCreatePreview.startPoint.x,
+                    y1: wallCreatePreview.startPoint.y,
+                    x2: wallCreatePreview.endPoint.x,
+                    y2: wallCreatePreview.endPoint.y,
+                    wallType: 'wall',
+                    blocksSight: true,
+                    blocksVision: true,
+                    blocksLight: true,
+                  } : null}
+                  viewportScale={viewport.scale}
+                  onSelectWall={handleSelectWallSource}
+                  onBeginWallEndpointDrag={handleWallEndpointMouseDown}
+                  onBeginWallSegmentDrag={handleWallSegmentMouseDown}
+                />
+              )}
+
+              {!isNarrationOverlayActive && isManager && !isWallToolActive && onToggleWallRuntimeSegment && (
                 <GrigliataWallRuntimeControls
                   walls={wallRuntimeSegments || lightingRenderInput?.walls}
                   viewportScale={viewport.scale}
@@ -5390,6 +5840,18 @@ export default function GrigliataBoard({
 
         <ActiveViewersOverlay viewers={activeViewers} />
 
+        {!isNarrationOverlayActive && isManager && (lightSourceControls || wallSourceControls) && (
+          <div className="pointer-events-none absolute inset-0 z-[27]">
+            <div data-testid="lighting-diagnostics-anchor" className="pointer-events-auto absolute bottom-20 left-4">
+              <GrigliataLightingDiagnostics
+                lights={editableLightSources}
+                walls={editableWallSources}
+                selectedToken={selectedTokenDetails}
+              />
+            </div>
+          </div>
+        )}
+
         {!isNarrationOverlayActive && isManager && selectedLight && (
           <div className="pointer-events-none absolute inset-0 z-[28]">
             <div className="pointer-events-auto absolute left-16 top-4">
@@ -5411,6 +5873,31 @@ export default function GrigliataBoard({
                   return didDeleteLight;
                 }}
                 onRequestClose={() => setSelectedLightId('')}
+              />
+            </div>
+          </div>
+        )}
+
+        {!isNarrationOverlayActive && isManager && selectedWall && (
+          <div className="pointer-events-none absolute inset-0 z-[28]">
+            <div className="pointer-events-auto absolute left-16 top-4">
+              <GrigliataSelectedWallPanel
+                wall={selectedWall}
+                isPending={!!wallSourceControls?.isPending}
+                onUpdateWall={wallSourceControls?.onUpdateWallSegment}
+                onDuplicateWall={wallSourceControls?.onDuplicateWallSegment}
+                onDeleteWall={async (wallId) => {
+                  if (isWallSourcePending) {
+                    return false;
+                  }
+
+                  const didDeleteWall = !!(await Promise.resolve(wallSourceControls?.onDeleteWallSegment?.(wallId)));
+                  if (didDeleteWall) {
+                    setSelectedWallId('');
+                  }
+                  return didDeleteWall;
+                }}
+                onRequestClose={() => setSelectedWallId('')}
               />
             </div>
           </div>

@@ -54,6 +54,8 @@ describe('lighting render input sanitization', () => {
       scene: { darkness: 0.5, globalLight: false },
       walls: [{
         id: 'wall-source-id',
+        label: 'North Door',
+        name: 'Raw Name',
         x1: 10,
         y1: 20,
         x2: 90,
@@ -118,6 +120,8 @@ describe('lighting render input sanitization', () => {
     }]);
     expect(renderInput.walls[0]).not.toHaveProperty('source');
     expect(renderInput.walls[0]).not.toHaveProperty('doorType');
+    expect(renderInput.walls[0]).not.toHaveProperty('label');
+    expect(renderInput.walls[0]).not.toHaveProperty('name');
   });
 
   test('keeps renderable finite scene lights and strips source-only light fields', () => {
