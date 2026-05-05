@@ -1303,6 +1303,65 @@ describe('GrigliataBoard', () => {
     expect(screen.queryByTestId('selected-light-panel')).not.toBeInTheDocument();
   });
 
+  test('renders DM darkness source controls outside narration only', async () => {
+    const onToggleDarknessTool = jest.fn();
+    const darknessSourceControls = {
+      isDarknessToolActive: false,
+      darknessSources: [{
+        id: 'darkness-1',
+        label: 'Void',
+        enabled: true,
+        x: 140,
+        y: 140,
+        radiusPx: 280,
+        intensity: 0.75,
+      }],
+      selectedDarknessId: 'darkness-1',
+      onSelectDarkness: jest.fn(),
+      onToggleDarknessTool,
+    };
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          darknessSourceControls,
+        })}
+      />
+    );
+
+    const trigger = await screen.findByTestId('darkness-source-tool-trigger');
+    fireEvent.click(trigger);
+    expect(onToggleDarknessTool).toHaveBeenCalled();
+    expect(await screen.findByTestId('darkness-source-handle')).toHaveAttribute('data-darknessid', 'darkness-1');
+    expect(screen.getByTestId('selected-darkness-panel')).toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: false,
+          darknessSourceControls,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('darkness-source-tool-trigger')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('darkness-source-handle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('selected-darkness-panel')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          darknessSourceControls,
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('darkness-source-tool-trigger')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('darkness-source-handle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('selected-darkness-panel')).not.toBeInTheDocument();
+  });
+
   test('renders DM lighting diagnostics outside narration only', async () => {
     const { rerender } = render(
       <GrigliataBoard
@@ -1494,6 +1553,137 @@ describe('GrigliataBoard', () => {
     });
   });
 
+  test('creates and drags darkness sources from the DM board controls', async () => {
+    const onCreateDarknessSource = jest.fn(() => Promise.resolve(true));
+    const onMoveDarknessSource = jest.fn(() => Promise.resolve(true));
+    const onSelectDarkness = jest.fn();
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          darknessSourceControls: {
+            isDarknessToolActive: true,
+            darknessSources: [],
+            onCreateDarknessSource,
+          },
+        })}
+      />
+    );
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 140, clientY: 140, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onCreateDarknessSource).toHaveBeenCalledWith(expect.objectContaining({
+        x: expect.any(Number),
+        y: expect.any(Number),
+      }));
+    });
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          darknessSourceControls: {
+            darknessSources: [{
+              id: 'darkness-1',
+              label: 'Void',
+              enabled: true,
+              x: 140,
+              y: 140,
+              radiusPx: 280,
+              intensity: 0.75,
+            }],
+            onSelectDarkness,
+            onMoveDarknessSource,
+          },
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('darkness-source-handle'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+    fireEvent.mouseMove(window, { clientX: 210, clientY: 210, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 210, clientY: 210, buttons: 0 });
+
+    expect(onSelectDarkness).toHaveBeenCalledWith('darkness-1');
+    await waitFor(() => {
+      expect(onMoveDarknessSource).toHaveBeenCalledWith('darkness-1', expect.objectContaining({
+        x: expect.any(Number),
+        y: expect.any(Number),
+      }));
+    });
+  });
+
+  test('selecting a light source clears an existing darkness selection', async () => {
+    const onSelectLight = jest.fn();
+    const onDeleteLightSource = jest.fn(() => Promise.resolve(true));
+    const onDeleteDarknessSource = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightSourceControls: {
+            lights: [{
+              id: 'light-1',
+              label: 'Torch',
+              enabled: true,
+              x: 140,
+              y: 140,
+              brightRadiusPx: 280,
+              dimRadiusPx: 560,
+              color: '#FFAD00',
+            }],
+            onSelectLight,
+            onDeleteLightSource,
+          },
+          darknessSourceControls: {
+            selectedDarknessId: 'darkness-1',
+            darknessSources: [{
+              id: 'darkness-1',
+              label: 'Void',
+              enabled: true,
+              x: 210,
+              y: 210,
+              radiusPx: 280,
+              intensity: 0.75,
+            }],
+            onDeleteDarknessSource,
+          },
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('selected-darkness-panel')).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByTestId('light-source-handle'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('selected-light-panel')).toBeInTheDocument();
+      expect(screen.queryByTestId('selected-darkness-panel')).not.toBeInTheDocument();
+    });
+    expect(onSelectLight).toHaveBeenCalledWith('light-1');
+
+    fireEvent.keyDown(window, { key: 'Delete', code: 'Delete' });
+
+    await waitFor(() => {
+      expect(onDeleteLightSource).toHaveBeenCalledWith('light-1');
+    });
+    expect(onDeleteDarknessSource).not.toHaveBeenCalled();
+  });
+
   test('creates and drags wall sources from the DM board controls', async () => {
     const onCreateWallSegment = jest.fn(() => Promise.resolve(true));
     const onMoveWallEndpoint = jest.fn(() => Promise.resolve(true));
@@ -1640,6 +1830,59 @@ describe('GrigliataBoard', () => {
     expect(screen.getByTestId('selected-light-panel')).toBeInTheDocument();
   });
 
+  test('blocks darkness source create, drag, and delete while a mutation is pending', async () => {
+    const onCreateDarknessSource = jest.fn(() => Promise.resolve(true));
+    const onMoveDarknessSource = jest.fn(() => Promise.resolve(true));
+    const onDeleteDarknessSource = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          darknessSourceControls: {
+            isDarknessToolActive: true,
+            isPending: true,
+            selectedDarknessId: 'darkness-1',
+            darknessSources: [{
+              id: 'darkness-1',
+              label: 'Void',
+              enabled: true,
+              x: 140,
+              y: 140,
+              radiusPx: 280,
+              intensity: 0.75,
+            }],
+            onCreateDarknessSource,
+            onMoveDarknessSource,
+            onDeleteDarknessSource,
+          },
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('selected-darkness-panel')).toBeInTheDocument();
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 140, clientY: 140, buttons: 0 });
+
+    fireEvent.mouseDown(screen.getByTestId('darkness-source-handle'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+    fireEvent.mouseMove(window, { clientX: 210, clientY: 210, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 210, clientY: 210, buttons: 0 });
+
+    fireEvent.keyDown(window, { key: 'Delete', code: 'Delete' });
+
+    expect(onCreateDarknessSource).not.toHaveBeenCalled();
+    expect(onMoveDarknessSource).not.toHaveBeenCalled();
+    expect(onDeleteDarknessSource).not.toHaveBeenCalled();
+    expect(screen.getByTestId('selected-darkness-panel')).toBeInTheDocument();
+  });
+
   test('keeps token dragging above overlapping light handles', async () => {
     const onMoveTokens = jest.fn(() => Promise.resolve(true));
     const onMoveLightSource = jest.fn(() => Promise.resolve(true));
@@ -1693,6 +1936,60 @@ describe('GrigliataBoard', () => {
       expect(onMoveTokens).toHaveBeenCalled();
     });
     expect(onMoveLightSource).not.toHaveBeenCalled();
+  });
+
+  test('keeps token dragging above overlapping darkness handles', async () => {
+    const onMoveTokens = jest.fn(() => Promise.resolve(true));
+    const onMoveDarknessSource = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          currentUserId: 'dm-1',
+          onMoveTokens,
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          darknessSourceControls: {
+            darknessSources: [{
+              id: 'darkness-1',
+              label: 'Void',
+              enabled: true,
+              x: 175,
+              y: 175,
+              radiusPx: 280,
+              intensity: 0.75,
+            }],
+            onMoveDarknessSource,
+          },
+        })}
+      />
+    );
+
+    const darknessHandle = await screen.findByTestId('darkness-source-handle');
+    const token = screen.getByTestId('token-node-user-1');
+    expect(darknessHandle.compareDocumentPosition(token) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.mouseDown(token, { button: 0, buttons: 1, clientX: 175, clientY: 175 });
+    fireEvent.mouseMove(window, { clientX: 245, clientY: 245, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 245, clientY: 245, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onMoveTokens).toHaveBeenCalled();
+    });
+    expect(onMoveDarknessSource).not.toHaveBeenCalled();
   });
 
   test('keeps token dragging above overlapping wall handles', async () => {

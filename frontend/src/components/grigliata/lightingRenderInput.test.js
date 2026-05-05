@@ -39,6 +39,7 @@ describe('lighting render input sanitization', () => {
       },
       walls: [],
       lights: [],
+      darknessSources: [],
       updatedAt: 'now',
       updatedBy: 'dm-1',
     });
@@ -222,6 +223,69 @@ describe('lighting render input sanitization', () => {
     expect(renderInput.lights[0]).not.toHaveProperty('updatedBy');
   });
 
+  test('keeps enabled renderable darkness sources and strips DM-only authoring fields', () => {
+    const renderInput = buildGrigliataLightingRenderInput({
+      schemaVersion: 1,
+      backgroundId: 'map-1',
+      scene: { darkness: 0.5, globalLight: false },
+      walls: [],
+      lights: [],
+      darknessSources: [{
+        id: 'darkness-1',
+        label: 'Secret Void',
+        name: 'Raw Name',
+        enabled: true,
+        x: 100,
+        y: 120,
+        radiusPx: 180,
+        intensity: 0.75,
+        source: { authoringOnly: true },
+        updatedBy: 'dm-1',
+      }, {
+        id: 'darkness-2',
+        label: 'Disabled',
+        enabled: false,
+        x: 220,
+        y: 120,
+        radiusPx: 180,
+        intensity: 1,
+      }, {
+        x: 220,
+        y: 140,
+        radiusPx: 0,
+        intensity: 1,
+      }, {
+        x: Number.POSITIVE_INFINITY,
+        y: 140,
+        radiusPx: 180,
+        intensity: 1,
+      }, {
+        x: 260,
+        y: 140,
+        radiusPx: 180,
+        intensity: 2,
+      }],
+    });
+
+    expect(renderInput.darknessSources).toEqual([{
+      x: 100,
+      y: 120,
+      radiusPx: 180,
+      intensity: 0.75,
+    }, {
+      x: 260,
+      y: 140,
+      radiusPx: 180,
+      intensity: 1,
+    }]);
+    expect(renderInput.darknessSources[0]).not.toHaveProperty('id');
+    expect(renderInput.darknessSources[0]).not.toHaveProperty('label');
+    expect(renderInput.darknessSources[0]).not.toHaveProperty('name');
+    expect(renderInput.darknessSources[0]).not.toHaveProperty('enabled');
+    expect(renderInput.darknessSources[0]).not.toHaveProperty('source');
+    expect(renderInput.darknessSources[0]).not.toHaveProperty('updatedBy');
+  });
+
   test('normalizes snapshot render input defensively before rendering', () => {
     const renderInput = normalizeGrigliataLightingRenderInput({
       schemaVersion: '2',
@@ -246,6 +310,14 @@ describe('lighting render input sanitization', () => {
         dimRadiusPx: 0,
         color: '#abc',
         id: 'raw-light-id',
+      }],
+      darknessSources: [{
+        id: 'raw-darkness-id',
+        label: 'Raw darkness',
+        x: '105',
+        y: 140,
+        radiusPx: '210',
+        intensity: 7,
       }],
       source: {
         fileName: 'source.json',
@@ -278,6 +350,12 @@ describe('lighting render input sanitization', () => {
         brightRadiusPx: 140,
         dimRadiusPx: 0,
         color: '#AABBCC',
+      }],
+      darknessSources: [{
+        x: 105,
+        y: 140,
+        radiusPx: 210,
+        intensity: 1,
       }],
       updatedAt: 'then',
       updatedBy: '',

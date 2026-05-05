@@ -24,6 +24,13 @@ const isGridMismatch = (selectedBackground, lightingMetadataDraft) => {
     || importedGrid.offsetYPx !== backgroundGrid.offsetYPx;
 };
 
+const clampNumber = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const normalizeSceneDarkness = (value) => {
+  const numericValue = Number(value);
+  return clampNumber(Number.isFinite(numericValue) ? numericValue : 0.6, 0, 1);
+};
+
 export default function GrigliataLightingImportPanel({
   selectedBackground,
   selectedFileName = '',
@@ -40,6 +47,9 @@ export default function GrigliataLightingImportPanel({
   hasLightingMetadata = false,
   lightingMetadataDraft = null,
   lightingMetadata = null,
+  sceneLighting = null,
+  isSceneLightingPending = false,
+  isSceneLightingDisabled = false,
   onLightingFileChange,
   onImportLightingMetadata,
   onApplyLightingCalibration,
@@ -47,6 +57,7 @@ export default function GrigliataLightingImportPanel({
   onToggleFogOfWarEnabled,
   onResetFogOfWar,
   onToggleDebugOverlay,
+  onUpdateSceneLighting,
 }) {
   const summaryText = formatSummaryText(selectedBackground?.lightingSummary);
   const hasSelectedBackground = !!selectedBackground?.id;
@@ -54,6 +65,17 @@ export default function GrigliataLightingImportPanel({
   const calibrationSource = lightingMetadataDraft || lightingMetadata;
   const hasCalibrationGrid = !!calibrationSource?.grid;
   const hasGridMismatch = isGridMismatch(selectedBackground, calibrationSource);
+  const scene = {
+    darkness: normalizeSceneDarkness(sceneLighting?.darkness),
+    globalLight: sceneLighting?.globalLight === true,
+  };
+  const areSceneControlsDisabled = (
+    !hasSelectedBackground
+    || !sceneLighting
+    || isSceneLightingPending
+    || isSceneLightingDisabled
+    || !onUpdateSceneLighting
+  );
 
   return (
     <section className="rounded-2xl border border-slate-700 bg-slate-950/75 shadow-2xl backdrop-blur-sm overflow-hidden">
@@ -100,6 +122,55 @@ export default function GrigliataLightingImportPanel({
             className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-cyan-400 focus:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
           />
         </label>
+
+        <div className="rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <label className="min-w-0 flex-1">
+              <span className="text-sm font-medium text-slate-100">Scene darkness</span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={scene.darkness}
+                onChange={(event) => onUpdateSceneLighting?.({
+                  darkness: normalizeSceneDarkness(event.target.value),
+                  globalLight: scene.globalLight,
+                })}
+                disabled={areSceneControlsDisabled}
+                aria-label="Scene darkness slider"
+                className="mt-2 w-full accent-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              value={scene.darkness}
+              onChange={(event) => onUpdateSceneLighting?.({
+                darkness: normalizeSceneDarkness(event.target.value),
+                globalLight: scene.globalLight,
+              })}
+              disabled={areSceneControlsDisabled}
+              aria-label="Scene darkness"
+              className="w-20 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-slate-100 focus:border-cyan-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+            />
+          </div>
+          <label className="mt-3 flex items-center justify-between gap-3 border-t border-slate-800 pt-3">
+            <span className="text-sm font-medium text-slate-100">Global light</span>
+            <input
+              type="checkbox"
+              checked={scene.globalLight}
+              onChange={(event) => onUpdateSceneLighting?.({
+                darkness: scene.darkness,
+                globalLight: event.target.checked,
+              })}
+              disabled={areSceneControlsDisabled}
+              className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-cyan-400 focus:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+          </label>
+        </div>
 
         <label className="block">
           <span className="text-xs text-slate-300">Dungeon Alchemist JSON</span>

@@ -109,6 +109,32 @@ const normalizeLight = (light) => {
   };
 };
 
+const normalizeDarknessSource = (darkness) => {
+  if (darkness?.enabled === false) {
+    return null;
+  }
+
+  const x = Number(darkness?.x);
+  const y = Number(darkness?.y);
+  const radiusPx = Math.max(0, asFiniteNumber(darkness?.radiusPx, 0));
+  const intensity = clamp(asFiniteNumber(darkness?.intensity, 1), 0, 1);
+
+  if (![x, y, radiusPx, intensity].every(Number.isFinite)) {
+    return null;
+  }
+
+  if (radiusPx <= 0 || intensity <= 0) {
+    return null;
+  }
+
+  return {
+    x,
+    y,
+    radiusPx,
+    intensity,
+  };
+};
+
 export const normalizeGrigliataLightingRenderInput = (data) => {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
     return null;
@@ -132,6 +158,9 @@ export const normalizeGrigliataLightingRenderInput = (data) => {
     lights: (Array.isArray(data.lights) ? data.lights : [])
       .map(normalizeLight)
       .filter(Boolean),
+    darknessSources: (Array.isArray(data.darknessSources) ? data.darknessSources : [])
+      .map(normalizeDarknessSource)
+      .filter(Boolean),
     updatedAt: data.updatedAt || null,
     updatedBy: typeof data.updatedBy === 'string' ? data.updatedBy : '',
   };
@@ -147,6 +176,7 @@ export const buildGrigliataLightingRenderInput = (metadata, {
     scene: metadata?.scene,
     walls: metadata?.walls,
     lights: metadata?.lights,
+    darknessSources: metadata?.darknessSources,
     updatedAt,
     updatedBy,
   });

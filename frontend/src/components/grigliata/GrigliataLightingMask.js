@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import {
+  Circle,
   Group,
   Line,
   Rect,
@@ -20,6 +21,7 @@ const DIM_LIGHT_TINT_OPACITY = 0.12;
 const BRIGHT_LIGHT_TINT_OPACITY = 0.18;
 const GLOBAL_DIM_LIGHT_TINT_OPACITY = 0.18;
 const GLOBAL_BRIGHT_LIGHT_TINT_OPACITY = 0.26;
+const DARKNESS_SOURCE_FILL = 'rgba(2, 6, 23, 1)';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -109,6 +111,28 @@ export default function GrigliataLightingMask({
       .filter(Boolean),
     [metadata?.lights, rayCount, wallSegments]
   );
+  const darknessSources = useMemo(
+    () => (Array.isArray(metadata?.darknessSources) ? metadata.darknessSources : [])
+      .map((darkness) => {
+        const x = Number(darkness?.x);
+        const y = Number(darkness?.y);
+        const radiusPx = Math.max(0, asFiniteNumber(darkness?.radiusPx, 0));
+        const intensity = clamp(asFiniteNumber(darkness?.intensity, 1), 0, 1);
+
+        if (![x, y, radiusPx, intensity].every(Number.isFinite) || radiusPx <= 0 || intensity <= 0) {
+          return null;
+        }
+
+        return {
+          x,
+          y,
+          radiusPx,
+          intensity,
+        };
+      })
+      .filter(Boolean),
+    [metadata?.darknessSources]
+  );
   const coverRect = useMemo(
     () => buildCoverRect({ bounds, grid: normalizedGrid }),
     [bounds, normalizedGrid]
@@ -125,8 +149,9 @@ export default function GrigliataLightingMask({
   const hasLightContribution = lightPolygons.some((light) => (
     hasRenderablePolygon(light.dimPolygon) || hasRenderablePolygon(light.brightPolygon)
   ));
+  const hasDarknessSourceContribution = darknessSources.length > 0;
 
-  if (!hasDarkness && !hasLightContribution) {
+  if (!hasDarkness && !hasLightContribution && !hasDarknessSourceContribution) {
     return null;
   }
 
@@ -215,6 +240,19 @@ export default function GrigliataLightingMask({
             listening={false}
           />
         )
+      ))}
+
+      {darknessSources.map((darkness, index) => (
+        <Circle
+          key={`darkness-source-${index}-${darkness.x}-${darkness.y}`}
+          data-testid="lighting-darkness-source-overlay"
+          x={darkness.x}
+          y={darkness.y}
+          radius={darkness.radiusPx}
+          fill={DARKNESS_SOURCE_FILL}
+          opacity={darkness.intensity}
+          listening={false}
+        />
       ))}
     </Group>
   );

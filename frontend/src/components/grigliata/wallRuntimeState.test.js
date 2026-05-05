@@ -9,6 +9,12 @@ const baseRenderInput = {
   backgroundId: 'map-1',
   scene: { darkness: 0.6, globalLight: false },
   lights: [],
+  darknessSources: [{
+    x: 140,
+    y: 140,
+    radiusPx: 210,
+    intensity: 0.7,
+  }],
   walls: [{
     id: 'wall-1',
     x1: 0,
@@ -164,5 +170,24 @@ describe('wallRuntimeState', () => {
     });
 
     expect(effectiveInput.walls.find((wall) => wall.id === 'wall-2').blocksSight).toBe(true);
+  });
+
+  test('preserves sanitized darkness sources while applying effective wall state', () => {
+    const effectiveInput = buildEffectiveLightingRenderInput({
+      lightingRenderInput: baseRenderInput,
+      wallRuntimeState: {
+        backgroundId: 'map-1',
+        segments: {
+          'wall-2': { isOpen: true },
+        },
+      },
+    });
+
+    expect(effectiveInput.darknessSources).toEqual([{
+      x: 140,
+      y: 140,
+      radiusPx: 210,
+      intensity: 0.7,
+    }]);
   });
 });

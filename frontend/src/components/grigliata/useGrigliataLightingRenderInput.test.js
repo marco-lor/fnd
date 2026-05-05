@@ -39,6 +39,7 @@ const HookProbe = ({ backgroundId = '', currentUserId = '' }) => {
       <div data-testid="background-id">{lightingRenderInput?.backgroundId || ''}</div>
       <div data-testid="light-count">{String(lightingRenderInput?.lights?.length || 0)}</div>
       <div data-testid="wall-count">{String(lightingRenderInput?.walls?.length || 0)}</div>
+      <div data-testid="darkness-count">{String(lightingRenderInput?.darknessSources?.length || 0)}</div>
       <div data-testid="light-color">{lightingRenderInput?.lights?.[0]?.color || ''}</div>
     </div>
   );
@@ -92,6 +93,14 @@ describe('useGrigliataLightingRenderInput', () => {
         color: '#abc',
         id: 'raw-light-id',
       }],
+      darknessSources: [{
+        id: 'raw-darkness-id',
+        label: 'Raw darkness',
+        x: 105,
+        y: 105,
+        radiusPx: 140,
+        intensity: 0.5,
+      }],
     };
 
     render(<HookProbe backgroundId="map-1" currentUserId="player-1" />);
@@ -107,6 +116,7 @@ describe('useGrigliataLightingRenderInput', () => {
     expect(screen.getByTestId('background-id')).toHaveTextContent('map-1');
     expect(screen.getByTestId('wall-count')).toHaveTextContent('1');
     expect(screen.getByTestId('light-count')).toHaveTextContent('1');
+    expect(screen.getByTestId('darkness-count')).toHaveTextContent('1');
     expect(screen.getByTestId('light-color')).toHaveTextContent('#AABBCC');
   });
 });

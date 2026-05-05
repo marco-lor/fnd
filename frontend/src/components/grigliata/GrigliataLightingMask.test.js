@@ -33,6 +33,7 @@ jest.mock('react-konva', () => {
   };
 
   return {
+    Circle: createComponent('Circle'),
     Group: createComponent('Group'),
     Line: createComponent('Line'),
     Rect: createComponent('Rect'),
@@ -84,6 +85,12 @@ const metadata = {
     dimRadiusPx: 160,
     color: '#FFAD00',
   }],
+  darknessSources: [{
+    x: 180,
+    y: 180,
+    radiusPx: 90,
+    intensity: 0.75,
+  }],
 };
 
 describe('GrigliataLightingMask', () => {
@@ -104,6 +111,7 @@ describe('GrigliataLightingMask', () => {
     expect(screen.getByTestId('lighting-light-dim-cutout')).toHaveAttribute('data-globalcompositeoperation', 'destination-out');
     expect(screen.getByTestId('lighting-light-bright-polygon')).toBeInTheDocument();
     expect(screen.getByTestId('lighting-light-dim-polygon')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-darkness-source-overlay')).toHaveAttribute('data-opacity', '0.75');
   });
 
   test('renders only the provided viewer-safe token vision sources', () => {
@@ -151,5 +159,33 @@ describe('GrigliataLightingMask', () => {
     expect(screen.queryByTestId('lighting-darkness-overlay')).not.toBeInTheDocument();
     expect(screen.queryByTestId('lighting-token-vision-cutout')).not.toBeInTheDocument();
     expect(screen.getByTestId('lighting-light-bright-polygon')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-darkness-source-overlay')).toBeInTheDocument();
+  });
+
+  test('renders darkness sources even when they are the only lighting contribution in global light', () => {
+    render(
+      <GrigliataLightingMask
+        bounds={bounds}
+        grid={grid}
+        metadata={{
+          scene: {
+            darkness: 0,
+            globalLight: true,
+          },
+          walls: [],
+          lights: [],
+          darknessSources: [{
+            x: 210,
+            y: 210,
+            radiusPx: 120,
+            intensity: 0.5,
+          }],
+        }}
+        tokens={[]}
+      />
+    );
+
+    expect(screen.getByTestId('lighting-mask-layer')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-darkness-source-overlay')).toHaveAttribute('data-radius', '120');
   });
 });

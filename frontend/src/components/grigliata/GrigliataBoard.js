@@ -18,6 +18,7 @@ import {
   FiEyeOff,
   FiImage,
   FiMinus,
+  FiMoon,
   FiPlay,
   FiPlus,
   FiRotateCcw,
@@ -84,7 +85,9 @@ import GrigliataWallRuntimeControls from './GrigliataWallRuntimeControls';
 import GrigliataWallAuthoringControls, { GrigliataSelectedWallPanel } from './GrigliataWallAuthoringControls';
 import GrigliataLightingDiagnostics from './GrigliataLightingDiagnostics';
 import GrigliataLightControls, { GrigliataSelectedLightPanel } from './GrigliataLightControls';
+import GrigliataDarknessControls, { GrigliataSelectedDarknessPanel } from './GrigliataDarknessControls';
 import { normalizeEditableLightSources } from './lightSources';
+import { normalizeEditableDarknessSources } from './darknessSources';
 import { normalizeEditableWallSegments } from './wallSources';
 import { resolveViewerTokenVisionSources } from './lightingVisibility';
 import {
@@ -181,6 +184,10 @@ const isAoEDragInteraction = (interaction) => (
 const isLightDragInteraction = (interaction) => (
   interaction?.type === 'light-drag-candidate'
   || interaction?.type === 'light-drag'
+);
+const isDarknessDragInteraction = (interaction) => (
+  interaction?.type === 'darkness-drag-candidate'
+  || interaction?.type === 'darkness-drag'
 );
 const isPingHoldInteraction = (interaction) => interaction?.type === 'ping-hold';
 
@@ -2332,6 +2339,7 @@ export default function GrigliataBoard({
   wallRuntimeSegments = null,
   onToggleWallRuntimeSegment = null,
   lightSourceControls = null,
+  darknessSourceControls = null,
   wallSourceControls = null,
   isNarrationOverlayActive = false,
 }) {
@@ -2357,6 +2365,12 @@ export default function GrigliataBoard({
       : ''
   ));
   const [lightDragState, setLightDragState] = useState(null);
+  const [selectedDarknessId, setSelectedDarknessId] = useState(() => (
+    typeof darknessSourceControls?.selectedDarknessId === 'string'
+      ? darknessSourceControls.selectedDarknessId
+      : ''
+  ));
+  const [darknessDragState, setDarknessDragState] = useState(null);
   const [selectedWallId, setSelectedWallId] = useState(() => (
     typeof wallSourceControls?.selectedWallId === 'string'
       ? wallSourceControls.selectedWallId
@@ -2399,9 +2413,11 @@ export default function GrigliataBoard({
   const resolvedDrawTheme = drawTheme || DEFAULT_DRAW_THEME;
   const isLightToolActive = !!(isManager && lightSourceControls?.isLightToolActive);
   const isLightSourcePending = !!lightSourceControls?.isPending;
+  const isDarknessToolActive = !!(isManager && darknessSourceControls?.isDarknessToolActive);
+  const isDarknessSourcePending = !!darknessSourceControls?.isPending;
   const isWallToolActive = !!(isManager && wallSourceControls?.isWallToolActive);
   const isWallSourcePending = !!wallSourceControls?.isPending;
-  const isMouseSelectionActive = !isRulerEnabled && !activeAoeFigureType && !isLightToolActive && !isWallToolActive;
+  const isMouseSelectionActive = !isRulerEnabled && !activeAoeFigureType && !isLightToolActive && !isDarknessToolActive && !isWallToolActive;
   const isMusicEnabled = !isMusicMuted;
   const musicToggleActionLabel = isMusicEnabled ? 'Mute Music' : 'Unmute Music';
   const musicToggleStateLabel = isMusicEnabled ? 'Shared music enabled' : 'Shared music muted';
@@ -2790,6 +2806,26 @@ export default function GrigliataBoard({
     () => renderedLightSources.find((light) => light.id === selectedLightId) || null,
     [renderedLightSources, selectedLightId]
   );
+  const editableDarknessSources = useMemo(
+    () => normalizeEditableDarknessSources(darknessSourceControls?.darknessSources),
+    [darknessSourceControls?.darknessSources]
+  );
+  const renderedDarknessSources = useMemo(
+    () => editableDarknessSources.map((darkness) => (
+      darknessDragState?.darknessId === darkness.id
+        ? {
+          ...darkness,
+          x: darknessDragState.originDarkness.x + darknessDragState.deltaWorld.x,
+          y: darknessDragState.originDarkness.y + darknessDragState.deltaWorld.y,
+        }
+        : darkness
+    )),
+    [darknessDragState, editableDarknessSources]
+  );
+  const selectedDarkness = useMemo(
+    () => renderedDarknessSources.find((darkness) => darkness.id === selectedDarknessId) || null,
+    [renderedDarknessSources, selectedDarknessId]
+  );
   const editableWallSources = useMemo(
     () => normalizeEditableWallSegments(wallSourceControls?.walls),
     [wallSourceControls?.walls]
@@ -3064,6 +3100,8 @@ export default function GrigliataBoard({
     setAoEFigureDragState(null);
     setSelectedLightId('');
     setLightDragState(null);
+    setSelectedDarknessId('');
+    setDarknessDragState(null);
     setSelectedWallId('');
     setWallDragState(null);
     setWallCreatePreview(null);
@@ -3086,6 +3124,8 @@ export default function GrigliataBoard({
     setSelectedAoEFigureId('');
     setSelectedLightId('');
     setLightDragState(null);
+    setSelectedDarknessId('');
+    setDarknessDragState(null);
     setSelectedWallId('');
     setWallDragState(null);
     setWallCreatePreview(null);
@@ -3100,10 +3140,10 @@ export default function GrigliataBoard({
     if (!activeAoeFigureType) {
       setAoEPreviewState(null);
     }
-    if (!isRulerEnabled && !activeAoeFigureType && !isLightToolActive && !isWallToolActive) {
+    if (!isRulerEnabled && !activeAoeFigureType && !isLightToolActive && !isDarknessToolActive && !isWallToolActive) {
       clearActiveSharedInteraction();
     }
-  }, [activeAoeFigureType, clearActiveSharedInteraction, isLightToolActive, isRulerEnabled, isWallToolActive]);
+  }, [activeAoeFigureType, clearActiveSharedInteraction, isDarknessToolActive, isLightToolActive, isRulerEnabled, isWallToolActive]);
 
   useEffect(() => {
     if (visibleLocalPings.length === localPings.length) {
@@ -3219,6 +3259,13 @@ export default function GrigliataBoard({
   }, [editableLightSources, selectedLightId]);
 
   useEffect(() => {
+    if (!selectedDarknessId) return;
+    if (!editableDarknessSources.some((darkness) => darkness.id === selectedDarknessId)) {
+      setSelectedDarknessId('');
+    }
+  }, [editableDarknessSources, selectedDarknessId]);
+
+  useEffect(() => {
     if (!selectedWallId) return;
     if (!editableWallSources.some((wall) => wall.id === selectedWallId)) {
       setSelectedWallId('');
@@ -3230,6 +3277,12 @@ export default function GrigliataBoard({
     if (typeof controlledSelectedLightId !== 'string') return;
     setSelectedLightId(controlledSelectedLightId);
   }, [lightSourceControls?.selectedLightId]);
+
+  useEffect(() => {
+    const controlledSelectedDarknessId = darknessSourceControls?.selectedDarknessId;
+    if (typeof controlledSelectedDarknessId !== 'string') return;
+    setSelectedDarknessId(controlledSelectedDarknessId);
+  }, [darknessSourceControls?.selectedDarknessId]);
 
   useEffect(() => {
     const controlledSelectedWallId = wallSourceControls?.selectedWallId;
@@ -3346,6 +3399,25 @@ export default function GrigliataBoard({
       point: {
         x: interaction.originLight.x + deltaWorld.x,
         y: interaction.originLight.y + deltaWorld.y,
+      },
+    };
+  }, []);
+
+  const getDraggedDarknessPoint = useCallback((interaction, pointerWorld) => {
+    if (!pointerWorld || !interaction?.originDarkness || !interaction?.startWorld) {
+      return null;
+    }
+
+    const deltaWorld = {
+      x: pointerWorld.x - interaction.startWorld.x,
+      y: pointerWorld.y - interaction.startWorld.y,
+    };
+
+    return {
+      deltaWorld,
+      point: {
+        x: interaction.originDarkness.x + deltaWorld.x,
+        y: interaction.originDarkness.y + deltaWorld.y,
       },
     };
   }, []);
@@ -3660,6 +3732,25 @@ export default function GrigliataBoard({
       return;
     }
 
+    if (activeInteraction.type === 'darkness-create') {
+      if (isDarknessSourcePending) {
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      let didCreateDarkness = false;
+      try {
+        didCreateDarkness = !!(await Promise.resolve(darknessSourceControls?.onCreateDarknessSource?.(activeInteraction.point)));
+      } finally {
+        clearActiveSharedInteraction();
+      }
+
+      if (didCreateDarkness) {
+        setSelectedDarknessId('');
+      }
+      return;
+    }
+
     if (activeInteraction.type === 'wall-create') {
       if (isWallSourcePending) {
         setWallCreatePreview(null);
@@ -3764,6 +3855,50 @@ export default function GrigliataBoard({
         }
       } finally {
         setLightDragState(null);
+        clearActiveSharedInteraction();
+      }
+      return;
+    }
+
+    if (isDarknessDragInteraction(activeInteraction)) {
+      if (activeInteraction.type === 'darkness-drag-candidate') {
+        setDarknessDragState(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      if (isDarknessSourcePending) {
+        setDarknessDragState(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      const dragPoint = pointerWorld
+        ? getDraggedDarknessPoint(activeInteraction, pointerWorld)
+        : null;
+      const nextPoint = dragPoint?.point || (
+        darknessDragState
+          ? {
+            x: darknessDragState.originDarkness.x + darknessDragState.deltaWorld.x,
+            y: darknessDragState.originDarkness.y + darknessDragState.deltaWorld.y,
+          }
+          : activeInteraction.originDarkness
+      );
+      const hasMoved = !!(
+        nextPoint
+        && activeInteraction.originDarkness
+        && (
+          Math.abs(nextPoint.x - activeInteraction.originDarkness.x) >= 0.5
+          || Math.abs(nextPoint.y - activeInteraction.originDarkness.y) >= 0.5
+        )
+      );
+
+      try {
+        if (hasMoved && activeInteraction.darknessId && nextPoint) {
+          await Promise.resolve(darknessSourceControls?.onMoveDarknessSource?.(activeInteraction.darknessId, nextPoint));
+        }
+      } finally {
+        setDarknessDragState(null);
         clearActiveSharedInteraction();
       }
       return;
@@ -3921,12 +4056,16 @@ export default function GrigliataBoard({
   }, [
     aoeFigureDragState,
     clearActiveSharedInteraction,
+    darknessDragState,
+    darknessSourceControls,
     getDraggedAoEFigureDraft,
+    getDraggedDarknessPoint,
     getDraggedLightPoint,
     getDraggedTokenMeasurement,
     getDraggedWallEndpointPoint,
     getDraggedWallSegmentDelta,
     getWorldPointFromClient,
+    isDarknessSourcePending,
     isLightSourcePending,
     isWallSourcePending,
     lightDragState,
@@ -4100,6 +4239,28 @@ export default function GrigliataBoard({
         return;
       }
 
+      if (isDarknessDragInteraction(activeInteraction)) {
+        if (activeInteraction.type === 'darkness-drag-candidate' && !hasMovedBeyondThreshold) return;
+
+        const dragPoint = getDraggedDarknessPoint(activeInteraction, pointerWorld);
+        if (!dragPoint) return;
+
+        if (activeInteraction.type === 'darkness-drag-candidate') {
+          interactionRef.current = {
+            ...activeInteraction,
+            type: 'darkness-drag',
+          };
+        }
+
+        setDarknessDragState({
+          darknessId: activeInteraction.darknessId,
+          originDarkness: activeInteraction.originDarkness,
+          deltaWorld: dragPoint.deltaWorld,
+        });
+        clearActiveSharedInteraction();
+        return;
+      }
+
       if (activeInteraction.type === 'wall-endpoint-drag-candidate' || activeInteraction.type === 'wall-endpoint-drag') {
         if (activeInteraction.type === 'wall-endpoint-drag-candidate' && !hasMovedBeyondThreshold) return;
 
@@ -4247,6 +4408,7 @@ export default function GrigliataBoard({
     buildAoEFigureForDraft,
     buildMeasurementForCells,
     getDraggedAoEFigureDraft,
+    getDraggedDarknessPoint,
     getDraggedLightPoint,
     getDraggedWallEndpointPoint,
     getDraggedWallSegmentDelta,
@@ -4267,7 +4429,7 @@ export default function GrigliataBoard({
 
       if (event.key !== 'Delete' && event.code !== 'Delete') return;
 
-      if (!selectedLightId && !selectedWallId && !selectedAoEFigureId && !selectedTokenIds.length) return;
+      if (!selectedLightId && !selectedDarknessId && !selectedWallId && !selectedAoEFigureId && !selectedTokenIds.length) return;
 
       event.preventDefault();
 
@@ -4280,6 +4442,22 @@ export default function GrigliataBoard({
           const didDeleteLight = !!(await Promise.resolve(lightSourceControls?.onDeleteLightSource?.(selectedLightId)));
           if (didDeleteLight) {
             setSelectedLightId('');
+          }
+        } catch {
+          // preserve selection if deletion fails
+        }
+        return;
+      }
+
+      if (selectedDarknessId) {
+        if (isDarknessSourcePending) {
+          return;
+        }
+
+        try {
+          const didDeleteDarkness = !!(await Promise.resolve(darknessSourceControls?.onDeleteDarknessSource?.(selectedDarknessId)));
+          if (didDeleteDarkness) {
+            setSelectedDarknessId('');
           }
         } catch {
           // preserve selection if deletion fails
@@ -4325,7 +4503,7 @@ export default function GrigliataBoard({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isLightSourcePending, isWallSourcePending, lightSourceControls, onDeleteAoEFigures, onDeleteTokens, selectedAoEFigureId, selectedLightId, selectedTokenIds, selectedWallId, wallSourceControls]);
+  }, [darknessSourceControls, isDarknessSourcePending, isLightSourcePending, isWallSourcePending, lightSourceControls, onDeleteAoEFigures, onDeleteTokens, selectedAoEFigureId, selectedDarknessId, selectedLightId, selectedTokenIds, selectedWallId, wallSourceControls]);
 
   const openTurnOrderContextMenu = useCallback((token, nativeEvent) => {
     if (!token?.tokenId || !token?.canMove) {
@@ -4364,10 +4542,25 @@ export default function GrigliataBoard({
     if (nextLightId) {
       setSelectedTokenIds([]);
       setSelectedAoEFigureId('');
+      setSelectedDarknessId('');
       setSelectedWallId('');
       setSelectionBox(null);
     }
   }, [lightSourceControls]);
+
+  const handleSelectDarknessSource = useCallback((darknessId) => {
+    const nextDarknessId = darknessId || '';
+    setSelectedDarknessId(nextDarknessId);
+    darknessSourceControls?.onSelectDarkness?.(nextDarknessId);
+
+    if (nextDarknessId) {
+      setSelectedTokenIds([]);
+      setSelectedAoEFigureId('');
+      setSelectedLightId('');
+      setSelectedWallId('');
+      setSelectionBox(null);
+    }
+  }, [darknessSourceControls]);
 
   const handleLightSourceMouseDown = useCallback((light, event) => {
     const nativeEvent = event.evt;
@@ -4421,6 +4614,60 @@ export default function GrigliataBoard({
     isRulerEnabled,
   ]);
 
+  const handleDarknessSourceMouseDown = useCallback((darkness, event) => {
+    const nativeEvent = event.evt;
+    event.cancelBubble = true;
+    setTurnOrderContextMenu(null);
+    setTurnOrderJoinPrompt(null);
+    setHoveredOverflowTokenId('');
+    setPinnedOverflowTokenId('');
+    clearPingHoldTimer();
+
+    if (!darkness?.id || isNarrationOverlayActive || activeAoeFigureType || isRulerEnabled || isDarknessSourcePending) {
+      return;
+    }
+
+    if (!isPrimaryMouseButton(nativeEvent)) {
+      return;
+    }
+
+    const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
+    if (!pointerWorld) return;
+
+    handleSelectDarknessSource(darkness.id);
+    setMeasurementState(null);
+    setAoEPreviewState(null);
+    setSelectedAoEFigureId('');
+    setSelectedLightId('');
+    setSelectedWallId('');
+    setSelectedTokenIds([]);
+    setSelectionBox(null);
+    clearActiveSharedInteraction();
+
+    interactionRef.current = {
+      type: 'darkness-drag-candidate',
+      darknessId: darkness.id,
+      startClient: {
+        x: nativeEvent.clientX,
+        y: nativeEvent.clientY,
+      },
+      startWorld: pointerWorld,
+      originDarkness: {
+        x: darkness.x,
+        y: darkness.y,
+      },
+    };
+  }, [
+    activeAoeFigureType,
+    clearActiveSharedInteraction,
+    clearPingHoldTimer,
+    getWorldPointFromClient,
+    handleSelectDarknessSource,
+    isDarknessSourcePending,
+    isNarrationOverlayActive,
+    isRulerEnabled,
+  ]);
+
   const handleSelectWallSource = useCallback((wallId) => {
     const nextWallId = wallId || '';
     setSelectedWallId(nextWallId);
@@ -4430,6 +4677,7 @@ export default function GrigliataBoard({
       setSelectedTokenIds([]);
       setSelectedAoEFigureId('');
       setSelectedLightId('');
+      setSelectedDarknessId('');
       setSelectionBox(null);
     }
   }, [wallSourceControls]);
@@ -4459,6 +4707,7 @@ export default function GrigliataBoard({
     setAoEPreviewState(null);
     setSelectedAoEFigureId('');
     setSelectedLightId('');
+    setSelectedDarknessId('');
     setSelectedTokenIds([]);
     setSelectionBox(null);
     clearActiveSharedInteraction();
@@ -4508,6 +4757,7 @@ export default function GrigliataBoard({
     setAoEPreviewState(null);
     setSelectedAoEFigureId('');
     setSelectedLightId('');
+    setSelectedDarknessId('');
     setSelectedTokenIds([]);
     setSelectionBox(null);
     clearActiveSharedInteraction();
@@ -4590,6 +4840,10 @@ export default function GrigliataBoard({
       return;
     }
 
+    if (isDarknessToolActive && darknessSourceControls?.onCreateDarknessSource && isDarknessSourcePending) {
+      return;
+    }
+
     setMeasurementState(null);
     setAoEPreviewState(null);
     setSelectedAoEFigureId('');
@@ -4598,6 +4852,7 @@ export default function GrigliataBoard({
     if (isWallToolActive && wallSourceControls?.onCreateWallSegment) {
       setSelectedTokenIds([]);
       setSelectedLightId('');
+      setSelectedDarknessId('');
       setSelectedWallId('');
       setSelectionBox(null);
       const preview = {
@@ -4619,6 +4874,7 @@ export default function GrigliataBoard({
 
     if (isLightToolActive && lightSourceControls?.onCreateLightSource) {
       setSelectedTokenIds([]);
+      setSelectedDarknessId('');
       setSelectionBox(null);
       setSelectedWallId('');
       interactionRef.current = {
@@ -4633,7 +4889,26 @@ export default function GrigliataBoard({
       return;
     }
 
+    if (isDarknessToolActive && darknessSourceControls?.onCreateDarknessSource) {
+      setSelectedTokenIds([]);
+      setSelectedLightId('');
+      setSelectedDarknessId('');
+      setSelectedWallId('');
+      setSelectionBox(null);
+      interactionRef.current = {
+        type: 'darkness-create',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startWorld: pointerWorld,
+        point: pointerWorld,
+      };
+      return;
+    }
+
     setSelectedLightId('');
+    setSelectedDarknessId('');
     setSelectedWallId('');
 
     if (activeAoeFigureType) {
@@ -4752,6 +5027,7 @@ export default function GrigliataBoard({
     setAoEPreviewState(null);
     setSelectedAoEFigureId('');
     setSelectedLightId('');
+    setSelectedDarknessId('');
     setSelectedWallId('');
     clearActiveSharedInteraction();
 
@@ -4835,6 +5111,7 @@ export default function GrigliataBoard({
     setSelectedTokenIds([]);
     setSelectionBox(null);
     setSelectedLightId('');
+    setSelectedDarknessId('');
     setSelectedWallId('');
 
     if (!figure?.canEdit) {
@@ -4895,6 +5172,8 @@ export default function GrigliataBoard({
       || !!selectedAoEFigureId
       || !!selectedLight
       || lightDragState
+      || !!selectedDarkness
+      || darknessDragState
       || !!selectedWall
       || wallDragState
     ) {
@@ -4912,8 +5191,10 @@ export default function GrigliataBoard({
     isManager,
     isTokenDragActive,
     isRulerEnabled,
+    darknessDragState,
     lightDragState,
     selectedAoEFigureId,
+    selectedDarkness,
     selectedLight,
     selectedWall,
     selectedTokens,
@@ -4939,6 +5220,8 @@ export default function GrigliataBoard({
       || !!selectedAoEFigureId
       || !!selectedLight
       || lightDragState
+      || !!selectedDarkness
+      || darknessDragState
       || !!selectedWall
       || wallDragState
     ) {
@@ -5015,8 +5298,10 @@ export default function GrigliataBoard({
     activeAoeFigureType,
     isTokenDragActive,
     isRulerEnabled,
+    darknessDragState,
     lightDragState,
     selectedAoEFigureId,
+    selectedDarkness,
     selectedLight,
     selectedWall,
     selectedTokenActionState,
@@ -5042,6 +5327,8 @@ export default function GrigliataBoard({
       || tokenDragState
       || !!selectedLight
       || lightDragState
+      || !!selectedDarkness
+      || darknessDragState
       || !!selectedWall
       || wallDragState
     ) {
@@ -5095,8 +5382,10 @@ export default function GrigliataBoard({
     aoeFigureDragState,
     isRulerEnabled,
     isTokenDragActive,
+    darknessDragState,
     lightDragState,
     selectedAoEFigure,
+    selectedDarkness,
     selectedLight,
     selectedWall,
     selectionBox,
@@ -5317,6 +5606,20 @@ export default function GrigliataBoard({
               className={`${getQuickControlButtonClassName(isLightToolActive)} disabled:cursor-not-allowed disabled:opacity-60`}
             >
               <FiSun className="h-4 w-4" />
+            </button>
+          )}
+          {!isNarrationOverlayActive && isManager && darknessSourceControls?.onToggleDarknessTool && (
+            <button
+              type="button"
+              onClick={() => darknessSourceControls?.onToggleDarknessTool?.()}
+              disabled={isNarrationOverlayActive || isDarknessSourcePending || !darknessSourceControls?.onToggleDarknessTool}
+              title={isDarknessToolActive ? 'Disable darkness source tool' : 'Enable darkness source tool'}
+              aria-label={isDarknessToolActive ? 'Disable darkness source tool' : 'Enable darkness source tool'}
+              aria-pressed={isDarknessToolActive}
+              data-testid="darkness-source-tool-trigger"
+              className={`${getQuickControlButtonClassName(isDarknessToolActive)} disabled:cursor-not-allowed disabled:opacity-60`}
+            >
+              <FiMoon className="h-4 w-4" />
             </button>
           )}
           {!isNarrationOverlayActive && isManager && wallSourceControls?.onToggleWallTool && (
@@ -5651,6 +5954,16 @@ export default function GrigliataBoard({
                 />
               )}
 
+              {!isNarrationOverlayActive && isManager && renderedDarknessSources.length > 0 && (
+                <GrigliataDarknessControls
+                  darknessSources={renderedDarknessSources}
+                  selectedDarknessId={selectedDarknessId}
+                  viewportScale={viewport.scale}
+                  onSelectDarkness={handleSelectDarknessSource}
+                  onBeginDarknessDrag={handleDarknessSourceMouseDown}
+                />
+              )}
+
               {visibleRenderedTokensBelowFog.map((token) => (
                 <TokenNode
                   key={token.tokenId}
@@ -5840,7 +6153,7 @@ export default function GrigliataBoard({
 
         <ActiveViewersOverlay viewers={activeViewers} />
 
-        {!isNarrationOverlayActive && isManager && (lightSourceControls || wallSourceControls) && (
+        {!isNarrationOverlayActive && isManager && (lightSourceControls || darknessSourceControls || wallSourceControls) && (
           <div className="pointer-events-none absolute inset-0 z-[27]">
             <div data-testid="lighting-diagnostics-anchor" className="pointer-events-auto absolute bottom-20 left-4">
               <GrigliataLightingDiagnostics
@@ -5873,6 +6186,32 @@ export default function GrigliataBoard({
                   return didDeleteLight;
                 }}
                 onRequestClose={() => setSelectedLightId('')}
+              />
+            </div>
+          </div>
+        )}
+
+        {!isNarrationOverlayActive && isManager && selectedDarkness && (
+          <div className="pointer-events-none absolute inset-0 z-[28]">
+            <div className="pointer-events-auto absolute left-16 top-4">
+              <GrigliataSelectedDarknessPanel
+                darkness={selectedDarkness}
+                grid={normalizedGrid}
+                isPending={!!darknessSourceControls?.isPending}
+                onUpdateDarkness={darknessSourceControls?.onUpdateDarknessSource}
+                onDuplicateDarkness={darknessSourceControls?.onDuplicateDarknessSource}
+                onDeleteDarkness={async (darknessId) => {
+                  if (isDarknessSourcePending) {
+                    return false;
+                  }
+
+                  const didDeleteDarkness = !!(await Promise.resolve(darknessSourceControls?.onDeleteDarknessSource?.(darknessId)));
+                  if (didDeleteDarkness) {
+                    setSelectedDarknessId('');
+                  }
+                  return didDeleteDarkness;
+                }}
+                onRequestClose={() => setSelectedDarknessId('')}
               />
             </div>
           </div>
