@@ -30,7 +30,7 @@ import {
   FiVolume2,
   FiVolumeX,
 } from 'react-icons/fi';
-import { MdCenterFocusStrong } from 'react-icons/md';
+import { MdBrush, MdCenterFocusStrong } from 'react-icons/md';
 import {
   BOARD_FIT_PADDING,
   DEFAULT_GRIGLIATA_DRAW_COLOR_KEY,
@@ -2442,6 +2442,7 @@ export default function GrigliataBoard({
   const musicToggleActionLabel = isMusicEnabled ? 'Mute Music' : 'Unmute Music';
   const musicToggleStateLabel = isMusicEnabled ? 'Shared music enabled' : 'Shared music muted';
   const prefersReducedMotion = useReducedMotion();
+  const fogBrushSettingsId = useId();
 
   const cancelBattlemapImageAnimation = useCallback(() => {
     cancelAnimationFrameSafe(battlemapImageAnimationHandleRef.current);
@@ -5737,62 +5738,93 @@ export default function GrigliataBoard({
             </button>
           )}
           {!isNarrationOverlayActive && isManager && fogBrushControls?.onToggleFogBrushTool && (
-            <button
-              type="button"
-              onClick={() => fogBrushControls?.onToggleFogBrushTool?.()}
-              disabled={isNarrationOverlayActive || isFogBrushPending || !fogBrushControls?.onToggleFogBrushTool}
-              title={isFogBrushToolActive ? 'Disable manual fog brush' : 'Enable manual fog brush'}
-              aria-label={isFogBrushToolActive ? 'Disable manual fog brush' : 'Enable manual fog brush'}
-              aria-pressed={isFogBrushToolActive}
-              data-testid="fog-brush-tool-trigger"
-              className={`${getQuickControlButtonClassName(isFogBrushToolActive)} disabled:cursor-not-allowed disabled:opacity-60`}
-            >
-              <FiEyeOff className="h-4 w-4" />
-            </button>
-          )}
-          {!isNarrationOverlayActive && isManager && isFogBrushToolActive && fogBrushControls && (
-            <div
-              data-testid="fog-brush-settings"
-              className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-slate-700/90 bg-slate-950/94 p-1 shadow-lg shadow-slate-950/40 backdrop-blur-md"
-            >
-              <button
-                type="button"
-                data-testid="fog-brush-mode-reveal"
-                onClick={() => fogBrushControls?.onChangeMode?.('reveal')}
-                disabled={isFogBrushPending}
-                title="Reveal fog"
-                aria-label="Reveal fog brush"
-                aria-pressed={fogBrushSettings.mode === 'reveal'}
-                className={`${getQuickControlButtonClassName(fogBrushSettings.mode === 'reveal')} h-8 w-8 rounded-xl disabled:cursor-not-allowed disabled:opacity-60`}
-              >
-                <FiEye className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                data-testid="fog-brush-mode-hide"
-                onClick={() => fogBrushControls?.onChangeMode?.('hide')}
-                disabled={isFogBrushPending}
-                title="Hide fog"
-                aria-label="Hide fog brush"
-                aria-pressed={fogBrushSettings.mode === 'hide'}
-                className={`${getQuickControlButtonClassName(fogBrushSettings.mode === 'hide')} h-8 w-8 rounded-xl disabled:cursor-not-allowed disabled:opacity-60`}
-              >
-                <FiEyeOff className="h-3.5 w-3.5" />
-              </button>
-              <label className="flex h-8 w-12 items-center justify-center rounded-xl border border-slate-700/90 bg-slate-900/90 px-1">
-                <span className="sr-only">Fog brush radius</span>
-                <input
-                  type="number"
-                  min={MIN_FOG_BRUSH_RADIUS_SQUARES}
-                  max={MAX_FOG_BRUSH_RADIUS_SQUARES}
-                  step="1"
-                  aria-label="Fog brush radius"
-                  value={fogBrushSettings.radiusSquares}
-                  disabled={isFogBrushPending}
-                  onChange={(event) => fogBrushControls?.onChangeRadiusSquares?.(Number(event.target.value))}
-                  className="h-6 w-full bg-transparent text-center text-xs font-semibold text-slate-100 outline-none disabled:cursor-not-allowed disabled:opacity-60"
-                />
-              </label>
+            <div className="pointer-events-auto relative z-10 h-10 w-10 shrink-0">
+              <div className="absolute left-0 top-0 z-20 flex items-start gap-2">
+                <button
+                  type="button"
+                  onClick={() => fogBrushControls?.onToggleFogBrushTool?.()}
+                  disabled={isNarrationOverlayActive || isFogBrushPending || !fogBrushControls?.onToggleFogBrushTool}
+                  title={isFogBrushToolActive ? 'Disable manual fog brush' : 'Enable manual fog brush'}
+                  aria-label={isFogBrushToolActive ? 'Disable manual fog brush' : 'Enable manual fog brush'}
+                  aria-pressed={isFogBrushToolActive}
+                  aria-expanded={isFogBrushToolActive}
+                  aria-controls={fogBrushSettingsId}
+                  data-testid="fog-brush-tool-trigger"
+                  className={`${getQuickControlButtonClassName(isFogBrushToolActive)} disabled:cursor-not-allowed disabled:opacity-60`}
+                >
+                  <MdBrush className="h-4 w-4" />
+                </button>
+
+                <AnimatePresence initial={false}>
+                  {isFogBrushToolActive && fogBrushControls && (
+                    <motion.div
+                      key="fog-brush-settings"
+                      id={fogBrushSettingsId}
+                      data-testid="fog-brush-settings"
+                      className={QUICK_CONTROL_DRAWER_CLASS}
+                      initial={prefersReducedMotion ? { opacity: 1, width: 'auto' } : { opacity: 0, width: 0 }}
+                      animate={{ opacity: 1, width: 'auto' }}
+                      exit={prefersReducedMotion ? { opacity: 0, width: 0 } : { opacity: 0, width: 0 }}
+                      transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.26, ease: DRAW_PICKER_EASE }}
+                    >
+                      <div className="flex items-center gap-1" role="group" aria-label="Manual fog brush settings">
+                        <motion.button
+                          type="button"
+                          data-testid="fog-brush-mode-reveal"
+                          onClick={() => fogBrushControls?.onChangeMode?.('reveal')}
+                          disabled={isFogBrushPending}
+                          title="Reveal fog"
+                          aria-label="Reveal fog brush"
+                          aria-pressed={fogBrushSettings.mode === 'reveal'}
+                          initial={prefersReducedMotion ? false : { opacity: 0, x: 12, scale: 0.74 }}
+                          animate={{ opacity: 1, x: 0, scale: 1 }}
+                          exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: 12, scale: 0.82 }}
+                          transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.18, ease: DRAW_PICKER_EASE }}
+                          className={`${getQuickControlButtonClassName(fogBrushSettings.mode === 'reveal')} h-8 w-8 rounded-xl disabled:cursor-not-allowed disabled:opacity-60`}
+                        >
+                          <FiEye className="h-3.5 w-3.5" />
+                        </motion.button>
+                        <motion.button
+                          type="button"
+                          data-testid="fog-brush-mode-hide"
+                          onClick={() => fogBrushControls?.onChangeMode?.('hide')}
+                          disabled={isFogBrushPending}
+                          title="Hide fog"
+                          aria-label="Hide fog brush"
+                          aria-pressed={fogBrushSettings.mode === 'hide'}
+                          initial={prefersReducedMotion ? false : { opacity: 0, x: 12, scale: 0.74 }}
+                          animate={{ opacity: 1, x: 0, scale: 1 }}
+                          exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: 12, scale: 0.82 }}
+                          transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.18, delay: 0.03, ease: DRAW_PICKER_EASE }}
+                          className={`${getQuickControlButtonClassName(fogBrushSettings.mode === 'hide')} h-8 w-8 rounded-xl disabled:cursor-not-allowed disabled:opacity-60`}
+                        >
+                          <FiEyeOff className="h-3.5 w-3.5" />
+                        </motion.button>
+                        <motion.label
+                          initial={prefersReducedMotion ? false : { opacity: 0, x: 12, scale: 0.74 }}
+                          animate={{ opacity: 1, x: 0, scale: 1 }}
+                          exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: 12, scale: 0.82 }}
+                          transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.18, delay: 0.06, ease: DRAW_PICKER_EASE }}
+                          className="flex h-8 w-12 items-center justify-center rounded-xl border border-slate-700/90 bg-slate-900/90 px-1"
+                        >
+                          <span className="sr-only">Fog brush radius</span>
+                          <input
+                            type="number"
+                            min={MIN_FOG_BRUSH_RADIUS_SQUARES}
+                            max={MAX_FOG_BRUSH_RADIUS_SQUARES}
+                            step="1"
+                            aria-label="Fog brush radius"
+                            value={fogBrushSettings.radiusSquares}
+                            disabled={isFogBrushPending}
+                            onChange={(event) => fogBrushControls?.onChangeRadiusSquares?.(Number(event.target.value))}
+                            className="h-6 w-full bg-transparent text-center text-xs font-semibold text-slate-100 outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                          />
+                        </motion.label>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
           )}
           <button

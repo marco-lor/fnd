@@ -1441,7 +1441,15 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    expect(await screen.findByTestId('fog-brush-tool-trigger')).toHaveAttribute('aria-pressed', 'true');
+    const trigger = await screen.findByTestId('fog-brush-tool-trigger');
+    const settings = screen.getByTestId('fog-brush-settings');
+
+    expect(trigger).toHaveAttribute('aria-pressed', 'true');
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger).toHaveAttribute('aria-controls', settings.id);
+    expect(settings.className).toContain('min-h-10');
+    expect(settings.className).toContain('overflow-hidden');
+
     fireEvent.click(screen.getByTestId('fog-brush-mode-hide'));
     fireEvent.click(screen.getByTestId('fog-brush-mode-reveal'));
     fireEvent.change(screen.getByRole('spinbutton', { name: /fog brush radius/i }), {
