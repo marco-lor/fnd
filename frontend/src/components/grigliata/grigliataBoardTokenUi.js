@@ -21,6 +21,7 @@ import {
   splitTokenStatusesForDisplay,
 } from './tokenStatuses';
 import useImageAsset from './useImageAsset';
+import { normalizeTokenVisionSettings } from './lightingVisibility';
 
 const SHAPE_OUTLINE_STROKE_WIDTH = 4;
 const TOKEN_STATUS_VISIBLE_BADGE_COUNT = 3;
@@ -37,6 +38,8 @@ const ACTIVE_TURN_PRIMARY = 'rgba(251, 191, 36, 0.98)';
 const ACTIVE_TURN_SECONDARY = '#fef3c7';
 const ACTIVE_TURN_GLOW = 'rgba(245, 158, 11, 0.42)';
 const ACTIVE_TURN_FILL = 'rgba(245, 158, 11, 0.16)';
+const GRID_LINE_STROKE = 'rgba(248, 250, 252, 0.14)';
+const GRID_LINE_STROKE_WIDTH = 1;
 
 const scaleTokenMetric = (size, ratio, minimum = 1) => Math.max(minimum, Math.round(size * ratio));
 const scaleTokenStroke = (size, ratio, minimum = 0.75) => Math.max(minimum, size * ratio);
@@ -494,8 +497,8 @@ export const GridLayer = ({ bounds, grid }) => {
       <Line
         key={`v-${index}`}
         points={[x, bounds.minY - normalizedGrid.cellSizePx, x, bounds.maxY + normalizedGrid.cellSizePx]}
-        stroke={index % 5 === 0 ? 'rgba(248, 250, 252, 0.38)' : 'rgba(248, 250, 252, 0.18)'}
-        strokeWidth={index % 5 === 0 ? 1.4 : 1}
+        stroke={GRID_LINE_STROKE}
+        strokeWidth={GRID_LINE_STROKE_WIDTH}
         listening={false}
       />
     );
@@ -507,8 +510,8 @@ export const GridLayer = ({ bounds, grid }) => {
       <Line
         key={`h-${index}`}
         points={[bounds.minX - normalizedGrid.cellSizePx, y, bounds.maxX + normalizedGrid.cellSizePx, y]}
-        stroke={index % 5 === 0 ? 'rgba(248, 250, 252, 0.38)' : 'rgba(248, 250, 252, 0.18)'}
-        strokeWidth={index % 5 === 0 ? 1.4 : 1}
+        stroke={GRID_LINE_STROKE}
+        strokeWidth={GRID_LINE_STROKE_WIDTH}
         listening={false}
       />
     );
@@ -581,7 +584,17 @@ export const buildSelectedTokenActionState = ({
       sizeSquares: normalizeTokenSizeSquares(selectedToken.sizeSquares),
     }
     : null;
-  const actionCount = (isManager ? 2 : 0) + (statusToken ? 1 : 0) + (sizeToken ? 1 : 0);
+  const visionToken = selectedToken && isManager
+    ? {
+      tokenId: selectedToken.tokenId,
+      label: selectedToken.label || 'token',
+      ...normalizeTokenVisionSettings(selectedToken),
+    }
+    : null;
+  const actionCount = (isManager ? 2 : 0)
+    + (statusToken ? 1 : 0)
+    + (sizeToken ? 1 : 0)
+    + (visionToken ? 1 : 0);
   if (actionCount < 1) {
     return null;
   }
@@ -608,6 +621,7 @@ export const buildSelectedTokenActionState = ({
     showDeadAction: isManager,
     statusToken,
     sizeToken,
+    visionToken,
     nextIsVisibleToPlayers: allSelectedTokensHidden,
     nextIsDead: !allSelectedTokensDead,
     visibilityTitle: allSelectedTokensHidden

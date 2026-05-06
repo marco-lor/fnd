@@ -18,17 +18,19 @@ import {
   FiEyeOff,
   FiImage,
   FiMinus,
+  FiMoon,
   FiPlay,
   FiPlus,
   FiRotateCcw,
   FiSkipForward,
+  FiSun,
   FiTrash2,
   FiUser,
   FiUsers,
   FiVolume2,
   FiVolumeX,
 } from 'react-icons/fi';
-import { MdCenterFocusStrong } from 'react-icons/md';
+import { MdBrush, MdCenterFocusStrong } from 'react-icons/md';
 import {
   BOARD_FIT_PADDING,
   DEFAULT_GRIGLIATA_DRAW_COLOR_KEY,
@@ -44,6 +46,7 @@ import {
 import {
   buildGridMeasurementPath,
   fitViewportToBounds,
+  getBackgroundAssetType,
   getBoardBounds,
   getInitials,
   getTokenPositionPx,
@@ -75,6 +78,27 @@ import {
   GridLayer,
   TokenNode,
 } from './grigliataBoardTokenUi';
+import GrigliataLightingDebugOverlay from './GrigliataLightingDebugOverlay';
+import GrigliataLightingMask from './GrigliataLightingMask';
+import GrigliataFogOfWarMask from './GrigliataFogOfWarMask';
+import GrigliataWallRuntimeControls from './GrigliataWallRuntimeControls';
+import GrigliataWallAuthoringControls, { GrigliataSelectedWallPanel } from './GrigliataWallAuthoringControls';
+import GrigliataLightingDiagnostics from './GrigliataLightingDiagnostics';
+import GrigliataLightControls, { GrigliataSelectedLightPanel } from './GrigliataLightControls';
+import GrigliataDarknessControls, { GrigliataSelectedDarknessPanel } from './GrigliataDarknessControls';
+import { normalizeEditableLightSources } from './lightSources';
+import { normalizeEditableDarknessSources } from './darknessSources';
+import { normalizeEditableWallSegments } from './wallSources';
+import { resolveViewerTokenVisionSources } from './lightingVisibility';
+import {
+  filterFogVisibleTokens,
+  splitFogVisibleTokenRenderLayers,
+} from './fogVisibilityFiltering';
+import {
+  MAX_FOG_BRUSH_RADIUS_SQUARES,
+  MIN_FOG_BRUSH_RADIUS_SQUARES,
+  normalizeFogBrushSettings,
+} from './fogBrushEditing';
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
 const RULER_LABEL_MIN_WIDTH = 90;
@@ -161,6 +185,14 @@ const isAoECreateInteraction = (interaction) => interaction?.type === 'aoe-creat
 const isAoEDragInteraction = (interaction) => (
   interaction?.type === 'aoe-drag-candidate'
   || interaction?.type === 'aoe-drag'
+);
+const isLightDragInteraction = (interaction) => (
+  interaction?.type === 'light-drag-candidate'
+  || interaction?.type === 'light-drag'
+);
+const isDarknessDragInteraction = (interaction) => (
+  interaction?.type === 'darkness-drag-candidate'
+  || interaction?.type === 'darkness-drag'
 );
 const isPingHoldInteraction = (interaction) => interaction?.type === 'ping-hold';
 
@@ -575,17 +607,137 @@ const cancelAnimationFrameSafe = (handle) => {
 
   window.clearTimeout(handle.id);
 };
+const EMPTY_VIDEO_ASSET_SNAPSHOT = {
+  status: 'idle',
+  image: null,
+  error: null,
+};
+const useVideoBackgroundAssetSnapshot = (src) => {
+  const normalizedSrc = typeof src === 'string' ? src.trim() : '';
+  const [snapshot, setSnapshot] = useState(EMPTY_VIDEO_ASSET_SNAPSHOT);
+
+  useEffect(() => {
+    if (!normalizedSrc) {
+      setSnapshot(EMPTY_VIDEO_ASSET_SNAPSHOT);
+      return undefined;
+    }
+
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+      setSnapshot({
+        status: 'error',
+        image: null,
+        error: new Error('Video loading is not available in this environment.'),
+      });
+      return undefined;
+    }
+
+    let isActive = true;
+    let didLoad = false;
+    const video = document.createElement('video');
+
+    const cleanupListeners = () => {
+      if (typeof video.removeEventListener === 'function') {
+        video.removeEventListener('loadeddata', handleLoaded);
+        video.removeEventListener('canplay', handleLoaded);
+        video.removeEventListener('error', handleError);
+      } else {
+        video.onloadeddata = null;
+        video.oncanplay = null;
+        video.onerror = null;
+      }
+    };
+
+    function handleLoaded() {
+      if (!isActive || didLoad) return;
+      didLoad = true;
+
+      setSnapshot({
+        status: 'loaded',
+        image: video,
+        error: null,
+      });
+
+      const playPromise = typeof video.play === 'function' ? video.play() : null;
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch(() => null);
+      }
+    }
+
+    function handleError(errorEvent) {
+      if (!isActive) return;
+
+      setSnapshot({
+        status: 'error',
+        image: null,
+        error: errorEvent instanceof Error
+          ? errorEvent
+          : new Error(`Failed to load video background: ${normalizedSrc}`),
+      });
+    }
+
+    setSnapshot({
+      status: 'loading',
+      image: null,
+      error: null,
+    });
+
+    video.muted = true;
+    video.defaultMuted = true;
+    video.loop = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    video.preload = 'auto';
+
+    if (typeof video.addEventListener === 'function') {
+      video.addEventListener('loadeddata', handleLoaded);
+      video.addEventListener('canplay', handleLoaded);
+      video.addEventListener('error', handleError);
+    } else {
+      video.onloadeddata = handleLoaded;
+      video.oncanplay = handleLoaded;
+      video.onerror = handleError;
+    }
+
+    video.src = normalizedSrc;
+    if (typeof video.load === 'function') {
+      try {
+        video.load();
+      } catch (_) {}
+    }
+
+    return () => {
+      isActive = false;
+      cleanupListeners();
+      if (typeof video.pause === 'function') {
+        video.pause();
+      }
+      if (typeof video.removeAttribute === 'function') {
+        video.removeAttribute('src');
+      }
+      if (typeof video.load === 'function') {
+        try {
+          video.load();
+        } catch (_) {}
+      }
+    };
+  }, [normalizedSrc]);
+
+  return snapshot;
+};
 const buildBattlemapImageLayer = ({ background, image, opacity = 1 }) => {
   if (!background?.imageUrl || !image) {
     return null;
   }
 
+  const assetType = getBackgroundAssetType(background);
+
   return {
     key: `${background.id || background.imageUrl}::${background.imageUrl}`,
     src: background.imageUrl,
+    assetType,
     image,
-    imageWidth: background.imageWidth || image.naturalWidth || image.width || 0,
-    imageHeight: background.imageHeight || image.naturalHeight || image.height || 0,
+    imageWidth: background.imageWidth || image.naturalWidth || image.videoWidth || image.width || 0,
+    imageHeight: background.imageHeight || image.naturalHeight || image.videoHeight || image.height || 0,
     opacity,
   };
 };
@@ -1274,6 +1426,7 @@ const EnhancedAoEFigureOverlay = ({
   onMouseDown,
   listening = true,
   viewportScale = 1,
+  hitTargetOnly = false,
 }) => {
   if (!figure?.figureType) {
     return null;
@@ -1282,7 +1435,9 @@ const EnhancedAoEFigureOverlay = ({
   const overlayProps = {
     listening,
     onMouseDown,
-    'data-testid': overlayId ? `aoe-figure-overlay-${overlayId}` : undefined,
+    'data-testid': overlayId
+      ? `aoe-figure-${hitTargetOnly ? 'hit-target' : 'overlay'}-${overlayId}`
+      : undefined,
   };
   const metrics = buildZoomNormalizedOverlayMetrics(viewportScale);
   const outlineStroke = isSelected ? 'rgba(248, 250, 252, 0.96)' : drawTheme.outlineStroke;
@@ -1385,6 +1540,8 @@ const EnhancedAoEFigureOverlay = ({
           stroke="rgba(255,255,255,0)"
           strokeWidth={metrics.aoeHitStrokeWidth}
         />
+        {hitTargetOnly ? null : (
+          <>
         <Circle
           x={figure.centerPoint.x}
           y={figure.centerPoint.y}
@@ -1404,6 +1561,8 @@ const EnhancedAoEFigureOverlay = ({
           shadowOpacity={0.24}
         />
         {measurementDecoration}
+          </>
+        )}
       </Group>
     );
   }
@@ -1420,6 +1579,8 @@ const EnhancedAoEFigureOverlay = ({
           stroke="rgba(255,255,255,0)"
           strokeWidth={metrics.aoeHitStrokeWidth}
         />
+        {hitTargetOnly ? null : (
+          <>
         <Rect
           x={figure.x}
           y={figure.y}
@@ -1441,6 +1602,8 @@ const EnhancedAoEFigureOverlay = ({
           shadowOpacity={0.24}
         />
         {measurementDecoration}
+          </>
+        )}
       </Group>
     );
   }
@@ -1456,6 +1619,8 @@ const EnhancedAoEFigureOverlay = ({
           strokeWidth={metrics.aoeHitStrokeWidth}
           lineJoin="round"
         />
+        {hitTargetOnly ? null : (
+          <>
         <Line
           points={figure.flatPoints}
           closed
@@ -1475,6 +1640,8 @@ const EnhancedAoEFigureOverlay = ({
           shadowOpacity={0.24}
         />
         {measurementDecoration}
+          </>
+        )}
       </Group>
     );
   }
@@ -2162,12 +2329,24 @@ export default function GrigliataBoard({
   isTokenStatusActionPending,
   onSetSelectedTokenSize,
   isTokenSizeActionPending = false,
+  onSetSelectedTokenVision,
+  isTokenVisionActionPending = false,
   selectedTokenDetails = null,
   onDropCurrentToken,
   onSelectedTokenIdsChange,
   sharedInteractions = [],
   activeViewers = [],
   onSharedInteractionChange,
+  lightingRenderInput = null,
+  lightingDebugMetadata = null,
+  showLightingDebugOverlay = false,
+  fogOfWar = null,
+  wallRuntimeSegments = null,
+  onToggleWallRuntimeSegment = null,
+  lightSourceControls = null,
+  darknessSourceControls = null,
+  wallSourceControls = null,
+  fogBrushControls = null,
   isNarrationOverlayActive = false,
 }) {
   const containerRef = useRef(null);
@@ -2186,6 +2365,25 @@ export default function GrigliataBoard({
   const [aoePreviewState, setAoEPreviewState] = useState(null);
   const [selectedAoEFigureId, setSelectedAoEFigureId] = useState('');
   const [aoeFigureDragState, setAoEFigureDragState] = useState(null);
+  const [selectedLightId, setSelectedLightId] = useState(() => (
+    typeof lightSourceControls?.selectedLightId === 'string'
+      ? lightSourceControls.selectedLightId
+      : ''
+  ));
+  const [lightDragState, setLightDragState] = useState(null);
+  const [selectedDarknessId, setSelectedDarknessId] = useState(() => (
+    typeof darknessSourceControls?.selectedDarknessId === 'string'
+      ? darknessSourceControls.selectedDarknessId
+      : ''
+  ));
+  const [darknessDragState, setDarknessDragState] = useState(null);
+  const [selectedWallId, setSelectedWallId] = useState(() => (
+    typeof wallSourceControls?.selectedWallId === 'string'
+      ? wallSourceControls.selectedWallId
+      : ''
+  ));
+  const [wallDragState, setWallDragState] = useState(null);
+  const [wallCreatePreview, setWallCreatePreview] = useState(null);
   const [activeSharedInteraction, setActiveSharedInteraction] = useState(null);
   const [localPings, setLocalPings] = useState([]);
   const [pingAnimationClock, setPingAnimationClock] = useState(() => Date.now());
@@ -2196,7 +2394,16 @@ export default function GrigliataBoard({
   const turnOrderPanelBodyId = useId();
   const [turnOrderContextMenu, setTurnOrderContextMenu] = useState(null);
   const [turnOrderJoinPrompt, setTurnOrderJoinPrompt] = useState(null);
-  const backgroundAssetSnapshot = useImageAssetSnapshot(activeBackground?.imageUrl || '');
+  const activeBackgroundAssetType = getBackgroundAssetType(activeBackground);
+  const backgroundImageAssetSnapshot = useImageAssetSnapshot(
+    activeBackgroundAssetType === 'image' ? activeBackground?.imageUrl || '' : ''
+  );
+  const backgroundVideoAssetSnapshot = useVideoBackgroundAssetSnapshot(
+    activeBackgroundAssetType === 'video' ? activeBackground?.imageUrl || '' : ''
+  );
+  const backgroundAssetSnapshot = activeBackgroundAssetType === 'video'
+    ? backgroundVideoAssetSnapshot
+    : backgroundImageAssetSnapshot;
   const turnOrderContextMenuRef = useRef(null);
   const turnOrderJoinInputRef = useRef(null);
   const lastReportedSelectedTokenIdsRef = useRef([]);
@@ -2206,18 +2413,44 @@ export default function GrigliataBoard({
   });
   const battlemapImageTransitionRef = useRef(battlemapImageTransition);
   const battlemapImageAnimationHandleRef = useRef(null);
+  const battlemapVideoFrameAnimationHandleRef = useRef(null);
   const previousNarrationOverlayActiveRef = useRef(isNarrationOverlayActive);
   const lastFitKeyRef = useRef('');
   const resolvedDrawTheme = drawTheme || DEFAULT_DRAW_THEME;
-  const isMouseSelectionActive = !isRulerEnabled && !activeAoeFigureType;
+  const isLightToolActive = !!(isManager && lightSourceControls?.isLightToolActive);
+  const isLightSourcePending = !!lightSourceControls?.isPending;
+  const isDarknessToolActive = !!(isManager && darknessSourceControls?.isDarknessToolActive);
+  const isDarknessSourcePending = !!darknessSourceControls?.isPending;
+  const isWallToolActive = !!(isManager && wallSourceControls?.isWallToolActive);
+  const isWallSourcePending = !!wallSourceControls?.isPending;
+  const isFogBrushToolActive = !!(isManager && fogBrushControls?.isFogBrushToolActive);
+  const isFogBrushPending = !!fogBrushControls?.isPending;
+  const fogBrushSettings = useMemo(
+    () => normalizeFogBrushSettings({
+      mode: fogBrushControls?.mode,
+      radiusSquares: fogBrushControls?.radiusSquares,
+    }),
+    [fogBrushControls?.mode, fogBrushControls?.radiusSquares]
+  );
+  const isMouseSelectionActive = !isRulerEnabled
+    && !activeAoeFigureType
+    && !isLightToolActive
+    && !isDarknessToolActive
+    && !isWallToolActive
+    && !isFogBrushToolActive;
   const isMusicEnabled = !isMusicMuted;
   const musicToggleActionLabel = isMusicEnabled ? 'Mute Music' : 'Unmute Music';
   const musicToggleStateLabel = isMusicEnabled ? 'Shared music enabled' : 'Shared music muted';
   const prefersReducedMotion = useReducedMotion();
+  const fogBrushSettingsId = useId();
 
   const cancelBattlemapImageAnimation = useCallback(() => {
     cancelAnimationFrameSafe(battlemapImageAnimationHandleRef.current);
     battlemapImageAnimationHandleRef.current = null;
+  }, []);
+  const cancelBattlemapVideoFrameAnimation = useCallback(() => {
+    cancelAnimationFrameSafe(battlemapVideoFrameAnimationHandleRef.current);
+    battlemapVideoFrameAnimationHandleRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -2230,6 +2463,12 @@ export default function GrigliataBoard({
     }
   ), [cancelBattlemapImageAnimation]);
 
+  useEffect(() => (
+    () => {
+      cancelBattlemapVideoFrameAnimation();
+    }
+  ), [cancelBattlemapVideoFrameAnimation]);
+
   const normalizedGrid = useMemo(() => normalizeGridConfig(grid), [grid]);
 
   const resolvedBackground = useMemo(() => {
@@ -2237,8 +2476,8 @@ export default function GrigliataBoard({
 
     return {
       ...activeBackground,
-      imageWidth: activeBackground.imageWidth || backgroundAssetSnapshot.image?.naturalWidth || backgroundAssetSnapshot.image?.width || 0,
-      imageHeight: activeBackground.imageHeight || backgroundAssetSnapshot.image?.naturalHeight || backgroundAssetSnapshot.image?.height || 0,
+      imageWidth: activeBackground.imageWidth || backgroundAssetSnapshot.image?.naturalWidth || backgroundAssetSnapshot.image?.videoWidth || backgroundAssetSnapshot.image?.width || 0,
+      imageHeight: activeBackground.imageHeight || backgroundAssetSnapshot.image?.naturalHeight || backgroundAssetSnapshot.image?.videoHeight || backgroundAssetSnapshot.image?.height || 0,
     };
   }, [activeBackground, backgroundAssetSnapshot.image]);
 
@@ -2377,6 +2616,51 @@ export default function GrigliataBoard({
     runBattlemapImageTransition,
     targetBattlemapImageLayer,
   ]);
+
+  const battlemapVideoFrameKey = useMemo(() => ([
+    battlemapImageTransition.visibleLayer,
+    battlemapImageTransition.fadingOutLayer,
+  ]
+    .filter((layer) => layer?.assetType === 'video' && layer?.src)
+    .map((layer) => layer.src)
+    .join('|')), [
+    battlemapImageTransition.fadingOutLayer,
+    battlemapImageTransition.visibleLayer,
+  ]);
+
+  useEffect(() => {
+    cancelBattlemapVideoFrameAnimation();
+
+    if (!battlemapVideoFrameKey) {
+      return undefined;
+    }
+
+    let isActive = true;
+    const drawFrame = () => {
+      if (!isActive) return;
+
+      const stage = stageRef.current;
+      if (typeof stage?.batchDraw === 'function') {
+        stage.batchDraw();
+      }
+      if (typeof stage?.getLayers === 'function') {
+        stage.getLayers().forEach((layer) => {
+          if (typeof layer?.batchDraw === 'function') {
+            layer.batchDraw();
+          }
+        });
+      }
+
+      battlemapVideoFrameAnimationHandleRef.current = requestAnimationFrameSafe(drawFrame);
+    };
+
+    battlemapVideoFrameAnimationHandleRef.current = requestAnimationFrameSafe(drawFrame);
+
+    return () => {
+      isActive = false;
+      cancelBattlemapVideoFrameAnimation();
+    };
+  }, [battlemapVideoFrameKey, cancelBattlemapVideoFrameAnimation]);
 
   const placedTokens = useMemo(
     () => (tokens || []).filter((token) => token?.placed),
@@ -2523,6 +2807,83 @@ export default function GrigliataBoard({
     }).filter((figure) => !!figure.renderable),
     [aoeFigureDragState, figureItems, normalizedGrid, selectedAoEFigureId]
   );
+  const editableLightSources = useMemo(
+    () => normalizeEditableLightSources(lightSourceControls?.lights),
+    [lightSourceControls?.lights]
+  );
+  const renderedLightSources = useMemo(
+    () => editableLightSources.map((light) => (
+      lightDragState?.lightId === light.id
+        ? {
+          ...light,
+          x: lightDragState.originLight.x + lightDragState.deltaWorld.x,
+          y: lightDragState.originLight.y + lightDragState.deltaWorld.y,
+        }
+        : light
+    )),
+    [editableLightSources, lightDragState]
+  );
+  const selectedLight = useMemo(
+    () => renderedLightSources.find((light) => light.id === selectedLightId) || null,
+    [renderedLightSources, selectedLightId]
+  );
+  const editableDarknessSources = useMemo(
+    () => normalizeEditableDarknessSources(darknessSourceControls?.darknessSources),
+    [darknessSourceControls?.darknessSources]
+  );
+  const renderedDarknessSources = useMemo(
+    () => editableDarknessSources.map((darkness) => (
+      darknessDragState?.darknessId === darkness.id
+        ? {
+          ...darkness,
+          x: darknessDragState.originDarkness.x + darknessDragState.deltaWorld.x,
+          y: darknessDragState.originDarkness.y + darknessDragState.deltaWorld.y,
+        }
+        : darkness
+    )),
+    [darknessDragState, editableDarknessSources]
+  );
+  const selectedDarkness = useMemo(
+    () => renderedDarknessSources.find((darkness) => darkness.id === selectedDarknessId) || null,
+    [renderedDarknessSources, selectedDarknessId]
+  );
+  const editableWallSources = useMemo(
+    () => normalizeEditableWallSegments(wallSourceControls?.walls),
+    [wallSourceControls?.walls]
+  );
+  const renderedWallSources = useMemo(
+    () => editableWallSources.map((wall) => {
+      if (wallDragState?.wallId !== wall.id) {
+        return wall;
+      }
+
+      if (wallDragState.type === 'endpoint') {
+        return {
+          ...wall,
+          ...(wallDragState.endpoint === 'start'
+            ? { x1: wallDragState.point.x, y1: wallDragState.point.y }
+            : { x2: wallDragState.point.x, y2: wallDragState.point.y }),
+        };
+      }
+
+      if (wallDragState.type === 'segment') {
+        return {
+          ...wall,
+          x1: wall.x1 + wallDragState.deltaWorld.x,
+          y1: wall.y1 + wallDragState.deltaWorld.y,
+          x2: wall.x2 + wallDragState.deltaWorld.x,
+          y2: wall.y2 + wallDragState.deltaWorld.y,
+        };
+      }
+
+      return wall;
+    }),
+    [editableWallSources, wallDragState]
+  );
+  const selectedWall = useMemo(
+    () => renderedWallSources.find((wall) => wall.id === selectedWallId) || null,
+    [renderedWallSources, selectedWallId]
+  );
   const tokenStatusDisplayById = useMemo(() => {
     const nextMap = new Map();
 
@@ -2616,6 +2977,16 @@ export default function GrigliataBoard({
   const visibleLocalPings = useMemo(
     () => localPings.filter((ping) => (pingAnimationClock - ping.startedAtMs) < MAP_PING_VISIBLE_MS),
     [localPings, pingAnimationClock]
+  );
+  const fogVisibleRenderedTokens = useMemo(
+    () => filterFogVisibleTokens({
+      tokens: renderedTokens,
+      currentUserId,
+      isManager,
+      grid: normalizedGrid,
+      fogOfWar,
+    }),
+    [currentUserId, fogOfWar, isManager, normalizedGrid, renderedTokens]
   );
   const hasVisibleRemotePing = useMemo(
     () => renderedSharedInteractions.some((interaction) => interaction.kind === 'ping'),
@@ -2748,6 +3119,13 @@ export default function GrigliataBoard({
     setAoEPreviewState(null);
     setSelectedAoEFigureId('');
     setAoEFigureDragState(null);
+    setSelectedLightId('');
+    setLightDragState(null);
+    setSelectedDarknessId('');
+    setDarknessDragState(null);
+    setSelectedWallId('');
+    setWallDragState(null);
+    setWallCreatePreview(null);
     setLocalPings([]);
     setPingAnimationClock(Date.now());
     clearActiveSharedInteraction();
@@ -2765,6 +3143,13 @@ export default function GrigliataBoard({
     setTurnOrderJoinPrompt(null);
     setSelectedTokenIds([]);
     setSelectedAoEFigureId('');
+    setSelectedLightId('');
+    setLightDragState(null);
+    setSelectedDarknessId('');
+    setDarknessDragState(null);
+    setSelectedWallId('');
+    setWallDragState(null);
+    setWallCreatePreview(null);
     clearActiveSharedInteraction();
     setHoveredTokenTooltipId('');
   }, [clearActiveSharedInteraction, isNarrationOverlayActive]);
@@ -2776,10 +3161,25 @@ export default function GrigliataBoard({
     if (!activeAoeFigureType) {
       setAoEPreviewState(null);
     }
-    if (!isRulerEnabled && !activeAoeFigureType) {
+    if (
+      !isRulerEnabled
+      && !activeAoeFigureType
+      && !isLightToolActive
+      && !isDarknessToolActive
+      && !isWallToolActive
+      && !isFogBrushToolActive
+    ) {
       clearActiveSharedInteraction();
     }
-  }, [activeAoeFigureType, clearActiveSharedInteraction, isRulerEnabled]);
+  }, [
+    activeAoeFigureType,
+    clearActiveSharedInteraction,
+    isDarknessToolActive,
+    isFogBrushToolActive,
+    isLightToolActive,
+    isRulerEnabled,
+    isWallToolActive,
+  ]);
 
   useEffect(() => {
     if (visibleLocalPings.length === localPings.length) {
@@ -2888,6 +3288,45 @@ export default function GrigliataBoard({
   }, [figureItemsById, selectedAoEFigureId]);
 
   useEffect(() => {
+    if (!selectedLightId) return;
+    if (!editableLightSources.some((light) => light.id === selectedLightId)) {
+      setSelectedLightId('');
+    }
+  }, [editableLightSources, selectedLightId]);
+
+  useEffect(() => {
+    if (!selectedDarknessId) return;
+    if (!editableDarknessSources.some((darkness) => darkness.id === selectedDarknessId)) {
+      setSelectedDarknessId('');
+    }
+  }, [editableDarknessSources, selectedDarknessId]);
+
+  useEffect(() => {
+    if (!selectedWallId) return;
+    if (!editableWallSources.some((wall) => wall.id === selectedWallId)) {
+      setSelectedWallId('');
+    }
+  }, [editableWallSources, selectedWallId]);
+
+  useEffect(() => {
+    const controlledSelectedLightId = lightSourceControls?.selectedLightId;
+    if (typeof controlledSelectedLightId !== 'string') return;
+    setSelectedLightId(controlledSelectedLightId);
+  }, [lightSourceControls?.selectedLightId]);
+
+  useEffect(() => {
+    const controlledSelectedDarknessId = darknessSourceControls?.selectedDarknessId;
+    if (typeof controlledSelectedDarknessId !== 'string') return;
+    setSelectedDarknessId(controlledSelectedDarknessId);
+  }, [darknessSourceControls?.selectedDarknessId]);
+
+  useEffect(() => {
+    const controlledSelectedWallId = wallSourceControls?.selectedWallId;
+    if (typeof controlledSelectedWallId !== 'string') return;
+    setSelectedWallId(controlledSelectedWallId);
+  }, [wallSourceControls?.selectedWallId]);
+
+  useEffect(() => {
     const tokenIdsWithOverflow = new Set(
       renderedTokens
         .filter((token) => (tokenStatusDisplayById.get(token.tokenId)?.overflowCount || 0) > 0)
@@ -2919,6 +3358,30 @@ export default function GrigliataBoard({
       y: (clientY - rect.top - viewport.y) / viewport.scale,
     };
   }, [viewport.x, viewport.y, viewport.scale]);
+
+  const paintFogBrushAtPoint = useCallback((point) => {
+    if (
+      !point
+      || !isFogBrushToolActive
+      || !fogBrushControls?.onPaintFogBrush
+    ) {
+      return false;
+    }
+
+    void Promise.resolve(fogBrushControls.onPaintFogBrush({
+      point,
+      mode: fogBrushSettings.mode,
+      radiusSquares: fogBrushSettings.radiusSquares,
+    })).catch((error) => {
+      console.error('Failed to paint Grigliata fog brush:', error);
+    });
+    return true;
+  }, [
+    fogBrushControls,
+    fogBrushSettings.mode,
+    fogBrushSettings.radiusSquares,
+    isFogBrushToolActive,
+  ]);
 
   const buildMeasurementForCells = useCallback((anchorCells, liveEndCell) => (
     buildGridMeasurementPath({
@@ -2980,6 +3443,66 @@ export default function GrigliataBoard({
       draft,
     };
   }, [normalizedGrid]);
+
+  const getDraggedLightPoint = useCallback((interaction, pointerWorld) => {
+    if (!pointerWorld || !interaction?.originLight || !interaction?.startWorld) {
+      return null;
+    }
+
+    const deltaWorld = {
+      x: pointerWorld.x - interaction.startWorld.x,
+      y: pointerWorld.y - interaction.startWorld.y,
+    };
+
+    return {
+      deltaWorld,
+      point: {
+        x: interaction.originLight.x + deltaWorld.x,
+        y: interaction.originLight.y + deltaWorld.y,
+      },
+    };
+  }, []);
+
+  const getDraggedDarknessPoint = useCallback((interaction, pointerWorld) => {
+    if (!pointerWorld || !interaction?.originDarkness || !interaction?.startWorld) {
+      return null;
+    }
+
+    const deltaWorld = {
+      x: pointerWorld.x - interaction.startWorld.x,
+      y: pointerWorld.y - interaction.startWorld.y,
+    };
+
+    return {
+      deltaWorld,
+      point: {
+        x: interaction.originDarkness.x + deltaWorld.x,
+        y: interaction.originDarkness.y + deltaWorld.y,
+      },
+    };
+  }, []);
+
+  const getDraggedWallEndpointPoint = useCallback((interaction, pointerWorld) => {
+    if (!pointerWorld || !interaction?.startWorld) {
+      return null;
+    }
+
+    return {
+      x: pointerWorld.x,
+      y: pointerWorld.y,
+    };
+  }, []);
+
+  const getDraggedWallSegmentDelta = useCallback((interaction, pointerWorld) => {
+    if (!pointerWorld || !interaction?.startWorld) {
+      return null;
+    }
+
+    return {
+      x: pointerWorld.x - interaction.startWorld.x,
+      y: pointerWorld.y - interaction.startWorld.y,
+    };
+  }, []);
 
   const syncSharedMeasureInteraction = useCallback((interaction, liveEndCell) => {
     if (!Array.isArray(interaction?.anchorCells) || !interaction.anchorCells.length || !liveEndCell) {
@@ -3229,6 +3752,11 @@ export default function GrigliataBoard({
       return;
     }
 
+    if (activeInteraction.type === 'fog-brush') {
+      clearActiveSharedInteraction();
+      return;
+    }
+
     if (activeInteraction.type === 'measure-candidate') {
       setMeasurementState(null);
       clearActiveSharedInteraction();
@@ -3246,6 +3774,69 @@ export default function GrigliataBoard({
 
       if (didCreateFigure) {
         onSelectMouseTool?.();
+      }
+      return;
+    }
+
+    if (activeInteraction.type === 'light-create') {
+      if (isLightSourcePending) {
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      let didCreateLight = false;
+      try {
+        didCreateLight = !!(await Promise.resolve(lightSourceControls?.onCreateLightSource?.(activeInteraction.point)));
+      } finally {
+        clearActiveSharedInteraction();
+      }
+
+      if (didCreateLight) {
+        setSelectedLightId('');
+      }
+      return;
+    }
+
+    if (activeInteraction.type === 'darkness-create') {
+      if (isDarknessSourcePending) {
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      let didCreateDarkness = false;
+      try {
+        didCreateDarkness = !!(await Promise.resolve(darknessSourceControls?.onCreateDarknessSource?.(activeInteraction.point)));
+      } finally {
+        clearActiveSharedInteraction();
+      }
+
+      if (didCreateDarkness) {
+        setSelectedDarknessId('');
+      }
+      return;
+    }
+
+    if (activeInteraction.type === 'wall-create') {
+      if (isWallSourcePending) {
+        setWallCreatePreview(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      const endPoint = pointerWorld || wallCreatePreview?.endPoint || activeInteraction.endPoint;
+      const startPoint = activeInteraction.startWorld;
+      const hasLength = !!(
+        endPoint
+        && Math.hypot(endPoint.x - startPoint.x, endPoint.y - startPoint.y) >= 0.5
+      );
+
+      try {
+        if (hasLength) {
+          await Promise.resolve(wallSourceControls?.onCreateWallSegment?.(startPoint, endPoint));
+        }
+      } finally {
+        setWallCreatePreview(null);
+        clearActiveSharedInteraction();
       }
       return;
     }
@@ -3287,6 +3878,157 @@ export default function GrigliataBoard({
     }
 
     if (activeInteraction.type === 'pan') {
+      return;
+    }
+
+    if (isLightDragInteraction(activeInteraction)) {
+      if (activeInteraction.type === 'light-drag-candidate') {
+        setLightDragState(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      if (isLightSourcePending) {
+        setLightDragState(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      const dragPoint = pointerWorld
+        ? getDraggedLightPoint(activeInteraction, pointerWorld)
+        : null;
+      const nextPoint = dragPoint?.point || (
+        lightDragState
+          ? {
+            x: lightDragState.originLight.x + lightDragState.deltaWorld.x,
+            y: lightDragState.originLight.y + lightDragState.deltaWorld.y,
+          }
+          : activeInteraction.originLight
+      );
+      const hasMoved = !!(
+        nextPoint
+        && activeInteraction.originLight
+        && (
+          Math.abs(nextPoint.x - activeInteraction.originLight.x) >= 0.5
+          || Math.abs(nextPoint.y - activeInteraction.originLight.y) >= 0.5
+        )
+      );
+
+      try {
+        if (hasMoved && activeInteraction.lightId && nextPoint) {
+          await Promise.resolve(lightSourceControls?.onMoveLightSource?.(activeInteraction.lightId, nextPoint));
+        }
+      } finally {
+        setLightDragState(null);
+        clearActiveSharedInteraction();
+      }
+      return;
+    }
+
+    if (isDarknessDragInteraction(activeInteraction)) {
+      if (activeInteraction.type === 'darkness-drag-candidate') {
+        setDarknessDragState(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      if (isDarknessSourcePending) {
+        setDarknessDragState(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      const dragPoint = pointerWorld
+        ? getDraggedDarknessPoint(activeInteraction, pointerWorld)
+        : null;
+      const nextPoint = dragPoint?.point || (
+        darknessDragState
+          ? {
+            x: darknessDragState.originDarkness.x + darknessDragState.deltaWorld.x,
+            y: darknessDragState.originDarkness.y + darknessDragState.deltaWorld.y,
+          }
+          : activeInteraction.originDarkness
+      );
+      const hasMoved = !!(
+        nextPoint
+        && activeInteraction.originDarkness
+        && (
+          Math.abs(nextPoint.x - activeInteraction.originDarkness.x) >= 0.5
+          || Math.abs(nextPoint.y - activeInteraction.originDarkness.y) >= 0.5
+        )
+      );
+
+      try {
+        if (hasMoved && activeInteraction.darknessId && nextPoint) {
+          await Promise.resolve(darknessSourceControls?.onMoveDarknessSource?.(activeInteraction.darknessId, nextPoint));
+        }
+      } finally {
+        setDarknessDragState(null);
+        clearActiveSharedInteraction();
+      }
+      return;
+    }
+
+    if (activeInteraction.type === 'wall-endpoint-drag-candidate' || activeInteraction.type === 'wall-endpoint-drag') {
+      if (activeInteraction.type === 'wall-endpoint-drag-candidate') {
+        setWallDragState(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      if (isWallSourcePending) {
+        setWallDragState(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      const nextPoint = pointerWorld
+        ? getDraggedWallEndpointPoint(activeInteraction, pointerWorld)
+        : wallDragState?.point;
+
+      try {
+        if (nextPoint && activeInteraction.wallId && activeInteraction.endpoint) {
+          await Promise.resolve(wallSourceControls?.onMoveWallEndpoint?.(
+            activeInteraction.wallId,
+            activeInteraction.endpoint,
+            nextPoint
+          ));
+        }
+      } finally {
+        setWallDragState(null);
+        clearActiveSharedInteraction();
+      }
+      return;
+    }
+
+    if (activeInteraction.type === 'wall-segment-drag-candidate' || activeInteraction.type === 'wall-segment-drag') {
+      if (activeInteraction.type === 'wall-segment-drag-candidate') {
+        setWallDragState(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      if (isWallSourcePending) {
+        setWallDragState(null);
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      const deltaWorld = pointerWorld
+        ? getDraggedWallSegmentDelta(activeInteraction, pointerWorld)
+        : wallDragState?.deltaWorld;
+
+      try {
+        if (deltaWorld && activeInteraction.wallId) {
+          await Promise.resolve(wallSourceControls?.onMoveWallSegment?.(
+            activeInteraction.wallId,
+            deltaWorld
+          ));
+        }
+      } finally {
+        setWallDragState(null);
+        clearActiveSharedInteraction();
+      }
       return;
     }
 
@@ -3379,9 +4121,20 @@ export default function GrigliataBoard({
   }, [
     aoeFigureDragState,
     clearActiveSharedInteraction,
+    darknessDragState,
+    darknessSourceControls,
     getDraggedAoEFigureDraft,
+    getDraggedDarknessPoint,
+    getDraggedLightPoint,
     getDraggedTokenMeasurement,
+    getDraggedWallEndpointPoint,
+    getDraggedWallSegmentDelta,
     getWorldPointFromClient,
+    isDarknessSourcePending,
+    isLightSourcePending,
+    isWallSourcePending,
+    lightDragState,
+    lightSourceControls,
     normalizedGrid,
     onCreateAoEFigure,
     onMoveAoEFigure,
@@ -3390,6 +4143,9 @@ export default function GrigliataBoard({
     tokenDragState,
     tokenItems,
     clearPingHoldTimer,
+    wallCreatePreview,
+    wallDragState,
+    wallSourceControls,
   ]);
 
   useEffect(() => {
@@ -3417,6 +4173,16 @@ export default function GrigliataBoard({
         Math.abs(event.clientX - activeInteraction.startClient.x) >= POINTER_DRAG_THRESHOLD_PX
         || Math.abs(event.clientY - activeInteraction.startClient.y) >= POINTER_DRAG_THRESHOLD_PX
       );
+
+      if (activeInteraction.type === 'fog-brush') {
+        paintFogBrushAtPoint(pointerWorld);
+        interactionRef.current = {
+          ...activeInteraction,
+          lastWorld: pointerWorld,
+        };
+        clearActiveSharedInteraction();
+        return;
+      }
 
       if (activeInteraction.type === 'selection-candidate') {
         if (!hasMovedBeyondThreshold) return;
@@ -3493,6 +4259,20 @@ export default function GrigliataBoard({
         return;
       }
 
+      if (activeInteraction.type === 'wall-create') {
+        const nextInteraction = {
+          ...activeInteraction,
+          endPoint: pointerWorld,
+        };
+        interactionRef.current = nextInteraction;
+        setWallCreatePreview({
+          startPoint: activeInteraction.startWorld,
+          endPoint: pointerWorld,
+        });
+        clearActiveSharedInteraction();
+        return;
+      }
+
       if (activeInteraction.type === 'selection-box') {
         setSelectionBox({
           start: activeInteraction.startWorld,
@@ -3509,6 +4289,95 @@ export default function GrigliataBoard({
           liveEndCell
         ));
         syncSharedMeasureInteraction(activeInteraction, liveEndCell);
+        return;
+      }
+
+      if (isLightDragInteraction(activeInteraction)) {
+        if (activeInteraction.type === 'light-drag-candidate' && !hasMovedBeyondThreshold) return;
+
+        const dragPoint = getDraggedLightPoint(activeInteraction, pointerWorld);
+        if (!dragPoint) return;
+
+        if (activeInteraction.type === 'light-drag-candidate') {
+          interactionRef.current = {
+            ...activeInteraction,
+            type: 'light-drag',
+          };
+        }
+
+        setLightDragState({
+          lightId: activeInteraction.lightId,
+          originLight: activeInteraction.originLight,
+          deltaWorld: dragPoint.deltaWorld,
+        });
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      if (isDarknessDragInteraction(activeInteraction)) {
+        if (activeInteraction.type === 'darkness-drag-candidate' && !hasMovedBeyondThreshold) return;
+
+        const dragPoint = getDraggedDarknessPoint(activeInteraction, pointerWorld);
+        if (!dragPoint) return;
+
+        if (activeInteraction.type === 'darkness-drag-candidate') {
+          interactionRef.current = {
+            ...activeInteraction,
+            type: 'darkness-drag',
+          };
+        }
+
+        setDarknessDragState({
+          darknessId: activeInteraction.darknessId,
+          originDarkness: activeInteraction.originDarkness,
+          deltaWorld: dragPoint.deltaWorld,
+        });
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      if (activeInteraction.type === 'wall-endpoint-drag-candidate' || activeInteraction.type === 'wall-endpoint-drag') {
+        if (activeInteraction.type === 'wall-endpoint-drag-candidate' && !hasMovedBeyondThreshold) return;
+
+        const point = getDraggedWallEndpointPoint(activeInteraction, pointerWorld);
+        if (!point) return;
+
+        if (activeInteraction.type === 'wall-endpoint-drag-candidate') {
+          interactionRef.current = {
+            ...activeInteraction,
+            type: 'wall-endpoint-drag',
+          };
+        }
+
+        setWallDragState({
+          type: 'endpoint',
+          wallId: activeInteraction.wallId,
+          endpoint: activeInteraction.endpoint,
+          point,
+        });
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      if (activeInteraction.type === 'wall-segment-drag-candidate' || activeInteraction.type === 'wall-segment-drag') {
+        if (activeInteraction.type === 'wall-segment-drag-candidate' && !hasMovedBeyondThreshold) return;
+
+        const deltaWorld = getDraggedWallSegmentDelta(activeInteraction, pointerWorld);
+        if (!deltaWorld) return;
+
+        if (activeInteraction.type === 'wall-segment-drag-candidate') {
+          interactionRef.current = {
+            ...activeInteraction,
+            type: 'wall-segment-drag',
+          };
+        }
+
+        setWallDragState({
+          type: 'segment',
+          wallId: activeInteraction.wallId,
+          deltaWorld,
+        });
+        clearActiveSharedInteraction();
         return;
       }
 
@@ -3614,6 +4483,10 @@ export default function GrigliataBoard({
     buildAoEFigureForDraft,
     buildMeasurementForCells,
     getDraggedAoEFigureDraft,
+    getDraggedDarknessPoint,
+    getDraggedLightPoint,
+    getDraggedWallEndpointPoint,
+    getDraggedWallSegmentDelta,
     clearActiveSharedInteraction,
     syncSharedAoEInteraction,
     finalizeInteraction,
@@ -3621,6 +4494,7 @@ export default function GrigliataBoard({
     getWorldPointFromClient,
     isRulerEnabled,
     normalizedGrid,
+    paintFogBrushAtPoint,
     syncSharedMeasureInteraction,
     clearPingHoldTimer,
   ]);
@@ -3631,9 +4505,57 @@ export default function GrigliataBoard({
 
       if (event.key !== 'Delete' && event.code !== 'Delete') return;
 
-      if (!selectedAoEFigureId && !selectedTokenIds.length) return;
+      if (!selectedLightId && !selectedDarknessId && !selectedWallId && !selectedAoEFigureId && !selectedTokenIds.length) return;
 
       event.preventDefault();
+
+      if (selectedLightId) {
+        if (isLightSourcePending) {
+          return;
+        }
+
+        try {
+          const didDeleteLight = !!(await Promise.resolve(lightSourceControls?.onDeleteLightSource?.(selectedLightId)));
+          if (didDeleteLight) {
+            setSelectedLightId('');
+          }
+        } catch {
+          // preserve selection if deletion fails
+        }
+        return;
+      }
+
+      if (selectedDarknessId) {
+        if (isDarknessSourcePending) {
+          return;
+        }
+
+        try {
+          const didDeleteDarkness = !!(await Promise.resolve(darknessSourceControls?.onDeleteDarknessSource?.(selectedDarknessId)));
+          if (didDeleteDarkness) {
+            setSelectedDarknessId('');
+          }
+        } catch {
+          // preserve selection if deletion fails
+        }
+        return;
+      }
+
+      if (selectedWallId) {
+        if (isWallSourcePending) {
+          return;
+        }
+
+        try {
+          const didDeleteWall = !!(await Promise.resolve(wallSourceControls?.onDeleteWallSegment?.(selectedWallId)));
+          if (didDeleteWall) {
+            setSelectedWallId('');
+          }
+        } catch {
+          // preserve selection if deletion fails
+        }
+        return;
+      }
 
       if (selectedAoEFigureId) {
         try {
@@ -3657,7 +4579,7 @@ export default function GrigliataBoard({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onDeleteAoEFigures, onDeleteTokens, selectedAoEFigureId, selectedTokenIds]);
+  }, [darknessSourceControls, isDarknessSourcePending, isLightSourcePending, isWallSourcePending, lightSourceControls, onDeleteAoEFigures, onDeleteTokens, selectedAoEFigureId, selectedDarknessId, selectedLightId, selectedTokenIds, selectedWallId, wallSourceControls]);
 
   const openTurnOrderContextMenu = useCallback((token, nativeEvent) => {
     if (!token?.tokenId || !token?.canMove) {
@@ -3687,6 +4609,253 @@ export default function GrigliataBoard({
     });
     return true;
   }, []);
+
+  const handleSelectLightSource = useCallback((lightId) => {
+    const nextLightId = lightId || '';
+    setSelectedLightId(nextLightId);
+    lightSourceControls?.onSelectLight?.(nextLightId);
+
+    if (nextLightId) {
+      setSelectedTokenIds([]);
+      setSelectedAoEFigureId('');
+      setSelectedDarknessId('');
+      setSelectedWallId('');
+      setSelectionBox(null);
+    }
+  }, [lightSourceControls]);
+
+  const handleSelectDarknessSource = useCallback((darknessId) => {
+    const nextDarknessId = darknessId || '';
+    setSelectedDarknessId(nextDarknessId);
+    darknessSourceControls?.onSelectDarkness?.(nextDarknessId);
+
+    if (nextDarknessId) {
+      setSelectedTokenIds([]);
+      setSelectedAoEFigureId('');
+      setSelectedLightId('');
+      setSelectedWallId('');
+      setSelectionBox(null);
+    }
+  }, [darknessSourceControls]);
+
+  const handleLightSourceMouseDown = useCallback((light, event) => {
+    const nativeEvent = event.evt;
+    event.cancelBubble = true;
+    setTurnOrderContextMenu(null);
+    setTurnOrderJoinPrompt(null);
+    setHoveredOverflowTokenId('');
+    setPinnedOverflowTokenId('');
+    clearPingHoldTimer();
+
+    if (!light?.id || isNarrationOverlayActive || activeAoeFigureType || isRulerEnabled || isLightSourcePending) {
+      return;
+    }
+
+    if (!isPrimaryMouseButton(nativeEvent)) {
+      return;
+    }
+
+    const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
+    if (!pointerWorld) return;
+
+    handleSelectLightSource(light.id);
+    setMeasurementState(null);
+    setAoEPreviewState(null);
+    setSelectedAoEFigureId('');
+    setSelectedTokenIds([]);
+    setSelectionBox(null);
+    clearActiveSharedInteraction();
+
+    interactionRef.current = {
+      type: 'light-drag-candidate',
+      lightId: light.id,
+      startClient: {
+        x: nativeEvent.clientX,
+        y: nativeEvent.clientY,
+      },
+      startWorld: pointerWorld,
+      originLight: {
+        x: light.x,
+        y: light.y,
+      },
+    };
+  }, [
+    activeAoeFigureType,
+    clearActiveSharedInteraction,
+    clearPingHoldTimer,
+    getWorldPointFromClient,
+    handleSelectLightSource,
+    isNarrationOverlayActive,
+    isLightSourcePending,
+    isRulerEnabled,
+  ]);
+
+  const handleDarknessSourceMouseDown = useCallback((darkness, event) => {
+    const nativeEvent = event.evt;
+    event.cancelBubble = true;
+    setTurnOrderContextMenu(null);
+    setTurnOrderJoinPrompt(null);
+    setHoveredOverflowTokenId('');
+    setPinnedOverflowTokenId('');
+    clearPingHoldTimer();
+
+    if (!darkness?.id || isNarrationOverlayActive || activeAoeFigureType || isRulerEnabled || isDarknessSourcePending) {
+      return;
+    }
+
+    if (!isPrimaryMouseButton(nativeEvent)) {
+      return;
+    }
+
+    const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
+    if (!pointerWorld) return;
+
+    handleSelectDarknessSource(darkness.id);
+    setMeasurementState(null);
+    setAoEPreviewState(null);
+    setSelectedAoEFigureId('');
+    setSelectedLightId('');
+    setSelectedWallId('');
+    setSelectedTokenIds([]);
+    setSelectionBox(null);
+    clearActiveSharedInteraction();
+
+    interactionRef.current = {
+      type: 'darkness-drag-candidate',
+      darknessId: darkness.id,
+      startClient: {
+        x: nativeEvent.clientX,
+        y: nativeEvent.clientY,
+      },
+      startWorld: pointerWorld,
+      originDarkness: {
+        x: darkness.x,
+        y: darkness.y,
+      },
+    };
+  }, [
+    activeAoeFigureType,
+    clearActiveSharedInteraction,
+    clearPingHoldTimer,
+    getWorldPointFromClient,
+    handleSelectDarknessSource,
+    isDarknessSourcePending,
+    isNarrationOverlayActive,
+    isRulerEnabled,
+  ]);
+
+  const handleSelectWallSource = useCallback((wallId) => {
+    const nextWallId = wallId || '';
+    setSelectedWallId(nextWallId);
+    wallSourceControls?.onSelectWall?.(nextWallId);
+
+    if (nextWallId) {
+      setSelectedTokenIds([]);
+      setSelectedAoEFigureId('');
+      setSelectedLightId('');
+      setSelectedDarknessId('');
+      setSelectionBox(null);
+    }
+  }, [wallSourceControls]);
+
+  const handleWallEndpointMouseDown = useCallback((wall, endpoint, event) => {
+    const nativeEvent = event.evt;
+    event.cancelBubble = true;
+    setTurnOrderContextMenu(null);
+    setTurnOrderJoinPrompt(null);
+    setHoveredOverflowTokenId('');
+    setPinnedOverflowTokenId('');
+    clearPingHoldTimer();
+
+    if (!wall?.id || isNarrationOverlayActive || !isWallToolActive || isWallSourcePending) {
+      return;
+    }
+
+    if (!isPrimaryMouseButton(nativeEvent)) {
+      return;
+    }
+
+    const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
+    if (!pointerWorld) return;
+
+    handleSelectWallSource(wall.id);
+    setMeasurementState(null);
+    setAoEPreviewState(null);
+    setSelectedAoEFigureId('');
+    setSelectedLightId('');
+    setSelectedDarknessId('');
+    setSelectedTokenIds([]);
+    setSelectionBox(null);
+    clearActiveSharedInteraction();
+
+    interactionRef.current = {
+      type: 'wall-endpoint-drag-candidate',
+      wallId: wall.id,
+      endpoint,
+      startClient: {
+        x: nativeEvent.clientX,
+        y: nativeEvent.clientY,
+      },
+      startWorld: pointerWorld,
+    };
+  }, [
+    clearActiveSharedInteraction,
+    clearPingHoldTimer,
+    getWorldPointFromClient,
+    handleSelectWallSource,
+    isNarrationOverlayActive,
+    isWallSourcePending,
+    isWallToolActive,
+  ]);
+
+  const handleWallSegmentMouseDown = useCallback((wall, event) => {
+    const nativeEvent = event.evt;
+    event.cancelBubble = true;
+    setTurnOrderContextMenu(null);
+    setTurnOrderJoinPrompt(null);
+    setHoveredOverflowTokenId('');
+    setPinnedOverflowTokenId('');
+    clearPingHoldTimer();
+
+    if (!wall?.id || isNarrationOverlayActive || !isWallToolActive || isWallSourcePending) {
+      return;
+    }
+
+    if (!isPrimaryMouseButton(nativeEvent)) {
+      return;
+    }
+
+    const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
+    if (!pointerWorld) return;
+
+    handleSelectWallSource(wall.id);
+    setMeasurementState(null);
+    setAoEPreviewState(null);
+    setSelectedAoEFigureId('');
+    setSelectedLightId('');
+    setSelectedDarknessId('');
+    setSelectedTokenIds([]);
+    setSelectionBox(null);
+    clearActiveSharedInteraction();
+
+    interactionRef.current = {
+      type: 'wall-segment-drag-candidate',
+      wallId: wall.id,
+      startClient: {
+        x: nativeEvent.clientX,
+        y: nativeEvent.clientY,
+      },
+      startWorld: pointerWorld,
+    };
+  }, [
+    clearActiveSharedInteraction,
+    clearPingHoldTimer,
+    getWorldPointFromClient,
+    handleSelectWallSource,
+    isNarrationOverlayActive,
+    isWallSourcePending,
+    isWallToolActive,
+  ]);
 
   const handleStageMouseDown = (event) => {
     if (isTokenDragActive) return;
@@ -3739,10 +4908,103 @@ export default function GrigliataBoard({
 
     clearPingHoldTimer();
 
+    if (isWallToolActive && wallSourceControls?.onCreateWallSegment && isWallSourcePending) {
+      return;
+    }
+
+    if (isLightToolActive && lightSourceControls?.onCreateLightSource && isLightSourcePending) {
+      return;
+    }
+
+    if (isDarknessToolActive && darknessSourceControls?.onCreateDarknessSource && isDarknessSourcePending) {
+      return;
+    }
+
     setMeasurementState(null);
     setAoEPreviewState(null);
     setSelectedAoEFigureId('');
     clearActiveSharedInteraction();
+
+    if (isWallToolActive && wallSourceControls?.onCreateWallSegment) {
+      setSelectedTokenIds([]);
+      setSelectedLightId('');
+      setSelectedDarknessId('');
+      setSelectedWallId('');
+      setSelectionBox(null);
+      const preview = {
+        startPoint: pointerWorld,
+        endPoint: pointerWorld,
+      };
+      setWallCreatePreview(preview);
+      interactionRef.current = {
+        type: 'wall-create',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startWorld: pointerWorld,
+        endPoint: pointerWorld,
+      };
+      return;
+    }
+
+    if (isLightToolActive && lightSourceControls?.onCreateLightSource) {
+      setSelectedTokenIds([]);
+      setSelectedDarknessId('');
+      setSelectionBox(null);
+      setSelectedWallId('');
+      interactionRef.current = {
+        type: 'light-create',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startWorld: pointerWorld,
+        point: pointerWorld,
+      };
+      return;
+    }
+
+    if (isDarknessToolActive && darknessSourceControls?.onCreateDarknessSource) {
+      setSelectedTokenIds([]);
+      setSelectedLightId('');
+      setSelectedDarknessId('');
+      setSelectedWallId('');
+      setSelectionBox(null);
+      interactionRef.current = {
+        type: 'darkness-create',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startWorld: pointerWorld,
+        point: pointerWorld,
+      };
+      return;
+    }
+
+    if (isFogBrushToolActive && fogBrushControls?.onPaintFogBrush) {
+      setSelectedTokenIds([]);
+      setSelectedLightId('');
+      setSelectedDarknessId('');
+      setSelectedWallId('');
+      setSelectionBox(null);
+      paintFogBrushAtPoint(pointerWorld);
+      interactionRef.current = {
+        type: 'fog-brush',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startWorld: pointerWorld,
+        lastWorld: pointerWorld,
+      };
+      return;
+    }
+
+    setSelectedLightId('');
+    setSelectedDarknessId('');
+    setSelectedWallId('');
 
     if (activeAoeFigureType) {
       setSelectedTokenIds([]);
@@ -3859,6 +5121,9 @@ export default function GrigliataBoard({
     setMeasurementState(null);
     setAoEPreviewState(null);
     setSelectedAoEFigureId('');
+    setSelectedLightId('');
+    setSelectedDarknessId('');
+    setSelectedWallId('');
     clearActiveSharedInteraction();
 
     if (!token?.canMove) {
@@ -3940,6 +5205,9 @@ export default function GrigliataBoard({
     clearActiveSharedInteraction();
     setSelectedTokenIds([]);
     setSelectionBox(null);
+    setSelectedLightId('');
+    setSelectedDarknessId('');
+    setSelectedWallId('');
 
     if (!figure?.canEdit) {
       setSelectedAoEFigureId('');
@@ -3976,8 +5244,8 @@ export default function GrigliataBoard({
     [renderedAoEFigures, selectedAoEFigureId]
   );
   const selectedTokens = useMemo(
-    () => renderedTokens.filter((token) => selectedTokenIdSet.has(token.tokenId)),
-    [renderedTokens, selectedTokenIdSet]
+    () => fogVisibleRenderedTokens.filter((token) => selectedTokenIdSet.has(token.tokenId)),
+    [fogVisibleRenderedTokens, selectedTokenIdSet]
   );
   useEffect(() => {
     const nextSelectedTokenIds = selectedTokens.map((token) => token.tokenId);
@@ -3997,6 +5265,13 @@ export default function GrigliataBoard({
       || isRulerEnabled
       || !!activeAoeFigureType
       || !!selectedAoEFigureId
+      || !!selectedLight
+      || lightDragState
+      || !!selectedDarkness
+      || darknessDragState
+      || !!selectedWall
+      || wallDragState
+      || isFogBrushToolActive
     ) {
       return null;
     }
@@ -4012,12 +5287,19 @@ export default function GrigliataBoard({
     isManager,
     isTokenDragActive,
     isRulerEnabled,
+    isFogBrushToolActive,
+    darknessDragState,
+    lightDragState,
     selectedAoEFigureId,
+    selectedDarkness,
+    selectedLight,
+    selectedWall,
     selectedTokens,
     selectionBox,
     stageSize.height,
     stageSize.width,
     tokenDragState,
+    wallDragState,
     viewport.scale,
     viewport.x,
     viewport.y,
@@ -4033,6 +5315,13 @@ export default function GrigliataBoard({
       || isRulerEnabled
       || !!activeAoeFigureType
       || !!selectedAoEFigureId
+      || !!selectedLight
+      || lightDragState
+      || !!selectedDarkness
+      || darknessDragState
+      || !!selectedWall
+      || wallDragState
+      || isFogBrushToolActive
     ) {
       return null;
     }
@@ -4107,7 +5396,13 @@ export default function GrigliataBoard({
     activeAoeFigureType,
     isTokenDragActive,
     isRulerEnabled,
+    isFogBrushToolActive,
+    darknessDragState,
+    lightDragState,
     selectedAoEFigureId,
+    selectedDarkness,
+    selectedLight,
+    selectedWall,
     selectedTokenActionState,
     selectedTokenDetails,
     selectedTokens,
@@ -4115,6 +5410,7 @@ export default function GrigliataBoard({
     stageSize.height,
     stageSize.width,
     tokenDragState,
+    wallDragState,
     viewport.scale,
     viewport.x,
     viewport.y,
@@ -4128,6 +5424,13 @@ export default function GrigliataBoard({
       || !!activeAoeFigureType
       || selectionBox
       || tokenDragState
+      || !!selectedLight
+      || lightDragState
+      || !!selectedDarkness
+      || darknessDragState
+      || !!selectedWall
+      || wallDragState
+      || isFogBrushToolActive
     ) {
       return null;
     }
@@ -4179,11 +5482,18 @@ export default function GrigliataBoard({
     aoeFigureDragState,
     isRulerEnabled,
     isTokenDragActive,
+    isFogBrushToolActive,
+    darknessDragState,
+    lightDragState,
     selectedAoEFigure,
+    selectedDarkness,
+    selectedLight,
+    selectedWall,
     selectionBox,
     stageSize.height,
     stageSize.width,
     tokenDragState,
+    wallDragState,
     viewport.scale,
     viewport.x,
     viewport.y,
@@ -4194,21 +5504,21 @@ export default function GrigliataBoard({
       return null;
     }
 
-    const token = renderedTokens.find((entry) => entry.tokenId === activeOverflowTokenId);
+    const token = fogVisibleRenderedTokens.find((entry) => entry.tokenId === activeOverflowTokenId);
     const overflowCount = tokenStatusDisplayById.get(activeOverflowTokenId)?.overflowCount || 0;
     if (!token || overflowCount < 1) {
       return null;
     }
 
     return token;
-  }, [activeOverflowTokenId, renderedTokens, tokenStatusDisplayById]);
+  }, [activeOverflowTokenId, fogVisibleRenderedTokens, tokenStatusDisplayById]);
   const hoveredTokenTooltip = useMemo(() => {
     if (!hoveredTokenTooltipId) {
       return null;
     }
 
-    return renderedTokens.find((entry) => entry.tokenId === hoveredTokenTooltipId) || null;
-  }, [hoveredTokenTooltipId, renderedTokens]);
+    return fogVisibleRenderedTokens.find((entry) => entry.tokenId === hoveredTokenTooltipId) || null;
+  }, [fogVisibleRenderedTokens, hoveredTokenTooltipId]);
   const hoveredTokenTooltipStyle = useMemo(() => {
     if (!hoveredTokenTooltip) {
       return null;
@@ -4264,7 +5574,19 @@ export default function GrigliataBoard({
   );
   const areTurnOrderControlsDisabled = isNarrationOverlayActive;
   const visibleRenderedAoEFigures = isNarrationOverlayActive ? [] : renderedAoEFigures;
-  const visibleRenderedTokens = isNarrationOverlayActive ? [] : renderedTokens;
+  const visibleRenderedTokens = isNarrationOverlayActive ? [] : fogVisibleRenderedTokens;
+  const visibleTokenRenderLayers = useMemo(
+    () => splitFogVisibleTokenRenderLayers({
+      tokens: visibleRenderedTokens,
+      currentUserId,
+      isManager,
+      grid: normalizedGrid,
+      fogOfWar,
+    }),
+    [currentUserId, fogOfWar, isManager, normalizedGrid, visibleRenderedTokens]
+  );
+  const visibleRenderedTokensBelowFog = visibleTokenRenderLayers.belowFogTokens;
+  const visibleRenderedTokensAboveFog = visibleTokenRenderLayers.aboveFogTokens;
   const visibleRenderedSharedInteractions = isNarrationOverlayActive ? [] : renderedSharedInteractions;
   const visibleLocalPingsForRender = isNarrationOverlayActive ? [] : visibleLocalPings;
   const visibleMeasurementState = isNarrationOverlayActive ? null : measurementState;
@@ -4274,6 +5596,21 @@ export default function GrigliataBoard({
   const visibleHoveredTokenTooltip = isNarrationOverlayActive ? null : hoveredTokenTooltip;
   const visibleSelectedAoEFigureActionState = isNarrationOverlayActive ? null : selectedAoEFigureActionState;
   const visibleSelectedTokenActionState = isNarrationOverlayActive ? null : selectedTokenActionState;
+  const visibleTokenVisionSources = useMemo(
+    () => (isNarrationOverlayActive ? [] : resolveViewerTokenVisionSources({
+      tokens: visibleRenderedTokens,
+      currentUserId,
+      isManager,
+      cellSizePx: normalizedGrid.cellSizePx,
+    })),
+    [
+      currentUserId,
+      isManager,
+      isNarrationOverlayActive,
+      normalizedGrid.cellSizePx,
+      visibleRenderedTokens,
+    ]
+  );
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-700 bg-slate-950/80 shadow-2xl">
@@ -4358,6 +5695,138 @@ export default function GrigliataBoard({
               disabled={isNarrationOverlayActive}
             />
           </div>
+          {!isNarrationOverlayActive && isManager && lightSourceControls?.onCreateLightSource && (
+            <button
+              type="button"
+              onClick={() => lightSourceControls?.onToggleLightTool?.()}
+              disabled={isNarrationOverlayActive || isLightSourcePending || !lightSourceControls?.onToggleLightTool}
+              title={isLightToolActive ? 'Disable light source tool' : 'Enable light source tool'}
+              aria-label={isLightToolActive ? 'Disable light source tool' : 'Enable light source tool'}
+              aria-pressed={isLightToolActive}
+              data-testid="light-source-tool-trigger"
+              className={`${getQuickControlButtonClassName(isLightToolActive)} disabled:cursor-not-allowed disabled:opacity-60`}
+            >
+              <FiSun className="h-4 w-4" />
+            </button>
+          )}
+          {!isNarrationOverlayActive && isManager && darknessSourceControls?.onToggleDarknessTool && (
+            <button
+              type="button"
+              onClick={() => darknessSourceControls?.onToggleDarknessTool?.()}
+              disabled={isNarrationOverlayActive || isDarknessSourcePending || !darknessSourceControls?.onToggleDarknessTool}
+              title={isDarknessToolActive ? 'Disable darkness source tool' : 'Enable darkness source tool'}
+              aria-label={isDarknessToolActive ? 'Disable darkness source tool' : 'Enable darkness source tool'}
+              aria-pressed={isDarknessToolActive}
+              data-testid="darkness-source-tool-trigger"
+              className={`${getQuickControlButtonClassName(isDarknessToolActive)} disabled:cursor-not-allowed disabled:opacity-60`}
+            >
+              <FiMoon className="h-4 w-4" />
+            </button>
+          )}
+          {!isNarrationOverlayActive && isManager && wallSourceControls?.onToggleWallTool && (
+            <button
+              type="button"
+              onClick={() => wallSourceControls?.onToggleWallTool?.()}
+              disabled={isNarrationOverlayActive || isWallSourcePending || !wallSourceControls?.onToggleWallTool}
+              title={isWallToolActive ? 'Disable wall authoring tool' : 'Enable wall authoring tool'}
+              aria-label={isWallToolActive ? 'Disable wall authoring tool' : 'Enable wall authoring tool'}
+              aria-pressed={isWallToolActive}
+              data-testid="wall-source-tool-trigger"
+              className={`${getQuickControlButtonClassName(isWallToolActive)} disabled:cursor-not-allowed disabled:opacity-60`}
+            >
+              <FiMinus className="h-4 w-4" />
+            </button>
+          )}
+          {!isNarrationOverlayActive && isManager && fogBrushControls?.onToggleFogBrushTool && (
+            <div className="pointer-events-auto relative z-10 h-10 w-10 shrink-0">
+              <div className="absolute left-0 top-0 z-20 flex items-start gap-2">
+                <button
+                  type="button"
+                  onClick={() => fogBrushControls?.onToggleFogBrushTool?.()}
+                  disabled={isNarrationOverlayActive || isFogBrushPending || !fogBrushControls?.onToggleFogBrushTool}
+                  title={isFogBrushToolActive ? 'Disable manual fog brush' : 'Enable manual fog brush'}
+                  aria-label={isFogBrushToolActive ? 'Disable manual fog brush' : 'Enable manual fog brush'}
+                  aria-pressed={isFogBrushToolActive}
+                  aria-expanded={isFogBrushToolActive}
+                  aria-controls={fogBrushSettingsId}
+                  data-testid="fog-brush-tool-trigger"
+                  className={`${getQuickControlButtonClassName(isFogBrushToolActive)} disabled:cursor-not-allowed disabled:opacity-60`}
+                >
+                  <MdBrush className="h-4 w-4" />
+                </button>
+
+                <AnimatePresence initial={false}>
+                  {isFogBrushToolActive && fogBrushControls && (
+                    <motion.div
+                      key="fog-brush-settings"
+                      id={fogBrushSettingsId}
+                      data-testid="fog-brush-settings"
+                      className={QUICK_CONTROL_DRAWER_CLASS}
+                      initial={prefersReducedMotion ? { opacity: 1, width: 'auto' } : { opacity: 0, width: 0 }}
+                      animate={{ opacity: 1, width: 'auto' }}
+                      exit={prefersReducedMotion ? { opacity: 0, width: 0 } : { opacity: 0, width: 0 }}
+                      transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.26, ease: DRAW_PICKER_EASE }}
+                    >
+                      <div className="flex items-center gap-1" role="group" aria-label="Manual fog brush settings">
+                        <motion.button
+                          type="button"
+                          data-testid="fog-brush-mode-reveal"
+                          onClick={() => fogBrushControls?.onChangeMode?.('reveal')}
+                          disabled={isFogBrushPending}
+                          title="Reveal fog"
+                          aria-label="Reveal fog brush"
+                          aria-pressed={fogBrushSettings.mode === 'reveal'}
+                          initial={prefersReducedMotion ? false : { opacity: 0, x: 12, scale: 0.74 }}
+                          animate={{ opacity: 1, x: 0, scale: 1 }}
+                          exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: 12, scale: 0.82 }}
+                          transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.18, ease: DRAW_PICKER_EASE }}
+                          className={`${getQuickControlButtonClassName(fogBrushSettings.mode === 'reveal')} h-8 w-8 rounded-xl disabled:cursor-not-allowed disabled:opacity-60`}
+                        >
+                          <FiEye className="h-3.5 w-3.5" />
+                        </motion.button>
+                        <motion.button
+                          type="button"
+                          data-testid="fog-brush-mode-hide"
+                          onClick={() => fogBrushControls?.onChangeMode?.('hide')}
+                          disabled={isFogBrushPending}
+                          title="Hide fog"
+                          aria-label="Hide fog brush"
+                          aria-pressed={fogBrushSettings.mode === 'hide'}
+                          initial={prefersReducedMotion ? false : { opacity: 0, x: 12, scale: 0.74 }}
+                          animate={{ opacity: 1, x: 0, scale: 1 }}
+                          exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: 12, scale: 0.82 }}
+                          transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.18, delay: 0.03, ease: DRAW_PICKER_EASE }}
+                          className={`${getQuickControlButtonClassName(fogBrushSettings.mode === 'hide')} h-8 w-8 rounded-xl disabled:cursor-not-allowed disabled:opacity-60`}
+                        >
+                          <FiEyeOff className="h-3.5 w-3.5" />
+                        </motion.button>
+                        <motion.label
+                          initial={prefersReducedMotion ? false : { opacity: 0, x: 12, scale: 0.74 }}
+                          animate={{ opacity: 1, x: 0, scale: 1 }}
+                          exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: 12, scale: 0.82 }}
+                          transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.18, delay: 0.06, ease: DRAW_PICKER_EASE }}
+                          className="flex h-8 w-12 items-center justify-center rounded-xl border border-slate-700/90 bg-slate-900/90 px-1"
+                        >
+                          <span className="sr-only">Fog brush radius</span>
+                          <input
+                            type="number"
+                            min={MIN_FOG_BRUSH_RADIUS_SQUARES}
+                            max={MAX_FOG_BRUSH_RADIUS_SQUARES}
+                            step="1"
+                            aria-label="Fog brush radius"
+                            value={fogBrushSettings.radiusSquares}
+                            disabled={isFogBrushPending}
+                            onChange={(event) => fogBrushControls?.onChangeRadiusSquares?.(Number(event.target.value))}
+                            className="h-6 w-full bg-transparent text-center text-xs font-semibold text-slate-100 outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                          />
+                        </motion.label>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+          )}
           <button
             type="button"
             onClick={onToggleInteractionSharing}
@@ -4540,6 +6009,7 @@ export default function GrigliataBoard({
               {battlemapImageTransition.fadingOutLayer && battlemapImageTransition.fadingOutLayer.imageWidth > 0 && battlemapImageTransition.fadingOutLayer.imageHeight > 0 && (
                 <KonvaImage
                   data-testid="battlemap-image-outgoing"
+                  data-asset-type={battlemapImageTransition.fadingOutLayer.assetType}
                   image={battlemapImageTransition.fadingOutLayer.image}
                   x={0}
                   y={0}
@@ -4553,6 +6023,7 @@ export default function GrigliataBoard({
               {battlemapImageTransition.visibleLayer && battlemapImageTransition.visibleLayer.imageWidth > 0 && battlemapImageTransition.visibleLayer.imageHeight > 0 && (
                 <KonvaImage
                   data-testid="battlemap-image-active"
+                  data-asset-type={battlemapImageTransition.visibleLayer.assetType}
                   image={battlemapImageTransition.visibleLayer.image}
                   x={0}
                   y={0}
@@ -4573,6 +6044,56 @@ export default function GrigliataBoard({
               />
 
               {!isNarrationOverlayActive && isGridVisible && <GridLayer bounds={boardBounds} grid={normalizedGrid} />}
+            </Layer>
+
+            {!isNarrationOverlayActive && lightingRenderInput && (
+              <Layer listening={false}>
+                <GrigliataLightingMask
+                  bounds={boardBounds}
+                  grid={normalizedGrid}
+                  metadata={lightingRenderInput}
+                  tokens={visibleRenderedTokens}
+                  visionSources={visibleTokenVisionSources}
+                />
+              </Layer>
+            )}
+
+            <Layer>
+              {!isNarrationOverlayActive && isManager && isWallToolActive && wallSourceControls && (
+                <GrigliataWallAuthoringControls
+                  walls={renderedWallSources}
+                  selectedWallId={selectedWallId}
+                  draftWall={wallCreatePreview ? {
+                    x1: wallCreatePreview.startPoint.x,
+                    y1: wallCreatePreview.startPoint.y,
+                    x2: wallCreatePreview.endPoint.x,
+                    y2: wallCreatePreview.endPoint.y,
+                    wallType: 'wall',
+                    blocksSight: true,
+                    blocksVision: true,
+                    blocksLight: true,
+                  } : null}
+                  viewportScale={viewport.scale}
+                  onSelectWall={handleSelectWallSource}
+                  onBeginWallEndpointDrag={handleWallEndpointMouseDown}
+                  onBeginWallSegmentDrag={handleWallSegmentMouseDown}
+                />
+              )}
+
+              {!isNarrationOverlayActive && isManager && !isWallToolActive && onToggleWallRuntimeSegment && (
+                <GrigliataWallRuntimeControls
+                  walls={wallRuntimeSegments || lightingRenderInput?.walls}
+                  viewportScale={viewport.scale}
+                  onToggleWallRuntimeSegment={onToggleWallRuntimeSegment}
+                />
+              )}
+
+              {!isNarrationOverlayActive && isManager && showLightingDebugOverlay && lightingDebugMetadata && (
+                <GrigliataLightingDebugOverlay
+                  metadata={lightingDebugMetadata}
+                  viewportScale={viewport.scale}
+                />
+              )}
 
               {normalizedSelectionRect && (
                 <>
@@ -4603,19 +6124,38 @@ export default function GrigliataBoard({
                 </>
               )}
 
-              {visibleRenderedAoEFigures.map((figure) => (
+              {visibleRenderedAoEFigures.filter((figure) => figure.canEdit).map((figure) => (
                 <EnhancedAoEFigureOverlay
-                  key={figure.id}
+                  key={`aoe-hit-target-${figure.id}`}
                   figure={figure.renderable}
-                  drawTheme={getGrigliataDrawTheme(figure.colorKey)}
                   overlayId={figure.id}
-                  isSelected={figure.isSelected}
                   viewportScale={viewport.scale}
+                  hitTargetOnly
                   onMouseDown={(event) => handleAoEFigureMouseDown(figure, event)}
                 />
               ))}
 
-              {visibleRenderedTokens.map((token) => (
+              {!isNarrationOverlayActive && isManager && renderedLightSources.length > 0 && (
+                <GrigliataLightControls
+                  lights={renderedLightSources}
+                  selectedLightId={selectedLightId}
+                  viewportScale={viewport.scale}
+                  onSelectLight={handleSelectLightSource}
+                  onBeginLightDrag={handleLightSourceMouseDown}
+                />
+              )}
+
+              {!isNarrationOverlayActive && isManager && renderedDarknessSources.length > 0 && (
+                <GrigliataDarknessControls
+                  darknessSources={renderedDarknessSources}
+                  selectedDarknessId={selectedDarknessId}
+                  viewportScale={viewport.scale}
+                  onSelectDarkness={handleSelectDarknessSource}
+                  onBeginDarknessDrag={handleDarknessSourceMouseDown}
+                />
+              )}
+
+              {visibleRenderedTokensBelowFog.map((token) => (
                 <TokenNode
                   key={token.tokenId}
                   token={token}
@@ -4650,6 +6190,69 @@ export default function GrigliataBoard({
                       currentTokenId === tokenId ? '' : tokenId
                     ));
                   }}
+                />
+              ))}
+            </Layer>
+
+            {!isNarrationOverlayActive && fogOfWar && (
+              <Layer listening={false}>
+                <GrigliataFogOfWarMask
+                  bounds={boardBounds}
+                  grid={normalizedGrid}
+                  exploredCells={fogOfWar.exploredCells}
+                  currentVisibleCells={fogOfWar.currentVisibleCells}
+                />
+              </Layer>
+            )}
+
+            <Layer>
+              {visibleRenderedTokensAboveFog.map((token) => (
+                <TokenNode
+                  key={token.tokenId}
+                  token={token}
+                  position={token.renderPosition}
+                  canMove={token.canMove}
+                  isActiveTurn={token.isActiveTurn}
+                  isSelected={token.isSelected}
+                  badgeImages={tokenStatusBadgeImages}
+                  drawTheme={resolvedDrawTheme}
+                  onMouseDown={handleTokenMouseDown}
+                  onContextMenu={handleTokenContextMenu}
+                  onHoverChange={(tokenId, isHovered) => {
+                    setHoveredTokenTooltipId((currentTokenId) => {
+                      if (!isHovered) {
+                        return currentTokenId === tokenId ? '' : currentTokenId;
+                      }
+
+                      return tokenId || '';
+                    });
+                  }}
+                  onOverflowMouseEnter={(tokenId) => setHoveredOverflowTokenId(tokenId || '')}
+                  onOverflowMouseLeave={(tokenId) => {
+                    setHoveredOverflowTokenId((currentTokenId) => (
+                      currentTokenId === tokenId ? '' : currentTokenId
+                    ));
+                  }}
+                  onOverflowToggle={(tokenId) => {
+                    if (!tokenId) return;
+
+                    setHoveredOverflowTokenId(tokenId);
+                    setPinnedOverflowTokenId((currentTokenId) => (
+                      currentTokenId === tokenId ? '' : tokenId
+                    ));
+                  }}
+                />
+              ))}
+
+              {visibleRenderedAoEFigures.map((figure) => (
+                <EnhancedAoEFigureOverlay
+                  key={figure.id}
+                  figure={figure.renderable}
+                  drawTheme={getGrigliataDrawTheme(figure.colorKey)}
+                  overlayId={figure.id}
+                  isSelected={figure.isSelected}
+                  viewportScale={viewport.scale}
+                  listening={false}
                 />
               ))}
 
@@ -4740,6 +6343,95 @@ export default function GrigliataBoard({
         )}
 
         <ActiveViewersOverlay viewers={activeViewers} />
+
+        {!isNarrationOverlayActive && isManager && (lightSourceControls || darknessSourceControls || wallSourceControls) && (
+          <div className="pointer-events-none absolute inset-0 z-[27]">
+            <div data-testid="lighting-diagnostics-anchor" className="pointer-events-auto absolute bottom-20 left-4">
+              <GrigliataLightingDiagnostics
+                lights={editableLightSources}
+                walls={editableWallSources}
+                selectedToken={selectedTokenDetails}
+              />
+            </div>
+          </div>
+        )}
+
+        {!isNarrationOverlayActive && isManager && selectedLight && (
+          <div className="pointer-events-none absolute inset-0 z-[28]">
+            <div className="pointer-events-auto absolute left-16 top-4">
+              <GrigliataSelectedLightPanel
+                light={selectedLight}
+                grid={normalizedGrid}
+                isPending={!!lightSourceControls?.isPending}
+                onUpdateLight={lightSourceControls?.onUpdateLightSource}
+                onDuplicateLight={lightSourceControls?.onDuplicateLightSource}
+                onDeleteLight={async (lightId) => {
+                  if (isLightSourcePending) {
+                    return false;
+                  }
+
+                  const didDeleteLight = !!(await Promise.resolve(lightSourceControls?.onDeleteLightSource?.(lightId)));
+                  if (didDeleteLight) {
+                    setSelectedLightId('');
+                  }
+                  return didDeleteLight;
+                }}
+                onRequestClose={() => setSelectedLightId('')}
+              />
+            </div>
+          </div>
+        )}
+
+        {!isNarrationOverlayActive && isManager && selectedDarkness && (
+          <div className="pointer-events-none absolute inset-0 z-[28]">
+            <div className="pointer-events-auto absolute left-16 top-4">
+              <GrigliataSelectedDarknessPanel
+                darkness={selectedDarkness}
+                grid={normalizedGrid}
+                isPending={!!darknessSourceControls?.isPending}
+                onUpdateDarkness={darknessSourceControls?.onUpdateDarknessSource}
+                onDuplicateDarkness={darknessSourceControls?.onDuplicateDarknessSource}
+                onDeleteDarkness={async (darknessId) => {
+                  if (isDarknessSourcePending) {
+                    return false;
+                  }
+
+                  const didDeleteDarkness = !!(await Promise.resolve(darknessSourceControls?.onDeleteDarknessSource?.(darknessId)));
+                  if (didDeleteDarkness) {
+                    setSelectedDarknessId('');
+                  }
+                  return didDeleteDarkness;
+                }}
+                onRequestClose={() => setSelectedDarknessId('')}
+              />
+            </div>
+          </div>
+        )}
+
+        {!isNarrationOverlayActive && isManager && selectedWall && (
+          <div className="pointer-events-none absolute inset-0 z-[28]">
+            <div className="pointer-events-auto absolute left-16 top-4">
+              <GrigliataSelectedWallPanel
+                wall={selectedWall}
+                isPending={!!wallSourceControls?.isPending}
+                onUpdateWall={wallSourceControls?.onUpdateWallSegment}
+                onDuplicateWall={wallSourceControls?.onDuplicateWallSegment}
+                onDeleteWall={async (wallId) => {
+                  if (isWallSourcePending) {
+                    return false;
+                  }
+
+                  const didDeleteWall = !!(await Promise.resolve(wallSourceControls?.onDeleteWallSegment?.(wallId)));
+                  if (didDeleteWall) {
+                    setSelectedWallId('');
+                  }
+                  return didDeleteWall;
+                }}
+                onRequestClose={() => setSelectedWallId('')}
+              />
+            </div>
+          </div>
+        )}
 
         {visibleOverflowToken && activeOverflowCardStyle && (
           <div className="pointer-events-none absolute inset-0 z-[18]">
@@ -4908,6 +6600,8 @@ export default function GrigliataBoard({
           onSetSelectedTokensDeadState={onSetSelectedTokensDeadState}
           onUpdateTokenStatuses={onUpdateTokenStatuses}
           onSetSelectedTokenSize={onSetSelectedTokenSize}
+          isTokenVisionActionPending={isTokenVisionActionPending}
+          onSetSelectedTokenVision={onSetSelectedTokenVision}
         />
 
         {visibleSelectedAoEFigureActionState && (

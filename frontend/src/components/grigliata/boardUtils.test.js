@@ -1,8 +1,11 @@
 import {
   buildPlacementDocId,
+  getBackgroundAssetType,
+  getFileExtensionFromContentType,
   getHiddenTokenIdsForBackground,
   getTokenPositionPx,
   isCurrentUserTokenHiddenForViewer,
+  isVideoBackground,
   normalizeGridConfig,
   normalizeHiddenTokenIdsByBackground,
   normalizeTokenSizeSquares,
@@ -11,6 +14,21 @@ import {
 describe('buildPlacementDocId', () => {
   test('serializes the background and token ids with the shared placement format', () => {
     expect(buildPlacementDocId('map-1', 'token-7')).toBe('map-1__token-7');
+  });
+});
+
+describe('background media helpers', () => {
+  test('defaults existing backgrounds to image and recognizes video backgrounds', () => {
+    expect(getBackgroundAssetType({})).toBe('image');
+    expect(getBackgroundAssetType({ assetType: 'image' })).toBe('image');
+    expect(getBackgroundAssetType({ assetType: 'video' })).toBe('video');
+    expect(isVideoBackground({ assetType: 'video' })).toBe(true);
+    expect(isVideoBackground({ imageUrl: 'https://example.com/map.png' })).toBe(false);
+  });
+
+  test('keeps audio and video mp4 extensions distinct', () => {
+    expect(getFileExtensionFromContentType('audio/mp4')).toBe('.m4a');
+    expect(getFileExtensionFromContentType('video/mp4')).toBe('.mp4');
   });
 });
 

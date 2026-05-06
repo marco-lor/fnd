@@ -91,4 +91,47 @@ describe('BackgroundGalleryPanel', () => {
     expect(screen.getByRole('button', { name: 'Closing...' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Narrate' })).toBeDisabled();
   });
+
+  test('shows the lighting indicator only for maps with imported lighting metadata', () => {
+    render(
+      <BackgroundGalleryPanel
+        {...buildProps({
+          backgrounds: [{
+            ...backgrounds[0],
+            lightingSummary: {
+              sourceType: 'dungeon-alchemist-foundry',
+              schemaVersion: 1,
+              wallCount: 20,
+              lightCount: 7,
+              alignmentStatus: 'match',
+            },
+          }, backgrounds[1], backgrounds[2]],
+        })}
+      />
+    );
+
+    expect(screen.getAllByLabelText('Lighting metadata imported')).toHaveLength(1);
+  });
+
+  test('accepts MP4 uploads and renders video map thumbnails', () => {
+    const { container } = render(
+      <BackgroundGalleryPanel
+        {...buildProps({
+          backgrounds: [{
+            id: 'map-video',
+            name: 'Dungeon Alchemist Loop',
+            imageUrl: 'https://example.com/map.mp4',
+            imageWidth: 2040,
+            imageHeight: 1620,
+            assetType: 'video',
+            grid: { cellSizePx: 60, offsetXPx: 0, offsetYPx: 0 },
+          }],
+        })}
+      />
+    );
+
+    expect(container.querySelector('input[type="file"]')).toHaveAttribute('accept', 'image/*,video/mp4');
+    expect(container.querySelector('video')).toHaveAttribute('src', 'https://example.com/map.mp4');
+    expect(screen.getByText(/2040 x 1620 px \| Video/i)).toBeInTheDocument();
+  });
 });

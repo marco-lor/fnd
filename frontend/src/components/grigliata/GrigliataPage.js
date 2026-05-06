@@ -14,6 +14,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   startAfter,
@@ -26,16 +27,58 @@ import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from 'fi
 import { useAuth } from '../../AuthContext';
 import { db, functions, storage } from '../firebaseConfig';
 import BackgroundGalleryPanel from './BackgroundGalleryPanel';
+import GrigliataLightingImportPanel from './GrigliataLightingImportPanel';
 import MusicLibraryPanel from './MusicLibraryPanel';
+import {
+  buildGrigliataLightingSummary,
+  GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION,
+  normalizeDungeonAlchemistLightingMetadata,
+  parseDungeonAlchemistLightingJson,
+} from './dungeonAlchemistLighting';
+import {
+  buildGrigliataLightingRenderInput,
+  GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION,
+} from './lightingRenderInput';
+import {
+  createManualLightSource,
+  deleteLightSource,
+  duplicateLightSource,
+  moveLightSource,
+  normalizeEditableLightSources,
+  updateLightSource,
+} from './lightSources';
+import {
+  createManualDarknessSource,
+  deleteDarknessSource,
+  duplicateDarknessSource,
+  moveDarknessSource,
+  normalizeEditableDarknessSources,
+  updateDarknessSource,
+} from './darknessSources';
+import {
+  createManualWallSegment,
+  deleteWallSegment,
+  duplicateWallSegment,
+  moveWallEndpoint,
+  moveWallSegment,
+  normalizeEditableWallSegments,
+  updateWallSegment,
+} from './wallSources';
+import {
+  buildEffectiveLightingRenderInput,
+  GRIGLIATA_WALL_STATE_COLLECTION,
+} from './wallRuntimeState';
 import {
   buildPlacementDocId,
   buildStorageSafeName,
   getDisplayNameFromFileName,
   getFileExtension,
   getFileExtensionFromContentType,
+  isVideoBackground,
   isManagerRole,
   normalizeGridConfig,
   readFileImageDimensions,
+  readFileVideoMetadata,
   snapBoardPointToGrid,
 } from './boardUtils';
 import {
@@ -93,10 +136,35 @@ import {
   TURN_EFFECT_KIND_SHIELD,
 } from './turnOrder';
 import useGrigliataPageData from './useGrigliataPageData';
+import useGrigliataLightingMetadata from './useGrigliataLightingMetadata';
+import useGrigliataLightingRenderInput from './useGrigliataLightingRenderInput';
+import useGrigliataWallRuntimeState from './useGrigliataWallRuntimeState';
+import useGrigliataFogOfWar from './useGrigliataFogOfWar';
+import useGrigliataFogOfWarPersistence from './useGrigliataFogOfWarPersistence';
 import useGrigliataPlacementActions from './useGrigliataPlacementActions';
+import {
+  buildGrigliataFogOfWarDocId,
+  GRIGLIATA_FOG_OF_WAR_COLLECTION,
+  GRIGLIATA_FOG_OF_WAR_SCHEMA_VERSION,
+  normalizeGrigliataFogOfWarDoc,
+} from './fogOfWar';
+import {
+  applyFogBrushEdit,
+  buildFogBrushCellKeys,
+  DEFAULT_FOG_BRUSH_RADIUS_SQUARES,
+  GRIGLIATA_FOG_BRUSH_CELL_LIMIT,
+  normalizeFogBrushMode,
+  normalizeFogBrushRadiusSquares,
+  normalizeFogBrushSettings,
+} from './fogBrushEditing';
+import {
+  filterFogVisibleTokens,
+  filterFogVisibleTurnOrderEntries,
+} from './fogVisibilityFiltering';
 import { useShellLayout } from '../common/shellLayout';
 
-const MAX_BACKGROUND_FILE_BYTES = 15 * 1024 * 1024;
+const MAX_BACKGROUND_IMAGE_FILE_BYTES = 15 * 1024 * 1024;
+const MAX_BACKGROUND_VIDEO_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_CUSTOM_TOKEN_FILE_BYTES = 8 * 1024 * 1024;
 const FIRESTORE_BATCH_SIZE = 450;
 // Firestore batched writes are capped at 20 rule access calls. Grigliata
@@ -119,10 +187,28 @@ const GRIGLIATA_CUSTOM_TOKEN_SPAWN_FUNCTION = 'spawnGrigliataCustomTokenInstance
 const GRIGLIATA_CUSTOM_TOKEN_UPDATE_FUNCTION = 'updateGrigliataCustomTokenTemplate';
 const GRIGLIATA_SPAWN_FOE_TOKEN_FUNCTION = 'spawnGrigliataFoeToken';
 
+const clampNumber = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const normalizeSceneLightingSettings = (scene = {}) => {
+  const darkness = Number(scene?.darkness);
+
+  return {
+    darkness: clampNumber(Number.isFinite(darkness) ? darkness : 0.6, 0, 1),
+    globalLight: scene?.globalLight === true,
+  };
+};
+
 const deleteGrigliataCustomTokenCallable = httpsCallable(functions, GRIGLIATA_CUSTOM_TOKEN_DELETE_FUNCTION);
 const spawnGrigliataCustomTokenInstanceCallable = httpsCallable(functions, GRIGLIATA_CUSTOM_TOKEN_SPAWN_FUNCTION);
 const spawnGrigliataFoeTokenCallable = httpsCallable(functions, GRIGLIATA_SPAWN_FOE_TOKEN_FUNCTION);
 const updateGrigliataCustomTokenTemplateCallable = httpsCallable(functions, GRIGLIATA_CUSTOM_TOKEN_UPDATE_FUNCTION);
+
+const buildFogBrushQueueKey = ({ backgroundId, mode, cellSizePx, ownerUids = [] } = {}) => JSON.stringify([
+  backgroundId,
+  mode,
+  cellSizePx,
+  ownerUids,
+]);
 
 const buildHiddenPlacementSettingsPayload = ({
   backgroundId,
@@ -155,12 +241,22 @@ const SIDEBAR_TAB_GRID_CLASS_NAMES = {
   2: 'grid grid-cols-2 gap-2',
   3: 'grid grid-cols-3 gap-2',
   4: 'grid grid-cols-2 gap-2',
+  5: 'grid grid-cols-2 gap-2',
 };
 const DEFAULT_SIDEBAR_TAB_GRID_CLASS_NAME = SIDEBAR_TAB_GRID_CLASS_NAMES[3];
 const MAX_DEFERRED_GALLERY_IMAGE_PRELOADS = 6;
 const collectUniqueImageUrls = (urls) => [...new Set(
   (urls || []).map((url) => (typeof url === 'string' ? url.trim() : '')).filter(Boolean)
 )];
+const getBackgroundImageUrlForPreload = (background) => (
+  background && !isVideoBackground(background) ? background.imageUrl : ''
+);
+const getBackgroundUploadAssetType = (file) => {
+  const contentType = typeof file?.type === 'string' ? file.type.trim().toLowerCase() : '';
+  if (contentType.startsWith('image/')) return 'image';
+  if (contentType === 'video/mp4') return 'video';
+  return '';
+};
 const normalizeNumericDraftValue = (value, fallback = 0) => {
   const numericValue = Number(value);
   return Number.isFinite(numericValue) ? numericValue : fallback;
@@ -171,6 +267,14 @@ const normalizeNonNegativeNumericValue = (value, fallback = 0) => (
 const normalizeCurrentResourceValue = (value, fallback = 0) => (
   normalizeNonNegativeNumericValue(value, fallback)
 );
+const areGridConfigsEqual = (leftGrid, rightGrid) => {
+  const left = normalizeGridConfig(leftGrid);
+  const right = normalizeGridConfig(rightGrid);
+
+  return left.cellSizePx === right.cellSizePx
+    && left.offsetXPx === right.offsetXPx
+    && left.offsetYPx === right.offsetYPx;
+};
 const normalizeTokenNotesValue = (value) => (typeof value === 'string' ? value : '');
 const resolveCustomTokenRole = (token = {}) => (
   token?.tokenType === 'custom'
@@ -293,10 +397,30 @@ export default function GrigliataPage() {
   const [calibrationDraft, setCalibrationDraft] = useState(DEFAULT_GRID);
   const [calibrationError, setCalibrationError] = useState('');
   const [isSavingCalibration, setIsSavingCalibration] = useState(false);
+  const [lightingSelectedFile, setLightingSelectedFile] = useState(null);
+  const [lightingImportDraft, setLightingImportDraft] = useState(null);
+  const [lightingImportError, setLightingImportError] = useState('');
+  const [isImportingLighting, setIsImportingLighting] = useState(false);
+  const [isApplyingLightingCalibration, setIsApplyingLightingCalibration] = useState(false);
+  const [isLightingEnabledPending, setIsLightingEnabledPending] = useState(false);
+  const [isLightSourceMutationPending, setIsLightSourceMutationPending] = useState(false);
+  const [isDarknessSourceMutationPending, setIsDarknessSourceMutationPending] = useState(false);
+  const [isSceneLightingMutationPending, setIsSceneLightingMutationPending] = useState(false);
+  const [isWallSourceMutationPending, setIsWallSourceMutationPending] = useState(false);
+  const [isFogOfWarEnabledPending, setIsFogOfWarEnabledPending] = useState(false);
+  const [isFogResetPending, setIsFogResetPending] = useState(false);
+  const [isLightingDebugOverlayVisible, setIsLightingDebugOverlayVisible] = useState(true);
   const [boardError, setBoardError] = useState('');
   const [activeTrayDragType, setActiveTrayDragType] = useState('');
   const [isRulerEnabled, setIsRulerEnabled] = useState(false);
   const [activeAoeFigureType, setActiveAoeFigureType] = useState('');
+  const [isLightToolActive, setIsLightToolActive] = useState(false);
+  const [isDarknessToolActive, setIsDarknessToolActive] = useState(false);
+  const [isWallToolActive, setIsWallToolActive] = useState(false);
+  const [isFogBrushToolActive, setIsFogBrushToolActive] = useState(false);
+  const [fogBrushMode, setFogBrushMode] = useState('reveal');
+  const [fogBrushRadiusSquares, setFogBrushRadiusSquares] = useState(DEFAULT_FOG_BRUSH_RADIUS_SQUARES);
+  const [isFogBrushMutationPending, setIsFogBrushMutationPending] = useState(false);
   const [drawColorKey, setDrawColorKey] = useState(persistedDrawColorKey);
   const [activeGridSizeOverride, setActiveGridSizeOverride] = useState(null);
   const [activeSidebarTab, setActiveSidebarTab] = useState('tokens');
@@ -325,6 +449,9 @@ export default function GrigliataPage() {
   const liveInteractionMutationQueueRef = useRef(Promise.resolve());
   const turnOrderRepairPendingRef = useRef(false);
   const narrationActionPendingRef = useRef(false);
+  const fogBrushQueueRef = useRef([]);
+  const fogBrushFlushPromiseRef = useRef(null);
+  const isFogBrushFlushActiveRef = useRef(false);
   const [gridVisibilityUpdateBackgroundId, setGridVisibilityUpdateBackgroundId] = useState('');
   const [isActiveBackgroundDeactivationPending, setIsActiveBackgroundDeactivationPending] = useState(false);
   const [isTurnOrderResetPending, setIsTurnOrderResetPending] = useState(false);
@@ -335,6 +462,7 @@ export default function GrigliataPage() {
   const [isTokenDeadActionPending, setIsTokenDeadActionPending] = useState(false);
   const [isTokenStatusActionPending, setIsTokenStatusActionPending] = useState(false);
   const [isTokenSizeActionPending, setIsTokenSizeActionPending] = useState(false);
+  const [isTokenVisionActionPending, setIsTokenVisionActionPending] = useState(false);
   const [isCreatingCustomToken, setIsCreatingCustomToken] = useState(false);
   const [updatingCustomTokenId, setUpdatingCustomTokenId] = useState('');
   const [deletingCustomTokenId, setDeletingCustomTokenId] = useState('');
@@ -420,7 +548,83 @@ export default function GrigliataPage() {
     currentUserId,
     isManager,
   });
+  const {
+    lightingMetadata,
+  } = useGrigliataLightingMetadata({
+    backgroundId: activeBackgroundId,
+    currentUserId,
+    isManager,
+  });
+  const {
+    lightingRenderInput,
+  } = useGrigliataLightingRenderInput({
+    backgroundId: activeBackgroundId,
+    currentUserId,
+  });
+  const {
+    wallRuntimeState,
+  } = useGrigliataWallRuntimeState({
+    backgroundId: activeBackgroundId,
+    currentUserId,
+  });
+  const {
+    fogOfWar,
+  } = useGrigliataFogOfWar({
+    backgroundId: activeBackgroundId,
+    currentUserId,
+    isManager,
+  });
+  const dmPreviewLightingRenderInput = useMemo(() => {
+    if (lightingRenderInput) {
+      return lightingRenderInput;
+    }
 
+    if (!isManager || !lightingMetadata) {
+      return null;
+    }
+
+    try {
+      return buildGrigliataLightingRenderInput(lightingMetadata, {
+        updatedAt: lightingMetadata.updatedAt || null,
+        updatedBy: lightingMetadata.updatedBy || '',
+      });
+    } catch (error) {
+      console.error('Failed to build DM lighting preview input:', error);
+      return null;
+    }
+  }, [isManager, lightingMetadata, lightingRenderInput]);
+  const effectiveLightingRenderInput = useMemo(() => buildEffectiveLightingRenderInput({
+    lightingRenderInput: dmPreviewLightingRenderInput,
+    wallRuntimeState,
+  }), [dmPreviewLightingRenderInput, wallRuntimeState]);
+  const enabledLightingRenderInput = combatBackground?.lightingEnabled === false
+    ? null
+    : effectiveLightingRenderInput;
+  const editableLightSources = useMemo(
+    () => (isManager ? normalizeEditableLightSources(lightingMetadata?.lights) : []),
+    [isManager, lightingMetadata?.lights]
+  );
+  const editableDarknessSources = useMemo(
+    () => (isManager ? normalizeEditableDarknessSources(lightingMetadata?.darknessSources) : []),
+    [isManager, lightingMetadata?.darknessSources]
+  );
+  const editableWallSources = useMemo(
+    () => (isManager ? normalizeEditableWallSegments(lightingMetadata?.walls) : []),
+    [isManager, lightingMetadata?.walls]
+  );
+  const editableSceneLighting = useMemo(() => {
+    if (!isManager || selectedBackground?.id !== activeBackgroundId) {
+      return null;
+    }
+
+    return normalizeSceneLightingSettings(lightingMetadata?.scene || enabledLightingRenderInput?.scene);
+  }, [
+    activeBackgroundId,
+    enabledLightingRenderInput?.scene,
+    isManager,
+    lightingMetadata?.scene,
+    selectedBackground?.id,
+  ]);
   useEffect(() => {
     if (!currentUserId || isManager || !currentCharacterId) {
       return undefined;
@@ -474,6 +678,7 @@ export default function GrigliataPage() {
     setSelectedTokensDeadState,
     updateTokenStatuses,
     setSelectedTokenSize,
+    setSelectedTokenVision,
   } = useGrigliataPlacementActions({
     activeBackgroundId,
     activePlacementsById,
@@ -493,6 +698,29 @@ export default function GrigliataPage() {
       .filter((token) => token?.tokenId)
       .map((token) => [token.tokenId, token])
   ), [boardTokens]);
+  const activeFogBrushOwnerUids = useMemo(() => {
+    if (!isManager || !currentUserId) {
+      return [];
+    }
+
+    const ownerUids = new Set();
+    [...activePlacementsById.values()].forEach((placement) => {
+      const ownerUid = typeof placement?.ownerUid === 'string' ? placement.ownerUid.trim() : '';
+      if (!ownerUid || ownerUid === currentUserId) {
+        return;
+      }
+
+      const tokenId = typeof placement?.tokenId === 'string' ? placement.tokenId : '';
+      const tokenType = placement?.tokenType || boardTokensById.get(tokenId)?.tokenType || '';
+      if (tokenType === 'foe') {
+        return;
+      }
+
+      ownerUids.add(ownerUid);
+    });
+
+    return [...ownerUids].sort();
+  }, [activePlacementsById, boardTokensById, currentUserId, isManager]);
   const selectedBoardTokens = useMemo(
     () => selectedBoardTokenIds
       .map((tokenId) => boardTokensById.get(tokenId))
@@ -509,6 +737,7 @@ export default function GrigliataPage() {
     && presentationBackground
     && presentationBackground.id === presentationBackgroundId
   );
+  const canEditSceneLighting = !!editableSceneLighting && !isNarrationOverlayActive;
   const isCombatMapChangeLocked = isNarrationOverlayActive || isTurnOrderStarted;
   const isNarrationActionPending = !!narrationActionBackgroundId;
   const destructiveGalleryLockBackgroundIds = useMemo(() => backgrounds.reduce((lockedBackgroundIds, background) => {
@@ -776,9 +1005,14 @@ export default function GrigliataPage() {
     userData,
   ]);
   const trayCurrentUserToken = isManager ? null : currentUserToken;
+  const isFogOfWarEnabled = combatBackground?.fogOfWarEnabled !== false;
   useEffect(() => {
     setSelectedBoardTokenIds([]);
-  }, [activeBackgroundId, isNarrationOverlayActive]);
+    setIsLightToolActive(false);
+    setIsDarknessToolActive(false);
+    setIsWallToolActive(false);
+    setIsFogBrushToolActive(false);
+  }, [activeBackgroundId, isFogOfWarEnabled, isNarrationOverlayActive]);
   const drawTheme = useMemo(
     () => getGrigliataDrawTheme(drawColorKey),
     [drawColorKey]
@@ -795,6 +1029,116 @@ export default function GrigliataPage() {
     () => (isNarrationOverlayActive ? [] : sharedInteractions),
     [isNarrationOverlayActive, sharedInteractions]
   );
+  const fogLightingRenderInput = isFogOfWarEnabled ? effectiveLightingRenderInput : null;
+  const normalizedFogGrid = useMemo(
+    () => normalizeGridConfig(grid),
+    [grid]
+  );
+  const {
+    currentVisibleCells: fogCurrentVisibleCells,
+  } = useGrigliataFogOfWarPersistence({
+    backgroundId: activeBackgroundId,
+    currentUserId,
+    isManager,
+    grid: normalizedFogGrid,
+    tokens: visibleBoardTokens,
+    lightingRenderInput: fogLightingRenderInput,
+    fogOfWar,
+    isEnabled: isFogOfWarEnabled && !isNarrationOverlayActive,
+  });
+  const boardFogOfWar = useMemo(() => {
+    if (
+      isManager
+      || isNarrationOverlayActive
+      || !isFogOfWarEnabled
+      || !fogLightingRenderInput
+    ) {
+      return null;
+    }
+
+    return {
+      exploredCells: fogOfWar?.cellSizePx === normalizedFogGrid.cellSizePx
+        ? fogOfWar.exploredCells
+        : [],
+      currentVisibleCells: fogCurrentVisibleCells,
+    };
+  }, [
+    fogCurrentVisibleCells,
+    fogLightingRenderInput,
+    fogOfWar,
+    isFogOfWarEnabled,
+    isManager,
+    isNarrationOverlayActive,
+    normalizedFogGrid.cellSizePx,
+  ]);
+  const boardRenderTokens = useMemo(
+    () => filterFogVisibleTokens({
+      tokens: visibleBoardTokens,
+      currentUserId,
+      isManager,
+      grid: normalizedFogGrid,
+      fogOfWar: boardFogOfWar,
+    }),
+    [
+      boardFogOfWar,
+      currentUserId,
+      isManager,
+      normalizedFogGrid,
+      visibleBoardTokens,
+    ]
+  );
+  const boardRenderAoEFigures = visibleAoeFigures;
+  const boardRenderSharedInteractions = visibleSharedInteractions;
+  const boardRenderTurnOrderEntries = useMemo(
+    () => filterFogVisibleTurnOrderEntries({
+      entries: turnOrderEntries,
+      tokens: boardRenderTokens,
+      isManager,
+      fogOfWar: boardFogOfWar,
+    }),
+    [
+      boardFogOfWar,
+      boardRenderTokens,
+      isManager,
+      turnOrderEntries,
+    ]
+  );
+  const boardRenderActiveTurnTokenId = useMemo(
+    () => (
+      activeTurnTokenId
+      && boardRenderTurnOrderEntries.some((entry) => entry.tokenId === activeTurnTokenId)
+        ? activeTurnTokenId
+        : ''
+    ),
+    [activeTurnTokenId, boardRenderTurnOrderEntries]
+  );
+  const boardRenderTokenIdSet = useMemo(
+    () => new Set(boardRenderTokens.map((token) => token.tokenId).filter(Boolean)),
+    [boardRenderTokens]
+  );
+  const boardRenderSelectedTokenDetails = useMemo(() => {
+    if (!boardFogOfWar || isManager || !selectedTokenDetails?.tokenId) {
+      return selectedTokenDetails;
+    }
+
+    return boardRenderTokenIdSet.has(selectedTokenDetails.tokenId)
+      ? selectedTokenDetails
+      : null;
+  }, [boardFogOfWar, boardRenderTokenIdSet, isManager, selectedTokenDetails]);
+  useEffect(() => {
+    if (!boardFogOfWar || isManager) {
+      return;
+    }
+
+    setSelectedBoardTokenIds((currentTokenIds) => {
+      if (!currentTokenIds.length) {
+        return currentTokenIds;
+      }
+
+      const nextTokenIds = currentTokenIds.filter((tokenId) => boardRenderTokenIdSet.has(tokenId));
+      return nextTokenIds.length === currentTokenIds.length ? currentTokenIds : nextTokenIds;
+    });
+  }, [boardFogOfWar, boardRenderTokenIdSet, isManager]);
   const normalizedMusicPlaybackState = useMemo(
     () => normalizeGrigliataMusicPlaybackState(musicPlaybackState),
     [musicPlaybackState]
@@ -820,6 +1164,7 @@ export default function GrigliataPage() {
         { key: 'gallery', label: 'DM Gallery' },
         { key: 'music', label: 'Music' },
         { key: 'calibration', label: 'Map Calibration' },
+        { key: 'lighting', label: 'Lighting' },
       ]
       : [{ key: 'tokens', label: 'Tokens' }]
   ), [isManager]);
@@ -827,17 +1172,17 @@ export default function GrigliataPage() {
     || DEFAULT_SIDEBAR_TAB_GRID_CLASS_NAME;
   const isGallerySidebarActive = isManager && activeSidebarTab === 'gallery';
   const immediateImageUrls = useMemo(() => collectUniqueImageUrls([
-    combatBackground?.imageUrl,
-    displayBackground?.imageUrl,
+    getBackgroundImageUrlForPreload(combatBackground),
+    getBackgroundImageUrlForPreload(displayBackground),
     currentUserToken?.imageUrl,
     ...customUserTokens.map((token) => token?.imageUrl),
     ...boardTokens.map((token) => token?.imageUrl),
   ]), [
     boardTokens,
-    combatBackground?.imageUrl,
+    combatBackground,
     currentUserToken?.imageUrl,
     customUserTokens,
-    displayBackground?.imageUrl,
+    displayBackground,
   ]);
   const deferredGalleryImageUrls = useMemo(() => {
     if (!isGallerySidebarActive) {
@@ -847,7 +1192,7 @@ export default function GrigliataPage() {
     const immediateImageUrlSet = new Set(immediateImageUrls);
     return collectUniqueImageUrls(
       backgrounds
-        .map((background) => background?.imageUrl)
+        .map(getBackgroundImageUrlForPreload)
         .filter((imageUrl) => !immediateImageUrlSet.has(imageUrl))
         .slice(0, MAX_DEFERRED_GALLERY_IMAGE_PRELOADS)
     );
@@ -933,6 +1278,10 @@ export default function GrigliataPage() {
 
     setActiveTrayDragType('');
     setActiveAoeFigureType('');
+    setIsLightToolActive(false);
+    setIsDarknessToolActive(false);
+    setIsWallToolActive(false);
+    setIsFogBrushToolActive(false);
     setIsRulerEnabled(false);
     setSelectedBoardTokenIds([]);
     setLocalLiveInteraction(null);
@@ -960,6 +1309,10 @@ export default function GrigliataPage() {
   }, [activeBackgroundId]);
 
   useEffect(() => {
+    setIsLightingDebugOverlayVisible(true);
+  }, [activeBackgroundId]);
+
+  useEffect(() => {
     const nextCalibrationBackgroundId = selectedBackground?.id || '';
     if (calibrationSelectionRef.current === nextCalibrationBackgroundId) return;
 
@@ -967,6 +1320,12 @@ export default function GrigliataPage() {
     setCalibrationDraft(normalizeGridConfig(selectedBackground?.grid));
     setCalibrationError('');
   }, [selectedBackground?.grid, selectedBackground?.id]);
+
+  useEffect(() => {
+    setLightingSelectedFile(null);
+    setLightingImportDraft(null);
+    setLightingImportError('');
+  }, [selectedBackgroundId]);
 
   useEffect(() => {
     if (!currentUserId) return undefined;
@@ -1915,10 +2274,18 @@ export default function GrigliataPage() {
       return;
     }
 
-    if (persistedActiveGrid.cellSizePx === activeGridSizeOverride.cellSizePx) {
+    const overrideGrid = normalizeGridConfig({
+      ...persistedActiveGrid,
+      ...activeGridSizeOverride.grid,
+      ...(Number.isFinite(activeGridSizeOverride.cellSizePx)
+        ? { cellSizePx: activeGridSizeOverride.cellSizePx }
+        : {}),
+    });
+
+    if (areGridConfigsEqual(persistedActiveGrid, overrideGrid)) {
       setActiveGridSizeOverride(null);
     }
-  }, [activeBackgroundId, activeGridSizeOverride, persistedActiveGrid.cellSizePx]);
+  }, [activeBackgroundId, activeGridSizeOverride, persistedActiveGrid]);
 
   useEffect(() => (
     () => {
@@ -2316,54 +2683,75 @@ export default function GrigliataPage() {
     const file = selectedFile;
 
     if (!file) {
-      setUploadError('Select an image file first.');
+      setUploadError('Select an image or MP4 video file first.');
       return;
     }
 
-    if (!file.type?.startsWith('image/')) {
-      setUploadError('The selected file must be an image.');
+    const assetType = getBackgroundUploadAssetType(file);
+
+    if (!assetType) {
+      setUploadError('The selected file must be an image or MP4 video.');
       return;
     }
 
-    if (file.size > MAX_BACKGROUND_FILE_BYTES) {
+    if (assetType === 'image' && file.size > MAX_BACKGROUND_IMAGE_FILE_BYTES) {
       setUploadError('Background images must be 15 MB or smaller.');
+      return;
+    }
+
+    if (assetType === 'video' && file.size > MAX_BACKGROUND_VIDEO_FILE_BYTES) {
+      setUploadError('Background videos must be 25 MB or smaller.');
       return;
     }
 
     const mapName = (uploadName || getDisplayNameFromFileName(file.name)).trim();
     const safeName = buildStorageSafeName(mapName, 'grigliata_map');
-    const fileExtension = getFileExtension(file.name) || '.png';
+    const fileExtension = getFileExtension(file.name)
+      || getFileExtensionFromContentType(file.type)
+      || (assetType === 'video' ? '.mp4' : '.png');
     const storagePath = `grigliata/backgrounds/${user.uid}/${safeName}_${Date.now()}${fileExtension}`;
     let uploadedPath = '';
 
     setIsUploading(true);
     try {
-      const { width, height } = await readFileImageDimensions(file);
+      const mediaMetadata = assetType === 'video'
+        ? await readFileVideoMetadata(file)
+        : await readFileImageDimensions(file);
       const fileRef = storageRef(storage, storagePath);
       await uploadBytes(fileRef, file);
       uploadedPath = storagePath;
       const imageUrl = await getDownloadURL(fileRef);
 
-      await addDoc(collection(db, 'grigliata_backgrounds'), {
+      const backgroundPayload = {
         name: mapName || 'Untitled Map',
         imageUrl,
         imagePath: storagePath,
-        imageWidth: width,
-        imageHeight: height,
+        imageWidth: mediaMetadata.width,
+        imageHeight: mediaMetadata.height,
+        assetType,
+        contentType: file.type || '',
+        fileName: file.name || '',
+        sizeBytes: file.size || 0,
         grid: normalizeGridConfig(DEFAULT_GRID),
         isGridVisible: true,
         createdAt: serverTimestamp(),
         createdBy: user.uid,
         updatedAt: serverTimestamp(),
         updatedBy: user.uid,
-      });
+      };
+
+      if (assetType === 'video') {
+        backgroundPayload.durationMs = mediaMetadata.durationMs || 0;
+      }
+
+      await addDoc(collection(db, 'grigliata_backgrounds'), backgroundPayload);
 
       setSelectedFile(null);
       setUploadName('');
       setUploadError('');
     } catch (error) {
       console.error('Failed to upload background:', error);
-      setUploadError('Failed to upload the selected image.');
+      setUploadError('Failed to upload the selected background.');
 
       if (uploadedPath) {
         try {
@@ -2418,7 +2806,7 @@ export default function GrigliataPage() {
     setIsNarrationClosePending(false);
     setNarrationActionBackgroundId(background.id);
     try {
-      if (background.imageUrl) {
+      if (background.imageUrl && !isVideoBackground(background)) {
         await preloadImageAssets([background.imageUrl]);
       }
 
@@ -3166,6 +3554,28 @@ export default function GrigliataPage() {
     }
   };
 
+  const handleSetSelectedTokenVision = async (tokenId, visionSettings) => {
+    if (!tokenId || typeof visionSettings?.visionEnabled !== 'boolean') {
+      return false;
+    }
+
+    setBoardError('');
+    setIsTokenVisionActionPending(true);
+    try {
+      return await setSelectedTokenVision(tokenId, visionSettings);
+    } catch (error) {
+      console.error('Failed to update token vision settings:', error);
+      setBoardError(
+        isPermissionDeniedError(error)
+          ? 'Only the DM can update token vision settings.'
+          : 'Unable to update that token vision right now.'
+      );
+      return false;
+    } finally {
+      setIsTokenVisionActionPending(false);
+    }
+  };
+
   const handleClearTokensForBackground = async (background) => {
     if (!isManager || !user?.uid || !background?.id) return;
 
@@ -3199,6 +3609,16 @@ export default function GrigliataPage() {
     }
   };
 
+  const deleteOptionalWallRuntimeState = async (backgroundId) => {
+    if (!backgroundId) return;
+
+    const wallStateDocRef = doc(db, GRIGLIATA_WALL_STATE_COLLECTION, backgroundId);
+    const wallStateSnapshot = await getDoc(wallStateDocRef);
+    if (wallStateSnapshot.exists()) {
+      await deleteDoc(wallStateDocRef);
+    }
+  };
+
   const handleDeleteBackground = async (background) => {
     if (!isManager || !user?.uid || !background?.id) return;
 
@@ -3229,6 +3649,17 @@ export default function GrigliataPage() {
       }
 
       await clearPlacementsForBackground(background.id);
+      await deleteDoc(doc(db, GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION, background.id));
+      await deleteDoc(doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, background.id));
+      await deleteOptionalWallRuntimeState(background.id);
+      await runPaginatedWriteBatch({
+        collectionName: GRIGLIATA_FOG_OF_WAR_COLLECTION,
+        baseConstraints: [where('backgroundId', '==', background.id)],
+        applyDocument: ({ batch, docSnap }) => {
+          batch.delete(docSnap.ref);
+          return 1;
+        },
+      });
 
       if (background.imagePath) {
         try {
@@ -3289,7 +3720,7 @@ export default function GrigliataPage() {
       if (selectedBackgroundId === activeBackgroundId) {
         setActiveGridSizeOverride({
           backgroundId: selectedBackgroundId,
-          cellSizePx: normalizedCalibration.cellSizePx,
+          grid: normalizedCalibration,
         });
       }
     } catch (error) {
@@ -3297,6 +3728,943 @@ export default function GrigliataPage() {
       setCalibrationError('Unable to save calibration changes.');
     } finally {
       setIsSavingCalibration(false);
+    }
+  };
+
+  const buildLightingMetadataFromFile = async (file, {
+    importedAt = null,
+    updatedAt = null,
+  } = {}) => {
+    if (!selectedBackground?.id) {
+      throw new Error('Select a background before importing lighting metadata.');
+    }
+
+    if (!file || typeof file.text !== 'function') {
+      throw new Error('Select a Dungeon Alchemist JSON file first.');
+    }
+
+    const rawJson = await file.text();
+    const parsedJson = parseDungeonAlchemistLightingJson(rawJson);
+    return normalizeDungeonAlchemistLightingMetadata(parsedJson, {
+      background: selectedBackground,
+      fileName: file.name || '',
+      importedAt,
+      importedBy: user?.uid || '',
+      updatedAt,
+      updatedBy: user?.uid || '',
+    });
+  };
+
+  const handleLightingFileChange = async (event) => {
+    const file = event.target.files?.[0] || null;
+    setLightingSelectedFile(file);
+    setLightingImportDraft(null);
+    setLightingImportError('');
+
+    if (!file) {
+      return;
+    }
+
+    try {
+      const metadataDraft = await buildLightingMetadataFromFile(file);
+      setLightingImportDraft(metadataDraft);
+    } catch (error) {
+      setLightingImportError(error?.message || 'Unable to parse that lighting metadata file.');
+    }
+  };
+
+  const handleImportLightingMetadata = async () => {
+    if (!isManager || !user?.uid || !selectedBackground?.id) return;
+
+    setLightingImportError('');
+    setBoardError('');
+    setIsImportingLighting(true);
+
+    try {
+      const importedAt = serverTimestamp();
+      const updatedAt = serverTimestamp();
+      const metadata = await buildLightingMetadataFromFile(lightingSelectedFile, {
+        importedAt,
+        updatedAt,
+      });
+      const summary = buildGrigliataLightingSummary(metadata, importedAt);
+      const renderInput = buildGrigliataLightingRenderInput(metadata, {
+        updatedAt,
+        updatedBy: user.uid,
+      });
+
+      await setDoc(
+        doc(db, GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION, selectedBackground.id),
+        metadata,
+        { merge: true }
+      );
+      await setDoc(
+        doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, selectedBackground.id),
+        renderInput,
+        { merge: true }
+      );
+      await setDoc(
+        doc(db, GRIGLIATA_WALL_STATE_COLLECTION, selectedBackground.id),
+        {
+          backgroundId: selectedBackground.id,
+          segments: {},
+          updatedAt,
+          updatedBy: user.uid,
+        }
+      );
+      await updateDoc(doc(db, 'grigliata_backgrounds', selectedBackground.id), {
+        lightingSummary: summary,
+        lightingEnabled: true,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+
+      setLightingImportDraft(metadata);
+    } catch (error) {
+      console.error('Failed to import Grigliata lighting metadata:', error);
+      setLightingImportError(error?.message || 'Unable to import lighting metadata.');
+    } finally {
+      setIsImportingLighting(false);
+    }
+  };
+
+  const handleToggleLightingDebugOverlay = () => {
+    setIsLightingDebugOverlayVisible((currentValue) => !currentValue);
+  };
+
+  const handleToggleLightingEnabled = async () => {
+    if (!isManager || !user?.uid || !selectedBackground?.id || isLightingEnabledPending) return;
+
+    setLightingImportError('');
+    setBoardError('');
+    setIsLightingEnabledPending(true);
+
+    try {
+      await updateDoc(doc(db, 'grigliata_backgrounds', selectedBackground.id), {
+        lightingEnabled: selectedBackground.lightingEnabled === false,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+    } catch (error) {
+      console.error('Failed to update Grigliata lighting enabled state:', error);
+      setLightingImportError('Unable to update computed lighting right now.');
+    } finally {
+      setIsLightingEnabledPending(false);
+    }
+  };
+
+  const handleToggleFogOfWarEnabled = async () => {
+    if (!isManager || !user?.uid || !selectedBackground?.id || isFogOfWarEnabledPending) return;
+
+    setLightingImportError('');
+    setBoardError('');
+    setIsFogOfWarEnabledPending(true);
+
+    try {
+      await updateDoc(doc(db, 'grigliata_backgrounds', selectedBackground.id), {
+        fogOfWarEnabled: selectedBackground.fogOfWarEnabled === false,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+    } catch (error) {
+      console.error('Failed to update Grigliata fog of war enabled state:', error);
+      setLightingImportError('Unable to update fog of war right now.');
+    } finally {
+      setIsFogOfWarEnabledPending(false);
+    }
+  };
+
+  const handleToggleFogBrushTool = useCallback(() => {
+    if (!isManager || !activeBackgroundId || !isFogOfWarEnabled) return;
+
+    setBoardError('');
+    setIsFogBrushToolActive((currentValue) => !currentValue);
+    setIsLightToolActive(false);
+    setIsDarknessToolActive(false);
+    setIsWallToolActive(false);
+    setActiveAoeFigureType('');
+    setIsRulerEnabled(false);
+  }, [activeBackgroundId, isFogOfWarEnabled, isManager]);
+
+  const handleChangeFogBrushMode = useCallback((nextMode) => {
+    setFogBrushMode(normalizeFogBrushMode(nextMode));
+  }, []);
+
+  const handleChangeFogBrushRadiusSquares = useCallback((nextRadiusSquares) => {
+    setFogBrushRadiusSquares(normalizeFogBrushRadiusSquares(nextRadiusSquares));
+  }, []);
+
+  const persistFogBrushQueueEntry = useCallback(async (entry) => {
+    if (
+      !entry?.backgroundId
+      || !entry?.updatedBy
+      || !Array.isArray(entry?.ownerUids)
+      || entry.ownerUids.length < 1
+      || !(entry?.brushCells instanceof Set)
+      || entry.brushCells.size < 1
+    ) {
+      return false;
+    }
+
+    const brushCells = [...entry.brushCells];
+    const updatedAt = serverTimestamp();
+    const writeResults = await Promise.all(entry.ownerUids.map(async (ownerUid) => {
+      const fogDocId = buildGrigliataFogOfWarDocId(entry.backgroundId, ownerUid);
+      if (!fogDocId) {
+        return false;
+      }
+
+      const fogDocRef = doc(db, GRIGLIATA_FOG_OF_WAR_COLLECTION, fogDocId);
+      return runTransaction(db, async (transaction) => {
+        const fogDocSnapshot = await transaction.get(fogDocRef);
+        const existingFogDoc = fogDocSnapshot.exists()
+          ? normalizeGrigliataFogOfWarDoc({
+              id: fogDocSnapshot.id,
+              ...fogDocSnapshot.data(),
+            })
+          : null;
+        const hasMatchingCellSize = existingFogDoc?.cellSizePx === entry.cellSizePx;
+
+        if (entry.mode === 'hide' && !hasMatchingCellSize) {
+          return false;
+        }
+
+        const nextExploredCells = applyFogBrushEdit({
+          existingCells: hasMatchingCellSize ? existingFogDoc.exploredCells : [],
+          brushCells,
+          mode: entry.mode,
+          cellLimit: GRIGLIATA_FOG_BRUSH_CELL_LIMIT,
+        });
+
+        transaction.set(fogDocRef, {
+          schemaVersion: GRIGLIATA_FOG_OF_WAR_SCHEMA_VERSION,
+          backgroundId: entry.backgroundId,
+          ownerUid,
+          cellSizePx: entry.cellSizePx,
+          exploredCells: nextExploredCells,
+          updatedAt,
+          updatedBy: entry.updatedBy,
+        }, { merge: true });
+        return true;
+      });
+    }));
+
+    return writeResults.some(Boolean);
+  }, []);
+
+  const flushFogBrushQueue = useCallback(() => {
+    if (isFogBrushFlushActiveRef.current) {
+      return fogBrushFlushPromiseRef.current || Promise.resolve(false);
+    }
+
+    isFogBrushFlushActiveRef.current = true;
+    setIsFogBrushMutationPending(true);
+
+    const flushPromise = (async () => {
+      let didWrite = false;
+
+      try {
+        while (fogBrushQueueRef.current.length > 0) {
+          const queuedEntries = fogBrushQueueRef.current.splice(0, fogBrushQueueRef.current.length);
+
+          for (const queuedEntry of queuedEntries) {
+            const didWriteEntry = await persistFogBrushQueueEntry(queuedEntry);
+            didWrite = didWrite || didWriteEntry;
+          }
+        }
+
+        return didWrite;
+      } catch (error) {
+        console.error('Failed to paint Grigliata fog brush:', error);
+        setBoardError('Unable to update fog of war right now.');
+        throw error;
+      } finally {
+        isFogBrushFlushActiveRef.current = false;
+        fogBrushFlushPromiseRef.current = null;
+        setIsFogBrushMutationPending(false);
+      }
+    })();
+
+    fogBrushFlushPromiseRef.current = flushPromise;
+    return flushPromise;
+  }, [persistFogBrushQueueEntry]);
+
+  const handlePaintFogBrush = useCallback(async ({
+    point = {},
+    mode = fogBrushMode,
+    radiusSquares = fogBrushRadiusSquares,
+  } = {}) => {
+    if (
+      !isManager
+      || !user?.uid
+      || !activeBackgroundId
+      || !isFogOfWarEnabled
+      || isNarrationOverlayActive
+      || activeFogBrushOwnerUids.length < 1
+    ) {
+      return false;
+    }
+
+    const brushSettings = normalizeFogBrushSettings({ mode, radiusSquares });
+    const brushCells = buildFogBrushCellKeys({
+      point,
+      radiusSquares: brushSettings.radiusSquares,
+      grid: normalizedFogGrid,
+    });
+    if (brushCells.length < 1) {
+      return false;
+    }
+
+    setBoardError('');
+    setLightingImportError('');
+
+    const ownerUids = [...activeFogBrushOwnerUids];
+    const queueEntry = {
+      backgroundId: activeBackgroundId,
+      ownerUids,
+      mode: brushSettings.mode,
+      cellSizePx: normalizedFogGrid.cellSizePx,
+      updatedBy: user.uid,
+      brushCells: new Set(brushCells),
+    };
+    queueEntry.key = buildFogBrushQueueKey(queueEntry);
+
+    const lastQueuedEntry = fogBrushQueueRef.current[fogBrushQueueRef.current.length - 1];
+    if (lastQueuedEntry?.key === queueEntry.key) {
+      brushCells.forEach((cellKey) => lastQueuedEntry.brushCells.add(cellKey));
+    } else {
+      fogBrushQueueRef.current.push(queueEntry);
+    }
+
+    return flushFogBrushQueue();
+  }, [
+    activeBackgroundId,
+    activeFogBrushOwnerUids,
+    fogBrushMode,
+    fogBrushRadiusSquares,
+    flushFogBrushQueue,
+    isManager,
+    isFogOfWarEnabled,
+    isNarrationOverlayActive,
+    normalizedFogGrid,
+    user?.uid,
+  ]);
+
+  const handleToggleWallRuntimeSegment = async (wall) => {
+    if (!isManager || !user?.uid || !activeBackgroundId || !wall?.id) return;
+
+    const wallType = wall.wallType === 'window' ? 'window' : (wall.wallType === 'door' ? 'door' : '');
+    if (!wallType) return;
+
+    setBoardError('');
+
+    try {
+      const updatedAt = serverTimestamp();
+      await setDoc(
+        doc(db, GRIGLIATA_WALL_STATE_COLLECTION, activeBackgroundId),
+        {
+          backgroundId: activeBackgroundId,
+          segments: {
+            [wall.id]: {
+              isOpen: wall.isOpen !== true,
+              updatedAt,
+              updatedBy: user.uid,
+            },
+          },
+          updatedAt,
+          updatedBy: user.uid,
+        },
+        { merge: true }
+      );
+    } catch (error) {
+      console.error('Failed to update Grigliata wall runtime state:', error);
+      setBoardError('Unable to update that door or window right now.');
+    }
+  };
+
+  const buildLightingMetadataForEdits = useCallback(({
+    nextLights = null,
+    nextWalls = null,
+    nextDarknessSources = null,
+    nextScene = null,
+    updatedAt,
+  } = {}) => {
+    if (!activeBackgroundId) {
+      throw new Error('Select a background before editing lighting metadata.');
+    }
+
+    const snapshotMetadata = lightingMetadata && typeof lightingMetadata === 'object'
+      ? lightingMetadata
+      : {};
+    const baseMetadata = { ...snapshotMetadata };
+    delete baseMetadata.id;
+    const normalizedGrid = normalizeGridConfig(baseMetadata.grid || grid);
+    const metadataGrid = {
+      ...(baseMetadata.grid && typeof baseMetadata.grid === 'object' ? baseMetadata.grid : {}),
+      ...normalizedGrid,
+    };
+    const scene = nextScene || baseMetadata.scene || lightingRenderInput?.scene || {
+      darkness: 0.6,
+      globalLight: false,
+    };
+    const walls = Array.isArray(nextWalls)
+      ? normalizeEditableWallSegments(nextWalls)
+      : (Array.isArray(baseMetadata.walls)
+      ? baseMetadata.walls
+      : (Array.isArray(lightingRenderInput?.walls) ? lightingRenderInput.walls : []));
+    const lights = Array.isArray(nextLights)
+      ? normalizeEditableLightSources(nextLights)
+      : (Array.isArray(baseMetadata.lights)
+        ? normalizeEditableLightSources(baseMetadata.lights)
+        : normalizeEditableLightSources(lightingRenderInput?.lights));
+    const darknessSources = Array.isArray(nextDarknessSources)
+      ? normalizeEditableDarknessSources(nextDarknessSources)
+      : (Array.isArray(baseMetadata.darknessSources)
+        ? normalizeEditableDarknessSources(baseMetadata.darknessSources)
+        : normalizeEditableDarknessSources(lightingRenderInput?.darknessSources));
+
+    return {
+      ...baseMetadata,
+      schemaVersion: baseMetadata.schemaVersion || 1,
+      backgroundId: activeBackgroundId,
+      source: baseMetadata.source || {
+        type: 'manual',
+        importedAt: null,
+        importedBy: user?.uid || '',
+      },
+      grid: metadataGrid,
+      scene: normalizeSceneLightingSettings(scene),
+      walls,
+      lights,
+      darknessSources,
+      updatedAt,
+      updatedBy: user?.uid || '',
+    };
+  }, [
+    activeBackgroundId,
+    grid,
+    lightingMetadata,
+    lightingRenderInput?.darknessSources,
+    lightingRenderInput?.lights,
+    lightingRenderInput?.scene,
+    lightingRenderInput?.walls,
+    user?.uid,
+  ]);
+
+  const buildLightingMetadataForLightSources = useCallback((nextLights, updatedAt) => (
+    buildLightingMetadataForEdits({ nextLights, updatedAt })
+  ), [buildLightingMetadataForEdits]);
+
+  const persistLightSources = useCallback(async (nextLights, {
+    enableLighting = false,
+  } = {}) => {
+    if (!isManager || !user?.uid || !activeBackgroundId || isLightSourceMutationPending) {
+      return false;
+    }
+
+    setBoardError('');
+    setLightingImportError('');
+    setIsLightSourceMutationPending(true);
+
+    try {
+      const updatedAt = serverTimestamp();
+      const metadata = buildLightingMetadataForLightSources(nextLights, updatedAt);
+      const renderInput = buildGrigliataLightingRenderInput(metadata, {
+        updatedAt,
+        updatedBy: user.uid,
+      });
+      const summary = buildGrigliataLightingSummary(metadata, metadata.source?.importedAt || null);
+
+      await setDoc(
+        doc(db, GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION, activeBackgroundId),
+        metadata,
+        { merge: true }
+      );
+      await setDoc(
+        doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, activeBackgroundId),
+        renderInput,
+        { merge: true }
+      );
+      await updateDoc(doc(db, 'grigliata_backgrounds', activeBackgroundId), {
+        lightingSummary: summary,
+        ...(enableLighting ? { lightingEnabled: true } : {}),
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to update Grigliata light sources:', error);
+      setBoardError('Unable to update that light source right now.');
+      throw error;
+    } finally {
+      setIsLightSourceMutationPending(false);
+    }
+  }, [
+    activeBackgroundId,
+    buildLightingMetadataForLightSources,
+    isLightSourceMutationPending,
+    isManager,
+    user?.uid,
+  ]);
+
+  const handleToggleLightTool = useCallback(() => {
+    if (!isManager || !activeBackgroundId) return;
+
+    setBoardError('');
+    setIsLightToolActive((currentValue) => !currentValue);
+    setIsDarknessToolActive(false);
+    setIsWallToolActive(false);
+    setIsFogBrushToolActive(false);
+    setActiveAoeFigureType('');
+    setIsRulerEnabled(false);
+  }, [activeBackgroundId, isManager]);
+
+  const handleCreateLightSource = useCallback(async (point) => {
+    if (!isManager || !activeBackgroundId) return false;
+
+    const currentLights = normalizeEditableLightSources(lightingMetadata?.lights);
+    const nextLight = createManualLightSource({
+      existingLights: currentLights,
+      point,
+      grid,
+    });
+
+    if (!nextLight) return false;
+
+    return persistLightSources([...currentLights, nextLight], { enableLighting: true });
+  }, [activeBackgroundId, grid, isManager, lightingMetadata?.lights, persistLightSources]);
+
+  const handleMoveLightSource = useCallback(async (lightId, point) => {
+    if (!isManager || !activeBackgroundId || !lightId) return false;
+
+    const nextLights = moveLightSource(lightingMetadata?.lights, lightId, point);
+    return persistLightSources(nextLights);
+  }, [activeBackgroundId, isManager, lightingMetadata?.lights, persistLightSources]);
+
+  const handleUpdateLightSource = useCallback(async (lightId, patch) => {
+    if (!isManager || !activeBackgroundId || !lightId) return false;
+
+    const nextLights = updateLightSource(lightingMetadata?.lights, lightId, patch);
+    return persistLightSources(nextLights);
+  }, [activeBackgroundId, isManager, lightingMetadata?.lights, persistLightSources]);
+
+  const handleDuplicateLightSource = useCallback(async (lightId) => {
+    if (!isManager || !activeBackgroundId || !lightId) return false;
+
+    const nextLights = duplicateLightSource(lightingMetadata?.lights, lightId, { grid });
+    return persistLightSources(nextLights);
+  }, [activeBackgroundId, grid, isManager, lightingMetadata?.lights, persistLightSources]);
+
+  const handleDeleteLightSource = useCallback(async (lightId) => {
+    if (!isManager || !activeBackgroundId || !lightId) return false;
+
+    const nextLights = deleteLightSource(lightingMetadata?.lights, lightId);
+    return persistLightSources(nextLights);
+  }, [activeBackgroundId, isManager, lightingMetadata?.lights, persistLightSources]);
+
+  const buildLightingMetadataForDarknessSources = useCallback((nextDarknessSources, updatedAt) => (
+    buildLightingMetadataForEdits({ nextDarknessSources, updatedAt })
+  ), [buildLightingMetadataForEdits]);
+
+  const buildLightingMetadataForScene = useCallback((nextScene, updatedAt) => (
+    buildLightingMetadataForEdits({ nextScene, updatedAt })
+  ), [buildLightingMetadataForEdits]);
+
+  const persistDarknessSources = useCallback(async (nextDarknessSources, {
+    enableLighting = false,
+  } = {}) => {
+    if (!isManager || !user?.uid || !activeBackgroundId || isDarknessSourceMutationPending) {
+      return false;
+    }
+
+    setBoardError('');
+    setLightingImportError('');
+    setIsDarknessSourceMutationPending(true);
+
+    try {
+      const updatedAt = serverTimestamp();
+      const metadata = buildLightingMetadataForDarknessSources(nextDarknessSources, updatedAt);
+      const renderInput = buildGrigliataLightingRenderInput(metadata, {
+        updatedAt,
+        updatedBy: user.uid,
+      });
+      const summary = buildGrigliataLightingSummary(metadata, metadata.source?.importedAt || null);
+
+      await setDoc(
+        doc(db, GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION, activeBackgroundId),
+        metadata,
+        { merge: true }
+      );
+      await setDoc(
+        doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, activeBackgroundId),
+        renderInput,
+        { merge: true }
+      );
+      await updateDoc(doc(db, 'grigliata_backgrounds', activeBackgroundId), {
+        lightingSummary: summary,
+        ...(enableLighting ? { lightingEnabled: true } : {}),
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to update Grigliata darkness sources:', error);
+      setBoardError('Unable to update that darkness source right now.');
+      throw error;
+    } finally {
+      setIsDarknessSourceMutationPending(false);
+    }
+  }, [
+    activeBackgroundId,
+    buildLightingMetadataForDarknessSources,
+    isDarknessSourceMutationPending,
+    isManager,
+    user?.uid,
+  ]);
+
+  const persistSceneLighting = useCallback(async (nextScene) => {
+    if (!isManager || !user?.uid || !activeBackgroundId || isSceneLightingMutationPending) {
+      return false;
+    }
+
+    setBoardError('');
+    setLightingImportError('');
+    setIsSceneLightingMutationPending(true);
+
+    try {
+      const updatedAt = serverTimestamp();
+      const metadata = buildLightingMetadataForScene(nextScene, updatedAt);
+      const renderInput = buildGrigliataLightingRenderInput(metadata, {
+        updatedAt,
+        updatedBy: user.uid,
+      });
+      const summary = buildGrigliataLightingSummary(metadata, metadata.source?.importedAt || null);
+
+      await setDoc(
+        doc(db, GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION, activeBackgroundId),
+        metadata,
+        { merge: true }
+      );
+      await setDoc(
+        doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, activeBackgroundId),
+        renderInput,
+        { merge: true }
+      );
+      await updateDoc(doc(db, 'grigliata_backgrounds', activeBackgroundId), {
+        lightingSummary: summary,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to update Grigliata scene lighting:', error);
+      setLightingImportError('Unable to update scene lighting right now.');
+      throw error;
+    } finally {
+      setIsSceneLightingMutationPending(false);
+    }
+  }, [
+    activeBackgroundId,
+    buildLightingMetadataForScene,
+    isManager,
+    isSceneLightingMutationPending,
+    user?.uid,
+  ]);
+
+  const handleToggleDarknessTool = useCallback(() => {
+    if (!isManager || !activeBackgroundId) return;
+
+    setBoardError('');
+    setIsDarknessToolActive((currentValue) => !currentValue);
+    setIsLightToolActive(false);
+    setIsWallToolActive(false);
+    setIsFogBrushToolActive(false);
+    setActiveAoeFigureType('');
+    setIsRulerEnabled(false);
+  }, [activeBackgroundId, isManager]);
+
+  const handleCreateDarknessSource = useCallback(async (point) => {
+    if (!isManager || !activeBackgroundId) return false;
+
+    const currentDarknessSources = normalizeEditableDarknessSources(lightingMetadata?.darknessSources);
+    const nextDarknessSource = createManualDarknessSource({
+      existingDarknessSources: currentDarknessSources,
+      point,
+      grid,
+    });
+
+    if (!nextDarknessSource) return false;
+
+    return persistDarknessSources([...currentDarknessSources, nextDarknessSource], { enableLighting: true });
+  }, [activeBackgroundId, grid, isManager, lightingMetadata?.darknessSources, persistDarknessSources]);
+
+  const handleMoveDarknessSource = useCallback(async (darknessId, point) => {
+    if (!isManager || !activeBackgroundId || !darknessId) return false;
+
+    const nextDarknessSources = moveDarknessSource(lightingMetadata?.darknessSources, darknessId, point);
+    return persistDarknessSources(nextDarknessSources);
+  }, [activeBackgroundId, isManager, lightingMetadata?.darknessSources, persistDarknessSources]);
+
+  const handleUpdateDarknessSource = useCallback(async (darknessId, patch) => {
+    if (!isManager || !activeBackgroundId || !darknessId) return false;
+
+    const nextDarknessSources = updateDarknessSource(lightingMetadata?.darknessSources, darknessId, patch);
+    return persistDarknessSources(nextDarknessSources);
+  }, [activeBackgroundId, isManager, lightingMetadata?.darknessSources, persistDarknessSources]);
+
+  const handleDuplicateDarknessSource = useCallback(async (darknessId) => {
+    if (!isManager || !activeBackgroundId || !darknessId) return false;
+
+    const nextDarknessSources = duplicateDarknessSource(lightingMetadata?.darknessSources, darknessId, { grid });
+    return persistDarknessSources(nextDarknessSources);
+  }, [activeBackgroundId, grid, isManager, lightingMetadata?.darknessSources, persistDarknessSources]);
+
+  const handleDeleteDarknessSource = useCallback(async (darknessId) => {
+    if (!isManager || !activeBackgroundId || !darknessId) return false;
+
+    const nextDarknessSources = deleteDarknessSource(lightingMetadata?.darknessSources, darknessId);
+    return persistDarknessSources(nextDarknessSources);
+  }, [activeBackgroundId, isManager, lightingMetadata?.darknessSources, persistDarknessSources]);
+
+  const handleUpdateSceneLighting = useCallback(async (patch) => {
+    if (!isManager || !activeBackgroundId || selectedBackground?.id !== activeBackgroundId) return false;
+
+    const currentScene = normalizeSceneLightingSettings(lightingMetadata?.scene || enabledLightingRenderInput?.scene);
+    const nextScene = normalizeSceneLightingSettings({
+      ...currentScene,
+      ...(patch || {}),
+    });
+    return persistSceneLighting(nextScene);
+  }, [
+    activeBackgroundId,
+    enabledLightingRenderInput?.scene,
+    isManager,
+    lightingMetadata?.scene,
+    persistSceneLighting,
+    selectedBackground?.id,
+  ]);
+
+  const buildLightingMetadataForWallSources = useCallback((nextWalls, updatedAt) => (
+    buildLightingMetadataForEdits({ nextWalls, updatedAt })
+  ), [buildLightingMetadataForEdits]);
+
+  const persistWallSources = useCallback(async (nextWalls) => {
+    if (!isManager || !user?.uid || !activeBackgroundId || isWallSourceMutationPending) {
+      return false;
+    }
+
+    setBoardError('');
+    setLightingImportError('');
+    setIsWallSourceMutationPending(true);
+
+    try {
+      const updatedAt = serverTimestamp();
+      const metadata = buildLightingMetadataForWallSources(nextWalls, updatedAt);
+      const renderInput = buildGrigliataLightingRenderInput(metadata, {
+        updatedAt,
+        updatedBy: user.uid,
+      });
+      const summary = buildGrigliataLightingSummary(metadata, metadata.source?.importedAt || null);
+
+      await setDoc(
+        doc(db, GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION, activeBackgroundId),
+        metadata,
+        { merge: true }
+      );
+      await setDoc(
+        doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, activeBackgroundId),
+        renderInput,
+        { merge: true }
+      );
+      await updateDoc(doc(db, 'grigliata_backgrounds', activeBackgroundId), {
+        lightingSummary: summary,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to update Grigliata wall sources:', error);
+      setBoardError('Unable to update that wall source right now.');
+      throw error;
+    } finally {
+      setIsWallSourceMutationPending(false);
+    }
+  }, [
+    activeBackgroundId,
+    buildLightingMetadataForWallSources,
+    isManager,
+    isWallSourceMutationPending,
+    user?.uid,
+  ]);
+
+  const handleToggleWallTool = useCallback(() => {
+    if (!isManager || !activeBackgroundId) return;
+
+    setBoardError('');
+    setIsWallToolActive((currentValue) => !currentValue);
+    setIsLightToolActive(false);
+    setIsDarknessToolActive(false);
+    setIsFogBrushToolActive(false);
+    setActiveAoeFigureType('');
+    setIsRulerEnabled(false);
+  }, [activeBackgroundId, isManager]);
+
+  const handleCreateWallSegment = useCallback(async (startPoint, endPoint) => {
+    if (!isManager || !activeBackgroundId) return false;
+
+    const currentWalls = normalizeEditableWallSegments(lightingMetadata?.walls);
+    const nextWall = createManualWallSegment({
+      existingWalls: currentWalls,
+      startPoint,
+      endPoint,
+    });
+
+    if (!nextWall) return false;
+
+    return persistWallSources([...currentWalls, nextWall]);
+  }, [activeBackgroundId, isManager, lightingMetadata?.walls, persistWallSources]);
+
+  const handleMoveWallEndpoint = useCallback(async (wallId, endpoint, point) => {
+    if (!isManager || !activeBackgroundId || !wallId) return false;
+
+    const nextWalls = moveWallEndpoint(lightingMetadata?.walls, wallId, endpoint, point);
+    return persistWallSources(nextWalls);
+  }, [activeBackgroundId, isManager, lightingMetadata?.walls, persistWallSources]);
+
+  const handleMoveWallSegment = useCallback(async (wallId, delta) => {
+    if (!isManager || !activeBackgroundId || !wallId) return false;
+
+    const nextWalls = moveWallSegment(lightingMetadata?.walls, wallId, delta);
+    return persistWallSources(nextWalls);
+  }, [activeBackgroundId, isManager, lightingMetadata?.walls, persistWallSources]);
+
+  const handleUpdateWallSegment = useCallback(async (wallId, patch) => {
+    if (!isManager || !activeBackgroundId || !wallId) return false;
+
+    const nextWalls = updateWallSegment(lightingMetadata?.walls, wallId, patch);
+    return persistWallSources(nextWalls);
+  }, [activeBackgroundId, isManager, lightingMetadata?.walls, persistWallSources]);
+
+  const handleDuplicateWallSegment = useCallback(async (wallId) => {
+    if (!isManager || !activeBackgroundId || !wallId) return false;
+
+    const nextWalls = duplicateWallSegment(lightingMetadata?.walls, wallId, { grid });
+    return persistWallSources(nextWalls);
+  }, [activeBackgroundId, grid, isManager, lightingMetadata?.walls, persistWallSources]);
+
+  const handleDeleteWallSegment = useCallback(async (wallId) => {
+    if (!isManager || !user?.uid || !activeBackgroundId || !wallId) return false;
+
+    const nextWalls = deleteWallSegment(lightingMetadata?.walls, wallId);
+    const didPersistWalls = await persistWallSources(nextWalls);
+    if (!didPersistWalls) return false;
+
+    try {
+      const updatedAt = serverTimestamp();
+      await setDoc(
+        doc(db, GRIGLIATA_WALL_STATE_COLLECTION, activeBackgroundId),
+        {
+          backgroundId: activeBackgroundId,
+          segments: {
+            [wallId]: deleteField(),
+          },
+          updatedAt,
+          updatedBy: user.uid,
+        },
+        { merge: true }
+      );
+    } catch (error) {
+      console.error('Failed to clear Grigliata wall runtime state:', error);
+      setBoardError('Unable to clear that wall source runtime state right now.');
+      throw error;
+    }
+
+    return true;
+  }, [activeBackgroundId, isManager, lightingMetadata?.walls, persistWallSources, user?.uid]);
+
+  const handleResetFogOfWar = async () => {
+    if (!isManager || !user?.uid || !selectedBackground?.id || isFogResetPending) return;
+
+    const confirmed = window.confirm(`Reset explored fog for "${selectedBackground.name || 'Untitled Map'}"?`);
+    if (!confirmed) return;
+
+    setLightingImportError('');
+    setBoardError('');
+    setIsFogResetPending(true);
+
+    try {
+      await runPaginatedWriteBatch({
+        collectionName: GRIGLIATA_FOG_OF_WAR_COLLECTION,
+        baseConstraints: [where('backgroundId', '==', selectedBackground.id)],
+        applyDocument: ({ batch, docSnap }) => {
+          batch.delete(docSnap.ref);
+          return 1;
+        },
+      });
+    } catch (error) {
+      console.error('Failed to reset Grigliata fog of war:', error);
+      setLightingImportError('Unable to reset fog of war right now.');
+    } finally {
+      setIsFogResetPending(false);
+    }
+  };
+
+  const handleApplyLightingCalibration = async () => {
+    if (!isManager || !user?.uid || !selectedBackground?.id) return;
+
+    const calibrationSource = lightingImportDraft
+      || (selectedBackground.id === activeBackgroundId ? lightingMetadata : null);
+
+    if (!calibrationSource?.grid) {
+      setLightingImportError('Import lighting metadata for this background before applying JSON calibration.');
+      return;
+    }
+
+    setLightingImportError('');
+    setCalibrationError('');
+    setBoardError('');
+    setIsApplyingLightingCalibration(true);
+
+    try {
+      const normalizedCalibration = normalizeGridConfig(calibrationSource.grid);
+      const updatedAt = serverTimestamp();
+      const renderInput = selectedBackground.id === activeBackgroundId && lightingMetadata
+        ? buildGrigliataLightingRenderInput(lightingMetadata, {
+          updatedAt,
+          updatedBy: user.uid,
+        })
+        : null;
+
+      if (selectedBackground.id === activeBackgroundId) {
+        await flushPendingGridSizeAutosave();
+      }
+
+      await updateDoc(doc(db, 'grigliata_backgrounds', selectedBackground.id), {
+        grid: normalizedCalibration,
+        updatedAt,
+        updatedBy: user.uid,
+      });
+      if (renderInput) {
+        await setDoc(
+          doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, selectedBackground.id),
+          renderInput,
+          { merge: true }
+        );
+      }
+
+      setCalibrationDraft(normalizedCalibration);
+
+      if (selectedBackground.id === activeBackgroundId) {
+        setActiveGridSizeOverride({
+          backgroundId: selectedBackground.id,
+          grid: normalizedCalibration,
+        });
+      }
+    } catch (error) {
+      console.error('Failed to apply lighting calibration:', error);
+      setLightingImportError('Unable to apply JSON calibration.');
+    } finally {
+      setIsApplyingLightingCalibration(false);
     }
   };
 
@@ -3440,12 +4808,20 @@ export default function GrigliataPage() {
   const handleSelectMouseTool = useCallback(() => {
     setBoardError('');
     setActiveAoeFigureType('');
+    setIsLightToolActive(false);
+    setIsDarknessToolActive(false);
+    setIsWallToolActive(false);
+    setIsFogBrushToolActive(false);
     setIsRulerEnabled(false);
   }, []);
 
   const handleToggleRuler = useCallback(() => {
     setBoardError('');
     setActiveAoeFigureType('');
+    setIsLightToolActive(false);
+    setIsDarknessToolActive(false);
+    setIsWallToolActive(false);
+    setIsFogBrushToolActive(false);
     setIsRulerEnabled((currentValue) => !currentValue);
   }, []);
 
@@ -3453,6 +4829,10 @@ export default function GrigliataPage() {
     setBoardError('');
     setActiveAoeFigureType(nextFigureType || '');
     if (nextFigureType) {
+      setIsLightToolActive(false);
+      setIsDarknessToolActive(false);
+      setIsWallToolActive(false);
+      setIsFogBrushToolActive(false);
       setIsRulerEnabled(false);
     }
   }, []);
@@ -3734,8 +5114,8 @@ export default function GrigliataPage() {
                 combatBackgroundName={combatBackground?.name || ''}
                 grid={grid}
                 isGridVisible={isNarrationOverlayActive ? false : isGridVisible}
-                tokens={visibleBoardTokens}
-                aoeFigures={visibleAoeFigures}
+                tokens={boardRenderTokens}
+                aoeFigures={boardRenderAoEFigures}
                 currentUserId={user.uid}
                 isManager={isManager}
                 isTokenDragActive={isTrayDragging && !isNarrationOverlayActive}
@@ -3757,9 +5137,9 @@ export default function GrigliataPage() {
                 onDeactivateActiveBackground={isManager ? handleDeactivateActiveBackground : null}
                 isDeactivateActiveBackgroundDisabled={!activeBackgroundId || isActiveBackgroundDeactivationPending || isCombatMapChangeLocked}
                 isTurnOrderEnabled={isTurnOrderEnabled}
-                turnOrderEntries={turnOrderEntries}
+                turnOrderEntries={boardRenderTurnOrderEntries}
                 isTurnOrderStarted={isTurnOrderStarted}
-                activeTurnTokenId={activeTurnTokenId}
+                activeTurnTokenId={boardRenderActiveTurnTokenId}
                 onStartTurnOrder={isManager && !isNarrationOverlayActive ? handleStartTurnOrder : null}
                 onAdvanceTurnOrder={isManager && !isNarrationOverlayActive ? handleAdvanceTurnOrder : null}
                 isTurnOrderProgressPending={isTurnOrderProgressPending}
@@ -3786,9 +5166,61 @@ export default function GrigliataPage() {
                 isTokenStatusActionPending={isTokenStatusActionPending}
                 onSetSelectedTokenSize={isNarrationOverlayActive ? null : handleSetSelectedTokenSize}
                 isTokenSizeActionPending={isTokenSizeActionPending}
-                selectedTokenDetails={isNarrationOverlayActive ? null : selectedTokenDetails}
-                sharedInteractions={visibleSharedInteractions}
+                onSetSelectedTokenVision={isManager && !isNarrationOverlayActive ? handleSetSelectedTokenVision : null}
+                isTokenVisionActionPending={isTokenVisionActionPending}
+                selectedTokenDetails={isNarrationOverlayActive ? null : boardRenderSelectedTokenDetails}
+                sharedInteractions={boardRenderSharedInteractions}
                 activeViewers={activePageViewers}
+                lightingRenderInput={enabledLightingRenderInput}
+                lightingDebugMetadata={lightingMetadata}
+                showLightingDebugOverlay={isManager && isLightingDebugOverlayVisible && !!lightingMetadata}
+                lightSourceControls={isManager && !isNarrationOverlayActive ? {
+                  isLightToolActive,
+                  isPending: isLightSourceMutationPending,
+                  lights: editableLightSources,
+                  onToggleLightTool: handleToggleLightTool,
+                  onCreateLightSource: handleCreateLightSource,
+                  onMoveLightSource: handleMoveLightSource,
+                  onUpdateLightSource: handleUpdateLightSource,
+                  onDuplicateLightSource: handleDuplicateLightSource,
+                  onDeleteLightSource: handleDeleteLightSource,
+                } : null}
+                darknessSourceControls={isManager && !isNarrationOverlayActive ? {
+                  isDarknessToolActive,
+                  isPending: isDarknessSourceMutationPending,
+                  darknessSources: editableDarknessSources,
+                  onToggleDarknessTool: handleToggleDarknessTool,
+                  onCreateDarknessSource: handleCreateDarknessSource,
+                  onMoveDarknessSource: handleMoveDarknessSource,
+                  onUpdateDarknessSource: handleUpdateDarknessSource,
+                  onDuplicateDarknessSource: handleDuplicateDarknessSource,
+                  onDeleteDarknessSource: handleDeleteDarknessSource,
+                } : null}
+                wallSourceControls={isManager && !isNarrationOverlayActive ? {
+                  isWallToolActive,
+                  isPending: isWallSourceMutationPending,
+                  walls: editableWallSources,
+                  onToggleWallTool: handleToggleWallTool,
+                  onCreateWallSegment: handleCreateWallSegment,
+                  onMoveWallEndpoint: handleMoveWallEndpoint,
+                  onMoveWallSegment: handleMoveWallSegment,
+                  onUpdateWallSegment: handleUpdateWallSegment,
+                  onDuplicateWallSegment: handleDuplicateWallSegment,
+                  onDeleteWallSegment: handleDeleteWallSegment,
+                } : null}
+                fogBrushControls={isManager && !isNarrationOverlayActive && isFogOfWarEnabled && activeBackgroundId ? {
+                  isFogBrushToolActive,
+                  mode: fogBrushMode,
+                  radiusSquares: fogBrushRadiusSquares,
+                  isPending: isFogBrushMutationPending,
+                  onToggleFogBrushTool: handleToggleFogBrushTool,
+                  onChangeMode: handleChangeFogBrushMode,
+                  onChangeRadiusSquares: handleChangeFogBrushRadiusSquares,
+                  onPaintFogBrush: handlePaintFogBrush,
+                } : null}
+                fogOfWar={boardFogOfWar}
+                wallRuntimeSegments={effectiveLightingRenderInput?.walls || []}
+                onToggleWallRuntimeSegment={isManager && !isNarrationOverlayActive ? handleToggleWallRuntimeSegment : null}
                 onSharedInteractionChange={isNarrationOverlayActive ? null : handleSharedInteractionChange}
                 onSelectedTokenIdsChange={setSelectedBoardTokenIds}
                 onDropCurrentToken={isNarrationOverlayActive ? null : ((payload, worldPoint) => {
@@ -3844,7 +5276,7 @@ export default function GrigliataPage() {
                     currentUserToken={trayCurrentUserToken}
                     customTokens={customUserTokens}
                     foeLibrary={foeLibrary}
-                    selectedTokenDetails={selectedTokenDetails}
+                    selectedTokenDetails={isNarrationOverlayActive ? null : boardRenderSelectedTokenDetails}
                     activeMapName={combatBackground?.name || ''}
                     hasActiveMap={!!activeBackgroundId}
                     onDragStart={(payload) => setActiveTrayDragType(payload?.type || 'grigliata-token')}
@@ -3945,6 +5377,37 @@ export default function GrigliataPage() {
                     }}
                     onSaveCalibration={handleSaveCalibration}
                     onResetCalibration={() => setCalibrationDraft(DEFAULT_GRID)}
+                  />
+                )}
+
+                {isManager && activeSidebarTab === 'lighting' && (
+                  <GrigliataLightingImportPanel
+                    selectedBackground={selectedBackground}
+                    selectedFileName={lightingSelectedFile?.name || ''}
+                    importError={lightingImportError}
+                    importWarnings={lightingImportDraft?.importWarnings || null}
+                    isImporting={isImportingLighting}
+                    isApplyingCalibration={isApplyingLightingCalibration}
+                    isLightingEnabled={selectedBackground?.lightingEnabled !== false}
+                    isLightingEnabledPending={isLightingEnabledPending}
+                    isFogOfWarEnabled={selectedBackground?.fogOfWarEnabled !== false}
+                    isFogOfWarEnabledPending={isFogOfWarEnabledPending}
+                    isFogResetPending={isFogResetPending}
+                    isDebugOverlayVisible={isLightingDebugOverlayVisible}
+                    hasLightingMetadata={!!lightingMetadata}
+                    lightingMetadataDraft={lightingImportDraft}
+                    lightingMetadata={selectedBackground?.id === activeBackgroundId ? lightingMetadata : null}
+                    sceneLighting={editableSceneLighting}
+                    isSceneLightingPending={isSceneLightingMutationPending}
+                    isSceneLightingDisabled={!canEditSceneLighting}
+                    onLightingFileChange={handleLightingFileChange}
+                    onImportLightingMetadata={handleImportLightingMetadata}
+                    onApplyLightingCalibration={handleApplyLightingCalibration}
+                    onToggleLightingEnabled={handleToggleLightingEnabled}
+                    onToggleFogOfWarEnabled={handleToggleFogOfWarEnabled}
+                    onResetFogOfWar={handleResetFogOfWar}
+                    onToggleDebugOverlay={handleToggleLightingDebugOverlay}
+                    onUpdateSceneLighting={canEditSceneLighting ? handleUpdateSceneLighting : null}
                   />
                 )}
               </div>

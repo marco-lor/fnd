@@ -29,6 +29,17 @@ const OVERFLOW_BADGE_FILL = 'rgba(2, 6, 23, 0.94)';
 const HIDDEN_BADGE_STROKE = 'rgba(226, 232, 240, 0.96)';
 const DEAD_BANNER_FILL = 'rgba(127, 29, 29, 0.88)';
 
+const createDeferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+
+  return { promise, resolve, reject };
+};
+
 jest.mock('framer-motion', () => {
   const actual = jest.requireActual('framer-motion');
 
@@ -502,6 +513,23 @@ describe('GrigliataBoard', () => {
     window.cancelAnimationFrame = originalCancelAnimationFrame;
   });
 
+  test('renders uniform subtle grid lines without major-line emphasis', async () => {
+    render(<GrigliataBoard {...buildProps()} />);
+
+    const gridLayer = await screen.findByTestId('grid-layer');
+    const gridLines = Array.from(gridLayer.querySelectorAll('[data-konva-type="Line"]'));
+
+    expect(gridLines.length).toBeGreaterThan(0);
+    expect(new Set(gridLines.map((line) => line.getAttribute('data-stroke')))).toEqual(
+      new Set(['rgba(248, 250, 252, 0.14)'])
+    );
+    expect(new Set(gridLines.map((line) => line.getAttribute('data-strokewidth')))).toEqual(
+      new Set(['1'])
+    );
+    expect(gridLayer.querySelector('[data-stroke="rgba(248, 250, 252, 0.38)"]')).toBeNull();
+    expect(gridLayer.querySelector('[data-strokewidth="1.4"]')).toBeNull();
+  });
+
   test('fades in the battlemap image when activating from grid only', async () => {
     jest.useFakeTimers();
 
@@ -538,6 +566,1731 @@ describe('GrigliataBoard', () => {
 
     expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-opacity', '1');
     expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
+  });
+
+  test('renders video battlemap backgrounds through the existing Konva image layer', async () => {
+    useReducedMotion.mockReturnValue(true);
+    const originalCreateElement = document.createElement.bind(document);
+    const listeners = {};
+    const mockVideo = {
+      videoWidth: 2040,
+      videoHeight: 1620,
+      muted: false,
+      defaultMuted: false,
+      loop: false,
+      playsInline: false,
+      autoplay: false,
+      preload: '',
+      src: '',
+      addEventListener: jest.fn((eventName, handler) => {
+        listeners[eventName] = handler;
+      }),
+      removeEventListener: jest.fn(),
+      play: jest.fn(() => Promise.resolve()),
+      pause: jest.fn(),
+      load: jest.fn(),
+      removeAttribute: jest.fn(),
+    };
+    const createElementSpy = jest
+      .spyOn(document, 'createElement')
+      .mockImplementation((tagName, options) => (
+        tagName === 'video'
+          ? mockVideo
+          : originalCreateElement(tagName, options)
+      ));
+
+    try {
+      render(
+        <GrigliataBoard
+          {...buildProps({
+            activeBackground: {
+              id: 'map-video',
+              name: 'Dungeon Alchemist Loop',
+              imageUrl: 'https://example.com/map.mp4',
+              imageWidth: 2040,
+              imageHeight: 1620,
+              assetType: 'video',
+            },
+          })}
+        />
+      );
+
+      await act(async () => {
+        listeners.loadeddata();
+      });
+
+      expect(useImageAssetSnapshot).toHaveBeenCalledWith('');
+      expect(mockVideo.muted).toBe(true);
+      expect(mockVideo.defaultMuted).toBe(true);
+      expect(mockVideo.loop).toBe(true);
+      expect(mockVideo.playsInline).toBe(true);
+      expect(mockVideo.autoplay).toBe(true);
+      expect(mockVideo.play).toHaveBeenCalled();
+
+      const activeVideoLayer = screen.getByTestId('battlemap-image-active');
+      expect(activeVideoLayer).toHaveAttribute('data-asset-type', 'video');
+      expect(activeVideoLayer).toHaveAttribute('data-width', '2040');
+      expect(activeVideoLayer).toHaveAttribute('data-height', '1620');
+    } finally {
+      createElementSpy.mockRestore();
+    }
+  });
+
+  test('renders the DM lighting debug overlay above the map and below tokens', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          tokens: [buildOverlayToken()],
+          lightingDebugMetadata: {
+            backgroundId: 'map-1',
+            walls: [{
+              id: 'wall-1',
+              x1: 10,
+              y1: 20,
+              x2: 80,
+              y2: 20,
+              blocksSight: true,
+              doorType: 0,
+            }],
+            lights: [{
+              id: 'light-1',
+              x: 45,
+              y: 55,
+              brightRadiusPx: 30,
+              dimRadiusPx: 60,
+              color: '#FFAD00',
+            }],
+          },
+          showLightingDebugOverlay: true,
+        })}
+      />
+    );
+
+    const overlay = await screen.findByTestId('lighting-debug-overlay');
+    const token = screen.getByTestId('token-node-user-1');
+
+    expect(screen.getByTestId('lighting-debug-wall')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-debug-light-point')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-debug-light-bright')).toHaveAttribute('data-radius', '30');
+    expect(overlay.compareDocumentPosition(token) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test('renders the computed lighting mask with viewer-safe token vision outside narration', async () => {
+    const lightingRenderInput = {
+      backgroundId: 'map-1',
+      scene: {
+        darkness: 0.6,
+        globalLight: false,
+      },
+      walls: [{
+        id: 'wall-1',
+        x1: 120,
+        y1: 0,
+        x2: 120,
+        y2: 220,
+        blocksSight: true,
+      }],
+      lights: [{
+        id: 'light-1',
+        x: 80,
+        y: 80,
+        brightRadiusPx: 60,
+        dimRadiusPx: 140,
+        color: '#FFAD00',
+      }],
+    };
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          currentUserId: 'dm-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+            visionRadiusSquares: 4,
+          }, {
+            tokenId: 'user-2',
+            id: 'user-2',
+            ownerUid: 'user-2',
+            tokenType: 'character',
+            label: 'Bryn',
+            imageUrl: '',
+            placed: true,
+            col: 4,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          lightingRenderInput,
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('lighting-mask-layer')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-darkness-overlay')).toHaveAttribute('data-opacity', '0.6');
+    expect(screen.getAllByTestId('lighting-token-vision-cutout').map((node) => (
+      node.getAttribute('data-tokenid')
+    ))).toEqual(['user-1', 'user-2']);
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: false,
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }, {
+            tokenId: 'user-2',
+            id: 'user-2',
+            ownerUid: 'user-2',
+            tokenType: 'character',
+            label: 'Bryn',
+            imageUrl: '',
+            placed: true,
+            col: 4,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          lightingRenderInput,
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('lighting-mask-layer')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-light-bright-polygon')).toBeInTheDocument();
+    expect(screen.getAllByTestId('lighting-token-vision-cutout')).toHaveLength(1);
+    expect(screen.getByTestId('lighting-token-vision-cutout')).toHaveAttribute('data-tokenid', 'user-1');
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          tokens: [buildOverlayToken()],
+          lightingRenderInput,
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
+
+    expect(screen.queryByTestId('lighting-mask-layer')).not.toBeInTheDocument();
+  });
+
+  test('renders imported lights for a player even without an eligible vision token', async () => {
+    const lightingRenderInput = {
+      backgroundId: 'map-1',
+      scene: {
+        darkness: 0.6,
+        globalLight: false,
+      },
+      walls: [],
+      lights: [{
+        x: 80,
+        y: 80,
+        brightRadiusPx: 60,
+        dimRadiusPx: 140,
+        color: '#FFAD00',
+      }],
+    };
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: false,
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-2',
+            id: 'user-2',
+            ownerUid: 'user-2',
+            tokenType: 'character',
+            label: 'Bryn',
+            imageUrl: '',
+            placed: true,
+            col: 4,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          lightingRenderInput,
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('lighting-mask-layer')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-light-bright-polygon')).toBeInTheDocument();
+    expect(screen.queryByTestId('lighting-token-vision-cutout')).not.toBeInTheDocument();
+  });
+
+  test('renders fog states after lighting and suppresses fog during narration', async () => {
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          fogOfWar: {
+            exploredCells: ['0:0', '1:0'],
+            currentVisibleCells: ['1:0', '2:0'],
+          },
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('fog-of-war-mask-layer')).toBeInTheDocument();
+    expect(screen.getByTestId('fog-unexplored-overlay')).toBeInTheDocument();
+    expect(screen.getAllByTestId('fog-explored-cell-cutout')).toHaveLength(1);
+    expect(screen.getAllByTestId('fog-current-cell-cutout')).toHaveLength(2);
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          fogOfWar: {
+            exploredCells: ['0:0'],
+            currentVisibleCells: [],
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('fog-of-war-mask-layer')).toBeInTheDocument();
+    expect(screen.getAllByTestId('fog-explored-cell-cutout')).toHaveLength(1);
+    expect(screen.queryByTestId('fog-current-cell-cutout')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          fogOfWar: {
+            exploredCells: ['0:0'],
+            currentVisibleCells: ['0:0'],
+          },
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
+
+    expect(screen.queryByTestId('fog-of-war-mask-layer')).not.toBeInTheDocument();
+  });
+
+  test('uses player fog to hide tokens outside current visibility while keeping the main token usable', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 9,
+            row: 9,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }, {
+            tokenId: 'user-2',
+            id: 'user-2',
+            ownerUid: 'user-2',
+            tokenType: 'character',
+            label: 'Bryn',
+            imageUrl: '',
+            placed: true,
+            col: 8,
+            row: 8,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }, {
+            tokenId: 'foe-1',
+            id: 'foe-1',
+            ownerUid: 'dm-1',
+            tokenType: 'foe',
+            label: 'Skeleton',
+            imageUrl: '',
+            placed: true,
+            col: 1,
+            row: 0,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          fogOfWar: {
+            exploredCells: ['8:8'],
+            currentVisibleCells: ['1:0'],
+          },
+        })}
+      />
+    );
+
+    const mainToken = await screen.findByTestId('token-node-user-1');
+    const foeToken = screen.getByTestId('token-node-foe-1');
+    const fog = screen.getByTestId('fog-of-war-mask-layer');
+    expect(mainToken).toBeInTheDocument();
+    expect(foeToken).toBeInTheDocument();
+    expect(screen.queryByTestId('token-node-user-2')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('fog-current-cell-cutout').map((node) => (
+      node.getAttribute('data-cellkey')
+    ))).toEqual(['1:0']);
+    expect(foeToken.compareDocumentPosition(fog) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(fog.compareDocumentPosition(mainToken) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test('keeps shared AoE and live drawing overlays visible outside memory fog', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          aoeFigures: [{
+            id: 'memory-figure',
+            backgroundId: 'map-1',
+            ownerUid: 'user-2',
+            figureType: 'circle',
+            slot: 1,
+            originCell: { col: 8, row: 8 },
+            targetCell: { col: 9, row: 8 },
+            colorKey: 'ion-cyan',
+            isVisibleToPlayers: true,
+          }],
+          sharedInteractions: [{
+            backgroundId: 'map-1',
+            ownerUid: 'user-2',
+            type: 'ping',
+            source: 'free',
+            colorKey: 'ion-cyan',
+            point: { x: 595, y: 595 },
+            startedAtMs: Date.now(),
+          }],
+          fogOfWar: {
+            exploredCells: ['8:8'],
+            currentVisibleCells: ['0:0'],
+          },
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('fog-of-war-mask-layer')).toBeInTheDocument();
+    expect(screen.getByTestId('aoe-figure-overlay-memory-figure')).toBeInTheDocument();
+    expect(screen.getByTestId('aoe-figure-overlay-memory-figure')).toHaveAttribute('data-listening', 'false');
+    expect(screen.getByTestId('map-ping-overlay-shared-user-2')).toBeInTheDocument();
+  });
+
+  test('renders player fog above tokens but below shared drawing overlays', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-2',
+            id: 'user-2',
+            ownerUid: 'user-2',
+            tokenType: 'character',
+            label: 'Bryn',
+            imageUrl: '',
+            placed: true,
+            col: 1,
+            row: 0,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          sharedInteractions: [{
+            backgroundId: 'map-1',
+            ownerUid: 'user-3',
+            type: 'measure',
+            source: 'free',
+            colorKey: 'ion-cyan',
+            anchorCells: [{ col: 8, row: 8 }],
+            liveEndCell: { col: 9, row: 8 },
+            updatedAt: Date.now(),
+            updatedBy: 'user-3',
+          }],
+          fogOfWar: {
+            exploredCells: ['1:0'],
+            currentVisibleCells: ['1:0'],
+          },
+        })}
+      />
+    );
+
+    const token = await screen.findByTestId('token-node-user-2');
+    const fog = screen.getByTestId('fog-of-war-mask-layer');
+    const sharedRuler = screen.getByTestId('measurement-overlay-shared-user-3');
+    expect(token.compareDocumentPosition(fog) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(fog.compareDocumentPosition(sharedRuler) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test('does not expose selected custom token controls for a player token hidden by fog', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'custom-1',
+            id: 'custom-1',
+            ownerUid: 'user-1',
+            tokenType: 'custom',
+            label: 'Familiar',
+            imageUrl: '',
+            placed: true,
+            col: 8,
+            row: 8,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          fogOfWar: {
+            exploredCells: ['8:8'],
+            currentVisibleCells: ['0:0'],
+          },
+        })}
+      />
+    );
+
+    expect(screen.queryByTestId('token-node-custom-1')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /edit statuses for familiar/i })).not.toBeInTheDocument();
+  });
+
+  test('keeps the lighting debug overlay toggle independent from the computed mask', async () => {
+    const lightingRenderInput = {
+      backgroundId: 'map-1',
+      scene: {
+        darkness: 0.5,
+        globalLight: false,
+      },
+      walls: [{
+        id: 'wall-1',
+        x1: 10,
+        y1: 20,
+        x2: 80,
+        y2: 20,
+        blocksSight: true,
+        doorType: 0,
+      }],
+      lights: [{
+        id: 'light-1',
+        x: 45,
+        y: 55,
+        brightRadiusPx: 30,
+        dimRadiusPx: 60,
+        color: '#FFAD00',
+      }],
+    };
+    const lightingDebugMetadata = {
+      ...lightingRenderInput,
+      walls: lightingRenderInput.walls.map((wall) => ({
+        ...wall,
+        id: 'raw-wall-id',
+        doorType: 1,
+        source: { sense: 1, door: 1 },
+      })),
+      lights: lightingRenderInput.lights.map((light) => ({
+        ...light,
+        id: 'raw-light-id',
+        source: { tintAlpha: 0.25 },
+      })),
+    };
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightingRenderInput,
+          lightingDebugMetadata,
+          showLightingDebugOverlay: false,
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('lighting-mask-layer')).toBeInTheDocument();
+    expect(screen.queryByTestId('lighting-debug-overlay')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightingRenderInput,
+          lightingDebugMetadata,
+          showLightingDebugOverlay: true,
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('lighting-mask-layer')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-debug-overlay')).toBeInTheDocument();
+  });
+
+  test('renders DM wall runtime controls outside narration and forwards toggles', async () => {
+    const onToggleWallRuntimeSegment = jest.fn();
+    const lightingRenderInput = {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.5, globalLight: false },
+      walls: [{
+        id: 'wall-1',
+        x1: 0,
+        y1: 0,
+        x2: 70,
+        y2: 0,
+        wallType: 'door',
+        isOpen: false,
+        blocksSight: true,
+      }],
+      lights: [],
+    };
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightingRenderInput,
+          onToggleWallRuntimeSegment,
+        })}
+      />
+    );
+
+    const toggle = await screen.findByTestId('wall-runtime-toggle');
+    fireEvent.click(toggle);
+    expect(onToggleWallRuntimeSegment).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'wall-1',
+      isOpen: false,
+    }));
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: false,
+          lightingRenderInput,
+          onToggleWallRuntimeSegment,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('wall-runtime-toggle')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightingRenderInput,
+          onToggleWallRuntimeSegment,
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('wall-runtime-toggle')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightingRenderInput,
+          onToggleWallRuntimeSegment,
+          wallSourceControls: {
+            isWallToolActive: true,
+            walls: [],
+            onToggleWallTool: jest.fn(),
+          },
+        })}
+      />
+    );
+    expect(screen.queryByTestId('wall-runtime-toggle')).not.toBeInTheDocument();
+  });
+
+  test('renders DM wall authoring tool outside narration only', async () => {
+    const onToggleWallTool = jest.fn();
+    const wallSourceControls = {
+      isWallToolActive: false,
+      walls: [],
+      onToggleWallTool,
+    };
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          wallSourceControls,
+        })}
+      />
+    );
+
+    const trigger = await screen.findByTestId('wall-source-tool-trigger');
+    fireEvent.click(trigger);
+    expect(onToggleWallTool).toHaveBeenCalled();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: false,
+          wallSourceControls,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('wall-source-tool-trigger')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          wallSourceControls,
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('wall-source-tool-trigger')).not.toBeInTheDocument();
+  });
+
+  test('renders DM light source controls outside narration only', async () => {
+    const lightSourceControls = {
+      lights: [{
+        id: 'light-1',
+        label: 'Torch',
+        enabled: true,
+        x: 140,
+        y: 140,
+        brightRadiusPx: 280,
+        dimRadiusPx: 560,
+        color: '#FFAD00',
+      }],
+      selectedLightId: 'light-1',
+      onSelectLight: jest.fn(),
+    };
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightSourceControls,
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('light-source-handle')).toHaveAttribute('data-lightid', 'light-1');
+    expect(screen.getByTestId('selected-light-panel')).toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: false,
+          lightSourceControls,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('light-source-handle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('selected-light-panel')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightSourceControls,
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('light-source-handle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('selected-light-panel')).not.toBeInTheDocument();
+  });
+
+  test('renders DM darkness source controls outside narration only', async () => {
+    const onToggleDarknessTool = jest.fn();
+    const darknessSourceControls = {
+      isDarknessToolActive: false,
+      darknessSources: [{
+        id: 'darkness-1',
+        label: 'Void',
+        enabled: true,
+        x: 140,
+        y: 140,
+        radiusPx: 280,
+        intensity: 0.75,
+      }],
+      selectedDarknessId: 'darkness-1',
+      onSelectDarkness: jest.fn(),
+      onToggleDarknessTool,
+    };
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          darknessSourceControls,
+        })}
+      />
+    );
+
+    const trigger = await screen.findByTestId('darkness-source-tool-trigger');
+    fireEvent.click(trigger);
+    expect(onToggleDarknessTool).toHaveBeenCalled();
+    expect(await screen.findByTestId('darkness-source-handle')).toHaveAttribute('data-darknessid', 'darkness-1');
+    expect(screen.getByTestId('selected-darkness-panel')).toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: false,
+          darknessSourceControls,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('darkness-source-tool-trigger')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('darkness-source-handle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('selected-darkness-panel')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          darknessSourceControls,
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('darkness-source-tool-trigger')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('darkness-source-handle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('selected-darkness-panel')).not.toBeInTheDocument();
+  });
+
+  test('renders DM fog brush controls outside narration only', async () => {
+    const onToggleFogBrushTool = jest.fn();
+    const fogBrushControls = {
+      isFogBrushToolActive: false,
+      mode: 'reveal',
+      radiusSquares: 2,
+      onToggleFogBrushTool,
+      onChangeMode: jest.fn(),
+      onChangeRadiusSquares: jest.fn(),
+      onPaintFogBrush: jest.fn(),
+    };
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          fogBrushControls,
+        })}
+      />
+    );
+
+    const trigger = await screen.findByTestId('fog-brush-tool-trigger');
+    fireEvent.click(trigger);
+    expect(onToggleFogBrushTool).toHaveBeenCalled();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: false,
+          fogBrushControls,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('fog-brush-tool-trigger')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          fogBrushControls,
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('fog-brush-tool-trigger')).not.toBeInTheDocument();
+  });
+
+  test('toggles reveal and hide brush settings', async () => {
+    const onChangeMode = jest.fn();
+    const onChangeRadiusSquares = jest.fn();
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          fogBrushControls: {
+            isFogBrushToolActive: true,
+            mode: 'reveal',
+            radiusSquares: 2,
+            onToggleFogBrushTool: jest.fn(),
+            onChangeMode,
+            onChangeRadiusSquares,
+            onPaintFogBrush: jest.fn(),
+          },
+        })}
+      />
+    );
+
+    const trigger = await screen.findByTestId('fog-brush-tool-trigger');
+    const settings = screen.getByTestId('fog-brush-settings');
+
+    expect(trigger).toHaveAttribute('aria-pressed', 'true');
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger).toHaveAttribute('aria-controls', settings.id);
+    expect(settings.className).toContain('min-h-10');
+    expect(settings.className).toContain('overflow-hidden');
+
+    fireEvent.click(screen.getByTestId('fog-brush-mode-hide'));
+    fireEvent.click(screen.getByTestId('fog-brush-mode-reveal'));
+    fireEvent.change(screen.getByRole('spinbutton', { name: /fog brush radius/i }), {
+      target: { value: '5' },
+    });
+
+    expect(onChangeMode).toHaveBeenNthCalledWith(1, 'hide');
+    expect(onChangeMode).toHaveBeenNthCalledWith(2, 'reveal');
+    expect(onChangeRadiusSquares).toHaveBeenCalledWith(5);
+  });
+
+  test('renders DM lighting diagnostics outside narration only', async () => {
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          selectedTokenDetails: {
+            tokenId: 'token-1',
+            visionEnabled: true,
+            visionRadiusSquares: 8,
+          },
+          activeViewers: [{
+            ownerUid: 'user-2',
+            characterId: 'Nyx',
+            colorKey: 'aurora-fuchsia',
+          }],
+          lightSourceControls: {
+            lights: [{
+              id: 'light-1',
+              label: 'Torch',
+              enabled: true,
+              x: 140,
+              y: 140,
+              brightRadiusPx: 280,
+              dimRadiusPx: 560,
+              color: '#FFAD00',
+            }, {
+              id: 'light-2',
+              label: 'Hidden lamp',
+              enabled: false,
+              x: 210,
+              y: 140,
+              brightRadiusPx: 280,
+              dimRadiusPx: 560,
+              color: '#FFFFFF',
+            }],
+          },
+          wallSourceControls: {
+            walls: [{
+              id: 'wall-1',
+              label: 'Door',
+              x1: 0,
+              y1: 0,
+              x2: 70,
+              y2: 0,
+              wallType: 'door',
+              blocksSight: true,
+            }],
+          },
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('lighting-diagnostics-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-diagnostics-active-lights')).toHaveTextContent('1');
+    expect(screen.getByTestId('lighting-diagnostics-disabled-lights')).toHaveTextContent('1');
+    expect(screen.getByTestId('lighting-diagnostics-token-vision')).toHaveTextContent('Enabled, 8 squares');
+    expect(screen.getByTestId('grigliata-active-viewers')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-diagnostics-anchor')).toHaveClass('bottom-20', 'left-4');
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          isNarrationOverlayActive: true,
+          lightSourceControls: {
+            lights: [{ id: 'light-1', enabled: true, x: 140, y: 140, brightRadiusPx: 280, dimRadiusPx: 560 }],
+          },
+          wallSourceControls: {
+            walls: [{ id: 'wall-1', x1: 0, y1: 0, x2: 70, y2: 0, blocksSight: true }],
+          },
+        })}
+      />
+    );
+    expect(screen.queryByTestId('lighting-diagnostics-panel')).not.toBeInTheDocument();
+  });
+
+  test('clears controlled light selection when selectedLightId becomes empty', async () => {
+    const lightSourceControls = {
+      lights: [{
+        id: 'light-1',
+        label: 'Torch',
+        enabled: true,
+        x: 140,
+        y: 140,
+        brightRadiusPx: 280,
+        dimRadiusPx: 560,
+        color: '#FFAD00',
+      }],
+      selectedLightId: 'light-1',
+      onSelectLight: jest.fn(),
+    };
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightSourceControls,
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('selected-light-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('light-source-handle')).toHaveAttribute('data-selected', 'true');
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightSourceControls: {
+            ...lightSourceControls,
+            selectedLightId: '',
+          },
+        })}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('selected-light-panel')).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('light-source-handle')).toHaveAttribute('data-selected', 'false');
+  });
+
+  test('creates and drags light sources from the DM board controls', async () => {
+    const onCreateLightSource = jest.fn(() => Promise.resolve(true));
+    const onMoveLightSource = jest.fn(() => Promise.resolve(true));
+    const onSelectLight = jest.fn();
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightSourceControls: {
+            isLightToolActive: true,
+            lights: [],
+            onCreateLightSource,
+          },
+        })}
+      />
+    );
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 140, clientY: 140, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onCreateLightSource).toHaveBeenCalledWith(expect.objectContaining({
+        x: expect.any(Number),
+        y: expect.any(Number),
+      }));
+    });
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightSourceControls: {
+            lights: [{
+              id: 'light-1',
+              label: 'Torch',
+              enabled: true,
+              x: 140,
+              y: 140,
+              brightRadiusPx: 280,
+              dimRadiusPx: 560,
+              color: '#FFAD00',
+            }],
+            onSelectLight,
+            onMoveLightSource,
+          },
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('light-source-handle'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+    fireEvent.mouseMove(window, { clientX: 210, clientY: 210, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 210, clientY: 210, buttons: 0 });
+
+    expect(onSelectLight).toHaveBeenCalledWith('light-1');
+    await waitFor(() => {
+      expect(onMoveLightSource).toHaveBeenCalledWith('light-1', expect.objectContaining({
+        x: expect.any(Number),
+        y: expect.any(Number),
+      }));
+    });
+  });
+
+  test('creates and drags darkness sources from the DM board controls', async () => {
+    const onCreateDarknessSource = jest.fn(() => Promise.resolve(true));
+    const onMoveDarknessSource = jest.fn(() => Promise.resolve(true));
+    const onSelectDarkness = jest.fn();
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          darknessSourceControls: {
+            isDarknessToolActive: true,
+            darknessSources: [],
+            onCreateDarknessSource,
+          },
+        })}
+      />
+    );
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 140, clientY: 140, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onCreateDarknessSource).toHaveBeenCalledWith(expect.objectContaining({
+        x: expect.any(Number),
+        y: expect.any(Number),
+      }));
+    });
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          darknessSourceControls: {
+            darknessSources: [{
+              id: 'darkness-1',
+              label: 'Void',
+              enabled: true,
+              x: 140,
+              y: 140,
+              radiusPx: 280,
+              intensity: 0.75,
+            }],
+            onSelectDarkness,
+            onMoveDarknessSource,
+          },
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('darkness-source-handle'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+    fireEvent.mouseMove(window, { clientX: 210, clientY: 210, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 210, clientY: 210, buttons: 0 });
+
+    expect(onSelectDarkness).toHaveBeenCalledWith('darkness-1');
+    await waitFor(() => {
+      expect(onMoveDarknessSource).toHaveBeenCalledWith('darkness-1', expect.objectContaining({
+        x: expect.any(Number),
+        y: expect.any(Number),
+      }));
+    });
+  });
+
+  test('paints fog cells with click and drag from the DM brush tool', async () => {
+    const onPaintFogBrush = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          fogBrushControls: {
+            isFogBrushToolActive: true,
+            mode: 'reveal',
+            radiusSquares: 2,
+            onToggleFogBrushTool: jest.fn(),
+            onChangeMode: jest.fn(),
+            onChangeRadiusSquares: jest.fn(),
+            onPaintFogBrush,
+          },
+        })}
+      />
+    );
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+    fireEvent.mouseMove(window, { clientX: 210, clientY: 140, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 210, clientY: 140, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onPaintFogBrush).toHaveBeenCalledTimes(2);
+    });
+    expect(onPaintFogBrush).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      point: expect.objectContaining({
+        x: expect.any(Number),
+        y: expect.any(Number),
+      }),
+      mode: 'reveal',
+      radiusSquares: 2,
+    }));
+    expect(onPaintFogBrush).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      mode: 'reveal',
+      radiusSquares: 2,
+    }));
+  });
+
+  test('keeps sampling fog brush drags while persistence is pending', async () => {
+    const firstPaint = createDeferred();
+    const onPaintFogBrush = jest.fn();
+
+    function PendingFogBrushHarness() {
+      const [isPending, setIsPending] = React.useState(false);
+
+      const handlePaintFogBrush = React.useCallback((payload) => {
+        onPaintFogBrush(payload);
+        setIsPending(true);
+        return firstPaint.promise;
+      }, []);
+
+      return (
+        <GrigliataBoard
+          {...buildProps({
+            isManager: true,
+            fogBrushControls: {
+              isFogBrushToolActive: true,
+              isPending,
+              mode: 'reveal',
+              radiusSquares: 2,
+              onToggleFogBrushTool: jest.fn(),
+              onChangeMode: jest.fn(),
+              onChangeRadiusSquares: jest.fn(),
+              onPaintFogBrush: handlePaintFogBrush,
+            },
+          })}
+        />
+      );
+    }
+
+    render(<PendingFogBrushHarness />);
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+
+    await waitFor(() => {
+      expect(onPaintFogBrush).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.mouseMove(window, { clientX: 210, clientY: 140, buttons: 1 });
+
+    await waitFor(() => {
+      expect(onPaintFogBrush).toHaveBeenCalledTimes(2);
+    });
+
+    await act(async () => {
+      firstPaint.resolve(true);
+      await firstPaint.promise;
+    });
+  });
+
+  test('selecting a light source clears an existing darkness selection', async () => {
+    const onSelectLight = jest.fn();
+    const onDeleteLightSource = jest.fn(() => Promise.resolve(true));
+    const onDeleteDarknessSource = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightSourceControls: {
+            lights: [{
+              id: 'light-1',
+              label: 'Torch',
+              enabled: true,
+              x: 140,
+              y: 140,
+              brightRadiusPx: 280,
+              dimRadiusPx: 560,
+              color: '#FFAD00',
+            }],
+            onSelectLight,
+            onDeleteLightSource,
+          },
+          darknessSourceControls: {
+            selectedDarknessId: 'darkness-1',
+            darknessSources: [{
+              id: 'darkness-1',
+              label: 'Void',
+              enabled: true,
+              x: 210,
+              y: 210,
+              radiusPx: 280,
+              intensity: 0.75,
+            }],
+            onDeleteDarknessSource,
+          },
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('selected-darkness-panel')).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByTestId('light-source-handle'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('selected-light-panel')).toBeInTheDocument();
+      expect(screen.queryByTestId('selected-darkness-panel')).not.toBeInTheDocument();
+    });
+    expect(onSelectLight).toHaveBeenCalledWith('light-1');
+
+    fireEvent.keyDown(window, { key: 'Delete', code: 'Delete' });
+
+    await waitFor(() => {
+      expect(onDeleteLightSource).toHaveBeenCalledWith('light-1');
+    });
+    expect(onDeleteDarknessSource).not.toHaveBeenCalled();
+  });
+
+  test('creates and drags wall sources from the DM board controls', async () => {
+    const onCreateWallSegment = jest.fn(() => Promise.resolve(true));
+    const onMoveWallEndpoint = jest.fn(() => Promise.resolve(true));
+    const onMoveWallSegment = jest.fn(() => Promise.resolve(true));
+    const onSelectWall = jest.fn();
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          wallSourceControls: {
+            isWallToolActive: true,
+            walls: [],
+            onCreateWallSegment,
+          },
+        })}
+      />
+    );
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+    fireEvent.mouseMove(window, { clientX: 280, clientY: 140, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 280, clientY: 140, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onCreateWallSegment).toHaveBeenCalledWith(
+        expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
+        expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) })
+      );
+    });
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          wallSourceControls: {
+            isWallToolActive: true,
+            selectedWallId: 'wall-1',
+            walls: [{
+              id: 'wall-1',
+              label: 'Wall',
+              x1: 140,
+              y1: 140,
+              x2: 280,
+              y2: 140,
+              wallType: 'wall',
+              blocksSight: true,
+              blocksVision: true,
+              blocksLight: true,
+            }],
+            onSelectWall,
+            onMoveWallEndpoint,
+            onMoveWallSegment,
+          },
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('wall-source-end-handle'), {
+      button: 0,
+      buttons: 1,
+      clientX: 280,
+      clientY: 140,
+    });
+    fireEvent.mouseMove(window, { clientX: 350, clientY: 210, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 350, clientY: 210, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onMoveWallEndpoint).toHaveBeenCalledWith(
+        'wall-1',
+        'end',
+        expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) })
+      );
+    });
+
+    fireEvent.mouseDown(screen.getByTestId('wall-source-hit-target-line'), {
+      button: 0,
+      buttons: 1,
+      clientX: 210,
+      clientY: 140,
+    });
+    fireEvent.mouseMove(window, { clientX: 280, clientY: 210, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 280, clientY: 210, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onMoveWallSegment).toHaveBeenCalledWith(
+        'wall-1',
+        expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) })
+      );
+    });
+  });
+
+  test('blocks light source create, drag, and delete while a mutation is pending', async () => {
+    const onCreateLightSource = jest.fn(() => Promise.resolve(true));
+    const onMoveLightSource = jest.fn(() => Promise.resolve(true));
+    const onDeleteLightSource = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          lightSourceControls: {
+            isLightToolActive: true,
+            isPending: true,
+            selectedLightId: 'light-1',
+            lights: [{
+              id: 'light-1',
+              label: 'Torch',
+              enabled: true,
+              x: 140,
+              y: 140,
+              brightRadiusPx: 280,
+              dimRadiusPx: 560,
+              color: '#FFAD00',
+            }],
+            onCreateLightSource,
+            onMoveLightSource,
+            onDeleteLightSource,
+          },
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('selected-light-panel')).toBeInTheDocument();
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 140, clientY: 140, buttons: 0 });
+
+    fireEvent.mouseDown(screen.getByTestId('light-source-handle'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+    fireEvent.mouseMove(window, { clientX: 210, clientY: 210, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 210, clientY: 210, buttons: 0 });
+
+    fireEvent.keyDown(window, { key: 'Delete', code: 'Delete' });
+
+    expect(onCreateLightSource).not.toHaveBeenCalled();
+    expect(onMoveLightSource).not.toHaveBeenCalled();
+    expect(onDeleteLightSource).not.toHaveBeenCalled();
+    expect(screen.getByTestId('selected-light-panel')).toBeInTheDocument();
+  });
+
+  test('blocks darkness source create, drag, and delete while a mutation is pending', async () => {
+    const onCreateDarknessSource = jest.fn(() => Promise.resolve(true));
+    const onMoveDarknessSource = jest.fn(() => Promise.resolve(true));
+    const onDeleteDarknessSource = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          darknessSourceControls: {
+            isDarknessToolActive: true,
+            isPending: true,
+            selectedDarknessId: 'darkness-1',
+            darknessSources: [{
+              id: 'darkness-1',
+              label: 'Void',
+              enabled: true,
+              x: 140,
+              y: 140,
+              radiusPx: 280,
+              intensity: 0.75,
+            }],
+            onCreateDarknessSource,
+            onMoveDarknessSource,
+            onDeleteDarknessSource,
+          },
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('selected-darkness-panel')).toBeInTheDocument();
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 140, clientY: 140, buttons: 0 });
+
+    fireEvent.mouseDown(screen.getByTestId('darkness-source-handle'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+    fireEvent.mouseMove(window, { clientX: 210, clientY: 210, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 210, clientY: 210, buttons: 0 });
+
+    fireEvent.keyDown(window, { key: 'Delete', code: 'Delete' });
+
+    expect(onCreateDarknessSource).not.toHaveBeenCalled();
+    expect(onMoveDarknessSource).not.toHaveBeenCalled();
+    expect(onDeleteDarknessSource).not.toHaveBeenCalled();
+    expect(screen.getByTestId('selected-darkness-panel')).toBeInTheDocument();
+  });
+
+  test('keeps token dragging above overlapping light handles', async () => {
+    const onMoveTokens = jest.fn(() => Promise.resolve(true));
+    const onMoveLightSource = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          currentUserId: 'dm-1',
+          onMoveTokens,
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          lightSourceControls: {
+            lights: [{
+              id: 'light-1',
+              label: 'Torch',
+              enabled: true,
+              x: 175,
+              y: 175,
+              brightRadiusPx: 280,
+              dimRadiusPx: 560,
+              color: '#FFAD00',
+            }],
+            onMoveLightSource,
+          },
+        })}
+      />
+    );
+
+    const lightHandle = await screen.findByTestId('light-source-handle');
+    const token = screen.getByTestId('token-node-user-1');
+    expect(lightHandle.compareDocumentPosition(token) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.mouseDown(token, { button: 0, buttons: 1, clientX: 175, clientY: 175 });
+    fireEvent.mouseMove(window, { clientX: 245, clientY: 245, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 245, clientY: 245, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onMoveTokens).toHaveBeenCalled();
+    });
+    expect(onMoveLightSource).not.toHaveBeenCalled();
+  });
+
+  test('keeps token dragging above overlapping darkness handles', async () => {
+    const onMoveTokens = jest.fn(() => Promise.resolve(true));
+    const onMoveDarknessSource = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          currentUserId: 'dm-1',
+          onMoveTokens,
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          darknessSourceControls: {
+            darknessSources: [{
+              id: 'darkness-1',
+              label: 'Void',
+              enabled: true,
+              x: 175,
+              y: 175,
+              radiusPx: 280,
+              intensity: 0.75,
+            }],
+            onMoveDarknessSource,
+          },
+        })}
+      />
+    );
+
+    const darknessHandle = await screen.findByTestId('darkness-source-handle');
+    const token = screen.getByTestId('token-node-user-1');
+    expect(darknessHandle.compareDocumentPosition(token) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.mouseDown(token, { button: 0, buttons: 1, clientX: 175, clientY: 175 });
+    fireEvent.mouseMove(window, { clientX: 245, clientY: 245, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 245, clientY: 245, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onMoveTokens).toHaveBeenCalled();
+    });
+    expect(onMoveDarknessSource).not.toHaveBeenCalled();
+  });
+
+  test('keeps token dragging above overlapping wall handles', async () => {
+    const onMoveTokens = jest.fn(() => Promise.resolve(true));
+    const onMoveWallSegment = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          currentUserId: 'dm-1',
+          onMoveTokens,
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          wallSourceControls: {
+            isWallToolActive: true,
+            selectedWallId: 'wall-1',
+            walls: [{
+              id: 'wall-1',
+              label: 'Wall',
+              x1: 140,
+              y1: 175,
+              x2: 245,
+              y2: 175,
+              wallType: 'wall',
+              blocksSight: true,
+              blocksVision: true,
+              blocksLight: true,
+            }],
+            onMoveWallSegment,
+          },
+        })}
+      />
+    );
+
+    const wallHandle = await screen.findByTestId('wall-source-hit-target-line');
+    const token = screen.getByTestId('token-node-user-1');
+    expect(wallHandle.compareDocumentPosition(token) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.mouseDown(token, { button: 0, buttons: 1, clientX: 175, clientY: 175 });
+    fireEvent.mouseMove(window, { clientX: 245, clientY: 245, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 245, clientY: 245, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onMoveTokens).toHaveBeenCalled();
+    });
+    expect(onMoveWallSegment).not.toHaveBeenCalled();
+  });
+
+  test('keeps token dragging above fog brush interaction', async () => {
+    const onMoveTokens = jest.fn(() => Promise.resolve(true));
+    const onPaintFogBrush = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          currentUserId: 'dm-1',
+          onMoveTokens,
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          fogBrushControls: {
+            isFogBrushToolActive: true,
+            mode: 'reveal',
+            radiusSquares: 2,
+            onToggleFogBrushTool: jest.fn(),
+            onChangeMode: jest.fn(),
+            onChangeRadiusSquares: jest.fn(),
+            onPaintFogBrush,
+          },
+        })}
+      />
+    );
+
+    const token = screen.getByTestId('token-node-user-1');
+    fireEvent.mouseDown(token, { button: 0, buttons: 1, clientX: 175, clientY: 175 });
+    fireEvent.mouseMove(window, { clientX: 245, clientY: 245, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 245, clientY: 245, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onMoveTokens).toHaveBeenCalled();
+    });
+    expect(onPaintFogBrush).not.toHaveBeenCalled();
   });
 
   test('keeps the old battlemap briefly while fading it out on deactivation', async () => {
@@ -1329,6 +3082,63 @@ describe('GrigliataBoard', () => {
     const chipTop = Number.parseFloat(chipCluster.style.top);
 
     expect(chipTop).toBeGreaterThanOrEqual((tokenScreenTop + tokenScreenSize) - 0.5);
+  });
+
+  test('shows selected-token vision controls only for DMs', async () => {
+    const token = {
+      tokenId: 'user-2',
+      id: 'user-2',
+      ownerUid: 'user-2',
+      tokenType: 'character',
+      label: 'Bryn',
+      imageUrl: '',
+      placed: true,
+      col: 2,
+      row: 2,
+      sizeSquares: 1,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    };
+    const { unmount } = render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'dm-1',
+          isManager: true,
+          tokens: [token],
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-2'), {
+      button: 0,
+      buttons: 1,
+      clientX: 160,
+      clientY: 160,
+    });
+
+    expect(await screen.findByRole('button', { name: /edit vision for bryn/i })).toBeInTheDocument();
+
+    unmount();
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-2',
+          isManager: false,
+          tokens: [token],
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-2'), {
+      button: 0,
+      buttons: 1,
+      clientX: 160,
+      clientY: 160,
+    });
+
+    expect(screen.queryByRole('button', { name: /edit vision/i })).not.toBeInTheDocument();
   });
 
   test('preserves sizeSquares when dragging a token', async () => {
@@ -2857,7 +4667,7 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-hit-target-${figureId}`), {
       button: 0,
       clientX: 315,
       clientY: 175,
@@ -3132,7 +4942,7 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-hit-target-${figureId}`), {
       button: 0,
       clientX: 175,
       clientY: 175,
@@ -3170,7 +4980,7 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-hit-target-${figureId}`), {
       button: 0,
       clientX: 175,
       clientY: 175,
@@ -3217,7 +5027,7 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-hit-target-${figureId}`), {
       button: 0,
       clientX: 210,
       clientY: 210,
@@ -3251,7 +5061,7 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-hit-target-${figureId}`), {
       button: 0,
       clientX: 175,
       clientY: 175,
@@ -3298,7 +5108,7 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-hit-target-${figureId}`), {
       button: 0,
       clientX: 210,
       clientY: 175,
@@ -3352,7 +5162,7 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
+    fireEvent.mouseDown(screen.getByTestId(`aoe-figure-hit-target-${figureId}`), {
       button: 0,
       clientX: 175,
       clientY: 175,
@@ -3386,6 +5196,9 @@ describe('GrigliataBoard', () => {
         })}
       />
     );
+
+    expect(screen.queryByTestId(`aoe-figure-hit-target-${figureId}`)).not.toBeInTheDocument();
+    expect(screen.getByTestId(`aoe-figure-overlay-${figureId}`)).toHaveAttribute('data-listening', 'false');
 
     fireEvent.mouseDown(screen.getByTestId(`aoe-figure-overlay-${figureId}`), {
       button: 0,
