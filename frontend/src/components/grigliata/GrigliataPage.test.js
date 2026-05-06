@@ -49,6 +49,7 @@ const mockFirestoreState = {
 
 const mockFirestoreListeners = [];
 const mockBatchInstances = [];
+const mockTransactionInstances = [];
 let mockGeneratedDocCounter = 0;
 
 const mockBuildCollectionTarget = (path) => ({ kind: 'collection', path });
@@ -142,6 +143,47 @@ const setDocData = (path, value) => {
   mockNotifyFirestoreListeners();
 };
 
+const mockApplyDocWrite = (target, payload, options = {}) => {
+  if (!target?.path) {
+    return;
+  }
+
+  const currentDoc = mockFirestoreState.docs[target.path] || {};
+  const nextDoc = options?.merge
+    ? { ...currentDoc, ...payload }
+    : { ...payload };
+  mockFirestoreState.docs[target.path] = nextDoc;
+
+  const pathSegments = target.path.split('/');
+  const id = pathSegments.pop();
+  const collectionPath = pathSegments.join('/');
+  const nextCollectionItem = { id, ...nextDoc };
+  const collectionItems = mockFirestoreState.collections[collectionPath] || [];
+  const itemIndex = collectionItems.findIndex((item) => item?.id === id);
+
+  if (itemIndex >= 0) {
+    collectionItems[itemIndex] = nextCollectionItem;
+  } else {
+    collectionItems.push(nextCollectionItem);
+  }
+
+  mockFirestoreState.collections[collectionPath] = collectionItems;
+};
+
+const mockRunFirestoreTransaction = (callback, completionPromise = Promise.resolve()) => {
+  const transaction = {
+    get: jest.fn((target) => Promise.resolve(mockBuildSnapshotForTarget(target))),
+    set: jest.fn((target, payload, options) => mockApplyDocWrite(target, payload, options)),
+    update: jest.fn(),
+    delete: jest.fn(),
+  };
+  mockTransactionInstances.push(transaction);
+
+  return Promise.resolve(callback(transaction)).then((result) => (
+    Promise.resolve(completionPromise).then(() => result)
+  ));
+};
+
 jest.mock('../../AuthContext', () => ({
   useAuth: jest.fn(),
 }));
@@ -217,6 +259,7 @@ jest.mock('firebase/firestore', () => ({
   }),
   orderBy: jest.fn((field) => ({ kind: 'orderBy', field })),
   query: jest.fn((base, ...constraints) => mockBuildQueryTarget(base, constraints)),
+  runTransaction: jest.fn((db, callback) => mockRunFirestoreTransaction(callback)),
   serverTimestamp: jest.fn(() => ({ __type: 'serverTimestamp' })),
   setDoc: jest.fn(() => Promise.resolve()),
   startAfter: jest.fn((value) => ({ kind: 'startAfter', value })),
@@ -295,6 +338,10 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-fog-enabled">{String(!!props.fogOfWar)}</div>
       <div data-testid="board-fog-cell-count">{String(props.fogOfWar?.exploredCells?.length || 0)}</div>
       <div data-testid="board-fog-current-count">{String(props.fogOfWar?.currentVisibleCells?.length || 0)}</div>
+      <div data-testid="board-fog-brush-controls">{String(!!props.fogBrushControls)}</div>
+      <div data-testid="board-fog-brush-active">{String(!!props.fogBrushControls?.isFogBrushToolActive)}</div>
+      <div data-testid="board-fog-brush-mode">{props.fogBrushControls?.mode || ''}</div>
+      <div data-testid="board-fog-brush-radius">{String(props.fogBrushControls?.radiusSquares || '')}</div>
         <button type="button" onClick={() => props.onSelectMouseTool?.()}>
           select mouse tool
         </button>
@@ -445,6 +492,38 @@ jest.mock('./GrigliataBoard', () => {
         </button>
         <button type="button" onClick={() => props.wallSourceControls?.onDeleteWallSegment?.('wall-1')}>
           delete wall source
+        </button>
+        <button type="button" onClick={() => props.fogBrushControls?.onToggleFogBrushTool?.()}>
+          toggle fog brush tool
+        </button>
+        <button type="button" onClick={() => props.fogBrushControls?.onChangeMode?.('reveal')}>
+          set fog brush reveal
+        </button>
+        <button type="button" onClick={() => props.fogBrushControls?.onChangeMode?.('hide')}>
+          set fog brush hide
+        </button>
+        <button type="button" onClick={() => props.fogBrushControls?.onChangeRadiusSquares?.(1)}>
+          set fog brush radius one
+        </button>
+        <button
+          type="button"
+          onClick={() => props.fogBrushControls?.onPaintFogBrush?.({
+            point: { x: 35, y: 35 },
+            mode: props.fogBrushControls?.mode,
+            radiusSquares: props.fogBrushControls?.radiusSquares,
+          })}
+        >
+          paint fog brush
+        </button>
+        <button
+          type="button"
+          onClick={() => props.fogBrushControls?.onPaintFogBrush?.({
+            point: { x: 735, y: 35 },
+            mode: props.fogBrushControls?.mode,
+            radiusSquares: props.fogBrushControls?.radiusSquares,
+          })}
+        >
+          paint distant fog brush
         </button>
         <button type="button" onClick={() => props.onChangeAoeFigureType?.('rectangle')}>
           activate rectangle tool
@@ -723,6 +802,7 @@ describe('GrigliataPage', () => {
     window.localStorage.clear();
     mockFirestoreListeners.splice(0, mockFirestoreListeners.length);
     mockBatchInstances.splice(0, mockBatchInstances.length);
+    mockTransactionInstances.splice(0, mockTransactionInstances.length);
     mockGeneratedDocCounter = 0;
     mockFirestoreState.collections = {
       grigliata_backgrounds: [
@@ -813,6 +893,7 @@ describe('GrigliataPage', () => {
     });
     firestore.orderBy.mockClear().mockImplementation((field) => ({ kind: 'orderBy', field }));
     firestore.query.mockClear().mockImplementation((base, ...constraints) => mockBuildQueryTarget(base, constraints));
+    firestore.runTransaction.mockClear().mockImplementation((db, callback) => mockRunFirestoreTransaction(callback));
     firestore.serverTimestamp.mockClear().mockImplementation(() => ({ __type: 'serverTimestamp' }));
     firestore.setDoc.mockClear().mockResolvedValue(undefined);
     firestore.startAfter.mockClear().mockImplementation((value) => ({ kind: 'startAfter', value }));
@@ -874,6 +955,9 @@ describe('GrigliataPage', () => {
   );
   const getCommittedBatches = () => (
     [...mockBatchInstances].filter((batch) => batch.commit.mock.calls.length > 0)
+  );
+  const getTransactionSetCalls = () => (
+    mockTransactionInstances.flatMap((transaction) => transaction.set.mock.calls)
   );
 
   test('derives the workspace height from shell metrics without querying the legacy navbar', async () => {
@@ -3204,6 +3288,354 @@ describe('GrigliataPage', () => {
       expect(screen.getByTestId('board-darkness-source-count')).toHaveTextContent('0');
       expect(screen.getByTestId('board-wall-source-count')).toHaveTextContent('0');
       expect(screen.getByTestId('board-wall-controls-count')).toHaveTextContent('0');
+    });
+  });
+
+  test('persists DM reveal brush edits for active player-owner fog docs only', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-1',
+      backgroundId: 'map-1',
+      tokenId: 'user-1',
+      ownerUid: 'user-1',
+      tokenType: 'character',
+      col: 0,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+    }, {
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      tokenId: 'user-2',
+      ownerUid: 'user-2',
+      tokenType: 'character',
+      col: 3,
+      row: 3,
+      isVisibleToPlayers: true,
+      isDead: false,
+    }, {
+      id: 'map-1__token-3',
+      backgroundId: 'map-1',
+      tokenId: 'token-3',
+      ownerUid: 'user-3',
+      tokenType: 'custom',
+      col: 4,
+      row: 3,
+      isVisibleToPlayers: true,
+      isDead: false,
+    }, {
+      id: 'map-1__foe-1',
+      backgroundId: 'map-1',
+      tokenId: 'foe-1',
+      ownerUid: 'dm-2',
+      tokenType: 'foe',
+      col: 5,
+      row: 3,
+      isVisibleToPlayers: true,
+      isDead: false,
+    }]);
+    setCollectionData('grigliata_fog_of_war', [{
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      ownerUid: 'user-2',
+      cellSizePx: 70,
+      exploredCells: ['5:5'],
+      updatedBy: 'user-2',
+    }, {
+      id: 'map-2__user-4',
+      backgroundId: 'map-2',
+      ownerUid: 'user-4',
+      cellSizePx: 70,
+      exploredCells: ['9:9'],
+      updatedBy: 'user-4',
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-brush-controls')).toHaveTextContent('true');
+    });
+    fireEvent.click(screen.getByRole('button', { name: /toggle fog brush tool/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-brush-active')).toHaveTextContent('true');
+    });
+
+    firestore.setDoc.mockClear();
+    firestore.updateDoc.mockClear();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /paint fog brush/i }));
+    });
+
+    await waitFor(() => {
+      expect(getTransactionSetCalls()).toEqual(expect.arrayContaining([
+        [
+          expect.objectContaining({ path: 'grigliata_fog_of_war/map-1__user-2' }),
+          expect.objectContaining({
+            backgroundId: 'map-1',
+            ownerUid: 'user-2',
+            cellSizePx: 70,
+            exploredCells: expect.arrayContaining(['0:0', '5:5']),
+            updatedBy: 'user-1',
+          }),
+          { merge: true },
+        ],
+      ]));
+    });
+    expect(getTransactionSetCalls()).toEqual(expect.arrayContaining([
+      [
+        expect.objectContaining({ path: 'grigliata_fog_of_war/map-1__user-3' }),
+        expect.objectContaining({
+          backgroundId: 'map-1',
+          ownerUid: 'user-3',
+          cellSizePx: 70,
+          exploredCells: expect.arrayContaining(['0:0']),
+          updatedBy: 'user-1',
+        }),
+        { merge: true },
+      ],
+    ]));
+    expect(getTransactionSetCalls().some(([target]) => (
+      target?.path === 'grigliata_fog_of_war/map-1__user-1'
+      || target?.path === 'grigliata_fog_of_war/map-1__dm-2'
+      || target?.path === 'grigliata_fog_of_war/map-2__user-4'
+    ))).toBe(false);
+    expect(firestore.runTransaction).toHaveBeenCalledTimes(2);
+    expect(firestore.setDoc.mock.calls.some(([target]) => (
+      target?.path === 'grigliata_background_lighting/map-1'
+      || target?.path === 'grigliata_lighting_render_inputs/map-1'
+      || target?.path === 'grigliata_wall_state/map-1'
+    ))).toBe(false);
+    expect(firestore.updateDoc).not.toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+      expect.any(Object)
+    );
+  });
+
+  test('persists DM hide brush edits without creating missing owner fog docs', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      tokenId: 'user-2',
+      ownerUid: 'user-2',
+      tokenType: 'character',
+      col: 3,
+      row: 3,
+      isVisibleToPlayers: true,
+      isDead: false,
+    }, {
+      id: 'map-1__user-3',
+      backgroundId: 'map-1',
+      tokenId: 'user-3',
+      ownerUid: 'user-3',
+      tokenType: 'character',
+      col: 4,
+      row: 3,
+      isVisibleToPlayers: true,
+      isDead: false,
+    }]);
+    setCollectionData('grigliata_fog_of_war', [{
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      ownerUid: 'user-2',
+      cellSizePx: 70,
+      exploredCells: ['0:0', '5:5'],
+      updatedBy: 'user-2',
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-brush-controls')).toHaveTextContent('true');
+    });
+    fireEvent.click(screen.getByRole('button', { name: /toggle fog brush tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /set fog brush hide/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-brush-mode')).toHaveTextContent('hide');
+    });
+
+    firestore.setDoc.mockClear();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /paint fog brush/i }));
+    });
+
+    await waitFor(() => {
+      expect(getTransactionSetCalls()).toEqual(expect.arrayContaining([
+        [
+          expect.objectContaining({ path: 'grigliata_fog_of_war/map-1__user-2' }),
+          expect.objectContaining({
+            backgroundId: 'map-1',
+            ownerUid: 'user-2',
+            exploredCells: ['5:5'],
+            updatedBy: 'user-1',
+          }),
+          { merge: true },
+        ],
+      ]));
+    });
+    expect(getTransactionSetCalls().some(([target]) => (
+      target?.path === 'grigliata_fog_of_war/map-1__user-3'
+    ))).toBe(false);
+    expect(firestore.runTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  test('queues DM brush samples while a fog transaction is pending', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      tokenId: 'user-2',
+      ownerUid: 'user-2',
+      tokenType: 'character',
+      col: 3,
+      row: 3,
+      isVisibleToPlayers: true,
+      isDead: false,
+    }]);
+    setCollectionData('grigliata_fog_of_war', [{
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      ownerUid: 'user-2',
+      cellSizePx: 70,
+      exploredCells: ['5:5'],
+      updatedBy: 'user-2',
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-brush-controls')).toHaveTextContent('true');
+    });
+    fireEvent.click(screen.getByRole('button', { name: /toggle fog brush tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /set fog brush radius one/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-brush-radius')).toHaveTextContent('1');
+    });
+
+    const firstTransaction = createDeferred();
+    firestore.runTransaction.mockClear();
+    mockTransactionInstances.splice(0, mockTransactionInstances.length);
+    firestore.runTransaction
+      .mockImplementationOnce((db, callback) => mockRunFirestoreTransaction(callback, firstTransaction.promise))
+      .mockImplementation((db, callback) => mockRunFirestoreTransaction(callback));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^paint fog brush$/i }));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(firestore.runTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /paint distant fog brush/i }));
+      await Promise.resolve();
+    });
+    expect(firestore.runTransaction).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      firstTransaction.resolve();
+      await firstTransaction.promise;
+    });
+
+    await waitFor(() => {
+      expect(firestore.runTransaction).toHaveBeenCalledTimes(2);
+    });
+    const finalSetCall = [...getTransactionSetCalls()].reverse().find(([target]) => (
+      target?.path === 'grigliata_fog_of_war/map-1__user-2'
+    ));
+    expect(finalSetCall?.[1]).toEqual(expect.objectContaining({
+      exploredCells: expect.arrayContaining(['0:0', '10:0', '5:5']),
+      updatedBy: 'user-1',
+    }));
+  });
+
+  test('enforces the DM brush cell limit against transaction snapshots', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      tokenId: 'user-2',
+      ownerUid: 'user-2',
+      tokenType: 'character',
+      col: 3,
+      row: 3,
+      isVisibleToPlayers: true,
+      isDead: false,
+    }]);
+    const existingCells = Array.from({ length: 5000 }, (_, index) => `${index}:10`);
+    setCollectionData('grigliata_fog_of_war', [{
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      ownerUid: 'user-2',
+      cellSizePx: 70,
+      exploredCells: existingCells,
+      updatedBy: 'user-2',
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-brush-controls')).toHaveTextContent('true');
+    });
+    fireEvent.click(screen.getByRole('button', { name: /toggle fog brush tool/i }));
+    fireEvent.click(screen.getByRole('button', { name: /set fog brush radius one/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-brush-radius')).toHaveTextContent('1');
+    });
+
+    firestore.runTransaction.mockClear();
+    mockTransactionInstances.splice(0, mockTransactionInstances.length);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^paint fog brush$/i }));
+    });
+
+    await waitFor(() => {
+      expect(getTransactionSetCalls()).toHaveLength(1);
+    });
+    const [, payload] = getTransactionSetCalls()[0];
+    expect(payload.exploredCells).toHaveLength(5000);
+    expect(payload.exploredCells).toContain('0:10');
+    expect(payload.exploredCells).not.toContain('0:0');
+  });
+
+  test('players, narration, and fog-disabled maps do not receive manual fog brush controls', async () => {
+    let view = render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-brush-controls')).toHaveTextContent('false');
+    });
+
+    view.unmount();
+    setManagerAuth();
+    setDocData('grigliata_state/current', {
+      activeBackgroundId: 'map-1',
+      presentationBackgroundId: 'map-2',
+    });
+    view = render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-narration-active')).toHaveTextContent('true');
+      expect(screen.getByTestId('board-fog-brush-controls')).toHaveTextContent('false');
+    });
+
+    view.unmount();
+    setManagerAuth();
+    setDocData('grigliata_state/current', {
+      activeBackgroundId: 'map-1',
+    });
+    setCollectionData('grigliata_backgrounds', [{
+      id: 'map-1',
+      name: 'Sunken Ruins',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+      isGridVisible: true,
+      isTurnOrderEnabled: false,
+      fogOfWarEnabled: false,
+    }]);
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-brush-controls')).toHaveTextContent('false');
     });
   });
 

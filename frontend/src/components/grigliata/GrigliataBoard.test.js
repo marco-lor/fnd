@@ -29,6 +29,17 @@ const OVERFLOW_BADGE_FILL = 'rgba(2, 6, 23, 0.94)';
 const HIDDEN_BADGE_STROKE = 'rgba(226, 232, 240, 0.96)';
 const DEAD_BANNER_FILL = 'rgba(127, 29, 29, 0.88)';
 
+const createDeferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+
+  return { promise, resolve, reject };
+};
+
 jest.mock('framer-motion', () => {
   const actual = jest.requireActual('framer-motion');
 
@@ -1362,6 +1373,86 @@ describe('GrigliataBoard', () => {
     expect(screen.queryByTestId('selected-darkness-panel')).not.toBeInTheDocument();
   });
 
+  test('renders DM fog brush controls outside narration only', async () => {
+    const onToggleFogBrushTool = jest.fn();
+    const fogBrushControls = {
+      isFogBrushToolActive: false,
+      mode: 'reveal',
+      radiusSquares: 2,
+      onToggleFogBrushTool,
+      onChangeMode: jest.fn(),
+      onChangeRadiusSquares: jest.fn(),
+      onPaintFogBrush: jest.fn(),
+    };
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          fogBrushControls,
+        })}
+      />
+    );
+
+    const trigger = await screen.findByTestId('fog-brush-tool-trigger');
+    fireEvent.click(trigger);
+    expect(onToggleFogBrushTool).toHaveBeenCalled();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: false,
+          fogBrushControls,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('fog-brush-tool-trigger')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          fogBrushControls,
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
+    expect(screen.queryByTestId('fog-brush-tool-trigger')).not.toBeInTheDocument();
+  });
+
+  test('toggles reveal and hide brush settings', async () => {
+    const onChangeMode = jest.fn();
+    const onChangeRadiusSquares = jest.fn();
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          fogBrushControls: {
+            isFogBrushToolActive: true,
+            mode: 'reveal',
+            radiusSquares: 2,
+            onToggleFogBrushTool: jest.fn(),
+            onChangeMode,
+            onChangeRadiusSquares,
+            onPaintFogBrush: jest.fn(),
+          },
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('fog-brush-tool-trigger')).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByTestId('fog-brush-mode-hide'));
+    fireEvent.click(screen.getByTestId('fog-brush-mode-reveal'));
+    fireEvent.change(screen.getByRole('spinbutton', { name: /fog brush radius/i }), {
+      target: { value: '5' },
+    });
+
+    expect(onChangeMode).toHaveBeenNthCalledWith(1, 'hide');
+    expect(onChangeMode).toHaveBeenNthCalledWith(2, 'reveal');
+    expect(onChangeRadiusSquares).toHaveBeenCalledWith(5);
+  });
+
   test('renders DM lighting diagnostics outside narration only', async () => {
     const { rerender } = render(
       <GrigliataBoard
@@ -1618,6 +1709,101 @@ describe('GrigliataBoard', () => {
         x: expect.any(Number),
         y: expect.any(Number),
       }));
+    });
+  });
+
+  test('paints fog cells with click and drag from the DM brush tool', async () => {
+    const onPaintFogBrush = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          fogBrushControls: {
+            isFogBrushToolActive: true,
+            mode: 'reveal',
+            radiusSquares: 2,
+            onToggleFogBrushTool: jest.fn(),
+            onChangeMode: jest.fn(),
+            onChangeRadiusSquares: jest.fn(),
+            onPaintFogBrush,
+          },
+        })}
+      />
+    );
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+    fireEvent.mouseMove(window, { clientX: 210, clientY: 140, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 210, clientY: 140, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onPaintFogBrush).toHaveBeenCalledTimes(2);
+    });
+    expect(onPaintFogBrush).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      point: expect.objectContaining({
+        x: expect.any(Number),
+        y: expect.any(Number),
+      }),
+      mode: 'reveal',
+      radiusSquares: 2,
+    }));
+    expect(onPaintFogBrush).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      mode: 'reveal',
+      radiusSquares: 2,
+    }));
+  });
+
+  test('keeps sampling fog brush drags while persistence is pending', async () => {
+    const firstPaint = createDeferred();
+    const onPaintFogBrush = jest.fn();
+
+    function PendingFogBrushHarness() {
+      const [isPending, setIsPending] = React.useState(false);
+
+      const handlePaintFogBrush = React.useCallback((payload) => {
+        onPaintFogBrush(payload);
+        setIsPending(true);
+        return firstPaint.promise;
+      }, []);
+
+      return (
+        <GrigliataBoard
+          {...buildProps({
+            isManager: true,
+            fogBrushControls: {
+              isFogBrushToolActive: true,
+              isPending,
+              mode: 'reveal',
+              radiusSquares: 2,
+              onToggleFogBrushTool: jest.fn(),
+              onChangeMode: jest.fn(),
+              onChangeRadiusSquares: jest.fn(),
+              onPaintFogBrush: handlePaintFogBrush,
+            },
+          })}
+        />
+      );
+    }
+
+    render(<PendingFogBrushHarness />);
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    fireEvent.mouseDown(stage, { button: 0, clientX: 140, clientY: 140, buttons: 1 });
+
+    await waitFor(() => {
+      expect(onPaintFogBrush).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.mouseMove(window, { clientX: 210, clientY: 140, buttons: 1 });
+
+    await waitFor(() => {
+      expect(onPaintFogBrush).toHaveBeenCalledTimes(2);
+    });
+
+    await act(async () => {
+      firstPaint.resolve(true);
+      await firstPaint.promise;
     });
   });
 
@@ -2049,6 +2235,54 @@ describe('GrigliataBoard', () => {
       expect(onMoveTokens).toHaveBeenCalled();
     });
     expect(onMoveWallSegment).not.toHaveBeenCalled();
+  });
+
+  test('keeps token dragging above fog brush interaction', async () => {
+    const onMoveTokens = jest.fn(() => Promise.resolve(true));
+    const onPaintFogBrush = jest.fn(() => Promise.resolve(true));
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          currentUserId: 'dm-1',
+          onMoveTokens,
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          fogBrushControls: {
+            isFogBrushToolActive: true,
+            mode: 'reveal',
+            radiusSquares: 2,
+            onToggleFogBrushTool: jest.fn(),
+            onChangeMode: jest.fn(),
+            onChangeRadiusSquares: jest.fn(),
+            onPaintFogBrush,
+          },
+        })}
+      />
+    );
+
+    const token = screen.getByTestId('token-node-user-1');
+    fireEvent.mouseDown(token, { button: 0, buttons: 1, clientX: 175, clientY: 175 });
+    fireEvent.mouseMove(window, { clientX: 245, clientY: 245, buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, clientX: 245, clientY: 245, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onMoveTokens).toHaveBeenCalled();
+    });
+    expect(onPaintFogBrush).not.toHaveBeenCalled();
   });
 
   test('keeps the old battlemap briefly while fading it out on deactivation', async () => {

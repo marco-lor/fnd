@@ -1,0 +1,118 @@
+import {
+  applyFogBrushEdit,
+  buildFogBrushCellKeys,
+  DEFAULT_FOG_BRUSH_RADIUS_SQUARES,
+  MAX_FOG_BRUSH_RADIUS_SQUARES,
+  MIN_FOG_BRUSH_RADIUS_SQUARES,
+  normalizeFogBrushMode,
+  normalizeFogBrushRadiusSquares,
+  normalizeFogBrushSettings,
+} from './fogBrushEditing';
+
+const grid = {
+  cellSizePx: 70,
+  offsetXPx: 0,
+  offsetYPx: 0,
+};
+
+describe('fogBrushEditing', () => {
+  test('normalizes brush radius and mode', () => {
+    expect(MIN_FOG_BRUSH_RADIUS_SQUARES).toBe(1);
+    expect(MAX_FOG_BRUSH_RADIUS_SQUARES).toBe(20);
+    expect(DEFAULT_FOG_BRUSH_RADIUS_SQUARES).toBe(2);
+
+    expect(normalizeFogBrushMode('hide')).toBe('hide');
+    expect(normalizeFogBrushMode('reveal')).toBe('reveal');
+    expect(normalizeFogBrushMode('erase')).toBe('reveal');
+
+    expect(normalizeFogBrushRadiusSquares(3.6)).toBe(4);
+    expect(normalizeFogBrushRadiusSquares(0)).toBe(1);
+    expect(normalizeFogBrushRadiusSquares(100)).toBe(20);
+    expect(normalizeFogBrushRadiusSquares('bad')).toBe(2);
+
+    expect(normalizeFogBrushSettings({
+      mode: 'hide',
+      radiusSquares: 8,
+    })).toEqual({
+      mode: 'hide',
+      radiusSquares: 8,
+    });
+  });
+
+  test('converts a circular brush center and radius to fog cells', () => {
+    expect(buildFogBrushCellKeys({
+      point: { x: 35, y: 35 },
+      radiusSquares: 1,
+      grid,
+    })).toEqual([
+      '0:-1',
+      '-1:0',
+      '0:0',
+      '1:0',
+      '0:1',
+    ]);
+  });
+
+  test('respects grid offsets while building brush cells', () => {
+    expect(buildFogBrushCellKeys({
+      point: { x: 45, y: 55 },
+      radiusSquares: 1,
+      grid: {
+        cellSizePx: 70,
+        offsetXPx: 10,
+        offsetYPx: 20,
+      },
+    })).toEqual([
+      '0:-1',
+      '-1:0',
+      '0:0',
+      '1:0',
+      '0:1',
+    ]);
+  });
+
+  test('reveal adds cells without duplicating', () => {
+    expect(applyFogBrushEdit({
+      existingCells: ['1:0', '0:0'],
+      brushCells: ['1:0', '2:0'],
+      mode: 'reveal',
+    })).toEqual(['0:0', '1:0', '2:0']);
+  });
+
+  test('reveal preserves existing cells before capping new brush cells', () => {
+    expect(applyFogBrushEdit({
+      existingCells: ['0:0', '1:0'],
+      brushCells: ['2:0', '3:0', '4:0'],
+      mode: 'reveal',
+      cellLimit: 4,
+    })).toEqual(['0:0', '1:0', '2:0', '3:0']);
+  });
+
+  test('hide removes cells', () => {
+    expect(applyFogBrushEdit({
+      existingCells: ['0:0', '1:0', '2:0'],
+      brushCells: ['1:0', '2:0'],
+      mode: 'hide',
+    })).toEqual(['0:0']);
+  });
+
+  test('clamps radius and ignores invalid points', () => {
+    expect(buildFogBrushCellKeys({
+      point: { x: 35, y: 35 },
+      radiusSquares: 0,
+      grid,
+    })).toEqual([
+      '0:-1',
+      '-1:0',
+      '0:0',
+      '1:0',
+      '0:1',
+    ]);
+
+    expect(buildFogBrushCellKeys({
+      point: { x: Number.NaN, y: 35 },
+      radiusSquares: 1,
+      grid,
+    })).toEqual([]);
+  });
+});

@@ -14,6 +14,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   startAfter,
@@ -141,7 +142,21 @@ import useGrigliataWallRuntimeState from './useGrigliataWallRuntimeState';
 import useGrigliataFogOfWar from './useGrigliataFogOfWar';
 import useGrigliataFogOfWarPersistence from './useGrigliataFogOfWarPersistence';
 import useGrigliataPlacementActions from './useGrigliataPlacementActions';
-import { GRIGLIATA_FOG_OF_WAR_COLLECTION } from './fogOfWar';
+import {
+  buildGrigliataFogOfWarDocId,
+  GRIGLIATA_FOG_OF_WAR_COLLECTION,
+  GRIGLIATA_FOG_OF_WAR_SCHEMA_VERSION,
+  normalizeGrigliataFogOfWarDoc,
+} from './fogOfWar';
+import {
+  applyFogBrushEdit,
+  buildFogBrushCellKeys,
+  DEFAULT_FOG_BRUSH_RADIUS_SQUARES,
+  GRIGLIATA_FOG_BRUSH_CELL_LIMIT,
+  normalizeFogBrushMode,
+  normalizeFogBrushRadiusSquares,
+  normalizeFogBrushSettings,
+} from './fogBrushEditing';
 import {
   filterFogVisibleTokens,
   filterFogVisibleTurnOrderEntries,
@@ -187,6 +202,13 @@ const deleteGrigliataCustomTokenCallable = httpsCallable(functions, GRIGLIATA_CU
 const spawnGrigliataCustomTokenInstanceCallable = httpsCallable(functions, GRIGLIATA_CUSTOM_TOKEN_SPAWN_FUNCTION);
 const spawnGrigliataFoeTokenCallable = httpsCallable(functions, GRIGLIATA_SPAWN_FOE_TOKEN_FUNCTION);
 const updateGrigliataCustomTokenTemplateCallable = httpsCallable(functions, GRIGLIATA_CUSTOM_TOKEN_UPDATE_FUNCTION);
+
+const buildFogBrushQueueKey = ({ backgroundId, mode, cellSizePx, ownerUids = [] } = {}) => JSON.stringify([
+  backgroundId,
+  mode,
+  cellSizePx,
+  ownerUids,
+]);
 
 const buildHiddenPlacementSettingsPayload = ({
   backgroundId,
@@ -395,6 +417,10 @@ export default function GrigliataPage() {
   const [isLightToolActive, setIsLightToolActive] = useState(false);
   const [isDarknessToolActive, setIsDarknessToolActive] = useState(false);
   const [isWallToolActive, setIsWallToolActive] = useState(false);
+  const [isFogBrushToolActive, setIsFogBrushToolActive] = useState(false);
+  const [fogBrushMode, setFogBrushMode] = useState('reveal');
+  const [fogBrushRadiusSquares, setFogBrushRadiusSquares] = useState(DEFAULT_FOG_BRUSH_RADIUS_SQUARES);
+  const [isFogBrushMutationPending, setIsFogBrushMutationPending] = useState(false);
   const [drawColorKey, setDrawColorKey] = useState(persistedDrawColorKey);
   const [activeGridSizeOverride, setActiveGridSizeOverride] = useState(null);
   const [activeSidebarTab, setActiveSidebarTab] = useState('tokens');
@@ -423,6 +449,9 @@ export default function GrigliataPage() {
   const liveInteractionMutationQueueRef = useRef(Promise.resolve());
   const turnOrderRepairPendingRef = useRef(false);
   const narrationActionPendingRef = useRef(false);
+  const fogBrushQueueRef = useRef([]);
+  const fogBrushFlushPromiseRef = useRef(null);
+  const isFogBrushFlushActiveRef = useRef(false);
   const [gridVisibilityUpdateBackgroundId, setGridVisibilityUpdateBackgroundId] = useState('');
   const [isActiveBackgroundDeactivationPending, setIsActiveBackgroundDeactivationPending] = useState(false);
   const [isTurnOrderResetPending, setIsTurnOrderResetPending] = useState(false);
@@ -669,6 +698,29 @@ export default function GrigliataPage() {
       .filter((token) => token?.tokenId)
       .map((token) => [token.tokenId, token])
   ), [boardTokens]);
+  const activeFogBrushOwnerUids = useMemo(() => {
+    if (!isManager || !currentUserId) {
+      return [];
+    }
+
+    const ownerUids = new Set();
+    [...activePlacementsById.values()].forEach((placement) => {
+      const ownerUid = typeof placement?.ownerUid === 'string' ? placement.ownerUid.trim() : '';
+      if (!ownerUid || ownerUid === currentUserId) {
+        return;
+      }
+
+      const tokenId = typeof placement?.tokenId === 'string' ? placement.tokenId : '';
+      const tokenType = placement?.tokenType || boardTokensById.get(tokenId)?.tokenType || '';
+      if (tokenType === 'foe') {
+        return;
+      }
+
+      ownerUids.add(ownerUid);
+    });
+
+    return [...ownerUids].sort();
+  }, [activePlacementsById, boardTokensById, currentUserId, isManager]);
   const selectedBoardTokens = useMemo(
     () => selectedBoardTokenIds
       .map((tokenId) => boardTokensById.get(tokenId))
@@ -953,12 +1005,14 @@ export default function GrigliataPage() {
     userData,
   ]);
   const trayCurrentUserToken = isManager ? null : currentUserToken;
+  const isFogOfWarEnabled = combatBackground?.fogOfWarEnabled !== false;
   useEffect(() => {
     setSelectedBoardTokenIds([]);
     setIsLightToolActive(false);
     setIsDarknessToolActive(false);
     setIsWallToolActive(false);
-  }, [activeBackgroundId, isNarrationOverlayActive]);
+    setIsFogBrushToolActive(false);
+  }, [activeBackgroundId, isFogOfWarEnabled, isNarrationOverlayActive]);
   const drawTheme = useMemo(
     () => getGrigliataDrawTheme(drawColorKey),
     [drawColorKey]
@@ -975,7 +1029,6 @@ export default function GrigliataPage() {
     () => (isNarrationOverlayActive ? [] : sharedInteractions),
     [isNarrationOverlayActive, sharedInteractions]
   );
-  const isFogOfWarEnabled = combatBackground?.fogOfWarEnabled !== false;
   const fogLightingRenderInput = isFogOfWarEnabled ? effectiveLightingRenderInput : null;
   const normalizedFogGrid = useMemo(
     () => normalizeGridConfig(grid),
@@ -1228,6 +1281,7 @@ export default function GrigliataPage() {
     setIsLightToolActive(false);
     setIsDarknessToolActive(false);
     setIsWallToolActive(false);
+    setIsFogBrushToolActive(false);
     setIsRulerEnabled(false);
     setSelectedBoardTokenIds([]);
     setLocalLiveInteraction(null);
@@ -3820,6 +3874,182 @@ export default function GrigliataPage() {
     }
   };
 
+  const handleToggleFogBrushTool = useCallback(() => {
+    if (!isManager || !activeBackgroundId || !isFogOfWarEnabled) return;
+
+    setBoardError('');
+    setIsFogBrushToolActive((currentValue) => !currentValue);
+    setIsLightToolActive(false);
+    setIsDarknessToolActive(false);
+    setIsWallToolActive(false);
+    setActiveAoeFigureType('');
+    setIsRulerEnabled(false);
+  }, [activeBackgroundId, isFogOfWarEnabled, isManager]);
+
+  const handleChangeFogBrushMode = useCallback((nextMode) => {
+    setFogBrushMode(normalizeFogBrushMode(nextMode));
+  }, []);
+
+  const handleChangeFogBrushRadiusSquares = useCallback((nextRadiusSquares) => {
+    setFogBrushRadiusSquares(normalizeFogBrushRadiusSquares(nextRadiusSquares));
+  }, []);
+
+  const persistFogBrushQueueEntry = useCallback(async (entry) => {
+    if (
+      !entry?.backgroundId
+      || !entry?.updatedBy
+      || !Array.isArray(entry?.ownerUids)
+      || entry.ownerUids.length < 1
+      || !(entry?.brushCells instanceof Set)
+      || entry.brushCells.size < 1
+    ) {
+      return false;
+    }
+
+    const brushCells = [...entry.brushCells];
+    const updatedAt = serverTimestamp();
+    const writeResults = await Promise.all(entry.ownerUids.map(async (ownerUid) => {
+      const fogDocId = buildGrigliataFogOfWarDocId(entry.backgroundId, ownerUid);
+      if (!fogDocId) {
+        return false;
+      }
+
+      const fogDocRef = doc(db, GRIGLIATA_FOG_OF_WAR_COLLECTION, fogDocId);
+      return runTransaction(db, async (transaction) => {
+        const fogDocSnapshot = await transaction.get(fogDocRef);
+        const existingFogDoc = fogDocSnapshot.exists()
+          ? normalizeGrigliataFogOfWarDoc({
+              id: fogDocSnapshot.id,
+              ...fogDocSnapshot.data(),
+            })
+          : null;
+        const hasMatchingCellSize = existingFogDoc?.cellSizePx === entry.cellSizePx;
+
+        if (entry.mode === 'hide' && !hasMatchingCellSize) {
+          return false;
+        }
+
+        const nextExploredCells = applyFogBrushEdit({
+          existingCells: hasMatchingCellSize ? existingFogDoc.exploredCells : [],
+          brushCells,
+          mode: entry.mode,
+          cellLimit: GRIGLIATA_FOG_BRUSH_CELL_LIMIT,
+        });
+
+        transaction.set(fogDocRef, {
+          schemaVersion: GRIGLIATA_FOG_OF_WAR_SCHEMA_VERSION,
+          backgroundId: entry.backgroundId,
+          ownerUid,
+          cellSizePx: entry.cellSizePx,
+          exploredCells: nextExploredCells,
+          updatedAt,
+          updatedBy: entry.updatedBy,
+        }, { merge: true });
+        return true;
+      });
+    }));
+
+    return writeResults.some(Boolean);
+  }, []);
+
+  const flushFogBrushQueue = useCallback(() => {
+    if (isFogBrushFlushActiveRef.current) {
+      return fogBrushFlushPromiseRef.current || Promise.resolve(false);
+    }
+
+    isFogBrushFlushActiveRef.current = true;
+    setIsFogBrushMutationPending(true);
+
+    const flushPromise = (async () => {
+      let didWrite = false;
+
+      try {
+        while (fogBrushQueueRef.current.length > 0) {
+          const queuedEntries = fogBrushQueueRef.current.splice(0, fogBrushQueueRef.current.length);
+
+          for (const queuedEntry of queuedEntries) {
+            const didWriteEntry = await persistFogBrushQueueEntry(queuedEntry);
+            didWrite = didWrite || didWriteEntry;
+          }
+        }
+
+        return didWrite;
+      } catch (error) {
+        console.error('Failed to paint Grigliata fog brush:', error);
+        setBoardError('Unable to update fog of war right now.');
+        throw error;
+      } finally {
+        isFogBrushFlushActiveRef.current = false;
+        fogBrushFlushPromiseRef.current = null;
+        setIsFogBrushMutationPending(false);
+      }
+    })();
+
+    fogBrushFlushPromiseRef.current = flushPromise;
+    return flushPromise;
+  }, [persistFogBrushQueueEntry]);
+
+  const handlePaintFogBrush = useCallback(async ({
+    point = {},
+    mode = fogBrushMode,
+    radiusSquares = fogBrushRadiusSquares,
+  } = {}) => {
+    if (
+      !isManager
+      || !user?.uid
+      || !activeBackgroundId
+      || !isFogOfWarEnabled
+      || isNarrationOverlayActive
+      || activeFogBrushOwnerUids.length < 1
+    ) {
+      return false;
+    }
+
+    const brushSettings = normalizeFogBrushSettings({ mode, radiusSquares });
+    const brushCells = buildFogBrushCellKeys({
+      point,
+      radiusSquares: brushSettings.radiusSquares,
+      grid: normalizedFogGrid,
+    });
+    if (brushCells.length < 1) {
+      return false;
+    }
+
+    setBoardError('');
+    setLightingImportError('');
+
+    const ownerUids = [...activeFogBrushOwnerUids];
+    const queueEntry = {
+      backgroundId: activeBackgroundId,
+      ownerUids,
+      mode: brushSettings.mode,
+      cellSizePx: normalizedFogGrid.cellSizePx,
+      updatedBy: user.uid,
+      brushCells: new Set(brushCells),
+    };
+    queueEntry.key = buildFogBrushQueueKey(queueEntry);
+
+    const lastQueuedEntry = fogBrushQueueRef.current[fogBrushQueueRef.current.length - 1];
+    if (lastQueuedEntry?.key === queueEntry.key) {
+      brushCells.forEach((cellKey) => lastQueuedEntry.brushCells.add(cellKey));
+    } else {
+      fogBrushQueueRef.current.push(queueEntry);
+    }
+
+    return flushFogBrushQueue();
+  }, [
+    activeBackgroundId,
+    activeFogBrushOwnerUids,
+    fogBrushMode,
+    fogBrushRadiusSquares,
+    flushFogBrushQueue,
+    isManager,
+    isFogOfWarEnabled,
+    isNarrationOverlayActive,
+    normalizedFogGrid,
+    user?.uid,
+  ]);
+
   const handleToggleWallRuntimeSegment = async (wall) => {
     if (!isManager || !user?.uid || !activeBackgroundId || !wall?.id) return;
 
@@ -3984,6 +4214,7 @@ export default function GrigliataPage() {
     setIsLightToolActive((currentValue) => !currentValue);
     setIsDarknessToolActive(false);
     setIsWallToolActive(false);
+    setIsFogBrushToolActive(false);
     setActiveAoeFigureType('');
     setIsRulerEnabled(false);
   }, [activeBackgroundId, isManager]);
@@ -4147,6 +4378,7 @@ export default function GrigliataPage() {
     setIsDarknessToolActive((currentValue) => !currentValue);
     setIsLightToolActive(false);
     setIsWallToolActive(false);
+    setIsFogBrushToolActive(false);
     setActiveAoeFigureType('');
     setIsRulerEnabled(false);
   }, [activeBackgroundId, isManager]);
@@ -4272,6 +4504,7 @@ export default function GrigliataPage() {
     setIsWallToolActive((currentValue) => !currentValue);
     setIsLightToolActive(false);
     setIsDarknessToolActive(false);
+    setIsFogBrushToolActive(false);
     setActiveAoeFigureType('');
     setIsRulerEnabled(false);
   }, [activeBackgroundId, isManager]);
@@ -4578,6 +4811,7 @@ export default function GrigliataPage() {
     setIsLightToolActive(false);
     setIsDarknessToolActive(false);
     setIsWallToolActive(false);
+    setIsFogBrushToolActive(false);
     setIsRulerEnabled(false);
   }, []);
 
@@ -4587,6 +4821,7 @@ export default function GrigliataPage() {
     setIsLightToolActive(false);
     setIsDarknessToolActive(false);
     setIsWallToolActive(false);
+    setIsFogBrushToolActive(false);
     setIsRulerEnabled((currentValue) => !currentValue);
   }, []);
 
@@ -4597,6 +4832,7 @@ export default function GrigliataPage() {
       setIsLightToolActive(false);
       setIsDarknessToolActive(false);
       setIsWallToolActive(false);
+      setIsFogBrushToolActive(false);
       setIsRulerEnabled(false);
     }
   }, []);
@@ -4971,6 +5207,16 @@ export default function GrigliataPage() {
                   onUpdateWallSegment: handleUpdateWallSegment,
                   onDuplicateWallSegment: handleDuplicateWallSegment,
                   onDeleteWallSegment: handleDeleteWallSegment,
+                } : null}
+                fogBrushControls={isManager && !isNarrationOverlayActive && isFogOfWarEnabled && activeBackgroundId ? {
+                  isFogBrushToolActive,
+                  mode: fogBrushMode,
+                  radiusSquares: fogBrushRadiusSquares,
+                  isPending: isFogBrushMutationPending,
+                  onToggleFogBrushTool: handleToggleFogBrushTool,
+                  onChangeMode: handleChangeFogBrushMode,
+                  onChangeRadiusSquares: handleChangeFogBrushRadiusSquares,
+                  onPaintFogBrush: handlePaintFogBrush,
                 } : null}
                 fogOfWar={boardFogOfWar}
                 wallRuntimeSegments={effectiveLightingRenderInput?.walls || []}

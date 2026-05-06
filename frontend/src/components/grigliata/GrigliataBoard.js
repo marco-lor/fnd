@@ -94,6 +94,11 @@ import {
   filterFogVisibleTokens,
   splitFogVisibleTokenRenderLayers,
 } from './fogVisibilityFiltering';
+import {
+  MAX_FOG_BRUSH_RADIUS_SQUARES,
+  MIN_FOG_BRUSH_RADIUS_SQUARES,
+  normalizeFogBrushSettings,
+} from './fogBrushEditing';
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
 const RULER_LABEL_MIN_WIDTH = 90;
@@ -2341,6 +2346,7 @@ export default function GrigliataBoard({
   lightSourceControls = null,
   darknessSourceControls = null,
   wallSourceControls = null,
+  fogBrushControls = null,
   isNarrationOverlayActive = false,
 }) {
   const containerRef = useRef(null);
@@ -2417,7 +2423,21 @@ export default function GrigliataBoard({
   const isDarknessSourcePending = !!darknessSourceControls?.isPending;
   const isWallToolActive = !!(isManager && wallSourceControls?.isWallToolActive);
   const isWallSourcePending = !!wallSourceControls?.isPending;
-  const isMouseSelectionActive = !isRulerEnabled && !activeAoeFigureType && !isLightToolActive && !isDarknessToolActive && !isWallToolActive;
+  const isFogBrushToolActive = !!(isManager && fogBrushControls?.isFogBrushToolActive);
+  const isFogBrushPending = !!fogBrushControls?.isPending;
+  const fogBrushSettings = useMemo(
+    () => normalizeFogBrushSettings({
+      mode: fogBrushControls?.mode,
+      radiusSquares: fogBrushControls?.radiusSquares,
+    }),
+    [fogBrushControls?.mode, fogBrushControls?.radiusSquares]
+  );
+  const isMouseSelectionActive = !isRulerEnabled
+    && !activeAoeFigureType
+    && !isLightToolActive
+    && !isDarknessToolActive
+    && !isWallToolActive
+    && !isFogBrushToolActive;
   const isMusicEnabled = !isMusicMuted;
   const musicToggleActionLabel = isMusicEnabled ? 'Mute Music' : 'Unmute Music';
   const musicToggleStateLabel = isMusicEnabled ? 'Shared music enabled' : 'Shared music muted';
@@ -3140,10 +3160,25 @@ export default function GrigliataBoard({
     if (!activeAoeFigureType) {
       setAoEPreviewState(null);
     }
-    if (!isRulerEnabled && !activeAoeFigureType && !isLightToolActive && !isDarknessToolActive && !isWallToolActive) {
+    if (
+      !isRulerEnabled
+      && !activeAoeFigureType
+      && !isLightToolActive
+      && !isDarknessToolActive
+      && !isWallToolActive
+      && !isFogBrushToolActive
+    ) {
       clearActiveSharedInteraction();
     }
-  }, [activeAoeFigureType, clearActiveSharedInteraction, isDarknessToolActive, isLightToolActive, isRulerEnabled, isWallToolActive]);
+  }, [
+    activeAoeFigureType,
+    clearActiveSharedInteraction,
+    isDarknessToolActive,
+    isFogBrushToolActive,
+    isLightToolActive,
+    isRulerEnabled,
+    isWallToolActive,
+  ]);
 
   useEffect(() => {
     if (visibleLocalPings.length === localPings.length) {
@@ -3322,6 +3357,30 @@ export default function GrigliataBoard({
       y: (clientY - rect.top - viewport.y) / viewport.scale,
     };
   }, [viewport.x, viewport.y, viewport.scale]);
+
+  const paintFogBrushAtPoint = useCallback((point) => {
+    if (
+      !point
+      || !isFogBrushToolActive
+      || !fogBrushControls?.onPaintFogBrush
+    ) {
+      return false;
+    }
+
+    void Promise.resolve(fogBrushControls.onPaintFogBrush({
+      point,
+      mode: fogBrushSettings.mode,
+      radiusSquares: fogBrushSettings.radiusSquares,
+    })).catch((error) => {
+      console.error('Failed to paint Grigliata fog brush:', error);
+    });
+    return true;
+  }, [
+    fogBrushControls,
+    fogBrushSettings.mode,
+    fogBrushSettings.radiusSquares,
+    isFogBrushToolActive,
+  ]);
 
   const buildMeasurementForCells = useCallback((anchorCells, liveEndCell) => (
     buildGridMeasurementPath({
@@ -3689,6 +3748,11 @@ export default function GrigliataBoard({
     }
 
     if (isPingHoldInteraction(activeInteraction)) {
+      return;
+    }
+
+    if (activeInteraction.type === 'fog-brush') {
+      clearActiveSharedInteraction();
       return;
     }
 
@@ -4109,6 +4173,16 @@ export default function GrigliataBoard({
         || Math.abs(event.clientY - activeInteraction.startClient.y) >= POINTER_DRAG_THRESHOLD_PX
       );
 
+      if (activeInteraction.type === 'fog-brush') {
+        paintFogBrushAtPoint(pointerWorld);
+        interactionRef.current = {
+          ...activeInteraction,
+          lastWorld: pointerWorld,
+        };
+        clearActiveSharedInteraction();
+        return;
+      }
+
       if (activeInteraction.type === 'selection-candidate') {
         if (!hasMovedBeyondThreshold) return;
 
@@ -4419,6 +4493,7 @@ export default function GrigliataBoard({
     getWorldPointFromClient,
     isRulerEnabled,
     normalizedGrid,
+    paintFogBrushAtPoint,
     syncSharedMeasureInteraction,
     clearPingHoldTimer,
   ]);
@@ -4907,6 +4982,25 @@ export default function GrigliataBoard({
       return;
     }
 
+    if (isFogBrushToolActive && fogBrushControls?.onPaintFogBrush) {
+      setSelectedTokenIds([]);
+      setSelectedLightId('');
+      setSelectedDarknessId('');
+      setSelectedWallId('');
+      setSelectionBox(null);
+      paintFogBrushAtPoint(pointerWorld);
+      interactionRef.current = {
+        type: 'fog-brush',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startWorld: pointerWorld,
+        lastWorld: pointerWorld,
+      };
+      return;
+    }
+
     setSelectedLightId('');
     setSelectedDarknessId('');
     setSelectedWallId('');
@@ -5176,6 +5270,7 @@ export default function GrigliataBoard({
       || darknessDragState
       || !!selectedWall
       || wallDragState
+      || isFogBrushToolActive
     ) {
       return null;
     }
@@ -5191,6 +5286,7 @@ export default function GrigliataBoard({
     isManager,
     isTokenDragActive,
     isRulerEnabled,
+    isFogBrushToolActive,
     darknessDragState,
     lightDragState,
     selectedAoEFigureId,
@@ -5224,6 +5320,7 @@ export default function GrigliataBoard({
       || darknessDragState
       || !!selectedWall
       || wallDragState
+      || isFogBrushToolActive
     ) {
       return null;
     }
@@ -5298,6 +5395,7 @@ export default function GrigliataBoard({
     activeAoeFigureType,
     isTokenDragActive,
     isRulerEnabled,
+    isFogBrushToolActive,
     darknessDragState,
     lightDragState,
     selectedAoEFigureId,
@@ -5331,6 +5429,7 @@ export default function GrigliataBoard({
       || darknessDragState
       || !!selectedWall
       || wallDragState
+      || isFogBrushToolActive
     ) {
       return null;
     }
@@ -5382,6 +5481,7 @@ export default function GrigliataBoard({
     aoeFigureDragState,
     isRulerEnabled,
     isTokenDragActive,
+    isFogBrushToolActive,
     darknessDragState,
     lightDragState,
     selectedAoEFigure,
@@ -5635,6 +5735,65 @@ export default function GrigliataBoard({
             >
               <FiMinus className="h-4 w-4" />
             </button>
+          )}
+          {!isNarrationOverlayActive && isManager && fogBrushControls?.onToggleFogBrushTool && (
+            <button
+              type="button"
+              onClick={() => fogBrushControls?.onToggleFogBrushTool?.()}
+              disabled={isNarrationOverlayActive || isFogBrushPending || !fogBrushControls?.onToggleFogBrushTool}
+              title={isFogBrushToolActive ? 'Disable manual fog brush' : 'Enable manual fog brush'}
+              aria-label={isFogBrushToolActive ? 'Disable manual fog brush' : 'Enable manual fog brush'}
+              aria-pressed={isFogBrushToolActive}
+              data-testid="fog-brush-tool-trigger"
+              className={`${getQuickControlButtonClassName(isFogBrushToolActive)} disabled:cursor-not-allowed disabled:opacity-60`}
+            >
+              <FiEyeOff className="h-4 w-4" />
+            </button>
+          )}
+          {!isNarrationOverlayActive && isManager && isFogBrushToolActive && fogBrushControls && (
+            <div
+              data-testid="fog-brush-settings"
+              className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-slate-700/90 bg-slate-950/94 p-1 shadow-lg shadow-slate-950/40 backdrop-blur-md"
+            >
+              <button
+                type="button"
+                data-testid="fog-brush-mode-reveal"
+                onClick={() => fogBrushControls?.onChangeMode?.('reveal')}
+                disabled={isFogBrushPending}
+                title="Reveal fog"
+                aria-label="Reveal fog brush"
+                aria-pressed={fogBrushSettings.mode === 'reveal'}
+                className={`${getQuickControlButtonClassName(fogBrushSettings.mode === 'reveal')} h-8 w-8 rounded-xl disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                <FiEye className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                data-testid="fog-brush-mode-hide"
+                onClick={() => fogBrushControls?.onChangeMode?.('hide')}
+                disabled={isFogBrushPending}
+                title="Hide fog"
+                aria-label="Hide fog brush"
+                aria-pressed={fogBrushSettings.mode === 'hide'}
+                className={`${getQuickControlButtonClassName(fogBrushSettings.mode === 'hide')} h-8 w-8 rounded-xl disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                <FiEyeOff className="h-3.5 w-3.5" />
+              </button>
+              <label className="flex h-8 w-12 items-center justify-center rounded-xl border border-slate-700/90 bg-slate-900/90 px-1">
+                <span className="sr-only">Fog brush radius</span>
+                <input
+                  type="number"
+                  min={MIN_FOG_BRUSH_RADIUS_SQUARES}
+                  max={MAX_FOG_BRUSH_RADIUS_SQUARES}
+                  step="1"
+                  aria-label="Fog brush radius"
+                  value={fogBrushSettings.radiusSquares}
+                  disabled={isFogBrushPending}
+                  onChange={(event) => fogBrushControls?.onChangeRadiusSquares?.(Number(event.target.value))}
+                  className="h-6 w-full bg-transparent text-center text-xs font-semibold text-slate-100 outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </label>
+            </div>
           )}
           <button
             type="button"
