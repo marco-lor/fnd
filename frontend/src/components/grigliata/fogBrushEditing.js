@@ -28,6 +28,11 @@ const isFinitePoint = (point) => (
   && Number.isFinite(Number(point?.y))
 );
 
+const limitFogCellKeys = (cellKeys, cellLimit) => {
+  const normalizedCells = normalizeFogCellKeys(cellKeys) || [];
+  return cellLimit === null ? normalizedCells : normalizedCells.slice(0, cellLimit);
+};
+
 export const normalizeFogBrushMode = (mode) => (
   VALID_FOG_BRUSH_MODES.has(mode) ? mode : FOG_BRUSH_MODE_REVEAL
 );
@@ -116,10 +121,13 @@ export const applyFogBrushEdit = ({
 
   if (normalizeFogBrushMode(mode) === FOG_BRUSH_MODE_HIDE) {
     const brushCellSet = new Set(normalizedBrushCells);
-    return normalizedExistingCells.filter((cellKey) => !brushCellSet.has(cellKey));
+    return limitFogCellKeys(
+      normalizedExistingCells.filter((cellKey) => !brushCellSet.has(cellKey)),
+      normalizedCellLimit
+    );
   }
 
-  const nextCells = new Set(normalizedExistingCells);
+  const nextCells = new Set(limitFogCellKeys(normalizedExistingCells, normalizedCellLimit));
   normalizedBrushCells.forEach((cellKey) => {
     if (
       !nextCells.has(cellKey)
@@ -131,5 +139,5 @@ export const applyFogBrushEdit = ({
 
     nextCells.add(cellKey);
   });
-  return normalizeFogCellKeys([...nextCells]) || [];
+  return limitFogCellKeys([...nextCells], normalizedCellLimit);
 };

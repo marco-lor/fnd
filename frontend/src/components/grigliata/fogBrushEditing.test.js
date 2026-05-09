@@ -88,12 +88,42 @@ describe('fogBrushEditing', () => {
     })).toEqual(['0:0', '1:0', '2:0', '3:0']);
   });
 
+  test('reveal trims oversized existing cells before writing', () => {
+    const existingCells = Array.from({ length: 5002 }, (_, index) => `${index}:10`);
+    const result = applyFogBrushEdit({
+      existingCells,
+      brushCells: ['0:0'],
+      mode: 'reveal',
+      cellLimit: 5000,
+    });
+
+    expect(result).toHaveLength(5000);
+    expect(result).toContain('0:10');
+    expect(result).not.toContain('0:0');
+    expect(result).not.toContain('5000:10');
+  });
+
   test('hide removes cells', () => {
     expect(applyFogBrushEdit({
       existingCells: ['0:0', '1:0', '2:0'],
       brushCells: ['1:0', '2:0'],
       mode: 'hide',
     })).toEqual(['0:0']);
+  });
+
+  test('hide trims oversized existing cells after removing brush cells', () => {
+    const existingCells = Array.from({ length: 5002 }, (_, index) => `${index}:10`);
+    const result = applyFogBrushEdit({
+      existingCells,
+      brushCells: ['0:10', '1:10', '2:10'],
+      mode: 'hide',
+      cellLimit: 5000,
+    });
+
+    expect(result).toHaveLength(4999);
+    expect(result).not.toContain('0:10');
+    expect(result).not.toContain('1:10');
+    expect(result).not.toContain('2:10');
   });
 
   test('clamps radius and ignores invalid points', () => {

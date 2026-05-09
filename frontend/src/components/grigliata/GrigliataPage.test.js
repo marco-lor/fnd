@@ -959,6 +959,22 @@ describe('GrigliataPage', () => {
   const getTransactionSetCalls = () => (
     mockTransactionInstances.flatMap((transaction) => transaction.set.mock.calls)
   );
+  const expectRuleSafeFogBrushPayload = (payload, expectedPayload = {}) => {
+    expect(Object.keys(payload).sort()).toEqual([
+      'backgroundId',
+      'cellSizePx',
+      'exploredCells',
+      'ownerUid',
+      'schemaVersion',
+      'updatedAt',
+      'updatedBy',
+    ].sort());
+    expect(payload).toEqual(expect.objectContaining({
+      schemaVersion: 1,
+      updatedAt: { __type: 'serverTimestamp' },
+      ...expectedPayload,
+    }));
+  };
 
   test('derives the workspace height from shell metrics without querying the legacy navbar', async () => {
     useShellLayout.mockReturnValue({
@@ -3394,6 +3410,26 @@ describe('GrigliataPage', () => {
         { merge: true },
       ],
     ]));
+    const user2FogWrite = getTransactionSetCalls().find(([target]) => (
+      target?.path === 'grigliata_fog_of_war/map-1__user-2'
+    ));
+    expectRuleSafeFogBrushPayload(user2FogWrite?.[1], {
+      backgroundId: 'map-1',
+      ownerUid: 'user-2',
+      cellSizePx: 70,
+      exploredCells: expect.arrayContaining(['0:0', '5:5']),
+      updatedBy: 'user-1',
+    });
+    const user3FogWrite = getTransactionSetCalls().find(([target]) => (
+      target?.path === 'grigliata_fog_of_war/map-1__user-3'
+    ));
+    expectRuleSafeFogBrushPayload(user3FogWrite?.[1], {
+      backgroundId: 'map-1',
+      ownerUid: 'user-3',
+      cellSizePx: 70,
+      exploredCells: expect.arrayContaining(['0:0']),
+      updatedBy: 'user-1',
+    });
     expect(getTransactionSetCalls().some(([target]) => (
       target?.path === 'grigliata_fog_of_war/map-1__user-1'
       || target?.path === 'grigliata_fog_of_war/map-1__dm-2'
@@ -3476,6 +3512,16 @@ describe('GrigliataPage', () => {
     expect(getTransactionSetCalls().some(([target]) => (
       target?.path === 'grigliata_fog_of_war/map-1__user-3'
     ))).toBe(false);
+    const user2FogWrite = getTransactionSetCalls().find(([target]) => (
+      target?.path === 'grigliata_fog_of_war/map-1__user-2'
+    ));
+    expectRuleSafeFogBrushPayload(user2FogWrite?.[1], {
+      backgroundId: 'map-1',
+      ownerUid: 'user-2',
+      cellSizePx: 70,
+      exploredCells: ['5:5'],
+      updatedBy: 'user-1',
+    });
     expect(firestore.runTransaction).toHaveBeenCalledTimes(2);
   });
 
@@ -3548,6 +3594,13 @@ describe('GrigliataPage', () => {
       exploredCells: expect.arrayContaining(['0:0', '10:0', '5:5']),
       updatedBy: 'user-1',
     }));
+    expectRuleSafeFogBrushPayload(finalSetCall?.[1], {
+      backgroundId: 'map-1',
+      ownerUid: 'user-2',
+      cellSizePx: 70,
+      exploredCells: expect.arrayContaining(['0:0', '10:0', '5:5']),
+      updatedBy: 'user-1',
+    });
   });
 
   test('enforces the DM brush cell limit against transaction snapshots', async () => {
@@ -3563,7 +3616,7 @@ describe('GrigliataPage', () => {
       isVisibleToPlayers: true,
       isDead: false,
     }]);
-    const existingCells = Array.from({ length: 5000 }, (_, index) => `${index}:10`);
+    const existingCells = Array.from({ length: 5001 }, (_, index) => `${index}:10`);
     setCollectionData('grigliata_fog_of_war', [{
       id: 'map-1__user-2',
       backgroundId: 'map-1',
@@ -3594,9 +3647,16 @@ describe('GrigliataPage', () => {
       expect(getTransactionSetCalls()).toHaveLength(1);
     });
     const [, payload] = getTransactionSetCalls()[0];
+    expectRuleSafeFogBrushPayload(payload, {
+      backgroundId: 'map-1',
+      ownerUid: 'user-2',
+      cellSizePx: 70,
+      updatedBy: 'user-1',
+    });
     expect(payload.exploredCells).toHaveLength(5000);
     expect(payload.exploredCells).toContain('0:10');
     expect(payload.exploredCells).not.toContain('0:0');
+    expect(payload.exploredCells).not.toContain('5000:10');
   });
 
   test('players, narration, and fog-disabled maps do not receive manual fog brush controls', async () => {
