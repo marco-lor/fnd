@@ -786,6 +786,11 @@ service cloud.firestore {
         && (cells.size() < 32 || isValidGrigliataFogCellKey(cells[31]));
     }
 
+    function hasValidGrigliataFogPolygons(polygons) {
+      return polygons is list
+        && polygons.size() <= 8;
+    }
+
     function isValidGrigliataFogOfWar(data, fogId) {
       return data.keys().hasAll([
           "backgroundId",
@@ -801,6 +806,7 @@ service cloud.firestore {
           "ownerUid",
           "cellSizePx",
           "exploredCells",
+          "exploredPolygons",
           "updatedAt",
           "updatedBy"
         ])
@@ -810,6 +816,7 @@ service cloud.firestore {
         && data.cellSizePx > 0
         && data.cellSizePx <= 500
         && hasValidGrigliataFogCellKeys(data.exploredCells)
+        && (!data.keys().hasAny(["exploredPolygons"]) || hasValidGrigliataFogPolygons(data.exploredPolygons))
         && data.updatedAt is timestamp
         && (data.updatedBy == null || data.updatedBy is string);
     }

@@ -1,4 +1,13 @@
 import { normalizeGridConfig } from './boardUtils';
+import {
+  FOG_POLYGON_MAX_RING_POINTS,
+  FOG_POLYGON_MEMORY_MAX_RING_POINTS,
+  FOG_POLYGON_RENDER_MAX_RING_POINTS,
+  normalizeFogMemoryPolygons,
+  normalizeFogPolygons,
+  normalizeRenderableFogPolygons,
+  simplifyFogRingToPointLimit,
+} from './fogPolygonGeometry';
 
 export const GRIGLIATA_FOG_OF_WAR_COLLECTION = 'grigliata_fog_of_war';
 export const GRIGLIATA_FOG_OF_WAR_SCHEMA_VERSION = 1;
@@ -200,6 +209,49 @@ export const buildCurrentFogCellKeys = ({
     }))
 );
 
+const buildFogPolygonsFromVision = ({
+  tokenVisionPolygons = [],
+  maxRingPoints = FOG_POLYGON_MAX_RING_POINTS,
+  normalizePolygons = normalizeFogPolygons,
+} = {}) => {
+  const fogPolygons = (Array.isArray(tokenVisionPolygons) ? tokenVisionPolygons : [])
+    .map((vision) => {
+      if (!Array.isArray(vision?.polygon)) {
+        return null;
+      }
+
+      const ring = simplifyFogRingToPointLimit(vision.polygon, maxRingPoints);
+      return ring.length >= 3 ? [ring] : null;
+    })
+    .filter(Boolean);
+
+  return normalizePolygons(fogPolygons) || [];
+};
+
+export const buildCurrentFogPolygons = ({
+  tokenVisionPolygons = [],
+} = {}) => buildFogPolygonsFromVision({
+  tokenVisionPolygons,
+  maxRingPoints: FOG_POLYGON_MAX_RING_POINTS,
+  normalizePolygons: normalizeFogPolygons,
+});
+
+export const buildCurrentFogRenderPolygons = ({
+  tokenVisionPolygons = [],
+} = {}) => buildFogPolygonsFromVision({
+  tokenVisionPolygons,
+  maxRingPoints: FOG_POLYGON_RENDER_MAX_RING_POINTS,
+  normalizePolygons: normalizeRenderableFogPolygons,
+});
+
+export const buildCurrentFogMemoryPolygons = ({
+  tokenVisionPolygons = [],
+} = {}) => buildFogPolygonsFromVision({
+  tokenVisionPolygons,
+  maxRingPoints: FOG_POLYGON_MEMORY_MAX_RING_POINTS,
+  normalizePolygons: normalizeFogMemoryPolygons,
+});
+
 export const normalizeGrigliataFogOfWarDoc = (data) => {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
     return null;
@@ -227,6 +279,12 @@ export const normalizeGrigliataFogOfWarDoc = (data) => {
   if (!exploredCells) {
     return null;
   }
+  const exploredPolygons = data.exploredPolygons === undefined
+    ? []
+    : normalizeFogMemoryPolygons(data.exploredPolygons, { rejectInvalid: true });
+  if (!exploredPolygons) {
+    return null;
+  }
 
   return {
     schemaVersion: GRIGLIATA_FOG_OF_WAR_SCHEMA_VERSION,
@@ -235,6 +293,7 @@ export const normalizeGrigliataFogOfWarDoc = (data) => {
     ownerUid,
     cellSizePx,
     exploredCells,
+    exploredPolygons,
     updatedAt: data.updatedAt || null,
     updatedBy: typeof data.updatedBy === 'string' ? data.updatedBy : '',
   };

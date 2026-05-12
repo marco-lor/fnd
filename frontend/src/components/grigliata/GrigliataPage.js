@@ -150,13 +150,16 @@ import {
 } from './fogOfWar';
 import {
   applyFogBrushEdit,
+  applyFogBrushPolygonEdit,
   buildFogBrushCellKeys,
+  buildFogBrushPolygon,
   DEFAULT_FOG_BRUSH_RADIUS_SQUARES,
   GRIGLIATA_FOG_BRUSH_CELL_LIMIT,
   normalizeFogBrushMode,
   normalizeFogBrushRadiusSquares,
   normalizeFogBrushSettings,
 } from './fogBrushEditing';
+import { encodeFogMemoryPolygonsForFirestore } from './fogPolygonGeometry';
 import {
   filterFogVisibleTokens,
   filterFogVisibleTurnOrderEntries,
@@ -1036,6 +1039,8 @@ export default function GrigliataPage() {
   );
   const {
     currentVisibleCells: fogCurrentVisibleCells,
+    currentVisiblePolygons: fogCurrentVisiblePolygons,
+    isPrecisionFogFallbackActive,
   } = useGrigliataFogOfWarPersistence({
     backgroundId: activeBackgroundId,
     currentUserId,
@@ -1060,15 +1065,22 @@ export default function GrigliataPage() {
       exploredCells: fogOfWar?.cellSizePx === normalizedFogGrid.cellSizePx
         ? fogOfWar.exploredCells
         : [],
+      exploredPolygons: fogOfWar?.cellSizePx === normalizedFogGrid.cellSizePx
+        ? fogOfWar.exploredPolygons || []
+        : [],
       currentVisibleCells: fogCurrentVisibleCells,
+      currentVisiblePolygons: fogCurrentVisiblePolygons,
+      forceRenderExploredCellFallback: isPrecisionFogFallbackActive,
     };
   }, [
     fogCurrentVisibleCells,
+    fogCurrentVisiblePolygons,
     fogLightingRenderInput,
     fogOfWar,
     isFogOfWarEnabled,
     isManager,
     isNarrationOverlayActive,
+    isPrecisionFogFallbackActive,
     normalizedFogGrid.cellSizePx,
   ]);
   const boardRenderTokens = useMemo(
@@ -3902,11 +3914,13 @@ export default function GrigliataPage() {
       || entry.ownerUids.length < 1
       || !(entry?.brushCells instanceof Set)
       || entry.brushCells.size < 1
+      || !Array.isArray(entry?.brushPolygons)
     ) {
       return false;
     }
 
     const brushCells = [...entry.brushCells];
+    const brushPolygons = entry.brushPolygons;
     const updatedAt = serverTimestamp();
     const writeResults = await Promise.all(entry.ownerUids.map(async (ownerUid) => {
       const fogDocId = buildGrigliataFogOfWarDocId(entry.backgroundId, ownerUid);
@@ -3935,6 +3949,11 @@ export default function GrigliataPage() {
           mode: entry.mode,
           cellLimit: GRIGLIATA_FOG_BRUSH_CELL_LIMIT,
         });
+        const nextExploredPolygons = applyFogBrushPolygonEdit({
+          existingPolygons: hasMatchingCellSize ? existingFogDoc.exploredPolygons || [] : [],
+          brushPolygons,
+          mode: entry.mode,
+        });
 
         transaction.set(fogDocRef, {
           schemaVersion: GRIGLIATA_FOG_OF_WAR_SCHEMA_VERSION,
@@ -3942,6 +3961,7 @@ export default function GrigliataPage() {
           ownerUid,
           cellSizePx: entry.cellSizePx,
           exploredCells: nextExploredCells,
+          exploredPolygons: encodeFogMemoryPolygonsForFirestore(nextExploredPolygons),
           updatedAt,
           updatedBy: entry.updatedBy,
         }, { merge: true });
@@ -4011,6 +4031,11 @@ export default function GrigliataPage() {
       radiusSquares: brushSettings.radiusSquares,
       grid: normalizedFogGrid,
     });
+    const brushPolygons = buildFogBrushPolygon({
+      point,
+      radiusSquares: brushSettings.radiusSquares,
+      grid: normalizedFogGrid,
+    });
     if (brushCells.length < 1) {
       return false;
     }
@@ -4026,12 +4051,14 @@ export default function GrigliataPage() {
       cellSizePx: normalizedFogGrid.cellSizePx,
       updatedBy: user.uid,
       brushCells: new Set(brushCells),
+      brushPolygons,
     };
     queueEntry.key = buildFogBrushQueueKey(queueEntry);
 
     const lastQueuedEntry = fogBrushQueueRef.current[fogBrushQueueRef.current.length - 1];
     if (lastQueuedEntry?.key === queueEntry.key) {
       brushCells.forEach((cellKey) => lastQueuedEntry.brushCells.add(cellKey));
+      lastQueuedEntry.brushPolygons.push(...brushPolygons);
     } else {
       fogBrushQueueRef.current.push(queueEntry);
     }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import GrigliataLightingMask from './GrigliataLightingMask';
 
 jest.mock('react-konva', () => {
@@ -187,5 +187,47 @@ describe('GrigliataLightingMask', () => {
 
     expect(screen.getByTestId('lighting-mask-layer')).toBeInTheDocument();
     expect(screen.getByTestId('lighting-darkness-source-overlay')).toHaveAttribute('data-radius', '120');
+  });
+
+  test('clips light and darkness-source contributions to the current fog-visible polygons', () => {
+    render(
+      <GrigliataLightingMask
+        bounds={bounds}
+        grid={grid}
+        metadata={metadata}
+        tokens={[token]}
+        lightClipPolygons={[[[
+          { x: 0, y: 0 },
+          { x: 220, y: 0 },
+          { x: 220, y: 220 },
+          { x: 0, y: 220 },
+        ]]]}
+      />
+    );
+
+    const clipGroup = screen.getByTestId('lighting-light-clip-group');
+    expect(clipGroup).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-token-vision-cutout')).toBeInTheDocument();
+    expect(within(clipGroup).queryByTestId('lighting-light-bright-cutout')).not.toBeInTheDocument();
+    expect(within(clipGroup).getByTestId('lighting-light-bright-polygon')).toBeInTheDocument();
+    expect(within(clipGroup).getByTestId('lighting-darkness-source-overlay')).toBeInTheDocument();
+  });
+
+  test('hides light contributions when fog clipping is active but there is no current vision', () => {
+    render(
+      <GrigliataLightingMask
+        bounds={bounds}
+        grid={grid}
+        metadata={metadata}
+        tokens={[token]}
+        lightClipPolygons={[]}
+      />
+    );
+
+    expect(screen.getByTestId('lighting-mask-layer')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-token-vision-cutout')).toBeInTheDocument();
+    expect(screen.queryByTestId('lighting-light-clip-group')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('lighting-light-bright-polygon')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('lighting-darkness-source-overlay')).not.toBeInTheDocument();
   });
 });

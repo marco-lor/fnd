@@ -6054,6 +6054,7 @@ export default function GrigliataBoard({
                   metadata={lightingRenderInput}
                   tokens={visibleRenderedTokens}
                   visionSources={visibleTokenVisionSources}
+                  lightClipPolygons={fogOfWar ? fogOfWar.currentVisiblePolygons || [] : undefined}
                 />
               </Layer>
             )}
@@ -6200,7 +6201,10 @@ export default function GrigliataBoard({
                   bounds={boardBounds}
                   grid={normalizedGrid}
                   exploredCells={fogOfWar.exploredCells}
+                  exploredPolygons={fogOfWar.exploredPolygons}
                   currentVisibleCells={fogOfWar.currentVisibleCells}
+                  currentVisiblePolygons={fogOfWar.currentVisiblePolygons}
+                  forceRenderExploredCellFallback={fogOfWar.forceRenderExploredCellFallback}
                 />
               </Layer>
             )}

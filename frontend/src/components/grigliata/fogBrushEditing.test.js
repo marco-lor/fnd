@@ -1,6 +1,8 @@
 import {
   applyFogBrushEdit,
+  applyFogBrushPolygonEdit,
   buildFogBrushCellKeys,
+  buildFogBrushPolygon,
   DEFAULT_FOG_BRUSH_RADIUS_SQUARES,
   MAX_FOG_BRUSH_RADIUS_SQUARES,
   MIN_FOG_BRUSH_RADIUS_SQUARES,
@@ -51,6 +53,31 @@ describe('fogBrushEditing', () => {
       '1:0',
       '0:1',
     ]);
+  });
+
+  test('converts a circular brush center and radius to precision polygon geometry', () => {
+    const polygons = buildFogBrushPolygon({
+      point: { x: 35, y: 35 },
+      radiusSquares: 1,
+      grid,
+      segments: 8,
+    });
+
+    expect(polygons).toHaveLength(1);
+    expect(polygons[0]).toHaveLength(1);
+    expect(polygons[0][0]).toHaveLength(8);
+    expect(polygons[0][0]).toEqual(expect.arrayContaining([
+      { x: -35, y: 35 },
+      { x: 35, y: -35 },
+      { x: 105, y: 35 },
+      { x: 35, y: 105 },
+    ]));
+
+    expect(buildFogBrushPolygon({
+      point: { x: 35, y: 35 },
+      radiusSquares: 1,
+      grid,
+    })[0][0].length).toBeGreaterThan(32);
   });
 
   test('respects grid offsets while building brush cells', () => {
@@ -109,6 +136,37 @@ describe('fogBrushEditing', () => {
       brushCells: ['1:0', '2:0'],
       mode: 'hide',
     })).toEqual(['0:0']);
+  });
+
+  test('reveal and hide update precision polygons while keeping cell fallback behavior intact', () => {
+    const existingPolygons = [[[
+      { x: 0, y: 0 },
+      { x: 70, y: 0 },
+      { x: 70, y: 70 },
+      { x: 0, y: 70 },
+    ]]];
+    const brushPolygons = buildFogBrushPolygon({
+      point: { x: 35, y: 35 },
+      radiusSquares: 1,
+      grid,
+      segments: 8,
+    });
+
+    expect(applyFogBrushPolygonEdit({
+      existingPolygons,
+      brushPolygons,
+      mode: 'reveal',
+    })).toEqual(expect.any(Array));
+    expect(applyFogBrushPolygonEdit({
+      existingPolygons,
+      brushPolygons,
+      mode: 'hide',
+    })).toEqual([]);
+    expect(applyFogBrushEdit({
+      existingCells: ['0:0', '5:5'],
+      brushCells: ['0:0'],
+      mode: 'hide',
+    })).toEqual(['5:5']);
   });
 
   test('hide trims oversized existing cells after removing brush cells', () => {

@@ -3,6 +3,11 @@ import {
   encodeFogCellKey,
   normalizeFogCellKeys,
 } from './fogOfWar';
+import {
+  applyFogMemoryPolygonHide,
+  applyFogMemoryPolygonReveal,
+  buildCircularFogMemoryPolygon,
+} from './fogPolygonGeometry';
 
 export const FOG_BRUSH_MODE_REVEAL = 'reveal';
 export const FOG_BRUSH_MODE_HIDE = 'hide';
@@ -106,6 +111,29 @@ export const buildFogBrushCellKeys = ({
   return normalizeFogCellKeys(cellKeys) || [];
 };
 
+export const buildFogBrushPolygon = ({
+  point = {},
+  radiusSquares = DEFAULT_FOG_BRUSH_RADIUS_SQUARES,
+  grid,
+  segments,
+} = {}) => {
+  if (!isFinitePoint(point)) {
+    return [];
+  }
+
+  const normalizedGrid = normalizeGridConfig(grid);
+  const normalizedRadiusSquares = normalizeFogBrushRadiusSquares(radiusSquares);
+
+  return buildCircularFogMemoryPolygon({
+    center: {
+      x: Number(point.x),
+      y: Number(point.y),
+    },
+    radiusPx: normalizedRadiusSquares * normalizedGrid.cellSizePx,
+    segments,
+  });
+};
+
 export const applyFogBrushEdit = ({
   existingCells = [],
   brushCells = [],
@@ -141,3 +169,19 @@ export const applyFogBrushEdit = ({
   });
   return limitFogCellKeys([...nextCells], normalizedCellLimit);
 };
+
+export const applyFogBrushPolygonEdit = ({
+  existingPolygons = [],
+  brushPolygons = [],
+  mode = FOG_BRUSH_MODE_REVEAL,
+} = {}) => (
+  normalizeFogBrushMode(mode) === FOG_BRUSH_MODE_HIDE
+    ? applyFogMemoryPolygonHide({
+      existingPolygons,
+      hidePolygons: brushPolygons,
+    })
+    : applyFogMemoryPolygonReveal({
+      existingPolygons,
+      revealPolygons: brushPolygons,
+    })
+);

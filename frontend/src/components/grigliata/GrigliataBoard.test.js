@@ -166,6 +166,7 @@ jest.mock('react-konva', () => {
     Layer: createComponent('Layer'),
     Group: createComponent('Group'),
     Rect: createComponent('Rect'),
+    Path: createComponent('Path'),
     Circle: createComponent('Circle'),
     Line: createComponent('Line'),
     Text: createComponent('Text', 'div', true),
@@ -786,6 +787,7 @@ describe('GrigliataBoard', () => {
     expect(screen.getByTestId('lighting-light-bright-polygon')).toBeInTheDocument();
     expect(screen.getAllByTestId('lighting-token-vision-cutout')).toHaveLength(1);
     expect(screen.getByTestId('lighting-token-vision-cutout')).toHaveAttribute('data-tokenid', 'user-1');
+    expect(screen.queryByTestId('lighting-light-clip-group')).not.toBeInTheDocument();
 
     rerender(
       <GrigliataBoard
@@ -847,6 +849,65 @@ describe('GrigliataBoard', () => {
     expect(screen.queryByTestId('lighting-token-vision-cutout')).not.toBeInTheDocument();
   });
 
+  test('clips player light contributions to current fog visibility when fog is active', async () => {
+    const lightingRenderInput = {
+      backgroundId: 'map-1',
+      scene: {
+        darkness: 0.6,
+        globalLight: false,
+      },
+      walls: [],
+      lights: [{
+        id: 'light-1',
+        x: 80,
+        y: 80,
+        brightRadiusPx: 60,
+        dimRadiusPx: 140,
+        color: '#FFAD00',
+      }],
+    };
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: false,
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          fogOfWar: {
+            exploredCells: ['0:0'],
+            exploredPolygons: [],
+            currentVisibleCells: ['1:1'],
+            currentVisiblePolygons: [[[
+              { x: 0, y: 0 },
+              { x: 220, y: 0 },
+              { x: 220, y: 220 },
+              { x: 0, y: 220 },
+            ]]],
+          },
+          lightingRenderInput,
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('lighting-mask-layer')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-light-clip-group')).toBeInTheDocument();
+    expect(screen.getByTestId('lighting-light-bright-polygon')).toBeInTheDocument();
+    expect(screen.getByTestId('fog-of-war-mask-layer')).toBeInTheDocument();
+  });
+
   test('renders fog states after lighting and suppresses fog during narration', async () => {
     const { rerender } = render(
       <GrigliataBoard
@@ -861,7 +922,7 @@ describe('GrigliataBoard', () => {
 
     expect(await screen.findByTestId('fog-of-war-mask-layer')).toBeInTheDocument();
     expect(screen.getByTestId('fog-unexplored-overlay')).toBeInTheDocument();
-    expect(screen.getAllByTestId('fog-explored-cell-cutout')).toHaveLength(1);
+    expect(screen.getAllByTestId('fog-remembered-cell-overlay')).toHaveLength(1);
     expect(screen.getAllByTestId('fog-current-cell-cutout')).toHaveLength(2);
 
     rerender(
@@ -876,8 +937,51 @@ describe('GrigliataBoard', () => {
     );
 
     expect(screen.getByTestId('fog-of-war-mask-layer')).toBeInTheDocument();
-    expect(screen.getAllByTestId('fog-explored-cell-cutout')).toHaveLength(1);
+    expect(screen.getAllByTestId('fog-remembered-cell-overlay')).toHaveLength(1);
     expect(screen.queryByTestId('fog-current-cell-cutout')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          fogOfWar: {
+            exploredCells: ['0:0', '2:0'],
+            exploredPolygons: [[[
+              { x: 0, y: 0 },
+              { x: 70, y: 0 },
+              { x: 70, y: 70 },
+              { x: 0, y: 70 },
+            ]]],
+            currentVisibleCells: [],
+            currentVisiblePolygons: [],
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('fog-known-polygon-clear')).toBeInTheDocument();
+    expect(screen.queryByTestId('fog-remembered-cell-overlay')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          fogOfWar: {
+            exploredCells: ['0:0', '2:0'],
+            exploredPolygons: [[[
+              { x: 0, y: 0 },
+              { x: 70, y: 0 },
+              { x: 70, y: 70 },
+              { x: 0, y: 70 },
+            ]]],
+            currentVisibleCells: [],
+            currentVisiblePolygons: [],
+            forceRenderExploredCellFallback: true,
+          },
+        })}
+      />
+    );
+
+    expect(screen.getAllByTestId('fog-remembered-cell-overlay')).toHaveLength(1);
+    expect(screen.getByTestId('fog-remembered-cell-overlay')).toHaveAttribute('data-cellkey', '2:0');
 
     rerender(
       <GrigliataBoard

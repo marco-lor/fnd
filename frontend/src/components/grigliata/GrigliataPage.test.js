@@ -338,6 +338,8 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-fog-enabled">{String(!!props.fogOfWar)}</div>
       <div data-testid="board-fog-cell-count">{String(props.fogOfWar?.exploredCells?.length || 0)}</div>
       <div data-testid="board-fog-current-count">{String(props.fogOfWar?.currentVisibleCells?.length || 0)}</div>
+      <div data-testid="board-fog-polygon-count">{String(props.fogOfWar?.exploredPolygons?.length || 0)}</div>
+      <div data-testid="board-fog-current-polygon-count">{String(props.fogOfWar?.currentVisiblePolygons?.length || 0)}</div>
       <div data-testid="board-fog-brush-controls">{String(!!props.fogBrushControls)}</div>
       <div data-testid="board-fog-brush-active">{String(!!props.fogBrushControls?.isFogBrushToolActive)}</div>
       <div data-testid="board-fog-brush-mode">{props.fogBrushControls?.mode || ''}</div>
@@ -964,6 +966,7 @@ describe('GrigliataPage', () => {
       'backgroundId',
       'cellSizePx',
       'exploredCells',
+      'exploredPolygons',
       'ownerUid',
       'schemaVersion',
       'updatedAt',
@@ -974,6 +977,15 @@ describe('GrigliataPage', () => {
       updatedAt: { __type: 'serverTimestamp' },
       ...expectedPayload,
     }));
+  };
+  const hasDirectNestedArray = (value) => {
+    if (Array.isArray(value)) {
+      return value.some((item) => Array.isArray(item) || hasDirectNestedArray(item));
+    }
+    if (value && typeof value === 'object') {
+      return Object.values(value).some(hasDirectNestedArray);
+    }
+    return false;
   };
 
   test('derives the workspace height from shell metrics without querying the legacy navbar', async () => {
@@ -3356,6 +3368,12 @@ describe('GrigliataPage', () => {
       ownerUid: 'user-2',
       cellSizePx: 70,
       exploredCells: ['5:5'],
+      exploredPolygons: [[[
+        { x: 350, y: 350 },
+        { x: 420, y: 350 },
+        { x: 420, y: 420 },
+        { x: 350, y: 420 },
+      ]]],
       updatedBy: 'user-2',
     }, {
       id: 'map-2__user-4',
@@ -3363,6 +3381,7 @@ describe('GrigliataPage', () => {
       ownerUid: 'user-4',
       cellSizePx: 70,
       exploredCells: ['9:9'],
+      exploredPolygons: [],
       updatedBy: 'user-4',
     }]);
 
@@ -3418,8 +3437,14 @@ describe('GrigliataPage', () => {
       ownerUid: 'user-2',
       cellSizePx: 70,
       exploredCells: expect.arrayContaining(['0:0', '5:5']),
+      exploredPolygons: expect.any(Array),
       updatedBy: 'user-1',
     });
+    expect(user2FogWrite?.[1].exploredPolygons.length).toBeGreaterThan(0);
+    expect(user2FogWrite?.[1].exploredPolygons[0]).toEqual(expect.objectContaining({
+      rings: expect.any(Array),
+    }));
+    expect(hasDirectNestedArray(user2FogWrite?.[1].exploredPolygons)).toBe(false);
     const user3FogWrite = getTransactionSetCalls().find(([target]) => (
       target?.path === 'grigliata_fog_of_war/map-1__user-3'
     ));
@@ -3428,8 +3453,10 @@ describe('GrigliataPage', () => {
       ownerUid: 'user-3',
       cellSizePx: 70,
       exploredCells: expect.arrayContaining(['0:0']),
+      exploredPolygons: expect.any(Array),
       updatedBy: 'user-1',
     });
+    expect(user3FogWrite?.[1].exploredPolygons.length).toBeGreaterThan(0);
     expect(getTransactionSetCalls().some(([target]) => (
       target?.path === 'grigliata_fog_of_war/map-1__user-1'
       || target?.path === 'grigliata_fog_of_war/map-1__dm-2'
@@ -3476,6 +3503,12 @@ describe('GrigliataPage', () => {
       ownerUid: 'user-2',
       cellSizePx: 70,
       exploredCells: ['0:0', '5:5'],
+      exploredPolygons: [[[
+        { x: 0, y: 0 },
+        { x: 70, y: 0 },
+        { x: 70, y: 70 },
+        { x: 0, y: 70 },
+      ]]],
       updatedBy: 'user-2',
     }]);
 
@@ -3520,6 +3553,7 @@ describe('GrigliataPage', () => {
       ownerUid: 'user-2',
       cellSizePx: 70,
       exploredCells: ['5:5'],
+      exploredPolygons: [],
       updatedBy: 'user-1',
     });
     expect(firestore.runTransaction).toHaveBeenCalledTimes(2);
@@ -3696,6 +3730,48 @@ describe('GrigliataPage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('board-fog-brush-controls')).toHaveTextContent('false');
+    });
+  });
+
+  test('passes player-safe polygon fog to players without manual fog controls', async () => {
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-1',
+      backgroundId: 'map-1',
+      tokenId: 'user-1',
+      ownerUid: 'user-1',
+      tokenType: 'character',
+      col: 0,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+    }]);
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.5, globalLight: false },
+      lights: [],
+      walls: [],
+    });
+    setDocData('grigliata_fog_of_war/map-1__user-1', {
+      backgroundId: 'map-1',
+      ownerUid: 'user-1',
+      cellSizePx: 70,
+      exploredCells: ['0:0'],
+      exploredPolygons: [[[
+        { x: 0, y: 0 },
+        { x: 70, y: 0 },
+        { x: 70, y: 70 },
+        { x: 0, y: 70 },
+      ]]],
+      updatedBy: 'user-1',
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('true');
+      expect(screen.getByTestId('board-fog-polygon-count')).toHaveTextContent('1');
+      expect(screen.getByTestId('board-fog-brush-controls')).toHaveTextContent('false');
+      expect(Number(screen.getByTestId('board-fog-current-polygon-count').textContent)).toBeGreaterThan(0);
     });
   });
 

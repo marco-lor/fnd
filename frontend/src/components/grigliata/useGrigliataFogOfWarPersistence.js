@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   arrayUnion,
   doc,
@@ -20,13 +20,20 @@ import {
 } from './lightingVisibility';
 import {
   buildCurrentFogCellKeys,
+  buildCurrentFogMemoryPolygons,
+  buildCurrentFogRenderPolygons,
   buildGrigliataFogOfWarDocId,
   GRIGLIATA_FOG_OF_WAR_COLLECTION,
   GRIGLIATA_FOG_OF_WAR_SCHEMA_VERSION,
   mergeFogCellKeys,
 } from './fogOfWar';
+import {
+  applyFogMemoryPolygonReveal,
+  encodeFogMemoryPolygonsForFirestore,
+} from './fogPolygonGeometry';
 
 export const GRIGLIATA_FOG_OF_WAR_WRITE_DEBOUNCE_MS = 350;
+export const DEFAULT_FOG_VISION_RAY_COUNT = 256;
 
 const buildRenderableTokensForFog = ({ tokens = [], grid }) => (
   (Array.isArray(tokens) ? tokens : []).map((token) => ({
@@ -36,6 +43,10 @@ const buildRenderableTokensForFog = ({ tokens = [], grid }) => (
 );
 
 export const buildViewerFogCurrentVisibleCells = ({
+  ...args
+} = {}) => buildViewerFogCurrentVisibility(args).currentVisibleCells;
+
+export const buildViewerFogCurrentVisibility = ({
   tokens = [],
   currentUserId = '',
   isManager = false,
@@ -44,7 +55,11 @@ export const buildViewerFogCurrentVisibleCells = ({
   rayCount,
 } = {}) => {
   if (!lightingRenderInput || isManager) {
-    return [];
+    return {
+      currentVisibleCells: [],
+      currentVisiblePolygons: [],
+      currentPersistencePolygons: [],
+    };
   }
 
   const normalizedGrid = normalizeGridConfig(grid);
@@ -60,21 +75,36 @@ export const buildViewerFogCurrentVisibleCells = ({
   });
 
   if (!visionSources.length) {
-    return [];
+    return {
+      currentVisibleCells: [],
+      currentVisiblePolygons: [],
+      currentPersistencePolygons: [],
+    };
   }
 
   const wallSegments = normalizeLightingWallSegments(lightingRenderInput.walls);
+  const fogRayCount = Number.isFinite(Number(rayCount))
+    ? rayCount
+    : DEFAULT_FOG_VISION_RAY_COUNT;
   const tokenVisionPolygons = buildTokenVisionPolygons({
     tokens: visionSources,
     visionRadiusPx: normalizedGrid.cellSizePx * DEFAULT_TOKEN_VISION_RADIUS_SQUARES,
     segments: wallSegments,
-    rayCount,
+    rayCount: fogRayCount,
   });
 
-  return buildCurrentFogCellKeys({
-    tokenVisionPolygons,
-    grid: normalizedGrid,
-  });
+  return {
+    currentVisibleCells: buildCurrentFogCellKeys({
+      tokenVisionPolygons,
+      grid: normalizedGrid,
+    }),
+    currentVisiblePolygons: buildCurrentFogRenderPolygons({
+      tokenVisionPolygons,
+    }),
+    currentPersistencePolygons: buildCurrentFogMemoryPolygons({
+      tokenVisionPolygons,
+    }),
+  };
 };
 
 export default function useGrigliataFogOfWarPersistence({
@@ -89,9 +119,16 @@ export default function useGrigliataFogOfWarPersistence({
   rayCount,
 }) {
   const normalizedGrid = useMemo(() => normalizeGridConfig(grid), [grid]);
-  const currentVisibleCells = useMemo(
+  const disabledPrecisionFogDocIdsRef = useRef(new Set());
+  const [disabledPrecisionFogDocIds, setDisabledPrecisionFogDocIds] = useState(() => new Set());
+  const fogDocId = useMemo(
+    () => buildGrigliataFogOfWarDocId(backgroundId, currentUserId),
+    [backgroundId, currentUserId]
+  );
+  const isPrecisionFogFallbackActive = !!fogDocId && disabledPrecisionFogDocIds.has(fogDocId);
+  const currentVisibility = useMemo(
     () => (isEnabled
-      ? buildViewerFogCurrentVisibleCells({
+      ? buildViewerFogCurrentVisibility({
         tokens,
         currentUserId,
         isManager,
@@ -99,7 +136,7 @@ export default function useGrigliataFogOfWarPersistence({
         lightingRenderInput,
         rayCount,
       })
-      : []),
+      : { currentVisibleCells: [], currentVisiblePolygons: [], currentPersistencePolygons: [] }),
     [
       currentUserId,
       isEnabled,
@@ -110,9 +147,11 @@ export default function useGrigliataFogOfWarPersistence({
       tokens,
     ]
   );
+  const currentVisibleCells = currentVisibility.currentVisibleCells;
+  const currentVisiblePolygons = currentVisibility.currentVisiblePolygons;
+  const currentPersistencePolygons = currentVisibility.currentPersistencePolygons;
 
   useEffect(() => {
-    const fogDocId = buildGrigliataFogOfWarDocId(backgroundId, currentUserId);
     if (
       !isEnabled
       || isManager
@@ -124,10 +163,35 @@ export default function useGrigliataFogOfWarPersistence({
     }
 
     const hasMatchingCellSize = fogOfWar?.cellSizePx === normalizedGrid.cellSizePx;
+    const isPrecisionPersistenceDisabled = disabledPrecisionFogDocIdsRef.current.has(fogDocId);
     const existingCellSet = new Set(hasMatchingCellSize ? fogOfWar.exploredCells || [] : []);
     const newVisibleCells = currentVisibleCells.filter((cellKey) => !existingCellSet.has(cellKey));
+    const precisionFallbackCells = mergeFogCellKeys(
+      hasMatchingCellSize ? fogOfWar.exploredCells || [] : [],
+      currentVisibleCells
+    );
+    const existingPolygons = hasMatchingCellSize ? fogOfWar?.exploredPolygons || [] : [];
+    const nextExploredPolygons = currentPersistencePolygons.length > 0
+      ? applyFogMemoryPolygonReveal({
+        existingPolygons,
+        revealPolygons: currentPersistencePolygons,
+      })
+      : existingPolygons;
+    const normalizedNextExploredPolygons = Array.isArray(nextExploredPolygons)
+      ? nextExploredPolygons
+      : [];
+    const firestoreExploredPolygons = encodeFogMemoryPolygonsForFirestore(
+      normalizedNextExploredPolygons
+    );
+    const hasPolygonChange = (
+      JSON.stringify(existingPolygons) !== JSON.stringify(normalizedNextExploredPolygons)
+    );
 
-    if (newVisibleCells.length < 1) {
+    const shouldPersistPolygons = !isPrecisionPersistenceDisabled
+      && firestoreExploredPolygons.length > 0
+      && hasPolygonChange;
+
+    if (newVisibleCells.length < 1 && !shouldPersistPolygons) {
       return undefined;
     }
 
@@ -141,14 +205,58 @@ export default function useGrigliataFogOfWarPersistence({
         updatedBy: currentUserId,
       };
       const fogDocRef = doc(db, GRIGLIATA_FOG_OF_WAR_COLLECTION, fogDocId);
+      const writePrecisionPolygons = (afterWritePromise = Promise.resolve()) => {
+        if (!shouldPersistPolygons) {
+          return;
+        }
+
+        const precisionPayload = {
+          ...basePayload,
+          exploredCells: precisionFallbackCells,
+          exploredPolygons: firestoreExploredPolygons,
+        };
+
+        void afterWritePromise
+          .then(() => setDoc(fogDocRef, precisionPayload, { merge: true }).catch((error) => {
+            if (error?.code === 'permission-denied') {
+              disabledPrecisionFogDocIdsRef.current.add(fogDocId);
+              setDisabledPrecisionFogDocIds((currentDocIds) => {
+                if (currentDocIds.has(fogDocId)) {
+                  return currentDocIds;
+                }
+                const nextDocIds = new Set(currentDocIds);
+                nextDocIds.add(fogDocId);
+                return nextDocIds;
+              });
+              console.warn(
+                'Precision Grigliata fog persistence was denied; continuing with cell fog fallback.',
+                error
+              );
+              return;
+            }
+            console.error('Failed to persist Grigliata precision fog of war:', error);
+          }))
+          .catch(() => {});
+      };
 
       if (hasMatchingCellSize) {
-        void setDoc(fogDocRef, {
+        if (newVisibleCells.length < 1) {
+          writePrecisionPolygons();
+          return;
+        }
+
+        const cellMergePayload = {
           ...basePayload,
           exploredCells: arrayUnion(...newVisibleCells),
+        };
+
+        const cellWritePromise = setDoc(fogDocRef, {
+          ...cellMergePayload,
         }, { merge: true }).catch((error) => {
           console.error('Failed to persist Grigliata fog of war:', error);
+          throw error;
         });
+        writePrecisionPolygons(cellWritePromise);
         return;
       }
 
@@ -163,6 +271,7 @@ export default function useGrigliataFogOfWarPersistence({
       void writePromise.catch((error) => {
         console.error('Failed to persist Grigliata fog of war:', error);
       });
+      writePrecisionPolygons(writePromise);
     }, GRIGLIATA_FOG_OF_WAR_WRITE_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timeoutId);
@@ -170,6 +279,8 @@ export default function useGrigliataFogOfWarPersistence({
     backgroundId,
     currentUserId,
     currentVisibleCells,
+    currentPersistencePolygons,
+    fogDocId,
     fogOfWar,
     isEnabled,
     isManager,
@@ -179,5 +290,7 @@ export default function useGrigliataFogOfWarPersistence({
 
   return {
     currentVisibleCells,
+    currentVisiblePolygons,
+    isPrecisionFogFallbackActive,
   };
 }

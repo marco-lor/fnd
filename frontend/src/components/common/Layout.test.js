@@ -150,6 +150,7 @@ describe('Layout shell', () => {
     setDesktopMatch(true);
 
     const { rerender } = renderLayout();
+    expect(screen.getByRole('navigation', { name: 'Primary' })).toHaveClass('custom-scroll');
 
     expect(screen.getByText('DM Dashboard')).toBeInTheDocument();
     expect(screen.getByText('Foes Hub')).toBeInTheDocument();

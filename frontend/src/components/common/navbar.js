@@ -158,7 +158,7 @@ const ProfileActions = ({
 );
 
 const NavList = ({ collapsed, navItems, onNavigate }) => (
-  <nav className="flex-1 overflow-y-auto pr-1" aria-label="Primary">
+  <nav className="custom-scroll flex-1 overflow-y-auto pr-1" aria-label="Primary">
     <ul className="space-y-2">
       {navItems.map((item) => {
         const Icon = item.icon;

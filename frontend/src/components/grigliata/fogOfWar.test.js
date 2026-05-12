@@ -1,5 +1,8 @@
 import {
+  buildCurrentFogMemoryPolygons,
+  buildCurrentFogRenderPolygons,
   buildGrigliataFogOfWarDocId,
+  buildCurrentFogPolygons,
   decodeFogCellKey,
   encodeFogCellKey,
   mergeFogCellKeys,
@@ -61,6 +64,12 @@ describe('fogOfWar', () => {
       ownerUid: 'user-1',
       cellSizePx: 70,
       exploredCells: ['1:0', '0:0', '1:0'],
+      exploredPolygons: [[[
+        { x: 70, y: 0 },
+        { x: 140, y: 0 },
+        { x: 140, y: 70 },
+        { x: 70, y: 70 },
+      ]]],
       updatedAt: { seconds: 1 },
       updatedBy: 'user-1',
     })).toEqual(expect.objectContaining({
@@ -69,7 +78,25 @@ describe('fogOfWar', () => {
       ownerUid: 'user-1',
       cellSizePx: 70,
       exploredCells: ['0:0', '1:0'],
+      exploredPolygons: [[[
+        { x: 70, y: 0 },
+        { x: 140, y: 0 },
+        { x: 140, y: 70 },
+        { x: 70, y: 70 },
+      ]]],
       updatedBy: 'user-1',
+    }));
+
+    expect(normalizeGrigliataFogOfWarDoc({
+      id: 'map-1__user-1',
+      backgroundId: 'map-1',
+      ownerUid: 'user-1',
+      cellSizePx: 70,
+      exploredCells: ['0:0'],
+      updatedBy: 'user-1',
+    })).toEqual(expect.objectContaining({
+      exploredCells: ['0:0'],
+      exploredPolygons: [],
     }));
 
     expect(normalizeGrigliataFogOfWarDoc({
@@ -93,5 +120,101 @@ describe('fogOfWar', () => {
       cellSizePx: 70,
       exploredCells: ['oops'],
     })).toBeNull();
+    expect(normalizeGrigliataFogOfWarDoc({
+      id: 'map-1__user-1',
+      backgroundId: 'map-1',
+      ownerUid: 'user-1',
+      cellSizePx: 70,
+      exploredCells: ['0:0'],
+      exploredPolygons: [[[
+        { x: 0, y: 0 },
+        { x: 10, y: Number.POSITIVE_INFINITY },
+        { x: 10, y: 10 },
+      ]]],
+    })).toBeNull();
+  });
+
+  test('normalizes Firestore-safe polygon storage docs into runtime multipolygons', () => {
+    expect(normalizeGrigliataFogOfWarDoc({
+      id: 'map-1__user-1',
+      backgroundId: 'map-1',
+      ownerUid: 'user-1',
+      cellSizePx: 70,
+      exploredCells: ['0:0'],
+      exploredPolygons: [{
+        rings: [{
+          points: [
+            { x: 0, y: 0 },
+            { x: 70, y: 0 },
+            { x: 70, y: 70 },
+            { x: 0, y: 70 },
+          ],
+        }],
+      }],
+    })).toEqual(expect.objectContaining({
+      exploredPolygons: [[[
+        { x: 0, y: 0 },
+        { x: 70, y: 0 },
+        { x: 70, y: 70 },
+        { x: 0, y: 70 },
+      ]]],
+    }));
+
+    const highDetailPoints = Array.from({ length: 96 }, (_, index) => {
+      const angle = (Math.PI * 2 * index) / 96;
+      return {
+        x: Math.round(Math.cos(angle) * 1000),
+        y: Math.round(Math.sin(angle) * 1000),
+      };
+    });
+    expect(normalizeGrigliataFogOfWarDoc({
+      id: 'map-1__user-1',
+      backgroundId: 'map-1',
+      ownerUid: 'user-1',
+      cellSizePx: 70,
+      exploredCells: ['0:0'],
+      exploredPolygons: [{
+        rings: [{
+          points: highDetailPoints,
+        }],
+      }],
+    })?.exploredPolygons[0][0]).toHaveLength(96);
+  });
+
+  test('normalizes current token vision polygons for fog rendering', () => {
+    expect(buildCurrentFogPolygons({
+      tokenVisionPolygons: [{
+        tokenId: 'user-1',
+        polygon: [
+          { x: 0, y: 0 },
+          { x: 70, y: 0 },
+          { x: 70, y: 70 },
+          { x: 0, y: 70 },
+        ],
+      }],
+    })).toEqual([[[
+      { x: 0, y: 0 },
+      { x: 70, y: 0 },
+      { x: 70, y: 70 },
+      { x: 0, y: 70 },
+    ]]]);
+  });
+
+  test('separates high-detail render and memory polygons from capped legacy polygons', () => {
+    const ring = Array.from({ length: 96 }, (_, index) => {
+      const angle = (Math.PI * 2 * index) / 96;
+      return {
+        x: Math.round(Math.cos(angle) * 1000),
+        y: Math.round(Math.sin(angle) * 1000),
+      };
+    });
+    const tokenVisionPolygons = [{
+      tokenId: 'user-1',
+      polygon: ring,
+    }];
+
+    expect(buildCurrentFogRenderPolygons({ tokenVisionPolygons })[0][0]).toHaveLength(96);
+    expect(buildCurrentFogMemoryPolygons({ tokenVisionPolygons })[0][0]).toHaveLength(96);
+    expect(buildCurrentFogPolygons({ tokenVisionPolygons })[0][0].length).toBeLessThanOrEqual(32);
   });
 });
