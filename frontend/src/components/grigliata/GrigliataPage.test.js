@@ -9,6 +9,13 @@ import {
 } from './liveInteractions';
 import { preloadImageAssets, scheduleImageAssetPreload } from './imageAssetRegistry';
 import { readAudioFileMetadata } from './music';
+import {
+  buildFogRasterTilePayload,
+  FOG_RASTER_MASK_ENCODING,
+  FOG_RASTER_PROFILE_ID,
+  GRIGLIATA_FOG_MEMORY_TILES_COLLECTION,
+  rasterizeFogPolygonsToTiles,
+} from './fogRasterMemory';
 
 const mockDeleteGrigliataCustomTokenCallable = jest.fn(() => Promise.resolve({ data: { success: true } }));
 const mockSpawnGrigliataCustomTokenInstanceCallable = jest.fn(() => Promise.resolve({ data: { success: true, tokenId: 'custom-instance-1' } }));
@@ -339,7 +346,9 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-fog-cell-count">{String(props.fogOfWar?.exploredCells?.length || 0)}</div>
       <div data-testid="board-fog-current-count">{String(props.fogOfWar?.currentVisibleCells?.length || 0)}</div>
       <div data-testid="board-fog-polygon-count">{String(props.fogOfWar?.exploredPolygons?.length || 0)}</div>
+      <div data-testid="board-fog-memory-tile-count">{String(props.fogOfWar?.memoryTiles?.length || 0)}</div>
       <div data-testid="board-fog-current-polygon-count">{String(props.fogOfWar?.currentVisiblePolygons?.length || 0)}</div>
+      <div data-testid="board-fog-render-cell-fallback">{String(props.fogOfWar?.renderCellFallback === true)}</div>
       <div data-testid="board-fog-brush-controls">{String(!!props.fogBrushControls)}</div>
       <div data-testid="board-fog-brush-active">{String(!!props.fogBrushControls?.isFogBrushToolActive)}</div>
       <div data-testid="board-fog-brush-mode">{props.fogBrushControls?.mode || ''}</div>
@@ -961,23 +970,91 @@ describe('GrigliataPage', () => {
   const getTransactionSetCalls = () => (
     mockTransactionInstances.flatMap((transaction) => transaction.set.mock.calls)
   );
-  const expectRuleSafeFogBrushPayload = (payload, expectedPayload = {}) => {
+  const getTransactionDeleteCalls = () => (
+    mockTransactionInstances.flatMap((transaction) => transaction.delete.mock.calls)
+  );
+  const TEST_FOG_GRID = { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 };
+  const buildCellFogPolygon = ({ col = 0, row = 0, grid = TEST_FOG_GRID } = {}) => {
+    const x = grid.offsetXPx + (col * grid.cellSizePx);
+    const y = grid.offsetYPx + (row * grid.cellSizePx);
+
+    return [[
+      { x, y },
+      { x: x + grid.cellSizePx, y },
+      { x: x + grid.cellSizePx, y: y + grid.cellSizePx },
+      { x, y: y + grid.cellSizePx },
+    ]];
+  };
+  const buildTestFogMemoryTileDocs = ({
+    backgroundId = 'map-1',
+    ownerUid = 'user-1',
+    grid = TEST_FOG_GRID,
+    polygons = [buildCellFogPolygon({ grid })],
+    updatedBy = ownerUid,
+  } = {}) => (
+    rasterizeFogPolygonsToTiles({
+      backgroundId,
+      ownerUid,
+      grid,
+      polygons,
+    }).map((tile) => ({
+      id: tile.id,
+      ...buildFogRasterTilePayload({
+        ...tile,
+        grid,
+        maskBytes: tile.maskBytes,
+        updatedAt: { __type: 'serverTimestamp' },
+        updatedBy,
+      }),
+    }))
+  );
+  const getTileOwnerFromPath = (path = '') => {
+    const docId = String(path).split('/').pop() || '';
+    return docId.split('__')[1] || '';
+  };
+  const expectRuleSafeFogTilePayload = (payload, expectedPayload = {}) => {
     expect(Object.keys(payload).sort()).toEqual([
       'backgroundId',
       'cellSizePx',
-      'exploredCells',
-      'exploredPolygons',
+      'maskBase64',
+      'maskEncoding',
+      'offsetXPx',
+      'offsetYPx',
       'ownerUid',
+      'rasterProfileId',
+      'samplesPerCell',
       'schemaVersion',
+      'tileCol',
+      'tileKey',
+      'tileRow',
+      'tileSizeCells',
       'updatedAt',
       'updatedBy',
     ].sort());
     expect(payload).toEqual(expect.objectContaining({
       schemaVersion: 1,
+      rasterProfileId: FOG_RASTER_PROFILE_ID,
+      maskEncoding: FOG_RASTER_MASK_ENCODING,
+      maskBase64: expect.any(String),
       updatedAt: { __type: 'serverTimestamp' },
       ...expectedPayload,
     }));
+    expect(payload).not.toHaveProperty('exploredCells');
+    expect(payload).not.toHaveProperty('exploredPolygons');
+    expect(hasDirectNestedArray(payload)).toBe(false);
   };
+  const getFogTileSetCallsByOwner = (ownerUid) => (
+    getTransactionSetCalls().filter(([target, payload]) => (
+      target?.path?.startsWith(`${GRIGLIATA_FOG_MEMORY_TILES_COLLECTION}/`)
+      && payload?.ownerUid === ownerUid
+    ))
+  );
+  const getFogTileDeleteCallsByOwner = (ownerUid) => (
+    getTransactionDeleteCalls().filter(([target]) => (
+      target?.path?.startsWith(`${GRIGLIATA_FOG_MEMORY_TILES_COLLECTION}/`)
+      && getTileOwnerFromPath(target.path) === ownerUid
+    ))
+  );
   const hasDirectNestedArray = (value) => {
     if (Array.isArray(value)) {
       return value.some((item) => Array.isArray(item) || hasDirectNestedArray(item));
@@ -987,7 +1064,6 @@ describe('GrigliataPage', () => {
     }
     return false;
   };
-
   test('derives the workspace height from shell metrics without querying the legacy navbar', async () => {
     useShellLayout.mockReturnValue({
       topInset: 96,
@@ -2885,20 +2961,17 @@ describe('GrigliataPage', () => {
     });
   });
 
-  test('subscribes to own fog and writes exploration only to the current player doc', async () => {
+  test('subscribes to own fog and writes raster exploration only to the current player tiles', async () => {
     setDocData('grigliata_lighting_render_inputs/map-1', {
       backgroundId: 'map-1',
       scene: { darkness: 0.6, globalLight: false },
       walls: [],
       lights: [],
     });
-    setDocData('grigliata_fog_of_war/map-1__user-2', {
-      backgroundId: 'map-1',
+    setCollectionData(GRIGLIATA_FOG_MEMORY_TILES_COLLECTION, buildTestFogMemoryTileDocs({
       ownerUid: 'user-2',
-      cellSizePx: 70,
-      exploredCells: ['9:9'],
-      updatedBy: 'user-2',
-    });
+      polygons: [buildCellFogPolygon({ col: 9, row: 9 })],
+    }));
     setCollectionData('grigliata_token_placements', [{
       id: 'map-1__user-1',
       backgroundId: 'map-1',
@@ -2933,25 +3006,43 @@ describe('GrigliataPage', () => {
     expect(firestore.onSnapshot.mock.calls.some(([target]) => (
       target?.path === 'grigliata_fog_of_war/map-1__user-2'
     ))).toBe(false);
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'query'
+      && target?.base?.path === GRIGLIATA_FOG_MEMORY_TILES_COLLECTION
+      && target.constraints?.some((constraint) => (
+        constraint.field === 'ownerUid' && constraint.value === 'user-1'
+      ))
+    ))).toBe(true);
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'query'
+      && target?.base?.path === GRIGLIATA_FOG_MEMORY_TILES_COLLECTION
+      && target.constraints?.some((constraint) => (
+        constraint.field === 'ownerUid' && constraint.value === 'user-2'
+      ))
+    ))).toBe(false);
 
     await act(async () => {
       jest.advanceTimersByTime(1000);
     });
 
     await waitFor(() => {
-      expect(firestore.setDoc).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'grigliata_fog_of_war/map-1__user-1' }),
-        expect.objectContaining({
+      expect(getFogTileSetCallsByOwner('user-1').length).toBeGreaterThan(0);
+    });
+    getFogTileSetCallsByOwner('user-1').forEach(([, payload, options]) => {
+      expect(options).toEqual({ merge: true });
+      expectRuleSafeFogTilePayload(payload, {
           backgroundId: 'map-1',
           ownerUid: 'user-1',
           cellSizePx: 70,
           updatedBy: 'user-1',
-        }),
-        expect.any(Object)
-      );
+      });
     });
+    expect(getTransactionSetCalls().some(([target, payload]) => (
+      target?.path?.startsWith(`${GRIGLIATA_FOG_MEMORY_TILES_COLLECTION}/`)
+      && payload?.ownerUid === 'user-2'
+    ))).toBe(false);
     expect(firestore.setDoc.mock.calls.some(([target]) => (
-      target?.path === 'grigliata_fog_of_war/map-1__user-2'
+      target?.path?.startsWith('grigliata_fog_of_war/')
     ))).toBe(false);
   });
 
@@ -3170,13 +3261,10 @@ describe('GrigliataPage', () => {
       walls: [],
       lights: [],
     });
-    setDocData('grigliata_fog_of_war/map-1__user-2', {
-      backgroundId: 'map-1',
+    setCollectionData(GRIGLIATA_FOG_MEMORY_TILES_COLLECTION, buildTestFogMemoryTileDocs({
       ownerUid: 'user-2',
-      cellSizePx: 70,
-      exploredCells: ['4:4', '5:4'],
-      updatedBy: 'user-2',
-    });
+      polygons: [buildCellFogPolygon({ col: 4, row: 4 })],
+    }));
 
     render(<GrigliataPage />);
 
@@ -3184,6 +3272,7 @@ describe('GrigliataPage', () => {
       expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('true');
     });
     expect(screen.getByTestId('board-fog-cell-count')).toHaveTextContent('0');
+    expect(screen.getByTestId('board-fog-memory-tile-count')).toHaveTextContent('0');
     expect(firestore.onSnapshot.mock.calls.some(([target]) => (
       target?.path === 'grigliata_fog_of_war/map-1__user-2'
     ))).toBe(false);
@@ -3204,20 +3293,18 @@ describe('GrigliataPage', () => {
       walls: [],
       lights: [{ x: 35, y: 35, brightRadiusPx: 70, dimRadiusPx: 140, color: '#FFFFFF' }],
     });
-    setDocData('grigliata_fog_of_war/map-1__user-1', {
-      backgroundId: 'map-1',
+    setCollectionData(GRIGLIATA_FOG_MEMORY_TILES_COLLECTION, buildTestFogMemoryTileDocs({
       ownerUid: 'user-1',
-      cellSizePx: 70,
-      exploredCells: ['0:0'],
-      updatedBy: 'user-1',
-    });
+      polygons: [buildCellFogPolygon({ col: 0, row: 0 })],
+    }));
 
     render(<GrigliataPage />);
 
     await waitFor(() => {
       expect(screen.getByTestId('board-lighting-count')).toHaveTextContent('0');
       expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('true');
-      expect(screen.getByTestId('board-fog-cell-count')).toHaveTextContent('1');
+      expect(screen.getByTestId('board-fog-cell-count')).toHaveTextContent('0');
+      expect(screen.getByTestId('board-fog-memory-tile-count')).toHaveTextContent('1');
     });
   });
 
@@ -3362,29 +3449,6 @@ describe('GrigliataPage', () => {
       isVisibleToPlayers: true,
       isDead: false,
     }]);
-    setCollectionData('grigliata_fog_of_war', [{
-      id: 'map-1__user-2',
-      backgroundId: 'map-1',
-      ownerUid: 'user-2',
-      cellSizePx: 70,
-      exploredCells: ['5:5'],
-      exploredPolygons: [[[
-        { x: 350, y: 350 },
-        { x: 420, y: 350 },
-        { x: 420, y: 420 },
-        { x: 350, y: 420 },
-      ]]],
-      updatedBy: 'user-2',
-    }, {
-      id: 'map-2__user-4',
-      backgroundId: 'map-2',
-      ownerUid: 'user-4',
-      cellSizePx: 70,
-      exploredCells: ['9:9'],
-      exploredPolygons: [],
-      updatedBy: 'user-4',
-    }]);
-
     render(<GrigliataPage />);
 
     await waitFor(() => {
@@ -3402,65 +3466,35 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      expect(getTransactionSetCalls()).toEqual(expect.arrayContaining([
-        [
-          expect.objectContaining({ path: 'grigliata_fog_of_war/map-1__user-2' }),
-          expect.objectContaining({
-            backgroundId: 'map-1',
-            ownerUid: 'user-2',
-            cellSizePx: 70,
-            exploredCells: expect.arrayContaining(['0:0', '5:5']),
-            updatedBy: 'user-1',
-          }),
-          { merge: true },
-        ],
-      ]));
+      expect(getFogTileSetCallsByOwner('user-2').length).toBeGreaterThan(0);
+      expect(getFogTileSetCallsByOwner('user-3').length).toBeGreaterThan(0);
     });
-    expect(getTransactionSetCalls()).toEqual(expect.arrayContaining([
-      [
-        expect.objectContaining({ path: 'grigliata_fog_of_war/map-1__user-3' }),
-        expect.objectContaining({
-          backgroundId: 'map-1',
-          ownerUid: 'user-3',
-          cellSizePx: 70,
-          exploredCells: expect.arrayContaining(['0:0']),
-          updatedBy: 'user-1',
-        }),
-        { merge: true },
-      ],
-    ]));
-    const user2FogWrite = getTransactionSetCalls().find(([target]) => (
-      target?.path === 'grigliata_fog_of_war/map-1__user-2'
-    ));
-    expectRuleSafeFogBrushPayload(user2FogWrite?.[1], {
-      backgroundId: 'map-1',
-      ownerUid: 'user-2',
-      cellSizePx: 70,
-      exploredCells: expect.arrayContaining(['0:0', '5:5']),
-      exploredPolygons: expect.any(Array),
-      updatedBy: 'user-1',
+
+    getFogTileSetCallsByOwner('user-2').forEach(([, payload, options]) => {
+      expect(options).toEqual({ merge: true });
+      expectRuleSafeFogTilePayload(payload, {
+        backgroundId: 'map-1',
+        ownerUid: 'user-2',
+        cellSizePx: 70,
+        updatedBy: 'user-1',
+      });
     });
-    expect(user2FogWrite?.[1].exploredPolygons.length).toBeGreaterThan(0);
-    expect(user2FogWrite?.[1].exploredPolygons[0]).toEqual(expect.objectContaining({
-      rings: expect.any(Array),
-    }));
-    expect(hasDirectNestedArray(user2FogWrite?.[1].exploredPolygons)).toBe(false);
-    const user3FogWrite = getTransactionSetCalls().find(([target]) => (
-      target?.path === 'grigliata_fog_of_war/map-1__user-3'
-    ));
-    expectRuleSafeFogBrushPayload(user3FogWrite?.[1], {
-      backgroundId: 'map-1',
-      ownerUid: 'user-3',
-      cellSizePx: 70,
-      exploredCells: expect.arrayContaining(['0:0']),
-      exploredPolygons: expect.any(Array),
-      updatedBy: 'user-1',
+    getFogTileSetCallsByOwner('user-3').forEach(([, payload, options]) => {
+      expect(options).toEqual({ merge: true });
+      expectRuleSafeFogTilePayload(payload, {
+        backgroundId: 'map-1',
+        ownerUid: 'user-3',
+        cellSizePx: 70,
+        updatedBy: 'user-1',
+      });
     });
-    expect(user3FogWrite?.[1].exploredPolygons.length).toBeGreaterThan(0);
     expect(getTransactionSetCalls().some(([target]) => (
-      target?.path === 'grigliata_fog_of_war/map-1__user-1'
-      || target?.path === 'grigliata_fog_of_war/map-1__dm-2'
-      || target?.path === 'grigliata_fog_of_war/map-2__user-4'
+      target?.path?.startsWith('grigliata_fog_of_war/')
+    ))).toBe(false);
+    expect(getTransactionSetCalls().some(([, payload]) => (
+      payload?.ownerUid === 'user-1'
+      || payload?.ownerUid === 'dm-2'
+      || payload?.ownerUid === 'user-4'
     ))).toBe(false);
     expect(firestore.runTransaction).toHaveBeenCalledTimes(2);
     expect(firestore.setDoc.mock.calls.some(([target]) => (
@@ -3497,20 +3531,10 @@ describe('GrigliataPage', () => {
       isVisibleToPlayers: true,
       isDead: false,
     }]);
-    setCollectionData('grigliata_fog_of_war', [{
-      id: 'map-1__user-2',
-      backgroundId: 'map-1',
+    setCollectionData(GRIGLIATA_FOG_MEMORY_TILES_COLLECTION, buildTestFogMemoryTileDocs({
       ownerUid: 'user-2',
-      cellSizePx: 70,
-      exploredCells: ['0:0', '5:5'],
-      exploredPolygons: [[[
-        { x: 0, y: 0 },
-        { x: 70, y: 0 },
-        { x: 70, y: 70 },
-        { x: 0, y: 70 },
-      ]]],
-      updatedBy: 'user-2',
-    }]);
+      polygons: [buildCellFogPolygon({ col: 0, row: 0 })],
+    }));
 
     render(<GrigliataPage />);
 
@@ -3529,33 +3553,16 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      expect(getTransactionSetCalls()).toEqual(expect.arrayContaining([
-        [
-          expect.objectContaining({ path: 'grigliata_fog_of_war/map-1__user-2' }),
-          expect.objectContaining({
-            backgroundId: 'map-1',
-            ownerUid: 'user-2',
-            exploredCells: ['5:5'],
-            updatedBy: 'user-1',
-          }),
-          { merge: true },
-        ],
-      ]));
+      expect(getFogTileDeleteCallsByOwner('user-2').length).toBeGreaterThan(0);
     });
     expect(getTransactionSetCalls().some(([target]) => (
-      target?.path === 'grigliata_fog_of_war/map-1__user-3'
+      target?.path?.startsWith(`${GRIGLIATA_FOG_MEMORY_TILES_COLLECTION}/`)
+      && getTileOwnerFromPath(target.path) === 'user-3'
     ))).toBe(false);
-    const user2FogWrite = getTransactionSetCalls().find(([target]) => (
-      target?.path === 'grigliata_fog_of_war/map-1__user-2'
-    ));
-    expectRuleSafeFogBrushPayload(user2FogWrite?.[1], {
-      backgroundId: 'map-1',
-      ownerUid: 'user-2',
-      cellSizePx: 70,
-      exploredCells: ['5:5'],
-      exploredPolygons: [],
-      updatedBy: 'user-1',
-    });
+    expect(getFogTileDeleteCallsByOwner('user-3')).toHaveLength(0);
+    expect(getTransactionSetCalls().some(([target]) => (
+      target?.path?.startsWith('grigliata_fog_of_war/')
+    ))).toBe(false);
     expect(firestore.runTransaction).toHaveBeenCalledTimes(2);
   });
 
@@ -3572,15 +3579,6 @@ describe('GrigliataPage', () => {
       isVisibleToPlayers: true,
       isDead: false,
     }]);
-    setCollectionData('grigliata_fog_of_war', [{
-      id: 'map-1__user-2',
-      backgroundId: 'map-1',
-      ownerUid: 'user-2',
-      cellSizePx: 70,
-      exploredCells: ['5:5'],
-      updatedBy: 'user-2',
-    }]);
-
     render(<GrigliataPage />);
 
     await waitFor(() => {
@@ -3621,23 +3619,25 @@ describe('GrigliataPage', () => {
     await waitFor(() => {
       expect(firestore.runTransaction).toHaveBeenCalledTimes(2);
     });
-    const finalSetCall = [...getTransactionSetCalls()].reverse().find(([target]) => (
-      target?.path === 'grigliata_fog_of_war/map-1__user-2'
-    ));
-    expect(finalSetCall?.[1]).toEqual(expect.objectContaining({
-      exploredCells: expect.arrayContaining(['0:0', '10:0', '5:5']),
-      updatedBy: 'user-1',
-    }));
-    expectRuleSafeFogBrushPayload(finalSetCall?.[1], {
-      backgroundId: 'map-1',
-      ownerUid: 'user-2',
-      cellSizePx: 70,
-      exploredCells: expect.arrayContaining(['0:0', '10:0', '5:5']),
-      updatedBy: 'user-1',
+    const user2TileWrites = getFogTileSetCallsByOwner('user-2');
+    expect(user2TileWrites.length).toBeGreaterThan(0);
+    user2TileWrites.forEach(([, payload, options]) => {
+      expect(options).toEqual({ merge: true });
+      expectRuleSafeFogTilePayload(payload, {
+        backgroundId: 'map-1',
+        ownerUid: 'user-2',
+        cellSizePx: 70,
+        updatedBy: 'user-1',
+      });
     });
+    expect(user2TileWrites.some(([, payload]) => payload.tileCol <= 0)).toBe(true);
+    expect(user2TileWrites.some(([, payload]) => payload.tileCol >= 1)).toBe(true);
+    expect(getTransactionSetCalls().some(([target]) => (
+      target?.path?.startsWith('grigliata_fog_of_war/')
+    ))).toBe(false);
   });
 
-  test('enforces the DM brush cell limit against transaction snapshots', async () => {
+  test('writes DM fog brush raster masks without legacy cell limit payloads', async () => {
     setManagerAuth();
     setCollectionData('grigliata_token_placements', [{
       id: 'map-1__user-2',
@@ -3650,13 +3650,12 @@ describe('GrigliataPage', () => {
       isVisibleToPlayers: true,
       isDead: false,
     }]);
-    const existingCells = Array.from({ length: 5001 }, (_, index) => `${index}:10`);
     setCollectionData('grigliata_fog_of_war', [{
       id: 'map-1__user-2',
       backgroundId: 'map-1',
       ownerUid: 'user-2',
       cellSizePx: 70,
-      exploredCells: existingCells,
+      exploredCells: Array.from({ length: 5001 }, (_, index) => `${index}:10`),
       updatedBy: 'user-2',
     }]);
 
@@ -3678,19 +3677,21 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      expect(getTransactionSetCalls()).toHaveLength(1);
+      expect(getFogTileSetCallsByOwner('user-2').length).toBeGreaterThan(0);
     });
-    const [, payload] = getTransactionSetCalls()[0];
-    expectRuleSafeFogBrushPayload(payload, {
-      backgroundId: 'map-1',
-      ownerUid: 'user-2',
-      cellSizePx: 70,
-      updatedBy: 'user-1',
+
+    getFogTileSetCallsByOwner('user-2').forEach(([, payload, options]) => {
+      expect(options).toEqual({ merge: true });
+      expectRuleSafeFogTilePayload(payload, {
+        backgroundId: 'map-1',
+        ownerUid: 'user-2',
+        cellSizePx: 70,
+        updatedBy: 'user-1',
+      });
     });
-    expect(payload.exploredCells).toHaveLength(5000);
-    expect(payload.exploredCells).toContain('0:10');
-    expect(payload.exploredCells).not.toContain('0:0');
-    expect(payload.exploredCells).not.toContain('5000:10');
+    expect(getTransactionSetCalls().some(([target]) => (
+      target?.path?.startsWith('grigliata_fog_of_war/')
+    ))).toBe(false);
   });
 
   test('players, narration, and fog-disabled maps do not receive manual fog brush controls', async () => {
@@ -3733,7 +3734,7 @@ describe('GrigliataPage', () => {
     });
   });
 
-  test('passes player-safe polygon fog to players without manual fog controls', async () => {
+  test('imports legacy polygon fog to player raster memory without manual fog controls', async () => {
     setCollectionData('grigliata_token_placements', [{
       id: 'map-1__user-1',
       backgroundId: 'map-1',
@@ -3769,10 +3770,15 @@ describe('GrigliataPage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('true');
-      expect(screen.getByTestId('board-fog-polygon-count')).toHaveTextContent('1');
+      expect(screen.getByTestId('board-fog-polygon-count')).toHaveTextContent('0');
+      expect(Number(screen.getByTestId('board-fog-memory-tile-count').textContent)).toBeGreaterThan(0);
       expect(screen.getByTestId('board-fog-brush-controls')).toHaveTextContent('false');
       expect(Number(screen.getByTestId('board-fog-current-polygon-count').textContent)).toBeGreaterThan(0);
     });
+
+    expect(firestore.setDoc.mock.calls.some(([target]) => (
+      target?.path?.startsWith('grigliata_fog_of_war/')
+    ))).toBe(false);
   });
 
   test('resets wall authoring when narration or the active map changes', async () => {
@@ -3848,6 +3854,18 @@ describe('GrigliataPage', () => {
       exploredCells: ['9:9'],
       updatedBy: 'user-2',
     }]);
+    setCollectionData(GRIGLIATA_FOG_MEMORY_TILES_COLLECTION, [
+      ...buildTestFogMemoryTileDocs({
+        backgroundId: 'map-1',
+        ownerUid: 'user-1',
+        polygons: [buildCellFogPolygon({ col: 0, row: 0 })],
+      }),
+      ...buildTestFogMemoryTileDocs({
+        backgroundId: 'map-2',
+        ownerUid: 'user-2',
+        polygons: [buildCellFogPolygon({ col: 9, row: 9 })],
+      }),
+    ]);
     const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
 
     render(<GrigliataPage />);
@@ -3859,14 +3877,23 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      expect(getCommittedBatches()).toHaveLength(1);
+      expect(getCommittedBatches()).toHaveLength(2);
     });
-    const [batch] = getCommittedBatches();
-    expect(batch.delete).toHaveBeenCalledWith(expect.objectContaining({
+    const committedBatches = getCommittedBatches();
+    expect(committedBatches.some((batch) => batch.delete.mock.calls.some(([target]) => (
+      target?.path === 'grigliata_fog_of_war/map-1__user-1'
+    )))).toBe(true);
+    expect(committedBatches.some((batch) => batch.delete.mock.calls.some(([target]) => (
+      target?.path === 'grigliata_fog_of_war/map-2__user-2'
+    )))).toBe(false);
+    expect(committedBatches.some((batch) => batch.delete.mock.calls.some(([target]) => (
+      target?.path?.startsWith(`${GRIGLIATA_FOG_MEMORY_TILES_COLLECTION}/map-1__user-1__`)
+    )))).toBe(true);
+    expect(committedBatches.some((batch) => batch.delete.mock.calls.some(([target]) => (
+      target?.path?.startsWith(`${GRIGLIATA_FOG_MEMORY_TILES_COLLECTION}/map-2__user-2__`)
+    )))).toBe(false);
+    expect(committedBatches[0].delete).toHaveBeenCalledWith(expect.objectContaining({
       path: 'grigliata_fog_of_war/map-1__user-1',
-    }));
-    expect(batch.delete).not.toHaveBeenCalledWith(expect.objectContaining({
-      path: 'grigliata_fog_of_war/map-2__user-2',
     }));
 
     confirmSpy.mockRestore();

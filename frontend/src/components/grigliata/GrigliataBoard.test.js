@@ -21,6 +21,13 @@ import {
   useTokenStatusIconImages,
 } from './tokenStatuses';
 import useImageAsset, { useImageAssetSnapshot } from './useImageAsset';
+import {
+  FOG_RASTER_MASK_ENCODING,
+  FOG_RASTER_PROFILE_ID,
+  createEmptyFogRasterMaskBytes,
+  encodeFogRasterMaskBase64,
+  normalizeFogRasterMemoryTileDoc,
+} from './fogRasterMemory';
 
 const MAP_PING_EPIC_ACCENT = '#f97316';
 const STATUS_BADGE_FILL = '#7c3aed';
@@ -178,6 +185,28 @@ const grid = {
   cellSizePx: 70,
   offsetXPx: 0,
   offsetYPx: 0,
+};
+
+const buildMemoryTile = ({ tileKey = '0:0', tileCol = 0, tileRow = 0 } = {}) => {
+  const maskBytes = createEmptyFogRasterMaskBytes();
+  maskBytes[0] = 0xff;
+  return normalizeFogRasterMemoryTileDoc({
+    id: `map-1__current-user__${FOG_RASTER_PROFILE_ID}__${tileKey}`,
+    backgroundId: 'map-1',
+    ownerUid: 'current-user',
+    tileKey,
+    tileCol,
+    tileRow,
+    rasterProfileId: FOG_RASTER_PROFILE_ID,
+    tileSizeCells: 8,
+    samplesPerCell: 16,
+    cellSizePx: 70,
+    offsetXPx: 0,
+    offsetYPx: 0,
+    maskEncoding: FOG_RASTER_MASK_ENCODING,
+    maskBase64: encodeFogRasterMaskBase64(maskBytes),
+    updatedBy: 'current-user',
+  });
 };
 
 const buildProps = (overrides = {}) => ({
@@ -922,8 +951,8 @@ describe('GrigliataBoard', () => {
 
     expect(await screen.findByTestId('fog-of-war-mask-layer')).toBeInTheDocument();
     expect(screen.getByTestId('fog-unexplored-overlay')).toBeInTheDocument();
-    expect(screen.getAllByTestId('fog-remembered-cell-overlay')).toHaveLength(1);
-    expect(screen.getAllByTestId('fog-current-cell-cutout')).toHaveLength(2);
+    expect(screen.queryByTestId('fog-remembered-cell-fallback-overlay')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('fog-current-cell-cutout')).not.toBeInTheDocument();
 
     rerender(
       <GrigliataBoard
@@ -937,7 +966,7 @@ describe('GrigliataBoard', () => {
     );
 
     expect(screen.getByTestId('fog-of-war-mask-layer')).toBeInTheDocument();
-    expect(screen.getAllByTestId('fog-remembered-cell-overlay')).toHaveLength(1);
+    expect(screen.queryByTestId('fog-remembered-cell-fallback-overlay')).not.toBeInTheDocument();
     expect(screen.queryByTestId('fog-current-cell-cutout')).not.toBeInTheDocument();
 
     rerender(
@@ -945,12 +974,7 @@ describe('GrigliataBoard', () => {
         {...buildProps({
           fogOfWar: {
             exploredCells: ['0:0', '2:0'],
-            exploredPolygons: [[[
-              { x: 0, y: 0 },
-              { x: 70, y: 0 },
-              { x: 70, y: 70 },
-              { x: 0, y: 70 },
-            ]]],
+            memoryTiles: [buildMemoryTile()],
             currentVisibleCells: [],
             currentVisiblePolygons: [],
           },
@@ -958,30 +982,24 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    expect(screen.getByTestId('fog-known-polygon-clear')).toBeInTheDocument();
-    expect(screen.queryByTestId('fog-remembered-cell-overlay')).not.toBeInTheDocument();
+    expect(screen.getByTestId('fog-remembered-raster-clear')).toBeInTheDocument();
+    expect(screen.getByTestId('fog-remembered-raster-overlay')).toBeInTheDocument();
+    expect(screen.queryByTestId('fog-remembered-cell-fallback-overlay')).not.toBeInTheDocument();
 
     rerender(
       <GrigliataBoard
         {...buildProps({
           fogOfWar: {
             exploredCells: ['0:0', '2:0'],
-            exploredPolygons: [[[
-              { x: 0, y: 0 },
-              { x: 70, y: 0 },
-              { x: 70, y: 70 },
-              { x: 0, y: 70 },
-            ]]],
+            memoryTiles: [buildMemoryTile()],
             currentVisibleCells: [],
             currentVisiblePolygons: [],
-            forceRenderExploredCellFallback: true,
           },
         })}
       />
     );
 
-    expect(screen.getAllByTestId('fog-remembered-cell-overlay')).toHaveLength(1);
-    expect(screen.getByTestId('fog-remembered-cell-overlay')).toHaveAttribute('data-cellkey', '2:0');
+    expect(screen.queryByTestId('fog-remembered-cell-fallback-overlay')).not.toBeInTheDocument();
 
     rerender(
       <GrigliataBoard
@@ -1057,9 +1075,7 @@ describe('GrigliataBoard', () => {
     expect(mainToken).toBeInTheDocument();
     expect(foeToken).toBeInTheDocument();
     expect(screen.queryByTestId('token-node-user-2')).not.toBeInTheDocument();
-    expect(screen.getAllByTestId('fog-current-cell-cutout').map((node) => (
-      node.getAttribute('data-cellkey')
-    ))).toEqual(['1:0']);
+    expect(screen.queryByTestId('fog-current-cell-cutout')).not.toBeInTheDocument();
     expect(foeToken.compareDocumentPosition(fog) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(fog.compareDocumentPosition(mainToken) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });

@@ -9,6 +9,11 @@ import {
   FOG_POLYGON_MAX_RING_POINTS,
   FOG_POLYGON_MEMORY_MAX_RING_POINTS,
 } from './fogPolygonGeometry';
+import {
+  FOG_RASTER_MASK_ENCODING,
+  FOG_RASTER_PROFILE_ID,
+  GRIGLIATA_FOG_MEMORY_TILES_COLLECTION,
+} from './fogRasterMemory';
 
 const mockBuildDocTarget = (...segments) => ({
   kind: 'doc',
@@ -22,6 +27,8 @@ const mockArrayUnionSentinel = (...values) => (
     : { __type: 'arrayUnion', values }
 );
 
+let mockTransactionInstances = [];
+
 jest.mock('../firebaseConfig', () => ({
   db: {},
 }));
@@ -29,6 +36,18 @@ jest.mock('../firebaseConfig', () => ({
 jest.mock('firebase/firestore', () => ({
   arrayUnion: jest.fn((...values) => mockArrayUnionSentinel(...values)),
   doc: jest.fn((db, ...segments) => mockBuildDocTarget(...segments)),
+  runTransaction: jest.fn((db, callback) => {
+    const transaction = {
+      get: jest.fn((target) => Promise.resolve({
+        id: target.id,
+        exists: () => false,
+        data: () => ({}),
+      })),
+      set: jest.fn(),
+    };
+    mockTransactionInstances.push(transaction);
+    return Promise.resolve(callback(transaction));
+  }),
   serverTimestamp: jest.fn(() => ({ __type: 'serverTimestamp' })),
   setDoc: jest.fn(() => Promise.resolve()),
 }));
@@ -83,9 +102,22 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
 
   beforeEach(() => {
     jest.useFakeTimers();
+    mockTransactionInstances = [];
     firestore = require('firebase/firestore');
     firestore.arrayUnion.mockClear().mockImplementation((...values) => mockArrayUnionSentinel(...values));
     firestore.doc.mockClear().mockImplementation((db, ...segments) => mockBuildDocTarget(...segments));
+    firestore.runTransaction.mockClear().mockImplementation((db, callback) => {
+      const transaction = {
+        get: jest.fn((target) => Promise.resolve({
+          id: target.id,
+          exists: () => false,
+          data: () => ({}),
+        })),
+        set: jest.fn(),
+      };
+      mockTransactionInstances.push(transaction);
+      return Promise.resolve(callback(transaction));
+    });
     firestore.serverTimestamp.mockClear().mockImplementation(() => ({ __type: 'serverTimestamp' }));
     firestore.setDoc.mockClear().mockImplementation(() => Promise.resolve());
   });
@@ -149,9 +181,9 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
     );
   });
 
-  test('persists cells before polygon precision data to keep fog memory stable', async () => {
+  test('persists raster memory tiles instead of legacy cell or polygon fallback', async () => {
     const HookProbe = () => {
-      const { currentVisibleCells, currentVisiblePolygons } = useGrigliataFogOfWarPersistence({
+      const { currentVisibleCells, currentVisiblePolygons, pendingMemoryTiles } = useGrigliataFogOfWarPersistence({
         backgroundId: 'map-1',
         currentUserId: 'user-1',
         isManager: false,
@@ -160,13 +192,14 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
         lightingRenderInput: closedDoorInput,
         fogOfWar: null,
         isEnabled: true,
-        rayCount: 64,
+        rayCount: 16,
       });
 
       return (
         <div>
           <div data-testid="cell-count">{String(currentVisibleCells.length)}</div>
           <div data-testid="polygon-count">{String(currentVisiblePolygons.length)}</div>
+          <div data-testid="pending-tile-count">{String(pendingMemoryTiles.length)}</div>
         </div>
       );
     };
@@ -176,6 +209,7 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
     await waitFor(() => {
       expect(Number(screen.getByTestId('cell-count').textContent)).toBeGreaterThan(0);
       expect(screen.getByTestId('polygon-count')).toHaveTextContent('1');
+      expect(Number(screen.getByTestId('pending-tile-count').textContent)).toBeGreaterThan(0);
     });
 
     await act(async () => {
@@ -184,145 +218,49 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
     });
 
     await waitFor(() => {
-      expect(firestore.setDoc).toHaveBeenCalledTimes(2);
+      expect(firestore.runTransaction).toHaveBeenCalledTimes(1);
     });
-    const [cellWrite, polygonWrite] = firestore.setDoc.mock.calls;
-    expect(cellWrite).toEqual([
-      expect.objectContaining({ path: 'grigliata_fog_of_war/map-1__user-1' }),
-      expect.objectContaining({
-        backgroundId: 'map-1',
-        ownerUid: 'user-1',
-        cellSizePx: 70,
-        exploredCells: expect.any(Array),
-        updatedBy: 'user-1',
-      }),
-      { merge: true },
-    ]);
-    expect(cellWrite[1]).not.toHaveProperty('exploredPolygons');
-    expect(polygonWrite).toEqual([
-      expect.objectContaining({ path: 'grigliata_fog_of_war/map-1__user-1' }),
-      expect.objectContaining({
-        backgroundId: 'map-1',
-        ownerUid: 'user-1',
-        cellSizePx: 70,
-        exploredCells: expect.any(Array),
-        exploredPolygons: expect.any(Array),
-        updatedBy: 'user-1',
-      }),
-      { merge: true },
-    ]);
-    expect(polygonWrite[1].exploredPolygons[0]).toEqual(expect.objectContaining({
-      rings: expect.any(Array),
+    expect(firestore.setDoc).not.toHaveBeenCalled();
+    const tileWrites = mockTransactionInstances[0].set.mock.calls;
+    expect(tileWrites.length).toBeGreaterThan(0);
+    expect(tileWrites[0][0].path).toContain(`${GRIGLIATA_FOG_MEMORY_TILES_COLLECTION}/`);
+    expect(tileWrites[0][1]).toEqual(expect.objectContaining({
+      backgroundId: 'map-1',
+      ownerUid: 'user-1',
+      cellSizePx: 70,
+      rasterProfileId: FOG_RASTER_PROFILE_ID,
+      maskEncoding: FOG_RASTER_MASK_ENCODING,
+      maskBase64: expect.any(String),
+      updatedBy: 'user-1',
     }));
-    expect(polygonWrite[1].exploredPolygons[0].rings[0].points.length).toBeGreaterThan(
-      FOG_POLYGON_MAX_RING_POINTS
-    );
-    expect(polygonWrite[1].exploredPolygons[0].rings[0].points.length).toBeLessThanOrEqual(
-      FOG_POLYGON_MEMORY_MAX_RING_POINTS
-    );
-    expect(hasDirectNestedArray(polygonWrite[1].exploredPolygons)).toBe(false);
+    expect(tileWrites[0][1]).not.toHaveProperty('exploredCells');
+    expect(tileWrites[0][1]).not.toHaveProperty('exploredPolygons');
+    expect(hasDirectNestedArray(tileWrites[0][1])).toBe(false);
   });
 
-  test('persists precision polygons with fallback cells when cells are already explored', async () => {
-    const visibility = buildViewerFogCurrentVisibility({
-      tokens: [token],
-      currentUserId: 'user-1',
-      isManager: false,
-      grid,
-      lightingRenderInput: closedDoorInput,
-      rayCount: 64,
-    });
-    const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const HookProbe = () => {
-      const { isPrecisionFogFallbackActive } = useGrigliataFogOfWarPersistence({
+  test('queues two rapid movements into one raster flush without dropping the first move', async () => {
+    const HookProbe = ({ movingToken }) => {
+      const { pendingMemoryTiles } = useGrigliataFogOfWarPersistence({
         backgroundId: 'map-1',
         currentUserId: 'user-1',
         isManager: false,
         grid,
-        tokens: [token],
-        lightingRenderInput: closedDoorInput,
-        fogOfWar: {
-          backgroundId: 'map-1',
-          ownerUid: 'user-1',
-          cellSizePx: 70,
-          exploredCells: visibility.currentVisibleCells,
-          exploredPolygons: [],
-        },
-        isEnabled: true,
-        rayCount: 64,
-      });
-      return <div data-testid="probe">ready</div>;
-    };
-
-    render(<HookProbe />);
-
-    await act(async () => {
-      jest.advanceTimersByTime(GRIGLIATA_FOG_OF_WAR_WRITE_DEBOUNCE_MS);
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    await waitFor(() => {
-      expect(firestore.setDoc).toHaveBeenCalledTimes(1);
-    });
-    expect(firestore.setDoc).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'grigliata_fog_of_war/map-1__user-1' }),
-      expect.objectContaining({
-        backgroundId: 'map-1',
-        ownerUid: 'user-1',
-        cellSizePx: 70,
-        exploredCells: expect.any(Array),
-        exploredPolygons: expect.any(Array),
-        updatedBy: 'user-1',
-      }),
-      { merge: true }
-    );
-    expect(firestore.setDoc.mock.calls[0][1].exploredPolygons[0]).toEqual(expect.objectContaining({
-      rings: expect.any(Array),
-    }));
-    expect(firestore.setDoc.mock.calls[0][1].exploredPolygons[0].rings[0].points.length).toBeGreaterThan(
-      FOG_POLYGON_MAX_RING_POINTS
-    );
-    expect(firestore.setDoc.mock.calls[0][1].exploredPolygons[0].rings[0].points.length).toBeLessThanOrEqual(
-      FOG_POLYGON_MEMORY_MAX_RING_POINTS
-    );
-    expect(firestore.setDoc.mock.calls[0][1].exploredCells).toEqual(
-      visibility.currentVisibleCells
-    );
-    expect(hasDirectNestedArray(firestore.setDoc.mock.calls[0][1].exploredPolygons)).toBe(false);
-    expect(consoleWarnSpy).not.toHaveBeenCalledWith(
-      'Precision Grigliata fog persistence was denied; continuing with cell fog fallback.',
-      expect.anything()
-    );
-
-    consoleWarnSpy.mockRestore();
-  });
-
-  test('keeps cell fog fallback when precision polygon persistence is denied', async () => {
-    const permissionError = Object.assign(new Error('denied'), { code: 'permission-denied' });
-    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-    const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    firestore.setDoc
-      .mockImplementationOnce(() => Promise.resolve())
-      .mockImplementationOnce(() => Promise.reject(permissionError));
-
-    const HookProbe = () => {
-      const { isPrecisionFogFallbackActive } = useGrigliataFogOfWarPersistence({
-        backgroundId: 'map-1',
-        currentUserId: 'user-1',
-        isManager: false,
-        grid,
-        tokens: [token],
+        tokens: [movingToken],
         lightingRenderInput: closedDoorInput,
         fogOfWar: null,
         isEnabled: true,
-        rayCount: 32,
+        rayCount: 16,
       });
-      return <div data-testid="fallback-active">{String(isPrecisionFogFallbackActive)}</div>;
+      return <div data-testid="pending-tile-count">{String(pendingMemoryTiles.length)}</div>;
     };
 
-    render(<HookProbe />);
+    const { rerender } = render(<HookProbe movingToken={{ ...token, col: 0, row: 0 }} />);
+
+    await waitFor(() => {
+      expect(Number(screen.getByTestId('pending-tile-count').textContent)).toBeGreaterThan(0);
+    });
+
+    rerender(<HookProbe movingToken={{ ...token, col: 10, row: 0 }} />);
 
     await act(async () => {
       jest.advanceTimersByTime(GRIGLIATA_FOG_OF_WAR_WRITE_DEBOUNCE_MS);
@@ -331,29 +269,11 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
     });
 
     await waitFor(() => {
-      expect(firestore.setDoc).toHaveBeenCalledTimes(2);
+      expect(firestore.runTransaction).toHaveBeenCalledTimes(1);
     });
-    await waitFor(() => {
-      expect(screen.getByTestId('fallback-active')).toHaveTextContent('true');
-    });
-    expect(firestore.setDoc.mock.calls[0][1]).toEqual(expect.objectContaining({
-      exploredCells: expect.any(Array),
-    }));
-    expect(firestore.setDoc.mock.calls[0][1]).not.toHaveProperty('exploredPolygons');
-    expect(firestore.setDoc.mock.calls[1][1]).toEqual(expect.objectContaining({
-      exploredCells: expect.any(Array),
-      exploredPolygons: expect.any(Array),
-    }));
-    expect(consoleErrorSpy).not.toHaveBeenCalledWith(
-      'Failed to persist Grigliata fog of war:',
-      permissionError
-    );
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      'Precision Grigliata fog persistence was denied; continuing with cell fog fallback.',
-      permissionError
-    );
-
-    consoleErrorSpy.mockRestore();
-    consoleWarnSpy.mockRestore();
+    const tileKeys = mockTransactionInstances[0].set.mock.calls
+      .map((call) => call[1].tileKey);
+    expect(new Set(tileKeys).size).toBeGreaterThan(1);
+    expect(firestore.setDoc).not.toHaveBeenCalled();
   });
 });

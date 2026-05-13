@@ -6202,9 +6202,9 @@ export default function GrigliataBoard({
                   grid={normalizedGrid}
                   exploredCells={fogOfWar.exploredCells}
                   exploredPolygons={fogOfWar.exploredPolygons}
+                  memoryTiles={fogOfWar.memoryTiles}
                   currentVisibleCells={fogOfWar.currentVisibleCells}
                   currentVisiblePolygons={fogOfWar.currentVisiblePolygons}
-                  forceRenderExploredCellFallback={fogOfWar.forceRenderExploredCellFallback}
                 />
               </Layer>
             )}

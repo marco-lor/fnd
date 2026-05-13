@@ -142,24 +142,27 @@ import useGrigliataWallRuntimeState from './useGrigliataWallRuntimeState';
 import useGrigliataFogOfWar from './useGrigliataFogOfWar';
 import useGrigliataFogOfWarPersistence from './useGrigliataFogOfWarPersistence';
 import useGrigliataPlacementActions from './useGrigliataPlacementActions';
+import { logGrigliataFogDebug } from './fogDebug';
 import {
-  buildGrigliataFogOfWarDocId,
   GRIGLIATA_FOG_OF_WAR_COLLECTION,
-  GRIGLIATA_FOG_OF_WAR_SCHEMA_VERSION,
-  normalizeGrigliataFogOfWarDoc,
 } from './fogOfWar';
 import {
-  applyFogBrushEdit,
-  applyFogBrushPolygonEdit,
-  buildFogBrushCellKeys,
   buildFogBrushPolygon,
   DEFAULT_FOG_BRUSH_RADIUS_SQUARES,
-  GRIGLIATA_FOG_BRUSH_CELL_LIMIT,
   normalizeFogBrushMode,
   normalizeFogBrushRadiusSquares,
   normalizeFogBrushSettings,
 } from './fogBrushEditing';
-import { encodeFogMemoryPolygonsForFirestore } from './fogPolygonGeometry';
+import {
+  buildFogRasterTilePayload,
+  countFogRasterMaskBits,
+  GRIGLIATA_FOG_MEMORY_TILES_COLLECTION,
+  mergeFogRasterMemoryTiles,
+  mergeFogRasterTileMasks,
+  normalizeFogRasterMemoryTileDoc,
+  rasterizeFogPolygonsToTiles,
+  subtractFogRasterTileMasks,
+} from './fogRasterMemory';
 import {
   filterFogVisibleTokens,
   filterFogVisibleTurnOrderEntries,
@@ -206,10 +209,19 @@ const spawnGrigliataCustomTokenInstanceCallable = httpsCallable(functions, GRIGL
 const spawnGrigliataFoeTokenCallable = httpsCallable(functions, GRIGLIATA_SPAWN_FOE_TOKEN_FUNCTION);
 const updateGrigliataCustomTokenTemplateCallable = httpsCallable(functions, GRIGLIATA_CUSTOM_TOKEN_UPDATE_FUNCTION);
 
-const buildFogBrushQueueKey = ({ backgroundId, mode, cellSizePx, ownerUids = [] } = {}) => JSON.stringify([
+const buildFogBrushQueueKey = ({
   backgroundId,
   mode,
   cellSizePx,
+  offsetXPx,
+  offsetYPx,
+  ownerUids = [],
+} = {}) => JSON.stringify([
+  backgroundId,
+  mode,
+  cellSizePx,
+  offsetXPx,
+  offsetYPx,
   ownerUids,
 ]);
 
@@ -1040,7 +1052,7 @@ export default function GrigliataPage() {
   const {
     currentVisibleCells: fogCurrentVisibleCells,
     currentVisiblePolygons: fogCurrentVisiblePolygons,
-    isPrecisionFogFallbackActive,
+    pendingMemoryTiles: fogPendingMemoryTiles,
   } = useGrigliataFogOfWarPersistence({
     backgroundId: activeBackgroundId,
     currentUserId,
@@ -1062,26 +1074,31 @@ export default function GrigliataPage() {
     }
 
     return {
-      exploredCells: fogOfWar?.cellSizePx === normalizedFogGrid.cellSizePx
-        ? fogOfWar.exploredCells
-        : [],
-      exploredPolygons: fogOfWar?.cellSizePx === normalizedFogGrid.cellSizePx
-        ? fogOfWar.exploredPolygons || []
-        : [],
+      exploredCells: [],
+      exploredPolygons: [],
+      memoryTiles: mergeFogRasterMemoryTiles([
+        ...(Array.isArray(fogOfWar?.memoryTiles) ? fogOfWar.memoryTiles : []),
+        ...(Array.isArray(fogPendingMemoryTiles) ? fogPendingMemoryTiles : []),
+      ]).filter((tile) => (
+        tile.cellSizePx === normalizedFogGrid.cellSizePx
+        && tile.offsetXPx === normalizedFogGrid.offsetXPx
+        && tile.offsetYPx === normalizedFogGrid.offsetYPx
+      )),
       currentVisibleCells: fogCurrentVisibleCells,
       currentVisiblePolygons: fogCurrentVisiblePolygons,
-      forceRenderExploredCellFallback: isPrecisionFogFallbackActive,
     };
   }, [
     fogCurrentVisibleCells,
     fogCurrentVisiblePolygons,
+    fogPendingMemoryTiles,
     fogLightingRenderInput,
     fogOfWar,
     isFogOfWarEnabled,
     isManager,
     isNarrationOverlayActive,
-    isPrecisionFogFallbackActive,
     normalizedFogGrid.cellSizePx,
+    normalizedFogGrid.offsetXPx,
+    normalizedFogGrid.offsetYPx,
   ]);
   const boardRenderTokens = useMemo(
     () => filterFogVisibleTokens({
@@ -3912,60 +3929,79 @@ export default function GrigliataPage() {
       || !entry?.updatedBy
       || !Array.isArray(entry?.ownerUids)
       || entry.ownerUids.length < 1
-      || !(entry?.brushCells instanceof Set)
-      || entry.brushCells.size < 1
       || !Array.isArray(entry?.brushPolygons)
+      || entry.brushPolygons.length < 1
     ) {
       return false;
     }
 
-    const brushCells = [...entry.brushCells];
-    const brushPolygons = entry.brushPolygons;
+    const brushGrid = normalizeGridConfig({
+      cellSizePx: entry.cellSizePx,
+      offsetXPx: entry.offsetXPx,
+      offsetYPx: entry.offsetYPx,
+    });
     const updatedAt = serverTimestamp();
     const writeResults = await Promise.all(entry.ownerUids.map(async (ownerUid) => {
-      const fogDocId = buildGrigliataFogOfWarDocId(entry.backgroundId, ownerUid);
-      if (!fogDocId) {
-        return false;
-      }
+      const brushTiles = rasterizeFogPolygonsToTiles({
+        backgroundId: entry.backgroundId,
+        ownerUid,
+        grid: brushGrid,
+        polygons: entry.brushPolygons,
+      });
+      if (brushTiles.length < 1) return false;
 
-      const fogDocRef = doc(db, GRIGLIATA_FOG_OF_WAR_COLLECTION, fogDocId);
       return runTransaction(db, async (transaction) => {
-        const fogDocSnapshot = await transaction.get(fogDocRef);
-        const existingFogDoc = fogDocSnapshot.exists()
-          ? normalizeGrigliataFogOfWarDoc({
-              id: fogDocSnapshot.id,
-              ...fogDocSnapshot.data(),
+        const reads = await Promise.all(brushTiles.map(async (brushTile) => {
+          const tileRef = doc(db, GRIGLIATA_FOG_MEMORY_TILES_COLLECTION, brushTile.id);
+          const tileSnapshot = await transaction.get(tileRef);
+          const existingTile = tileSnapshot.exists()
+            ? normalizeFogRasterMemoryTileDoc({
+              id: tileSnapshot.id,
+              ...tileSnapshot.data(),
             })
-          : null;
-        const hasMatchingCellSize = existingFogDoc?.cellSizePx === entry.cellSizePx;
+            : null;
+          return { brushTile, tileRef, existingTile };
+        }));
 
-        if (entry.mode === 'hide' && !hasMatchingCellSize) {
-          return false;
-        }
+        let didWriteTile = false;
+        reads.forEach(({ brushTile, tileRef, existingTile }) => {
+          if (entry.mode === 'hide' && !existingTile) {
+            return;
+          }
 
-        const nextExploredCells = applyFogBrushEdit({
-          existingCells: hasMatchingCellSize ? existingFogDoc.exploredCells : [],
-          brushCells,
-          mode: entry.mode,
-          cellLimit: GRIGLIATA_FOG_BRUSH_CELL_LIMIT,
+          const nextMaskBytes = entry.mode === 'hide'
+            ? subtractFogRasterTileMasks(existingTile.maskBytes, brushTile.maskBytes)
+            : mergeFogRasterTileMasks(existingTile?.maskBytes, brushTile.maskBytes);
+          const nextBitCount = countFogRasterMaskBits(nextMaskBytes);
+
+          if (entry.mode === 'hide' && nextBitCount < 1) {
+            transaction.delete(tileRef);
+            didWriteTile = true;
+            return;
+          }
+
+          if (nextBitCount < 1) {
+            return;
+          }
+
+          transaction.set(tileRef, buildFogRasterTilePayload({
+            ...brushTile,
+            grid: brushGrid,
+            maskBytes: nextMaskBytes,
+            updatedAt,
+            updatedBy: entry.updatedBy,
+          }), { merge: true });
+          didWriteTile = true;
         });
-        const nextExploredPolygons = applyFogBrushPolygonEdit({
-          existingPolygons: hasMatchingCellSize ? existingFogDoc.exploredPolygons || [] : [],
-          brushPolygons,
-          mode: entry.mode,
-        });
 
-        transaction.set(fogDocRef, {
-          schemaVersion: GRIGLIATA_FOG_OF_WAR_SCHEMA_VERSION,
+        logGrigliataFogDebug('raster-brush-write', {
           backgroundId: entry.backgroundId,
           ownerUid,
-          cellSizePx: entry.cellSizePx,
-          exploredCells: nextExploredCells,
-          exploredPolygons: encodeFogMemoryPolygonsForFirestore(nextExploredPolygons),
-          updatedAt,
-          updatedBy: entry.updatedBy,
-        }, { merge: true });
-        return true;
+          mode: entry.mode,
+          inputTileCount: brushTiles.length,
+          didWriteTile,
+        });
+        return didWriteTile;
       });
     }));
 
@@ -4026,17 +4062,12 @@ export default function GrigliataPage() {
     }
 
     const brushSettings = normalizeFogBrushSettings({ mode, radiusSquares });
-    const brushCells = buildFogBrushCellKeys({
-      point,
-      radiusSquares: brushSettings.radiusSquares,
-      grid: normalizedFogGrid,
-    });
     const brushPolygons = buildFogBrushPolygon({
       point,
       radiusSquares: brushSettings.radiusSquares,
       grid: normalizedFogGrid,
     });
-    if (brushCells.length < 1) {
+    if (brushPolygons.length < 1) {
       return false;
     }
 
@@ -4049,15 +4080,15 @@ export default function GrigliataPage() {
       ownerUids,
       mode: brushSettings.mode,
       cellSizePx: normalizedFogGrid.cellSizePx,
+      offsetXPx: normalizedFogGrid.offsetXPx,
+      offsetYPx: normalizedFogGrid.offsetYPx,
       updatedBy: user.uid,
-      brushCells: new Set(brushCells),
       brushPolygons,
     };
     queueEntry.key = buildFogBrushQueueKey(queueEntry);
 
     const lastQueuedEntry = fogBrushQueueRef.current[fogBrushQueueRef.current.length - 1];
     if (lastQueuedEntry?.key === queueEntry.key) {
-      brushCells.forEach((cellKey) => lastQueuedEntry.brushCells.add(cellKey));
       lastQueuedEntry.brushPolygons.push(...brushPolygons);
     } else {
       fogBrushQueueRef.current.push(queueEntry);
@@ -4628,6 +4659,14 @@ export default function GrigliataPage() {
           return 1;
         },
       });
+      await runPaginatedWriteBatch({
+        collectionName: GRIGLIATA_FOG_MEMORY_TILES_COLLECTION,
+        baseConstraints: [where('backgroundId', '==', selectedBackground.id)],
+        applyDocument: ({ batch, docSnap }) => {
+          batch.delete(docSnap.ref);
+          return 1;
+        },
+      });
     } catch (error) {
       console.error('Failed to reset Grigliata fog of war:', error);
       setLightingImportError('Unable to reset fog of war right now.');
@@ -4802,9 +4841,36 @@ export default function GrigliataPage() {
     if (!user?.uid || !moves?.length) return;
 
     setBoardError('');
+    logGrigliataFogDebug('token-move:start', {
+      currentUserId: user.uid,
+      activeBackgroundId,
+      moveCount: moves.length,
+      moves: moves.map((move) => ({
+        tokenId: move?.tokenId || move?.ownerUid || '',
+        ownerUid: move?.ownerUid || '',
+        backgroundId: move?.backgroundId || '',
+        col: move?.col,
+        row: move?.row,
+        x: move?.x,
+        y: move?.y,
+        isVisibleToPlayers: move?.isVisibleToPlayers,
+      })),
+    });
     try {
       await commitPlacementMoves(moves);
+      logGrigliataFogDebug('token-move:commit-ok', {
+        currentUserId: user.uid,
+        activeBackgroundId,
+        moveCount: moves.length,
+      });
     } catch (error) {
+      logGrigliataFogDebug('token-move:commit-error', {
+        currentUserId: user.uid,
+        activeBackgroundId,
+        moveCount: moves.length,
+        code: error?.code || '',
+        message: error?.message || String(error),
+      });
       console.error('Failed to move selected token placements:', error);
       setBoardError(
         isPermissionDeniedError(error)

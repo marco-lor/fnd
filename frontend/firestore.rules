@@ -744,6 +744,12 @@ service cloud.firestore {
         && fogId.matches('^.+__' + request.auth.uid + '$');
     }
 
+    function isOwnGrigliataFogMemoryTileProbeId(tileId) {
+      return isSignedIn()
+        && tileId is string
+        && tileId.matches('^.+__' + request.auth.uid + '__fog-raster-c8-s16-v1__-?[0-9]+:-?[0-9]+$');
+    }
+
     function isValidGrigliataFogCellKey(cellKey) {
       return cellKey is string
         && cellKey.matches('^-?[0-9]+:-?[0-9]+$');
@@ -791,6 +797,21 @@ service cloud.firestore {
         && polygons.size() <= 8;
     }
 
+    function isValidGrigliataFogRasterTileKey(tileKey) {
+      return tileKey is string
+        && tileKey.matches('^-?[0-9]+:-?[0-9]+$');
+    }
+
+    function isGrigliataFogMemoryTileId(backgroundId, ownerUid, rasterProfileId, tileKey, tileId) {
+      return backgroundId is string
+        && backgroundId.size() > 0
+        && ownerUid is string
+        && ownerUid.size() > 0
+        && rasterProfileId == "fog-raster-c8-s16-v1"
+        && isValidGrigliataFogRasterTileKey(tileKey)
+        && tileId == backgroundId + "__" + ownerUid + "__" + rasterProfileId + "__" + tileKey;
+    }
+
     function isValidGrigliataFogOfWar(data, fogId) {
       return data.keys().hasAll([
           "backgroundId",
@@ -817,6 +838,60 @@ service cloud.firestore {
         && data.cellSizePx <= 500
         && hasValidGrigliataFogCellKeys(data.exploredCells)
         && (!data.keys().hasAny(["exploredPolygons"]) || hasValidGrigliataFogPolygons(data.exploredPolygons))
+        && data.updatedAt is timestamp
+        && (data.updatedBy == null || data.updatedBy is string);
+    }
+
+    function isValidGrigliataFogMemoryTile(data, tileId) {
+      return data.keys().hasAll([
+          "backgroundId",
+          "ownerUid",
+          "tileKey",
+          "tileCol",
+          "tileRow",
+          "rasterProfileId",
+          "tileSizeCells",
+          "samplesPerCell",
+          "cellSizePx",
+          "offsetXPx",
+          "offsetYPx",
+          "maskEncoding",
+          "maskBase64",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.keys().hasOnly([
+          "schemaVersion",
+          "backgroundId",
+          "ownerUid",
+          "tileKey",
+          "tileCol",
+          "tileRow",
+          "rasterProfileId",
+          "tileSizeCells",
+          "samplesPerCell",
+          "cellSizePx",
+          "offsetXPx",
+          "offsetYPx",
+          "maskEncoding",
+          "maskBase64",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && (!data.keys().hasAny(["schemaVersion"]) || data.schemaVersion is int)
+        && isGrigliataFogMemoryTileId(data.backgroundId, data.ownerUid, data.rasterProfileId, data.tileKey, tileId)
+        && data.tileCol is int
+        && data.tileRow is int
+        && data.tileSizeCells == 8
+        && data.samplesPerCell == 16
+        && data.cellSizePx is int
+        && data.cellSizePx > 0
+        && data.cellSizePx <= 500
+        && data.offsetXPx is int
+        && data.offsetYPx is int
+        && data.maskEncoding == "base64-bitset-v1"
+        && data.maskBase64 is string
+        && data.maskBase64.size() <= 4096
         && data.updatedAt is timestamp
         && (data.updatedBy == null || data.updatedBy is string);
     }
@@ -1219,6 +1294,58 @@ service cloud.firestore {
         && isValidGrigliataFogOfWar(request.resource.data, fogId)
         && request.resource.data.backgroundId == resource.data.backgroundId
         && request.resource.data.ownerUid == resource.data.ownerUid
+        && (
+          isGrigliataManager()
+          || (
+            request.auth.uid == resource.data.ownerUid
+            && (
+              request.resource.data.updatedBy == null
+              || request.resource.data.updatedBy == request.auth.uid
+            )
+          )
+        );
+
+      allow delete: if isGrigliataManager();
+    }
+
+    match /grigliata_fog_memory_tiles/{tileId} {
+      allow get: if isSignedIn()
+        && (
+          isGrigliataManager()
+          || (
+            resource == null
+            && isOwnGrigliataFogMemoryTileProbeId(tileId)
+          )
+          || (
+            resource != null
+            && request.auth.uid == resource.data.ownerUid
+          )
+        );
+
+      allow list: if isSignedIn()
+        && (
+          isGrigliataManager()
+          || request.auth.uid == resource.data.ownerUid
+        );
+
+      allow create: if isSignedIn()
+        && isValidGrigliataFogMemoryTile(request.resource.data, tileId)
+        && (
+          isGrigliataManager()
+          || (
+            request.auth.uid == request.resource.data.ownerUid
+            && (
+              request.resource.data.updatedBy == null
+              || request.resource.data.updatedBy == request.auth.uid
+            )
+          )
+        );
+
+      allow update: if isSignedIn()
+        && isValidGrigliataFogMemoryTile(request.resource.data, tileId)
+        && request.resource.data.backgroundId == resource.data.backgroundId
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.tileKey == resource.data.tileKey
         && (
           isGrigliataManager()
           || (

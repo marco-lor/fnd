@@ -217,4 +217,18 @@ describe('fogPolygonGeometry', () => {
     expect(result[0][0].length).toBeGreaterThan(FOG_POLYGON_MAX_RING_POINTS);
     expect(result[0][0].length).toBeLessThanOrEqual(FOG_POLYGON_MEMORY_MAX_RING_POINTS);
   });
+
+  test('does not erase existing memory when reveal union exceeds polygon limits', () => {
+    const existingPolygons = Array.from({ length: 8 }, (_, index) => (
+      square(index * 20, 0, (index * 20) + 10, 10)[0]
+    ));
+    const revealPolygons = square(200, 0, 210, 10);
+
+    const result = applyFogMemoryPolygonReveal({
+      existingPolygons,
+      revealPolygons,
+    });
+
+    expect(result).toEqual(normalizeFogMemoryPolygons(existingPolygons));
+  });
 });

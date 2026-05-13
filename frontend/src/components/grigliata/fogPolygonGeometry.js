@@ -424,11 +424,15 @@ export const applyFogPolygonReveal = ({
   }
 
   const polygonClipping = require('polygon-clipping');
-  return runBooleanOperation(
+  const booleanResult = runBooleanOperation(
     polygonClipping.union,
     [normalizedExisting, normalizedReveal],
     normalizePolygons
   );
+
+  return booleanResult
+    || normalizePolygons([...normalizedExisting, ...normalizedReveal])
+    || normalizedExisting;
 };
 
 export const applyFogMemoryPolygonReveal = (args = {}) => applyFogPolygonReveal({

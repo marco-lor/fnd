@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  arrayUnion,
   doc,
+  runTransaction,
   serverTimestamp,
-  setDoc,
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import {
@@ -23,17 +22,34 @@ import {
   buildCurrentFogMemoryPolygons,
   buildCurrentFogRenderPolygons,
   buildGrigliataFogOfWarDocId,
-  GRIGLIATA_FOG_OF_WAR_COLLECTION,
-  GRIGLIATA_FOG_OF_WAR_SCHEMA_VERSION,
-  mergeFogCellKeys,
 } from './fogOfWar';
 import {
-  applyFogMemoryPolygonReveal,
-  encodeFogMemoryPolygonsForFirestore,
-} from './fogPolygonGeometry';
+  buildFogRasterTilePayload,
+  countFogRasterMaskBits,
+  GRIGLIATA_FOG_MEMORY_TILES_COLLECTION,
+  maskContainsFogRasterBits,
+  mergeFogRasterMemoryTiles,
+  mergeFogRasterTileMasks,
+  normalizeFogRasterMemoryTileDoc,
+  rasterizeFogPolygonsToTiles,
+} from './fogRasterMemory';
+import { logGrigliataFogDebug } from './fogDebug';
 
 export const GRIGLIATA_FOG_OF_WAR_WRITE_DEBOUNCE_MS = 350;
 export const DEFAULT_FOG_VISION_RAY_COUNT = 256;
+
+const tileMatchesGrid = (tile, grid) => (
+  tile?.cellSizePx === grid.cellSizePx
+  && tile?.offsetXPx === grid.offsetXPx
+  && tile?.offsetYPx === grid.offsetYPx
+);
+
+const buildTileMap = (tiles = []) => (
+  mergeFogRasterMemoryTiles(tiles).reduce((tileMap, tile) => {
+    tileMap.set(tile.id, tile);
+    return tileMap;
+  }, new Map())
+);
 
 const buildRenderableTokensForFog = ({ tokens = [], grid }) => (
   (Array.isArray(tokens) ? tokens : []).map((token) => ({
@@ -119,13 +135,16 @@ export default function useGrigliataFogOfWarPersistence({
   rayCount,
 }) {
   const normalizedGrid = useMemo(() => normalizeGridConfig(grid), [grid]);
-  const disabledPrecisionFogDocIdsRef = useRef(new Set());
-  const [disabledPrecisionFogDocIds, setDisabledPrecisionFogDocIds] = useState(() => new Set());
+  const pendingTileMapRef = useRef(new Map());
+  const inFlightTileMapRef = useRef(new Map());
+  const flushTimeoutRef = useRef(null);
+  const movementSequenceRef = useRef(0);
+  const importedLegacyFogDocIdsRef = useRef(new Set());
+  const [pendingMemoryTiles, setPendingMemoryTiles] = useState([]);
   const fogDocId = useMemo(
     () => buildGrigliataFogOfWarDocId(backgroundId, currentUserId),
     [backgroundId, currentUserId]
   );
-  const isPrecisionFogFallbackActive = !!fogDocId && disabledPrecisionFogDocIds.has(fogDocId);
   const currentVisibility = useMemo(
     () => (isEnabled
       ? buildViewerFogCurrentVisibility({
@@ -150,6 +169,257 @@ export default function useGrigliataFogOfWarPersistence({
   const currentVisibleCells = currentVisibility.currentVisibleCells;
   const currentVisiblePolygons = currentVisibility.currentVisiblePolygons;
   const currentPersistencePolygons = currentVisibility.currentPersistencePolygons;
+  const storedMemoryTiles = useMemo(
+    () => (Array.isArray(fogOfWar?.memoryTiles) ? fogOfWar.memoryTiles : [])
+      .filter((tile) => tileMatchesGrid(tile, normalizedGrid)),
+    [fogOfWar?.memoryTiles, normalizedGrid]
+  );
+
+  const refreshPendingMemoryTiles = useCallback(() => {
+    setPendingMemoryTiles(mergeFogRasterMemoryTiles([
+      ...inFlightTileMapRef.current.values(),
+      ...pendingTileMapRef.current.values(),
+    ]));
+  }, []);
+
+  const getKnownTileMap = useCallback(() => buildTileMap([
+    ...storedMemoryTiles,
+    ...inFlightTileMapRef.current.values(),
+    ...pendingTileMapRef.current.values(),
+  ]), [storedMemoryTiles]);
+
+  const pruneSettledPendingTiles = useCallback(() => {
+    const storedTileMap = buildTileMap(storedMemoryTiles);
+    let didChange = false;
+
+    [inFlightTileMapRef.current, pendingTileMapRef.current].forEach((tileMap) => {
+      [...tileMap.entries()].forEach(([tileId, tile]) => {
+        const storedTile = storedTileMap.get(tileId);
+        if (storedTile && maskContainsFogRasterBits(storedTile.maskBytes, tile.maskBytes)) {
+          tileMap.delete(tileId);
+          didChange = true;
+        }
+      });
+    });
+
+    if (didChange) {
+      refreshPendingMemoryTiles();
+    }
+  }, [refreshPendingMemoryTiles, storedMemoryTiles]);
+
+  const flushPendingTiles = useCallback(() => {
+    const tilesToFlush = [...pendingTileMapRef.current.values()];
+    pendingTileMapRef.current.clear();
+
+    tilesToFlush.forEach((tile) => {
+      const existingInFlightTile = inFlightTileMapRef.current.get(tile.id);
+      inFlightTileMapRef.current.set(tile.id, existingInFlightTile
+        ? {
+          ...tile,
+          maskBytes: mergeFogRasterTileMasks(existingInFlightTile.maskBytes, tile.maskBytes),
+        }
+        : tile);
+    });
+    refreshPendingMemoryTiles();
+
+    if (!tilesToFlush.length) {
+      return;
+    }
+
+    const totalBitCount = tilesToFlush.reduce(
+      (total, tile) => total + countFogRasterMaskBits(tile.maskBytes),
+      0
+    );
+    logGrigliataFogDebug('raster-flush-start', {
+      backgroundId,
+      currentUserId,
+      tileCount: tilesToFlush.length,
+      totalBitCount,
+    });
+
+    void runTransaction(db, async (transaction) => {
+      const reads = await Promise.all(tilesToFlush.map(async (tile) => {
+        const tileRef = doc(db, GRIGLIATA_FOG_MEMORY_TILES_COLLECTION, tile.id);
+        const snapshot = await transaction.get(tileRef);
+        const existingTile = snapshot.exists()
+          ? normalizeFogRasterMemoryTileDoc({
+            id: snapshot.id,
+            ...snapshot.data(),
+          })
+          : null;
+        return { tile, tileRef, existingTile };
+      }));
+
+      const updatedAt = serverTimestamp();
+      reads.forEach(({ tile, tileRef, existingTile }) => {
+        const mergedMaskBytes = existingTile
+          ? mergeFogRasterTileMasks(existingTile.maskBytes, tile.maskBytes)
+          : tile.maskBytes;
+
+        if (existingTile && maskContainsFogRasterBits(existingTile.maskBytes, tile.maskBytes)) {
+          return;
+        }
+
+        transaction.set(
+          tileRef,
+          buildFogRasterTilePayload({
+            ...tile,
+            grid: {
+              cellSizePx: tile.cellSizePx,
+              offsetXPx: tile.offsetXPx,
+              offsetYPx: tile.offsetYPx,
+            },
+            maskBytes: mergedMaskBytes,
+            updatedAt,
+            updatedBy: currentUserId,
+          }),
+          { merge: true }
+        );
+      });
+    }).then(() => {
+      tilesToFlush.forEach((tile) => {
+        inFlightTileMapRef.current.delete(tile.id);
+      });
+      refreshPendingMemoryTiles();
+      logGrigliataFogDebug('raster-flush-ok', {
+        backgroundId,
+        currentUserId,
+        tileCount: tilesToFlush.length,
+        totalBitCount,
+      });
+    }).catch((error) => {
+      tilesToFlush.forEach((tile) => {
+        const pendingTile = pendingTileMapRef.current.get(tile.id);
+        pendingTileMapRef.current.set(tile.id, pendingTile
+          ? {
+            ...tile,
+            maskBytes: mergeFogRasterTileMasks(pendingTile.maskBytes, tile.maskBytes),
+          }
+          : tile);
+        inFlightTileMapRef.current.delete(tile.id);
+      });
+      refreshPendingMemoryTiles();
+      console.error('Failed to persist Grigliata raster fog memory:', error);
+      logGrigliataFogDebug('raster-flush-error', {
+        backgroundId,
+        currentUserId,
+        tileCount: tilesToFlush.length,
+        code: error?.code || '',
+        message: error?.message || String(error),
+      });
+    });
+  }, [backgroundId, currentUserId, refreshPendingMemoryTiles]);
+
+  const scheduleRasterFlush = useCallback(() => {
+    if (flushTimeoutRef.current) {
+      window.clearTimeout(flushTimeoutRef.current);
+    }
+    flushTimeoutRef.current = window.setTimeout(() => {
+      flushTimeoutRef.current = null;
+      flushPendingTiles();
+    }, GRIGLIATA_FOG_OF_WAR_WRITE_DEBOUNCE_MS);
+  }, [flushPendingTiles]);
+
+  const queueRasterTiles = useCallback(({ tiles = [], source = 'movement', movementId = 0 } = {}) => {
+    if (!tiles.length) {
+      logGrigliataFogDebug('raster-queue-skip', {
+        backgroundId,
+        currentUserId,
+        source,
+        movementId,
+        reason: 'no-raster-tiles',
+      });
+      return;
+    }
+
+    const knownTileMap = getKnownTileMap();
+    let queuedTileCount = 0;
+    let queuedBitCount = 0;
+
+    tiles.forEach((tile) => {
+      const knownTile = knownTileMap.get(tile.id);
+      if (knownTile && maskContainsFogRasterBits(knownTile.maskBytes, tile.maskBytes)) {
+        return;
+      }
+
+      const pendingTile = pendingTileMapRef.current.get(tile.id);
+      const nextTile = pendingTile
+        ? {
+          ...tile,
+          maskBytes: mergeFogRasterTileMasks(pendingTile.maskBytes, tile.maskBytes),
+        }
+        : tile;
+
+      pendingTileMapRef.current.set(tile.id, nextTile);
+      knownTileMap.set(tile.id, nextTile);
+      queuedTileCount += 1;
+      queuedBitCount += countFogRasterMaskBits(tile.maskBytes);
+    });
+
+    logGrigliataFogDebug('raster-queue-add', {
+      backgroundId,
+      currentUserId,
+      source,
+      movementId,
+      inputTileCount: tiles.length,
+      queuedTileCount,
+      queuedBitCount,
+      pendingTileCount: pendingTileMapRef.current.size,
+    });
+
+    if (queuedTileCount > 0) {
+      refreshPendingMemoryTiles();
+      scheduleRasterFlush();
+    }
+  }, [
+    backgroundId,
+    currentUserId,
+    getKnownTileMap,
+    refreshPendingMemoryTiles,
+    scheduleRasterFlush,
+  ]);
+
+  useEffect(() => {
+    logGrigliataFogDebug('visibility', {
+      backgroundId,
+      currentUserId,
+      fogDocId,
+      isManager,
+      isEnabled,
+      hasLightingRenderInput: !!lightingRenderInput,
+      tokenCount: Array.isArray(tokens) ? tokens.length : 0,
+      placedTokenIds: (Array.isArray(tokens) ? tokens : [])
+        .filter((token) => token?.placed)
+        .map((token) => token.tokenId || token.ownerUid || ''),
+      currentVisibleCellCount: currentVisibleCells.length,
+      currentVisiblePolygonCount: currentVisiblePolygons.length,
+      currentPersistencePolygonCount: currentPersistencePolygons.length,
+      storedCellCount: fogOfWar?.cellSizePx === normalizedGrid.cellSizePx
+        ? fogOfWar?.exploredCells?.length || 0
+        : 0,
+      storedPolygonCount: fogOfWar?.cellSizePx === normalizedGrid.cellSizePx
+        ? fogOfWar?.exploredPolygons?.length || 0
+        : 0,
+      storedRasterTileCount: storedMemoryTiles.length,
+      pendingRasterTileCount: pendingMemoryTiles.length,
+      visualCellFallbackEnabled: false,
+    });
+  }, [
+    backgroundId,
+    currentPersistencePolygons.length,
+    currentUserId,
+    currentVisibleCells.length,
+    currentVisiblePolygons.length,
+    fogDocId,
+    fogOfWar,
+    isEnabled,
+    isManager,
+    lightingRenderInput,
+    normalizedGrid.cellSizePx,
+    pendingMemoryTiles.length,
+    storedMemoryTiles.length,
+    tokens,
+  ]);
 
   useEffect(() => {
     if (
@@ -157,140 +427,135 @@ export default function useGrigliataFogOfWarPersistence({
       || isManager
       || !fogDocId
       || !lightingRenderInput
-      || currentVisibleCells.length < 1
+      || currentPersistencePolygons.length < 1
     ) {
-      return undefined;
-    }
-
-    const hasMatchingCellSize = fogOfWar?.cellSizePx === normalizedGrid.cellSizePx;
-    const isPrecisionPersistenceDisabled = disabledPrecisionFogDocIdsRef.current.has(fogDocId);
-    const existingCellSet = new Set(hasMatchingCellSize ? fogOfWar.exploredCells || [] : []);
-    const newVisibleCells = currentVisibleCells.filter((cellKey) => !existingCellSet.has(cellKey));
-    const precisionFallbackCells = mergeFogCellKeys(
-      hasMatchingCellSize ? fogOfWar.exploredCells || [] : [],
-      currentVisibleCells
-    );
-    const existingPolygons = hasMatchingCellSize ? fogOfWar?.exploredPolygons || [] : [];
-    const nextExploredPolygons = currentPersistencePolygons.length > 0
-      ? applyFogMemoryPolygonReveal({
-        existingPolygons,
-        revealPolygons: currentPersistencePolygons,
-      })
-      : existingPolygons;
-    const normalizedNextExploredPolygons = Array.isArray(nextExploredPolygons)
-      ? nextExploredPolygons
-      : [];
-    const firestoreExploredPolygons = encodeFogMemoryPolygonsForFirestore(
-      normalizedNextExploredPolygons
-    );
-    const hasPolygonChange = (
-      JSON.stringify(existingPolygons) !== JSON.stringify(normalizedNextExploredPolygons)
-    );
-
-    const shouldPersistPolygons = !isPrecisionPersistenceDisabled
-      && firestoreExploredPolygons.length > 0
-      && hasPolygonChange;
-
-    if (newVisibleCells.length < 1 && !shouldPersistPolygons) {
-      return undefined;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      const basePayload = {
-        schemaVersion: GRIGLIATA_FOG_OF_WAR_SCHEMA_VERSION,
+      logGrigliataFogDebug('persistence:skip', {
         backgroundId,
-        ownerUid: currentUserId,
-        cellSizePx: normalizedGrid.cellSizePx,
-        updatedAt: serverTimestamp(),
-        updatedBy: currentUserId,
-      };
-      const fogDocRef = doc(db, GRIGLIATA_FOG_OF_WAR_COLLECTION, fogDocId);
-      const writePrecisionPolygons = (afterWritePromise = Promise.resolve()) => {
-        if (!shouldPersistPolygons) {
-          return;
-        }
-
-        const precisionPayload = {
-          ...basePayload,
-          exploredCells: precisionFallbackCells,
-          exploredPolygons: firestoreExploredPolygons,
-        };
-
-        void afterWritePromise
-          .then(() => setDoc(fogDocRef, precisionPayload, { merge: true }).catch((error) => {
-            if (error?.code === 'permission-denied') {
-              disabledPrecisionFogDocIdsRef.current.add(fogDocId);
-              setDisabledPrecisionFogDocIds((currentDocIds) => {
-                if (currentDocIds.has(fogDocId)) {
-                  return currentDocIds;
-                }
-                const nextDocIds = new Set(currentDocIds);
-                nextDocIds.add(fogDocId);
-                return nextDocIds;
-              });
-              console.warn(
-                'Precision Grigliata fog persistence was denied; continuing with cell fog fallback.',
-                error
-              );
-              return;
-            }
-            console.error('Failed to persist Grigliata precision fog of war:', error);
-          }))
-          .catch(() => {});
-      };
-
-      if (hasMatchingCellSize) {
-        if (newVisibleCells.length < 1) {
-          writePrecisionPolygons();
-          return;
-        }
-
-        const cellMergePayload = {
-          ...basePayload,
-          exploredCells: arrayUnion(...newVisibleCells),
-        };
-
-        const cellWritePromise = setDoc(fogDocRef, {
-          ...cellMergePayload,
-        }, { merge: true }).catch((error) => {
-          console.error('Failed to persist Grigliata fog of war:', error);
-          throw error;
-        });
-        writePrecisionPolygons(cellWritePromise);
-        return;
-      }
-
-      const replacementPayload = {
-        ...basePayload,
-        exploredCells: mergeFogCellKeys(currentVisibleCells),
-      };
-      const writePromise = fogOfWar
-        ? setDoc(fogDocRef, replacementPayload)
-        : setDoc(fogDocRef, replacementPayload, { merge: true });
-
-      void writePromise.catch((error) => {
-        console.error('Failed to persist Grigliata fog of war:', error);
+        currentUserId,
+        fogDocId,
+        isEnabled,
+        isManager,
+        hasLightingRenderInput: !!lightingRenderInput,
+        currentVisibleCellCount: currentVisibleCells.length,
+        currentPersistencePolygonCount: currentPersistencePolygons.length,
+        reason: !isEnabled
+          ? 'disabled'
+          : (
+            isManager
+              ? 'manager'
+              : (
+                !fogDocId
+                  ? 'missing-doc-id'
+                  : (
+                    !lightingRenderInput
+                      ? 'missing-lighting-render-input'
+                      : 'no-current-persistence-polygons'
+                  )
+              )
+          ),
       });
-      writePrecisionPolygons(writePromise);
-    }, GRIGLIATA_FOG_OF_WAR_WRITE_DEBOUNCE_MS);
+      return undefined;
+    }
 
-    return () => window.clearTimeout(timeoutId);
+    const movementId = movementSequenceRef.current + 1;
+    movementSequenceRef.current = movementId;
+    const rasterTiles = rasterizeFogPolygonsToTiles({
+      backgroundId,
+      ownerUid: currentUserId,
+      grid: normalizedGrid,
+      polygons: currentPersistencePolygons,
+    });
+
+    logGrigliataFogDebug('raster-visibility', {
+      backgroundId,
+      currentUserId,
+      fogDocId,
+      movementId,
+      currentVisibleCellCount: currentVisibleCells.length,
+      currentPersistencePolygonCount: currentPersistencePolygons.length,
+      rasterTileCount: rasterTiles.length,
+      rasterBitCount: rasterTiles.reduce(
+        (total, tile) => total + countFogRasterMaskBits(tile.maskBytes),
+        0
+      ),
+    });
+
+    queueRasterTiles({
+      tiles: rasterTiles,
+      source: 'movement',
+      movementId,
+    });
+
+    return undefined;
   }, [
     backgroundId,
     currentUserId,
-    currentVisibleCells,
+    currentVisibleCells.length,
     currentPersistencePolygons,
+    fogDocId,
+    isEnabled,
+    isManager,
+    lightingRenderInput,
+    normalizedGrid,
+    queueRasterTiles,
+  ]);
+
+  useEffect(() => {
+    const hasMatchingLegacyGrid = fogOfWar?.cellSizePx === normalizedGrid.cellSizePx;
+    const legacyPolygons = hasMatchingLegacyGrid && Array.isArray(fogOfWar?.exploredPolygons)
+      ? fogOfWar.exploredPolygons
+      : [];
+
+    if (
+      !isEnabled
+      || isManager
+      || !fogDocId
+      || legacyPolygons.length < 1
+      || storedMemoryTiles.length > 0
+      || importedLegacyFogDocIdsRef.current.has(fogDocId)
+    ) {
+      return;
+    }
+
+    importedLegacyFogDocIdsRef.current.add(fogDocId);
+    const rasterTiles = rasterizeFogPolygonsToTiles({
+      backgroundId,
+      ownerUid: currentUserId,
+      grid: normalizedGrid,
+      polygons: legacyPolygons,
+    });
+
+    queueRasterTiles({
+      tiles: rasterTiles,
+      source: 'legacy-polygon-import',
+      movementId: 0,
+    });
+  }, [
+    backgroundId,
+    currentUserId,
     fogDocId,
     fogOfWar,
     isEnabled,
     isManager,
-    lightingRenderInput,
-    normalizedGrid.cellSizePx,
+    normalizedGrid,
+    queueRasterTiles,
+    storedMemoryTiles.length,
   ]);
+
+  useEffect(() => {
+    pruneSettledPendingTiles();
+  }, [pruneSettledPendingTiles]);
+
+  useEffect(() => () => {
+    if (flushTimeoutRef.current) {
+      window.clearTimeout(flushTimeoutRef.current);
+      flushTimeoutRef.current = null;
+    }
+  }, []);
 
   return {
     currentVisibleCells,
     currentVisiblePolygons,
-    isPrecisionFogFallbackActive,
+    pendingMemoryTiles,
   };
 }
