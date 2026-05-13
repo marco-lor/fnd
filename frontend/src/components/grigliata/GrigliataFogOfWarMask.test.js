@@ -132,6 +132,39 @@ describe('GrigliataFogOfWarMask', () => {
     expect(screen.queryByTestId('fog-current-cell-cutout')).not.toBeInTheDocument();
   });
 
+  test('renders overlapping current vision polygons as merged live vision', () => {
+    render(
+      <GrigliataFogOfWarMask
+        bounds={bounds}
+        grid={grid}
+        memoryTiles={[buildMemoryTile()]}
+        currentVisiblePolygons={[
+          [[
+            { x: 0, y: 0 },
+            { x: 140, y: 0 },
+            { x: 140, y: 140 },
+            { x: 0, y: 140 },
+          ]],
+          [[
+            { x: 70, y: 0 },
+            { x: 210, y: 0 },
+            { x: 210, y: 140 },
+            { x: 70, y: 140 },
+          ]],
+        ]}
+      />
+    );
+
+    const currentCutout = screen.getByTestId('fog-current-polygon-cutout');
+    const finalCurrentCutout = screen.getByTestId('fog-current-polygon-cutout-final');
+
+    expect(screen.getByTestId('fog-remembered-raster-overlay')).toBeInTheDocument();
+    expect(currentCutout).toHaveAttribute('data-fillrule', 'nonzero');
+    expect(currentCutout).toHaveAttribute('data-globalcompositeoperation', 'destination-out');
+    expect(finalCurrentCutout).toHaveAttribute('data-fillrule', 'nonzero');
+    expect(finalCurrentCutout).toHaveAttribute('data-globalcompositeoperation', 'destination-out');
+  });
+
   test('does not render cell fallback gaps when precision polygon memory is partial', () => {
     render(
       <GrigliataFogOfWarMask

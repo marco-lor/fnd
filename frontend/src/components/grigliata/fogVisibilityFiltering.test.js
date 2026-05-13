@@ -177,4 +177,44 @@ describe('fogVisibilityFiltering', () => {
     expect(visibleMainLayers.belowFogTokens.map((token) => token.tokenId)).toEqual(['user-1']);
     expect(visibleMainLayers.aboveFogTokens).toEqual([]);
   });
+
+  test('retains owned custom token drag previews above fog', () => {
+    const draggedCustomToken = buildToken({
+      tokenId: 'custom-2',
+      id: 'custom-2',
+      ownerUid: 'user-1',
+      tokenType: 'custom',
+      col: 5,
+      row: 5,
+      isDragPreview: true,
+      renderPosition: { x: 350, y: 350, size: 70 },
+    });
+    const hiddenIdleCustomToken = buildToken({
+      tokenId: 'custom-3',
+      id: 'custom-3',
+      ownerUid: 'user-1',
+      tokenType: 'custom',
+      col: 5,
+      row: 5,
+    });
+
+    const visibleTokens = filterFogVisibleTokens({
+      tokens: [draggedCustomToken, hiddenIdleCustomToken],
+      currentUserId: 'user-1',
+      isManager: false,
+      grid,
+      fogOfWar,
+    });
+    const layers = splitFogVisibleTokenRenderLayers({
+      tokens: visibleTokens,
+      currentUserId: 'user-1',
+      isManager: false,
+      grid,
+      fogOfWar,
+    });
+
+    expect(visibleTokens.map((token) => token.tokenId)).toEqual(['custom-2']);
+    expect(layers.belowFogTokens).toEqual([]);
+    expect(layers.aboveFogTokens.map((token) => token.tokenId)).toEqual(['custom-2']);
+  });
 });

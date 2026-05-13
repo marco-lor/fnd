@@ -2779,12 +2779,17 @@ export default function GrigliataBoard({
   }, [tokenDragState]);
 
   const renderedTokens = useMemo(
-    () => tokenItems.map((token) => ({
-      ...token,
-      renderPosition: dragPositionOverrides.get(token.tokenId) || token.position,
-      isActiveTurn: token.tokenId === activeTurnTokenId,
-      isSelected: selectedTokenIdSet.has(token.tokenId),
-    })),
+    () => tokenItems.map((token) => {
+      const dragPosition = dragPositionOverrides.get(token.tokenId);
+
+      return {
+        ...token,
+        renderPosition: dragPosition || token.position,
+        isDragPreview: !!dragPosition,
+        isActiveTurn: token.tokenId === activeTurnTokenId,
+        isSelected: selectedTokenIdSet.has(token.tokenId),
+      };
+    }),
     [activeTurnTokenId, tokenItems, dragPositionOverrides, selectedTokenIdSet]
   );
   const renderedAoEFigures = useMemo(
@@ -5602,12 +5607,14 @@ export default function GrigliataBoard({
       currentUserId,
       isManager,
       cellSizePx: normalizedGrid.cellSizePx,
+      backgroundId: resolvedBackground?.id || '',
     })),
     [
       currentUserId,
       isManager,
       isNarrationOverlayActive,
       normalizedGrid.cellSizePx,
+      resolvedBackground?.id,
       visibleRenderedTokens,
     ]
   );

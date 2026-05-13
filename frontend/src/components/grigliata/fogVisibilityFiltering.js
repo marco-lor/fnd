@@ -28,6 +28,28 @@ const isPlayerMainToken = ({ token, currentUserId = '' }) => (
   && getTokenId(token) === currentUserId
 );
 
+const isPlayerOwnedToken = ({ token, currentUserId = '' }) => (
+  !!currentUserId
+  && (
+    token?.ownerUid === currentUserId
+    || isPlayerMainToken({ token, currentUserId })
+  )
+);
+
+const isRetainedPlayerDragPreview = ({ token, currentUserId = '' }) => (
+  token?.isDragPreview === true
+  && isPlayerOwnedToken({ token, currentUserId })
+  && token?.tokenType !== 'foe'
+  && token?.isDead !== true
+  && token?.isVisibleToPlayers !== false
+  && token?.visionEnabled !== false
+);
+
+const isRetainedPlayerToken = ({ token, currentUserId = '' }) => (
+  isPlayerMainToken({ token, currentUserId })
+  || isRetainedPlayerDragPreview({ token, currentUserId })
+);
+
 const buildCurrentVisibleCellSet = (fogOfWar) => {
   const normalizedCells = normalizeFogCellKeys(fogOfWar?.currentVisibleCells);
   if (!normalizedCells?.length) {
@@ -124,7 +146,7 @@ export const isFogVisibleToken = ({
   currentCellSet = null,
   grid,
 } = {}) => {
-  if (isPlayerMainToken({ token, currentUserId })) {
+  if (isRetainedPlayerToken({ token, currentUserId })) {
     return true;
   }
 
@@ -178,7 +200,7 @@ export const splitFogVisibleTokenRenderLayers = ({
 
   asArray(tokens).forEach((token) => {
     if (
-      isPlayerMainToken({ token, currentUserId })
+      isRetainedPlayerToken({ token, currentUserId })
       && !boundsIntersectVisibleCells({
         bounds: getTokenBounds({ token, grid: normalizedGrid }),
         grid: normalizedGrid,

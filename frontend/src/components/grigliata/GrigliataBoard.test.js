@@ -794,6 +794,19 @@ describe('GrigliataBoard', () => {
             isDead: false,
             statuses: [],
           }, {
+            tokenId: 'custom-1',
+            id: 'custom-1',
+            ownerUid: 'user-1',
+            tokenType: 'custom',
+            label: 'Lantern Spirit',
+            imageUrl: '',
+            placed: true,
+            col: 3,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }, {
             tokenId: 'user-2',
             id: 'user-2',
             ownerUid: 'user-2',
@@ -814,8 +827,9 @@ describe('GrigliataBoard', () => {
 
     expect(screen.getByTestId('lighting-mask-layer')).toBeInTheDocument();
     expect(screen.getByTestId('lighting-light-bright-polygon')).toBeInTheDocument();
-    expect(screen.getAllByTestId('lighting-token-vision-cutout')).toHaveLength(1);
-    expect(screen.getByTestId('lighting-token-vision-cutout')).toHaveAttribute('data-tokenid', 'user-1');
+    expect(screen.getAllByTestId('lighting-token-vision-cutout').map((node) => (
+      node.getAttribute('data-tokenid')
+    ))).toEqual(['user-1', 'custom-1']);
     expect(screen.queryByTestId('lighting-light-clip-group')).not.toBeInTheDocument();
 
     rerender(
@@ -1193,6 +1207,74 @@ describe('GrigliataBoard', () => {
 
     expect(screen.queryByTestId('token-node-custom-1')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /edit statuses for familiar/i })).not.toBeInTheDocument();
+  });
+
+  test('keeps owned custom tokens visible while dragging outside current fog visibility', async () => {
+    const { container } = render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'custom-1',
+            id: 'custom-1',
+            ownerUid: 'user-1',
+            tokenType: 'custom',
+            label: 'Familiar',
+            imageUrl: '',
+            placed: true,
+            col: 0,
+            row: 0,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          fogOfWar: {
+            exploredCells: ['0:0'],
+            currentVisibleCells: ['0:0'],
+          },
+        })}
+      />
+    );
+
+    const tokenNode = await screen.findByTestId('token-node-custom-1');
+    const stage = container.querySelector('[data-konva-type="Stage"]');
+    const viewportLeft = getNumericKonvaProp(stage, 'data-x');
+    const viewportTop = getNumericKonvaProp(stage, 'data-y');
+    const viewportScale = getNumericKonvaProp(stage, 'data-scalex') || 1;
+    const tokenWorldX = getNumericKonvaProp(tokenNode, 'data-x');
+    const tokenWorldY = getNumericKonvaProp(tokenNode, 'data-y');
+    const toClientPoint = (worldX, worldY) => ({
+      clientX: viewportLeft + (worldX * viewportScale),
+      clientY: viewportTop + (worldY * viewportScale),
+    });
+
+    fireEvent.mouseDown(tokenNode, {
+      button: 0,
+      buttons: 1,
+      ...toClientPoint(tokenWorldX, tokenWorldY),
+    });
+    fireEvent.mouseMove(window, {
+      button: 0,
+      buttons: 1,
+      ...toClientPoint(tokenWorldX + (grid.cellSizePx * 5), tokenWorldY),
+    });
+
+    await waitFor(() => {
+      expect(getNumericKonvaProp(screen.getByTestId('token-node-custom-1'), 'data-x')).toBeGreaterThan(200);
+    });
+
+    const draggedTokenNode = screen.getByTestId('token-node-custom-1');
+    const fog = screen.getByTestId('fog-of-war-mask-layer');
+    expect(fog.compareDocumentPosition(draggedTokenNode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.mouseUp(window, {
+        button: 0,
+        buttons: 0,
+        ...toClientPoint(tokenWorldX + (grid.cellSizePx * 5), tokenWorldY),
+      });
+      await Promise.resolve();
+    });
   });
 
   test('keeps the lighting debug overlay toggle independent from the computed mask', async () => {

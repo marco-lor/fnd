@@ -181,6 +181,54 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
     );
   });
 
+  test('unions current fog from every eligible owned token', () => {
+    const visibility = buildViewerFogCurrentVisibility({
+      tokens: [
+        { ...token, tokenId: 'user-1', ownerUid: 'user-1', col: 0, row: 0 },
+        {
+          ...token,
+          tokenId: 'custom-1',
+          ownerUid: 'user-1',
+          tokenType: 'custom',
+          col: 10,
+          row: 0,
+        },
+        {
+          ...token,
+          tokenId: 'other-1',
+          ownerUid: 'user-2',
+          col: 20,
+          row: 0,
+        },
+        {
+          ...token,
+          tokenId: 'dead-1',
+          ownerUid: 'user-1',
+          col: 30,
+          row: 0,
+          isDead: true,
+        },
+      ],
+      currentUserId: 'user-1',
+      isManager: false,
+      grid,
+      lightingRenderInput: {
+        backgroundId: 'map-1',
+        scene: { darkness: 0.6, globalLight: false },
+        lights: [],
+        walls: [],
+      },
+      rayCount: 32,
+    });
+
+    expect(visibility.currentVisibleCells).toContain('0:0');
+    expect(visibility.currentVisibleCells).toContain('10:0');
+    expect(visibility.currentVisibleCells).not.toContain('20:0');
+    expect(visibility.currentVisibleCells).not.toContain('30:0');
+    expect(visibility.currentVisiblePolygons).toHaveLength(2);
+    expect(visibility.currentPersistencePolygons).toHaveLength(2);
+  });
+
   test('persists raster memory tiles instead of legacy cell or polygon fallback', async () => {
     const HookProbe = () => {
       const { currentVisibleCells, currentVisiblePolygons, pendingMemoryTiles } = useGrigliataFogOfWarPersistence({
@@ -274,6 +322,69 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
     const tileKeys = mockTransactionInstances[0].set.mock.calls
       .map((call) => call[1].tileKey);
     expect(new Set(tileKeys).size).toBeGreaterThan(1);
+    expect(firestore.setDoc).not.toHaveBeenCalled();
+  });
+
+  test('queues rapid movements from different owned tokens into one shared raster flush', async () => {
+    const HookProbe = ({ mainToken, companionToken }) => {
+      const { pendingMemoryTiles } = useGrigliataFogOfWarPersistence({
+        backgroundId: 'map-1',
+        currentUserId: 'user-1',
+        isManager: false,
+        grid,
+        tokens: [mainToken, companionToken],
+        lightingRenderInput: {
+          backgroundId: 'map-1',
+          scene: { darkness: 0.6, globalLight: false },
+          lights: [],
+          walls: [],
+        },
+        fogOfWar: null,
+        isEnabled: true,
+        rayCount: 16,
+      });
+      return <div data-testid="pending-tile-count">{String(pendingMemoryTiles.length)}</div>;
+    };
+
+    const buildMainToken = (col) => ({ ...token, tokenId: 'user-1', ownerUid: 'user-1', col, row: 0, visionRadiusSquares: 1 });
+    const buildCompanionToken = (col) => ({
+      ...token,
+      tokenId: 'custom-1',
+      ownerUid: 'user-1',
+      tokenType: 'custom',
+      col,
+      row: 0,
+      visionRadiusSquares: 1,
+    });
+    const { rerender } = render(
+      <HookProbe mainToken={buildMainToken(0)} companionToken={buildCompanionToken(10)} />
+    );
+
+    await waitFor(() => {
+      expect(Number(screen.getByTestId('pending-tile-count').textContent)).toBeGreaterThan(1);
+    });
+
+    rerender(<HookProbe mainToken={buildMainToken(20)} companionToken={buildCompanionToken(10)} />);
+    rerender(<HookProbe mainToken={buildMainToken(20)} companionToken={buildCompanionToken(30)} />);
+
+    await act(async () => {
+      jest.advanceTimersByTime(GRIGLIATA_FOG_OF_WAR_WRITE_DEBOUNCE_MS);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(firestore.runTransaction).toHaveBeenCalledTimes(1);
+    });
+    const tileWrites = mockTransactionInstances[0].set.mock.calls;
+    const tileKeys = tileWrites.map((call) => call[1].tileKey);
+    expect(new Set(tileKeys).size).toBeGreaterThanOrEqual(4);
+    expect(tileKeys).toEqual(expect.arrayContaining(['0:0', '1:0', '2:0', '3:0']));
+    tileWrites.forEach(([, payload]) => {
+      expect(payload.ownerUid).toBe('user-1');
+      expect(payload).not.toHaveProperty('exploredCells');
+      expect(payload).not.toHaveProperty('exploredPolygons');
+    });
     expect(firestore.setDoc).not.toHaveBeenCalled();
   });
 });

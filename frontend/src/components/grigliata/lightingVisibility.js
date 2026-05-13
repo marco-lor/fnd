@@ -55,61 +55,122 @@ const isPlayerMainToken = ({ tokenId, currentUserId }) => (
   && tokenId === currentUserId
 );
 
-const canTokenProvideVisionForViewer = ({
+const getTokenBackgroundId = (token = {}) => (
+  typeof token?.backgroundId === 'string' && token.backgroundId
+    ? token.backgroundId
+    : ''
+);
+
+const isPlayerOwnedToken = ({ token, tokenId, currentUserId }) => (
+  !!currentUserId
+  && (
+    token?.ownerUid === currentUserId
+    || isPlayerMainToken({ tokenId, currentUserId })
+  )
+);
+
+const buildSkippedTokenDiagnostic = ({ token, tokenId, reason }) => ({
+  tokenId: tokenId || token?.tokenId || token?.id || token?.ownerUid || '',
+  ownerUid: typeof token?.ownerUid === 'string' ? token.ownerUid : '',
+  reason,
+});
+
+const getTokenVisionSkipReason = ({
   token,
   tokenId,
   currentUserId = '',
   isManager = false,
+  backgroundId = '',
 }) => {
-  if (!tokenId || token?.placed === false || token?.isDead === true) {
-    return false;
+  if (!tokenId) {
+    return 'missing-token-id';
+  }
+
+  const tokenBackgroundId = getTokenBackgroundId(token);
+  if (backgroundId && tokenBackgroundId && tokenBackgroundId !== backgroundId) {
+    return 'wrong-background';
+  }
+
+  if (token?.placed === false) {
+    return 'unplaced';
+  }
+
+  if (token?.isDead === true) {
+    return 'dead';
   }
 
   const visionSettings = normalizeTokenVisionSettings(token);
   if (!visionSettings.visionEnabled) {
-    return false;
+    return 'vision-disabled';
   }
 
   if (isManager) {
-    return true;
+    return '';
   }
 
-  // Conservative milestone policy: custom/shared/foe ownership can be ambiguous,
-  // so players only emit vision from their main character token id.
-  return token?.isVisibleToPlayers !== false
-    && isPlayerMainToken({ tokenId, currentUserId });
+  if (!isPlayerOwnedToken({ token, tokenId, currentUserId })) {
+    return 'not-owned';
+  }
+
+  if (token?.tokenType === 'foe') {
+    return 'foe';
+  }
+
+  if (token?.isVisibleToPlayers === false) {
+    return 'hidden';
+  }
+
+  return '';
 };
 
-export const resolveViewerTokenVisionSources = ({
+export const buildViewerTokenVisionEligibilityReport = ({
   tokens = [],
   currentUserId = '',
   isManager = false,
   cellSizePx = 0,
+  backgroundId = '',
 } = {}) => {
   const normalizedCellSizePx = normalizeCellSizePx(cellSizePx);
+  const sources = [];
+  const skippedTokens = [];
 
-  return (Array.isArray(tokens) ? tokens : [])
-    .map((token) => {
-      const tokenId = getTokenId(token);
-      if (!canTokenProvideVisionForViewer({
+  (Array.isArray(tokens) ? tokens : []).forEach((token) => {
+    const tokenId = getTokenId(token);
+    const skipReason = getTokenVisionSkipReason({
+      token,
+      tokenId,
+      currentUserId,
+      isManager,
+      backgroundId,
+    });
+    if (skipReason) {
+      skippedTokens.push(buildSkippedTokenDiagnostic({
         token,
         tokenId,
-        currentUserId,
-        isManager,
-      })) {
-        return null;
-      }
+        reason: skipReason,
+      }));
+      return;
+    }
 
-      const visionSettings = normalizeTokenVisionSettings(token);
-      return {
-        ...token,
-        tokenId,
-        visionEnabled: visionSettings.visionEnabled,
-        visionRadiusSquares: visionSettings.visionRadiusSquares,
-        ...(normalizedCellSizePx > 0
-          ? { visionRadiusPx: normalizedCellSizePx * visionSettings.visionRadiusSquares }
-          : {}),
-      };
-    })
-    .filter(Boolean);
+    const visionSettings = normalizeTokenVisionSettings(token);
+    sources.push({
+      ...token,
+      tokenId,
+      visionEnabled: visionSettings.visionEnabled,
+      visionRadiusSquares: visionSettings.visionRadiusSquares,
+      ...(normalizedCellSizePx > 0
+        ? { visionRadiusPx: normalizedCellSizePx * visionSettings.visionRadiusSquares }
+        : {}),
+    });
+  });
+
+  return {
+    sources,
+    contributingTokenIds: sources.map((source) => source.tokenId).filter(Boolean),
+    skippedTokens,
+  };
 };
+
+export const resolveViewerTokenVisionSources = (args = {}) => (
+  buildViewerTokenVisionEligibilityReport(args).sources
+);

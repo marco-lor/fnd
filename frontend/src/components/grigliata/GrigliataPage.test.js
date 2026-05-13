@@ -3178,6 +3178,7 @@ describe('GrigliataPage', () => {
       row: 8,
       isVisibleToPlayers: true,
       isDead: false,
+      visionEnabled: false,
       statuses: [],
     }]);
 
@@ -3199,7 +3200,7 @@ describe('GrigliataPage', () => {
     expect(screen.queryByRole('button', { name: /save details/i })).not.toBeInTheDocument();
   });
 
-  test('does not reveal fog from custom, foe, or other player tokens', async () => {
+  test('reveals shared fog from owned custom tokens but not foe or other ineligible tokens', async () => {
     setDocData('grigliata_lighting_render_inputs/map-1', {
       backgroundId: 'map-1',
       scene: { darkness: 0.6, globalLight: false },
@@ -3211,17 +3212,19 @@ describe('GrigliataPage', () => {
       backgroundId: 'map-1',
       tokenId: 'custom-1',
       ownerUid: 'user-1',
+      tokenType: 'custom',
       col: 0,
       row: 0,
       isVisibleToPlayers: true,
       isDead: false,
-      visionRadiusSquares: 6,
+      visionRadiusSquares: 1,
     }, {
       id: 'map-1__foe-1',
       backgroundId: 'map-1',
       tokenId: 'foe-1',
       ownerUid: 'dm-1',
-      col: 3,
+      tokenType: 'foe',
+      col: 6,
       row: 0,
       isVisibleToPlayers: true,
       isDead: false,
@@ -3231,10 +3234,32 @@ describe('GrigliataPage', () => {
       backgroundId: 'map-1',
       tokenId: 'user-2',
       ownerUid: 'user-2',
-      col: 6,
+      col: 10,
       row: 0,
       isVisibleToPlayers: true,
       isDead: false,
+      visionRadiusSquares: 6,
+    }, {
+      id: 'map-1__hidden-1',
+      backgroundId: 'map-1',
+      tokenId: 'hidden-1',
+      ownerUid: 'user-1',
+      tokenType: 'custom',
+      col: 14,
+      row: 0,
+      isVisibleToPlayers: false,
+      isDead: false,
+      visionRadiusSquares: 6,
+    }, {
+      id: 'map-1__dead-1',
+      backgroundId: 'map-1',
+      tokenId: 'dead-1',
+      ownerUid: 'user-1',
+      tokenType: 'custom',
+      col: 18,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: true,
       visionRadiusSquares: 6,
     }]);
 
@@ -3242,13 +3267,22 @@ describe('GrigliataPage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('true');
-      expect(screen.getByTestId('board-fog-current-count')).toHaveTextContent('0');
+      expect(Number(screen.getByTestId('board-fog-current-count').textContent)).toBeGreaterThan(0);
     });
+    expect(screen.getByTestId('board-token-ids')).toHaveTextContent('custom-1');
+    expect(screen.getByTestId('board-token-ids')).not.toHaveTextContent('foe-1');
+    expect(screen.getByTestId('board-token-ids')).not.toHaveTextContent('user-2');
+    expect(screen.getByTestId('board-token-ids')).not.toHaveTextContent('hidden-1');
+    expect(screen.getByTestId('board-token-ids')).not.toHaveTextContent('dead-1');
 
     await act(async () => {
       jest.advanceTimersByTime(1000);
     });
 
+    await waitFor(() => {
+      expect(getFogTileSetCallsByOwner('user-1').length).toBeGreaterThan(0);
+    });
+    expect(getFogTileSetCallsByOwner('user-2')).toEqual([]);
     expect(firestore.setDoc.mock.calls.some(([target]) => (
       target?.path?.startsWith('grigliata_fog_of_war/')
     ))).toBe(false);

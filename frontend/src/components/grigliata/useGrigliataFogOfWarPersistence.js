@@ -15,7 +15,7 @@ import {
 } from './lightingGeometry';
 import {
   DEFAULT_TOKEN_VISION_RADIUS_SQUARES,
-  resolveViewerTokenVisionSources,
+  buildViewerTokenVisionEligibilityReport,
 } from './lightingVisibility';
 import {
   buildCurrentFogCellKeys,
@@ -66,6 +66,7 @@ export const buildViewerFogCurrentVisibility = ({
   tokens = [],
   currentUserId = '',
   isManager = false,
+  backgroundId = '',
   grid,
   lightingRenderInput = null,
   rayCount,
@@ -75,6 +76,8 @@ export const buildViewerFogCurrentVisibility = ({
       currentVisibleCells: [],
       currentVisiblePolygons: [],
       currentPersistencePolygons: [],
+      contributingTokenIds: [],
+      skippedTokens: [],
     };
   }
 
@@ -83,18 +86,22 @@ export const buildViewerFogCurrentVisibility = ({
     tokens,
     grid: normalizedGrid,
   });
-  const visionSources = resolveViewerTokenVisionSources({
+  const visionSourceReport = buildViewerTokenVisionEligibilityReport({
     tokens: renderableTokens,
     currentUserId,
     isManager,
     cellSizePx: normalizedGrid.cellSizePx,
+    backgroundId,
   });
+  const visionSources = visionSourceReport.sources;
 
   if (!visionSources.length) {
     return {
       currentVisibleCells: [],
       currentVisiblePolygons: [],
       currentPersistencePolygons: [],
+      contributingTokenIds: [],
+      skippedTokens: visionSourceReport.skippedTokens,
     };
   }
 
@@ -120,6 +127,8 @@ export const buildViewerFogCurrentVisibility = ({
     currentPersistencePolygons: buildCurrentFogMemoryPolygons({
       tokenVisionPolygons,
     }),
+    contributingTokenIds: visionSourceReport.contributingTokenIds,
+    skippedTokens: visionSourceReport.skippedTokens,
   };
 };
 
@@ -151,12 +160,20 @@ export default function useGrigliataFogOfWarPersistence({
         tokens,
         currentUserId,
         isManager,
+        backgroundId,
         grid: normalizedGrid,
         lightingRenderInput,
         rayCount,
       })
-      : { currentVisibleCells: [], currentVisiblePolygons: [], currentPersistencePolygons: [] }),
+      : {
+        currentVisibleCells: [],
+        currentVisiblePolygons: [],
+        currentPersistencePolygons: [],
+        contributingTokenIds: [],
+        skippedTokens: [],
+      }),
     [
+      backgroundId,
       currentUserId,
       isEnabled,
       isManager,
@@ -169,6 +186,8 @@ export default function useGrigliataFogOfWarPersistence({
   const currentVisibleCells = currentVisibility.currentVisibleCells;
   const currentVisiblePolygons = currentVisibility.currentVisiblePolygons;
   const currentPersistencePolygons = currentVisibility.currentPersistencePolygons;
+  const contributingTokenIds = currentVisibility.contributingTokenIds || [];
+  const skippedTokens = currentVisibility.skippedTokens || [];
   const storedMemoryTiles = useMemo(
     () => (Array.isArray(fogOfWar?.memoryTiles) ? fogOfWar.memoryTiles : [])
       .filter((tile) => tileMatchesGrid(tile, normalizedGrid)),
@@ -320,13 +339,19 @@ export default function useGrigliataFogOfWarPersistence({
     }, GRIGLIATA_FOG_OF_WAR_WRITE_DEBOUNCE_MS);
   }, [flushPendingTiles]);
 
-  const queueRasterTiles = useCallback(({ tiles = [], source = 'movement', movementId = 0 } = {}) => {
+  const queueRasterTiles = useCallback(({
+    tiles = [],
+    source = 'movement',
+    movementId = 0,
+    sourceTokenIds = [],
+  } = {}) => {
     if (!tiles.length) {
       logGrigliataFogDebug('raster-queue-skip', {
         backgroundId,
         currentUserId,
         source,
         movementId,
+        sourceTokenIds,
         reason: 'no-raster-tiles',
       });
       return;
@@ -365,6 +390,7 @@ export default function useGrigliataFogOfWarPersistence({
       queuedTileCount,
       queuedBitCount,
       pendingTileCount: pendingTileMapRef.current.size,
+      sourceTokenIds,
     });
 
     if (queuedTileCount > 0) {
@@ -394,6 +420,9 @@ export default function useGrigliataFogOfWarPersistence({
       currentVisibleCellCount: currentVisibleCells.length,
       currentVisiblePolygonCount: currentVisiblePolygons.length,
       currentPersistencePolygonCount: currentPersistencePolygons.length,
+      contributingTokenIds,
+      skippedTokens: skippedTokens.slice(0, 12),
+      skippedTokenCount: skippedTokens.length,
       storedCellCount: fogOfWar?.cellSizePx === normalizedGrid.cellSizePx
         ? fogOfWar?.exploredCells?.length || 0
         : 0,
@@ -410,6 +439,7 @@ export default function useGrigliataFogOfWarPersistence({
     currentUserId,
     currentVisibleCells.length,
     currentVisiblePolygons.length,
+    contributingTokenIds,
     fogDocId,
     fogOfWar,
     isEnabled,
@@ -417,6 +447,7 @@ export default function useGrigliataFogOfWarPersistence({
     lightingRenderInput,
     normalizedGrid.cellSizePx,
     pendingMemoryTiles.length,
+    skippedTokens,
     storedMemoryTiles.length,
     tokens,
   ]);
@@ -438,6 +469,9 @@ export default function useGrigliataFogOfWarPersistence({
         hasLightingRenderInput: !!lightingRenderInput,
         currentVisibleCellCount: currentVisibleCells.length,
         currentPersistencePolygonCount: currentPersistencePolygons.length,
+        contributingTokenIds,
+        skippedTokens: skippedTokens.slice(0, 12),
+        skippedTokenCount: skippedTokens.length,
         reason: !isEnabled
           ? 'disabled'
           : (
@@ -473,6 +507,9 @@ export default function useGrigliataFogOfWarPersistence({
       movementId,
       currentVisibleCellCount: currentVisibleCells.length,
       currentPersistencePolygonCount: currentPersistencePolygons.length,
+      contributingTokenIds,
+      skippedTokens: skippedTokens.slice(0, 12),
+      skippedTokenCount: skippedTokens.length,
       rasterTileCount: rasterTiles.length,
       rasterBitCount: rasterTiles.reduce(
         (total, tile) => total + countFogRasterMaskBits(tile.maskBytes),
@@ -484,6 +521,7 @@ export default function useGrigliataFogOfWarPersistence({
       tiles: rasterTiles,
       source: 'movement',
       movementId,
+      sourceTokenIds: contributingTokenIds,
     });
 
     return undefined;
@@ -492,12 +530,14 @@ export default function useGrigliataFogOfWarPersistence({
     currentUserId,
     currentVisibleCells.length,
     currentPersistencePolygons,
+    contributingTokenIds,
     fogDocId,
     isEnabled,
     isManager,
     lightingRenderInput,
     normalizedGrid,
     queueRasterTiles,
+    skippedTokens,
   ]);
 
   useEffect(() => {

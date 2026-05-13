@@ -169,7 +169,7 @@ export default function GrigliataFogOfWarMask({
           data-testid="fog-current-polygon-cutout"
           data={currentPolygonPathData}
           fill="#ffffff"
-          fillRule="evenodd"
+          fillRule="nonzero"
           globalCompositeOperation="destination-out"
           listening={false}
         />
@@ -195,7 +195,7 @@ export default function GrigliataFogOfWarMask({
           data-testid="fog-current-polygon-cutout-final"
           data={currentPolygonPathData}
           fill="#ffffff"
-          fillRule="evenodd"
+          fillRule="nonzero"
           globalCompositeOperation="destination-out"
           listening={false}
         />
