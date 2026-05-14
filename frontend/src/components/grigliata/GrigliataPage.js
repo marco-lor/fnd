@@ -139,8 +139,12 @@ import useGrigliataPageData from './useGrigliataPageData';
 import useGrigliataLightingMetadata from './useGrigliataLightingMetadata';
 import useGrigliataLightingRenderInput from './useGrigliataLightingRenderInput';
 import useGrigliataWallRuntimeState from './useGrigliataWallRuntimeState';
-import useGrigliataFogOfWar from './useGrigliataFogOfWar';
-import useGrigliataFogOfWarPersistence from './useGrigliataFogOfWarPersistence';
+import useGrigliataFogOfWar, {
+  useGrigliataFogRasterMemory,
+} from './useGrigliataFogOfWar';
+import useGrigliataFogOfWarPersistence, {
+  buildViewerFogCurrentVisibility,
+} from './useGrigliataFogOfWarPersistence';
 import useGrigliataPlacementActions from './useGrigliataPlacementActions';
 import { logGrigliataFogDebug } from './fogDebug';
 import {
@@ -179,6 +183,87 @@ const FIRESTORE_BATCH_SIZE = 450;
 const PLACEMENT_RULE_SAFE_BATCH_SIZE = 6;
 const PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE = 4;
 const PLACEMENT_DELETE_BATCH_SIZE = 3;
+const EMPTY_VIEW_AS_FOG_VISIBILITY = {
+  currentVisibleCells: [],
+  currentVisiblePolygons: [],
+  currentPersistencePolygons: [],
+  contributingTokenIds: [],
+  skippedTokens: [],
+};
+
+const normalizeViewAsPlayerUid = (value) => (
+  typeof value === 'string' ? value.trim() : ''
+);
+
+const addViewAsPlayerOption = (optionsByUid, {
+  ownerUid = '',
+  label = '',
+  colorKey = '',
+  currentUserId = '',
+}) => {
+  const normalizedOwnerUid = normalizeViewAsPlayerUid(ownerUid);
+  if (!normalizedOwnerUid || normalizedOwnerUid === currentUserId) {
+    return;
+  }
+
+  const normalizedLabel = typeof label === 'string' && label.trim()
+    ? label.trim()
+    : normalizedOwnerUid;
+  const existingOption = optionsByUid.get(normalizedOwnerUid);
+
+  optionsByUid.set(normalizedOwnerUid, {
+    ownerUid: normalizedOwnerUid,
+    label: existingOption?.label || normalizedLabel,
+    colorKey: existingOption?.colorKey || colorKey || '',
+  });
+};
+
+const buildViewAsPlayerOptions = ({
+  activePageViewers = [],
+  boardTokens = [],
+  currentUserId = '',
+  selectedPlayerUid = '',
+} = {}) => {
+  const optionsByUid = new Map();
+
+  (Array.isArray(activePageViewers) ? activePageViewers : []).forEach((viewer) => {
+    addViewAsPlayerOption(optionsByUid, {
+      ownerUid: viewer?.ownerUid,
+      label: viewer?.characterId,
+      colorKey: viewer?.colorKey,
+      currentUserId,
+    });
+  });
+
+  (Array.isArray(boardTokens) ? boardTokens : []).forEach((token) => {
+    if (token?.tokenType === 'foe') {
+      return;
+    }
+
+    addViewAsPlayerOption(optionsByUid, {
+      ownerUid: token?.ownerUid,
+      label: token?.characterId || token?.label || token?.ownerUid,
+      currentUserId,
+    });
+  });
+
+  const normalizedSelectedPlayerUid = normalizeViewAsPlayerUid(selectedPlayerUid);
+  if (normalizedSelectedPlayerUid && !optionsByUid.has(normalizedSelectedPlayerUid)) {
+    addViewAsPlayerOption(optionsByUid, {
+      ownerUid: normalizedSelectedPlayerUid,
+      label: normalizedSelectedPlayerUid,
+      currentUserId,
+    });
+  }
+
+  return [...optionsByUid.values()]
+    .sort((left, right) => left.label.localeCompare(right.label));
+};
+
+const filterPlayerVisibleBoardTokens = (tokens = []) => (
+  (Array.isArray(tokens) ? tokens : [])
+    .filter((token) => token?.isVisibleToPlayers !== false)
+);
 const DRAW_COLOR_AUTOSAVE_DEBOUNCE_MS = 300;
 const GRID_SIZE_AUTOSAVE_DEBOUNCE_MS = 300;
 const MUSIC_VOLUME_WRITE_THROTTLE_MS = 150;
@@ -390,6 +475,7 @@ export default function GrigliataPage() {
   const isMusicMuted = userData?.settings?.[GRIGLIATA_MUSIC_MUTED_FIELD] === true;
   const [localLiveInteraction, setLocalLiveInteraction] = useState(null);
   const [isInteractionSharingEnabled, setIsInteractionSharingEnabled] = useState(persistedInteractionSharingEnabled);
+  const [viewAsPlayerUid, setViewAsPlayerUid] = useState('');
 
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploadName, setUploadName] = useState('');
@@ -489,6 +575,11 @@ export default function GrigliataPage() {
 
   const role = (userData?.role || '').toLowerCase();
   const isManager = isManagerRole(role);
+  useEffect(() => {
+    if (!isManager && viewAsPlayerUid) {
+      setViewAsPlayerUid('');
+    }
+  }, [isManager, viewAsPlayerUid]);
   const currentUserHiddenBackgroundIds = useMemo(() => {
     const hiddenBackgroundIds = userData?.settings?.[GRIGLIATA_HIDDEN_BACKGROUND_IDS_FIELD];
     return Array.isArray(hiddenBackgroundIds)
@@ -721,6 +812,22 @@ export default function GrigliataPage() {
       .filter((token) => token?.tokenId)
       .map((token) => [token.tokenId, token])
   ), [boardTokens]);
+  const viewAsPlayerOptions = useMemo(() => (
+    isManager
+      ? buildViewAsPlayerOptions({
+        activePageViewers,
+        boardTokens,
+        currentUserId,
+        selectedPlayerUid: viewAsPlayerUid,
+      })
+      : []
+  ), [
+    activePageViewers,
+    boardTokens,
+    currentUserId,
+    isManager,
+    viewAsPlayerUid,
+  ]);
   const activeFogBrushOwnerUids = useMemo(() => {
     if (!isManager || !currentUserId) {
       return [];
@@ -1040,9 +1147,20 @@ export default function GrigliataPage() {
     () => getGrigliataDrawTheme(drawColorKey),
     [drawColorKey]
   );
+  const isViewAsPlayerSelected = !!(isManager && viewAsPlayerUid);
+  const isViewAsPlayerPreviewActive = !!(
+    isViewAsPlayerSelected
+    && !isNarrationOverlayActive
+  );
   const visibleBoardTokens = useMemo(
     () => (isNarrationOverlayActive ? [] : boardTokens),
     [boardTokens, isNarrationOverlayActive]
+  );
+  const viewAsPlayerBoardTokens = useMemo(
+    () => (isViewAsPlayerPreviewActive
+      ? filterPlayerVisibleBoardTokens(visibleBoardTokens)
+      : []),
+    [isViewAsPlayerPreviewActive, visibleBoardTokens]
   );
   const visibleAoeFigures = useMemo(
     () => (isNarrationOverlayActive ? [] : aoeFigureSnapshots),
@@ -1058,6 +1176,40 @@ export default function GrigliataPage() {
     [grid]
   );
   const {
+    memoryTiles: viewAsPlayerMemoryTiles,
+  } = useGrigliataFogRasterMemory({
+    backgroundId: activeBackgroundId,
+    ownerUid: viewAsPlayerUid,
+    enabled: isViewAsPlayerSelected && isFogOfWarEnabled && !!activeBackgroundId,
+  });
+  const viewAsPlayerCurrentVisibility = useMemo(() => {
+    if (
+      !isViewAsPlayerPreviewActive
+      || !isFogOfWarEnabled
+      || !fogLightingRenderInput
+      || !viewAsPlayerUid
+    ) {
+      return EMPTY_VIEW_AS_FOG_VISIBILITY;
+    }
+
+    return buildViewerFogCurrentVisibility({
+      tokens: viewAsPlayerBoardTokens,
+      currentUserId: viewAsPlayerUid,
+      isManager: false,
+      backgroundId: activeBackgroundId,
+      grid: normalizedFogGrid,
+      lightingRenderInput: fogLightingRenderInput,
+    });
+  }, [
+    activeBackgroundId,
+    fogLightingRenderInput,
+    isFogOfWarEnabled,
+    isViewAsPlayerPreviewActive,
+    normalizedFogGrid,
+    viewAsPlayerBoardTokens,
+    viewAsPlayerUid,
+  ]);
+  const {
     currentVisibleCells: fogCurrentVisibleCells,
     currentVisiblePolygons: fogCurrentVisiblePolygons,
     pendingMemoryTiles: fogPendingMemoryTiles,
@@ -1071,13 +1223,58 @@ export default function GrigliataPage() {
     fogOfWar,
     isEnabled: isFogOfWarEnabled && !isNarrationOverlayActive,
   });
+  useEffect(() => {
+    if (!isManager) {
+      return;
+    }
+
+    logGrigliataFogDebug('view-as-preview', {
+      backgroundId: activeBackgroundId,
+      viewedPlayerUid: viewAsPlayerUid,
+      previewActive: isViewAsPlayerPreviewActive && isFogOfWarEnabled,
+      persistenceDisabled: true,
+      memoryTileCount: Array.isArray(viewAsPlayerMemoryTiles) ? viewAsPlayerMemoryTiles.length : 0,
+      currentVisibleCellCount: viewAsPlayerCurrentVisibility.currentVisibleCells.length,
+      currentVisiblePolygonCount: viewAsPlayerCurrentVisibility.currentVisiblePolygons.length,
+      contributingTokenIds: viewAsPlayerCurrentVisibility.contributingTokenIds || [],
+      skippedTokens: (viewAsPlayerCurrentVisibility.skippedTokens || []).slice(0, 12),
+      skippedTokenCount: (viewAsPlayerCurrentVisibility.skippedTokens || []).length,
+    });
+  }, [
+    activeBackgroundId,
+    isFogOfWarEnabled,
+    isManager,
+    isViewAsPlayerPreviewActive,
+    viewAsPlayerCurrentVisibility,
+    viewAsPlayerMemoryTiles,
+    viewAsPlayerUid,
+  ]);
   const boardFogOfWar = useMemo(() => {
     if (
-      isManager
-      || isNarrationOverlayActive
+      isNarrationOverlayActive
       || !isFogOfWarEnabled
       || !fogLightingRenderInput
     ) {
+      return null;
+    }
+
+    if (isViewAsPlayerPreviewActive) {
+      return {
+        exploredCells: [],
+        exploredPolygons: [],
+        memoryTiles: mergeFogRasterMemoryTiles(
+          Array.isArray(viewAsPlayerMemoryTiles) ? viewAsPlayerMemoryTiles : []
+        ).filter((tile) => (
+          tile.cellSizePx === normalizedFogGrid.cellSizePx
+          && tile.offsetXPx === normalizedFogGrid.offsetXPx
+          && tile.offsetYPx === normalizedFogGrid.offsetYPx
+        )),
+        currentVisibleCells: viewAsPlayerCurrentVisibility.currentVisibleCells,
+        currentVisiblePolygons: viewAsPlayerCurrentVisibility.currentVisiblePolygons,
+      };
+    }
+
+    if (isManager) {
       return null;
     }
 
@@ -1104,24 +1301,32 @@ export default function GrigliataPage() {
     isFogOfWarEnabled,
     isManager,
     isNarrationOverlayActive,
+    isViewAsPlayerPreviewActive,
     normalizedFogGrid.cellSizePx,
     normalizedFogGrid.offsetXPx,
     normalizedFogGrid.offsetYPx,
+    viewAsPlayerCurrentVisibility,
+    viewAsPlayerMemoryTiles,
   ]);
+  const boardFogViewerUserId = isViewAsPlayerPreviewActive ? viewAsPlayerUid : currentUserId;
+  const boardFogViewerIsManager = isViewAsPlayerPreviewActive ? false : isManager;
+  const boardTokenRenderCandidates = isViewAsPlayerPreviewActive
+    ? viewAsPlayerBoardTokens
+    : visibleBoardTokens;
   const boardRenderTokens = useMemo(
     () => filterFogVisibleTokens({
-      tokens: visibleBoardTokens,
-      currentUserId,
-      isManager,
+      tokens: boardTokenRenderCandidates,
+      currentUserId: boardFogViewerUserId,
+      isManager: boardFogViewerIsManager,
       grid: normalizedFogGrid,
       fogOfWar: boardFogOfWar,
     }),
     [
       boardFogOfWar,
-      currentUserId,
-      isManager,
+      boardFogViewerIsManager,
+      boardFogViewerUserId,
+      boardTokenRenderCandidates,
       normalizedFogGrid,
-      visibleBoardTokens,
     ]
   );
   const boardRenderAoEFigures = visibleAoeFigures;
@@ -1130,13 +1335,13 @@ export default function GrigliataPage() {
     () => filterFogVisibleTurnOrderEntries({
       entries: turnOrderEntries,
       tokens: boardRenderTokens,
-      isManager,
+      isManager: boardFogViewerIsManager,
       fogOfWar: boardFogOfWar,
     }),
     [
       boardFogOfWar,
+      boardFogViewerIsManager,
       boardRenderTokens,
-      isManager,
       turnOrderEntries,
     ]
   );
@@ -1154,16 +1359,16 @@ export default function GrigliataPage() {
     [boardRenderTokens]
   );
   const boardRenderSelectedTokenDetails = useMemo(() => {
-    if (!boardFogOfWar || isManager || !selectedTokenDetails?.tokenId) {
+    if (!boardFogOfWar || boardFogViewerIsManager || !selectedTokenDetails?.tokenId) {
       return selectedTokenDetails;
     }
 
     return boardRenderTokenIdSet.has(selectedTokenDetails.tokenId)
       ? selectedTokenDetails
       : null;
-  }, [boardFogOfWar, boardRenderTokenIdSet, isManager, selectedTokenDetails]);
+  }, [boardFogOfWar, boardFogViewerIsManager, boardRenderTokenIdSet, selectedTokenDetails]);
   useEffect(() => {
-    if (!boardFogOfWar || isManager) {
+    if (!boardFogOfWar || boardFogViewerIsManager) {
       return;
     }
 
@@ -1175,7 +1380,7 @@ export default function GrigliataPage() {
       const nextTokenIds = currentTokenIds.filter((tokenId) => boardRenderTokenIdSet.has(tokenId));
       return nextTokenIds.length === currentTokenIds.length ? currentTokenIds : nextTokenIds;
     });
-  }, [boardFogOfWar, boardRenderTokenIdSet, isManager]);
+  }, [boardFogOfWar, boardFogViewerIsManager, boardRenderTokenIdSet]);
   const normalizedMusicPlaybackState = useMemo(
     () => normalizeGrigliataMusicPlaybackState(musicPlaybackState),
     [musicPlaybackState]
@@ -5219,6 +5424,8 @@ export default function GrigliataPage() {
                 aoeFigures={boardRenderAoEFigures}
                 currentUserId={user.uid}
                 isManager={isManager}
+                fogViewerUserId={boardFogViewerUserId}
+                isFogViewerManager={boardFogViewerIsManager}
                 isTokenDragActive={isTrayDragging && !isNarrationOverlayActive}
                 activeTrayDragType={activeTrayDragType}
                 isRulerEnabled={isRulerEnabled}
@@ -5334,6 +5541,46 @@ export default function GrigliataPage() {
           </div>
 
           <aside className="flex flex-col gap-3 xl:h-full xl:min-h-0">
+            {isManager && (
+              <div
+                data-testid="grigliata-view-as-control"
+                className="rounded-2xl border border-slate-700 bg-slate-950/75 p-3 shadow-2xl backdrop-blur-sm"
+              >
+                <label
+                  htmlFor="grigliata-view-as-player"
+                  className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-400"
+                >
+                  View As Player
+                </label>
+                <div className="flex items-center gap-2">
+                  <select
+                    id="grigliata-view-as-player"
+                    value={viewAsPlayerUid}
+                    onChange={(event) => setViewAsPlayerUid(normalizeViewAsPlayerUid(event.target.value))}
+                    disabled={!activeBackgroundId}
+                    className="min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-slate-100 outline-none transition-colors focus:border-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <option value="">DM view</option>
+                    {viewAsPlayerOptions.map((option) => (
+                      <option key={option.ownerUid} value={option.ownerUid}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  {viewAsPlayerUid && (
+                    <button
+                      type="button"
+                      onClick={() => setViewAsPlayerUid('')}
+                      className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-200 transition-colors hover:bg-slate-800"
+                      aria-label="Clear View As Player"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="rounded-2xl border border-slate-700 bg-slate-950/75 p-2 shadow-2xl backdrop-blur-sm">
               <div
                 className={sidebarTabListClassName}

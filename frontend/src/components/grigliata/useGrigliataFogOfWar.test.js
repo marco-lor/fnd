@@ -1,6 +1,8 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
-import useGrigliataFogOfWar from './useGrigliataFogOfWar';
+import useGrigliataFogOfWar, {
+  useGrigliataFogRasterMemory,
+} from './useGrigliataFogOfWar';
 import {
   FOG_RASTER_MASK_ENCODING,
   FOG_RASTER_PROFILE_ID,
@@ -69,6 +71,22 @@ const HookProbe = ({ backgroundId = '', currentUserId = '', isManager = false })
       <div data-testid="owner">{fogOfWar?.ownerUid || ''}</div>
       <div data-testid="cell-count">{String(fogOfWar?.exploredCells?.length || 0)}</div>
       <div data-testid="memory-tile-count">{String(fogOfWar?.memoryTiles?.length || 0)}</div>
+    </div>
+  );
+};
+
+const RasterMemoryProbe = ({ backgroundId = '', ownerUid = '', enabled = true }) => {
+  const { memoryTiles, isRasterFogReady } = useGrigliataFogRasterMemory({
+    backgroundId,
+    ownerUid,
+    enabled,
+  });
+
+  return (
+    <div>
+      <div data-testid="raster-ready">{String(isRasterFogReady)}</div>
+      <div data-testid="raster-memory-tile-count">{String(memoryTiles.length)}</div>
+      <div data-testid="raster-memory-owner-uids">{memoryTiles.map((tile) => tile.ownerUid).join(',')}</div>
     </div>
   );
 };
@@ -210,6 +228,69 @@ describe('useGrigliataFogOfWar', () => {
     expect(firestore.where).toHaveBeenCalledWith('ownerUid', '==', 'user-1');
     expect(firestore.where).toHaveBeenCalledWith('rasterProfileId', '==', FOG_RASTER_PROFILE_ID);
     expect(screen.getByTestId('memory-tile-count')).toHaveTextContent('1');
+  });
+
+  test('raster-only loader subscribes only to the selected owner memory tiles', async () => {
+    const maskBytes = createEmptyFogRasterMaskBytes();
+    maskBytes[0] = 1;
+    mockCollectionData.grigliata_fog_memory_tiles = [{
+      id: 'map-1__user-2__fog-raster-c8-s16-v1__0:0',
+      backgroundId: 'map-1',
+      ownerUid: 'user-2',
+      tileKey: '0:0',
+      tileCol: 0,
+      tileRow: 0,
+      rasterProfileId: FOG_RASTER_PROFILE_ID,
+      tileSizeCells: 8,
+      samplesPerCell: 16,
+      cellSizePx: 70,
+      offsetXPx: 0,
+      offsetYPx: 0,
+      maskEncoding: FOG_RASTER_MASK_ENCODING,
+      maskBase64: encodeFogRasterMaskBase64(maskBytes),
+      updatedBy: 'user-2',
+    }, {
+      id: 'map-1__user-3__fog-raster-c8-s16-v1__0:0',
+      backgroundId: 'map-1',
+      ownerUid: 'user-3',
+      tileKey: '0:0',
+      tileCol: 0,
+      tileRow: 0,
+      rasterProfileId: FOG_RASTER_PROFILE_ID,
+      tileSizeCells: 8,
+      samplesPerCell: 16,
+      cellSizePx: 70,
+      offsetXPx: 0,
+      offsetYPx: 0,
+      maskEncoding: FOG_RASTER_MASK_ENCODING,
+      maskBase64: encodeFogRasterMaskBase64(maskBytes),
+      updatedBy: 'user-3',
+    }];
+
+    render(<RasterMemoryProbe backgroundId="map-1" ownerUid="user-2" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('raster-ready')).toHaveTextContent('true');
+    });
+    expect(firestore.collection).toHaveBeenCalledWith(expect.anything(), 'grigliata_fog_memory_tiles');
+    expect(firestore.where).toHaveBeenCalledWith('backgroundId', '==', 'map-1');
+    expect(firestore.where).toHaveBeenCalledWith('ownerUid', '==', 'user-2');
+    expect(firestore.where).toHaveBeenCalledWith('rasterProfileId', '==', FOG_RASTER_PROFILE_ID);
+    expect(firestore.onSnapshot).not.toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_fog_of_war/map-1__user-2' }),
+      expect.any(Function),
+      expect.any(Function)
+    );
+    expect(screen.getByTestId('raster-memory-tile-count')).toHaveTextContent('1');
+    expect(screen.getByTestId('raster-memory-owner-uids')).toHaveTextContent('user-2');
+  });
+
+  test('raster-only loader stays idle when preview loading is disabled', () => {
+    render(<RasterMemoryProbe backgroundId="map-1" ownerUid="user-2" enabled={false} />);
+
+    expect(firestore.onSnapshot).not.toHaveBeenCalled();
+    expect(screen.getByTestId('raster-ready')).toHaveTextContent('false');
+    expect(screen.getByTestId('raster-memory-tile-count')).toHaveTextContent('0');
   });
 
   test('normalizes malformed snapshots to null while becoming ready', async () => {

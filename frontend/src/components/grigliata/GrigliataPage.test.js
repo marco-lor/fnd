@@ -21,6 +21,7 @@ const mockDeleteGrigliataCustomTokenCallable = jest.fn(() => Promise.resolve({ d
 const mockSpawnGrigliataCustomTokenInstanceCallable = jest.fn(() => Promise.resolve({ data: { success: true, tokenId: 'custom-instance-1' } }));
 const mockSpawnGrigliataFoeTokenCallable = jest.fn(() => Promise.resolve({ data: { success: true, tokenId: 'foe-token-1' } }));
 const mockUpdateGrigliataCustomTokenTemplateCallable = jest.fn(() => Promise.resolve({ data: { success: true } }));
+const mockLogGrigliataFogDebug = jest.fn();
 
 const createDeferred = () => {
   let resolve;
@@ -301,6 +302,10 @@ jest.mock('./music', () => {
     readAudioFileMetadata: jest.fn(() => Promise.resolve({ durationMs: 12_345 })),
   };
 });
+
+jest.mock('./fogDebug', () => ({
+  logGrigliataFogDebug: (...args) => mockLogGrigliataFogDebug(...args),
+}));
 jest.mock('./GrigliataBoard', () => {
   const React = require('react');
 
@@ -352,6 +357,8 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-fog-memory-tile-count">{String(props.fogOfWar?.memoryTiles?.length || 0)}</div>
       <div data-testid="board-fog-current-polygon-count">{String(props.fogOfWar?.currentVisiblePolygons?.length || 0)}</div>
       <div data-testid="board-fog-render-cell-fallback">{String(props.fogOfWar?.renderCellFallback === true)}</div>
+      <div data-testid="board-fog-viewer-id">{props.fogViewerUserId || ''}</div>
+      <div data-testid="board-fog-viewer-manager">{String(props.isFogViewerManager)}</div>
       <div data-testid="board-fog-brush-controls">{String(!!props.fogBrushControls)}</div>
       <div data-testid="board-fog-brush-active">{String(!!props.fogBrushControls?.isFogBrushToolActive)}</div>
       <div data-testid="board-fog-brush-mode">{props.fogBrushControls?.mode || ''}</div>
@@ -937,6 +944,7 @@ describe('GrigliataPage', () => {
     scheduleImageAssetPreload.mockClear().mockImplementation(() => jest.fn());
 
     readAudioFileMetadata.mockClear().mockResolvedValue({ durationMs: 12_345 });
+    mockLogGrigliataFogDebug.mockClear();
     mockDeleteGrigliataCustomTokenCallable.mockClear().mockResolvedValue({ data: { success: true } });
     mockSpawnGrigliataCustomTokenInstanceCallable.mockClear().mockResolvedValue({ data: { success: true, tokenId: 'custom-instance-1' } });
     mockSpawnGrigliataFoeTokenCallable.mockClear().mockResolvedValue({ data: { success: true, tokenId: 'foe-token-1' } });
@@ -3371,6 +3379,249 @@ describe('GrigliataPage', () => {
     expect(firestore.onSnapshot.mock.calls.some(([target]) => (
       target?.path === 'grigliata_fog_of_war/map-1__user-2'
     ))).toBe(false);
+  });
+
+  test('lets the DM view a selected player raster fog preview without persistence', async () => {
+    setManagerAuth();
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [],
+    });
+    setCollectionData(GRIGLIATA_FOG_MEMORY_TILES_COLLECTION, [
+      ...buildTestFogMemoryTileDocs({
+        ownerUid: 'user-2',
+        polygons: [buildCellFogPolygon({ col: 0, row: 0 })],
+      }),
+      ...buildTestFogMemoryTileDocs({
+        ownerUid: 'user-3',
+        polygons: [buildCellFogPolygon({ col: 9, row: 9 })],
+      }),
+    ]);
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      tokenId: 'user-2',
+      ownerUid: 'user-2',
+      tokenType: 'character',
+      col: 0,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+      visionRadiusSquares: 1,
+    }, {
+      id: 'map-1__custom-2',
+      backgroundId: 'map-1',
+      tokenId: 'custom-2',
+      ownerUid: 'user-2',
+      tokenType: 'custom',
+      label: 'Lantern Spirit',
+      col: 3,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+      visionRadiusSquares: 1,
+    }, {
+      id: 'map-1__hidden-2',
+      backgroundId: 'map-1',
+      tokenId: 'hidden-2',
+      ownerUid: 'user-2',
+      tokenType: 'custom',
+      col: 0,
+      row: 0,
+      isVisibleToPlayers: false,
+      isDead: false,
+      visionRadiusSquares: 6,
+    }, {
+      id: 'map-1__dead-2',
+      backgroundId: 'map-1',
+      tokenId: 'dead-2',
+      ownerUid: 'user-2',
+      tokenType: 'custom',
+      col: 20,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: true,
+      visionRadiusSquares: 6,
+    }, {
+      id: 'map-1__blind-2',
+      backgroundId: 'map-1',
+      tokenId: 'blind-2',
+      ownerUid: 'user-2',
+      tokenType: 'custom',
+      col: 24,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+      visionEnabled: false,
+      visionRadiusSquares: 6,
+    }, {
+      id: 'map-1__foe-1',
+      backgroundId: 'map-1',
+      tokenId: 'foe-1',
+      ownerUid: 'user-2',
+      tokenType: 'foe',
+      col: 28,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+      visionRadiusSquares: 6,
+    }, {
+      id: 'map-1__user-3',
+      backgroundId: 'map-1',
+      tokenId: 'user-3',
+      ownerUid: 'user-3',
+      tokenType: 'character',
+      col: 32,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+      visionRadiusSquares: 6,
+    }]);
+    setCollectionData('grigliata_aoe_figures', [{
+      id: 'shared-memory-figure',
+      backgroundId: 'map-1',
+      ownerUid: 'user-3',
+      figureType: 'circle',
+      slot: 1,
+      originCell: { col: 20, row: 20 },
+      targetCell: { col: 21, row: 20 },
+      colorKey: 'ion-cyan',
+      isVisibleToPlayers: true,
+    }]);
+    setCollectionData('grigliata_live_interactions', [{
+      id: 'map-1__user-3',
+      backgroundId: 'map-1',
+      ownerUid: 'user-3',
+      type: 'ping',
+      source: 'free',
+      colorKey: 'ion-cyan',
+      point: { x: 1400, y: 1400 },
+      startedAtMs: Date.now(),
+      updatedAt: Date.now(),
+      updatedBy: 'user-3',
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('false');
+    });
+
+    fireEvent.change(screen.getByRole('combobox', { name: /view as player/i }), {
+      target: { value: 'user-2' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('true');
+      expect(screen.getByTestId('board-fog-memory-tile-count')).toHaveTextContent('1');
+      expect(Number(screen.getByTestId('board-fog-current-count').textContent)).toBeGreaterThan(0);
+    });
+    expect(screen.getByTestId('board-fog-cell-count')).toHaveTextContent('0');
+    expect(screen.getByTestId('board-fog-polygon-count')).toHaveTextContent('0');
+    expect(screen.getByTestId('board-fog-viewer-id')).toHaveTextContent('user-2');
+    expect(screen.getByTestId('board-fog-viewer-manager')).toHaveTextContent('false');
+    expect(screen.getByTestId('board-token-ids')).toHaveTextContent('user-2');
+    expect(screen.getByTestId('board-token-ids')).toHaveTextContent('custom-2');
+    expect(screen.getByTestId('board-token-ids')).not.toHaveTextContent('hidden-2');
+    expect(screen.getByTestId('board-aoe-count')).toHaveTextContent('1');
+    expect(screen.getByTestId('board-shared-count')).toHaveTextContent('1');
+    expect(screen.getByTestId('board-fog-brush-controls')).toHaveTextContent('true');
+    await waitFor(() => {
+      expect(mockLogGrigliataFogDebug).toHaveBeenCalledWith(
+        'view-as-preview',
+        expect.objectContaining({
+          viewedPlayerUid: 'user-2',
+          previewActive: true,
+          persistenceDisabled: true,
+          contributingTokenIds: expect.arrayContaining(['user-2', 'custom-2']),
+        })
+      );
+    });
+    const previewLog = [...mockLogGrigliataFogDebug.mock.calls].reverse()
+      .find(([eventName, payload]) => (
+        eventName === 'view-as-preview'
+        && payload?.viewedPlayerUid === 'user-2'
+        && payload?.previewActive === true
+      ));
+    expect(previewLog?.[1]?.skippedTokens).toEqual(expect.arrayContaining([
+      expect.objectContaining({ tokenId: 'dead-2', reason: 'dead' }),
+      expect.objectContaining({ tokenId: 'blind-2', reason: 'vision-disabled' }),
+      expect.objectContaining({ tokenId: 'foe-1', reason: 'foe' }),
+      expect.objectContaining({ tokenId: 'user-3', reason: 'not-owned' }),
+    ]));
+    expect(previewLog?.[1]?.contributingTokenIds).not.toContain('foe-1');
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'query'
+      && target?.base?.path === GRIGLIATA_FOG_MEMORY_TILES_COLLECTION
+      && target.constraints?.some((constraint) => (
+        constraint.field === 'ownerUid' && constraint.value === 'user-2'
+      ))
+    ))).toBe(true);
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'query'
+      && target?.base?.path === GRIGLIATA_FOG_MEMORY_TILES_COLLECTION
+      && target.constraints?.some((constraint) => (
+        constraint.field === 'ownerUid' && constraint.value === 'user-3'
+      ))
+    ))).toBe(false);
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.path === 'grigliata_fog_of_war/map-1__user-2'
+    ))).toBe(false);
+
+    expect(firestore.runTransaction).not.toHaveBeenCalled();
+    expect(getFogTileSetCallsByOwner('user-2')).toEqual([]);
+    expect(firestore.setDoc.mock.calls.some(([target]) => (
+      target?.path?.startsWith('grigliata_fog_of_war/')
+    ))).toBe(false);
+  });
+
+  test('suppresses DM view-as preview fog during narration', async () => {
+    setManagerAuth();
+    setDocData('grigliata_state/current', {
+      activeBackgroundId: 'map-1',
+      presentationBackgroundId: 'map-2',
+    });
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [],
+    });
+    setCollectionData(GRIGLIATA_FOG_MEMORY_TILES_COLLECTION, buildTestFogMemoryTileDocs({
+      ownerUid: 'user-2',
+      polygons: [buildCellFogPolygon({ col: 0, row: 0 })],
+    }));
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      tokenId: 'user-2',
+      ownerUid: 'user-2',
+      tokenType: 'character',
+      col: 0,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+      visionRadiusSquares: 4,
+    }]);
+
+    render(<GrigliataPage />);
+
+    fireEvent.change(await screen.findByRole('combobox', { name: /view as player/i }), {
+      target: { value: 'user-2' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-narration-active')).toHaveTextContent('true');
+      expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('false');
+    });
+
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+    });
+
+    expect(getFogTileSetCallsByOwner('user-2')).toEqual([]);
   });
 
   test('keeps fog active when computed lighting is disabled', async () => {

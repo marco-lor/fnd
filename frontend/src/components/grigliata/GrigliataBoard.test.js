@@ -1094,6 +1094,162 @@ describe('GrigliataBoard', () => {
     expect(fog.compareDocumentPosition(mainToken) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  test('uses a separate fog viewer identity for DM view-as token filtering while keeping manager controls', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'dm-1',
+          isManager: true,
+          fogViewerUserId: 'user-1',
+          isFogViewerManager: false,
+          onToggleGridVisibility: jest.fn(),
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 9,
+            row: 9,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }, {
+            tokenId: 'user-2',
+            id: 'user-2',
+            ownerUid: 'user-2',
+            tokenType: 'character',
+            label: 'Bryn',
+            imageUrl: '',
+            placed: true,
+            col: 8,
+            row: 8,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }, {
+            tokenId: 'foe-1',
+            id: 'foe-1',
+            ownerUid: 'dm-1',
+            tokenType: 'foe',
+            label: 'Skeleton',
+            imageUrl: '',
+            placed: true,
+            col: 1,
+            row: 0,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          fogOfWar: {
+            exploredCells: [],
+            exploredPolygons: [],
+            memoryTiles: [buildMemoryTile()],
+            currentVisibleCells: ['1:0'],
+            currentVisiblePolygons: [],
+          },
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('token-node-user-1')).toBeInTheDocument();
+    expect(screen.getByTestId('token-node-foe-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('token-node-user-2')).not.toBeInTheDocument();
+    expect(screen.getByTestId('grigliata-manager-controls')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /hide grid/i })).toBeInTheDocument();
+  });
+
+  test('uses the fog viewer identity for DM view-as lighting vision sources', async () => {
+    const lightingRenderInput = {
+      backgroundId: 'map-1',
+      scene: {
+        darkness: 0.6,
+        globalLight: false,
+      },
+      walls: [],
+      lights: [{
+        id: 'light-1',
+        x: 120,
+        y: 120,
+        brightRadiusPx: 80,
+        dimRadiusPx: 120,
+        color: '#FFAD00',
+      }],
+    };
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'dm-1',
+          isManager: true,
+          fogViewerUserId: 'user-1',
+          isFogViewerManager: false,
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }, {
+            tokenId: 'custom-1',
+            id: 'custom-1',
+            ownerUid: 'user-1',
+            tokenType: 'custom',
+            label: 'Lantern Spirit',
+            imageUrl: '',
+            placed: true,
+            col: 3,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }, {
+            tokenId: 'user-2',
+            id: 'user-2',
+            ownerUid: 'user-2',
+            tokenType: 'character',
+            label: 'Bryn',
+            imageUrl: '',
+            placed: true,
+            col: 4,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+          fogOfWar: {
+            exploredCells: [],
+            exploredPolygons: [],
+            memoryTiles: [buildMemoryTile()],
+            currentVisibleCells: ['2:2', '3:2', '4:2'],
+            currentVisiblePolygons: [[[
+              { x: 0, y: 0 },
+              { x: 420, y: 0 },
+              { x: 420, y: 420 },
+              { x: 0, y: 420 },
+            ]]],
+          },
+          lightingRenderInput,
+        })}
+      />
+    );
+
+    expect(await screen.findByTestId('lighting-mask-layer')).toBeInTheDocument();
+    expect(screen.getAllByTestId('lighting-token-vision-cutout').map((node) => (
+      node.getAttribute('data-tokenid')
+    ))).toEqual(['user-1', 'custom-1']);
+    expect(screen.getByTestId('lighting-light-clip-group')).toBeInTheDocument();
+  });
+
   test('keeps shared AoE and live drawing overlays visible outside memory fog', async () => {
     render(
       <GrigliataBoard

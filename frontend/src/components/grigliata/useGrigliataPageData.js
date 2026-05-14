@@ -644,7 +644,12 @@ export default function useGrigliataPageData({
             tokenType: 'character',
             imageSource: 'profile',
           } : null);
-        const tokenType = profile?.tokenType || (placement.tokenId !== placement.ownerUid ? 'custom' : 'character');
+        const placementTokenType = placement?.tokenType === 'foe'
+          ? 'foe'
+          : (placement?.tokenType === 'custom' ? 'custom' : '');
+        const tokenType = profile?.tokenType
+          || placementTokenType
+          || (placement.tokenId !== placement.ownerUid ? 'custom' : 'character');
         const imageSource = profile?.imageSource || (
           tokenType === 'foe'
             ? 'foesHub'

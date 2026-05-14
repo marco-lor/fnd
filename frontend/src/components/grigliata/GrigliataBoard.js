@@ -2281,6 +2281,8 @@ export default function GrigliataBoard({
   aoeFigures = [],
   currentUserId,
   isManager,
+  fogViewerUserId = '',
+  isFogViewerManager,
   isTokenDragActive,
   activeTrayDragType = '',
   isRulerEnabled,
@@ -2443,6 +2445,10 @@ export default function GrigliataBoard({
   const musicToggleStateLabel = isMusicEnabled ? 'Shared music enabled' : 'Shared music muted';
   const prefersReducedMotion = useReducedMotion();
   const fogBrushSettingsId = useId();
+  const resolvedFogViewerUserId = fogViewerUserId || currentUserId;
+  const resolvedIsFogViewerManager = typeof isFogViewerManager === 'boolean'
+    ? isFogViewerManager
+    : isManager;
 
   const cancelBattlemapImageAnimation = useCallback(() => {
     cancelAnimationFrameSafe(battlemapImageAnimationHandleRef.current);
@@ -2986,12 +2992,12 @@ export default function GrigliataBoard({
   const fogVisibleRenderedTokens = useMemo(
     () => filterFogVisibleTokens({
       tokens: renderedTokens,
-      currentUserId,
-      isManager,
+      currentUserId: resolvedFogViewerUserId,
+      isManager: resolvedIsFogViewerManager,
       grid: normalizedGrid,
       fogOfWar,
     }),
-    [currentUserId, fogOfWar, isManager, normalizedGrid, renderedTokens]
+    [fogOfWar, normalizedGrid, renderedTokens, resolvedFogViewerUserId, resolvedIsFogViewerManager]
   );
   const hasVisibleRemotePing = useMemo(
     () => renderedSharedInteractions.some((interaction) => interaction.kind === 'ping'),
@@ -5583,12 +5589,12 @@ export default function GrigliataBoard({
   const visibleTokenRenderLayers = useMemo(
     () => splitFogVisibleTokenRenderLayers({
       tokens: visibleRenderedTokens,
-      currentUserId,
-      isManager,
+      currentUserId: resolvedFogViewerUserId,
+      isManager: resolvedIsFogViewerManager,
       grid: normalizedGrid,
       fogOfWar,
     }),
-    [currentUserId, fogOfWar, isManager, normalizedGrid, visibleRenderedTokens]
+    [fogOfWar, normalizedGrid, resolvedFogViewerUserId, resolvedIsFogViewerManager, visibleRenderedTokens]
   );
   const visibleRenderedTokensBelowFog = visibleTokenRenderLayers.belowFogTokens;
   const visibleRenderedTokensAboveFog = visibleTokenRenderLayers.aboveFogTokens;
@@ -5604,17 +5610,17 @@ export default function GrigliataBoard({
   const visibleTokenVisionSources = useMemo(
     () => (isNarrationOverlayActive ? [] : resolveViewerTokenVisionSources({
       tokens: visibleRenderedTokens,
-      currentUserId,
-      isManager,
+      currentUserId: resolvedFogViewerUserId,
+      isManager: resolvedIsFogViewerManager,
       cellSizePx: normalizedGrid.cellSizePx,
       backgroundId: resolvedBackground?.id || '',
     })),
     [
-      currentUserId,
-      isManager,
       isNarrationOverlayActive,
       normalizedGrid.cellSizePx,
       resolvedBackground?.id,
+      resolvedFogViewerUserId,
+      resolvedIsFogViewerManager,
       visibleRenderedTokens,
     ]
   );
