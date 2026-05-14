@@ -2,7 +2,7 @@
 import React, { useMemo, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
-import { auth } from '../firebaseConfig';
+import { auth, db, storage } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
 import { HiMagnifyingGlassPlus } from 'react-icons/hi2';
 import { LuImageUp } from 'react-icons/lu';
@@ -15,10 +15,10 @@ import {
 } from 'react-icons/gi';
 import { FiBookOpen, FiCompass, FiLogOut, FiMenu, FiSettings, FiShield, FiShoppingBag, FiX } from 'react-icons/fi';
 import { GoSidebarCollapse, GoSidebarExpand } from 'react-icons/go';
-import { storage, db } from '../firebaseConfig';
 import { ref as storageRef, deleteObject, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { doc, updateDoc } from 'firebase/firestore';
+import { deleteDoc, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { useShellLayout } from './shellLayout';
+import { GRIGLIATA_PAGE_PRESENCE_COLLECTION } from '../grigliata/presence';
 
 const NAV_ITEMS = [
   {
@@ -361,10 +361,28 @@ const Navbar = () => {
     NAV_ITEMS.find((item) => item.path === location.pathname)?.label || 'Navigation'
   ), [location.pathname]);
 
+  const clearGrigliataPagePresenceBeforeLogout = async () => {
+    if (location.pathname !== '/grigliata' || !user?.uid) {
+      return;
+    }
+
+    try {
+      const presenceDocRef = doc(db, GRIGLIATA_PAGE_PRESENCE_COLLECTION, user.uid);
+      const presenceDocSnap = await getDoc(presenceDocRef);
+
+      if (presenceDocSnap.exists()) {
+        await deleteDoc(presenceDocRef);
+      }
+    } catch (error) {
+      console.error('Failed to clear Grigliata page presence before logout:', error);
+    }
+  };
+
   const handleLogout = async () => {
     try {
       setIsLoggingOut(true);
       closeMobileNav();
+      await clearGrigliataPagePresenceBeforeLogout();
       await signOut(auth);
       // AuthContext will handle clearing localStorage and state
       navigate('/');

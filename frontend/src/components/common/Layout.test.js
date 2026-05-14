@@ -89,7 +89,9 @@ jest.mock('firebase/storage', () => ({
 }));
 
 jest.mock('firebase/firestore', () => ({
+  deleteDoc: jest.fn(() => Promise.resolve()),
   doc: jest.fn((db, ...segments) => ({ path: segments.join('/') })),
+  getDoc: jest.fn(() => Promise.resolve({ exists: () => false })),
   updateDoc: jest.fn(() => Promise.resolve()),
 }));
 
@@ -144,6 +146,15 @@ describe('Layout shell', () => {
   beforeEach(() => {
     window.localStorage.clear();
     useAuth.mockReturnValue(buildAuthState('dm'));
+
+    const firebaseAuth = require('firebase/auth');
+    firebaseAuth.signOut.mockClear().mockResolvedValue(undefined);
+
+    const firestore = require('firebase/firestore');
+    firestore.deleteDoc.mockClear().mockResolvedValue(undefined);
+    firestore.doc.mockClear().mockImplementation((db, ...segments) => ({ path: segments.join('/') }));
+    firestore.getDoc.mockClear().mockResolvedValue({ exists: () => false });
+    firestore.updateDoc.mockClear().mockResolvedValue(undefined);
   });
 
   test('renders role-gated navigation items for desktop roles', () => {
@@ -215,5 +226,56 @@ describe('Layout shell', () => {
 
     fireEvent.click(screen.getByRole('link', { name: 'Bazaar' }));
     await waitFor(() => expect(drawer.className).toContain('-translate-x-full'));
+  });
+
+  test('clears Grigliata page presence before signing out from Grigliata', async () => {
+    setDesktopMatch(true);
+    useAuth.mockReturnValue(buildAuthState('player'));
+
+    const firebaseAuth = require('firebase/auth');
+    const firestore = require('firebase/firestore');
+    firestore.getDoc.mockResolvedValue({ exists: () => true });
+
+    renderLayout(['/grigliata']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Logout' }));
+
+    await waitFor(() => {
+      expect(firebaseAuth.signOut).toHaveBeenCalled();
+    });
+
+    expect(firestore.doc).toHaveBeenCalledWith(
+      expect.anything(),
+      'grigliata_page_presence',
+      'user-1'
+    );
+    expect(firestore.getDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_page_presence/user-1' })
+    );
+    expect(firestore.deleteDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_page_presence/user-1' })
+    );
+    expect(firestore.deleteDoc.mock.invocationCallOrder[0]).toBeLessThan(
+      firebaseAuth.signOut.mock.invocationCallOrder[0]
+    );
+  });
+
+  test('does not query Grigliata page presence when logging out elsewhere', async () => {
+    setDesktopMatch(true);
+    useAuth.mockReturnValue(buildAuthState('player'));
+
+    const firebaseAuth = require('firebase/auth');
+    const firestore = require('firebase/firestore');
+
+    renderLayout(['/home']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Logout' }));
+
+    await waitFor(() => {
+      expect(firebaseAuth.signOut).toHaveBeenCalled();
+    });
+
+    expect(firestore.getDoc).not.toHaveBeenCalled();
+    expect(firestore.deleteDoc).not.toHaveBeenCalled();
   });
 });

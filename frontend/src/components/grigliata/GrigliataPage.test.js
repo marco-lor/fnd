@@ -200,6 +200,9 @@ jest.mock('../common/shellLayout', () => ({
 }));
 
 jest.mock('../firebaseConfig', () => ({
+  auth: {
+    currentUser: { uid: 'user-1' },
+  },
   db: {},
   functions: {},
   storage: {},
@@ -921,6 +924,9 @@ describe('GrigliataPage', () => {
       return batch;
     });
 
+    const firebaseConfig = require('../firebaseConfig');
+    firebaseConfig.auth.currentUser = { uid: 'user-1' };
+
     const storageApi = require('firebase/storage');
     storageApi.deleteObject.mockClear().mockResolvedValue(undefined);
     storageApi.getDownloadURL.mockClear().mockResolvedValue('https://example.com/uploaded-map.png');
@@ -1136,6 +1142,61 @@ describe('GrigliataPage', () => {
         expect.objectContaining({ path: 'grigliata_page_presence/user-1' })
       );
     });
+  });
+
+  test('skips page presence delete when auth has already cleared on unmount', async () => {
+    const firebaseConfig = require('../firebaseConfig');
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'player',
+        characterId: 'Kael',
+        settings: {
+          grigliata_draw_color: 'ion-cyan',
+          grigliata_share_interactions: false,
+        },
+        imageUrl: '',
+        imagePath: '',
+      },
+      loading: false,
+    });
+
+    const { unmount } = render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_page_presence/user-1' }),
+        expect.objectContaining({ ownerUid: 'user-1' }),
+        { merge: true }
+      );
+    });
+
+    firestore.deleteDoc.mockClear();
+    firestore.setDoc.mockClear();
+    firebaseConfig.auth.currentUser = null;
+
+    unmount();
+
+    await act(async () => {
+      jest.advanceTimersByTime(25_000);
+      await Promise.resolve();
+    });
+
+    expect(firestore.deleteDoc).not.toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_page_presence/user-1' })
+    );
+    expect(firestore.setDoc).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).not.toHaveBeenCalledWith(
+      'Failed to clear Grigliata page presence:',
+      expect.anything()
+    );
+
+    consoleErrorSpy.mockRestore();
   });
 
   test('does not write page presence for DM users', async () => {

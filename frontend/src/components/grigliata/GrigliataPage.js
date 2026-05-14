@@ -25,7 +25,7 @@ import {
 import { httpsCallable } from 'firebase/functions';
 import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
 import { useAuth } from '../../AuthContext';
-import { db, functions, storage } from '../firebaseConfig';
+import { auth, db, functions, storage } from '../firebaseConfig';
 import BackgroundGalleryPanel from './BackgroundGalleryPanel';
 import GrigliataLightingImportPanel from './GrigliataLightingImportPanel';
 import MusicLibraryPanel from './MusicLibraryPanel';
@@ -670,7 +670,15 @@ export default function GrigliataPage() {
     return () => {
       isActive = false;
       window.clearInterval(intervalId);
+      if (auth.currentUser?.uid !== currentUserId) {
+        return;
+      }
+
       void deleteDoc(presenceDocRef).catch((error) => {
+        if (error?.code === 'permission-denied' && auth.currentUser?.uid !== currentUserId) {
+          return;
+        }
+
         console.error('Failed to clear Grigliata page presence:', error);
       });
     };
