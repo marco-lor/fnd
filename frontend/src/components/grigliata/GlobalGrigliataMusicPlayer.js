@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
 import {
@@ -8,15 +8,28 @@ import {
   GRIGLIATA_MUSIC_MUTED_FIELD,
   GRIGLIATA_MUSIC_PLAYBACK_COLLECTION,
   GRIGLIATA_MUSIC_PLAYBACK_DOC_ID,
+  GRIGLIATA_MUSIC_PLAYBACK_SESSION_COLLECTION,
   GRIGLIATA_MUSIC_PLAYBACK_STATUSES,
+  normalizeGrigliataMusicPlaybackSession,
   normalizeGrigliataMusicPlaybackState,
+  sortGrigliataMusicPlaybackSessions,
 } from './music';
 
 const clearAudioSource = (audio) => {
   if (!audio) return;
 
-  audio.pause();
-  audio.currentTime = 0;
+  try {
+    audio.pause();
+  } catch (error) {
+    // Ignore cleanup failures in browsers that disallow controlling detached media.
+  }
+
+  try {
+    audio.currentTime = 0;
+  } catch (error) {
+    // Ignore cleanup failures in browsers that disallow seeking detached media.
+  }
+
   if (audio.dataset.grigliataAudioUrl) {
     delete audio.dataset.grigliataAudioUrl;
   }
@@ -27,6 +40,13 @@ const clearAudioSource = (audio) => {
     // Ignore cleanup failures in browsers that disallow loading detached media.
   }
 };
+
+const clearAudioSources = (audioMap) => {
+  audioMap.forEach((audio) => clearAudioSource(audio));
+  audioMap.clear();
+};
+
+const getPlaybackSessionId = (session) => session?.id || session?.trackId || '';
 
 const ensureAudioSource = async (audio, audioUrl) => {
   if (!audio || !audioUrl) return;
@@ -128,31 +148,46 @@ export const subscribeToGrigliataMusicPlayback = (onPlaybackState, onError) => o
   (snapshot) => {
     onPlaybackState(
       snapshot.exists()
-        ? normalizeGrigliataMusicPlaybackState(snapshot.data())
+        ? normalizeGrigliataMusicPlaybackState(snapshot.data({ serverTimestamps: 'estimate' }))
         : EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE
     );
   },
   onError
 );
 
+export const subscribeToGrigliataMusicPlaybackSessions = (onPlaybackSessions, onError) => onSnapshot(
+  collection(db, GRIGLIATA_MUSIC_PLAYBACK_SESSION_COLLECTION),
+  (snapshot) => {
+    const nextSessions = snapshot.docs.map((docSnap) => ({
+      id: docSnap.id,
+      ...docSnap.data({ serverTimestamps: 'estimate' }),
+    }));
+    onPlaybackSessions(sortGrigliataMusicPlaybackSessions(nextSessions));
+  },
+  onError
+);
+
 export default function GlobalGrigliataMusicPlayer({
   subscribeToPlaybackState = subscribeToGrigliataMusicPlayback,
+  subscribeToPlaybackSessions = subscribeToGrigliataMusicPlaybackSessions,
 }) {
   const { user, userData } = useAuth();
-  const audioRef = useRef(null);
+  const audioRefs = useRef(new Map());
   const [playbackState, setPlaybackState] = useState(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
-  const [isUnlockPromptVisible, setIsUnlockPromptVisible] = useState(false);
+  const [playbackSessions, setPlaybackSessions] = useState([]);
+  const [blockedPlaybackSessionIds, setBlockedPlaybackSessionIds] = useState([]);
   const isMusicMuted = userData?.settings?.[GRIGLIATA_MUSIC_MUTED_FIELD] === true;
 
   useEffect(() => {
     if (!user?.uid) {
       setPlaybackState(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
-      setIsUnlockPromptVisible(false);
-      clearAudioSource(audioRef.current);
+      setPlaybackSessions([]);
+      setBlockedPlaybackSessionIds([]);
+      clearAudioSources(audioRefs.current);
       return undefined;
     }
 
-    const unsubscribe = subscribeToPlaybackState(
+    const unsubscribePlaybackState = subscribeToPlaybackState(
       (nextPlaybackState) => {
         setPlaybackState(nextPlaybackState || EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
       },
@@ -162,64 +197,126 @@ export default function GlobalGrigliataMusicPlayer({
       }
     );
 
+    const unsubscribePlaybackSessions = subscribeToPlaybackSessions(
+      (nextPlaybackSessions) => {
+        setPlaybackSessions(sortGrigliataMusicPlaybackSessions(nextPlaybackSessions));
+      },
+      (error) => {
+        console.error('Failed to load Grigliata music playback sessions:', error);
+        setPlaybackSessions([]);
+      }
+    );
+
     return () => {
-      if (typeof unsubscribe === 'function') {
-        unsubscribe();
+      if (typeof unsubscribePlaybackState === 'function') {
+        unsubscribePlaybackState();
+      }
+      if (typeof unsubscribePlaybackSessions === 'function') {
+        unsubscribePlaybackSessions();
       }
     };
-  }, [subscribeToPlaybackState, user?.uid]);
+  }, [subscribeToPlaybackSessions, subscribeToPlaybackState, user?.uid]);
 
   const normalizedPlaybackState = useMemo(
     () => normalizeGrigliataMusicPlaybackState(playbackState),
     [playbackState]
   );
+  const normalizedPlaybackSessions = useMemo(() => {
+    if (!user?.uid) {
+      return [];
+    }
 
-  const applyPlaybackState = useCallback(async (nextPlaybackState) => {
-    const audio = audioRef.current;
+    const activeSessions = sortGrigliataMusicPlaybackSessions(playbackSessions);
+    if (activeSessions.length > 0) {
+      return activeSessions;
+    }
+
+    return [{
+      ...normalizeGrigliataMusicPlaybackSession(normalizedPlaybackState),
+      id: 'legacy-current',
+    }];
+  }, [normalizedPlaybackState, playbackSessions, user?.uid]);
+  const isUnlockPromptVisible = blockedPlaybackSessionIds.length > 0;
+
+  const markPlaybackSessionBlocked = useCallback((sessionId) => {
+    if (!sessionId) return;
+
+    setBlockedPlaybackSessionIds((currentIds) => (
+      currentIds.includes(sessionId) ? currentIds : [...currentIds, sessionId]
+    ));
+  }, []);
+
+  const clearBlockedPlaybackSession = useCallback((sessionId) => {
+    if (!sessionId) return;
+
+    setBlockedPlaybackSessionIds((currentIds) => currentIds.filter((currentId) => currentId !== sessionId));
+  }, []);
+
+  const registerPlaybackSessionAudio = useCallback((sessionId, audio) => {
+    if (!sessionId) return;
+
+    if (audio) {
+      audioRefs.current.set(sessionId, audio);
+    }
+  }, []);
+
+  useEffect(() => () => {
+    clearAudioSources(audioRefs.current);
+  }, []);
+
+  const applyPlaybackSession = useCallback(async (nextPlaybackSession) => {
+    const normalizedSession = normalizeGrigliataMusicPlaybackSession(nextPlaybackSession);
+    const sessionId = getPlaybackSessionId(normalizedSession);
+    const audio = audioRefs.current.get(sessionId);
     if (!audio) return;
 
-    const normalizedState = normalizeGrigliataMusicPlaybackState(nextPlaybackState);
-    applyAudioVolume(audio, normalizedState.volume);
+    applyAudioVolume(audio, normalizedPlaybackState.volume);
     applyAudioMuted(audio, isMusicMuted);
+    audio.loop = normalizedSession.loop === true;
 
     try {
       if (
-        normalizedState.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED
-        || !normalizedState.audioUrl
+        normalizedSession.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED
+        || !normalizedSession.audioUrl
       ) {
-        setIsUnlockPromptVisible(false);
+        clearBlockedPlaybackSession(sessionId);
         clearAudioSource(audio);
         return;
       }
 
-      await ensureAudioSource(audio, normalizedState.audioUrl);
+      await ensureAudioSource(audio, normalizedSession.audioUrl);
 
-      if (normalizedState.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PAUSED) {
-        await seekAudio(audio, normalizedState.offsetMs / 1000);
+      if (normalizedSession.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PAUSED) {
+        await seekAudio(audio, normalizedSession.offsetMs / 1000);
         audio.pause();
-        setIsUnlockPromptVisible(false);
+        clearBlockedPlaybackSession(sessionId);
         return;
       }
 
-      const targetOffsetMs = computeGrigliataMusicPlaybackOffsetMs(normalizedState);
-      if (normalizedState.durationMs > 0 && targetOffsetMs >= normalizedState.durationMs) {
-        await seekAudio(audio, normalizedState.durationMs / 1000);
+      const targetOffsetMs = computeGrigliataMusicPlaybackOffsetMs(normalizedSession);
+      if (
+        !normalizedSession.loop
+        && normalizedSession.durationMs > 0
+        && targetOffsetMs >= normalizedSession.durationMs
+      ) {
+        await seekAudio(audio, normalizedSession.durationMs / 1000);
         audio.pause();
-        setIsUnlockPromptVisible(false);
+        clearBlockedPlaybackSession(sessionId);
         return;
       }
 
       await seekAudio(audio, targetOffsetMs / 1000);
       await audio.play();
-      setIsUnlockPromptVisible(false);
+      clearBlockedPlaybackSession(sessionId);
     } catch (error) {
       if (error?.name === 'AbortError') {
         return;
       }
 
       if (isAutoplayBlockedError(error)) {
-        console.error('Grigliata music playback was blocked by the browser:', error);
-        setIsUnlockPromptVisible(!isMusicMuted);
+        if (!isMusicMuted) {
+          markPlaybackSessionBlocked(sessionId);
+        }
         return;
       }
 
@@ -230,16 +327,29 @@ export default function GlobalGrigliataMusicPlayer({
         console.error('Failed to start Grigliata music playback:', error);
       }
 
-      setIsUnlockPromptVisible(false);
+      clearBlockedPlaybackSession(sessionId);
     }
-  }, [isMusicMuted]);
+  }, [clearBlockedPlaybackSession, isMusicMuted, markPlaybackSessionBlocked, normalizedPlaybackState.volume]);
+
+  useEffect(() => {
+    const activeSessionIds = new Set(normalizedPlaybackSessions.map(getPlaybackSessionId).filter(Boolean));
+
+    audioRefs.current.forEach((audio, sessionId) => {
+      if (!activeSessionIds.has(sessionId)) {
+        clearAudioSource(audio);
+        audioRefs.current.delete(sessionId);
+      }
+    });
+
+    setBlockedPlaybackSessionIds((currentIds) => currentIds.filter((sessionId) => activeSessionIds.has(sessionId)));
+  }, [normalizedPlaybackSessions]);
 
   useEffect(() => {
     let cancelled = false;
 
     const syncPlayback = async () => {
       if (cancelled) return;
-      await applyPlaybackState(normalizedPlaybackState);
+      await Promise.all(normalizedPlaybackSessions.map((session) => applyPlaybackSession(session)));
     };
 
     void syncPlayback();
@@ -247,36 +357,37 @@ export default function GlobalGrigliataMusicPlayer({
     return () => {
       cancelled = true;
     };
-  }, [applyPlaybackState, normalizedPlaybackState]);
+  }, [applyPlaybackSession, normalizedPlaybackSessions]);
 
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return undefined;
-
-    const handleEnded = () => {
-      setIsUnlockPromptVisible(false);
-    };
-
-    audio.addEventListener('ended', handleEnded);
-    return () => audio.removeEventListener('ended', handleEnded);
-  }, []);
+  const handlePlaybackSessionEnded = useCallback((sessionId) => {
+    clearBlockedPlaybackSession(sessionId);
+  }, [clearBlockedPlaybackSession]);
 
   const handleUnlockAudio = useCallback(async () => {
-    await applyPlaybackState(normalizedPlaybackState);
-  }, [applyPlaybackState, normalizedPlaybackState]);
+    await Promise.all(normalizedPlaybackSessions.map((session) => applyPlaybackSession(session)));
+  }, [applyPlaybackSession, normalizedPlaybackSessions]);
 
   return (
     <>
-      <audio
-        ref={audioRef}
-        preload="auto"
-        className="hidden"
-        aria-hidden="true"
-      />
+      {normalizedPlaybackSessions.map((session) => {
+        const sessionId = getPlaybackSessionId(session);
+        if (!sessionId) return null;
+
+        return (
+          <audio
+            key={sessionId}
+            ref={(audio) => registerPlaybackSessionAudio(sessionId, audio)}
+            preload="auto"
+            className="hidden"
+            aria-hidden="true"
+            onEnded={() => handlePlaybackSessionEnded(sessionId)}
+          />
+        );
+      })}
 
       {isUnlockPromptVisible
         && !isMusicMuted
-        && normalizedPlaybackState.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING && (
+        && normalizedPlaybackSessions.some((session) => session.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING) && (
         <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-2xl border border-amber-400/40 bg-slate-950/95 p-4 text-white shadow-2xl backdrop-blur">
           <p className="text-sm font-semibold text-amber-200">Enable audio</p>
           <p className="mt-1 text-xs text-slate-300">

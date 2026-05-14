@@ -4,6 +4,7 @@ import {getStorage} from "firebase-admin/storage";
 import {randomUUID} from "crypto";
 
 const DEFAULT_GRIGLIATA_MUSIC_VOLUME = 0.65;
+const GRIGLIATA_MUSIC_PLAYBACK_SESSION_COLLECTION = "grigliata_music_playback_sessions";
 
 const clampMusicVolume = (volume: unknown) => {
   if (typeof volume !== "number" || !Number.isFinite(volume)) {
@@ -27,6 +28,28 @@ const STOPPED_PLAYBACK_STATE = (updatedBy: string | null, volume: number) => ({
   updatedBy,
 });
 
+const deletePlaybackSessionsForTrack = async (trackId: string) => {
+  if (!trackId) {
+    return;
+  }
+
+  const sessionsSnap = await admin.firestore()
+    .collection(GRIGLIATA_MUSIC_PLAYBACK_SESSION_COLLECTION)
+    .where("trackId", "==", trackId)
+    .get();
+
+  if (sessionsSnap.empty) {
+    return;
+  }
+
+  const batch = admin.firestore().batch();
+  sessionsSnap.docs.forEach((sessionDoc) => {
+    batch.delete(sessionDoc.ref);
+  });
+
+  await batch.commit();
+};
+
 export const cleanupGrigliataMusicTrack = onDocumentDeleted(
   {
     document: "grigliata_music_tracks/{trackId}",
@@ -49,6 +72,8 @@ export const cleanupGrigliataMusicTrack = onDocumentDeleted(
         });
       }
     }
+
+    await deletePlaybackSessionsForTrack(event.params.trackId);
 
     const playbackRef = admin.firestore().doc("grigliata_music_playback/current");
     const playbackSnap = await playbackRef.get();

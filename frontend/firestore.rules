@@ -1089,6 +1089,68 @@ service cloud.firestore {
         );
     }
 
+    function isValidGrigliataMusicPlaybackSession(data, sessionId) {
+      return data.keys().hasAll([
+          "status",
+          "trackId",
+          "trackName",
+          "audioUrl",
+          "durationMs",
+          "offsetMs",
+          "loop",
+          "startedAt",
+          "startedAtMs",
+          "commandId",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.keys().hasOnly([
+          "status",
+          "trackId",
+          "trackName",
+          "audioUrl",
+          "durationMs",
+          "offsetMs",
+          "loop",
+          "startedAt",
+          "startedAtMs",
+          "commandId",
+          "updatedAt",
+          "updatedBy"
+        ])
+        && data.status is string
+        && data.status in ["playing", "paused"]
+        && data.trackId is string
+        && data.trackId == sessionId
+        && data.trackName is string
+        && data.trackName.size() > 0
+        && data.audioUrl is string
+        && data.audioUrl.size() > 0
+        && data.durationMs is int
+        && data.durationMs > 0
+        && data.offsetMs is int
+        && data.offsetMs >= 0
+        && data.offsetMs <= data.durationMs
+        && data.loop is bool
+        && data.startedAtMs is int
+        && data.startedAtMs >= 0
+        && data.commandId is string
+        && data.commandId.size() > 0
+        && (data.updatedBy == null || data.updatedBy is string)
+        && (
+          (
+            data.status == "paused"
+            && data.startedAt == null
+            && data.startedAtMs == 0
+          )
+          || (
+            data.status == "playing"
+            && data.startedAt != null
+            && data.startedAtMs > 0
+          )
+        );
+    }
+
     function isGrigliataPlacementVisibleToPlayers(data) {
       return !data.keys().hasAny(["isVisibleToPlayers"])
         || data.isVisibleToPlayers == true;
@@ -1376,6 +1438,16 @@ service cloud.firestore {
       allow create, update: if stateId == "current"
         && isGrigliataManager()
         && isValidGrigliataMusicPlayback(request.resource.data);
+    }
+
+    match /grigliata_music_playback_sessions/{sessionId} {
+      allow read: if isSignedIn();
+
+      allow create, update: if isGrigliataManager()
+        && isValidGrigliataMusicPlaybackSession(request.resource.data, sessionId);
+
+      allow delete: if isGrigliataManager()
+        && isValidGrigliataMusicPlaybackSession(resource.data, sessionId);
     }
 
     match /grigliata_tokens/{tokenId} {

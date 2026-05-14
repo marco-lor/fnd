@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { FiDownload, FiPause, FiPlay, FiSquare, FiTrash2 } from 'react-icons/fi';
+import React, { useEffect, useMemo, useState } from 'react';
+import { FiDownload, FiPause, FiPlay, FiRepeat, FiSquare, FiTrash2 } from 'react-icons/fi';
 import {
+  computeGrigliataMusicPlaybackOffsetMs,
   GRIGLIATA_MUSIC_PLAYBACK_STATUSES,
   normalizeGrigliataMusicVolume,
 } from './music';
@@ -26,6 +27,13 @@ const formatSizeBytes = (sizeBytes) => {
 
 const toVolumePercent = (volume) => Math.round(normalizeGrigliataMusicVolume(volume) * 100);
 const toVolumeValue = (value) => normalizeGrigliataMusicVolume(Number(value || 0) / 100);
+const toSeekOffsetMs = (value, durationMs) => {
+  const numericValue = Number(value || 0);
+  const numericDuration = Math.max(0, Number(durationMs || 0));
+
+  if (!Number.isFinite(numericValue)) return 0;
+  return Math.min(numericDuration, Math.max(0, Math.round(numericValue)));
+};
 const VOLUME_COMMIT_KEYS = new Set([
   'ArrowDown',
   'ArrowLeft',
@@ -46,9 +54,15 @@ const getMusicActionClassName = (toneClassName) => (
 
 const buildTrackActionLabel = (actionLabel, trackName) => `${actionLabel} ${trackName}`;
 
+const getSessionProgressMs = (session, now) => {
+  if (!session) return 0;
+  return computeGrigliataMusicPlaybackOffsetMs(session, now);
+};
+
 export default function MusicLibraryPanel({
   tracks,
   activePlaybackState,
+  activePlaybackSessions = [],
   uploadName,
   selectedFileName,
   uploadError,
@@ -62,22 +76,71 @@ export default function MusicLibraryPanel({
   onSharedVolumeChange,
   onSharedVolumeCommit,
   onPlayTrack,
+  onPlayTrackInLoop,
   onPauseTrack,
   onResumeTrack,
+  onSeekTrack,
   onStopTrack,
   onDeleteTrack,
 }) {
-  const activeTrackId = activePlaybackState?.trackId || '';
-  const activeStatus = activePlaybackState?.status || GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED;
   const isPlaybackActionPending = !!playbackActionTrackId;
   const [sharedVolumePercent, setSharedVolumePercent] = useState(() => toVolumePercent(activePlaybackState?.volume));
+  const [playbackClockMs, setPlaybackClockMs] = useState(() => Date.now());
+  const [seekDraftOffsetsByTrackId, setSeekDraftOffsetsByTrackId] = useState({});
+  const playbackSessionsByTrackId = useMemo(() => {
+    const nextMap = new Map();
+
+    (Array.isArray(activePlaybackSessions) ? activePlaybackSessions : []).forEach((session) => {
+      if (session?.trackId) {
+        nextMap.set(session.trackId, session);
+      }
+    });
+
+    return nextMap;
+  }, [activePlaybackSessions]);
 
   useEffect(() => {
     setSharedVolumePercent(toVolumePercent(activePlaybackState?.volume));
   }, [activePlaybackState?.volume]);
 
+  useEffect(() => {
+    if (!activePlaybackSessions.some((session) => session?.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING)) {
+      setPlaybackClockMs(Date.now());
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setPlaybackClockMs(Date.now());
+    }, 500);
+
+    return () => window.clearInterval(intervalId);
+  }, [activePlaybackSessions]);
+
+  useEffect(() => {
+    setSeekDraftOffsetsByTrackId((currentDrafts) => {
+      const activeTrackIds = new Set(activePlaybackSessions.map((session) => session?.trackId).filter(Boolean));
+      const nextDrafts = Object.fromEntries(
+        Object.entries(currentDrafts).filter(([trackId]) => activeTrackIds.has(trackId))
+      );
+
+      return Object.keys(nextDrafts).length === Object.keys(currentDrafts).length
+        ? currentDrafts
+        : nextDrafts;
+    });
+  }, [activePlaybackSessions]);
+
   const commitSharedVolume = (nextPercent) => {
     onSharedVolumeCommit?.(toVolumeValue(nextPercent));
+  };
+
+  const commitTrackSeek = (track, session, nextOffsetMs) => {
+    if (!track?.id || !session) return;
+    onSeekTrack?.(track, session, nextOffsetMs);
+    setSeekDraftOffsetsByTrackId((currentDrafts) => {
+      const nextDrafts = { ...currentDrafts };
+      delete nextDrafts[track.id];
+      return nextDrafts;
+    });
   };
 
   return (
@@ -179,11 +242,21 @@ export default function MusicLibraryPanel({
             ) : (
               tracks.map((track) => {
                 const trackName = track.name || 'Untitled Track';
-                const isActiveTrack = track.id === activeTrackId;
+                const activeSession = playbackSessionsByTrackId.get(track.id) || null;
+                const activeStatus = activeSession?.status || GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED;
+                const isActiveTrack = !!activeSession;
                 const isPlaying = isActiveTrack && activeStatus === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING;
                 const isPaused = isActiveTrack && activeStatus === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PAUSED;
                 const isDeleting = deletingTrackId === track.id;
                 const isActionPending = playbackActionTrackId === track.id;
+                const durationMs = Math.max(0, Math.round(Number(activeSession?.durationMs || track.durationMs || 0)));
+                const progressMs = durationMs > 0
+                  ? getSessionProgressMs(activeSession, playbackClockMs)
+                  : 0;
+                const hasSeekDraft = Object.prototype.hasOwnProperty.call(seekDraftOffsetsByTrackId, track.id);
+                const seekOffsetMs = hasSeekDraft
+                  ? seekDraftOffsetsByTrackId[track.id]
+                  : progressMs;
 
                 return (
                   <div key={track.id} className="px-3 py-3">
@@ -201,6 +274,11 @@ export default function MusicLibraryPanel({
                               Paused
                             </span>
                           )}
+                          {isActiveTrack && activeSession?.loop === true && (
+                            <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-sky-300">
+                              Loop
+                            </span>
+                          )}
                         </div>
 
                         <p className="mt-1 text-xs text-slate-400 truncate">
@@ -212,25 +290,77 @@ export default function MusicLibraryPanel({
                       </div>
                     </div>
 
+                    {isActiveTrack && durationMs > 0 && (
+                      <div className="mt-3">
+                        <div className="mb-1 flex items-center justify-between gap-3 text-[11px] text-slate-500">
+                          <span>{formatDurationMs(seekOffsetMs)}</span>
+                          <span>{formatDurationMs(durationMs)}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max={durationMs}
+                          step="250"
+                          value={seekOffsetMs}
+                          disabled={isPlaybackActionPending || isDeleting}
+                          aria-label={buildTrackActionLabel('Seek', trackName)}
+                          onChange={(event) => {
+                            const nextOffsetMs = toSeekOffsetMs(event.target.value, durationMs);
+                            setSeekDraftOffsetsByTrackId((currentDrafts) => ({
+                              ...currentDrafts,
+                              [track.id]: nextOffsetMs,
+                            }));
+                          }}
+                          onMouseUp={(event) => commitTrackSeek(track, activeSession, toSeekOffsetMs(event.currentTarget.value, durationMs))}
+                          onTouchEnd={(event) => commitTrackSeek(track, activeSession, toSeekOffsetMs(event.currentTarget.value, durationMs))}
+                          onBlur={(event) => {
+                            if (hasSeekDraft) {
+                              commitTrackSeek(track, activeSession, toSeekOffsetMs(event.currentTarget.value, durationMs));
+                            }
+                          }}
+                          onKeyUp={(event) => {
+                            if (VOLUME_COMMIT_KEYS.has(event.key)) {
+                              commitTrackSeek(track, activeSession, toSeekOffsetMs(event.currentTarget.value, durationMs));
+                            }
+                          }}
+                          className="h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-800 accent-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                        />
+                      </div>
+                    )}
+
                     <div className="mt-3 flex flex-wrap gap-2">
                       {!isActiveTrack && (
-                        <button
-                          type="button"
-                          onClick={() => onPlayTrack(track)}
-                          disabled={isPlaybackActionPending || isDeleting}
-                          aria-label={buildTrackActionLabel('Play', trackName)}
-                          title={isActionPending && playbackActionType === 'play' ? `Starting ${trackName}` : buildTrackActionLabel('Play', trackName)}
-                          aria-busy={isActionPending && playbackActionType === 'play' ? true : undefined}
-                          className={getMusicActionClassName('border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10')}
-                        >
-                          <FiPlay className={MUSIC_ACTION_ICON_CLASS_NAME} />
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => onPlayTrack(track)}
+                            disabled={isPlaybackActionPending || isDeleting}
+                            aria-label={buildTrackActionLabel('Play', trackName)}
+                            title={isActionPending && playbackActionType === 'play' ? `Starting ${trackName}` : buildTrackActionLabel('Play', trackName)}
+                            aria-busy={isActionPending && playbackActionType === 'play' ? true : undefined}
+                            className={getMusicActionClassName('border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10')}
+                          >
+                            <FiPlay className={MUSIC_ACTION_ICON_CLASS_NAME} />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => onPlayTrackInLoop(track)}
+                            disabled={isPlaybackActionPending || isDeleting}
+                            aria-label={buildTrackActionLabel('Play in loop', trackName)}
+                            title={isActionPending && playbackActionType === 'loop' ? `Starting ${trackName} in loop` : buildTrackActionLabel('Play in loop', trackName)}
+                            aria-busy={isActionPending && playbackActionType === 'loop' ? true : undefined}
+                            className={getMusicActionClassName('border-sky-500/40 text-sky-200 hover:bg-sky-500/10')}
+                          >
+                            <FiRepeat className={MUSIC_ACTION_ICON_CLASS_NAME} />
+                          </button>
+                        </>
                       )}
 
                       {isPlaying && (
                         <button
                           type="button"
-                          onClick={() => onPauseTrack(track)}
+                          onClick={() => onPauseTrack(track, activeSession)}
                           disabled={isPlaybackActionPending || isDeleting}
                           aria-label={buildTrackActionLabel('Pause', trackName)}
                           title={isActionPending && playbackActionType === 'pause' ? `Pausing ${trackName}` : buildTrackActionLabel('Pause', trackName)}
@@ -244,7 +374,7 @@ export default function MusicLibraryPanel({
                       {isPaused && (
                         <button
                           type="button"
-                          onClick={() => onResumeTrack(track)}
+                          onClick={() => onResumeTrack(track, activeSession)}
                           disabled={isPlaybackActionPending || isDeleting}
                           aria-label={buildTrackActionLabel('Resume', trackName)}
                           title={isActionPending && playbackActionType === 'resume' ? `Resuming ${trackName}` : buildTrackActionLabel('Resume', trackName)}
@@ -258,7 +388,7 @@ export default function MusicLibraryPanel({
                       {isActiveTrack && (
                         <button
                           type="button"
-                          onClick={() => onStopTrack(track)}
+                          onClick={() => onStopTrack(track, activeSession)}
                           disabled={isPlaybackActionPending || isDeleting}
                           aria-label={buildTrackActionLabel('Stop', trackName)}
                           title={isActionPending && playbackActionType === 'stop' ? `Stopping ${trackName}` : buildTrackActionLabel('Stop', trackName)}

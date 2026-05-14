@@ -848,6 +848,7 @@ describe('GrigliataPage', () => {
       grigliata_live_interactions: [],
       grigliata_page_presence: [],
       grigliata_music_tracks: [],
+      grigliata_music_playback_sessions: [],
       foes: [],
     };
     mockFirestoreState.docs = {
@@ -6077,7 +6078,7 @@ describe('GrigliataPage', () => {
     }
   });
 
-  test('plays, pauses, resumes, and stops shared music playback', async () => {
+  test('plays, loops, seeks, pauses, resumes, and stops shared music sessions independently', async () => {
     setManagerAuth();
     jest.setSystemTime(new Date('2026-04-15T18:00:10.000Z'));
 
@@ -6092,6 +6093,16 @@ describe('GrigliataPage', () => {
           contentType: 'audio/mpeg',
           sizeBytes: 2048,
           durationMs: 120_000,
+        },
+        {
+          id: 'track-2',
+          name: 'Cavern Drone',
+          fileName: 'cavern-drone.mp3',
+          audioUrl: 'https://example.com/audio/cavern-drone.mp3',
+          audioPath: 'grigliata/music/user-1/cavern-drone.mp3',
+          contentType: 'audio/mpeg',
+          sizeBytes: 4096,
+          durationMs: 240_000,
         },
       ]);
     });
@@ -6127,7 +6138,7 @@ describe('GrigliataPage', () => {
 
     await waitFor(() => {
       expect(firestore.setDoc).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'grigliata_music_playback/current' }),
+        expect.objectContaining({ path: 'grigliata_music_playback_sessions/track-1' }),
         expect.objectContaining({
           status: 'playing',
           trackId: 'track-1',
@@ -6135,7 +6146,30 @@ describe('GrigliataPage', () => {
           audioUrl: 'https://example.com/audio/battle-theme.mp3',
           durationMs: 120_000,
           offsetMs: 0,
-          volume: 0.35,
+          loop: false,
+          startedAt: { __type: 'serverTimestamp' },
+          updatedBy: 'user-1',
+          commandId: expect.any(String),
+        })
+      );
+    });
+    firestore.setDoc.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^play in loop cavern drone$/i }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_playback_sessions/track-2' }),
+        expect.objectContaining({
+          status: 'playing',
+          trackId: 'track-2',
+          trackName: 'Cavern Drone',
+          audioUrl: 'https://example.com/audio/cavern-drone.mp3',
+          durationMs: 240_000,
+          offsetMs: 0,
+          loop: true,
           startedAt: { __type: 'serverTimestamp' },
           updatedBy: 'user-1',
           commandId: expect.any(String),
@@ -6145,23 +6179,41 @@ describe('GrigliataPage', () => {
     firestore.setDoc.mockClear();
 
     act(() => {
-      setDocData('grigliata_music_playback/current', {
-        status: 'playing',
-        trackId: 'track-1',
-        trackName: 'Battle Theme',
-        audioUrl: 'https://example.com/audio/battle-theme.mp3',
-        durationMs: 120_000,
-        offsetMs: 2_000,
-        volume: 0.35,
-        startedAt: { toMillis: () => Date.now() - 5_000 },
-        commandId: 'cmd-play',
-        updatedBy: 'user-1',
-      });
+      setCollectionData('grigliata_music_playback_sessions', [
+        {
+          id: 'track-1',
+          status: 'playing',
+          trackId: 'track-1',
+          trackName: 'Battle Theme',
+          audioUrl: 'https://example.com/audio/battle-theme.mp3',
+          durationMs: 120_000,
+          offsetMs: 2_000,
+          loop: false,
+          startedAt: { toMillis: () => Date.now() - 5_000 },
+          commandId: 'cmd-play',
+          updatedBy: 'user-1',
+        },
+        {
+          id: 'track-2',
+          status: 'playing',
+          trackId: 'track-2',
+          trackName: 'Cavern Drone',
+          audioUrl: 'https://example.com/audio/cavern-drone.mp3',
+          durationMs: 240_000,
+          offsetMs: 0,
+          loop: true,
+          startedAt: { toMillis: () => Date.now() - 1_000 },
+          commandId: 'cmd-loop',
+          updatedBy: 'user-1',
+        },
+      ]);
     });
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /^pause battle theme$/i })).not.toBeDisabled();
+      expect(screen.getByText(/^loop$/i)).toBeInTheDocument();
     });
+    expect(screen.getByRole('slider', { name: /^seek battle theme$/i })).toHaveValue('7000');
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /^pause battle theme$/i }));
@@ -6169,12 +6221,12 @@ describe('GrigliataPage', () => {
 
     await waitFor(() => {
       expect(firestore.setDoc).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'grigliata_music_playback/current' }),
+        expect.objectContaining({ path: 'grigliata_music_playback_sessions/track-1' }),
         expect.objectContaining({
           status: 'paused',
           trackId: 'track-1',
           offsetMs: 7_000,
-          volume: 0.35,
+          loop: false,
           startedAt: null,
           updatedBy: 'user-1',
           commandId: expect.any(String),
@@ -6184,18 +6236,91 @@ describe('GrigliataPage', () => {
     firestore.setDoc.mockClear();
 
     act(() => {
-      setDocData('grigliata_music_playback/current', {
-        status: 'paused',
-        trackId: 'track-1',
-        trackName: 'Battle Theme',
-        audioUrl: 'https://example.com/audio/battle-theme.mp3',
-        durationMs: 120_000,
-        offsetMs: 7_000,
-        volume: 0.35,
-        startedAt: null,
-        commandId: 'cmd-pause',
-        updatedBy: 'user-1',
-      });
+      setCollectionData('grigliata_music_playback_sessions', [
+        {
+          id: 'track-1',
+          status: 'paused',
+          trackId: 'track-1',
+          trackName: 'Battle Theme',
+          audioUrl: 'https://example.com/audio/battle-theme.mp3',
+          durationMs: 120_000,
+          offsetMs: 7_000,
+          loop: false,
+          startedAt: null,
+          commandId: 'cmd-pause',
+          updatedBy: 'user-1',
+        },
+        {
+          id: 'track-2',
+          status: 'playing',
+          trackId: 'track-2',
+          trackName: 'Cavern Drone',
+          audioUrl: 'https://example.com/audio/cavern-drone.mp3',
+          durationMs: 240_000,
+          offsetMs: 0,
+          loop: true,
+          startedAt: { toMillis: () => Date.now() - 1_000 },
+          commandId: 'cmd-loop',
+          updatedBy: 'user-1',
+        },
+      ]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('slider', { name: /^seek battle theme$/i })).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      const seekSlider = screen.getByRole('slider', { name: /^seek battle theme$/i });
+      fireEvent.change(seekSlider, { target: { value: '30000' } });
+      fireEvent.mouseUp(seekSlider);
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_playback_sessions/track-1' }),
+        expect.objectContaining({
+          status: 'paused',
+          trackId: 'track-1',
+          offsetMs: 30_000,
+          loop: false,
+          startedAt: null,
+          updatedBy: 'user-1',
+          commandId: expect.any(String),
+        })
+      );
+    });
+    firestore.setDoc.mockClear();
+
+    act(() => {
+      setCollectionData('grigliata_music_playback_sessions', [
+        {
+          id: 'track-1',
+          status: 'paused',
+          trackId: 'track-1',
+          trackName: 'Battle Theme',
+          audioUrl: 'https://example.com/audio/battle-theme.mp3',
+          durationMs: 120_000,
+          offsetMs: 30_000,
+          loop: false,
+          startedAt: null,
+          commandId: 'cmd-seek',
+          updatedBy: 'user-1',
+        },
+        {
+          id: 'track-2',
+          status: 'playing',
+          trackId: 'track-2',
+          trackName: 'Cavern Drone',
+          audioUrl: 'https://example.com/audio/cavern-drone.mp3',
+          durationMs: 240_000,
+          offsetMs: 0,
+          loop: true,
+          startedAt: { toMillis: () => Date.now() - 1_000 },
+          commandId: 'cmd-loop',
+          updatedBy: 'user-1',
+        },
+      ]);
     });
 
     await waitFor(() => {
@@ -6208,12 +6333,12 @@ describe('GrigliataPage', () => {
 
     await waitFor(() => {
       expect(firestore.setDoc).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'grigliata_music_playback/current' }),
+        expect.objectContaining({ path: 'grigliata_music_playback_sessions/track-1' }),
         expect.objectContaining({
           status: 'playing',
           trackId: 'track-1',
-          offsetMs: 7_000,
-          volume: 0.35,
+          offsetMs: 30_000,
+          loop: false,
           startedAt: { __type: 'serverTimestamp' },
           updatedBy: 'user-1',
           commandId: expect.any(String),
@@ -6223,48 +6348,126 @@ describe('GrigliataPage', () => {
     firestore.setDoc.mockClear();
 
     act(() => {
-      setDocData('grigliata_music_playback/current', {
-        status: 'playing',
-        trackId: 'track-1',
-        trackName: 'Battle Theme',
-        audioUrl: 'https://example.com/audio/battle-theme.mp3',
-        durationMs: 120_000,
-        offsetMs: 7_000,
-        volume: 0.35,
-        startedAt: { toMillis: () => Date.now() - 1_000 },
-        commandId: 'cmd-resume',
-        updatedBy: 'user-1',
-      });
+      setCollectionData('grigliata_music_playback_sessions', [
+        {
+          id: 'track-1',
+          status: 'playing',
+          trackId: 'track-1',
+          trackName: 'Battle Theme',
+          audioUrl: 'https://example.com/audio/battle-theme.mp3',
+          durationMs: 120_000,
+          offsetMs: 30_000,
+          loop: false,
+          startedAt: { toMillis: () => Date.now() - 1_000 },
+          commandId: 'cmd-resume',
+          updatedBy: 'user-1',
+        },
+        {
+          id: 'track-2',
+          status: 'playing',
+          trackId: 'track-2',
+          trackName: 'Cavern Drone',
+          audioUrl: 'https://example.com/audio/cavern-drone.mp3',
+          durationMs: 240_000,
+          offsetMs: 0,
+          loop: true,
+          startedAt: { toMillis: () => Date.now() - 1_000 },
+          commandId: 'cmd-loop',
+          updatedBy: 'user-1',
+        },
+      ]);
     });
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /^stop battle theme$/i })).not.toBeDisabled();
     });
+    firestore.deleteDoc.mockClear();
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /^stop battle theme$/i }));
     });
 
     await waitFor(() => {
-      expect(firestore.setDoc).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'grigliata_music_playback/current' }),
-        expect.objectContaining({
-          status: 'stopped',
-          trackId: '',
-          trackName: '',
-          audioUrl: '',
-          durationMs: 0,
-          offsetMs: 0,
-          volume: 0.35,
-          startedAt: null,
-          updatedBy: 'user-1',
-          commandId: expect.any(String),
-        })
+      expect(firestore.deleteDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_playback_sessions/track-1' })
       );
     });
+    expect(firestore.deleteDoc).not.toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_music_playback_sessions/track-2' })
+    );
   });
 
-  test('stops shared playback before deleting the active music track', async () => {
+  test('clears finished non-loop music sessions automatically', async () => {
+    setManagerAuth();
+    jest.setSystemTime(new Date('2026-04-15T18:10:00.000Z'));
+    const finishedStartedAtMs = Date.now() - 6_000;
+
+    act(() => {
+      setCollectionData('grigliata_music_tracks', [
+        {
+          id: 'track-1',
+          name: 'Short Sting',
+          fileName: 'short-sting.mp3',
+          audioUrl: 'https://example.com/audio/short-sting.mp3',
+          audioPath: 'grigliata/music/user-1/short-sting.mp3',
+          contentType: 'audio/mpeg',
+          sizeBytes: 2048,
+          durationMs: 5_000,
+        },
+        {
+          id: 'track-2',
+          name: 'Loop Pad',
+          fileName: 'loop-pad.mp3',
+          audioUrl: 'https://example.com/audio/loop-pad.mp3',
+          audioPath: 'grigliata/music/user-1/loop-pad.mp3',
+          contentType: 'audio/mpeg',
+          sizeBytes: 4096,
+          durationMs: 5_000,
+        },
+      ]);
+      setCollectionData('grigliata_music_playback_sessions', [
+        {
+          id: 'track-1',
+          status: 'playing',
+          trackId: 'track-1',
+          trackName: 'Short Sting',
+          audioUrl: 'https://example.com/audio/short-sting.mp3',
+          durationMs: 5_000,
+          offsetMs: 0,
+          loop: false,
+          startedAt: { toMillis: () => finishedStartedAtMs },
+          commandId: 'cmd-finished',
+          updatedBy: 'user-1',
+        },
+        {
+          id: 'track-2',
+          status: 'playing',
+          trackId: 'track-2',
+          trackName: 'Loop Pad',
+          audioUrl: 'https://example.com/audio/loop-pad.mp3',
+          durationMs: 5_000,
+          offsetMs: 0,
+          loop: true,
+          startedAt: { toMillis: () => finishedStartedAtMs },
+          commandId: 'cmd-loop-finished',
+          updatedBy: 'user-1',
+        },
+      ]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(firestore.deleteDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_playback_sessions/track-1' })
+      );
+    });
+    expect(firestore.deleteDoc).not.toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_music_playback_sessions/track-2' })
+    );
+  });
+
+  test('deletes the active music session before deleting its track', async () => {
     setManagerAuth();
     const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
 
@@ -6282,37 +6485,47 @@ describe('GrigliataPage', () => {
         },
       ]);
       setDocData('grigliata_music_playback/current', {
-        status: 'playing',
-        trackId: 'track-1',
-        trackName: 'Battle Theme',
-        audioUrl: 'https://example.com/audio/battle-theme.mp3',
-        durationMs: 120_000,
+        status: 'stopped',
+        trackId: '',
+        trackName: '',
+        audioUrl: '',
+        durationMs: 0,
         offsetMs: 0,
         volume: 0.42,
-        startedAt: { toMillis: () => Date.now() - 1_000 },
-        commandId: 'cmd-active',
+        startedAt: null,
+        commandId: 'cmd-stopped',
         updatedBy: 'user-1',
       });
+      setCollectionData('grigliata_music_playback_sessions', [
+        {
+          id: 'track-1',
+          status: 'playing',
+          trackId: 'track-1',
+          trackName: 'Battle Theme',
+          audioUrl: 'https://example.com/audio/battle-theme.mp3',
+          durationMs: 120_000,
+          offsetMs: 0,
+          loop: false,
+          startedAt: { toMillis: () => Date.now() - 1_000 },
+          commandId: 'cmd-active',
+          updatedBy: 'user-1',
+        },
+      ]);
     });
 
     render(<GrigliataPage />);
 
     fireEvent.click(screen.getByRole('tab', { name: /music/i }));
     firestore.setDoc.mockClear();
+    firestore.deleteDoc.mockClear();
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /^delete battle theme$/i }));
     });
 
     await waitFor(() => {
-      expect(firestore.setDoc).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'grigliata_music_playback/current' }),
-        expect.objectContaining({
-          status: 'stopped',
-          trackId: '',
-          audioUrl: '',
-          volume: 0.42,
-        })
+      expect(firestore.deleteDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_playback_sessions/track-1' })
       );
     });
 
@@ -6321,6 +6534,14 @@ describe('GrigliataPage', () => {
         expect.objectContaining({ path: 'grigliata_music_tracks/track-1' })
       );
     });
+
+    const deletedPaths = firestore.deleteDoc.mock.calls.map(([target]) => target.path);
+    expect(deletedPaths.indexOf('grigliata_music_playback_sessions/track-1'))
+      .toBeLessThan(deletedPaths.indexOf('grigliata_music_tracks/track-1'));
+    expect(firestore.setDoc).not.toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_music_playback/current' }),
+      expect.anything()
+    );
 
     confirmSpy.mockRestore();
   });

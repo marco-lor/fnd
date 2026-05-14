@@ -3,6 +3,7 @@ import { timestampToMillis } from './boardUtils';
 export const GRIGLIATA_MUSIC_TRACK_COLLECTION = 'grigliata_music_tracks';
 export const GRIGLIATA_MUSIC_PLAYBACK_COLLECTION = 'grigliata_music_playback';
 export const GRIGLIATA_MUSIC_PLAYBACK_DOC_ID = 'current';
+export const GRIGLIATA_MUSIC_PLAYBACK_SESSION_COLLECTION = 'grigliata_music_playback_sessions';
 export const GRIGLIATA_MUSIC_PLAYBACK_STATUSES = {
   PLAYING: 'playing',
   PAUSED: 'paused',
@@ -61,6 +62,22 @@ export const EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE = {
   updatedBy: '',
 };
 
+export const EMPTY_GRIGLIATA_MUSIC_PLAYBACK_SESSION = {
+  id: '',
+  status: GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED,
+  trackId: '',
+  trackName: '',
+  audioUrl: '',
+  durationMs: 0,
+  offsetMs: 0,
+  loop: false,
+  startedAt: null,
+  startedAtMs: 0,
+  commandId: '',
+  updatedAt: null,
+  updatedBy: '',
+};
+
 export const createGrigliataMusicCommandId = () => (
   `music_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
 );
@@ -112,23 +129,118 @@ export const normalizeGrigliataMusicPlaybackState = (state) => {
   };
 };
 
+export const normalizeGrigliataMusicPlaybackSession = (session) => {
+  const status = resolvePlaybackStatus(session?.status);
+  const durationMs = Math.max(0, Math.round(asFiniteNumber(session?.durationMs, 0)));
+  const offsetMs = Math.max(0, Math.round(asFiniteNumber(session?.offsetMs, 0)));
+  const trackId = resolveTrackId(session);
+
+  return {
+    id: isNonEmptyString(session?.id) ? session.id.trim() : trackId,
+    status,
+    trackId,
+    trackName: isNonEmptyString(session?.trackName) ? session.trackName.trim() : '',
+    audioUrl: isNonEmptyString(session?.audioUrl) ? session.audioUrl.trim() : '',
+    durationMs,
+    offsetMs: durationMs > 0 ? clamp(offsetMs, 0, durationMs) : offsetMs,
+    loop: session?.loop === true,
+    startedAt: session?.startedAt || null,
+    startedAtMs: Math.max(0, Math.round(asFiniteNumber(session?.startedAtMs, 0))),
+    commandId: isNonEmptyString(session?.commandId) ? session.commandId.trim() : '',
+    updatedAt: session?.updatedAt || null,
+    updatedBy: isNonEmptyString(session?.updatedBy) ? session.updatedBy.trim() : '',
+  };
+};
+
+export const sortGrigliataMusicPlaybackSessions = (sessions) => (
+  [...(sessions || [])]
+    .map((session) => normalizeGrigliataMusicPlaybackSession(session))
+    .filter((session) => (
+      session.status !== GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED
+      && session.trackId
+      && session.trackName
+      && session.audioUrl
+    ))
+    .sort((left, right) => {
+      const rightMillis = timestampToMillis(right.updatedAt || right.startedAt);
+      const leftMillis = timestampToMillis(left.updatedAt || left.startedAt);
+      if (rightMillis !== leftMillis) return rightMillis - leftMillis;
+      return left.trackName.localeCompare(right.trackName);
+    })
+);
+
 export const computeGrigliataMusicPlaybackOffsetMs = (state, now = Date.now()) => {
   const normalizedState = normalizeGrigliataMusicPlaybackState(state);
   const baseOffsetMs = normalizedState.offsetMs;
+  const isLooping = state?.loop === true;
 
   if (normalizedState.status !== GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING) {
     return baseOffsetMs;
   }
 
-  const startedAtMs = timestampToMillis(normalizedState.startedAt);
+  const startedAtMs = Math.max(0, Math.round(asFiniteNumber(state?.startedAtMs, 0)))
+    || timestampToMillis(normalizedState.startedAt);
   const elapsedMs = startedAtMs > 0 ? Math.max(0, now - startedAtMs) : 0;
   const nextOffsetMs = baseOffsetMs + elapsedMs;
 
   if (normalizedState.durationMs > 0) {
+    if (isLooping) {
+      return nextOffsetMs % normalizedState.durationMs;
+    }
+
     return clamp(nextOffsetMs, 0, normalizedState.durationMs);
   }
 
   return nextOffsetMs;
+};
+
+export const buildGrigliataMusicPlaybackSession = ({
+  status,
+  track = null,
+  offsetMs = 0,
+  loop = false,
+  startedAt = null,
+  startedAtMs = 0,
+  updatedAt = null,
+  updatedBy = '',
+  commandId = createGrigliataMusicCommandId(),
+}) => {
+  const resolvedStatus = resolvePlaybackStatus(status);
+  const normalizedTrack = normalizeGrigliataMusicTrack(track);
+  const resolvedDurationMs = normalizedTrack.durationMs;
+  const resolvedOffsetMs = Math.max(0, Math.round(asFiniteNumber(offsetMs, 0)));
+  const clampedOffsetMs = resolvedDurationMs > 0
+    ? clamp(resolvedOffsetMs, 0, resolvedDurationMs)
+    : resolvedOffsetMs;
+
+  if (resolvedStatus === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED) {
+    return {
+      ...EMPTY_GRIGLIATA_MUSIC_PLAYBACK_SESSION,
+      id: normalizedTrack.id,
+      trackId: normalizedTrack.id,
+      commandId,
+      updatedAt,
+      updatedBy: isNonEmptyString(updatedBy) ? updatedBy.trim() : '',
+    };
+  }
+
+  return {
+    id: normalizedTrack.id,
+    status: resolvedStatus,
+    trackId: normalizedTrack.id,
+    trackName: normalizedTrack.name,
+    audioUrl: normalizedTrack.audioUrl,
+    durationMs: resolvedDurationMs,
+    offsetMs: clampedOffsetMs,
+    loop: loop === true,
+    startedAt: resolvedStatus === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING ? startedAt || null : null,
+    startedAtMs: resolvedStatus === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING
+      ? Math.max(0, Math.round(asFiniteNumber(startedAtMs, 0)))
+      : 0,
+    commandId,
+    updatedAt,
+    updatedBy: isNonEmptyString(updatedBy) ? updatedBy.trim() : '',
+  };
 };
 
 export const buildGrigliataMusicPlaybackState = ({

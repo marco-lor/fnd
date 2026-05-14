@@ -105,6 +105,7 @@ import {
 import MapCalibrationPanel from './MapCalibrationPanel';
 import MyTokenTray from './MyTokenTray';
 import {
+  buildGrigliataMusicPlaybackSession,
   buildGrigliataMusicPlaybackState,
   computeGrigliataMusicPlaybackOffsetMs,
   DEFAULT_GRIGLIATA_MUSIC_VOLUME,
@@ -112,6 +113,7 @@ import {
   GRIGLIATA_MUSIC_MUTED_FIELD,
   GRIGLIATA_MUSIC_PLAYBACK_COLLECTION,
   GRIGLIATA_MUSIC_PLAYBACK_DOC_ID,
+  GRIGLIATA_MUSIC_PLAYBACK_SESSION_COLLECTION,
   GRIGLIATA_MUSIC_PLAYBACK_STATUSES,
   GRIGLIATA_MUSIC_TRACK_COLLECTION,
   MAX_GRIGLIATA_MUSIC_FILE_BYTES,
@@ -264,9 +266,19 @@ const filterPlayerVisibleBoardTokens = (tokens = []) => (
   (Array.isArray(tokens) ? tokens : [])
     .filter((token) => token?.isVisibleToPlayers !== false)
 );
+const buildMusicPlaybackSessionTrack = (track = {}, session = {}) => ({
+  ...(track || {}),
+  id: track?.id || session?.trackId || session?.id || '',
+  name: track?.name || session?.trackName || '',
+  audioUrl: track?.audioUrl || session?.audioUrl || '',
+  durationMs: Number.isFinite(Number(track?.durationMs))
+    ? Number(track.durationMs)
+    : Number(session?.durationMs || 0),
+});
 const DRAW_COLOR_AUTOSAVE_DEBOUNCE_MS = 300;
 const GRID_SIZE_AUTOSAVE_DEBOUNCE_MS = 300;
 const MUSIC_VOLUME_WRITE_THROTTLE_MS = 150;
+const MUSIC_PLAYBACK_COMPLETION_GRACE_MS = 250;
 const LEGACY_TOKEN_CLEANUP_FIELD = 'legacyTokenPlacementCleanupCompletedAt';
 const LEGACY_PLACEMENT_DEAD_STATE_CLEANUP_FIELD = 'legacyPlacementDeadStateCleanupCompletedAt';
 const LEGACY_PLACEMENT_VISIBILITY_CLEANUP_FIELD = 'legacyPlacementVisibilityCleanupCompletedAt';
@@ -546,6 +558,7 @@ export default function GrigliataPage() {
   const pendingMusicVolumeRef = useRef(null);
   const latestRequestedMusicVolumeRef = useRef(DEFAULT_GRIGLIATA_MUSIC_VOLUME);
   const latestMusicPlaybackStateRef = useRef(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
+  const autoClearingMusicSessionIdsRef = useRef(new Set());
   const activeLiveInteractionDocIdRef = useRef('');
   const liveInteractionMutationQueueRef = useRef(Promise.resolve());
   const turnOrderRepairPendingRef = useRef(false);
@@ -633,6 +646,7 @@ export default function GrigliataPage() {
     activeTurnEntry,
     activeTurnTokenId,
     musicPlaybackState,
+    musicPlaybackSessions,
     musicTracks,
     persistedActiveGrid,
     presentationBackground,
@@ -1385,6 +1399,17 @@ export default function GrigliataPage() {
     () => normalizeGrigliataMusicPlaybackState(musicPlaybackState),
     [musicPlaybackState]
   );
+  const musicPlaybackSessionsByTrackId = useMemo(() => {
+    const nextMap = new Map();
+
+    (Array.isArray(musicPlaybackSessions) ? musicPlaybackSessions : []).forEach((session) => {
+      if (session?.trackId) {
+        nextMap.set(session.trackId, session);
+      }
+    });
+
+    return nextMap;
+  }, [musicPlaybackSessions]);
 
   useEffect(() => {
     latestMusicPlaybackStateRef.current = normalizedMusicPlaybackState;
@@ -2252,6 +2277,119 @@ export default function GrigliataPage() {
     );
   }, []);
 
+  const persistMusicPlaybackSession = useCallback(async (nextPlaybackSession) => {
+    const targetTrackId = nextPlaybackSession?.trackId || nextPlaybackSession?.id || '';
+    if (!targetTrackId) return;
+    const sessionPayload = { ...nextPlaybackSession };
+    delete sessionPayload.id;
+
+    await setDoc(
+      doc(db, GRIGLIATA_MUSIC_PLAYBACK_SESSION_COLLECTION, targetTrackId),
+      sessionPayload
+    );
+  }, []);
+
+  const deleteMusicPlaybackSession = useCallback(async (trackId) => {
+    if (!trackId) return;
+
+    await deleteDoc(doc(db, GRIGLIATA_MUSIC_PLAYBACK_SESSION_COLLECTION, trackId));
+  }, []);
+
+  useEffect(() => {
+    if (!isManager || !currentUserId) {
+      autoClearingMusicSessionIdsRef.current.clear();
+      return undefined;
+    }
+
+    const activeTrackIds = new Set(
+      (Array.isArray(musicPlaybackSessions) ? musicPlaybackSessions : [])
+        .map((session) => session?.trackId || session?.id || '')
+        .filter(Boolean)
+    );
+    autoClearingMusicSessionIdsRef.current.forEach((trackId) => {
+      if (!activeTrackIds.has(trackId)) {
+        autoClearingMusicSessionIdsRef.current.delete(trackId);
+      }
+    });
+
+    const clearCompletedSessions = (now) => {
+      const completedTrackIds = [];
+
+      (Array.isArray(musicPlaybackSessions) ? musicPlaybackSessions : []).forEach((session) => {
+        const trackId = session?.trackId || session?.id || '';
+        const durationMs = Math.max(0, Math.round(Number(session?.durationMs || 0)));
+
+        if (
+          !trackId
+          || autoClearingMusicSessionIdsRef.current.has(trackId)
+          || session?.status !== GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING
+          || session?.loop === true
+          || durationMs <= 0
+        ) {
+          return;
+        }
+
+        if (computeGrigliataMusicPlaybackOffsetMs(session, now) >= durationMs) {
+          completedTrackIds.push(trackId);
+        }
+      });
+
+      if (completedTrackIds.length === 0) return;
+
+      completedTrackIds.forEach((trackId) => autoClearingMusicSessionIdsRef.current.add(trackId));
+
+      void Promise.all(completedTrackIds.map((trackId) => deleteMusicPlaybackSession(trackId)))
+        .catch((error) => {
+          console.error('Failed to clear completed Grigliata music playback sessions:', error);
+          setBoardError('Unable to clear finished shared music playback right now.');
+        })
+        .finally(() => {
+          completedTrackIds.forEach((trackId) => autoClearingMusicSessionIdsRef.current.delete(trackId));
+        });
+    };
+
+    const now = Date.now();
+    let nextCompletionMs = null;
+
+    (Array.isArray(musicPlaybackSessions) ? musicPlaybackSessions : []).forEach((session) => {
+      const trackId = session?.trackId || session?.id || '';
+      const durationMs = Math.max(0, Math.round(Number(session?.durationMs || 0)));
+
+      if (
+        !trackId
+        || autoClearingMusicSessionIdsRef.current.has(trackId)
+        || session?.status !== GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING
+        || session?.loop === true
+        || durationMs <= 0
+      ) {
+        return;
+      }
+
+      const remainingMs = durationMs - computeGrigliataMusicPlaybackOffsetMs(session, now);
+      if (remainingMs <= 0) {
+        nextCompletionMs = 0;
+        return;
+      }
+
+      nextCompletionMs = nextCompletionMs === null
+        ? remainingMs
+        : Math.min(nextCompletionMs, remainingMs);
+    });
+
+    if (nextCompletionMs === null) return undefined;
+
+    if (nextCompletionMs <= 0) {
+      clearCompletedSessions(now);
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      clearCompletedSessions(Date.now());
+    }, nextCompletionMs + MUSIC_PLAYBACK_COMPLETION_GRACE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [currentUserId, deleteMusicPlaybackSession, isManager, musicPlaybackSessions]);
+
   const persistSharedMusicVolume = useCallback(async (nextVolume) => {
     if (!isManager || !currentUserId) return;
 
@@ -2313,21 +2451,20 @@ export default function GrigliataPage() {
 
   const runMusicPlaybackAction = useCallback(async ({
     actionType,
-    buildState,
+    trackId,
+    run,
   }) => {
     if (!isManager || !currentUserId) return;
 
-    const nextPlaybackState = buildState?.();
-    if (!nextPlaybackState) return;
-
-    const targetTrackId = nextPlaybackState.trackId || normalizedMusicPlaybackState.trackId || '';
+    const targetTrackId = trackId || '';
+    if (!targetTrackId || typeof run !== 'function') return;
 
     setBoardError('');
     clearMusicVolumeWriteTimer();
     setMusicPlaybackActionTrackId(targetTrackId);
     setMusicPlaybackActionType(actionType);
     try {
-      await persistMusicPlaybackState(nextPlaybackState);
+      await run();
     } catch (error) {
       console.error(`Failed to ${actionType} Grigliata music playback:`, error);
       setBoardError('Unable to update the shared music playback right now.');
@@ -2339,8 +2476,6 @@ export default function GrigliataPage() {
     clearMusicVolumeWriteTimer,
     currentUserId,
     isManager,
-    normalizedMusicPlaybackState.trackId,
-    persistMusicPlaybackState,
   ]);
 
   const handleUploadMusicTrack = useCallback(async () => {
@@ -2416,61 +2551,107 @@ export default function GrigliataPage() {
     user?.uid,
   ]);
 
-  const handlePlayMusicTrack = useCallback(async (track) => {
+  const handleStartMusicTrack = useCallback(async (track, { loop = false } = {}) => {
+    const targetTrackId = track?.id || '';
+
     await runMusicPlaybackAction({
-      actionType: 'play',
-      buildState: () => buildGrigliataMusicPlaybackState({
+      actionType: loop ? 'loop' : 'play',
+      trackId: targetTrackId,
+      run: async () => persistMusicPlaybackSession(buildGrigliataMusicPlaybackSession({
         status: GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING,
-        track,
+        track: buildMusicPlaybackSessionTrack(track),
         offsetMs: 0,
-        volume: getCurrentSharedMusicVolume(),
+        loop,
         startedAt: serverTimestamp(),
+        startedAtMs: Date.now(),
         updatedAt: serverTimestamp(),
         updatedBy: currentUserId,
-      }),
+      })),
     });
-  }, [currentUserId, getCurrentSharedMusicVolume, runMusicPlaybackAction]);
+  }, [currentUserId, persistMusicPlaybackSession, runMusicPlaybackAction]);
 
-  const handlePauseMusicTrack = useCallback(async (track) => {
+  const handlePlayMusicTrack = useCallback(async (track) => {
+    await handleStartMusicTrack(track, { loop: false });
+  }, [handleStartMusicTrack]);
+
+  const handlePlayMusicTrackInLoop = useCallback(async (track) => {
+    await handleStartMusicTrack(track, { loop: true });
+  }, [handleStartMusicTrack]);
+
+  const handlePauseMusicTrack = useCallback(async (track, playbackSession = null) => {
+    const activeSession = playbackSession || musicPlaybackSessionsByTrackId.get(track?.id || '');
+    const targetTrackId = activeSession?.trackId || track?.id || '';
+    if (!activeSession || !targetTrackId) return;
+
     await runMusicPlaybackAction({
       actionType: 'pause',
-      buildState: () => buildGrigliataMusicPlaybackState({
+      trackId: targetTrackId,
+      run: async () => persistMusicPlaybackSession(buildGrigliataMusicPlaybackSession({
         status: GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PAUSED,
-        track,
-        offsetMs: computeGrigliataMusicPlaybackOffsetMs(normalizedMusicPlaybackState),
-        volume: getCurrentSharedMusicVolume(),
+        track: buildMusicPlaybackSessionTrack(track, activeSession),
+        offsetMs: computeGrigliataMusicPlaybackOffsetMs(activeSession),
+        loop: activeSession.loop === true,
         updatedAt: serverTimestamp(),
         updatedBy: currentUserId,
-      }),
+      })),
     });
-  }, [currentUserId, getCurrentSharedMusicVolume, normalizedMusicPlaybackState, runMusicPlaybackAction]);
+  }, [currentUserId, musicPlaybackSessionsByTrackId, persistMusicPlaybackSession, runMusicPlaybackAction]);
 
-  const handleResumeMusicTrack = useCallback(async (track) => {
+  const handleResumeMusicTrack = useCallback(async (track, playbackSession = null) => {
+    const activeSession = playbackSession || musicPlaybackSessionsByTrackId.get(track?.id || '');
+    const targetTrackId = activeSession?.trackId || track?.id || '';
+    if (!activeSession || !targetTrackId) return;
+
     await runMusicPlaybackAction({
       actionType: 'resume',
-      buildState: () => buildGrigliataMusicPlaybackState({
+      trackId: targetTrackId,
+      run: async () => persistMusicPlaybackSession(buildGrigliataMusicPlaybackSession({
         status: GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING,
-        track,
-        offsetMs: normalizedMusicPlaybackState.offsetMs,
-        volume: getCurrentSharedMusicVolume(),
+        track: buildMusicPlaybackSessionTrack(track, activeSession),
+        offsetMs: activeSession.offsetMs,
+        loop: activeSession.loop === true,
         startedAt: serverTimestamp(),
+        startedAtMs: Date.now(),
         updatedAt: serverTimestamp(),
         updatedBy: currentUserId,
-      }),
+      })),
     });
-  }, [currentUserId, getCurrentSharedMusicVolume, normalizedMusicPlaybackState.offsetMs, runMusicPlaybackAction]);
+  }, [currentUserId, musicPlaybackSessionsByTrackId, persistMusicPlaybackSession, runMusicPlaybackAction]);
 
-  const handleStopMusicTrack = useCallback(async () => {
+  const handleSeekMusicTrack = useCallback(async (track, playbackSession = null, nextOffsetMs = 0) => {
+    const activeSession = playbackSession || musicPlaybackSessionsByTrackId.get(track?.id || '');
+    const targetTrackId = activeSession?.trackId || track?.id || '';
+    if (!activeSession || !targetTrackId) return;
+
+    const nextStatus = activeSession.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PAUSED
+      ? GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PAUSED
+      : GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING;
+
+    await runMusicPlaybackAction({
+      actionType: 'seek',
+      trackId: targetTrackId,
+      run: async () => persistMusicPlaybackSession(buildGrigliataMusicPlaybackSession({
+        status: nextStatus,
+        track: buildMusicPlaybackSessionTrack(track, activeSession),
+        offsetMs: nextOffsetMs,
+        loop: activeSession.loop === true,
+        startedAt: nextStatus === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING ? serverTimestamp() : null,
+        startedAtMs: nextStatus === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING ? Date.now() : 0,
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUserId,
+      })),
+    });
+  }, [currentUserId, musicPlaybackSessionsByTrackId, persistMusicPlaybackSession, runMusicPlaybackAction]);
+
+  const handleStopMusicTrack = useCallback(async (track, playbackSession = null) => {
+    const targetTrackId = playbackSession?.trackId || track?.id || '';
+
     await runMusicPlaybackAction({
       actionType: 'stop',
-      buildState: () => buildGrigliataMusicPlaybackState({
-        status: GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED,
-        volume: getCurrentSharedMusicVolume(),
-        updatedAt: serverTimestamp(),
-        updatedBy: currentUserId,
-      }),
+      trackId: targetTrackId,
+      run: async () => deleteMusicPlaybackSession(targetTrackId),
     });
-  }, [currentUserId, getCurrentSharedMusicVolume, runMusicPlaybackAction]);
+  }, [deleteMusicPlaybackSession, runMusicPlaybackAction]);
 
   const handleDeleteMusicTrack = useCallback(async (track) => {
     if (!isManager || !user?.uid || !track?.id) return;
@@ -2481,6 +2662,11 @@ export default function GrigliataPage() {
     setDeletingMusicTrackId(track.id);
     setBoardError('');
     try {
+      if (musicPlaybackSessionsByTrackId.has(track.id)) {
+        clearMusicVolumeWriteTimer();
+        await deleteMusicPlaybackSession(track.id);
+      }
+
       if (normalizedMusicPlaybackState.trackId === track.id) {
         clearMusicVolumeWriteTimer();
         await persistMusicPlaybackState(buildGrigliataMusicPlaybackState({
@@ -2503,7 +2689,9 @@ export default function GrigliataPage() {
     currentUserId,
     getCurrentSharedMusicVolume,
     isManager,
+    musicPlaybackSessionsByTrackId,
     normalizedMusicPlaybackState.trackId,
+    deleteMusicPlaybackSession,
     persistMusicPlaybackState,
     user?.uid,
   ]);
@@ -5684,6 +5872,7 @@ export default function GrigliataPage() {
                   <MusicLibraryPanel
                     tracks={musicTracks}
                     activePlaybackState={normalizedMusicPlaybackState}
+                    activePlaybackSessions={musicPlaybackSessions}
                     uploadName={musicUploadName}
                     selectedFileName={musicSelectedFile?.name || ''}
                     uploadError={musicUploadError}
@@ -5704,8 +5893,10 @@ export default function GrigliataPage() {
                     onSharedVolumeChange={handleSharedMusicVolumeChange}
                     onSharedVolumeCommit={handleSharedMusicVolumeCommit}
                     onPlayTrack={handlePlayMusicTrack}
+                    onPlayTrackInLoop={handlePlayMusicTrackInLoop}
                     onPauseTrack={handlePauseMusicTrack}
                     onResumeTrack={handleResumeMusicTrack}
+                    onSeekTrack={handleSeekMusicTrack}
                     onStopTrack={handleStopMusicTrack}
                     onDeleteTrack={handleDeleteMusicTrack}
                   />

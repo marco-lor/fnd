@@ -5,6 +5,8 @@ import { useAuth } from '../../AuthContext';
 
 const mockDocs = {};
 const mockListeners = [];
+let mockPlaybackSessions = [];
+const mockSessionListeners = [];
 
 const mockNotifyListeners = () => {
   mockListeners.forEach((listener) => {
@@ -15,6 +17,17 @@ const mockNotifyListeners = () => {
 const setPlaybackDoc = (value) => {
   mockDocs['grigliata_music_playback/current'] = value;
   mockNotifyListeners();
+};
+
+const mockNotifySessionListeners = () => {
+  mockSessionListeners.forEach((listener) => {
+    listener.onPlaybackSessions(mockPlaybackSessions);
+  });
+};
+
+const setPlaybackSessions = (value) => {
+  mockPlaybackSessions = value;
+  mockNotifySessionListeners();
 };
 
 const prepareAudioElement = (audio) => {
@@ -43,6 +56,7 @@ jest.mock('../firebaseConfig', () => ({
 }));
 
 jest.mock('firebase/firestore', () => ({
+  collection: jest.fn(),
   doc: jest.fn(),
   onSnapshot: jest.fn(),
 }));
@@ -53,9 +67,12 @@ describe('GlobalGrigliataMusicPlayer', () => {
   let loadSpy;
   let dateNowSpy;
   let subscribeToPlaybackState;
+  let subscribeToPlaybackSessions;
 
   beforeEach(() => {
     mockListeners.splice(0, mockListeners.length);
+    mockSessionListeners.splice(0, mockSessionListeners.length);
+    mockPlaybackSessions = [];
     mockDocs['grigliata_music_playback/current'] = {
       status: 'stopped',
       trackId: '',
@@ -87,6 +104,19 @@ describe('GlobalGrigliataMusicPlayer', () => {
         const listenerIndex = mockListeners.indexOf(listener);
         if (listenerIndex >= 0) {
           mockListeners.splice(listenerIndex, 1);
+        }
+      };
+    });
+
+    subscribeToPlaybackSessions = jest.fn((onPlaybackSessions) => {
+      const listener = { onPlaybackSessions };
+      mockSessionListeners.push(listener);
+      onPlaybackSessions(mockPlaybackSessions);
+
+      return () => {
+        const listenerIndex = mockSessionListeners.indexOf(listener);
+        if (listenerIndex >= 0) {
+          mockSessionListeners.splice(listenerIndex, 1);
         }
       };
     });
@@ -185,6 +215,129 @@ describe('GlobalGrigliataMusicPlayer', () => {
     expect(audio.volume).toBeCloseTo(0.2);
   });
 
+  test('plays multiple shared playback sessions with shared volume and loop state', async () => {
+    setPlaybackDoc({
+      status: 'stopped',
+      trackId: '',
+      trackName: '',
+      audioUrl: '',
+      durationMs: 0,
+      offsetMs: 0,
+      volume: 0.4,
+      startedAt: null,
+      commandId: 'cmd-volume',
+      updatedBy: 'user-1',
+    });
+
+    const { container } = render(
+      <GlobalGrigliataMusicPlayer
+        subscribeToPlaybackState={subscribeToPlaybackState}
+        subscribeToPlaybackSessions={subscribeToPlaybackSessions}
+      />
+    );
+
+    await waitFor(() => {
+      expect(subscribeToPlaybackState).toHaveBeenCalledTimes(1);
+      expect(subscribeToPlaybackSessions).toHaveBeenCalledTimes(1);
+    });
+
+    const activeSessions = [
+      {
+        id: 'track-1',
+        status: 'playing',
+        trackId: 'track-1',
+        trackName: 'Battle Theme',
+        audioUrl: 'https://example.com/audio/battle-theme.mp3',
+        durationMs: 120_000,
+        offsetMs: 2_000,
+        loop: false,
+        startedAt: { toMillis: () => 7_000 },
+        commandId: 'cmd-battle',
+        updatedBy: 'user-1',
+      },
+      {
+        id: 'track-2',
+        status: 'playing',
+        trackId: 'track-2',
+        trackName: 'Cavern Drone',
+        audioUrl: 'https://example.com/audio/cavern-drone.mp3',
+        durationMs: 240_000,
+        offsetMs: 4_000,
+        loop: true,
+        startedAt: { toMillis: () => 9_000 },
+        commandId: 'cmd-drone',
+        updatedBy: 'user-1',
+      },
+    ];
+
+    await act(async () => {
+      setPlaybackSessions(activeSessions);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('audio')).toHaveLength(2);
+    });
+
+    Array.from(container.querySelectorAll('audio')).forEach((audio) => {
+      prepareAudioElement(audio);
+    });
+    playSpy.mockClear();
+    pauseSpy.mockClear();
+
+    await act(async () => {
+      setPlaybackSessions(activeSessions.map((session) => ({
+        ...session,
+        commandId: `${session.commandId}-resync`,
+      })));
+    });
+
+    await waitFor(() => {
+      expect(playSpy).toHaveBeenCalledTimes(2);
+    });
+
+    const syncedAudios = Array.from(container.querySelectorAll('audio'));
+    const battleAudio = syncedAudios.find((audio) => audio.dataset.grigliataAudioUrl === 'https://example.com/audio/battle-theme.mp3');
+    const droneAudio = syncedAudios.find((audio) => audio.dataset.grigliataAudioUrl === 'https://example.com/audio/cavern-drone.mp3');
+
+    expect(battleAudio).toBeTruthy();
+    expect(droneAudio).toBeTruthy();
+    expect(battleAudio.currentTime).toBe(5);
+    expect(droneAudio.currentTime).toBe(5);
+    expect(battleAudio.loop).toBe(false);
+    expect(droneAudio.loop).toBe(true);
+    expect(battleAudio.volume).toBeCloseTo(0.4);
+    expect(droneAudio.volume).toBeCloseTo(0.4);
+
+    await act(async () => {
+      setPlaybackDoc({
+        status: 'stopped',
+        trackId: '',
+        trackName: '',
+        audioUrl: '',
+        durationMs: 0,
+        offsetMs: 0,
+        volume: 0.22,
+        startedAt: null,
+        commandId: 'cmd-volume-2',
+        updatedBy: 'user-1',
+      });
+    });
+
+    await waitFor(() => {
+      expect(battleAudio.volume).toBeCloseTo(0.22);
+      expect(droneAudio.volume).toBeCloseTo(0.22);
+    });
+
+    await act(async () => {
+      setPlaybackSessions([activeSessions[1]]);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('audio')).toHaveLength(1);
+    });
+    expect(battleAudio.getAttribute('src')).toBe(null);
+  });
+
   test('does not attach to an already finished playback session for late joiners', async () => {
     const { container } = render(
       <GlobalGrigliataMusicPlayer subscribeToPlaybackState={subscribeToPlaybackState} />
@@ -270,6 +423,7 @@ describe('GlobalGrigliataMusicPlayer', () => {
       });
 
       expect(audio.volume).toBeCloseTo(0.28);
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
     } finally {
       consoleErrorSpy.mockRestore();
     }

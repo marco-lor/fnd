@@ -30,8 +30,10 @@ import {
   EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE,
   GRIGLIATA_MUSIC_PLAYBACK_COLLECTION,
   GRIGLIATA_MUSIC_PLAYBACK_DOC_ID,
+  GRIGLIATA_MUSIC_PLAYBACK_SESSION_COLLECTION,
   GRIGLIATA_MUSIC_TRACK_COLLECTION,
   normalizeGrigliataMusicPlaybackState,
+  sortGrigliataMusicPlaybackSessions,
   sortGrigliataMusicTracks,
 } from './music';
 import {
@@ -114,6 +116,7 @@ export default function useGrigliataPageData({
   const [pagePresenceSnapshots, setPagePresenceSnapshots] = useState([]);
   const [musicTracks, setMusicTracks] = useState([]);
   const [musicPlaybackState, setMusicPlaybackState] = useState(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
+  const [musicPlaybackSessions, setMusicPlaybackSessions] = useState([]);
   const [selectedBackgroundId, setSelectedBackgroundId] = useState('');
   const [liveInteractionClock, setLiveInteractionClock] = useState(() => Date.now());
   const [pagePresenceClock, setPagePresenceClock] = useState(() => Date.now());
@@ -397,6 +400,7 @@ export default function useGrigliataPageData({
     if (!currentUserId || !isManager) {
       setMusicTracks([]);
       setMusicPlaybackState(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
+      setMusicPlaybackSessions([]);
       return undefined;
     }
 
@@ -420,7 +424,7 @@ export default function useGrigliataPageData({
       (snapshot) => {
         setMusicPlaybackState(
           snapshot.exists()
-            ? normalizeGrigliataMusicPlaybackState(snapshot.data())
+            ? normalizeGrigliataMusicPlaybackState(snapshot.data({ serverTimestamps: 'estimate' }))
             : EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE
         );
       },
@@ -430,9 +434,25 @@ export default function useGrigliataPageData({
       }
     );
 
+    const unsubscribePlaybackSessions = onSnapshot(
+      collection(db, GRIGLIATA_MUSIC_PLAYBACK_SESSION_COLLECTION),
+      (snapshot) => {
+        const nextSessions = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data({ serverTimestamps: 'estimate' }),
+        }));
+        setMusicPlaybackSessions(sortGrigliataMusicPlaybackSessions(nextSessions));
+      },
+      (error) => {
+        console.error('Failed to load Grigliata music playback sessions:', error);
+        setMusicPlaybackSessions([]);
+      }
+    );
+
     return () => {
       unsubscribeTracks();
       unsubscribePlayback();
+      unsubscribePlaybackSessions();
     };
   }, [currentUserId, isManager]);
 
@@ -906,6 +926,7 @@ export default function useGrigliataPageData({
     activeTurnEntry,
     activeTurnTokenId,
     musicPlaybackState,
+    musicPlaybackSessions,
     musicTracks,
     persistedActiveGrid,
     presentationBackground,
