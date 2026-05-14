@@ -3,8 +3,10 @@ import {
   DEFAULT_BOARD_CELLS,
   DEFAULT_GRID,
   FEET_PER_GRID_SQUARE,
+  MAX_GRIGLIATA_FIT_VIEWPORT_SCALE,
   MAX_GRIGLIATA_TOKEN_SIZE_SQUARES,
   MAX_GRID_CELL_SIZE,
+  MIN_GRIGLIATA_VIEWPORT_SCALE,
   MIN_GRIGLIATA_TOKEN_SIZE_SQUARES,
   MIN_GRID_CELL_SIZE,
 } from './constants';
@@ -466,8 +468,8 @@ export const fitViewportToBounds = (
   const availableHeight = Math.max(1, safeHeight - (padding * 2));
   const scale = clamp(
     Math.min(availableWidth / Math.max(1, bounds.width), availableHeight / Math.max(1, bounds.height)),
-    0.18,
-    2.5
+    MIN_GRIGLIATA_VIEWPORT_SCALE,
+    MAX_GRIGLIATA_FIT_VIEWPORT_SCALE
   );
 
   return {

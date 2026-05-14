@@ -4,12 +4,14 @@ import {
   getFileExtensionFromContentType,
   getHiddenTokenIdsForBackground,
   getTokenPositionPx,
+  fitViewportToBounds,
   isCurrentUserTokenHiddenForViewer,
   isVideoBackground,
   normalizeGridConfig,
   normalizeHiddenTokenIdsByBackground,
   normalizeTokenSizeSquares,
 } from './boardUtils';
+import { MIN_GRIGLIATA_VIEWPORT_SCALE } from './constants';
 
 describe('buildPlacementDocId', () => {
   test('serializes the background and token ids with the shared placement format', () => {
@@ -59,6 +61,28 @@ describe('normalizeGridConfig', () => {
       offsetXPx: 0,
       offsetYPx: 0,
     });
+  });
+});
+
+describe('fitViewportToBounds', () => {
+  test('allows reset view to zoom out to the shared viewport floor', () => {
+    const viewport = fitViewportToBounds(
+      {
+        minX: 0,
+        minY: 0,
+        maxX: 20000,
+        maxY: 12000,
+        width: 20000,
+        height: 12000,
+      },
+      920,
+      640,
+      48
+    );
+
+    expect(viewport.scale).toBe(MIN_GRIGLIATA_VIEWPORT_SCALE);
+    expect(Number.isFinite(viewport.x)).toBe(true);
+    expect(Number.isFinite(viewport.y)).toBe(true);
   });
 });
 

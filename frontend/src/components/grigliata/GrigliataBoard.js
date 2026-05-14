@@ -36,10 +36,12 @@ import {
   DEFAULT_GRIGLIATA_DRAW_COLOR_KEY,
   getGrigliataDrawTheme,
   GRIGLIATA_DRAW_THEMES,
+  MAX_GRIGLIATA_VIEWPORT_SCALE,
   MAP_PING_ANIMATION_INTERVAL_MS,
   MAP_PING_BROADCAST_CLEAR_MS,
   MAP_PING_HOLD_DELAY_MS,
   MAP_PING_VISIBLE_MS,
+  MIN_GRIGLIATA_VIEWPORT_SCALE,
   FOE_LIBRARY_DRAG_TYPE,
   TRAY_DRAG_MIME,
 } from './constants';
@@ -3606,7 +3608,10 @@ export default function GrigliataBoard({
   ]);
 
   const applyScale = (nextScale, pointer) => {
-    const safeScale = Math.min(4, Math.max(0.2, nextScale));
+    const safeScale = Math.min(
+      MAX_GRIGLIATA_VIEWPORT_SCALE,
+      Math.max(MIN_GRIGLIATA_VIEWPORT_SCALE, nextScale)
+    );
     const referencePoint = pointer || {
       x: stageSize.width / 2,
       y: stageSize.height / 2,

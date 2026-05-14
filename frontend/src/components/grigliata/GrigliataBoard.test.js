@@ -12,6 +12,7 @@ import {
   MAP_PING_BROADCAST_CLEAR_MS,
   MAP_PING_HOLD_DELAY_MS,
   MAP_PING_VISIBLE_MS,
+  MIN_GRIGLIATA_VIEWPORT_SCALE,
   TRAY_DRAG_MIME,
 } from './constants';
 import { buildRenderableGrigliataAoEFigure } from './aoeFigures';
@@ -2993,6 +2994,25 @@ describe('GrigliataBoard', () => {
 
     expect(Number.parseFloat(stage.getAttribute('data-scalex') || '1')).toBeCloseTo(initialScale * expectedScaleBy, 5);
     expect(Number.parseFloat(stage.getAttribute('data-scaley') || '1')).toBeCloseTo(initialScale * expectedScaleBy, 5);
+  });
+
+  test.each([
+    { roleLabel: 'player', isManager: false },
+    { roleLabel: 'manager', isManager: true },
+  ])('allows $roleLabel viewers to zoom the battlemap out to five percent scale', ({ isManager }) => {
+    const { container } = render(
+      <GrigliataBoard {...buildProps({ isManager })} />
+    );
+
+    const stage = container.querySelector('[data-konva-type="Stage"]');
+    expect(stage).toBeTruthy();
+
+    for (let index = 0; index < 24; index += 1) {
+      fireEvent.wheel(stage, { deltaY: 120 });
+    }
+
+    expect(Number.parseFloat(stage.getAttribute('data-scalex') || '1')).toBeCloseTo(MIN_GRIGLIATA_VIEWPORT_SCALE, 5);
+    expect(Number.parseFloat(stage.getAttribute('data-scaley') || '1')).toBeCloseTo(MIN_GRIGLIATA_VIEWPORT_SCALE, 5);
   });
 
   test('fires a tray drop only once when the drop lands on the active overlay', () => {
