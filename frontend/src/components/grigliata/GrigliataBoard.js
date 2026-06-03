@@ -743,6 +743,23 @@ const buildBattlemapImageLayer = ({ background, image, opacity = 1 }) => {
     opacity,
   };
 };
+const buildNarrationImageBounds = (background) => {
+  const width = Number(background?.imageWidth) || 0;
+  const height = Number(background?.imageHeight) || 0;
+
+  if (width <= 0 || height <= 0) {
+    return null;
+  }
+
+  return {
+    minX: 0,
+    minY: 0,
+    maxX: width,
+    maxY: height,
+    width,
+    height,
+  };
+};
 const getDominantBattlemapImageLayer = ({ visibleLayer, fadingOutLayer }) => {
   if (visibleLayer && fadingOutLayer) {
     return visibleLayer.opacity >= fadingOutLayer.opacity ? visibleLayer : fadingOutLayer;
@@ -2927,6 +2944,13 @@ export default function GrigliataBoard({
     () => getBoardBounds({ background: resolvedBackground, grid: normalizedGrid, tokens: placedTokens }),
     [resolvedBackground, normalizedGrid, placedTokens]
   );
+  const narrationImageBounds = useMemo(
+    () => (isNarrationOverlayActive ? buildNarrationImageBounds(resolvedBackground) : null),
+    [isNarrationOverlayActive, resolvedBackground]
+  );
+  const viewportFitBounds = narrationImageBounds || boardBounds;
+  const backplateBounds = narrationImageBounds || boardBounds;
+  const backplatePadding = narrationImageBounds ? 0 : normalizedGrid.cellSizePx;
   const renderedSharedInteractions = useMemo(
     () => (sharedInteractions || [])
       .filter((interaction) => interaction?.ownerUid && interaction.ownerUid !== currentUserId)
@@ -3107,13 +3131,17 @@ export default function GrigliataBoard({
     };
   }, []);
 
-  const fitKey = resolvedBackground?.id || '__no_active_background__';
+  const fitKey = [
+    resolvedBackground?.id || '__no_active_background__',
+    isNarrationOverlayActive ? 'narration' : 'board',
+    narrationImageBounds ? `${narrationImageBounds.width}x${narrationImageBounds.height}` : '',
+  ].join('::');
 
   const fitToBoard = useCallback(() => {
     if (!stageSize.width || !stageSize.height) return;
-    setViewport(fitViewportToBounds(boardBounds, stageSize.width, stageSize.height, BOARD_FIT_PADDING));
+    setViewport(fitViewportToBounds(viewportFitBounds, stageSize.width, stageSize.height, BOARD_FIT_PADDING));
     lastFitKeyRef.current = fitKey;
-  }, [boardBounds, fitKey, stageSize.height, stageSize.width]);
+  }, [fitKey, stageSize.height, stageSize.width, viewportFitBounds]);
 
   useEffect(() => {
     if (!stageSize.width || !stageSize.height) return;
@@ -6016,10 +6044,10 @@ export default function GrigliataBoard({
           >
             <Layer>
               <Rect
-                x={boardBounds.minX - normalizedGrid.cellSizePx}
-                y={boardBounds.minY - normalizedGrid.cellSizePx}
-                width={boardBounds.width + (normalizedGrid.cellSizePx * 2)}
-                height={boardBounds.height + (normalizedGrid.cellSizePx * 2)}
+                x={backplateBounds.minX - backplatePadding}
+                y={backplateBounds.minY - backplatePadding}
+                width={backplateBounds.width + (backplatePadding * 2)}
+                height={backplateBounds.height + (backplatePadding * 2)}
                 fill="#0f172a"
                 listening={false}
               />
@@ -6053,10 +6081,10 @@ export default function GrigliataBoard({
               )}
 
               <Rect
-                x={boardBounds.minX - normalizedGrid.cellSizePx}
-                y={boardBounds.minY - normalizedGrid.cellSizePx}
-                width={boardBounds.width + (normalizedGrid.cellSizePx * 2)}
-                height={boardBounds.height + (normalizedGrid.cellSizePx * 2)}
+                x={backplateBounds.minX - backplatePadding}
+                y={backplateBounds.minY - backplatePadding}
+                width={backplateBounds.width + (backplatePadding * 2)}
+                height={backplateBounds.height + (backplatePadding * 2)}
                 fill="rgba(15, 23, 42, 0.12)"
                 listening={false}
               />

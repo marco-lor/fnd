@@ -2793,6 +2793,62 @@ describe('GrigliataBoard', () => {
     expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
   });
 
+  test('centers and maximizes the narration image using image bounds while combat maps keep board fit', async () => {
+    useReducedMotion.mockReturnValue(true);
+
+    const background = {
+      id: 'map-1',
+      name: 'Desert Narration',
+      imageUrl: 'https://example.com/desert.png',
+      imageWidth: 1920,
+      imageHeight: 1080,
+    };
+
+    const { container, rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: background,
+        })}
+      />
+    );
+
+    const getStage = () => container.querySelector('[data-konva-type="Stage"]');
+
+    await waitFor(() => {
+      expect(getNumericKonvaProp(getStage(), 'data-scalex')).toBeCloseTo(544 / 1400, 5);
+    });
+
+    expect(getNumericKonvaProp(getStage(), 'data-scalex')).toBeLessThan(824 / 1920);
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: background,
+          combatBackgroundName: 'Untitled Map',
+          isNarrationOverlayActive: true,
+        })}
+      />
+    );
+
+    await waitFor(() => {
+      expect(getNumericKonvaProp(getStage(), 'data-scalex')).toBeCloseTo(824 / 1920, 5);
+    });
+
+    const activeImage = screen.getByTestId('battlemap-image-active');
+    const viewportLeft = getNumericKonvaProp(getStage(), 'data-x');
+    const viewportTop = getNumericKonvaProp(getStage(), 'data-y');
+    const viewportScale = getNumericKonvaProp(getStage(), 'data-scalex');
+    const imageScreenWidth = getNumericKonvaProp(activeImage, 'data-width') * viewportScale;
+    const imageScreenHeight = getNumericKonvaProp(activeImage, 'data-height') * viewportScale;
+
+    expect(activeImage).toHaveAttribute('data-width', '1920');
+    expect(activeImage).toHaveAttribute('data-height', '1080');
+    expect(imageScreenWidth).toBeCloseTo(824, 4);
+    expect(viewportLeft + (imageScreenWidth / 2)).toBeCloseTo(460, 4);
+    expect(viewportTop + (imageScreenHeight / 2)).toBeCloseTo(320, 4);
+    expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
+  });
+
   test('hides the combat battlemap while the narration image is still loading', async () => {
     jest.useFakeTimers();
 
