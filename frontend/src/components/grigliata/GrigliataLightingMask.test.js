@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import GrigliataLightingMask from './GrigliataLightingMask';
+import * as lightingGeometry from './lightingGeometry';
 
 jest.mock('react-konva', () => {
   const React = require('react');
@@ -138,6 +139,43 @@ describe('GrigliataLightingMask', () => {
     expect(screen.getAllByTestId('lighting-token-vision-cutout')).toHaveLength(1);
     expect(screen.getByTestId('lighting-token-vision-cutout')).toHaveAttribute('data-tokenid', 'token-1');
   });
+
+  test('uses precomputed token vision polygons when supplied', () => {
+    const buildTokenVisionPolygonsSpy = jest.spyOn(lightingGeometry, 'buildTokenVisionPolygons');
+
+    render(
+      <GrigliataLightingMask
+        bounds={bounds}
+        grid={grid}
+        metadata={metadata}
+        tokens={[{
+          tokenId: 'token-2',
+          renderPosition: {
+            x: 210,
+            y: 70,
+            size: 70,
+          },
+        }]}
+        precomputedTokenVisionPolygons={[{
+          tokenId: 'precomputed-1',
+          origin: { x: 35, y: 35 },
+          radius: 70,
+          polygon: [
+            { x: 0, y: 0 },
+            { x: 70, y: 0 },
+            { x: 70, y: 70 },
+            { x: 0, y: 70 },
+          ],
+        }]}
+      />
+    );
+
+    expect(buildTokenVisionPolygonsSpy).not.toHaveBeenCalled();
+    expect(screen.getByTestId('lighting-token-vision-cutout')).toHaveAttribute('data-tokenid', 'precomputed-1');
+
+    buildTokenVisionPolygonsSpy.mockRestore();
+  });
+
 
   test('skips darkness in global light scenes while showing clipped light contribution', () => {
     render(

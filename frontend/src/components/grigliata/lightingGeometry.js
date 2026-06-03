@@ -40,6 +40,42 @@ const normalizeRayCount = (rayCount = DEFAULT_LIGHTING_RAY_COUNT) => (
   Math.max(8, Math.round(asFiniteNumber(rayCount, DEFAULT_LIGHTING_RAY_COUNT)))
 );
 
+const segmentMayAffectCircle = ({ segment, origin, radius, tolerance = LIGHTING_GEOMETRY_EPSILON }) => {
+  if (!segment || !isFinitePoint(origin)) {
+    return false;
+  }
+
+  const minX = Math.min(segment.x1, segment.x2) - tolerance;
+  const maxX = Math.max(segment.x1, segment.x2) + tolerance;
+  const minY = Math.min(segment.y1, segment.y2) - tolerance;
+  const maxY = Math.max(segment.y1, segment.y2) + tolerance;
+  const circleMinX = origin.x - radius - tolerance;
+  const circleMaxX = origin.x + radius + tolerance;
+  const circleMinY = origin.y - radius - tolerance;
+  const circleMaxY = origin.y + radius + tolerance;
+
+  return !(
+    maxX < circleMinX
+    || minX > circleMaxX
+    || maxY < circleMinY
+    || minY > circleMaxY
+  );
+};
+
+const filterSegmentsForVisibilityCircle = ({
+  segments = [],
+  origin,
+  radius,
+  tolerance = LIGHTING_GEOMETRY_EPSILON,
+} = {}) => (
+  (Array.isArray(segments) ? segments : []).filter((segment) => segmentMayAffectCircle({
+    segment,
+    origin,
+    radius,
+    tolerance,
+  }))
+);
+
 const normalizeSegment = (wall, index) => {
   if (wall?.blocksSight !== true) {
     return null;
@@ -240,9 +276,15 @@ export const computeVisibilityPolygon = ({
     x: Number(origin.x),
     y: Number(origin.y),
   };
+  const relevantSegments = filterSegmentsForVisibilityCircle({
+    segments,
+    origin: normalizedOrigin,
+    radius: normalizedRadius,
+    tolerance,
+  });
   const angles = collectVisibilityAngles({
     origin: normalizedOrigin,
-    segments,
+    segments: relevantSegments,
     rayCount,
     endpointAngleOffset,
   });
@@ -251,7 +293,7 @@ export const computeVisibilityPolygon = ({
     origin: normalizedOrigin,
     angle,
     radius: normalizedRadius,
-    segments,
+    segments: relevantSegments,
     tolerance,
   }));
 };

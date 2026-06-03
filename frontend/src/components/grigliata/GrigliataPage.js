@@ -189,6 +189,7 @@ const EMPTY_VIEW_AS_FOG_VISIBILITY = {
   currentVisibleCells: [],
   currentVisiblePolygons: [],
   currentPersistencePolygons: [],
+  currentTokenVisionPolygons: [],
   contributingTokenIds: [],
   skippedTokens: [],
 };
@@ -1213,6 +1214,7 @@ export default function GrigliataPage() {
       backgroundId: activeBackgroundId,
       grid: normalizedFogGrid,
       lightingRenderInput: fogLightingRenderInput,
+      includeCurrentVisibleCells: false,
     });
   }, [
     activeBackgroundId,
@@ -1226,6 +1228,7 @@ export default function GrigliataPage() {
   const {
     currentVisibleCells: fogCurrentVisibleCells,
     currentVisiblePolygons: fogCurrentVisiblePolygons,
+    currentTokenVisionPolygons: fogCurrentTokenVisionPolygons,
     pendingMemoryTiles: fogPendingMemoryTiles,
   } = useGrigliataFogOfWarPersistence({
     backgroundId: activeBackgroundId,
@@ -1285,6 +1288,7 @@ export default function GrigliataPage() {
         )),
         currentVisibleCells: viewAsPlayerCurrentVisibility.currentVisibleCells,
         currentVisiblePolygons: viewAsPlayerCurrentVisibility.currentVisiblePolygons,
+        currentTokenVisionPolygons: viewAsPlayerCurrentVisibility.currentTokenVisionPolygons,
       };
     }
 
@@ -1305,10 +1309,12 @@ export default function GrigliataPage() {
       )),
       currentVisibleCells: fogCurrentVisibleCells,
       currentVisiblePolygons: fogCurrentVisiblePolygons,
+      currentTokenVisionPolygons: fogCurrentTokenVisionPolygons,
     };
   }, [
     fogCurrentVisibleCells,
     fogCurrentVisiblePolygons,
+    fogCurrentTokenVisionPolygons,
     fogPendingMemoryTiles,
     fogLightingRenderInput,
     fogOfWar,

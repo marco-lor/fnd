@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   doc,
-  runTransaction,
+  getDoc,
   serverTimestamp,
+  setDoc,
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import {
@@ -38,6 +39,41 @@ import { logGrigliataFogDebug } from './fogDebug';
 export const GRIGLIATA_FOG_OF_WAR_WRITE_DEBOUNCE_MS = 350;
 export const DEFAULT_FOG_VISION_RAY_COUNT = 256;
 
+const EMPTY_CURRENT_VISIBILITY = {
+  currentVisibleCells: [],
+  currentVisiblePolygons: [],
+  currentPersistencePolygons: [],
+  currentTokenVisionPolygons: [],
+  contributingTokenIds: [],
+  skippedTokens: [],
+  visibilityKey: '',
+};
+
+const roundVisibilityNumber = (value) => {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue)
+    ? Math.round(numericValue * 1000) / 1000
+    : 0;
+};
+
+const buildEmptyCurrentVisibility = (visibilityKey = '') => ({
+  ...EMPTY_CURRENT_VISIBILITY,
+  visibilityKey,
+});
+
+const isRetryableRasterFlushError = (error) => {
+  const code = String(error?.code || '').toLowerCase();
+  const name = String(error?.name || '').toLowerCase();
+  const message = String(error?.message || error || '').toLowerCase();
+
+  return code.includes('already-exists')
+    || code.includes('aborted')
+    || code.includes('failed-precondition')
+    || name.includes('already-exists')
+    || message.includes('already-exists')
+    || message.includes('conflict');
+};
+
 const tileMatchesGrid = (tile, grid) => (
   tile?.cellSizePx === grid.cellSizePx
   && tile?.offsetXPx === grid.offsetXPx
@@ -58,6 +94,119 @@ const buildRenderableTokensForFog = ({ tokens = [], grid }) => (
   }))
 );
 
+const buildVisionSourceKeyParts = (source = {}) => {
+  const position = source?.renderPosition || source?.position || {};
+  return [
+    source?.tokenId || source?.id || source?.ownerUid || '',
+    source?.ownerUid || '',
+    source?.backgroundId || '',
+    source?.tokenType || '',
+    source?.placed === false ? 'unplaced' : 'placed',
+    source?.isDead === true ? 'dead' : 'alive',
+    source?.isVisibleToPlayers === false ? 'hidden' : 'visible',
+    source?.visionEnabled === false ? 'vision-off' : 'vision-on',
+    roundVisibilityNumber(source?.visionRadiusSquares),
+    roundVisibilityNumber(source?.visionRadiusPx),
+    roundVisibilityNumber(position.x),
+    roundVisibilityNumber(position.y),
+    roundVisibilityNumber(position.size),
+  ];
+};
+
+const buildWallSegmentKeyParts = (segment = {}) => [
+  segment.id || '',
+  roundVisibilityNumber(segment.x1),
+  roundVisibilityNumber(segment.y1),
+  roundVisibilityNumber(segment.x2),
+  roundVisibilityNumber(segment.y2),
+];
+
+const buildRenderableTokenVisionPolygons = (tokenVisionPolygons = []) => (
+  (Array.isArray(tokenVisionPolygons) ? tokenVisionPolygons : [])
+    .map((vision) => {
+      const polygon = (Array.isArray(vision?.polygon) ? vision.polygon : [])
+        .filter((point) => Number.isFinite(Number(point?.x)) && Number.isFinite(Number(point?.y)))
+        .map((point) => ({
+          x: roundVisibilityNumber(point.x),
+          y: roundVisibilityNumber(point.y),
+        }));
+
+      if (polygon.length < 3) {
+        return null;
+      }
+
+      return {
+        tokenId: vision?.tokenId || '',
+        origin: {
+          x: roundVisibilityNumber(vision?.origin?.x),
+          y: roundVisibilityNumber(vision?.origin?.y),
+        },
+        radius: roundVisibilityNumber(vision?.radius),
+        polygon,
+      };
+    })
+    .filter(Boolean)
+);
+
+export const buildViewerFogVisibilityKey = ({
+  tokens = [],
+  currentUserId = '',
+  isManager = false,
+  backgroundId = '',
+  grid,
+  lightingRenderInput = null,
+  rayCount,
+  includeCurrentVisibleCells = true,
+} = {}) => {
+  const normalizedGrid = normalizeGridConfig(grid);
+  const fogRayCount = Number.isFinite(Number(rayCount))
+    ? Number(rayCount)
+    : DEFAULT_FOG_VISION_RAY_COUNT;
+
+  if (!lightingRenderInput || isManager) {
+    return JSON.stringify({
+      backgroundId,
+      currentUserId,
+      isManager,
+      hasLightingRenderInput: !!lightingRenderInput,
+      includeCurrentVisibleCells,
+    });
+  }
+
+  const renderableTokens = buildRenderableTokensForFog({
+    tokens,
+    grid: normalizedGrid,
+  });
+  const visionSourceReport = buildViewerTokenVisionEligibilityReport({
+    tokens: renderableTokens,
+    currentUserId,
+    isManager,
+    cellSizePx: normalizedGrid.cellSizePx,
+    backgroundId,
+  });
+  const wallSegments = normalizeLightingWallSegments(lightingRenderInput.walls);
+
+  return JSON.stringify({
+    backgroundId,
+    currentUserId,
+    isManager,
+    includeCurrentVisibleCells,
+    rayCount: fogRayCount,
+    grid: [
+      normalizedGrid.cellSizePx,
+      normalizedGrid.offsetXPx,
+      normalizedGrid.offsetYPx,
+    ].map(roundVisibilityNumber),
+    sources: visionSourceReport.sources.map(buildVisionSourceKeyParts),
+    skipped: visionSourceReport.skippedTokens.map((skippedToken) => [
+      skippedToken.tokenId || '',
+      skippedToken.ownerUid || '',
+      skippedToken.reason || '',
+    ]),
+    walls: wallSegments.map(buildWallSegmentKeyParts),
+  });
+};
+
 export const buildViewerFogCurrentVisibleCells = ({
   ...args
 } = {}) => buildViewerFogCurrentVisibility(args).currentVisibleCells;
@@ -70,15 +219,22 @@ export const buildViewerFogCurrentVisibility = ({
   grid,
   lightingRenderInput = null,
   rayCount,
+  includeCurrentVisibleCells = true,
+  visibilityKey = '',
 } = {}) => {
+  const resolvedVisibilityKey = visibilityKey || buildViewerFogVisibilityKey({
+    tokens,
+    currentUserId,
+    isManager,
+    backgroundId,
+    grid,
+    lightingRenderInput,
+    rayCount,
+    includeCurrentVisibleCells,
+  });
+
   if (!lightingRenderInput || isManager) {
-    return {
-      currentVisibleCells: [],
-      currentVisiblePolygons: [],
-      currentPersistencePolygons: [],
-      contributingTokenIds: [],
-      skippedTokens: [],
-    };
+    return buildEmptyCurrentVisibility(resolvedVisibilityKey);
   }
 
   const normalizedGrid = normalizeGridConfig(grid);
@@ -97,11 +253,10 @@ export const buildViewerFogCurrentVisibility = ({
 
   if (!visionSources.length) {
     return {
-      currentVisibleCells: [],
-      currentVisiblePolygons: [],
-      currentPersistencePolygons: [],
+      ...EMPTY_CURRENT_VISIBILITY,
       contributingTokenIds: [],
       skippedTokens: visionSourceReport.skippedTokens,
+      visibilityKey: resolvedVisibilityKey,
     };
   }
 
@@ -117,18 +272,22 @@ export const buildViewerFogCurrentVisibility = ({
   });
 
   return {
-    currentVisibleCells: buildCurrentFogCellKeys({
-      tokenVisionPolygons,
-      grid: normalizedGrid,
-    }),
+    currentVisibleCells: includeCurrentVisibleCells
+      ? buildCurrentFogCellKeys({
+        tokenVisionPolygons,
+        grid: normalizedGrid,
+      })
+      : [],
     currentVisiblePolygons: buildCurrentFogRenderPolygons({
       tokenVisionPolygons,
     }),
     currentPersistencePolygons: buildCurrentFogMemoryPolygons({
       tokenVisionPolygons,
     }),
+    currentTokenVisionPolygons: buildRenderableTokenVisionPolygons(tokenVisionPolygons),
     contributingTokenIds: visionSourceReport.contributingTokenIds,
     skippedTokens: visionSourceReport.skippedTokens,
+    visibilityKey: resolvedVisibilityKey,
   };
 };
 
@@ -147,16 +306,27 @@ export default function useGrigliataFogOfWarPersistence({
   const pendingTileMapRef = useRef(new Map());
   const inFlightTileMapRef = useRef(new Map());
   const flushTimeoutRef = useRef(null);
+  const flushInFlightRef = useRef(false);
+  const flushAfterInFlightRef = useRef(false);
   const movementSequenceRef = useRef(0);
   const importedLegacyFogDocIdsRef = useRef(new Set());
+  const visibilityCacheRef = useRef({
+    key: '',
+    visibility: buildEmptyCurrentVisibility(''),
+  });
+  const lastQueuedVisibilityKeyRef = useRef('');
   const [pendingMemoryTiles, setPendingMemoryTiles] = useState([]);
   const fogDocId = useMemo(
     () => buildGrigliataFogOfWarDocId(backgroundId, currentUserId),
     [backgroundId, currentUserId]
   );
   const currentVisibility = useMemo(
-    () => (isEnabled
-      ? buildViewerFogCurrentVisibility({
+    () => {
+      if (!isEnabled) {
+        return buildEmptyCurrentVisibility('disabled');
+      }
+
+      const visibilityKey = buildViewerFogVisibilityKey({
         tokens,
         currentUserId,
         isManager,
@@ -164,14 +334,31 @@ export default function useGrigliataFogOfWarPersistence({
         grid: normalizedGrid,
         lightingRenderInput,
         rayCount,
-      })
-      : {
-        currentVisibleCells: [],
-        currentVisiblePolygons: [],
-        currentPersistencePolygons: [],
-        contributingTokenIds: [],
-        skippedTokens: [],
-      }),
+        includeCurrentVisibleCells: false,
+      });
+
+      if (visibilityCacheRef.current.key === visibilityKey) {
+        return visibilityCacheRef.current.visibility;
+      }
+
+      const nextVisibility = buildViewerFogCurrentVisibility({
+        tokens,
+        currentUserId,
+        isManager,
+        backgroundId,
+        grid: normalizedGrid,
+        lightingRenderInput,
+        rayCount,
+        includeCurrentVisibleCells: false,
+        visibilityKey,
+      });
+
+      visibilityCacheRef.current = {
+        key: visibilityKey,
+        visibility: nextVisibility,
+      };
+      return nextVisibility;
+    },
     [
       backgroundId,
       currentUserId,
@@ -186,8 +373,14 @@ export default function useGrigliataFogOfWarPersistence({
   const currentVisibleCells = currentVisibility.currentVisibleCells;
   const currentVisiblePolygons = currentVisibility.currentVisiblePolygons;
   const currentPersistencePolygons = currentVisibility.currentPersistencePolygons;
-  const contributingTokenIds = currentVisibility.contributingTokenIds || [];
-  const skippedTokens = currentVisibility.skippedTokens || [];
+  const currentTokenVisionPolygons = currentVisibility.currentTokenVisionPolygons;
+  const currentVisibilityKey = currentVisibility.visibilityKey || '';
+  const contributingTokenIds = Array.isArray(currentVisibility.contributingTokenIds)
+    ? currentVisibility.contributingTokenIds
+    : EMPTY_CURRENT_VISIBILITY.contributingTokenIds;
+  const skippedTokens = Array.isArray(currentVisibility.skippedTokens)
+    ? currentVisibility.skippedTokens
+    : EMPTY_CURRENT_VISIBILITY.skippedTokens;
   const storedMemoryTiles = useMemo(
     () => (Array.isArray(fogOfWar?.memoryTiles) ? fogOfWar.memoryTiles : [])
       .filter((tile) => tileMatchesGrid(tile, normalizedGrid)),
@@ -227,6 +420,17 @@ export default function useGrigliataFogOfWarPersistence({
   }, [refreshPendingMemoryTiles, storedMemoryTiles]);
 
   const flushPendingTiles = useCallback(() => {
+    if (flushInFlightRef.current) {
+      flushAfterInFlightRef.current = true;
+      logGrigliataFogDebug('raster-flush-defer', {
+        backgroundId,
+        currentUserId,
+        pendingTileCount: pendingTileMapRef.current.size,
+        inFlightTileCount: inFlightTileMapRef.current.size,
+      });
+      return;
+    }
+
     const tilesToFlush = [...pendingTileMapRef.current.values()];
     pendingTileMapRef.current.clear();
 
@@ -245,6 +449,8 @@ export default function useGrigliataFogOfWarPersistence({
       return;
     }
 
+    flushInFlightRef.current = true;
+
     const totalBitCount = tilesToFlush.reduce(
       (total, tile) => total + countFogRasterMaskBits(tile.maskBytes),
       0
@@ -256,46 +462,41 @@ export default function useGrigliataFogOfWarPersistence({
       totalBitCount,
     });
 
-    void runTransaction(db, async (transaction) => {
-      const reads = await Promise.all(tilesToFlush.map(async (tile) => {
-        const tileRef = doc(db, GRIGLIATA_FOG_MEMORY_TILES_COLLECTION, tile.id);
-        const snapshot = await transaction.get(tileRef);
-        const existingTile = snapshot.exists()
-          ? normalizeFogRasterMemoryTileDoc({
-            id: snapshot.id,
-            ...snapshot.data(),
-          })
-          : null;
-        return { tile, tileRef, existingTile };
-      }));
+    void Promise.all(tilesToFlush.map(async (tile) => {
+      const tileRef = doc(db, GRIGLIATA_FOG_MEMORY_TILES_COLLECTION, tile.id);
+      const snapshot = await getDoc(tileRef);
+      const existingTile = snapshot.exists()
+        ? normalizeFogRasterMemoryTileDoc({
+          id: snapshot.id,
+          ...snapshot.data(),
+        })
+        : null;
 
-      const updatedAt = serverTimestamp();
-      reads.forEach(({ tile, tileRef, existingTile }) => {
-        const mergedMaskBytes = existingTile
-          ? mergeFogRasterTileMasks(existingTile.maskBytes, tile.maskBytes)
-          : tile.maskBytes;
+      const mergedMaskBytes = existingTile
+        ? mergeFogRasterTileMasks(existingTile.maskBytes, tile.maskBytes)
+        : tile.maskBytes;
 
-        if (existingTile && maskContainsFogRasterBits(existingTile.maskBytes, tile.maskBytes)) {
-          return;
-        }
+      if (existingTile && maskContainsFogRasterBits(existingTile.maskBytes, tile.maskBytes)) {
+        return false;
+      }
 
-        transaction.set(
-          tileRef,
-          buildFogRasterTilePayload({
-            ...tile,
-            grid: {
-              cellSizePx: tile.cellSizePx,
-              offsetXPx: tile.offsetXPx,
-              offsetYPx: tile.offsetYPx,
-            },
-            maskBytes: mergedMaskBytes,
-            updatedAt,
-            updatedBy: currentUserId,
-          }),
-          { merge: true }
-        );
-      });
-    }).then(() => {
+      await setDoc(
+        tileRef,
+        buildFogRasterTilePayload({
+          ...tile,
+          grid: {
+            cellSizePx: tile.cellSizePx,
+            offsetXPx: tile.offsetXPx,
+            offsetYPx: tile.offsetYPx,
+          },
+          maskBytes: mergedMaskBytes,
+          updatedAt: serverTimestamp(),
+          updatedBy: currentUserId,
+        }),
+        { merge: true }
+      );
+      return true;
+    })).then((writeResults) => {
       tilesToFlush.forEach((tile) => {
         inFlightTileMapRef.current.delete(tile.id);
       });
@@ -304,9 +505,12 @@ export default function useGrigliataFogOfWarPersistence({
         backgroundId,
         currentUserId,
         tileCount: tilesToFlush.length,
+        writtenTileCount: writeResults.filter(Boolean).length,
         totalBitCount,
       });
     }).catch((error) => {
+      const isRetryableConflict = isRetryableRasterFlushError(error);
+
       tilesToFlush.forEach((tile) => {
         const pendingTile = pendingTileMapRef.current.get(tile.id);
         pendingTileMapRef.current.set(tile.id, pendingTile
@@ -318,14 +522,30 @@ export default function useGrigliataFogOfWarPersistence({
         inFlightTileMapRef.current.delete(tile.id);
       });
       refreshPendingMemoryTiles();
-      console.error('Failed to persist Grigliata raster fog memory:', error);
+
+      if (isRetryableConflict) {
+        flushAfterInFlightRef.current = true;
+      } else {
+        console.error('Failed to persist Grigliata raster fog memory:', error);
+      }
+
       logGrigliataFogDebug('raster-flush-error', {
         backgroundId,
         currentUserId,
         tileCount: tilesToFlush.length,
         code: error?.code || '',
         message: error?.message || String(error),
+        willRetry: isRetryableConflict,
       });
+    }).finally(() => {
+      flushInFlightRef.current = false;
+
+      if (flushAfterInFlightRef.current) {
+        flushAfterInFlightRef.current = false;
+        if (pendingTileMapRef.current.size > 0) {
+          flushPendingTiles();
+        }
+      }
     });
   }, [backgroundId, currentUserId, refreshPendingMemoryTiles]);
 
@@ -488,8 +708,29 @@ export default function useGrigliataFogOfWarPersistence({
               )
           ),
       });
+      lastQueuedVisibilityKeyRef.current = '';
       return undefined;
     }
+
+    if (currentVisibilityKey && lastQueuedVisibilityKeyRef.current === currentVisibilityKey) {
+      logGrigliataFogDebug('persistence:skip', {
+        backgroundId,
+        currentUserId,
+        fogDocId,
+        isEnabled,
+        isManager,
+        hasLightingRenderInput: !!lightingRenderInput,
+        currentVisibleCellCount: currentVisibleCells.length,
+        currentPersistencePolygonCount: currentPersistencePolygons.length,
+        contributingTokenIds,
+        skippedTokens: skippedTokens.slice(0, 12),
+        skippedTokenCount: skippedTokens.length,
+        reason: 'unchanged-visibility',
+      });
+      return undefined;
+    }
+
+    lastQueuedVisibilityKeyRef.current = currentVisibilityKey;
 
     const movementId = movementSequenceRef.current + 1;
     movementSequenceRef.current = movementId;
@@ -529,6 +770,7 @@ export default function useGrigliataFogOfWarPersistence({
     backgroundId,
     currentUserId,
     currentVisibleCells.length,
+    currentVisibilityKey,
     currentPersistencePolygons,
     contributingTokenIds,
     fogDocId,
@@ -591,11 +833,13 @@ export default function useGrigliataFogOfWarPersistence({
       window.clearTimeout(flushTimeoutRef.current);
       flushTimeoutRef.current = null;
     }
+    flushAfterInFlightRef.current = false;
   }, []);
 
   return {
     currentVisibleCells,
     currentVisiblePolygons,
+    currentTokenVisionPolygons,
     pendingMemoryTiles,
   };
 }

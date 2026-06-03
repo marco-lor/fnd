@@ -3068,7 +3068,7 @@ describe('GrigliataPage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('true');
-      expect(Number(screen.getByTestId('board-fog-current-count').textContent)).toBeGreaterThan(0);
+      expect(Number(screen.getByTestId('board-fog-current-polygon-count').textContent)).toBeGreaterThan(0);
     });
     expect(firestore.onSnapshot.mock.calls.some(([target]) => (
       target?.path === 'grigliata_fog_of_war/map-1__user-1'
@@ -3337,7 +3337,7 @@ describe('GrigliataPage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('true');
-      expect(Number(screen.getByTestId('board-fog-current-count').textContent)).toBeGreaterThan(0);
+      expect(Number(screen.getByTestId('board-fog-current-polygon-count').textContent)).toBeGreaterThan(0);
     });
     expect(screen.getByTestId('board-token-ids')).toHaveTextContent('custom-1');
     expect(screen.getByTestId('board-token-ids')).not.toHaveTextContent('foe-1');
@@ -3517,7 +3517,7 @@ describe('GrigliataPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('true');
       expect(screen.getByTestId('board-fog-memory-tile-count')).toHaveTextContent('1');
-      expect(Number(screen.getByTestId('board-fog-current-count').textContent)).toBeGreaterThan(0);
+      expect(Number(screen.getByTestId('board-fog-current-polygon-count').textContent)).toBeGreaterThan(0);
     });
     expect(screen.getByTestId('board-fog-cell-count')).toHaveTextContent('0');
     expect(screen.getByTestId('board-fog-polygon-count')).toHaveTextContent('0');

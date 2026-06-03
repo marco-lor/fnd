@@ -121,6 +121,25 @@ describe('lightingGeometry', () => {
     expect(polygon.some((point) => point.blocked && Math.abs(point.x - 10) < 0.001)).toBe(true);
   });
 
+  test('ignores blocker endpoint angles outside the vision radius bounds', () => {
+    const polygon = computeVisibilityPolygon({
+      origin: { x: 0, y: 0 },
+      radius: 20,
+      rayCount: 16,
+      segments: normalizeLightingWallSegments([{
+        id: 'far-wall',
+        x1: 1000,
+        y1: -100,
+        x2: 1000,
+        y2: 100,
+        blocksSight: true,
+      }]),
+    });
+
+    expect(polygon).toHaveLength(16);
+    expect(polygon.some((point) => point.blocked)).toBe(false);
+  });
+
   test('builds bright and dim light polygons using normalized pixel radii', () => {
     const light = {
       id: 'light-1',

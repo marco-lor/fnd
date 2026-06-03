@@ -36,6 +36,11 @@ jest.mock('../firebaseConfig', () => ({
 jest.mock('firebase/firestore', () => ({
   arrayUnion: jest.fn((...values) => mockArrayUnionSentinel(...values)),
   doc: jest.fn((db, ...segments) => mockBuildDocTarget(...segments)),
+  getDoc: jest.fn((target) => Promise.resolve({
+    id: target.id,
+    exists: () => false,
+    data: () => ({}),
+  })),
   runTransaction: jest.fn((db, callback) => {
     const transaction = {
       get: jest.fn((target) => Promise.resolve({
@@ -106,6 +111,11 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
     firestore = require('firebase/firestore');
     firestore.arrayUnion.mockClear().mockImplementation((...values) => mockArrayUnionSentinel(...values));
     firestore.doc.mockClear().mockImplementation((db, ...segments) => mockBuildDocTarget(...segments));
+    firestore.getDoc.mockClear().mockImplementation((target) => Promise.resolve({
+      id: target.id,
+      exists: () => false,
+      data: () => ({}),
+    }));
     firestore.runTransaction.mockClear().mockImplementation((db, callback) => {
       const transaction = {
         get: jest.fn((target) => Promise.resolve({
@@ -255,7 +265,7 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
     render(<HookProbe />);
 
     await waitFor(() => {
-      expect(Number(screen.getByTestId('cell-count').textContent)).toBeGreaterThan(0);
+      expect(screen.getByTestId('cell-count')).toHaveTextContent('0');
       expect(screen.getByTestId('polygon-count')).toHaveTextContent('1');
       expect(Number(screen.getByTestId('pending-tile-count').textContent)).toBeGreaterThan(0);
     });
@@ -266,10 +276,10 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
     });
 
     await waitFor(() => {
-      expect(firestore.runTransaction).toHaveBeenCalledTimes(1);
+      expect(firestore.setDoc).toHaveBeenCalled();
     });
-    expect(firestore.setDoc).not.toHaveBeenCalled();
-    const tileWrites = mockTransactionInstances[0].set.mock.calls;
+    expect(firestore.runTransaction).not.toHaveBeenCalled();
+    const tileWrites = firestore.setDoc.mock.calls;
     expect(tileWrites.length).toBeGreaterThan(0);
     expect(tileWrites[0][0].path).toContain(`${GRIGLIATA_FOG_MEMORY_TILES_COLLECTION}/`);
     expect(tileWrites[0][1]).toEqual(expect.objectContaining({
@@ -283,7 +293,54 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
     }));
     expect(tileWrites[0][1]).not.toHaveProperty('exploredCells');
     expect(tileWrites[0][1]).not.toHaveProperty('exploredPolygons');
+    expect(tileWrites[0][2]).toEqual({ merge: true });
     expect(hasDirectNestedArray(tileWrites[0][1])).toBe(false);
+  });
+
+  test('skips duplicate raster writes when only non-visibility token fields change', async () => {
+    const HookProbe = ({ movingToken }) => {
+      const { pendingMemoryTiles } = useGrigliataFogOfWarPersistence({
+        backgroundId: 'map-1',
+        currentUserId: 'user-1',
+        isManager: false,
+        grid,
+        tokens: [movingToken],
+        lightingRenderInput: closedDoorInput,
+        fogOfWar: null,
+        isEnabled: true,
+        rayCount: 16,
+      });
+      return <div data-testid="pending-tile-count">{String(pendingMemoryTiles.length)}</div>;
+    };
+
+    const { rerender } = render(<HookProbe movingToken={{ ...token, statuses: [] }} />);
+
+    await waitFor(() => {
+      expect(Number(screen.getByTestId('pending-tile-count').textContent)).toBeGreaterThan(0);
+    });
+
+    await act(async () => {
+      jest.advanceTimersByTime(GRIGLIATA_FOG_OF_WAR_WRITE_DEBOUNCE_MS);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalled();
+    });
+
+    const writeCount = firestore.setDoc.mock.calls.length;
+
+    rerender(<HookProbe movingToken={{ ...token, statuses: ['poisoned'] }} />);
+
+    await act(async () => {
+      jest.advanceTimersByTime(GRIGLIATA_FOG_OF_WAR_WRITE_DEBOUNCE_MS);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(firestore.setDoc).toHaveBeenCalledTimes(writeCount);
+    expect(firestore.runTransaction).not.toHaveBeenCalled();
   });
 
   test('queues two rapid movements into one raster flush without dropping the first move', async () => {
@@ -317,12 +374,152 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
     });
 
     await waitFor(() => {
-      expect(firestore.runTransaction).toHaveBeenCalledTimes(1);
+      expect(firestore.setDoc).toHaveBeenCalled();
     });
-    const tileKeys = mockTransactionInstances[0].set.mock.calls
+    const tileKeys = firestore.setDoc.mock.calls
       .map((call) => call[1].tileKey);
     expect(new Set(tileKeys).size).toBeGreaterThan(1);
-    expect(firestore.setDoc).not.toHaveBeenCalled();
+    expect(firestore.runTransaction).not.toHaveBeenCalled();
+  });
+
+  test('defers a new raster flush while previous merge writes are still in flight', async () => {
+    let resolveFirstWrite;
+    let setDocCallCount = 0;
+    firestore.setDoc.mockImplementation(() => {
+      setDocCallCount += 1;
+      if (setDocCallCount === 1) {
+        return new Promise((resolve) => {
+          resolveFirstWrite = resolve;
+        });
+      }
+
+      return Promise.resolve();
+    });
+
+    const HookProbe = ({ movingToken }) => {
+      const { pendingMemoryTiles } = useGrigliataFogOfWarPersistence({
+        backgroundId: 'map-1',
+        currentUserId: 'user-1',
+        isManager: false,
+        grid,
+        tokens: [movingToken],
+        lightingRenderInput: closedDoorInput,
+        fogOfWar: null,
+        isEnabled: true,
+        rayCount: 16,
+      });
+      return <div data-testid="pending-tile-count">{String(pendingMemoryTiles.length)}</div>;
+    };
+
+    const { rerender } = render(<HookProbe movingToken={{ ...token, col: 0, row: 0 }} />);
+
+    await waitFor(() => {
+      expect(Number(screen.getByTestId('pending-tile-count').textContent)).toBeGreaterThan(0);
+    });
+
+    await act(async () => {
+      jest.advanceTimersByTime(GRIGLIATA_FOG_OF_WAR_WRITE_DEBOUNCE_MS);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalled();
+      expect(resolveFirstWrite).toEqual(expect.any(Function));
+    });
+    const firstFlushWriteCount = firestore.setDoc.mock.calls.length;
+
+    rerender(<HookProbe movingToken={{ ...token, col: 10, row: 0 }} />);
+
+    await act(async () => {
+      jest.advanceTimersByTime(GRIGLIATA_FOG_OF_WAR_WRITE_DEBOUNCE_MS);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(firestore.setDoc).toHaveBeenCalledTimes(firstFlushWriteCount);
+
+    await act(async () => {
+      resolveFirstWrite();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc.mock.calls.length).toBeGreaterThan(firstFlushWriteCount);
+    });
+    expect(firestore.runTransaction).not.toHaveBeenCalled();
+  });
+
+  test('retries retryable raster merge write failures', async () => {
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    let rejectFirstWrite;
+    firestore.setDoc.mockImplementation(() => {
+      if (!rejectFirstWrite) {
+        return new Promise((resolve, reject) => {
+          rejectFirstWrite = () => {
+            const error = new Error('Document changed before merge write');
+            error.code = 'failed-precondition';
+            reject(error);
+          };
+        });
+      }
+
+      return Promise.resolve();
+    });
+
+    const HookProbe = () => {
+      const { pendingMemoryTiles } = useGrigliataFogOfWarPersistence({
+        backgroundId: 'map-1',
+        currentUserId: 'user-1',
+        isManager: false,
+        grid,
+        tokens: [{ ...token, col: 0, row: 0 }],
+        lightingRenderInput: closedDoorInput,
+        fogOfWar: null,
+        isEnabled: true,
+        rayCount: 16,
+      });
+      return <div data-testid="pending-tile-count">{String(pendingMemoryTiles.length)}</div>;
+    };
+
+    render(<HookProbe />);
+
+    await waitFor(() => {
+      expect(Number(screen.getByTestId('pending-tile-count').textContent)).toBeGreaterThan(0);
+    });
+
+    await act(async () => {
+      jest.advanceTimersByTime(GRIGLIATA_FOG_OF_WAR_WRITE_DEBOUNCE_MS);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalled();
+      expect(rejectFirstWrite).toEqual(expect.any(Function));
+    });
+    const firstFlushWriteCount = firestore.setDoc.mock.calls.length;
+
+    await act(async () => {
+      rejectFirstWrite();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc.mock.calls.length).toBeGreaterThan(firstFlushWriteCount);
+    });
+    expect(firestore.runTransaction).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).not.toHaveBeenCalledWith(
+      'Failed to persist Grigliata raster fog memory:',
+      expect.anything()
+    );
+
+    consoleErrorSpy.mockRestore();
   });
 
   test('queues rapid movements from different owned tokens into one shared raster flush', async () => {
@@ -374,9 +571,9 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
     });
 
     await waitFor(() => {
-      expect(firestore.runTransaction).toHaveBeenCalledTimes(1);
+      expect(firestore.setDoc).toHaveBeenCalled();
     });
-    const tileWrites = mockTransactionInstances[0].set.mock.calls;
+    const tileWrites = firestore.setDoc.mock.calls;
     const tileKeys = tileWrites.map((call) => call[1].tileKey);
     expect(new Set(tileKeys).size).toBeGreaterThanOrEqual(4);
     expect(tileKeys).toEqual(expect.arrayContaining(['0:0', '1:0', '2:0', '3:0']));
@@ -385,6 +582,6 @@ describe('useGrigliataFogOfWarPersistence visibility helpers', () => {
       expect(payload).not.toHaveProperty('exploredCells');
       expect(payload).not.toHaveProperty('exploredPolygons');
     });
-    expect(firestore.setDoc).not.toHaveBeenCalled();
+    expect(firestore.runTransaction).not.toHaveBeenCalled();
   });
 });

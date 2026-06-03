@@ -6072,6 +6072,7 @@ export default function GrigliataBoard({
                   metadata={lightingRenderInput}
                   tokens={visibleRenderedTokens}
                   visionSources={visibleTokenVisionSources}
+                  precomputedTokenVisionPolygons={Array.isArray(fogOfWar?.currentTokenVisionPolygons) ? fogOfWar.currentTokenVisionPolygons : null}
                   lightClipPolygons={fogOfWar ? fogOfWar.currentVisiblePolygons || [] : undefined}
                 />
               </Layer>

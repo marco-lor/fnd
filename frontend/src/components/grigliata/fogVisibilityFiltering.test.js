@@ -30,6 +30,17 @@ const fogOfWar = {
   currentVisibleCells: ['0:0', '1:0'],
 };
 
+const polygonFogOfWar = {
+  exploredCells: ['0:0'],
+  currentVisibleCells: [],
+  currentVisiblePolygons: [[[
+    { x: 140, y: 0 },
+    { x: 210, y: 0 },
+    { x: 210, y: 70 },
+    { x: 140, y: 70 },
+  ]]],
+};
+
 describe('fogVisibilityFiltering', () => {
   test('keeps the player main token visible while filtering other tokens by current visible cells', () => {
     const tokens = [
@@ -81,6 +92,40 @@ describe('fogVisibilityFiltering', () => {
       isManager: false,
       grid,
       fogOfWar,
+    })).toEqual([]);
+  });
+
+  test('uses current polygons for live token visibility without current cells', () => {
+    expect(filterFogVisibleTokens({
+      tokens: [
+        buildToken({ tokenId: 'visible-1', id: 'visible-1', col: 2, row: 0 }),
+        buildToken({ tokenId: 'hidden-1', id: 'hidden-1', col: 0, row: 0 }),
+      ],
+      currentUserId: 'user-1',
+      isManager: false,
+      grid,
+      fogOfWar: polygonFogOfWar,
+    }).map((token) => token.tokenId)).toEqual(['visible-1']);
+
+    expect(splitFogVisibleTokenRenderLayers({
+      tokens: [buildToken({ tokenId: 'user-1', id: 'user-1', ownerUid: 'user-1', col: 0, row: 0 })],
+      currentUserId: 'user-1',
+      isManager: false,
+      grid,
+      fogOfWar: polygonFogOfWar,
+    }).aboveFogTokens.map((token) => token.tokenId)).toEqual(['user-1']);
+  });
+
+  test('does not treat explored memory cells as fallback when current polygons exist', () => {
+    expect(filterFogVisibleTokens({
+      tokens: [buildToken({ tokenId: 'memory-only', id: 'memory-only', col: 0, row: 0 })],
+      currentUserId: 'user-1',
+      isManager: false,
+      grid,
+      fogOfWar: {
+        ...polygonFogOfWar,
+        exploredCells: ['0:0'],
+      },
     })).toEqual([]);
   });
 

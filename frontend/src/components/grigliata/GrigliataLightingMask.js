@@ -177,6 +177,7 @@ export default function GrigliataLightingMask({
   metadata,
   tokens = [],
   visionSources = null,
+  precomputedTokenVisionPolygons = null,
   lightClipPolygons,
   rayCount,
 }) {
@@ -187,13 +188,21 @@ export default function GrigliataLightingMask({
     [metadata?.walls]
   );
   const tokenVisionPolygons = useMemo(
-    () => buildTokenVisionPolygons({
-      tokens: resolvedVisionSources,
-      visionRadiusPx: normalizedGrid.cellSizePx * DEFAULT_TOKEN_VISION_RADIUS_SQUARES,
-      segments: wallSegments,
+    () => (Array.isArray(precomputedTokenVisionPolygons)
+      ? precomputedTokenVisionPolygons
+      : buildTokenVisionPolygons({
+        tokens: resolvedVisionSources,
+        visionRadiusPx: normalizedGrid.cellSizePx * DEFAULT_TOKEN_VISION_RADIUS_SQUARES,
+        segments: wallSegments,
+        rayCount,
+      })),
+    [
+      normalizedGrid.cellSizePx,
+      precomputedTokenVisionPolygons,
       rayCount,
-    }),
-    [normalizedGrid.cellSizePx, rayCount, resolvedVisionSources, wallSegments]
+      resolvedVisionSources,
+      wallSegments,
+    ]
   );
   const lightPolygons = useMemo(
     () => (Array.isArray(metadata?.lights) ? metadata.lights : [])
