@@ -988,6 +988,10 @@ describe('GrigliataPage', () => {
   const getTransactionSetCalls = () => (
     mockTransactionInstances.flatMap((transaction) => transaction.set.mock.calls)
   );
+  const getFogMemoryTileSetCalls = () => ([
+    ...getTransactionSetCalls(),
+    ...firestore.setDoc.mock.calls,
+  ]);
   const getTransactionDeleteCalls = () => (
     mockTransactionInstances.flatMap((transaction) => transaction.delete.mock.calls)
   );
@@ -1062,7 +1066,7 @@ describe('GrigliataPage', () => {
     expect(hasDirectNestedArray(payload)).toBe(false);
   };
   const getFogTileSetCallsByOwner = (ownerUid) => (
-    getTransactionSetCalls().filter(([target, payload]) => (
+    getFogMemoryTileSetCalls().filter(([target, payload]) => (
       target?.path?.startsWith(`${GRIGLIATA_FOG_MEMORY_TILES_COLLECTION}/`)
       && payload?.ownerUid === ownerUid
     ))
@@ -6996,6 +7000,105 @@ describe('GrigliataPage', () => {
       expect(screen.getByTestId('board-active-turn-token')).toHaveTextContent('user-1');
       expect(screen.getByTestId('board-turn-order-count')).toHaveTextContent('2');
     });
+  });
+
+  test('adds a secondary narration image with magnetic placement', async () => {
+    setManagerAuth();
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        imageUrl: 'https://example.com/map-1.png',
+        imageWidth: 1280,
+        imageHeight: 720,
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+      }, {
+        id: 'map-2',
+        name: 'Iron Keep',
+        imageUrl: 'https://example.com/map-2.png',
+        imageWidth: 1920,
+        imageHeight: 1080,
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+      }, {
+        id: 'map-3',
+        name: 'Frost Hall',
+        imageUrl: 'https://example.com/map-3.png',
+        imageWidth: 1600,
+        imageHeight: 900,
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+      }]);
+      setDocData('grigliata_state/current', {
+        activeBackgroundId: 'map-1',
+        presentationBackgroundId: 'map-2',
+        presentationPlacements: [{
+          id: 'background:map-2',
+          backgroundId: 'map-2',
+          x: 0,
+          y: 0,
+          width: 1920,
+          height: 1080,
+          order: 0,
+          mode: 'free',
+          attachedSide: '',
+        }],
+      });
+    });
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+    });
+
+    firestore.setDoc.mockClear();
+    preloadImageAssets.mockClear();
+
+    const latestBackgroundGalleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+    await act(async () => {
+      latestBackgroundGalleryProps.onAddNarrationBackground({
+        id: 'map-3',
+        name: 'Frost Hall',
+        imageUrl: 'https://example.com/map-3.png',
+        imageWidth: 1600,
+        imageHeight: 900,
+      });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Attach Frost Hall right of narration group' }));
+    });
+
+    expect(preloadImageAssets).toHaveBeenCalledWith(['https://example.com/map-3.png']);
+    expect(firestore.setDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_state/current' }),
+      expect.objectContaining({
+        presentationBackgroundId: 'map-2',
+        presentationPlacements: [
+          expect.objectContaining({
+            backgroundId: 'map-2',
+            x: 0,
+            y: 0,
+            order: 0,
+          }),
+          expect.objectContaining({
+            backgroundId: 'map-3',
+            x: 1920,
+            y: 90,
+            width: 1600,
+            height: 900,
+            order: 1,
+            mode: 'magnetic',
+            attachedSide: 'right',
+          }),
+        ],
+        updatedAt: { __type: 'serverTimestamp' },
+        updatedBy: 'user-1',
+      }),
+      { merge: true }
+    );
   });
 
   test('blocks combat-map switching and deactivation while turn order is active', async () => {

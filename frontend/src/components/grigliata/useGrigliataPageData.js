@@ -53,6 +53,10 @@ import {
   GRIGLIATA_GALLERY_FOLDERS_COLLECTION,
   sortGalleryFolders,
 } from './galleryFolders';
+import {
+  buildBackgroundMap,
+  normalizeNarrationPlacements,
+} from './narrationScene';
 
 const LIVE_INTERACTION_CLOCK_INTERVAL_MS = 15 * 1000;
 const PAGE_PRESENCE_CLOCK_INTERVAL_MS = 15 * 1000;
@@ -246,7 +250,7 @@ export default function useGrigliataPageData({
   const activeBackgroundId = typeof boardState?.activeBackgroundId === 'string'
     ? boardState.activeBackgroundId
     : '';
-  const presentationBackgroundId = typeof boardState?.presentationBackgroundId === 'string'
+  const legacyPresentationBackgroundId = typeof boardState?.presentationBackgroundId === 'string'
     ? boardState.presentationBackgroundId
     : '';
 
@@ -509,11 +513,28 @@ export default function useGrigliataPageData({
     () => backgrounds.find((background) => background.id === activeBackgroundId) || null,
     [backgrounds, activeBackgroundId]
   );
-  const presentationBackground = useMemo(
-    () => backgrounds.find((background) => background.id === presentationBackgroundId) || null,
-    [backgrounds, presentationBackgroundId]
+  const presentationPlacements = useMemo(
+    () => normalizeNarrationPlacements({
+      rawPlacements: boardState?.presentationPlacements,
+      legacyBackgroundId: legacyPresentationBackgroundId,
+      backgrounds,
+    }),
+    [backgrounds, boardState?.presentationPlacements, legacyPresentationBackgroundId]
   );
-  const displayBackground = presentationBackground || activeBackground;
+  const presentationBackgroundIds = useMemo(
+    () => presentationPlacements.map((placement) => placement.backgroundId),
+    [presentationPlacements]
+  );
+  const presentationBackgroundsById = useMemo(
+    () => buildBackgroundMap(backgrounds.filter((background) => presentationBackgroundIds.includes(background.id))),
+    [backgrounds, presentationBackgroundIds]
+  );
+  const presentationBackgroundId = presentationPlacements[0]?.backgroundId || '';
+  const presentationBackground = presentationBackgroundId
+    ? presentationBackgroundsById.get(presentationBackgroundId) || null
+    : null;
+  const presentationPrimaryBackground = presentationBackground;
+  const displayBackground = presentationPrimaryBackground || activeBackground;
 
   const sharedInteractions = useMemo(
     () => filterActiveGrigliataLiveInteractions(
@@ -958,7 +979,11 @@ export default function useGrigliataPageData({
     musicTracks,
     persistedActiveGrid,
     presentationBackground,
+    presentationBackgroundIds,
+    presentationBackgroundsById,
     presentationBackgroundId,
+    presentationPlacements,
+    presentationPrimaryBackground,
     selectedBackground,
     selectedBackgroundId,
     setSelectedBackgroundId,

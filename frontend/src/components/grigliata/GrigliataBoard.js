@@ -101,6 +101,11 @@ import {
   MIN_FOG_BRUSH_RADIUS_SQUARES,
   normalizeFogBrushSettings,
 } from './fogBrushEditing';
+import {
+  buildBackgroundMap,
+  buildInitialNarrationPlacement,
+  buildNarrationPlacementBounds,
+} from './narrationScene';
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
 const RULER_LABEL_MIN_WIDTH = 90;
@@ -742,6 +747,45 @@ const buildBattlemapImageLayer = ({ background, image, opacity = 1 }) => {
     imageHeight: background.imageHeight || image.naturalHeight || image.videoHeight || image.height || 0,
     opacity,
   };
+};
+const NarrationPlacementImage = ({
+  placement,
+  background,
+  isPrimary = false,
+  isManager = false,
+  onMoveNarrationPlacement = null,
+}) => {
+  const assetType = getBackgroundAssetType(background);
+  const imageSnapshot = useImageAssetSnapshot(assetType === 'image' ? background?.imageUrl || '' : '');
+  const videoSnapshot = useVideoBackgroundAssetSnapshot(assetType === 'video' ? background?.imageUrl || '' : '');
+  const assetSnapshot = assetType === 'video' ? videoSnapshot : imageSnapshot;
+
+  if (!placement?.id || !background?.imageUrl || assetSnapshot.status !== 'loaded' || !assetSnapshot.image) {
+    return null;
+  }
+
+  return (
+    <KonvaImage
+      data-testid={isPrimary ? 'battlemap-image-active' : `narration-image-placement-${placement.id}`}
+      data-asset-type={assetType}
+      image={assetSnapshot.image}
+      x={placement.x}
+      y={placement.y}
+      width={placement.width}
+      height={placement.height}
+      opacity={1}
+      draggable={!!(isManager && onMoveNarrationPlacement)}
+      listening={!!(isManager && onMoveNarrationPlacement)}
+      onDragEnd={(event) => {
+        const target = event?.target;
+        const targetAttrX = target?.attrs?.x ?? target?.getAttribute?.('data-x');
+        const targetAttrY = target?.attrs?.y ?? target?.getAttribute?.('data-y');
+        const nextX = typeof target?.x === 'function' ? target.x() : Number(targetAttrX ?? placement.x);
+        const nextY = typeof target?.y === 'function' ? target.y() : Number(targetAttrY ?? placement.y);
+        onMoveNarrationPlacement?.(placement.id, { x: nextX, y: nextY });
+      }}
+    />
+  );
 };
 const buildNarrationImageBounds = (background) => {
   const width = Number(background?.imageWidth) || 0;
@@ -2369,6 +2413,9 @@ export default function GrigliataBoard({
   wallSourceControls = null,
   fogBrushControls = null,
   isNarrationOverlayActive = false,
+  narrationPlacements = [],
+  narrationBackgrounds = [],
+  onMoveNarrationPlacement = null,
 }) {
   const containerRef = useRef(null);
   const stageRef = useRef(null);
@@ -2437,6 +2484,10 @@ export default function GrigliataBoard({
   const battlemapVideoFrameAnimationHandleRef = useRef(null);
   const previousNarrationOverlayActiveRef = useRef(isNarrationOverlayActive);
   const lastFitKeyRef = useRef('');
+  const narrationBackgroundsById = useMemo(
+    () => buildBackgroundMap(narrationBackgrounds),
+    [narrationBackgrounds]
+  );
   const resolvedDrawTheme = drawTheme || DEFAULT_DRAW_THEME;
   const isLightToolActive = !!(isManager && lightSourceControls?.isLightToolActive);
   const isLightSourcePending = !!lightSourceControls?.isPending;
@@ -2505,6 +2556,16 @@ export default function GrigliataBoard({
       imageHeight: activeBackground.imageHeight || backgroundAssetSnapshot.image?.naturalHeight || backgroundAssetSnapshot.image?.videoHeight || backgroundAssetSnapshot.image?.height || 0,
     };
   }, [activeBackground, backgroundAssetSnapshot.image]);
+
+  const resolvedNarrationPlacements = useMemo(() => {
+    if (!isNarrationOverlayActive) return [];
+    if (Array.isArray(narrationPlacements) && narrationPlacements.length) {
+      return narrationPlacements;
+    }
+
+    const fallbackPlacement = buildInitialNarrationPlacement(resolvedBackground);
+    return fallbackPlacement ? [fallbackPlacement] : [];
+  }, [isNarrationOverlayActive, narrationPlacements, resolvedBackground]);
 
   const targetBattlemapImageLayer = useMemo(
     () => buildBattlemapImageLayer({
@@ -2945,8 +3006,10 @@ export default function GrigliataBoard({
     [resolvedBackground, normalizedGrid, placedTokens]
   );
   const narrationImageBounds = useMemo(
-    () => (isNarrationOverlayActive ? buildNarrationImageBounds(resolvedBackground) : null),
-    [isNarrationOverlayActive, resolvedBackground]
+    () => (isNarrationOverlayActive
+      ? buildNarrationPlacementBounds(resolvedNarrationPlacements) || buildNarrationImageBounds(resolvedBackground)
+      : null),
+    [isNarrationOverlayActive, resolvedNarrationPlacements, resolvedBackground]
   );
   const viewportFitBounds = narrationImageBounds || boardBounds;
   const backplateBounds = narrationImageBounds || boardBounds;
@@ -3134,7 +3197,9 @@ export default function GrigliataBoard({
   const fitKey = [
     resolvedBackground?.id || '__no_active_background__',
     isNarrationOverlayActive ? 'narration' : 'board',
-    narrationImageBounds ? `${narrationImageBounds.width}x${narrationImageBounds.height}` : '',
+    narrationImageBounds
+      ? `${narrationImageBounds.minX},${narrationImageBounds.minY},${narrationImageBounds.maxX},${narrationImageBounds.maxY}`
+      : '',
   ].join('::');
 
   const fitToBoard = useCallback(() => {
@@ -5640,6 +5705,7 @@ export default function GrigliataBoard({
   const visibleHoveredTokenTooltip = isNarrationOverlayActive ? null : hoveredTokenTooltip;
   const visibleSelectedAoEFigureActionState = isNarrationOverlayActive ? null : selectedAoEFigureActionState;
   const visibleSelectedTokenActionState = isNarrationOverlayActive ? null : selectedTokenActionState;
+  const narrationExtraImageCount = isNarrationOverlayActive ? Math.max(0, resolvedNarrationPlacements.length - 1) : 0;
   const visibleTokenVisionSources = useMemo(
     () => (isNarrationOverlayActive ? [] : resolveViewerTokenVisionSources({
       tokens: visibleRenderedTokens,
@@ -5674,6 +5740,14 @@ export default function GrigliataBoard({
               className="rounded-full border border-amber-400/35 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200"
             >
               Narration
+            </span>
+          )}
+          {narrationExtraImageCount > 0 && (
+            <span
+              data-testid="narration-overlay-count-badge"
+              className="rounded-full border border-violet-400/35 bg-violet-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-200"
+            >
+              +{narrationExtraImageCount}
             </span>
           )}
         </div>
@@ -6052,7 +6126,23 @@ export default function GrigliataBoard({
                 listening={false}
               />
 
-              {battlemapImageTransition.fadingOutLayer && battlemapImageTransition.fadingOutLayer.imageWidth > 0 && battlemapImageTransition.fadingOutLayer.imageHeight > 0 && (
+              {isNarrationOverlayActive && resolvedNarrationPlacements.map((placement, index) => {
+                const placementBackground = narrationBackgroundsById.get(placement.backgroundId)
+                  || (index === 0 ? resolvedBackground : null);
+
+                return (
+                  <NarrationPlacementImage
+                    key={placement.id}
+                    placement={placement}
+                    background={placementBackground}
+                    isPrimary={index === 0}
+                    isManager={isManager}
+                    onMoveNarrationPlacement={onMoveNarrationPlacement}
+                  />
+                );
+              })}
+
+              {!isNarrationOverlayActive && battlemapImageTransition.fadingOutLayer && battlemapImageTransition.fadingOutLayer.imageWidth > 0 && battlemapImageTransition.fadingOutLayer.imageHeight > 0 && (
                 <KonvaImage
                   data-testid="battlemap-image-outgoing"
                   data-asset-type={battlemapImageTransition.fadingOutLayer.assetType}
@@ -6066,7 +6156,7 @@ export default function GrigliataBoard({
                 />
               )}
 
-              {battlemapImageTransition.visibleLayer && battlemapImageTransition.visibleLayer.imageWidth > 0 && battlemapImageTransition.visibleLayer.imageHeight > 0 && (
+              {!isNarrationOverlayActive && battlemapImageTransition.visibleLayer && battlemapImageTransition.visibleLayer.imageWidth > 0 && battlemapImageTransition.visibleLayer.imageHeight > 0 && (
                 <KonvaImage
                   data-testid="battlemap-image-active"
                   data-asset-type={battlemapImageTransition.visibleLayer.assetType}

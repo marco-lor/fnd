@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FiCheck, FiChevronDown, FiFolder, FiGrid, FiPlay, FiRadio, FiTrash2, FiUserMinus, FiXCircle, FiZap } from 'react-icons/fi';
+import { FiCheck, FiChevronDown, FiFolder, FiGrid, FiLayers, FiPlay, FiRadio, FiTrash2, FiUserMinus, FiXCircle, FiZap } from 'react-icons/fi';
 import { isVideoBackground } from './boardUtils';
 import BackgroundGalleryOrganizerOverlay from './BackgroundGalleryOrganizerOverlay';
 import {
@@ -22,6 +22,7 @@ export default function BackgroundGalleryPanel({
   galleryFolders = [],
   activeBackgroundId,
   presentationBackgroundId,
+  presentationBackgroundIds = [],
   selectedBackgroundId,
   uploadName,
   selectedFileName,
@@ -44,6 +45,8 @@ export default function BackgroundGalleryPanel({
   onUseBackground,
   onNarrateBackground,
   onCloseNarration,
+  onAddNarrationBackground,
+  onRemoveNarrationBackground,
   onClearTokensForBackground,
   onDeleteBackground,
   onCalibrateBackground,
@@ -53,6 +56,13 @@ export default function BackgroundGalleryPanel({
   onMoveBackgroundToFolder,
 }) {
   const destructiveActionLockedBackgroundIdSet = new Set(destructiveActionLockedBackgroundIds);
+  const presentationBackgroundIdSet = useMemo(() => (
+    new Set([
+      ...(Array.isArray(presentationBackgroundIds) ? presentationBackgroundIds : []),
+      ...(presentationBackgroundId ? [presentationBackgroundId] : []),
+    ])
+  ), [presentationBackgroundId, presentationBackgroundIds]);
+  const isNarrationSceneActive = presentationBackgroundIdSet.size > 0;
   const [isOrganizerOpen, setIsOrganizerOpen] = useState(false);
   const [folderMenuBackgroundId, setFolderMenuBackgroundId] = useState('');
   const [selectedFolderFilterId, setSelectedFolderFilterId] = useState(ALL_GALLERY_FOLDER_FILTER_ID);
@@ -264,7 +274,8 @@ export default function BackgroundGalleryPanel({
             ) : (
               filteredBackgrounds.map((background) => {
                 const isActive = background.id === activeBackgroundId;
-                const isNarrated = background.id === presentationBackgroundId;
+                const isPrimaryNarration = background.id === presentationBackgroundId;
+                const isIncludedInNarration = presentationBackgroundIdSet.has(background.id);
                 const isSelected = background.id === selectedBackgroundId;
                 const isVideo = isVideoBackground(background);
                 const isUsePending = activatingBackgroundId === background.id;
@@ -273,12 +284,29 @@ export default function BackgroundGalleryPanel({
                 const isBusy = isUsePending || isNarrationPending || deletingBackgroundId === background.id || clearingTokensBackgroundId === background.id;
                 const hasLightingMetadata = !!background.lightingSummary;
                 const backgroundName = background.name || 'Untitled Map';
-                const narrationActionLabel = isNarrated
+                const narrationActionLabel = isPrimaryNarration
                   ? `Close narration for ${backgroundName}`
-                  : `Narrate ${backgroundName}`;
-                const narrationPendingTitle = isNarrated && isNarrationClosePending
+                  : (isIncludedInNarration ? `Remove ${backgroundName} from narration` : `Narrate ${backgroundName}`);
+                const narrationPendingTitle = isPrimaryNarration && isNarrationClosePending
                   ? `Closing narration for ${backgroundName}`
-                  : `Narrating ${backgroundName}`;
+                  : (isIncludedInNarration ? `Removing ${backgroundName} from narration` : `Narrating ${backgroundName}`);
+                const multiNarrationActionLabel = `Add ${backgroundName} to multi narration`;
+                const multiNarrationPendingTitle = `Adding ${backgroundName} to multi narration`;
+                const shouldShowMultiNarrationAction = isNarrationSceneActive && !isIncludedInNarration && !isActive;
+                const narrationBadgeLabel = isPrimaryNarration ? 'Narration' : 'Multi';
+                const handleNarrationAction = () => {
+                  if (isPrimaryNarration) {
+                    onCloseNarration?.(background);
+                    return;
+                  }
+
+                  if (isIncludedInNarration) {
+                    onRemoveNarrationBackground?.(background);
+                    return;
+                  }
+
+                  onNarrateBackground?.(background);
+                };
 
                 return (
                   <div
@@ -319,9 +347,9 @@ export default function BackgroundGalleryPanel({
                                 Active
                               </span>
                             )}
-                            {isNarrated && (
+                            {isIncludedInNarration && (
                               <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200">
-                                Narration
+                                {narrationBadgeLabel}
                               </span>
                             )}
                             {hasLightingMetadata && (
@@ -375,25 +403,35 @@ export default function BackgroundGalleryPanel({
                           <FiPlay className={GALLERY_ACTION_ICON_CLASS_NAME} aria-hidden="true" />
                         </button>
 
-                        {(!isActive || isNarrated) && (
+                        {(!isActive || isIncludedInNarration) && (
                           <button
                             type="button"
                             aria-label={narrationActionLabel}
                             title={isNarrationPending ? narrationPendingTitle : narrationActionLabel}
                             aria-busy={isNarrationPending ? true : undefined}
-                            onClick={() => (
-                              isNarrated
-                                ? onCloseNarration?.(background)
-                                : onNarrateBackground?.(background)
-                            )}
+                            onClick={handleNarrationAction}
                             disabled={isBusy || isNarrationActionPending}
                             className={getGalleryActionClassName('border-amber-500/40 text-amber-200 hover:bg-amber-500/10')}
                           >
-                            {isNarrated ? (
+                            {isPrimaryNarration || isIncludedInNarration ? (
                               <FiXCircle className={GALLERY_ACTION_ICON_CLASS_NAME} aria-hidden="true" />
                             ) : (
                               <FiRadio className={GALLERY_ACTION_ICON_CLASS_NAME} aria-hidden="true" />
                             )}
+                          </button>
+                        )}
+
+                        {shouldShowMultiNarrationAction && (
+                          <button
+                            type="button"
+                            aria-label={multiNarrationActionLabel}
+                            title={isNarrationPending ? multiNarrationPendingTitle : multiNarrationActionLabel}
+                            aria-busy={isNarrationPending ? true : undefined}
+                            onClick={() => onAddNarrationBackground?.(background)}
+                            disabled={isBusy || isNarrationActionPending}
+                            className={getGalleryActionClassName('border-violet-500/40 text-violet-200 hover:bg-violet-500/10')}
+                          >
+                            <FiLayers className={GALLERY_ACTION_ICON_CLASS_NAME} aria-hidden="true" />
                           </button>
                         )}
 

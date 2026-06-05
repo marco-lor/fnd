@@ -40,6 +40,7 @@ const buildProps = (overrides = {}) => ({
   galleryFolders,
   activeBackgroundId: 'map-1',
   presentationBackgroundId: '',
+  presentationBackgroundIds: [],
   selectedBackgroundId: 'map-1',
   uploadName: '',
   selectedFileName: '',
@@ -62,6 +63,8 @@ const buildProps = (overrides = {}) => ({
   onUseBackground: jest.fn(),
   onNarrateBackground: jest.fn(),
   onCloseNarration: jest.fn(),
+  onAddNarrationBackground: jest.fn(),
+  onRemoveNarrationBackground: jest.fn(),
   onClearTokensForBackground: jest.fn(),
   onDeleteBackground: jest.fn(),
   onCalibrateBackground: jest.fn(),
@@ -107,6 +110,56 @@ describe('BackgroundGalleryPanel', () => {
 
     expect(screen.getByRole('button', { name: 'Close narration for Iron Keep' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Narrate Frost Hall' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add Frost Hall to multi narration' })).toBeDisabled();
+  });
+
+  test('shows multi narration controls only while a narration scene is active', () => {
+    const onAddNarrationBackground = jest.fn();
+    const onRemoveNarrationBackground = jest.fn();
+    const { rerender } = render(
+      <BackgroundGalleryPanel
+        {...buildProps({
+          onAddNarrationBackground,
+          onRemoveNarrationBackground,
+        })}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: 'Add Iron Keep to multi narration' })).not.toBeInTheDocument();
+
+    rerender(
+      <BackgroundGalleryPanel
+        {...buildProps({
+          presentationBackgroundId: 'map-2',
+          presentationBackgroundIds: ['map-2'],
+          onAddNarrationBackground,
+          onRemoveNarrationBackground,
+        })}
+      />
+    );
+
+    const frostHallRow = screen.getByTestId('background-gallery-row-map-3');
+    fireEvent.click(within(frostHallRow).getByRole('button', { name: 'Add Frost Hall to multi narration' }));
+
+    expect(onAddNarrationBackground).toHaveBeenCalledWith(backgrounds[2]);
+    expect(within(screen.getByTestId('background-gallery-row-map-2')).queryByRole('button', { name: 'Add Iron Keep to multi narration' })).not.toBeInTheDocument();
+
+    rerender(
+      <BackgroundGalleryPanel
+        {...buildProps({
+          presentationBackgroundId: 'map-2',
+          presentationBackgroundIds: ['map-2', 'map-3'],
+          onAddNarrationBackground,
+          onRemoveNarrationBackground,
+        })}
+      />
+    );
+
+    const includedFrostHallRow = screen.getByTestId('background-gallery-row-map-3');
+    fireEvent.click(within(includedFrostHallRow).getByRole('button', { name: 'Remove Frost Hall from narration' }));
+
+    expect(screen.queryByRole('button', { name: 'Add Frost Hall to multi narration' })).not.toBeInTheDocument();
+    expect(onRemoveNarrationBackground).toHaveBeenCalledWith(backgrounds[2]);
   });
 
   test('shows the lighting indicator only for maps with imported lighting metadata', () => {

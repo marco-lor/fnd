@@ -29,6 +29,7 @@ import { auth, db, functions, storage } from '../firebaseConfig';
 import BackgroundGalleryPanel from './BackgroundGalleryPanel';
 import GrigliataLightingImportPanel from './GrigliataLightingImportPanel';
 import MusicLibraryPanel from './MusicLibraryPanel';
+import NarrationPlacementPicker from './NarrationPlacementPicker';
 import {
   buildGrigliataLightingSummary,
   GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION,
@@ -95,6 +96,13 @@ import {
   isReservedGalleryFolderName,
   normalizeGalleryFolderName,
 } from './galleryFolders';
+import {
+  buildInitialNarrationPlacement,
+  buildNarrationStatePayload,
+  buildNextNarrationPlacement,
+  moveNarrationPlacement,
+  removeNarrationPlacementByBackgroundId,
+} from './narrationScene';
 import {
   buildGrigliataAoEFigureDoc,
   buildGrigliataAoEFigureDocId,
@@ -510,6 +518,7 @@ export default function GrigliataPage() {
 
   const [activatingBackgroundId, setActivatingBackgroundId] = useState('');
   const [narrationActionBackgroundId, setNarrationActionBackgroundId] = useState('');
+  const [narrationPlacementPromptBackground, setNarrationPlacementPromptBackground] = useState(null);
   const [isNarrationClosePending, setIsNarrationClosePending] = useState(false);
   const [deletingBackgroundId, setDeletingBackgroundId] = useState('');
   const [clearingTokensBackgroundId, setClearingTokensBackgroundId] = useState('');
@@ -661,8 +670,10 @@ export default function GrigliataPage() {
     musicPlaybackSessions,
     musicTracks,
     persistedActiveGrid,
-    presentationBackground,
+    presentationBackgroundIds,
+    presentationBackgroundsById,
     presentationBackgroundId,
+    presentationPlacements,
     selectedBackground,
     selectedBackgroundId,
     setSelectedBackgroundId,
@@ -888,10 +899,12 @@ export default function GrigliataPage() {
   const activeTurnCursor = combatBackground?.turnOrderActive && typeof combatBackground.turnOrderActive === 'object'
     ? combatBackground.turnOrderActive
     : null;
-  const isNarrationOverlayActive = !!(
-    presentationBackgroundId
-    && presentationBackground
-    && presentationBackground.id === presentationBackgroundId
+  const isNarrationOverlayActive = presentationPlacements.length > 0;
+  const presentationBackgrounds = useMemo(
+    () => presentationPlacements
+      .map((placement) => presentationBackgroundsById.get(placement.backgroundId))
+      .filter(Boolean),
+    [presentationBackgroundsById, presentationPlacements]
   );
   const canEditSceneLighting = !!editableSceneLighting && !isNarrationOverlayActive;
   const isCombatMapChangeLocked = isNarrationOverlayActive || isTurnOrderStarted;
@@ -914,20 +927,41 @@ export default function GrigliataPage() {
   }, []), [activeBackgroundId, backgrounds, isCombatMapChangeLocked]);
 
   useEffect(() => {
-    if (!isManager || !user?.uid || !presentationBackgroundId || presentationBackground || backgrounds.length < 1) {
+    if (!isManager || !user?.uid || backgrounds.length < 1) {
+      return;
+    }
+
+    const validBackgroundIds = new Set(backgrounds.map((background) => background.id).filter(Boolean));
+    const rawPresentationBackgroundId = typeof boardState?.presentationBackgroundId === 'string'
+      ? boardState.presentationBackgroundId
+      : '';
+    const rawPresentationPlacements = Array.isArray(boardState?.presentationPlacements)
+      ? boardState.presentationPlacements
+      : [];
+    const hasMissingLegacyBackground = !!(
+      rawPresentationBackgroundId
+      && !validBackgroundIds.has(rawPresentationBackgroundId)
+    );
+    const hasMissingPlacementBackground = rawPresentationPlacements.some((placement) => {
+      const backgroundId = typeof placement?.backgroundId === 'string' ? placement.backgroundId : '';
+      return backgroundId && !validBackgroundIds.has(backgroundId);
+    });
+
+    if (!hasMissingLegacyBackground && !hasMissingPlacementBackground) {
       return;
     }
 
     void setDoc(doc(db, 'grigliata_state', 'current'), {
-      presentationBackgroundId: '',
+      ...buildNarrationStatePayload(presentationPlacements),
       updatedAt: serverTimestamp(),
       updatedBy: user.uid,
     }, { merge: true });
   }, [
-    backgrounds.length,
+    backgrounds,
+    boardState?.presentationBackgroundId,
+    boardState?.presentationPlacements,
     isManager,
-    presentationBackground,
-    presentationBackgroundId,
+    presentationPlacements,
     user?.uid,
   ]);
 
@@ -3386,6 +3420,14 @@ export default function GrigliataPage() {
     }
   };
 
+  const writeNarrationSceneState = async (placements) => {
+    await setDoc(doc(db, 'grigliata_state', 'current'), {
+      ...buildNarrationStatePayload(placements),
+      updatedAt: serverTimestamp(),
+      updatedBy: user.uid,
+    }, { merge: true });
+  };
+
   const handleStartNarration = async (background) => {
     if (
       !isManager
@@ -3404,11 +3446,8 @@ export default function GrigliataPage() {
         await preloadImageAssets([background.imageUrl]);
       }
 
-      await setDoc(doc(db, 'grigliata_state', 'current'), {
-        presentationBackgroundId: background.id,
-        updatedAt: serverTimestamp(),
-        updatedBy: user.uid,
-      }, { merge: true });
+      const initialPlacement = buildInitialNarrationPlacement(background);
+      await writeNarrationSceneState(initialPlacement ? [initialPlacement] : []);
     } catch (error) {
       console.error('Failed to start narration overlay:', error);
       setBoardError('Unable to open that narration scene.');
@@ -3419,19 +3458,91 @@ export default function GrigliataPage() {
     }
   };
 
+  const handleAddNarrationPlacement = async (background, placementMode = {}) => {
+    if (
+      !isManager
+      || !user?.uid
+      || !background?.id
+      || background.id === activeBackgroundId
+      || presentationBackgroundIds.includes(background.id)
+      || narrationActionPendingRef.current
+    ) return;
+
+    setBoardError('');
+    narrationActionPendingRef.current = true;
+    setIsNarrationClosePending(false);
+    setNarrationActionBackgroundId(background.id);
+    try {
+      if (background.imageUrl && !isVideoBackground(background)) {
+        await preloadImageAssets([background.imageUrl]);
+      }
+
+      const nextPlacement = buildNextNarrationPlacement({
+        background,
+        existingPlacements: presentationPlacements,
+        mode: placementMode?.mode,
+        side: placementMode?.side,
+      });
+      if (!nextPlacement) return;
+
+      await writeNarrationSceneState([...presentationPlacements, nextPlacement]);
+      setNarrationPlacementPromptBackground(null);
+    } catch (error) {
+      console.error('Failed to add narration image:', error);
+      setBoardError('Unable to add that narration image.');
+    } finally {
+      narrationActionPendingRef.current = false;
+      setNarrationActionBackgroundId('');
+      setIsNarrationClosePending(false);
+    }
+  };
+
+  const handleRemoveNarrationPlacement = async (background) => {
+    const backgroundId = typeof background?.id === 'string' ? background.id : '';
+    if (!isManager || !user?.uid || !backgroundId || narrationActionPendingRef.current) return;
+
+    const nextPlacements = removeNarrationPlacementByBackgroundId(presentationPlacements, backgroundId);
+    if (nextPlacements.length === presentationPlacements.length) return;
+
+    setBoardError('');
+    narrationActionPendingRef.current = true;
+    setIsNarrationClosePending(nextPlacements.length === 0);
+    setNarrationActionBackgroundId(backgroundId);
+    try {
+      await writeNarrationSceneState(nextPlacements);
+    } catch (error) {
+      console.error('Failed to remove narration image:', error);
+      setBoardError('Unable to remove that narration image.');
+    } finally {
+      narrationActionPendingRef.current = false;
+      setNarrationActionBackgroundId('');
+      setIsNarrationClosePending(false);
+    }
+  };
+
+  const handleMoveNarrationPlacement = async (placementId, nextPosition) => {
+    if (!isManager || !user?.uid || !placementId) return;
+
+    const nextPlacements = moveNarrationPlacement(presentationPlacements, placementId, nextPosition);
+    if (nextPlacements === presentationPlacements) return;
+
+    try {
+      await writeNarrationSceneState(nextPlacements);
+    } catch (error) {
+      console.error('Failed to move narration image:', error);
+      setBoardError('Unable to move that narration image.');
+    }
+  };
+
   const handleStopNarration = async () => {
-    if (!isManager || !user?.uid || !presentationBackgroundId || narrationActionPendingRef.current) return;
+    if (!isManager || !user?.uid || !isNarrationOverlayActive || narrationActionPendingRef.current) return;
 
     setBoardError('');
     narrationActionPendingRef.current = true;
     setIsNarrationClosePending(true);
     setNarrationActionBackgroundId(presentationBackgroundId);
     try {
-      await setDoc(doc(db, 'grigliata_state', 'current'), {
-        presentationBackgroundId: '',
-        updatedAt: serverTimestamp(),
-        updatedBy: user.uid,
-      }, { merge: true });
+      await writeNarrationSceneState([]);
     } catch (error) {
       console.error('Failed to close narration overlay:', error);
       setBoardError('Unable to close the narration scene.');
@@ -4275,12 +4386,10 @@ export default function GrigliataPage() {
         }, { merge: true });
       }
 
-      if (background.id === presentationBackgroundId) {
-        await setDoc(doc(db, 'grigliata_state', 'current'), {
-          presentationBackgroundId: '',
-          updatedAt: serverTimestamp(),
-          updatedBy: user.uid,
-        }, { merge: true });
+      if (presentationBackgroundIds.includes(background.id)) {
+        await writeNarrationSceneState(
+          removeNarrationPlacementByBackgroundId(presentationPlacements, background.id)
+        );
       }
     } catch (error) {
       console.error('Failed to delete background:', error);
@@ -5763,6 +5872,16 @@ export default function GrigliataPage() {
           </div>
         )}
 
+        <NarrationPlacementPicker
+          isOpen={!!narrationPlacementPromptBackground}
+          background={narrationPlacementPromptBackground}
+          backgrounds={backgrounds}
+          placements={presentationPlacements}
+          isPending={isNarrationActionPending}
+          onClose={() => setNarrationPlacementPromptBackground(null)}
+          onSelectPlacement={(placementMode) => handleAddNarrationPlacement(narrationPlacementPromptBackground, placementMode)}
+        />
+
         <div className="grid flex-1 min-h-0 gap-3 xl:grid-cols-[minmax(0,1fr)_22rem]">
           <div className={`min-w-0 xl:min-h-0 ${isTrayDragging ? 'rounded-3xl ring-2 ring-amber-400/20' : ''}`}>
             <div className="h-full min-h-[480px] xl:min-h-0">
@@ -5888,6 +6007,9 @@ export default function GrigliataPage() {
                   handlePlaceTrayToken(payload, worldPoint);
                 })}
                 isNarrationOverlayActive={isNarrationOverlayActive}
+                narrationPlacements={presentationPlacements}
+                narrationBackgrounds={presentationBackgrounds}
+                onMoveNarrationPlacement={isManager ? handleMoveNarrationPlacement : null}
               />
             </div>
           </div>
@@ -6000,6 +6122,7 @@ export default function GrigliataPage() {
                     galleryFolders={galleryFolders}
                     activeBackgroundId={activeBackgroundId}
                     presentationBackgroundId={presentationBackgroundId}
+                    presentationBackgroundIds={presentationBackgroundIds}
                     selectedBackgroundId={selectedBackgroundId}
                     uploadName={uploadName}
                     selectedFileName={selectedFile?.name || ''}
@@ -6029,6 +6152,8 @@ export default function GrigliataPage() {
                     onUseBackground={handleUseBackground}
                     onNarrateBackground={handleStartNarration}
                     onCloseNarration={handleStopNarration}
+                    onAddNarrationBackground={setNarrationPlacementPromptBackground}
+                    onRemoveNarrationBackground={handleRemoveNarrationPlacement}
                     onClearTokensForBackground={handleClearTokensForBackground}
                     onDeleteBackground={handleDeleteBackground}
                     onCalibrateBackground={handleOpenCalibration}

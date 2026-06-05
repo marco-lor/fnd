@@ -2849,6 +2849,80 @@ describe('GrigliataBoard', () => {
     expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
   });
 
+  test('renders multi-image narration placements and persists DM movement', async () => {
+    useReducedMotion.mockReturnValue(true);
+    const onMoveNarrationPlacement = jest.fn();
+    const { container } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          isNarrationOverlayActive: true,
+          activeBackground: {
+            id: 'map-2',
+            name: 'Iron Keep',
+            imageUrl: 'https://example.com/map-2.png',
+            imageWidth: 1920,
+            imageHeight: 1080,
+          },
+          narrationBackgrounds: [{
+            id: 'map-2',
+            name: 'Iron Keep',
+            imageUrl: 'https://example.com/map-2.png',
+            imageWidth: 1920,
+            imageHeight: 1080,
+          }, {
+            id: 'map-3',
+            name: 'Frost Hall',
+            imageUrl: 'https://example.com/map-3.png',
+            imageWidth: 1600,
+            imageHeight: 900,
+          }],
+          narrationPlacements: [{
+            id: 'background:map-2',
+            backgroundId: 'map-2',
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            order: 0,
+            mode: 'free',
+            attachedSide: '',
+          }, {
+            id: 'background:map-3',
+            backgroundId: 'map-3',
+            x: 1920,
+            y: 90,
+            width: 1600,
+            height: 900,
+            order: 1,
+            mode: 'magnetic',
+            attachedSide: 'right',
+          }],
+          onMoveNarrationPlacement,
+        })}
+      />
+    );
+
+    const stage = container.querySelector('[data-konva-type="Stage"]');
+    await waitFor(() => {
+      expect(getNumericKonvaProp(stage, 'data-scalex')).toBeCloseTo(824 / 3520, 5);
+    });
+
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-width', '1920');
+    expect(screen.getByTestId('narration-overlay-count-badge')).toHaveTextContent('+1');
+
+    const secondaryImage = screen.getByTestId('narration-image-placement-background:map-3');
+    expect(secondaryImage).toHaveAttribute('data-x', '1920');
+    expect(secondaryImage).toHaveAttribute('data-y', '90');
+    expect(secondaryImage).toHaveAttribute('data-draggable', 'true');
+
+    secondaryImage.setAttribute('data-x', '2100');
+    secondaryImage.setAttribute('data-y', '120');
+    fireEvent.dragEnd(secondaryImage);
+
+    expect(onMoveNarrationPlacement).toHaveBeenCalledWith('background:map-3', { x: 2100, y: 120 });
+  });
+
   test('hides the combat battlemap while the narration image is still loading', async () => {
     jest.useFakeTimers();
 
