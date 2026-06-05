@@ -82,8 +82,8 @@ describe('BackgroundGalleryPanel', () => {
       />
     );
 
-    const clearButtons = screen.getAllByRole('button', { name: 'Clear Tokens' });
-    const deleteButtons = screen.getAllByRole('button', { name: 'Delete' });
+    const clearButtons = screen.getAllByRole('button', { name: /^Clear tokens from /i });
+    const deleteButtons = screen.getAllByRole('button', { name: /^Delete /i });
 
     expect(clearButtons[0]).toBeDisabled();
     expect(deleteButtons[0]).toBeDisabled();
@@ -105,8 +105,8 @@ describe('BackgroundGalleryPanel', () => {
       />
     );
 
-    expect(screen.getByRole('button', { name: 'Closing...' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Narrate' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Close narration for Iron Keep' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Narrate Frost Hall' })).toBeDisabled();
   });
 
   test('shows the lighting indicator only for maps with imported lighting metadata', () => {
@@ -168,9 +168,9 @@ describe('BackgroundGalleryPanel', () => {
     fireEvent.click(within(ironKeepRow).getByRole('button', { name: 'Move to Boss Arenas' }));
 
     expect(onMoveBackgroundToFolder).toHaveBeenCalledWith('map-2', 'folder-a');
-    expect(within(ironKeepRow).getByRole('button', { name: 'Use' })).toBeInTheDocument();
-    expect(within(ironKeepRow).getByRole('button', { name: 'Narrate' })).toBeInTheDocument();
-    expect(within(ironKeepRow).getByRole('button', { name: 'Calibrate' })).toBeInTheDocument();
+    expect(within(ironKeepRow).getByRole('button', { name: 'Use Iron Keep' })).toBeInTheDocument();
+    expect(within(ironKeepRow).getByRole('button', { name: 'Narrate Iron Keep' })).toBeInTheDocument();
+    expect(within(ironKeepRow).getByRole('button', { name: 'Calibrate Iron Keep grid' })).toBeInTheDocument();
   });
 
   test('renders the row folder menu inline inside the selected map row', () => {

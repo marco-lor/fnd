@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FiCheck, FiChevronDown, FiFolder, FiZap } from 'react-icons/fi';
+import { FiCheck, FiChevronDown, FiFolder, FiGrid, FiPlay, FiRadio, FiTrash2, FiUserMinus, FiXCircle, FiZap } from 'react-icons/fi';
 import { isVideoBackground } from './boardUtils';
 import BackgroundGalleryOrganizerOverlay from './BackgroundGalleryOrganizerOverlay';
 import {
@@ -10,6 +10,12 @@ import {
 } from './galleryFolders';
 
 const ALL_GALLERY_FOLDER_FILTER_ID = '__all__';
+const GALLERY_ACTION_BASE_CLASS_NAME = 'inline-flex h-9 w-9 items-center justify-center rounded-md border transition-colors disabled:cursor-not-allowed disabled:opacity-60';
+const GALLERY_ACTION_ICON_CLASS_NAME = 'h-4 w-4';
+
+const getGalleryActionClassName = (toneClassName) => (
+  `${GALLERY_ACTION_BASE_CLASS_NAME} ${toneClassName}`
+);
 
 export default function BackgroundGalleryPanel({
   backgrounds,
@@ -266,6 +272,13 @@ export default function BackgroundGalleryPanel({
                 const isDestructiveActionLocked = destructiveActionLockedBackgroundIdSet.has(background.id);
                 const isBusy = isUsePending || isNarrationPending || deletingBackgroundId === background.id || clearingTokensBackgroundId === background.id;
                 const hasLightingMetadata = !!background.lightingSummary;
+                const backgroundName = background.name || 'Untitled Map';
+                const narrationActionLabel = isNarrated
+                  ? `Close narration for ${backgroundName}`
+                  : `Narrate ${backgroundName}`;
+                const narrationPendingTitle = isNarrated && isNarrationClosePending
+                  ? `Closing narration for ${backgroundName}`
+                  : `Narrating ${backgroundName}`;
 
                 return (
                   <div
@@ -286,21 +299,21 @@ export default function BackgroundGalleryPanel({
                             isVideo ? (
                               <video
                                 src={background.imageUrl}
-                                aria-label={background.name || 'Video map'}
+                                aria-label={backgroundName}
                                 className="w-full h-full object-cover"
                                 muted
                                 playsInline
                                 preload="metadata"
                               />
                             ) : (
-                              <img src={background.imageUrl} alt={background.name} className="w-full h-full object-cover" />
+                              <img src={background.imageUrl} alt={backgroundName} className="w-full h-full object-cover" />
                             )
                           ) : null}
                         </div>
 
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <p className="text-sm font-semibold text-slate-100 truncate">{background.name || 'Untitled Map'}</p>
+                            <p className="text-sm font-semibold text-slate-100 truncate">{backgroundName}</p>
                             {isActive && (
                               <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-300">
                                 Active
@@ -339,71 +352,86 @@ export default function BackgroundGalleryPanel({
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
-                          aria-label={`Move ${background.name || 'Untitled Map'} to folder`}
+                          aria-label={`Move ${backgroundName} to folder`}
+                          title={`Move ${backgroundName} to folder`}
                           onClick={() => setFolderMenuBackgroundId((currentId) => (
                             currentId === background.id ? '' : background.id
                           ))}
                           disabled={movingBackgroundFolderId === background.id}
-                          className="inline-flex items-center gap-2 rounded-md border border-sky-500/40 px-3 py-1.5 text-xs font-semibold text-sky-200 transition-colors hover:bg-sky-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                          className={getGalleryActionClassName('border-sky-500/40 text-sky-200 hover:bg-sky-500/10')}
                         >
-                          <FiFolder className="h-3.5 w-3.5" aria-hidden="true" />
-                          Folder
+                          <FiFolder className={GALLERY_ACTION_ICON_CLASS_NAME} aria-hidden="true" />
                         </button>
-
 
                         <button
                           type="button"
+                          aria-label={`Use ${backgroundName}`}
+                          title={isUsePending ? `Using ${backgroundName}` : `Use ${backgroundName}`}
+                          aria-busy={isUsePending ? true : undefined}
                           onClick={() => onUseBackground(background)}
                           disabled={isBusy || isNarrationActionPending || isUseBackgroundDisabled || isActive}
-                          className="rounded-md border border-emerald-500/40 px-3 py-1.5 text-xs font-semibold text-emerald-200 transition-colors hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                          className={getGalleryActionClassName('border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10')}
                         >
-                          {isUsePending ? 'Using...' : 'Use'}
+                          <FiPlay className={GALLERY_ACTION_ICON_CLASS_NAME} aria-hidden="true" />
                         </button>
 
                         {(!isActive || isNarrated) && (
                           <button
                             type="button"
+                            aria-label={narrationActionLabel}
+                            title={isNarrationPending ? narrationPendingTitle : narrationActionLabel}
+                            aria-busy={isNarrationPending ? true : undefined}
                             onClick={() => (
                               isNarrated
                                 ? onCloseNarration?.(background)
                                 : onNarrateBackground?.(background)
                             )}
                             disabled={isBusy || isNarrationActionPending}
-                            className="rounded-md border border-amber-500/40 px-3 py-1.5 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                            className={getGalleryActionClassName('border-amber-500/40 text-amber-200 hover:bg-amber-500/10')}
                           >
-                            {isNarrationPending
-                              ? (isNarrated && isNarrationClosePending ? 'Closing...' : 'Narrating...')
-                              : (isNarrated ? 'Close narration' : 'Narrate')}
+                            {isNarrated ? (
+                              <FiXCircle className={GALLERY_ACTION_ICON_CLASS_NAME} aria-hidden="true" />
+                            ) : (
+                              <FiRadio className={GALLERY_ACTION_ICON_CLASS_NAME} aria-hidden="true" />
+                            )}
                           </button>
                         )}
 
                         <button
                           type="button"
+                          aria-label={`Calibrate ${backgroundName} grid`}
+                          title={`Calibrate ${backgroundName} grid`}
                           onClick={() => {
                             onSelectBackground(background.id);
                             onCalibrateBackground?.(background.id);
                           }}
-                          className="rounded-md border border-sky-500/40 px-3 py-1.5 text-xs font-semibold text-sky-200 transition-colors hover:bg-sky-500/10"
+                          className={getGalleryActionClassName('border-sky-500/40 text-sky-200 hover:bg-sky-500/10')}
                         >
-                          Calibrate
+                          <FiGrid className={GALLERY_ACTION_ICON_CLASS_NAME} aria-hidden="true" />
                         </button>
 
                         <button
                           type="button"
+                          aria-label={`Clear tokens from ${backgroundName}`}
+                          title={clearingTokensBackgroundId === background.id ? `Clearing tokens from ${backgroundName}` : `Clear tokens from ${backgroundName}`}
+                          aria-busy={clearingTokensBackgroundId === background.id ? true : undefined}
                           onClick={() => onClearTokensForBackground(background)}
                           disabled={clearingTokensBackgroundId === background.id || deletingBackgroundId === background.id || isNarrationActionPending || isDestructiveActionLocked}
-                          className="rounded-md border border-amber-500/40 px-3 py-1.5 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                          className={getGalleryActionClassName('border-amber-500/40 text-amber-200 hover:bg-amber-500/10')}
                         >
-                          {clearingTokensBackgroundId === background.id ? 'Clearing...' : 'Clear Tokens'}
+                          <FiUserMinus className={GALLERY_ACTION_ICON_CLASS_NAME} aria-hidden="true" />
                         </button>
 
                         <button
                           type="button"
+                          aria-label={`Delete ${backgroundName}`}
+                          title={deletingBackgroundId === background.id ? `Deleting ${backgroundName}` : `Delete ${backgroundName}`}
+                          aria-busy={deletingBackgroundId === background.id ? true : undefined}
                           onClick={() => onDeleteBackground(background)}
                           disabled={deletingBackgroundId === background.id || clearingTokensBackgroundId === background.id || isNarrationActionPending || isDestructiveActionLocked}
-                          className="rounded-md border border-red-500/40 px-3 py-1.5 text-xs font-semibold text-red-200 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                          className={getGalleryActionClassName('border-red-500/40 text-red-200 hover:bg-red-500/10')}
                         >
-                          {deletingBackgroundId === background.id ? 'Deleting...' : 'Delete'}
+                          <FiTrash2 className={GALLERY_ACTION_ICON_CLASS_NAME} aria-hidden="true" />
                         </button>
                       </div>
 
