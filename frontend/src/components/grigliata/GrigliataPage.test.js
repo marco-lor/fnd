@@ -842,6 +842,7 @@ describe('GrigliataPage', () => {
           isTurnOrderEnabled: false,
         },
       ],
+      grigliata_gallery_folders: [],
       grigliata_tokens: [],
       grigliata_token_placements: [],
       grigliata_aoe_figures: [],
@@ -899,7 +900,9 @@ describe('GrigliataPage', () => {
     firestore.doc.mockClear().mockImplementation((dbOrCollection, ...segments) => mockBuildDocTargetFromArgs(dbOrCollection, ...segments));
     firestore.documentId.mockClear().mockImplementation(() => '__name__');
     firestore.getDoc.mockClear().mockImplementation((target) => Promise.resolve(mockBuildSnapshotForTarget(target)));
-    firestore.getDocs.mockClear().mockImplementation((target) => Promise.resolve(mockBuildSnapshotForTarget(target)));
+    firestore.getDocs.mockClear().mockImplementation((target) => (
+      Promise.resolve(mockBuildSnapshotForTarget(target) || mockCreateQuerySnapshot('', []))
+    ));
     firestore.limit.mockClear().mockImplementation((value) => ({ kind: 'limit', value }));
     firestore.onSnapshot.mockClear().mockImplementation((target, onNext) => {
       const listener = { target, onNext };
@@ -1541,6 +1544,161 @@ describe('GrigliataPage', () => {
       URL.createObjectURL = originalCreateObjectURL;
       URL.revokeObjectURL = originalRevokeObjectURL;
     }
+  });
+
+  test('subscribes shared gallery folders for DMs and passes them to the gallery panel', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_gallery_folders', [{
+      id: 'folder-b',
+      name: 'Cities',
+      normalizedName: 'cities',
+    }, {
+      id: 'folder-a',
+      name: 'Boss Arenas',
+      normalizedName: 'boss arenas',
+    }]);
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+    await waitFor(() => {
+      expect(BackgroundGalleryPanelMock).toHaveBeenCalled();
+    });
+
+    const latestBackgroundGalleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'collection' && target.path === 'grigliata_gallery_folders'
+    ))).toBe(true);
+    expect(latestBackgroundGalleryProps.galleryFolders.map((folder) => folder.id)).toEqual(['folder-a', 'folder-b']);
+  });
+
+  test('does not subscribe gallery folders for non-DM users', async () => {
+    render(<GrigliataPage />);
+
+    await screen.findByTestId('grigliata-board');
+
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'collection' && target.path === 'grigliata_gallery_folders'
+    ))).toBe(false);
+  });
+
+  test('moves a gallery background into a selected shared folder', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_gallery_folders', [{
+      id: 'folder-a',
+      name: 'Boss Arenas',
+      normalizedName: 'boss arenas',
+    }]);
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+    await waitFor(() => {
+      expect(BackgroundGalleryPanelMock).toHaveBeenCalled();
+    });
+
+    const latestBackgroundGalleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+
+    await act(async () => {
+      await latestBackgroundGalleryProps.onMoveBackgroundToFolder('map-2', 'folder-a');
+    });
+
+    expect(firestore.updateDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_backgrounds/map-2' }),
+      expect.objectContaining({
+        galleryFolderId: 'folder-a',
+        galleryFolderAssignedBy: 'user-1',
+        updatedBy: 'user-1',
+      })
+    );
+  });
+
+  test('creates and renames shared gallery folders with normalized names', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_gallery_folders', [{
+      id: 'folder-a',
+      name: 'Boss Arenas',
+      normalizedName: 'boss arenas',
+    }]);
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+    await waitFor(() => {
+      expect(BackgroundGalleryPanelMock).toHaveBeenCalled();
+    });
+
+    const latestBackgroundGalleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+
+    await act(async () => {
+      await latestBackgroundGalleryProps.onCreateGalleryFolder(' Cities  ');
+      await latestBackgroundGalleryProps.onRenameGalleryFolder('folder-a', ' Final Rooms ');
+    });
+
+    expect(firestore.addDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_gallery_folders' }),
+      expect.objectContaining({
+        name: 'Cities',
+        normalizedName: 'cities',
+        createdBy: 'user-1',
+        updatedBy: 'user-1',
+      })
+    );
+    expect(firestore.updateDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_gallery_folders/folder-a' }),
+      expect.objectContaining({
+        name: 'Final Rooms',
+        normalizedName: 'final rooms',
+        updatedBy: 'user-1',
+      })
+    );
+  });
+
+  test('deletes a shared gallery folder by moving contained maps to Unfiled first', async () => {
+    setManagerAuth();
+    window.confirm = jest.fn(() => true);
+    setCollectionData('grigliata_backgrounds', [{
+      id: 'map-1',
+      name: 'Sunken Ruins',
+      galleryFolderId: 'folder-a',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+    }, {
+      id: 'map-2',
+      name: 'Iron Keep',
+      galleryFolderId: 'folder-a',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+    }, {
+      id: 'map-3',
+      name: 'Frost Hall',
+      galleryFolderId: 'folder-b',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+    }]);
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+    await waitFor(() => {
+      expect(BackgroundGalleryPanelMock).toHaveBeenCalled();
+    });
+
+    const latestBackgroundGalleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+
+    await act(async () => {
+      await latestBackgroundGalleryProps.onDeleteGalleryFolder({ id: 'folder-a', name: 'Boss Arenas' });
+    });
+
+    const latestBatch = getLastCommittedBatch();
+    expect(latestBatch.update).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+      expect.objectContaining({ galleryFolderId: '' })
+    );
+    expect(latestBatch.update).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_backgrounds/map-2' }),
+      expect.objectContaining({ galleryFolderId: '' })
+    );
+    expect(latestBatch.delete).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_gallery_folders/folder-a' })
+    );
+    expect(latestBatch.commit).toHaveBeenCalledTimes(1);
   });
 
   test('imports Dungeon Alchemist lighting metadata for a selected DM background', async () => {

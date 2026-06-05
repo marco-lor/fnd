@@ -1307,6 +1307,10 @@ service cloud.firestore {
       allow write: if isGrigliataManager();
     }
 
+    match /grigliata_gallery_folders/{folderId} {
+      allow read, write: if isGrigliataManager();
+    }
+
     match /grigliata_background_lighting/{backgroundId} {
       allow read, write: if isGrigliataManager();
     }

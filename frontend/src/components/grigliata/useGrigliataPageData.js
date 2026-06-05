@@ -49,6 +49,10 @@ import {
   normalizeTokenVisionRadiusSquares,
   normalizeTokenVisionSettings,
 } from './lightingVisibility';
+import {
+  GRIGLIATA_GALLERY_FOLDERS_COLLECTION,
+  sortGalleryFolders,
+} from './galleryFolders';
 
 const LIVE_INTERACTION_CLOCK_INTERVAL_MS = 15 * 1000;
 const PAGE_PRESENCE_CLOCK_INTERVAL_MS = 15 * 1000;
@@ -117,6 +121,7 @@ export default function useGrigliataPageData({
   const [musicTracks, setMusicTracks] = useState([]);
   const [musicPlaybackState, setMusicPlaybackState] = useState(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
   const [musicPlaybackSessions, setMusicPlaybackSessions] = useState([]);
+  const [galleryFolders, setGalleryFolders] = useState([]);
   const [selectedBackgroundId, setSelectedBackgroundId] = useState('');
   const [liveInteractionClock, setLiveInteractionClock] = useState(() => Date.now());
   const [pagePresenceClock, setPagePresenceClock] = useState(() => Date.now());
@@ -128,6 +133,7 @@ export default function useGrigliataPageData({
       setFoeLibrary([]);
       setTokenProfiles([]);
       setPagePresenceSnapshots([]);
+      setGalleryFolders([]);
       return undefined;
     }
 
@@ -192,6 +198,26 @@ export default function useGrigliataPageData({
         return () => {};
       })();
 
+    const unsubscribeGalleryFolders = isManager
+      ? onSnapshot(
+        collection(db, GRIGLIATA_GALLERY_FOLDERS_COLLECTION),
+        (snapshot) => {
+          const nextFolders = snapshot.docs.map((docSnap) => ({
+            id: docSnap.id,
+            ...docSnap.data(),
+          }));
+          setGalleryFolders(sortGalleryFolders(nextFolders));
+        },
+        (error) => {
+          console.error('Failed to load Grigliata gallery folders:', error);
+          setGalleryFolders([]);
+        }
+      )
+      : (() => {
+        setGalleryFolders([]);
+        return () => {};
+      })();
+
     const unsubscribePagePresence = onSnapshot(
       collection(db, GRIGLIATA_PAGE_PRESENCE_COLLECTION),
       (snapshot) => {
@@ -211,6 +237,7 @@ export default function useGrigliataPageData({
       unsubscribeBackgrounds();
       unsubscribeState();
       unsubscribeFoes();
+      unsubscribeGalleryFolders();
       unsubscribeTokenProfiles();
       unsubscribePagePresence();
     };
@@ -917,6 +944,7 @@ export default function useGrigliataPageData({
     customUserTokens,
     displayBackground,
     foeLibrary,
+    galleryFolders,
     grid,
     isActivePlacementsReady,
     isCurrentUserTokenHiddenOnActiveMap,

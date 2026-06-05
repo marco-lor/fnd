@@ -88,6 +88,14 @@ import {
   resolveGrigliataDrawColorKey,
 } from './constants';
 import {
+  buildNormalizedGalleryFolderName,
+  GRIGLIATA_GALLERY_FOLDERS_COLLECTION,
+  getWritableGalleryFolderId,
+  hasDuplicateGalleryFolderName,
+  isReservedGalleryFolderName,
+  normalizeGalleryFolderName,
+} from './galleryFolders';
+import {
   buildGrigliataAoEFigureDoc,
   buildGrigliataAoEFigureDocId,
   findNextGrigliataAoEFigureSlot,
@@ -505,6 +513,8 @@ export default function GrigliataPage() {
   const [isNarrationClosePending, setIsNarrationClosePending] = useState(false);
   const [deletingBackgroundId, setDeletingBackgroundId] = useState('');
   const [clearingTokensBackgroundId, setClearingTokensBackgroundId] = useState('');
+  const [folderMutationId, setFolderMutationId] = useState('');
+  const [movingBackgroundFolderId, setMovingBackgroundFolderId] = useState('');
   const [deletingMusicTrackId, setDeletingMusicTrackId] = useState('');
   const [musicPlaybackActionTrackId, setMusicPlaybackActionTrackId] = useState('');
   const [musicPlaybackActionType, setMusicPlaybackActionType] = useState('');
@@ -638,6 +648,7 @@ export default function GrigliataPage() {
     customUserTokens,
     displayBackground,
     foeLibrary,
+    galleryFolders,
     grid,
     isActivePlacementsReady,
     isCurrentUserTokenHiddenOnActiveMap,
@@ -1486,7 +1497,7 @@ export default function GrigliataPage() {
         : baseConstraints;
       const snapshot = await getDocs(query(collection(db, collectionName), ...pageConstraints));
 
-      if (snapshot.empty) {
+      if (!snapshot || snapshot.empty) {
         return;
       }
 
@@ -3170,6 +3181,7 @@ export default function GrigliataPage() {
         sizeBytes: file.size || 0,
         grid: normalizeGridConfig(DEFAULT_GRID),
         isGridVisible: true,
+        galleryFolderId: '',
         createdAt: serverTimestamp(),
         createdBy: user.uid,
         updatedAt: serverTimestamp(),
@@ -3198,6 +3210,152 @@ export default function GrigliataPage() {
       }
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleCreateGalleryFolder = async (folderName) => {
+    if (!isManager || !user?.uid) return false;
+
+    const normalizedName = normalizeGalleryFolderName(folderName);
+    if (!normalizedName) {
+      setBoardError('Enter a folder name before creating it.');
+      return false;
+    }
+
+    if (isReservedGalleryFolderName(normalizedName)) {
+      setBoardError('Unfiled is already used by the gallery.');
+      return false;
+    }
+
+    if (hasDuplicateGalleryFolderName(galleryFolders, normalizedName)) {
+      setBoardError('A gallery folder with that name already exists.');
+      return false;
+    }
+
+    setBoardError('');
+    setFolderMutationId('__create__');
+    try {
+      await addDoc(collection(db, GRIGLIATA_GALLERY_FOLDERS_COLLECTION), {
+        name: normalizedName,
+        normalizedName: buildNormalizedGalleryFolderName(normalizedName),
+        createdAt: serverTimestamp(),
+        createdBy: user.uid,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to create Grigliata gallery folder:', error);
+      setBoardError('Unable to create that gallery folder.');
+      return false;
+    } finally {
+      setFolderMutationId('');
+    }
+  };
+
+  const handleRenameGalleryFolder = async (folderId, folderName) => {
+    if (!isManager || !user?.uid || !folderId) return false;
+
+    const normalizedName = normalizeGalleryFolderName(folderName);
+    if (!normalizedName) {
+      setBoardError('Enter a folder name before saving it.');
+      return false;
+    }
+
+    if (isReservedGalleryFolderName(normalizedName)) {
+      setBoardError('Unfiled is already used by the gallery.');
+      return false;
+    }
+
+    if (hasDuplicateGalleryFolderName(galleryFolders, normalizedName, folderId)) {
+      setBoardError('A gallery folder with that name already exists.');
+      return false;
+    }
+
+    setBoardError('');
+    setFolderMutationId(folderId);
+    try {
+      await updateDoc(doc(db, GRIGLIATA_GALLERY_FOLDERS_COLLECTION, folderId), {
+        name: normalizedName,
+        normalizedName: buildNormalizedGalleryFolderName(normalizedName),
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to rename Grigliata gallery folder:', error);
+      setBoardError('Unable to rename that gallery folder.');
+      return false;
+    } finally {
+      setFolderMutationId('');
+    }
+  };
+
+  const handleMoveBackgroundToFolder = async (backgroundId, folderId = '') => {
+    if (!isManager || !user?.uid || !backgroundId) return false;
+
+    const nextFolderId = getWritableGalleryFolderId(folderId);
+    if (nextFolderId && !galleryFolders.some((folder) => folder.id === nextFolderId)) {
+      setBoardError('That gallery folder no longer exists.');
+      return false;
+    }
+
+    setBoardError('');
+    setMovingBackgroundFolderId(backgroundId);
+    try {
+      await updateDoc(doc(db, 'grigliata_backgrounds', backgroundId), {
+        galleryFolderId: nextFolderId,
+        galleryFolderAssignedAt: serverTimestamp(),
+        galleryFolderAssignedBy: user.uid,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to move Grigliata background to folder:', error);
+      setBoardError('Unable to move that map to the selected folder.');
+      return false;
+    } finally {
+      setMovingBackgroundFolderId('');
+    }
+  };
+
+  const handleDeleteGalleryFolder = async (folder) => {
+    if (!isManager || !user?.uid || !folder?.id) return false;
+
+    const confirmed = window.confirm(`Delete folder "${folder.name || 'Untitled Folder'}"? Maps inside it will move to Unfiled.`);
+    if (!confirmed) {
+      return false;
+    }
+
+    setBoardError('');
+    setFolderMutationId(folder.id);
+    try {
+      const containedBackgroundsSnapshot = await getDocs(query(
+        collection(db, 'grigliata_backgrounds'),
+        where('galleryFolderId', '==', folder.id)
+      ));
+      const batch = writeBatch(db);
+
+      containedBackgroundsSnapshot.docs.forEach((docSnap) => {
+        batch.update(doc(db, 'grigliata_backgrounds', docSnap.id), {
+          galleryFolderId: '',
+          galleryFolderAssignedAt: serverTimestamp(),
+          galleryFolderAssignedBy: user.uid,
+          updatedAt: serverTimestamp(),
+          updatedBy: user.uid,
+        });
+      });
+      batch.delete(doc(db, GRIGLIATA_GALLERY_FOLDERS_COLLECTION, folder.id));
+
+      await batch.commit();
+      return true;
+    } catch (error) {
+      console.error('Failed to delete Grigliata gallery folder:', error);
+      setBoardError('Unable to delete that gallery folder.');
+      return false;
+    } finally {
+      setFolderMutationId('');
     }
   };
 
@@ -5839,6 +5997,7 @@ export default function GrigliataPage() {
                 {isManager && activeSidebarTab === 'gallery' && (
                   <BackgroundGalleryPanel
                     backgrounds={backgrounds}
+                    galleryFolders={galleryFolders}
                     activeBackgroundId={activeBackgroundId}
                     presentationBackgroundId={presentationBackgroundId}
                     selectedBackgroundId={selectedBackgroundId}
@@ -5852,6 +6011,8 @@ export default function GrigliataPage() {
                     isNarrationClosePending={isNarrationClosePending}
                     deletingBackgroundId={deletingBackgroundId}
                     clearingTokensBackgroundId={clearingTokensBackgroundId}
+                    folderMutationId={folderMutationId}
+                    movingBackgroundFolderId={movingBackgroundFolderId}
                     isUseBackgroundDisabled={isCombatMapChangeLocked}
                     destructiveActionLockedBackgroundIds={destructiveGalleryLockBackgroundIds}
                     onUploadNameChange={setUploadName}
@@ -5871,6 +6032,10 @@ export default function GrigliataPage() {
                     onClearTokensForBackground={handleClearTokensForBackground}
                     onDeleteBackground={handleDeleteBackground}
                     onCalibrateBackground={handleOpenCalibration}
+                    onCreateGalleryFolder={handleCreateGalleryFolder}
+                    onRenameGalleryFolder={handleRenameGalleryFolder}
+                    onDeleteGalleryFolder={handleDeleteGalleryFolder}
+                    onMoveBackgroundToFolder={handleMoveBackgroundToFolder}
                   />
                 )}
 
