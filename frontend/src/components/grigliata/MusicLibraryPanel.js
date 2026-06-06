@@ -1,10 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { FiDownload, FiPause, FiPlay, FiRepeat, FiSquare, FiTrash2 } from 'react-icons/fi';
+import { FiDownload, FiFolder, FiPause, FiPlay, FiRepeat, FiSquare, FiTrash2 } from 'react-icons/fi';
+import MediaFolderFilterButton from './MediaFolderFilterButton';
+import MediaFolderOrganizerOverlay from './MediaFolderOrganizerOverlay';
 import {
   computeGrigliataMusicPlaybackOffsetMs,
   GRIGLIATA_MUSIC_PLAYBACK_STATUSES,
   normalizeGrigliataMusicVolume,
 } from './music';
+import {
+  buildMusicFolderOptions,
+  getMusicFolderDisplayName,
+  getResolvedMusicFolderId,
+  getWritableMusicFolderId,
+  UNFILED_MUSIC_FOLDER_ID,
+} from './musicFolders';
 
 const formatDurationMs = (durationMs) => {
   const totalSeconds = Math.max(0, Math.round(Number(durationMs || 0) / 1000));
@@ -61,6 +70,8 @@ const getSessionProgressMs = (session, now) => {
 
 export default function MusicLibraryPanel({
   tracks,
+  musicFolders = [],
+  selectedFolderId = UNFILED_MUSIC_FOLDER_ID,
   activePlaybackState,
   activePlaybackSessions = [],
   uploadName,
@@ -70,6 +81,13 @@ export default function MusicLibraryPanel({
   deletingTrackId,
   playbackActionTrackId,
   playbackActionType,
+  folderMutationId = '',
+  movingTrackFolderId = '',
+  onSelectedFolderIdChange,
+  onCreateMusicFolder,
+  onRenameMusicFolder,
+  onDeleteMusicFolder,
+  onMoveTrackToFolder,
   onUploadNameChange,
   onUploadFileChange,
   onUploadTrack,
@@ -87,6 +105,9 @@ export default function MusicLibraryPanel({
   const [sharedVolumePercent, setSharedVolumePercent] = useState(() => toVolumePercent(activePlaybackState?.volume));
   const [playbackClockMs, setPlaybackClockMs] = useState(() => Date.now());
   const [seekDraftOffsetsByTrackId, setSeekDraftOffsetsByTrackId] = useState({});
+  const [isOrganizerOpen, setIsOrganizerOpen] = useState(false);
+  const [folderMenuTrackId, setFolderMenuTrackId] = useState('');
+  const folderOptions = useMemo(() => buildMusicFolderOptions(musicFolders), [musicFolders]);
   const playbackSessionsByTrackId = useMemo(() => {
     const nextMap = new Map();
 
@@ -98,6 +119,13 @@ export default function MusicLibraryPanel({
 
     return nextMap;
   }, [activePlaybackSessions]);
+  const loadedTrackIds = useMemo(() => (
+    new Set((tracks || []).map((track) => track?.id).filter(Boolean))
+  ), [tracks]);
+  const outsideSelectedFolderSessions = useMemo(() => (
+    (activePlaybackSessions || [])
+      .filter((session) => session?.trackId && !loadedTrackIds.has(session.trackId))
+  ), [activePlaybackSessions, loadedTrackIds]);
 
   useEffect(() => {
     setSharedVolumePercent(toVolumePercent(activePlaybackState?.volume));
@@ -141,6 +169,138 @@ export default function MusicLibraryPanel({
       delete nextDrafts[track.id];
       return nextDrafts;
     });
+  };
+
+  const buildTrackFromSession = (session = {}) => ({
+    id: session.trackId || session.id || '',
+    name: session.trackName || 'Untitled Track',
+    fileName: '',
+    audioUrl: session.audioUrl || '',
+    audioPath: '',
+    contentType: '',
+    sizeBytes: 0,
+    durationMs: Math.max(0, Math.round(Number(session.durationMs || 0))),
+  });
+
+  const renderActiveSessionControls = (session) => {
+    const track = buildTrackFromSession(session);
+    const trackName = track.name || 'Untitled Track';
+    const activeStatus = session?.status || GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED;
+    const isPlaying = activeStatus === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING;
+    const isPaused = activeStatus === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PAUSED;
+    const isActionPending = playbackActionTrackId === track.id;
+    const durationMs = Math.max(0, Math.round(Number(session?.durationMs || 0)));
+    const progressMs = durationMs > 0 ? getSessionProgressMs(session, playbackClockMs) : 0;
+    const hasSeekDraft = Object.prototype.hasOwnProperty.call(seekDraftOffsetsByTrackId, track.id);
+    const seekOffsetMs = hasSeekDraft ? seekDraftOffsetsByTrackId[track.id] : progressMs;
+
+    return (
+      <div key={track.id} className="px-3 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm font-semibold text-slate-100 truncate">{trackName}</p>
+              {isPlaying && (
+                <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-300">
+                  Playing
+                </span>
+              )}
+              {isPaused && (
+                <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-300">
+                  Paused
+                </span>
+              )}
+              {session?.loop === true && (
+                <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-sky-300">
+                  Loop
+                </span>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-slate-400">Playing outside the selected folder</p>
+          </div>
+        </div>
+
+        {durationMs > 0 && (
+          <div className="mt-3">
+            <div className="mb-1 flex items-center justify-between gap-3 text-[11px] text-slate-500">
+              <span>{formatDurationMs(seekOffsetMs)}</span>
+              <span>{formatDurationMs(durationMs)}</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max={durationMs}
+              step="250"
+              value={seekOffsetMs}
+              disabled={isPlaybackActionPending}
+              aria-label={buildTrackActionLabel('Seek', trackName)}
+              onChange={(event) => {
+                const nextOffsetMs = toSeekOffsetMs(event.target.value, durationMs);
+                setSeekDraftOffsetsByTrackId((currentDrafts) => ({
+                  ...currentDrafts,
+                  [track.id]: nextOffsetMs,
+                }));
+              }}
+              onMouseUp={(event) => commitTrackSeek(track, session, toSeekOffsetMs(event.currentTarget.value, durationMs))}
+              onTouchEnd={(event) => commitTrackSeek(track, session, toSeekOffsetMs(event.currentTarget.value, durationMs))}
+              onBlur={(event) => {
+                if (hasSeekDraft) {
+                  commitTrackSeek(track, session, toSeekOffsetMs(event.currentTarget.value, durationMs));
+                }
+              }}
+              onKeyUp={(event) => {
+                if (VOLUME_COMMIT_KEYS.has(event.key)) {
+                  commitTrackSeek(track, session, toSeekOffsetMs(event.currentTarget.value, durationMs));
+                }
+              }}
+              className="h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-800 accent-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+            />
+          </div>
+        )}
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          {isPlaying && (
+            <button
+              type="button"
+              onClick={() => onPauseTrack(track, session)}
+              disabled={isPlaybackActionPending}
+              aria-label={buildTrackActionLabel('Pause', trackName)}
+              title={isActionPending && playbackActionType === 'pause' ? `Pausing ${trackName}` : buildTrackActionLabel('Pause', trackName)}
+              aria-busy={isActionPending && playbackActionType === 'pause' ? true : undefined}
+              className={getMusicActionClassName('border-amber-500/40 text-amber-200 hover:bg-amber-500/10')}
+            >
+              <FiPause className={MUSIC_ACTION_ICON_CLASS_NAME} />
+            </button>
+          )}
+
+          {isPaused && (
+            <button
+              type="button"
+              onClick={() => onResumeTrack(track, session)}
+              disabled={isPlaybackActionPending}
+              aria-label={buildTrackActionLabel('Resume', trackName)}
+              title={isActionPending && playbackActionType === 'resume' ? `Resuming ${trackName}` : buildTrackActionLabel('Resume', trackName)}
+              aria-busy={isActionPending && playbackActionType === 'resume' ? true : undefined}
+              className={getMusicActionClassName('border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10')}
+            >
+              <FiPlay className={MUSIC_ACTION_ICON_CLASS_NAME} />
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => onStopTrack(track, session)}
+            disabled={isPlaybackActionPending}
+            aria-label={buildTrackActionLabel('Stop', trackName)}
+            title={isActionPending && playbackActionType === 'stop' ? `Stopping ${trackName}` : buildTrackActionLabel('Stop', trackName)}
+            aria-busy={isActionPending && playbackActionType === 'stop' ? true : undefined}
+            className={getMusicActionClassName('border-rose-500/40 text-rose-200 hover:bg-rose-500/10')}
+          >
+            <FiSquare className={MUSIC_ACTION_ICON_CLASS_NAME} />
+          </button>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -230,14 +390,46 @@ export default function MusicLibraryPanel({
         </div>
 
         <div className="rounded-xl border border-slate-800 bg-slate-900/70">
-          <div className="px-3 py-3 border-b border-slate-800">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Library</p>
+          <div className="space-y-3 px-3 py-3 border-b border-slate-800">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Library</p>
+              <button
+                type="button"
+                aria-label="Organize Music"
+                onClick={() => setIsOrganizerOpen(true)}
+                className="inline-flex shrink-0 items-center gap-2 rounded-md border border-violet-500/40 px-2.5 py-1.5 text-xs font-semibold text-violet-200 transition-colors hover:bg-violet-500/10"
+              >
+                <FiFolder className="h-3.5 w-3.5" aria-hidden="true" />
+                Organize
+              </button>
+            </div>
+
+            <MediaFolderFilterButton
+              folders={musicFolders}
+              selectedFolderId={selectedFolderId}
+              onSelectedFolderIdChange={onSelectedFolderIdChange}
+              buttonLabel="Filter Music by folder"
+              listboxLabel="Filter Music by folder options"
+              tone="violet"
+              onBeforeOpen={() => setFolderMenuTrackId('')}
+            />
           </div>
+
+          {outsideSelectedFolderSessions.length > 0 && (
+            <div className="border-b border-slate-800">
+              <div className="border-b border-slate-800 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Active Tracks</p>
+              </div>
+              <div className="divide-y divide-slate-800">
+                {outsideSelectedFolderSessions.map(renderActiveSessionControls)}
+              </div>
+            </div>
+          )}
 
           <div className="max-h-[30rem] overflow-y-auto custom-scroll divide-y divide-slate-800">
             {tracks.length === 0 ? (
               <div className="px-3 py-4 text-sm text-slate-400">
-                No tracks uploaded yet.
+                No tracks in this folder.
               </div>
             ) : (
               tracks.map((track) => {
@@ -259,7 +451,7 @@ export default function MusicLibraryPanel({
                   : progressMs;
 
                 return (
-                  <div key={track.id} className="px-3 py-3">
+                  <div key={track.id} data-testid={`music-library-row-${track.id}`} className="px-3 py-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
@@ -286,6 +478,9 @@ export default function MusicLibraryPanel({
                         </p>
                         <p className="mt-1 text-[11px] text-slate-500">
                           {formatDurationMs(track.durationMs)} | {formatSizeBytes(track.sizeBytes)}
+                        </p>
+                        <p className="mt-1 text-[11px] font-medium text-violet-200/80">
+                          Folder: {getMusicFolderDisplayName(track, musicFolders)}
                         </p>
                       </div>
                     </div>
@@ -329,6 +524,19 @@ export default function MusicLibraryPanel({
                     )}
 
                     <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        aria-label={buildTrackActionLabel('Move', `${trackName} to folder`)}
+                        title={buildTrackActionLabel('Move', `${trackName} to folder`)}
+                        onClick={() => setFolderMenuTrackId((currentId) => (
+                          currentId === track.id ? '' : track.id
+                        ))}
+                        disabled={movingTrackFolderId === track.id}
+                        className={getMusicActionClassName('border-violet-500/40 text-violet-200 hover:bg-violet-500/10')}
+                      >
+                        <FiFolder className={MUSIC_ACTION_ICON_CLASS_NAME} />
+                      </button>
+
                       {!isActiveTrack && (
                         <>
                           <button
@@ -423,6 +631,35 @@ export default function MusicLibraryPanel({
                         <FiTrash2 className={MUSIC_ACTION_ICON_CLASS_NAME} />
                       </button>
                     </div>
+
+                    {folderMenuTrackId === track.id && (
+                      <div className="mt-2 rounded-lg border border-slate-700 bg-slate-950/90 p-1.5 shadow-inner shadow-black/30">
+                        <div className="grid grid-cols-1 gap-1">
+                          {folderOptions.map((folder) => {
+                            const targetFolderId = getWritableMusicFolderId(folder.id);
+                            const isCurrentFolder = getResolvedMusicFolderId(track, musicFolders) === folder.id;
+
+                            return (
+                              <button
+                                key={folder.id}
+                                type="button"
+                                onClick={() => {
+                                  onMoveTrackToFolder?.(track.id, targetFolderId);
+                                  setFolderMenuTrackId('');
+                                }}
+                                disabled={isCurrentFolder || movingTrackFolderId === track.id}
+                                className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-xs font-semibold text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-55"
+                              >
+                                <span className="truncate">Move to {folder.name}</span>
+                                {isCurrentFolder && (
+                                  <span className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-violet-300">Current</span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -430,6 +667,61 @@ export default function MusicLibraryPanel({
           </div>
         </div>
       </div>
+
+      <MediaFolderOrganizerOverlay
+        isOpen={isOrganizerOpen}
+        title="Organize Music"
+        subtitle="Move tracks between shared folders without changing the uploaded files."
+        folders={musicFolders}
+        items={tracks}
+        selectedFolderId={selectedFolderId}
+        itemNounPlural="tracks"
+        emptyMessage="Drop tracks here or use a row folder control to move tracks into this folder."
+        folderMutationId={folderMutationId}
+        movingItemId={movingTrackFolderId}
+        tone="violet"
+        onClose={() => setIsOrganizerOpen(false)}
+        onSelectedFolderIdChange={onSelectedFolderIdChange}
+        onCreateFolder={onCreateMusicFolder}
+        onRenameFolder={onRenameMusicFolder}
+        onDeleteFolder={onDeleteMusicFolder}
+        onMoveItemToFolder={onMoveTrackToFolder}
+        getItemId={(track) => track?.id || ''}
+        renderItem={({ item: track, itemId, moving, dragProps }) => {
+          const resolvedFolderId = getResolvedMusicFolderId(track, musicFolders);
+          const selectValue = getWritableMusicFolderId(resolvedFolderId);
+
+          return (
+            <article
+              key={itemId}
+              data-testid={`music-organizer-track-${itemId}`}
+              {...dragProps}
+              className="rounded-xl border border-slate-800 bg-slate-900/60 p-3"
+            >
+              <p className="truncate text-sm font-semibold text-slate-100">{track.name || 'Untitled Track'}</p>
+              <p className="mt-1 text-xs text-slate-500">
+                {track.fileName || 'Unknown file'} | {formatDurationMs(track.durationMs)}
+              </p>
+              <select
+                aria-label={`Move ${track.name || 'Untitled Track'} to folder`}
+                value={selectValue}
+                onChange={(event) => onMoveTrackToFolder?.(itemId, event.target.value)}
+                disabled={moving}
+                className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 focus:border-violet-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {folderOptions.map((folder) => (
+                  <option
+                    key={folder.id}
+                    value={getWritableMusicFolderId(folder.id)}
+                  >
+                    {folder.name}
+                  </option>
+                ))}
+              </select>
+            </article>
+          );
+        }}
+      />
     </section>
   );
 }

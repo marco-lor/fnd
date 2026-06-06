@@ -34,6 +34,7 @@
     "build": "react-scripts build",
     "build:production": "node scripts/build-production.js",
     "verify:production-build": "node scripts/build-production.js --verify-only",
+    "grigliata:backfill-media-folders": "node scripts/backfill-grigliata-media-folders.js",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "fb:login": "npx firebase login",

@@ -1,11 +1,22 @@
 import {
   buildGalleryFolderBuckets,
+  buildGalleryFolderOptions,
   getGalleryFolderDisplayName,
+  getWritableGalleryFolderId,
   hasDuplicateGalleryFolderName,
   normalizeGalleryFolderName,
   sortGalleryFolders,
   UNFILED_GALLERY_FOLDER_ID,
 } from './galleryFolders';
+import {
+  buildMusicFolderOptions,
+  getMusicFolderDisplayName,
+  getWritableMusicFolderId,
+  hasDuplicateMusicFolderName,
+  normalizeMusicFolderName,
+  sortMusicFolders,
+  UNFILED_MUSIC_FOLDER_ID,
+} from './musicFolders';
 
 describe('gallery folder helpers', () => {
   test('normalizes folder names for display and duplicate checks', () => {
@@ -66,5 +77,43 @@ describe('gallery folder helpers', () => {
     expect(getGalleryFolderDisplayName({ galleryFolderId: 'folder-a' }, folders)).toBe('Boss Arenas');
     expect(getGalleryFolderDisplayName({ galleryFolderId: 'folder-missing' }, folders)).toBe('Unfiled');
     expect(getGalleryFolderDisplayName({}, folders)).toBe('Unfiled');
+  });
+
+  test('exposes Unfiled as a UI folder while writing it as an empty Firestore field', () => {
+    expect(buildGalleryFolderOptions([])).toEqual([{
+      id: UNFILED_GALLERY_FOLDER_ID,
+      name: 'Unfiled',
+      isSystem: true,
+    }]);
+    expect(getWritableGalleryFolderId(UNFILED_GALLERY_FOLDER_ID)).toBe('');
+    expect(getWritableGalleryFolderId('folder-a')).toBe('folder-a');
+  });
+});
+
+describe('music folder helpers', () => {
+  test('mirrors gallery folder normalization, sorting, duplicate detection, and writable ids', () => {
+    const folders = [
+      { id: 'music-b', name: 'Combat' },
+      { id: 'music-a', name: '  Ambience  ' },
+    ];
+
+    expect(normalizeMusicFolderName('\nBoss   Themes\t')).toBe('Boss Themes');
+    expect(sortMusicFolders(folders).map((folder) => folder.id)).toEqual(['music-a', 'music-b']);
+    expect(hasDuplicateMusicFolderName(folders, 'ambience')).toBe(true);
+    expect(hasDuplicateMusicFolderName(folders, 'ambience', 'music-a')).toBe(false);
+    expect(buildMusicFolderOptions(folders).map((folder) => folder.id)).toEqual([
+      UNFILED_MUSIC_FOLDER_ID,
+      'music-a',
+      'music-b',
+    ]);
+    expect(getWritableMusicFolderId(UNFILED_MUSIC_FOLDER_ID)).toBe('');
+  });
+
+  test('resolves track folder display names and falls invalid assignments back to Unfiled', () => {
+    const folders = [{ id: 'music-a', name: 'Ambience' }];
+
+    expect(getMusicFolderDisplayName({ musicFolderId: 'music-a' }, folders)).toBe('Ambience');
+    expect(getMusicFolderDisplayName({ musicFolderId: 'missing-folder' }, folders)).toBe('Unfiled');
+    expect(getMusicFolderDisplayName({}, folders)).toBe('Unfiled');
   });
 });

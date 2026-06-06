@@ -991,6 +991,9 @@ service cloud.firestore {
           "contentType",
           "sizeBytes",
           "durationMs",
+          "musicFolderId",
+          "musicFolderAssignedAt",
+          "musicFolderAssignedBy",
           "createdAt",
           "createdBy",
           "updatedAt",
@@ -1010,6 +1013,9 @@ service cloud.firestore {
         && data.sizeBytes >= 0
         && data.durationMs is int
         && data.durationMs > 0
+        && (!data.keys().hasAny(["musicFolderId"]) || data.musicFolderId is string)
+        && (!data.keys().hasAny(["musicFolderAssignedAt"]) || data.musicFolderAssignedAt == null || data.musicFolderAssignedAt is timestamp)
+        && (!data.keys().hasAny(["musicFolderAssignedBy"]) || data.musicFolderAssignedBy == null || data.musicFolderAssignedBy is string)
         && (data.createdBy == null || data.createdBy is string)
         && (data.updatedBy == null || data.updatedBy is string);
     }
@@ -1308,6 +1314,10 @@ service cloud.firestore {
     }
 
     match /grigliata_gallery_folders/{folderId} {
+      allow read, write: if isGrigliataManager();
+    }
+
+    match /grigliata_music_folders/{folderId} {
       allow read, write: if isGrigliataManager();
     }
 

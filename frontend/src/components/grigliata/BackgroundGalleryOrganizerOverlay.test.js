@@ -33,7 +33,9 @@ const buildProps = (overrides = {}) => ({
   renamingFolderId: '',
   deletingFolderId: '',
   movingBackgroundId: '',
+  selectedFolderId: '__unfiled__',
   onClose: jest.fn(),
+  onSelectedFolderIdChange: jest.fn(),
   onCreateFolder: jest.fn(),
   onRenameFolder: jest.fn(),
   onDeleteFolder: jest.fn(),
@@ -121,6 +123,23 @@ describe('BackgroundGalleryOrganizerOverlay', () => {
     fireEvent.drop(screen.getByTestId('gallery-folder-drop-folder-a'), { dataTransfer });
 
     expect(onMoveBackgroundToFolder).toHaveBeenCalledWith('map-2', 'folder-a');
+  });
+
+  test('switches folders from the sidebar without requiring all folder contents to be loaded', () => {
+    const onSelectedFolderIdChange = jest.fn();
+    render(
+      <BackgroundGalleryOrganizerOverlay
+        {...buildProps({
+          backgrounds: [],
+          selectedFolderId: '__unfiled__',
+          onSelectedFolderIdChange,
+        })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open folder Boss Arenas' }));
+
+    expect(onSelectedFolderIdChange).toHaveBeenCalledWith('folder-a');
   });
 
   test('closes from Escape and the backdrop', () => {

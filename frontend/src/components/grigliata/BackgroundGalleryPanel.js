@@ -1,15 +1,16 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FiCheck, FiChevronDown, FiFolder, FiGrid, FiLayers, FiPlay, FiRadio, FiTrash2, FiUserMinus, FiXCircle, FiZap } from 'react-icons/fi';
+import React, { useMemo, useState } from 'react';
+import { FiFolder, FiGrid, FiLayers, FiPlay, FiRadio, FiTrash2, FiUserMinus, FiXCircle, FiZap } from 'react-icons/fi';
 import { isVideoBackground } from './boardUtils';
 import BackgroundGalleryOrganizerOverlay from './BackgroundGalleryOrganizerOverlay';
+import MediaFolderFilterButton from './MediaFolderFilterButton';
 import {
   buildGalleryFolderOptions,
   getGalleryFolderDisplayName,
   getResolvedGalleryFolderId,
   getWritableGalleryFolderId,
+  UNFILED_GALLERY_FOLDER_ID,
 } from './galleryFolders';
 
-const ALL_GALLERY_FOLDER_FILTER_ID = '__all__';
 const GALLERY_ACTION_BASE_CLASS_NAME = 'inline-flex h-9 w-9 items-center justify-center rounded-md border transition-colors disabled:cursor-not-allowed disabled:opacity-60';
 const GALLERY_ACTION_ICON_CLASS_NAME = 'h-4 w-4';
 
@@ -36,8 +37,10 @@ export default function BackgroundGalleryPanel({
   clearingTokensBackgroundId,
   folderMutationId = '',
   movingBackgroundFolderId = '',
+  selectedFolderId = UNFILED_GALLERY_FOLDER_ID,
   isUseBackgroundDisabled,
   destructiveActionLockedBackgroundIds = [],
+  onSelectedFolderIdChange,
   onUploadNameChange,
   onUploadFileChange,
   onUploadBackground,
@@ -65,68 +68,9 @@ export default function BackgroundGalleryPanel({
   const isNarrationSceneActive = presentationBackgroundIdSet.size > 0;
   const [isOrganizerOpen, setIsOrganizerOpen] = useState(false);
   const [folderMenuBackgroundId, setFolderMenuBackgroundId] = useState('');
-  const [selectedFolderFilterId, setSelectedFolderFilterId] = useState(ALL_GALLERY_FOLDER_FILTER_ID);
-  const [isFolderFilterOpen, setIsFolderFilterOpen] = useState(false);
-  const folderFilterRef = useRef(null);
   const folderOptions = useMemo(() => (
     buildGalleryFolderOptions(galleryFolders)
   ), [galleryFolders]);
-  const filterOptions = useMemo(() => ([
-    {
-      id: ALL_GALLERY_FOLDER_FILTER_ID,
-      name: 'All folders',
-    },
-    ...folderOptions,
-  ]), [folderOptions]);
-  const validFilterIds = useMemo(() => (
-    new Set(filterOptions.map((folder) => folder.id))
-  ), [filterOptions]);
-  const selectedFolderFilter = useMemo(() => (
-    filterOptions.find((folder) => folder.id === selectedFolderFilterId) || filterOptions[0]
-  ), [filterOptions, selectedFolderFilterId]);
-  const filteredBackgrounds = useMemo(() => {
-    if (selectedFolderFilterId === ALL_GALLERY_FOLDER_FILTER_ID || !validFilterIds.has(selectedFolderFilterId)) {
-      return backgrounds;
-    }
-
-    return backgrounds.filter((background) => (
-      getResolvedGalleryFolderId(background, galleryFolders) === selectedFolderFilterId
-    ));
-  }, [backgrounds, galleryFolders, selectedFolderFilterId, validFilterIds]);
-
-  useEffect(() => {
-    if (!validFilterIds.has(selectedFolderFilterId)) {
-      setSelectedFolderFilterId(ALL_GALLERY_FOLDER_FILTER_ID);
-    }
-  }, [selectedFolderFilterId, validFilterIds]);
-
-  useEffect(() => {
-    if (!isFolderFilterOpen) {
-      return undefined;
-    }
-
-    const handleDocumentMouseDown = (event) => {
-      if (!folderFilterRef.current || folderFilterRef.current.contains(event.target)) {
-        return;
-      }
-
-      setIsFolderFilterOpen(false);
-    };
-
-    const handleDocumentKeyDown = (event) => {
-      if (event.key === 'Escape') {
-        setIsFolderFilterOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleDocumentMouseDown);
-    document.addEventListener('keydown', handleDocumentKeyDown);
-
-    return () => {
-      document.removeEventListener('mousedown', handleDocumentMouseDown);
-      document.removeEventListener('keydown', handleDocumentKeyDown);
-    };
-  }, [isFolderFilterOpen]);
 
   return (
     <section className="rounded-2xl border border-slate-700 bg-slate-950/75 backdrop-blur-sm shadow-2xl overflow-hidden">
@@ -189,90 +133,24 @@ export default function BackgroundGalleryPanel({
               </button>
             </div>
 
-            <div ref={folderFilterRef} className="relative">
-              <button
-                type="button"
-                aria-label="Filter DM Gallery by folder"
-                aria-haspopup="listbox"
-                aria-expanded={isFolderFilterOpen}
-                aria-controls="dm-gallery-folder-filter-options"
-                onClick={() => {
-                  setIsFolderFilterOpen((currentValue) => !currentValue);
-                  setFolderMenuBackgroundId('');
-                }}
-                className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
-                  isFolderFilterOpen
-                    ? 'border-sky-400/70 bg-sky-500/10 shadow-[0_0_0_1px_rgba(56,189,248,0.22)]'
-                    : 'border-slate-700 bg-slate-950/70 hover:border-sky-500/50 hover:bg-slate-900/80'
-                }`}
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <FiFolder className="h-4 w-4 shrink-0 text-sky-200" aria-hidden="true" />
-                  <span className="truncate text-xs font-semibold text-slate-100">
-                    {selectedFolderFilter?.name || 'All folders'}
-                  </span>
-                </span>
-                <FiChevronDown
-                  className={`h-4 w-4 shrink-0 text-slate-300 transition-transform ${
-                    isFolderFilterOpen ? 'rotate-180 text-sky-200' : ''
-                  }`}
-                  aria-hidden="true"
-                />
-              </button>
-
-              {isFolderFilterOpen && (
-                <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-lg border border-sky-500/35 bg-slate-950 shadow-2xl shadow-black/60">
-                  <div
-                    id="dm-gallery-folder-filter-options"
-                    role="listbox"
-                    aria-label="Filter DM Gallery by folder options"
-                    className="max-h-52 overflow-y-auto custom-scroll bg-slate-950 p-1"
-                  >
-                    {filterOptions.map((folder) => {
-                      const isSelectedFilter = selectedFolderFilterId === folder.id;
-
-                      return (
-                        <button
-                          key={folder.id}
-                          type="button"
-                          role="option"
-                          aria-selected={isSelectedFilter}
-                          onClick={() => {
-                            setSelectedFolderFilterId(folder.id);
-                            setFolderMenuBackgroundId('');
-                            setIsFolderFilterOpen(false);
-                          }}
-                          className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs font-semibold transition-colors ${
-                            isSelectedFilter
-                              ? 'bg-sky-500/20 text-sky-100'
-                              : 'text-slate-200 hover:bg-slate-800/85 hover:text-white'
-                          }`}
-                        >
-                          <FiFolder className="h-3.5 w-3.5 shrink-0 text-sky-200/80" aria-hidden="true" />
-                          <span className="min-w-0 flex-1 truncate">{folder.name}</span>
-                          {isSelectedFilter && (
-                            <FiCheck className="h-3.5 w-3.5 shrink-0 text-sky-200" aria-hidden="true" />
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
+            <MediaFolderFilterButton
+              folders={galleryFolders}
+              selectedFolderId={selectedFolderId}
+              onSelectedFolderIdChange={onSelectedFolderIdChange}
+              buttonLabel="Filter DM Gallery by folder"
+              listboxLabel="Filter DM Gallery by folder options"
+              tone="sky"
+              onBeforeOpen={() => setFolderMenuBackgroundId('')}
+            />
           </div>
 
           <div className="max-h-[26rem] overflow-y-auto custom-scroll divide-y divide-slate-800">
             {backgrounds.length === 0 ? (
               <div className="px-3 py-4 text-sm text-slate-400">
-                No backgrounds uploaded yet.
-              </div>
-            ) : filteredBackgrounds.length === 0 ? (
-              <div className="px-3 py-4 text-sm text-slate-400">
                 No maps in this folder.
               </div>
             ) : (
-              filteredBackgrounds.map((background) => {
+              backgrounds.map((background) => {
                 const isActive = background.id === activeBackgroundId;
                 const isPrimaryNarration = background.id === presentationBackgroundId;
                 const isIncludedInNarration = presentationBackgroundIdSet.has(background.id);
@@ -514,9 +392,11 @@ export default function BackgroundGalleryPanel({
         isOpen={isOrganizerOpen}
         backgrounds={backgrounds}
         folders={galleryFolders}
+        selectedFolderId={selectedFolderId}
         folderMutationId={folderMutationId}
         movingBackgroundFolderId={movingBackgroundFolderId}
         onClose={() => setIsOrganizerOpen(false)}
+        onSelectedFolderIdChange={onSelectedFolderIdChange}
         onCreateFolder={onCreateGalleryFolder}
         onRenameFolder={onRenameGalleryFolder}
         onDeleteFolder={onDeleteGalleryFolder}

@@ -102,13 +102,38 @@ const mockApplyQueryConstraints = (items, constraints) => (
       return filteredItems;
     }
 
-    return filteredItems.filter((item) => item?.[constraint.field] === constraint.value);
+    return filteredItems.filter((item) => {
+      const itemValue = item?.[constraint.field];
+      const normalizedItemValue = (
+        constraint.value === ''
+        && (constraint.field === 'galleryFolderId' || constraint.field === 'musicFolderId')
+        && typeof itemValue !== 'string'
+      )
+        ? ''
+        : itemValue;
+
+      return normalizedItemValue === constraint.value;
+    });
   }, items)
 );
 
 const mockBuildSnapshotForTarget = (target) => {
   if (target?.kind === 'doc') {
-    return mockCreateDocSnapshot(target.path, mockFirestoreState.docs[target.path]);
+    let docData = mockFirestoreState.docs[target.path];
+    if (!docData) {
+      const pathSegments = target.path.split('/');
+      const docId = pathSegments.pop();
+      const collectionPath = pathSegments.join('/');
+      const collectionItem = (mockFirestoreState.collections[collectionPath] || [])
+        .find((item) => item?.id === docId);
+
+      if (collectionItem) {
+        const { id, ...rest } = collectionItem;
+        docData = rest;
+      }
+    }
+
+    return mockCreateDocSnapshot(target.path, docData);
   }
 
   if (target?.kind === 'query') {
@@ -843,6 +868,7 @@ describe('GrigliataPage', () => {
         },
       ],
       grigliata_gallery_folders: [],
+      grigliata_music_folders: [],
       grigliata_tokens: [],
       grigliata_token_placements: [],
       grigliata_aoe_figures: [],
@@ -1574,7 +1600,38 @@ describe('GrigliataPage', () => {
     expect(firestore.onSnapshot.mock.calls.some(([target]) => (
       target?.kind === 'collection' && target.path === 'grigliata_gallery_folders'
     ))).toBe(true);
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'query'
+      && target.base?.path === 'grigliata_backgrounds'
+      && target.constraints?.some((constraint) => (
+        constraint.kind === 'where'
+        && constraint.field === 'galleryFolderId'
+        && constraint.op === '=='
+        && constraint.value === ''
+      ))
+    ))).toBe(true);
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'doc' && target.path === 'grigliata_backgrounds/map-1'
+    ))).toBe(true);
     expect(latestBackgroundGalleryProps.galleryFolders.map((folder) => folder.id)).toEqual(['folder-a', 'folder-b']);
+    expect(latestBackgroundGalleryProps.selectedFolderId).toBe('__unfiled__');
+
+    await act(async () => {
+      latestBackgroundGalleryProps.onSelectedFolderIdChange('folder-a');
+    });
+
+    await waitFor(() => {
+      expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+        target?.kind === 'query'
+        && target.base?.path === 'grigliata_backgrounds'
+        && target.constraints?.some((constraint) => (
+          constraint.kind === 'where'
+          && constraint.field === 'galleryFolderId'
+          && constraint.op === '=='
+          && constraint.value === 'folder-a'
+        ))
+      ))).toBe(true);
+    });
   });
 
   test('does not subscribe gallery folders for non-DM users', async () => {
@@ -6121,6 +6178,90 @@ describe('GrigliataPage', () => {
     }
   });
 
+  test('subscribes music folders and selected-folder tracks, then moves a track between folders', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_music_folders', [{
+      id: 'folder-a',
+      name: 'Combat',
+      normalizedName: 'combat',
+    }]);
+    setCollectionData('grigliata_music_tracks', [{
+      id: 'track-1',
+      name: 'Battle Theme',
+      fileName: 'battle-theme.mp3',
+      audioUrl: 'https://example.com/audio/battle-theme.mp3',
+      audioPath: 'grigliata/music/user-1/battle-theme.mp3',
+      contentType: 'audio/mpeg',
+      sizeBytes: 2048,
+      durationMs: 120000,
+      musicFolderId: '',
+    }, {
+      id: 'track-2',
+      name: 'Boss Loop',
+      fileName: 'boss-loop.mp3',
+      audioUrl: 'https://example.com/audio/boss-loop.mp3',
+      audioPath: 'grigliata/music/user-1/boss-loop.mp3',
+      contentType: 'audio/mpeg',
+      sizeBytes: 4096,
+      durationMs: 90000,
+      musicFolderId: 'folder-a',
+    }]);
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /music/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Battle Theme')).toBeInTheDocument();
+    });
+
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'collection' && target.path === 'grigliata_music_folders'
+    ))).toBe(true);
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'query'
+      && target.base?.path === 'grigliata_music_tracks'
+      && target.constraints?.some((constraint) => (
+        constraint.kind === 'where'
+        && constraint.field === 'musicFolderId'
+        && constraint.op === '=='
+        && constraint.value === ''
+      ))
+    ))).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Battle Theme to folder' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Move to Combat' }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.updateDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_tracks/track-1' }),
+        expect.objectContaining({
+          musicFolderId: 'folder-a',
+          musicFolderAssignedBy: 'user-1',
+          updatedBy: 'user-1',
+        })
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Music by folder' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Combat' }));
+
+    await waitFor(() => {
+      expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+        target?.kind === 'query'
+        && target.base?.path === 'grigliata_music_tracks'
+        && target.constraints?.some((constraint) => (
+          constraint.kind === 'where'
+          && constraint.field === 'musicFolderId'
+          && constraint.op === '=='
+          && constraint.value === 'folder-a'
+        ))
+      ))).toBe(true);
+    });
+  });
+
   test('uploads a music track and persists its metadata', async () => {
     setManagerAuth();
     const storageApi = require('firebase/storage');
@@ -6163,6 +6304,7 @@ describe('GrigliataPage', () => {
           contentType: 'audio/mpeg',
           sizeBytes: 2048,
           durationMs: 12_345,
+          musicFolderId: '',
           createdBy: 'user-1',
           updatedBy: 'user-1',
         })

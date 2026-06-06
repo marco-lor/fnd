@@ -89,13 +89,25 @@ import {
   resolveGrigliataDrawColorKey,
 } from './constants';
 import {
+  buildGalleryFolderOptions,
   buildNormalizedGalleryFolderName,
   GRIGLIATA_GALLERY_FOLDERS_COLLECTION,
   getWritableGalleryFolderId,
   hasDuplicateGalleryFolderName,
   isReservedGalleryFolderName,
   normalizeGalleryFolderName,
+  UNFILED_GALLERY_FOLDER_ID,
 } from './galleryFolders';
+import {
+  buildMusicFolderOptions,
+  buildNormalizedMusicFolderName,
+  GRIGLIATA_MUSIC_FOLDERS_COLLECTION,
+  getWritableMusicFolderId,
+  hasDuplicateMusicFolderName,
+  isReservedMusicFolderName,
+  normalizeMusicFolderName,
+  UNFILED_MUSIC_FOLDER_ID,
+} from './musicFolders';
 import {
   buildInitialNarrationPlacement,
   buildNarrationStatePayload,
@@ -515,6 +527,8 @@ export default function GrigliataPage() {
   const [musicUploadError, setMusicUploadError] = useState('');
   const [isMusicUploading, setIsMusicUploading] = useState(false);
   const [isMusicMutePending, setIsMusicMutePending] = useState(false);
+  const [selectedGalleryFolderId, setSelectedGalleryFolderId] = useState(UNFILED_GALLERY_FOLDER_ID);
+  const [selectedMusicFolderId, setSelectedMusicFolderId] = useState(UNFILED_MUSIC_FOLDER_ID);
 
   const [activatingBackgroundId, setActivatingBackgroundId] = useState('');
   const [narrationActionBackgroundId, setNarrationActionBackgroundId] = useState('');
@@ -524,6 +538,8 @@ export default function GrigliataPage() {
   const [clearingTokensBackgroundId, setClearingTokensBackgroundId] = useState('');
   const [folderMutationId, setFolderMutationId] = useState('');
   const [movingBackgroundFolderId, setMovingBackgroundFolderId] = useState('');
+  const [musicFolderMutationId, setMusicFolderMutationId] = useState('');
+  const [movingMusicTrackFolderId, setMovingMusicTrackFolderId] = useState('');
   const [deletingMusicTrackId, setDeletingMusicTrackId] = useState('');
   const [musicPlaybackActionTrackId, setMusicPlaybackActionTrackId] = useState('');
   const [musicPlaybackActionType, setMusicPlaybackActionType] = useState('');
@@ -657,6 +673,7 @@ export default function GrigliataPage() {
     customUserTokens,
     displayBackground,
     foeLibrary,
+    galleryBackgrounds,
     galleryFolders,
     grid,
     isActivePlacementsReady,
@@ -668,6 +685,7 @@ export default function GrigliataPage() {
     activeTurnTokenId,
     musicPlaybackState,
     musicPlaybackSessions,
+    musicFolders,
     musicTracks,
     persistedActiveGrid,
     presentationBackgroundIds,
@@ -690,6 +708,8 @@ export default function GrigliataPage() {
     currentUserHiddenTokenIdsByBackground,
     currentUserId,
     isManager,
+    selectedGalleryFolderId,
+    selectedMusicFolderId,
   });
   const {
     lightingMetadata,
@@ -1461,6 +1481,24 @@ export default function GrigliataPage() {
 
     return nextMap;
   }, [musicPlaybackSessions]);
+  const galleryFolderOptions = useMemo(
+    () => buildGalleryFolderOptions(galleryFolders),
+    [galleryFolders]
+  );
+  const musicFolderOptions = useMemo(
+    () => buildMusicFolderOptions(musicFolders),
+    [musicFolders]
+  );
+
+  useEffect(() => {
+    if (galleryFolderOptions.some((folder) => folder.id === selectedGalleryFolderId)) return;
+    setSelectedGalleryFolderId(UNFILED_GALLERY_FOLDER_ID);
+  }, [galleryFolderOptions, selectedGalleryFolderId]);
+
+  useEffect(() => {
+    if (musicFolderOptions.some((folder) => folder.id === selectedMusicFolderId)) return;
+    setSelectedMusicFolderId(UNFILED_MUSIC_FOLDER_ID);
+  }, [musicFolderOptions, selectedMusicFolderId]);
 
   useEffect(() => {
     latestMusicPlaybackStateRef.current = normalizedMusicPlaybackState;
@@ -1509,12 +1547,12 @@ export default function GrigliataPage() {
 
     const immediateImageUrlSet = new Set(immediateImageUrls);
     return collectUniqueImageUrls(
-      backgrounds
+      galleryBackgrounds
         .map(getBackgroundImageUrlForPreload)
         .filter((imageUrl) => !immediateImageUrlSet.has(imageUrl))
         .slice(0, MAX_DEFERRED_GALLERY_IMAGE_PRELOADS)
     );
-  }, [backgrounds, immediateImageUrls, isGallerySidebarActive]);
+  }, [galleryBackgrounds, immediateImageUrls, isGallerySidebarActive]);
 
   const runPaginatedWriteBatch = useCallback(async ({
     collectionName,
@@ -2572,6 +2610,9 @@ export default function GrigliataPage() {
         contentType: file.type || '',
         sizeBytes: file.size || 0,
         durationMs,
+        musicFolderId: getWritableMusicFolderId(selectedMusicFolderId),
+        musicFolderAssignedAt: null,
+        musicFolderAssignedBy: '',
         createdAt: serverTimestamp(),
         createdBy: user.uid,
         updatedAt: serverTimestamp(),
@@ -2599,6 +2640,7 @@ export default function GrigliataPage() {
     isManager,
     musicSelectedFile,
     musicUploadName,
+    selectedMusicFolderId,
     user?.uid,
   ]);
 
@@ -2746,6 +2788,155 @@ export default function GrigliataPage() {
     persistMusicPlaybackState,
     user?.uid,
   ]);
+
+  const handleCreateMusicFolder = async (folderName) => {
+    if (!isManager || !user?.uid) return false;
+
+    const normalizedName = normalizeMusicFolderName(folderName);
+    if (!normalizedName) {
+      setBoardError('Enter a folder name before creating it.');
+      return false;
+    }
+
+    if (isReservedMusicFolderName(normalizedName)) {
+      setBoardError('Unfiled is already used by the music library.');
+      return false;
+    }
+
+    if (hasDuplicateMusicFolderName(musicFolders, normalizedName)) {
+      setBoardError('A music folder with that name already exists.');
+      return false;
+    }
+
+    setBoardError('');
+    setMusicFolderMutationId('__create__');
+    try {
+      await addDoc(collection(db, GRIGLIATA_MUSIC_FOLDERS_COLLECTION), {
+        name: normalizedName,
+        normalizedName: buildNormalizedMusicFolderName(normalizedName),
+        createdAt: serverTimestamp(),
+        createdBy: user.uid,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to create Grigliata music folder:', error);
+      setBoardError('Unable to create that music folder.');
+      return false;
+    } finally {
+      setMusicFolderMutationId('');
+    }
+  };
+
+  const handleRenameMusicFolder = async (folderId, folderName) => {
+    if (!isManager || !user?.uid || !folderId) return false;
+
+    const normalizedName = normalizeMusicFolderName(folderName);
+    if (!normalizedName) {
+      setBoardError('Enter a folder name before saving it.');
+      return false;
+    }
+
+    if (isReservedMusicFolderName(normalizedName)) {
+      setBoardError('Unfiled is already used by the music library.');
+      return false;
+    }
+
+    if (hasDuplicateMusicFolderName(musicFolders, normalizedName, folderId)) {
+      setBoardError('A music folder with that name already exists.');
+      return false;
+    }
+
+    setBoardError('');
+    setMusicFolderMutationId(folderId);
+    try {
+      await updateDoc(doc(db, GRIGLIATA_MUSIC_FOLDERS_COLLECTION, folderId), {
+        name: normalizedName,
+        normalizedName: buildNormalizedMusicFolderName(normalizedName),
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to rename Grigliata music folder:', error);
+      setBoardError('Unable to rename that music folder.');
+      return false;
+    } finally {
+      setMusicFolderMutationId('');
+    }
+  };
+
+  const handleMoveMusicTrackToFolder = async (trackId, folderId = '') => {
+    if (!isManager || !user?.uid || !trackId) return false;
+
+    const nextFolderId = getWritableMusicFolderId(folderId);
+    if (nextFolderId && !musicFolders.some((folder) => folder.id === nextFolderId)) {
+      setBoardError('That music folder no longer exists.');
+      return false;
+    }
+
+    setBoardError('');
+    setMovingMusicTrackFolderId(trackId);
+    try {
+      await updateDoc(doc(db, GRIGLIATA_MUSIC_TRACK_COLLECTION, trackId), {
+        musicFolderId: nextFolderId,
+        musicFolderAssignedAt: serverTimestamp(),
+        musicFolderAssignedBy: user.uid,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to move Grigliata music track to folder:', error);
+      setBoardError('Unable to move that track to the selected folder.');
+      return false;
+    } finally {
+      setMovingMusicTrackFolderId('');
+    }
+  };
+
+  const handleDeleteMusicFolder = async (folder) => {
+    if (!isManager || !user?.uid || !folder?.id) return false;
+
+    const confirmed = window.confirm(`Delete folder "${folder.name || 'Untitled Folder'}"? Tracks inside it will move to Unfiled.`);
+    if (!confirmed) {
+      return false;
+    }
+
+    setBoardError('');
+    setMusicFolderMutationId(folder.id);
+    try {
+      const containedTracksSnapshot = await getDocs(query(
+        collection(db, GRIGLIATA_MUSIC_TRACK_COLLECTION),
+        where('musicFolderId', '==', folder.id)
+      ));
+      const batch = writeBatch(db);
+
+      containedTracksSnapshot.docs.forEach((docSnap) => {
+        batch.update(doc(db, GRIGLIATA_MUSIC_TRACK_COLLECTION, docSnap.id), {
+          musicFolderId: '',
+          musicFolderAssignedAt: serverTimestamp(),
+          musicFolderAssignedBy: user.uid,
+          updatedAt: serverTimestamp(),
+          updatedBy: user.uid,
+        });
+      });
+      batch.delete(doc(db, GRIGLIATA_MUSIC_FOLDERS_COLLECTION, folder.id));
+
+      await batch.commit();
+      if (selectedMusicFolderId === folder.id) {
+        setSelectedMusicFolderId(UNFILED_MUSIC_FOLDER_ID);
+      }
+      return true;
+    } catch (error) {
+      console.error('Failed to delete Grigliata music folder:', error);
+      setBoardError('Unable to delete that music folder.');
+      return false;
+    } finally {
+      setMusicFolderMutationId('');
+    }
+  };
 
   useEffect(() => {
     if (!activeGridSizeOverride) return;
@@ -3215,7 +3406,7 @@ export default function GrigliataPage() {
         sizeBytes: file.size || 0,
         grid: normalizeGridConfig(DEFAULT_GRID),
         isGridVisible: true,
-        galleryFolderId: '',
+        galleryFolderId: getWritableGalleryFolderId(selectedGalleryFolderId),
         createdAt: serverTimestamp(),
         createdBy: user.uid,
         updatedAt: serverTimestamp(),
@@ -6118,8 +6309,9 @@ export default function GrigliataPage() {
 
                 {isManager && activeSidebarTab === 'gallery' && (
                   <BackgroundGalleryPanel
-                    backgrounds={backgrounds}
+                    backgrounds={galleryBackgrounds}
                     galleryFolders={galleryFolders}
+                    selectedFolderId={selectedGalleryFolderId}
                     activeBackgroundId={activeBackgroundId}
                     presentationBackgroundId={presentationBackgroundId}
                     presentationBackgroundIds={presentationBackgroundIds}
@@ -6138,6 +6330,7 @@ export default function GrigliataPage() {
                     movingBackgroundFolderId={movingBackgroundFolderId}
                     isUseBackgroundDisabled={isCombatMapChangeLocked}
                     destructiveActionLockedBackgroundIds={destructiveGalleryLockBackgroundIds}
+                    onSelectedFolderIdChange={setSelectedGalleryFolderId}
                     onUploadNameChange={setUploadName}
                     onUploadFileChange={(event) => {
                       const file = event.target.files?.[0] || null;
@@ -6167,6 +6360,8 @@ export default function GrigliataPage() {
                 {isManager && activeSidebarTab === 'music' && (
                   <MusicLibraryPanel
                     tracks={musicTracks}
+                    musicFolders={musicFolders}
+                    selectedFolderId={selectedMusicFolderId}
                     activePlaybackState={normalizedMusicPlaybackState}
                     activePlaybackSessions={musicPlaybackSessions}
                     uploadName={musicUploadName}
@@ -6176,6 +6371,13 @@ export default function GrigliataPage() {
                     deletingTrackId={deletingMusicTrackId}
                     playbackActionTrackId={musicPlaybackActionTrackId}
                     playbackActionType={musicPlaybackActionType}
+                    folderMutationId={musicFolderMutationId}
+                    movingTrackFolderId={movingMusicTrackFolderId}
+                    onSelectedFolderIdChange={setSelectedMusicFolderId}
+                    onCreateMusicFolder={handleCreateMusicFolder}
+                    onRenameMusicFolder={handleRenameMusicFolder}
+                    onDeleteMusicFolder={handleDeleteMusicFolder}
+                    onMoveTrackToFolder={handleMoveMusicTrackToFolder}
                     onUploadNameChange={setMusicUploadName}
                     onUploadFileChange={(event) => {
                       const file = event.target.files?.[0] || null;

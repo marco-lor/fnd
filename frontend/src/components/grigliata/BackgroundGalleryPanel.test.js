@@ -54,8 +54,10 @@ const buildProps = (overrides = {}) => ({
   clearingTokensBackgroundId: '',
   folderMutationId: '',
   movingBackgroundFolderId: '',
+  selectedFolderId: '__unfiled__',
   isUseBackgroundDisabled: false,
   destructiveActionLockedBackgroundIds: [],
+  onSelectedFolderIdChange: jest.fn(),
   onUploadNameChange: jest.fn(),
   onUploadFileChange: jest.fn(),
   onUploadBackground: jest.fn(),
@@ -237,23 +239,17 @@ describe('BackgroundGalleryPanel', () => {
     expect(screen.getByTestId('background-gallery-row-map-3')).toBeInTheDocument();
   });
 
-  test('filters available maps by the selected gallery folder', () => {
-    render(<BackgroundGalleryPanel {...buildProps()} />);
+  test('requests a selected gallery folder change instead of filtering all maps locally', () => {
+    const onSelectedFolderIdChange = jest.fn();
+    render(<BackgroundGalleryPanel {...buildProps({ onSelectedFolderIdChange })} />);
 
     const folderFilter = screen.getByRole('button', { name: 'Filter DM Gallery by folder' });
     fireEvent.click(folderFilter);
     fireEvent.click(screen.getByRole('option', { name: 'Boss Arenas' }));
 
+    expect(onSelectedFolderIdChange).toHaveBeenCalledWith('folder-a');
     expect(screen.getByTestId('background-gallery-row-map-1')).toBeInTheDocument();
-    expect(screen.queryByTestId('background-gallery-row-map-2')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('background-gallery-row-map-3')).not.toBeInTheDocument();
-
-    fireEvent.click(folderFilter);
-    fireEvent.click(screen.getByRole('option', { name: 'Unfiled' }));
-
-    expect(screen.queryByTestId('background-gallery-row-map-1')).not.toBeInTheDocument();
     expect(screen.getByTestId('background-gallery-row-map-2')).toBeInTheDocument();
-    expect(screen.getByTestId('background-gallery-row-map-3')).toBeInTheDocument();
   });
 
   test('opens the folder filter as a dark custom listbox', () => {
@@ -266,8 +262,8 @@ describe('BackgroundGalleryPanel', () => {
 
     const folderListbox = screen.getByRole('listbox', { name: 'Filter DM Gallery by folder options' });
     expect(folderListbox).toHaveClass('bg-slate-950');
-    expect(screen.getByRole('option', { name: 'All folders' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('option', { name: 'Unfiled' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'All folders' })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Unfiled' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('option', { name: 'Boss Arenas' })).toBeInTheDocument();
   });
 
