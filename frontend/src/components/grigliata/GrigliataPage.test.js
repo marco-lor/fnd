@@ -1531,13 +1531,7 @@ describe('GrigliataPage', () => {
       Object.defineProperty(file, 'size', { value: 807_085 });
 
       await act(async () => {
-        BackgroundGalleryPanelMock.mock.calls.at(-1)[0].onUploadFileChange({
-          target: { files: [file] },
-        });
-      });
-
-      await act(async () => {
-        await BackgroundGalleryPanelMock.mock.calls.at(-1)[0].onUploadBackground();
+        await BackgroundGalleryPanelMock.mock.calls.at(-1)[0].onUploadBackgroundFiles([file]);
       });
 
       expect(URL.createObjectURL).toHaveBeenCalledWith(file);
@@ -1573,6 +1567,165 @@ describe('GrigliataPage', () => {
       createElementSpy.mockRestore();
       URL.createObjectURL = originalCreateObjectURL;
       URL.revokeObjectURL = originalRevokeObjectURL;
+    }
+  });
+
+  test('uploads multiple selected background files using filename-derived map names', async () => {
+    setManagerAuth();
+    const storageApi = require('firebase/storage');
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    const OriginalImage = window.Image;
+
+    URL.createObjectURL = jest.fn((file) => `blob:${file.name}`);
+    URL.revokeObjectURL = jest.fn();
+    window.Image = class MockImage {
+      constructor() {
+        this.naturalWidth = 1280;
+        this.naturalHeight = 720;
+        this.onload = null;
+        this.onerror = null;
+        this._src = '';
+      }
+
+      set src(value) {
+        this._src = value;
+        this.onload?.();
+      }
+
+      get src() {
+        return this._src;
+      }
+    };
+
+    try {
+      render(<GrigliataPage />);
+
+      fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+
+      const firstFile = new File(['first-image'], 'train-yard.png', { type: 'image/png' });
+      const secondFile = new File(['second-image'], 'signal-room.jpg', { type: 'image/jpeg' });
+      Object.defineProperty(firstFile, 'size', { value: 1024 });
+      Object.defineProperty(secondFile, 'size', { value: 2048 });
+
+      await act(async () => {
+        await BackgroundGalleryPanelMock.mock.calls.at(-1)[0].onUploadBackgroundFiles([firstFile, secondFile]);
+      });
+
+      expect(storageApi.uploadBytes).toHaveBeenCalledTimes(2);
+      expect(firestore.addDoc).toHaveBeenCalledTimes(2);
+      expect(firestore.addDoc).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ path: 'grigliata_backgrounds' }),
+        expect.objectContaining({
+          name: 'train yard',
+          imagePath: expect.stringMatching(/^grigliata\/backgrounds\/user-1\/train_yard_\d+\.png$/),
+          imageWidth: 1280,
+          imageHeight: 720,
+          assetType: 'image',
+          contentType: 'image/png',
+          fileName: 'train-yard.png',
+          sizeBytes: 1024,
+        })
+      );
+      expect(firestore.addDoc).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ path: 'grigliata_backgrounds' }),
+        expect.objectContaining({
+          name: 'signal room',
+          imagePath: expect.stringMatching(/^grigliata\/backgrounds\/user-1\/signal_room_\d+\.jpg$/),
+          imageWidth: 1280,
+          imageHeight: 720,
+          assetType: 'image',
+          contentType: 'image/jpeg',
+          fileName: 'signal-room.jpg',
+          sizeBytes: 2048,
+        })
+      );
+    } finally {
+      URL.createObjectURL = originalCreateObjectURL;
+      URL.revokeObjectURL = originalRevokeObjectURL;
+      window.Image = OriginalImage;
+    }
+  });
+
+  test('rejects a mixed background selection before uploading when any file is unsupported', async () => {
+    setManagerAuth();
+    const storageApi = require('firebase/storage');
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+
+    const validFile = new File(['map'], 'train-yard.png', { type: 'image/png' });
+    const invalidFile = new File(['notes'], 'text-notes.txt', { type: 'text/plain' });
+
+    await act(async () => {
+      await BackgroundGalleryPanelMock.mock.calls.at(-1)[0].onUploadBackgroundFiles([validFile, invalidFile]);
+    });
+
+    expect(storageApi.uploadBytes).not.toHaveBeenCalled();
+    expect(firestore.addDoc).not.toHaveBeenCalled();
+    expect(BackgroundGalleryPanelMock.mock.calls.at(-1)[0].uploadError).toMatch(/text-notes\.txt/i);
+  });
+
+  test('cleans up the current background file when a multi-upload metadata write fails', async () => {
+    setManagerAuth();
+    const storageApi = require('firebase/storage');
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    const OriginalImage = window.Image;
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    firestore.addDoc
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('write failed'));
+
+    URL.createObjectURL = jest.fn((file) => `blob:${file.name}`);
+    URL.revokeObjectURL = jest.fn();
+    window.Image = class MockImage {
+      constructor() {
+        this.naturalWidth = 1536;
+        this.naturalHeight = 1024;
+        this.onload = null;
+        this.onerror = null;
+        this._src = '';
+      }
+
+      set src(value) {
+        this._src = value;
+        this.onload?.();
+      }
+
+      get src() {
+        return this._src;
+      }
+    };
+
+    try {
+      render(<GrigliataPage />);
+
+      fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+
+      const firstFile = new File(['first-image'], 'train-yard.png', { type: 'image/png' });
+      const secondFile = new File(['second-image'], 'signal-room.png', { type: 'image/png' });
+
+      await act(async () => {
+        await BackgroundGalleryPanelMock.mock.calls.at(-1)[0].onUploadBackgroundFiles([firstFile, secondFile]);
+      });
+
+      expect(storageApi.uploadBytes).toHaveBeenCalledTimes(2);
+      expect(firestore.addDoc).toHaveBeenCalledTimes(2);
+      expect(storageApi.deleteObject).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: expect.stringMatching(/^grigliata\/backgrounds\/user-1\/signal_room_\d+\.png$/),
+        })
+      );
+      expect(BackgroundGalleryPanelMock.mock.calls.at(-1)[0].uploadError).toMatch(/signal-room\.png/i);
+    } finally {
+      consoleErrorSpy.mockRestore();
+      URL.createObjectURL = originalCreateObjectURL;
+      URL.revokeObjectURL = originalRevokeObjectURL;
+      window.Image = OriginalImage;
     }
   });
 

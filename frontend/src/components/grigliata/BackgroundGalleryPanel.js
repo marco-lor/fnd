@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { FiFolder, FiGrid, FiLayers, FiPlay, FiRadio, FiTrash2, FiUserMinus, FiXCircle, FiZap } from 'react-icons/fi';
+import React, { useMemo, useRef, useState } from 'react';
+import { FiFilter, FiFolder, FiGrid, FiLayers, FiLoader, FiMaximize2, FiPlay, FiRadio, FiTrash2, FiUploadCloud, FiUserMinus, FiX, FiXCircle, FiZap } from 'react-icons/fi';
 import { isVideoBackground } from './boardUtils';
 import BackgroundGalleryOrganizerOverlay from './BackgroundGalleryOrganizerOverlay';
 import MediaFolderFilterButton from './MediaFolderFilterButton';
@@ -25,8 +25,6 @@ export default function BackgroundGalleryPanel({
   presentationBackgroundId,
   presentationBackgroundIds = [],
   selectedBackgroundId,
-  uploadName,
-  selectedFileName,
   uploadError,
   isUploading,
   activatingBackgroundId,
@@ -41,9 +39,7 @@ export default function BackgroundGalleryPanel({
   isUseBackgroundDisabled,
   destructiveActionLockedBackgroundIds = [],
   onSelectedFolderIdChange,
-  onUploadNameChange,
-  onUploadFileChange,
-  onUploadBackground,
+  onUploadBackgroundFiles,
   onSelectBackground,
   onUseBackground,
   onNarrateBackground,
@@ -68,70 +64,40 @@ export default function BackgroundGalleryPanel({
   const isNarrationSceneActive = presentationBackgroundIdSet.size > 0;
   const [isOrganizerOpen, setIsOrganizerOpen] = useState(false);
   const [folderMenuBackgroundId, setFolderMenuBackgroundId] = useState('');
+  const [previewBackground, setPreviewBackground] = useState(null);
+  const uploadFileInputRef = useRef(null);
   const folderOptions = useMemo(() => (
     buildGalleryFolderOptions(galleryFolders)
   ), [galleryFolders]);
+  const previewBackgroundName = previewBackground?.name || 'Untitled Map';
+  const isPreviewVideo = previewBackground ? isVideoBackground(previewBackground) : false;
+  const handleUploadFileInputChange = (event) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length > 0) {
+      onUploadBackgroundFiles?.(files);
+    }
+
+    event.target.value = '';
+  };
 
   return (
-    <section className="rounded-2xl border border-slate-700 bg-slate-950/75 backdrop-blur-sm shadow-2xl overflow-hidden">
+    <section className="rounded-2xl border border-slate-700 bg-slate-950/75 backdrop-blur-sm shadow-2xl overflow-hidden xl:flex xl:h-full xl:min-h-0 xl:flex-col">
       <div className="px-4 py-3 border-b border-slate-800">
         <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-300">DM Gallery</h2>
       </div>
 
-      <div className="p-4 space-y-5">
-        <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-3">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Upload Background</p>
-          <div className="mt-3 space-y-3">
+      <div className="p-3 space-y-3 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+        <div className="rounded-xl border border-slate-800 bg-slate-900/70 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-800">
             <input
-              type="text"
-              value={uploadName}
-              onChange={(event) => onUploadNameChange(event.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-sky-400 focus:outline-none"
-              placeholder="Display name for this map"
-            />
-
-            <input
+              ref={uploadFileInputRef}
               type="file"
               accept="image/*,video/mp4"
-              onChange={onUploadFileChange}
-              className="block w-full text-sm text-slate-200 file:mr-3 file:rounded-md file:border-0 file:bg-slate-800 file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-200 hover:file:bg-slate-700"
+              multiple
+              onChange={handleUploadFileInputChange}
+              className="hidden"
+              tabIndex={-1}
             />
-
-            {selectedFileName && (
-              <p className="text-xs text-slate-400 truncate">{selectedFileName}</p>
-            )}
-
-            {uploadError && (
-              <div className="rounded-lg border border-red-500/30 bg-red-900/20 px-3 py-2 text-xs text-red-200">
-                {uploadError}
-              </div>
-            )}
-
-            <button
-              type="button"
-              onClick={onUploadBackground}
-              disabled={isUploading}
-              className="w-full rounded-lg bg-sky-500 px-4 py-2 text-sm font-semibold text-black transition-colors hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isUploading ? 'Uploading...' : 'Add To Gallery'}
-            </button>
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-slate-800 bg-slate-900/70">
-          <div className="space-y-3 px-3 py-3 border-b border-slate-800">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Available Maps</p>
-              <button
-                type="button"
-                aria-label="Organize DM Gallery"
-                onClick={() => setIsOrganizerOpen(true)}
-                className="inline-flex shrink-0 items-center gap-2 rounded-md border border-sky-500/40 px-2.5 py-1.5 text-xs font-semibold text-sky-200 transition-colors hover:bg-sky-500/10"
-              >
-                <FiFolder className="h-3.5 w-3.5" aria-hidden="true" />
-                Organize
-              </button>
-            </div>
 
             <MediaFolderFilterButton
               folders={galleryFolders}
@@ -141,10 +107,46 @@ export default function BackgroundGalleryPanel({
               listboxLabel="Filter DM Gallery by folder options"
               tone="sky"
               onBeforeOpen={() => setFolderMenuBackgroundId('')}
+              LeadingIcon={FiFilter}
+              size="compact"
+              className="min-w-0 flex-1"
             />
+            <button
+              type="button"
+              aria-label={isUploading ? 'Uploading background files' : 'Upload background files'}
+              aria-busy={isUploading ? 'true' : undefined}
+              title={isUploading ? 'Uploading background files' : 'Upload background files'}
+              onClick={() => uploadFileInputRef.current?.click()}
+              disabled={isUploading}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-sky-500 text-black transition-colors hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isUploading ? (
+                <FiLoader className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <FiUploadCloud className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+            </button>
+            <button
+              type="button"
+              aria-label="Organize DM Gallery"
+              title="Organize DM Gallery"
+              onClick={() => setIsOrganizerOpen(true)}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-sky-500/40 text-sky-200 transition-colors hover:bg-sky-500/10"
+            >
+              <FiFolder className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
           </div>
 
-          <div className="max-h-[26rem] overflow-y-auto custom-scroll divide-y divide-slate-800">
+          {uploadError && (
+            <div className="border-b border-red-500/20 bg-red-900/15 px-3 py-2 text-xs text-red-200">
+              {uploadError}
+            </div>
+          )}
+
+          <div
+            data-testid="background-gallery-scroll-list"
+            className="max-h-[26rem] overflow-y-auto custom-scroll divide-y divide-slate-800 xl:max-h-none xl:min-h-0 xl:flex-1"
+          >
             {backgrounds.length === 0 ? (
               <div className="px-3 py-4 text-sm text-slate-400">
                 No maps in this folder.
@@ -194,13 +196,14 @@ export default function BackgroundGalleryPanel({
                       isSelected ? 'bg-slate-800/70' : 'bg-transparent'
                     }`}
                   >
-                    <button
-                      type="button"
-                      onClick={() => onSelectBackground(background.id)}
-                      className="w-full text-left"
-                    >
-                      <div className="flex gap-3">
-                        <div className="w-20 h-14 rounded-lg overflow-hidden border border-slate-700 bg-slate-950 shrink-0">
+                    <div className="flex gap-3">
+                      <div className="group/thumbnail relative h-14 w-20 shrink-0 overflow-hidden rounded-lg border border-slate-700 bg-slate-950">
+                        <button
+                          type="button"
+                          aria-label={`Select ${backgroundName}`}
+                          onClick={() => onSelectBackground(background.id)}
+                          className="block h-full w-full"
+                        >
                           {background.imageUrl ? (
                             isVideo ? (
                               <video
@@ -215,9 +218,28 @@ export default function BackgroundGalleryPanel({
                               <img src={background.imageUrl} alt={backgroundName} className="w-full h-full object-cover" />
                             )
                           ) : null}
-                        </div>
+                        </button>
+                        {background.imageUrl && (
+                          <button
+                            type="button"
+                            aria-label={`Preview ${backgroundName}`}
+                            title={`Preview ${backgroundName}`}
+                            onClick={() => setPreviewBackground(background)}
+                            className="absolute inset-0 flex items-center justify-center bg-slate-950/55 text-sky-100 opacity-0 transition-opacity pointer-events-none group-hover/thumbnail:pointer-events-auto group-hover/thumbnail:opacity-100 focus:pointer-events-auto focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/80"
+                          >
+                            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/30 bg-black/45 shadow-lg shadow-black/40">
+                              <FiMaximize2 className="h-4 w-4" aria-hidden="true" />
+                            </span>
+                          </button>
+                        )}
+                      </div>
 
-                        <div className="min-w-0 flex-1">
+                      <button
+                        type="button"
+                        onClick={() => onSelectBackground(background.id)}
+                        className="min-w-0 flex-1 text-left"
+                      >
+                        <div>
                           <div className="flex items-center gap-2">
                             <p className="text-sm font-semibold text-slate-100 truncate">{backgroundName}</p>
                             {isActive && (
@@ -251,8 +273,8 @@ export default function BackgroundGalleryPanel({
                             Grid {background.grid?.cellSizePx || 70}px | offset {background.grid?.offsetXPx || 0}, {background.grid?.offsetYPx || 0}
                           </p>
                         </div>
-                      </div>
-                    </button>
+                      </button>
+                    </div>
 
                     <div className="mt-3 space-y-2">
                       <div className="flex flex-wrap gap-2">
@@ -402,6 +424,57 @@ export default function BackgroundGalleryPanel({
         onDeleteFolder={onDeleteGalleryFolder}
         onMoveBackgroundToFolder={onMoveBackgroundToFolder}
       />
+
+      {previewBackground && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="background-gallery-preview-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+          onClick={() => setPreviewBackground(null)}
+        >
+          <div
+            className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
+              <h3
+                id="background-gallery-preview-title"
+                className="min-w-0 truncate text-sm font-semibold text-slate-100"
+              >
+                Preview {previewBackgroundName}
+              </h3>
+              <button
+                type="button"
+                aria-label="Close preview"
+                title="Close preview"
+                onClick={() => setPreviewBackground(null)}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-700 text-slate-200 transition-colors hover:bg-slate-800"
+              >
+                <FiX className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="flex min-h-0 flex-1 items-center justify-center bg-black p-3">
+              {isPreviewVideo ? (
+                <video
+                  src={previewBackground.imageUrl}
+                  aria-label={`${previewBackgroundName} preview`}
+                  className="max-h-[78vh] max-w-full rounded-lg object-contain"
+                  controls
+                  muted
+                  playsInline
+                />
+              ) : (
+                <img
+                  src={previewBackground.imageUrl}
+                  alt={`${previewBackgroundName} preview`}
+                  className="max-h-[78vh] max-w-full rounded-lg object-contain"
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

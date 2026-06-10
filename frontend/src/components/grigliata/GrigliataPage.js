@@ -518,8 +518,6 @@ export default function GrigliataPage() {
   const [isInteractionSharingEnabled, setIsInteractionSharingEnabled] = useState(persistedInteractionSharingEnabled);
   const [viewAsPlayerUid, setViewAsPlayerUid] = useState('');
 
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [uploadName, setUploadName] = useState('');
   const [uploadError, setUploadError] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [musicSelectedFile, setMusicSelectedFile] = useState(null);
@@ -3348,43 +3346,35 @@ export default function GrigliataPage() {
     }
   };
 
-  const handleUploadBackground = async () => {
-    if (!isManager || !user?.uid) return;
-
-    setUploadError('');
-    const file = selectedFile;
-
-    if (!file) {
-      setUploadError('Select an image or MP4 video file first.');
-      return;
-    }
-
+  const getBackgroundUploadValidationError = (file) => {
+    const fileName = file?.name || 'selected file';
     const assetType = getBackgroundUploadAssetType(file);
 
     if (!assetType) {
-      setUploadError('The selected file must be an image or MP4 video.');
-      return;
+      return `"${fileName}" must be an image or MP4 video.`;
     }
 
     if (assetType === 'image' && file.size > MAX_BACKGROUND_IMAGE_FILE_BYTES) {
-      setUploadError('Background images must be 15 MB or smaller.');
-      return;
+      return `"${fileName}" must be 15 MB or smaller.`;
     }
 
     if (assetType === 'video' && file.size > MAX_BACKGROUND_VIDEO_FILE_BYTES) {
-      setUploadError('Background videos must be 25 MB or smaller.');
-      return;
+      return `"${fileName}" must be 25 MB or smaller.`;
     }
 
-    const mapName = (uploadName || getDisplayNameFromFileName(file.name)).trim();
+    return '';
+  };
+
+  const uploadBackgroundFile = async (file, fileIndex) => {
+    const assetType = getBackgroundUploadAssetType(file);
+    const mapName = getDisplayNameFromFileName(file.name).trim();
     const safeName = buildStorageSafeName(mapName, 'grigliata_map');
     const fileExtension = getFileExtension(file.name)
       || getFileExtensionFromContentType(file.type)
       || (assetType === 'video' ? '.mp4' : '.png');
-    const storagePath = `grigliata/backgrounds/${user.uid}/${safeName}_${Date.now()}${fileExtension}`;
+    const storagePath = `grigliata/backgrounds/${user.uid}/${safeName}_${Date.now() + fileIndex}${fileExtension}`;
     let uploadedPath = '';
 
-    setIsUploading(true);
     try {
       const mediaMetadata = assetType === 'video'
         ? await readFileVideoMetadata(file)
@@ -3418,13 +3408,9 @@ export default function GrigliataPage() {
       }
 
       await addDoc(collection(db, 'grigliata_backgrounds'), backgroundPayload);
-
-      setSelectedFile(null);
-      setUploadName('');
-      setUploadError('');
     } catch (error) {
       console.error('Failed to upload background:', error);
-      setUploadError('Failed to upload the selected background.');
+      setUploadError(`Failed to upload "${file.name || mapName}".`);
 
       if (uploadedPath) {
         try {
@@ -3433,6 +3419,40 @@ export default function GrigliataPage() {
           console.warn('Background upload cleanup failed:', cleanupError);
         }
       }
+
+      throw error;
+    }
+  };
+
+  const handleUploadBackgroundFiles = async (files) => {
+    if (!isManager || !user?.uid) return;
+
+    setUploadError('');
+    const selectedFiles = Array.from(files || []).filter(Boolean);
+
+    if (selectedFiles.length === 0) {
+      setUploadError('Select image or MP4 video files first.');
+      return;
+    }
+
+    const validationError = selectedFiles
+      .map((file) => getBackgroundUploadValidationError(file))
+      .find(Boolean);
+
+    if (validationError) {
+      setUploadError(validationError);
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      for (const [fileIndex, file] of selectedFiles.entries()) {
+        await uploadBackgroundFile(file, fileIndex);
+      }
+
+      setUploadError('');
+    } catch {
+      // uploadBackgroundFile already surfaced the file-specific error and cleanup.
     } finally {
       setIsUploading(false);
     }
@@ -6276,11 +6296,14 @@ export default function GrigliataPage() {
               </div>
             </div>
 
-            <div className="min-h-0 xl:flex-1 xl:overflow-y-auto xl:pr-1 custom-scroll">
+            <div className={`min-h-0 xl:flex-1 xl:pr-1 custom-scroll ${
+              activeSidebarTab === 'gallery' ? 'xl:overflow-hidden' : 'xl:overflow-y-auto'
+            }`}
+            >
               <div
                 id={`grigliata-sidebar-panel-${activeSidebarTab}`}
                 role="tabpanel"
-                className="space-y-3"
+                className={activeSidebarTab === 'gallery' ? 'xl:h-full xl:min-h-0' : 'space-y-3'}
               >
                 {activeSidebarTab === 'tokens' && (
                   <MyTokenTray
@@ -6316,8 +6339,6 @@ export default function GrigliataPage() {
                     presentationBackgroundId={presentationBackgroundId}
                     presentationBackgroundIds={presentationBackgroundIds}
                     selectedBackgroundId={selectedBackgroundId}
-                    uploadName={uploadName}
-                    selectedFileName={selectedFile?.name || ''}
                     uploadError={uploadError}
                     isUploading={isUploading}
                     activatingBackgroundId={activatingBackgroundId}
@@ -6331,16 +6352,7 @@ export default function GrigliataPage() {
                     isUseBackgroundDisabled={isCombatMapChangeLocked}
                     destructiveActionLockedBackgroundIds={destructiveGalleryLockBackgroundIds}
                     onSelectedFolderIdChange={setSelectedGalleryFolderId}
-                    onUploadNameChange={setUploadName}
-                    onUploadFileChange={(event) => {
-                      const file = event.target.files?.[0] || null;
-                      setSelectedFile(file);
-                      setUploadError('');
-                      if (file && !uploadName.trim()) {
-                        setUploadName(getDisplayNameFromFileName(file.name));
-                      }
-                    }}
-                    onUploadBackground={handleUploadBackground}
+                    onUploadBackgroundFiles={handleUploadBackgroundFiles}
                     onSelectBackground={setSelectedBackgroundId}
                     onUseBackground={handleUseBackground}
                     onNarrateBackground={handleStartNarration}

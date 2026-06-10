@@ -42,8 +42,6 @@ const buildProps = (overrides = {}) => ({
   presentationBackgroundId: '',
   presentationBackgroundIds: [],
   selectedBackgroundId: 'map-1',
-  uploadName: '',
-  selectedFileName: '',
   uploadError: '',
   isUploading: false,
   activatingBackgroundId: '',
@@ -58,9 +56,7 @@ const buildProps = (overrides = {}) => ({
   isUseBackgroundDisabled: false,
   destructiveActionLockedBackgroundIds: [],
   onSelectedFolderIdChange: jest.fn(),
-  onUploadNameChange: jest.fn(),
-  onUploadFileChange: jest.fn(),
-  onUploadBackground: jest.fn(),
+  onUploadBackgroundFiles: jest.fn(),
   onSelectBackground: jest.fn(),
   onUseBackground: jest.fn(),
   onNarrateBackground: jest.fn(),
@@ -205,6 +201,90 @@ describe('BackgroundGalleryPanel', () => {
     expect(container.querySelector('input[type="file"]')).toHaveAttribute('accept', 'image/*,video/mp4');
     expect(container.querySelector('video')).toHaveAttribute('src', 'https://example.com/map.mp4');
     expect(screen.getByText(/2040 x 1620 px \| Video/i)).toBeInTheDocument();
+  });
+
+  test('uploads selected background files from the minimal maps toolbar', () => {
+    const onUploadBackgroundFiles = jest.fn();
+    const file = new File(['map'], 'train-yard.png', { type: 'image/png' });
+    const secondFile = new File(['map-2'], 'signal-room.png', { type: 'image/png' });
+    const { container } = render(
+      <BackgroundGalleryPanel
+        {...buildProps({
+          onUploadBackgroundFiles,
+        })}
+      />
+    );
+
+    expect(screen.queryByText('Upload Background')).not.toBeInTheDocument();
+    expect(screen.queryByText('Available Maps')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Display name for this map')).not.toBeInTheDocument();
+    expect(screen.queryByText('Choose File')).not.toBeInTheDocument();
+    expect(screen.queryByText('Add To Gallery')).not.toBeInTheDocument();
+
+    const uploadInput = container.querySelector('input[type="file"]');
+    expect(uploadInput).toHaveAttribute('accept', 'image/*,video/mp4');
+    expect(uploadInput).toHaveAttribute('multiple');
+
+    fireEvent.change(uploadInput, {
+      target: { files: [file, secondFile] },
+    });
+
+    expect(screen.getByRole('button', { name: 'Upload background files' })).toBeInTheDocument();
+    expect(onUploadBackgroundFiles).toHaveBeenCalledWith([file, secondFile]);
+    expect(uploadInput.value).toBe('');
+  });
+
+  test('renders the available maps controls on one compact icon row', () => {
+    render(<BackgroundGalleryPanel {...buildProps()} />);
+
+    expect(screen.queryByText('Available Maps')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Filter DM Gallery by folder' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Upload background files' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Organize DM Gallery' })).toBeInTheDocument();
+    expect(screen.queryByText('Organize')).not.toBeInTheDocument();
+  });
+
+  test('shows a loading icon while background files are uploading', () => {
+    render(<BackgroundGalleryPanel {...buildProps({ isUploading: true })} />);
+
+    const uploadButton = screen.getByRole('button', { name: 'Uploading background files' });
+
+    expect(uploadButton).toBeDisabled();
+    expect(uploadButton).toHaveAttribute('aria-busy', 'true');
+    expect(uploadButton.querySelector('svg')).toHaveClass('animate-spin');
+  });
+
+  test('lets the map list fill the available desktop sidebar height', () => {
+    render(<BackgroundGalleryPanel {...buildProps()} />);
+
+    const mapList = screen.getByTestId('background-gallery-scroll-list');
+
+    expect(mapList).toHaveClass('xl:flex-1');
+    expect(mapList).toHaveClass('xl:min-h-0');
+    expect(mapList).toHaveClass('xl:max-h-none');
+  });
+
+  test('opens a local zoom preview from a map thumbnail without selecting it', () => {
+    const onSelectBackground = jest.fn();
+    render(<BackgroundGalleryPanel {...buildProps({ onSelectBackground })} />);
+
+    const sunkenRuinsRow = screen.getByTestId('background-gallery-row-map-1');
+    const previewButton = within(sunkenRuinsRow).getByRole('button', { name: 'Preview Sunken Ruins' });
+
+    expect(previewButton).toHaveClass('opacity-0');
+    expect(previewButton).toHaveClass('group-hover/thumbnail:opacity-100');
+
+    fireEvent.click(previewButton);
+
+    expect(onSelectBackground).not.toHaveBeenCalled();
+
+    const previewDialog = screen.getByRole('dialog', { name: 'Preview Sunken Ruins' });
+    expect(previewDialog).toHaveAttribute('aria-modal', 'true');
+    expect(within(previewDialog).getByRole('img', { name: 'Sunken Ruins preview' })).toHaveAttribute('src', backgrounds[0].imageUrl);
+
+    fireEvent.click(within(previewDialog).getByRole('button', { name: 'Close preview' }));
+
+    expect(screen.queryByRole('dialog', { name: 'Preview Sunken Ruins' })).not.toBeInTheDocument();
   });
 
   test('shows each map folder and falls invalid assignments back to Unfiled', () => {

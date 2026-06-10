@@ -31,12 +31,22 @@ export default function MediaFolderFilterButton({
   listboxLabel,
   tone = 'sky',
   onBeforeOpen,
+  LeadingIcon = FiFolder,
+  size = 'default',
+  className = '',
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const filterRef = useRef(null);
   const toneClassNames = TONE_CLASS_NAMES[tone] || TONE_CLASS_NAMES.sky;
   const folderOptions = useMemo(() => buildMediaFolderOptions(folders), [folders]);
   const selectedFolder = folderOptions.find((folder) => folder.id === selectedFolderId) || folderOptions[0];
+  const isCompact = size === 'compact';
+  const buttonClassName = isCompact
+    ? 'h-9 gap-2 rounded-md px-2.5 py-1.5'
+    : 'gap-3 rounded-lg px-3 py-2';
+  const iconClassName = isCompact ? 'h-3.5 w-3.5' : 'h-4 w-4';
+  const textClassName = isCompact ? 'text-[11px]' : 'text-xs';
+  const chevronClassName = isCompact ? 'h-3.5 w-3.5' : 'h-4 w-4';
 
   useEffect(() => {
     if (!isOpen) {
@@ -67,7 +77,7 @@ export default function MediaFolderFilterButton({
   }, [isOpen]);
 
   return (
-    <div ref={filterRef} className="relative">
+    <div ref={filterRef} className={`relative ${className}`}>
       <button
         type="button"
         aria-label={buttonLabel}
@@ -78,18 +88,18 @@ export default function MediaFolderFilterButton({
           onBeforeOpen?.();
           setIsOpen((currentValue) => !currentValue);
         }}
-        className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
+        className={`flex w-full items-center justify-between border text-left transition-colors ${buttonClassName} ${
           isOpen ? toneClassNames.openButton : toneClassNames.closedButton
         }`}
       >
         <span className="flex min-w-0 items-center gap-2">
-          <FiFolder className={`h-4 w-4 shrink-0 ${toneClassNames.icon}`} aria-hidden="true" />
-          <span className="truncate text-xs font-semibold text-slate-100">
+          <LeadingIcon className={`${iconClassName} shrink-0 ${toneClassNames.icon}`} aria-hidden="true" />
+          <span className={`truncate font-semibold text-slate-100 ${textClassName}`}>
             {selectedFolder?.name || 'Unfiled'}
           </span>
         </span>
         <FiChevronDown
-          className={`h-4 w-4 shrink-0 text-slate-300 transition-transform ${isOpen ? `rotate-180 ${toneClassNames.icon}` : ''}`}
+          className={`${chevronClassName} shrink-0 text-slate-300 transition-transform ${isOpen ? `rotate-180 ${toneClassNames.icon}` : ''}`}
           aria-hidden="true"
         />
       </button>
