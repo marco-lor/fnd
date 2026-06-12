@@ -4535,7 +4535,7 @@ export default function GrigliataPage() {
     }
   };
 
-  const handleDeleteBackground = async (background) => {
+  const handleDeleteBackground = async (background, { skipConfirmation = false } = {}) => {
     if (!isManager || !user?.uid || !background?.id) return;
 
     const hasActiveTurnOrderCursor = !!(
@@ -4553,8 +4553,10 @@ export default function GrigliataPage() {
       return;
     }
 
-    const confirmed = window.confirm(`Delete background "${background.name || 'Untitled Map'}" permanently?`);
-    if (!confirmed) return;
+    if (!skipConfirmation) {
+      const confirmed = window.confirm(`Delete background "${background.name || 'Untitled Map'}" permanently?`);
+      if (!confirmed) return;
+    }
 
     setDeletingBackgroundId(background.id);
     setBoardError('');
@@ -4607,6 +4609,20 @@ export default function GrigliataPage() {
       setBoardError('Unable to delete that background.');
     } finally {
       setDeletingBackgroundId('');
+    }
+  };
+
+  const handleDeleteBackgrounds = async (selectedBackgrounds = []) => {
+    if (!isManager || !user?.uid) return;
+
+    const deletableBackgrounds = selectedBackgrounds.filter((background) => background?.id);
+    if (!deletableBackgrounds.length) return;
+
+    const confirmed = window.confirm(`Delete ${deletableBackgrounds.length} selected background${deletableBackgrounds.length === 1 ? '' : 's'} permanently?`);
+    if (!confirmed) return;
+
+    for (const background of deletableBackgrounds) {
+      await handleDeleteBackground(background, { skipConfirmation: true });
     }
   };
 
@@ -6361,6 +6377,7 @@ export default function GrigliataPage() {
                     onRemoveNarrationBackground={handleRemoveNarrationPlacement}
                     onClearTokensForBackground={handleClearTokensForBackground}
                     onDeleteBackground={handleDeleteBackground}
+                    onDeleteBackgrounds={handleDeleteBackgrounds}
                     onCalibrateBackground={handleOpenCalibration}
                     onCreateGalleryFolder={handleCreateGalleryFolder}
                     onRenameGalleryFolder={handleRenameGalleryFolder}

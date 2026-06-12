@@ -40,6 +40,8 @@ const buildProps = (overrides = {}) => ({
   onRenameFolder: jest.fn(),
   onDeleteFolder: jest.fn(),
   onMoveBackgroundToFolder: jest.fn(),
+  onDeleteBackground: jest.fn(),
+  onDeleteBackgrounds: jest.fn(),
   ...overrides,
 });
 
@@ -103,6 +105,44 @@ describe('BackgroundGalleryOrganizerOverlay', () => {
     });
 
     expect(onMoveBackgroundToFolder).toHaveBeenCalledWith('map-2', 'folder-b');
+  });
+
+  test('selects maps and moves them together to another folder', () => {
+    const onMoveBackgroundToFolder = jest.fn();
+    render(
+      <BackgroundGalleryOrganizerOverlay
+        {...buildProps({ onMoveBackgroundToFolder })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all maps' }));
+    fireEvent.change(screen.getByLabelText('Move selected maps to folder'), {
+      target: { value: 'folder-b' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Move selected maps' }));
+
+    expect(onMoveBackgroundToFolder).toHaveBeenCalledWith('map-1', 'folder-b');
+    expect(onMoveBackgroundToFolder).toHaveBeenCalledWith('map-2', 'folder-b');
+  });
+
+  test('deletes one map or the selected maps from the organizer', () => {
+    const onDeleteBackground = jest.fn();
+    const onDeleteBackgrounds = jest.fn();
+    render(
+      <BackgroundGalleryOrganizerOverlay
+        {...buildProps({ onDeleteBackground, onDeleteBackgrounds })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Dragon Room map' }));
+    expect(onDeleteBackground).toHaveBeenCalledWith(expect.objectContaining({ id: 'map-1' }));
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Old Harbor' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete selected maps' }));
+
+    expect(onDeleteBackgrounds).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 'map-2' }),
+    ]);
   });
 
   test('moves a background by dragging it onto a folder drop target', () => {

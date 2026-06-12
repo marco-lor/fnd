@@ -54,6 +54,7 @@ export default function BackgroundGalleryPanel({
   onRenameGalleryFolder,
   onDeleteGalleryFolder,
   onMoveBackgroundToFolder,
+  onDeleteBackgrounds,
 }) {
   const destructiveActionLockedBackgroundIdSet = new Set(destructiveActionLockedBackgroundIds);
   const presentationBackgroundIdSet = useMemo(() => (
@@ -482,6 +483,8 @@ export default function BackgroundGalleryPanel({
         onRenameFolder={onRenameGalleryFolder}
         onDeleteFolder={onDeleteGalleryFolder}
         onMoveBackgroundToFolder={onMoveBackgroundToFolder}
+        onDeleteBackground={onDeleteBackground}
+        onDeleteBackgrounds={onDeleteBackgrounds}
       />
 
       {previewOverlay}

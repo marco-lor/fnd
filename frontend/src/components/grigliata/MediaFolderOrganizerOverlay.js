@@ -33,6 +33,7 @@ export default function MediaFolderOrganizerOverlay({
   folders = [],
   items = [],
   selectedFolderId = UNFILED_MEDIA_FOLDER_ID,
+  itemNounSingular = 'item',
   itemNounPlural = 'items',
   emptyMessage,
   folderMutationId = '',
@@ -44,15 +45,30 @@ export default function MediaFolderOrganizerOverlay({
   onRenameFolder,
   onDeleteFolder,
   onMoveItemToFolder,
+  onDeleteSelectedItems,
   getItemId = (item) => item?.id || '',
+  isItemSelectionEnabled = false,
   renderItem,
 }) {
   const [newFolderName, setNewFolderName] = useState('');
   const [editingFolderId, setEditingFolderId] = useState('');
   const [renameDraft, setRenameDraft] = useState('');
+  const [selectedItemIds, setSelectedItemIds] = useState([]);
+  const [bulkMoveFolderId, setBulkMoveFolderId] = useState(getWritableMediaFolderId(selectedFolderId));
   const toneClassNames = TONE_CLASS_NAMES[tone] || TONE_CLASS_NAMES.sky;
   const folderOptions = useMemo(() => buildMediaFolderOptions(folders), [folders]);
   const selectedFolder = folderOptions.find((folder) => folder.id === selectedFolderId) || folderOptions[0];
+  const itemEntries = useMemo(() => (
+    items
+      .map((item) => ({ item, itemId: getItemId(item) }))
+      .filter(({ itemId }) => !!itemId)
+  ), [getItemId, items]);
+  const selectedItemIdSet = useMemo(() => new Set(selectedItemIds), [selectedItemIds]);
+  const selectedItems = itemEntries
+    .filter(({ itemId }) => selectedItemIdSet.has(itemId))
+    .map(({ item }) => item);
+  const isAllItemsSelected = itemEntries.length > 0 && itemEntries.every(({ itemId }) => selectedItemIdSet.has(itemId));
+  const hasSelectedItems = selectedItemIds.length > 0;
 
   useEffect(() => {
     if (!isOpen) {
@@ -63,6 +79,20 @@ export default function MediaFolderOrganizerOverlay({
       onSelectedFolderIdChange?.(UNFILED_MEDIA_FOLDER_ID);
     }
   }, [folderOptions, isOpen, onSelectedFolderIdChange, selectedFolderId]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSelectedItemIds([]);
+      return;
+    }
+
+    const availableItemIds = new Set(itemEntries.map(({ itemId }) => itemId));
+    setSelectedItemIds((currentIds) => currentIds.filter((itemId) => availableItemIds.has(itemId)));
+  }, [isOpen, itemEntries]);
+
+  useEffect(() => {
+    setBulkMoveFolderId(getWritableMediaFolderId(selectedFolder?.id || selectedFolderId));
+  }, [selectedFolder?.id, selectedFolderId]);
 
   if (!isOpen) {
     return null;
@@ -103,6 +133,39 @@ export default function MediaFolderOrganizerOverlay({
     }
 
     onMoveItemToFolder?.(itemId, getWritableMediaFolderId(folderId));
+  };
+
+  const handleToggleSelectedItem = (itemId) => {
+    setSelectedItemIds((currentIds) => (
+      currentIds.includes(itemId)
+        ? currentIds.filter((selectedItemId) => selectedItemId !== itemId)
+        : [...currentIds, itemId]
+    ));
+  };
+
+  const handleToggleAllItems = () => {
+    setSelectedItemIds(isAllItemsSelected ? [] : itemEntries.map(({ itemId }) => itemId));
+  };
+
+  const handleMoveSelectedItems = () => {
+    if (!hasSelectedItems) {
+      return;
+    }
+
+    const targetFolderId = getWritableMediaFolderId(bulkMoveFolderId);
+    selectedItemIds.forEach((itemId) => {
+      onMoveItemToFolder?.(itemId, targetFolderId);
+    });
+    setSelectedItemIds([]);
+  };
+
+  const handleDeleteSelectedItems = () => {
+    if (!hasSelectedItems) {
+      return;
+    }
+
+    onDeleteSelectedItems?.(selectedItems);
+    setSelectedItemIds([]);
   };
 
   const overlay = (
@@ -277,6 +340,56 @@ export default function MediaFolderOrganizerOverlay({
                 </p>
               </div>
 
+              {isItemSelectionEnabled && !!items.length && (
+                <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-950/70 px-4 py-3">
+                  <label className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/70 px-2.5 py-2 text-xs font-semibold text-slate-200">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select all ${itemNounPlural}`}
+                      checked={isAllItemsSelected}
+                      onChange={handleToggleAllItems}
+                      className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-sky-400"
+                    />
+                    Select all
+                  </label>
+                  <span className="text-xs text-slate-400">
+                    {selectedItemIds.length} selected
+                  </span>
+                  <select
+                    aria-label={`Move selected ${itemNounPlural} to folder`}
+                    value={bulkMoveFolderId}
+                    onChange={(event) => setBulkMoveFolderId(event.target.value)}
+                    disabled={!hasSelectedItems}
+                    className="min-w-0 rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-slate-100 focus:border-sky-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {folderOptions.map((folder) => (
+                      <option
+                        key={folder.id}
+                        value={getWritableMediaFolderId(folder.id)}
+                      >
+                        {folder.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleMoveSelectedItems}
+                    disabled={!hasSelectedItems}
+                    className="rounded-lg border border-sky-400/40 bg-sky-500 px-3 py-2 text-xs font-semibold text-black transition-colors hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Move selected {itemNounPlural}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeleteSelectedItems}
+                    disabled={!hasSelectedItems || !onDeleteSelectedItems}
+                    className="rounded-lg border border-red-500/40 px-3 py-2 text-xs font-semibold text-red-200 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Delete selected {itemNounPlural}
+                  </button>
+                </div>
+              )}
+
               <div className="min-h-0 flex-1 overflow-y-auto p-3 custom-scroll">
                 {!items.length ? (
                   <div className="flex h-full min-h-[12rem] items-center justify-center rounded-xl border border-dashed border-slate-700 bg-slate-900/35 px-4 text-center text-sm text-slate-400">
@@ -284,14 +397,16 @@ export default function MediaFolderOrganizerOverlay({
                   </div>
                 ) : (
                   <div className="grid gap-3 lg:grid-cols-2">
-                    {items.map((item) => {
-                      const itemId = getItemId(item);
-
+                    {itemEntries.map(({ item, itemId }) => {
                       return renderItem?.({
                         item,
                         itemId,
                         folderOptions,
                         moving: movingItemId === itemId,
+                        isSelectionEnabled: isItemSelectionEnabled,
+                        isSelected: selectedItemIdSet.has(itemId),
+                        onSelectedChange: () => handleToggleSelectedItem(itemId),
+                        itemNounSingular,
                         dragProps: {
                           draggable: true,
                           onDragStart: (event) => {
