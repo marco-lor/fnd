@@ -278,6 +278,10 @@ describe('BackgroundGalleryPanel', () => {
 
     expect(onSelectBackground).not.toHaveBeenCalled();
 
+    const previewOverlay = screen.getByTestId('background-gallery-preview-overlay');
+    expect(previewOverlay.parentElement).toBe(document.body);
+    expect(previewOverlay).toHaveClass('z-[120]');
+
     const previewDialog = screen.getByRole('dialog', { name: 'Preview Sunken Ruins' });
     expect(previewDialog).toHaveAttribute('aria-modal', 'true');
     expect(within(previewDialog).getByRole('img', { name: 'Sunken Ruins preview' })).toHaveAttribute('src', backgrounds[0].imageUrl);

@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { FiFilter, FiFolder, FiGrid, FiLayers, FiLoader, FiMaximize2, FiPlay, FiRadio, FiTrash2, FiUploadCloud, FiUserMinus, FiX, FiXCircle, FiZap } from 'react-icons/fi';
 import { isVideoBackground } from './boardUtils';
 import BackgroundGalleryOrganizerOverlay from './BackgroundGalleryOrganizerOverlay';
@@ -79,6 +80,64 @@ export default function BackgroundGalleryPanel({
 
     event.target.value = '';
   };
+  const previewOverlay = previewBackground && typeof document !== 'undefined' ? createPortal(
+    <div
+      data-testid="background-gallery-preview-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="background-gallery-preview-title"
+      tabIndex={-1}
+      className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/78 p-3 text-slate-100 backdrop-blur-sm sm:p-5"
+      onClick={() => setPreviewBackground(null)}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          setPreviewBackground(null);
+        }
+      }}
+    >
+      <div
+        className="relative z-10 flex h-[min(54rem,calc(100vh-2rem))] w-[min(86rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-slate-700/90 bg-slate-950/96 shadow-2xl shadow-black/60 ring-1 ring-sky-200/10 backdrop-blur-md"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
+          <h3
+            id="background-gallery-preview-title"
+            className="min-w-0 truncate text-sm font-semibold uppercase tracking-[0.18em] text-sky-300"
+          >
+            Preview {previewBackgroundName}
+          </h3>
+          <button
+            type="button"
+            aria-label="Close preview"
+            title="Close preview"
+            onClick={() => setPreviewBackground(null)}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-700 text-slate-300 transition-colors hover:bg-slate-800 hover:text-white"
+          >
+            <FiX className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+        <div className="flex min-h-0 flex-1 items-center justify-center bg-black p-3">
+          {isPreviewVideo ? (
+            <video
+              src={previewBackground.imageUrl}
+              aria-label={`${previewBackgroundName} preview`}
+              className="max-h-full max-w-full rounded-lg object-contain"
+              controls
+              muted
+              playsInline
+            />
+          ) : (
+            <img
+              src={previewBackground.imageUrl}
+              alt={`${previewBackgroundName} preview`}
+              className="max-h-full max-w-full rounded-lg object-contain"
+            />
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body
+  ) : null;
 
   return (
     <section className="rounded-2xl border border-slate-700 bg-slate-950/75 backdrop-blur-sm shadow-2xl overflow-hidden xl:flex xl:h-full xl:min-h-0 xl:flex-col">
@@ -425,56 +484,7 @@ export default function BackgroundGalleryPanel({
         onMoveBackgroundToFolder={onMoveBackgroundToFolder}
       />
 
-      {previewBackground && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="background-gallery-preview-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
-          onClick={() => setPreviewBackground(null)}
-        >
-          <div
-            className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
-              <h3
-                id="background-gallery-preview-title"
-                className="min-w-0 truncate text-sm font-semibold text-slate-100"
-              >
-                Preview {previewBackgroundName}
-              </h3>
-              <button
-                type="button"
-                aria-label="Close preview"
-                title="Close preview"
-                onClick={() => setPreviewBackground(null)}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-700 text-slate-200 transition-colors hover:bg-slate-800"
-              >
-                <FiX className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </div>
-            <div className="flex min-h-0 flex-1 items-center justify-center bg-black p-3">
-              {isPreviewVideo ? (
-                <video
-                  src={previewBackground.imageUrl}
-                  aria-label={`${previewBackgroundName} preview`}
-                  className="max-h-[78vh] max-w-full rounded-lg object-contain"
-                  controls
-                  muted
-                  playsInline
-                />
-              ) : (
-                <img
-                  src={previewBackground.imageUrl}
-                  alt={`${previewBackgroundName} preview`}
-                  className="max-h-[78vh] max-w-full rounded-lg object-contain"
-                />
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {previewOverlay}
     </section>
   );
 }
