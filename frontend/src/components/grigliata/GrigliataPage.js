@@ -520,8 +520,6 @@ export default function GrigliataPage() {
 
   const [uploadError, setUploadError] = useState('');
   const [isUploading, setIsUploading] = useState(false);
-  const [musicSelectedFile, setMusicSelectedFile] = useState(null);
-  const [musicUploadName, setMusicUploadName] = useState('');
   const [musicUploadError, setMusicUploadError] = useState('');
   const [isMusicUploading, setIsMusicUploading] = useState(false);
   const [isMusicMutePending, setIsMusicMutePending] = useState(false);
@@ -1525,6 +1523,7 @@ export default function GrigliataPage() {
   const sidebarTabListClassName = SIDEBAR_TAB_GRID_CLASS_NAMES[sidebarTabs.length]
     || DEFAULT_SIDEBAR_TAB_GRID_CLASS_NAME;
   const isGallerySidebarActive = isManager && activeSidebarTab === 'gallery';
+  const isCompactFullHeightSidebarTab = isManager && ['gallery', 'music'].includes(activeSidebarTab);
   const immediateImageUrls = useMemo(() => collectUniqueImageUrls([
     getBackgroundImageUrlForPreload(combatBackground),
     getBackgroundImageUrlForPreload(displayBackground),
@@ -2565,34 +2564,27 @@ export default function GrigliataPage() {
     isManager,
   ]);
 
-  const handleUploadMusicTrack = useCallback(async () => {
-    if (!isManager || !user?.uid) return;
+  const getMusicUploadValidationError = (file) => {
+    const fileName = file?.name || 'selected file';
 
-    setMusicUploadError('');
-    const file = musicSelectedFile;
-
-    if (!file) {
-      setMusicUploadError('Select an audio file first.');
-      return;
-    }
-
-    if (!file.type?.startsWith('audio/')) {
-      setMusicUploadError('The selected file must be an audio file.');
-      return;
+    if (!file?.type?.startsWith('audio/')) {
+      return `"${fileName}" must be an audio file.`;
     }
 
     if (file.size > MAX_GRIGLIATA_MUSIC_FILE_BYTES) {
-      setMusicUploadError('Audio tracks must be 25 MB or smaller.');
-      return;
+      return `"${fileName}" must be 25 MB or smaller.`;
     }
 
-    const trackName = (musicUploadName || getDisplayNameFromFileName(file.name)).trim();
+    return '';
+  };
+
+  const uploadMusicTrackFile = async (file, fileIndex) => {
+    const trackName = getDisplayNameFromFileName(file.name).trim();
     const safeName = buildStorageSafeName(trackName, 'grigliata_music');
     const fileExtension = getFileExtension(file.name) || getFileExtensionFromContentType(file.type);
-    const storagePath = `grigliata/music/${user.uid}/${safeName}_${Date.now()}${fileExtension}`;
+    const storagePath = `grigliata/music/${user.uid}/${safeName}_${Date.now() + fileIndex}${fileExtension}`;
     let uploadedPath = '';
 
-    setIsMusicUploading(true);
     try {
       const { durationMs } = await readAudioFileMetadata(file);
       const fileRef = storageRef(storage, storagePath);
@@ -2616,13 +2608,9 @@ export default function GrigliataPage() {
         updatedAt: serverTimestamp(),
         updatedBy: user.uid,
       });
-
-      setMusicSelectedFile(null);
-      setMusicUploadName('');
-      setMusicUploadError('');
     } catch (error) {
       console.error('Failed to upload Grigliata music track:', error);
-      setMusicUploadError('Failed to upload the selected audio track.');
+      setMusicUploadError(`Failed to upload "${file.name || trackName}".`);
 
       if (uploadedPath) {
         try {
@@ -2631,13 +2619,45 @@ export default function GrigliataPage() {
           console.warn('Music upload cleanup failed:', cleanupError);
         }
       }
+
+      throw error;
+    }
+  };
+
+  const handleUploadMusicTrackFiles = useCallback(async (files) => {
+    if (!isManager || !user?.uid) return;
+
+    setMusicUploadError('');
+    const selectedFiles = Array.from(files || []).filter(Boolean);
+
+    if (selectedFiles.length === 0) {
+      setMusicUploadError('Select audio files first.');
+      return;
+    }
+
+    const validationError = selectedFiles
+      .map((file) => getMusicUploadValidationError(file))
+      .find(Boolean);
+
+    if (validationError) {
+      setMusicUploadError(validationError);
+      return;
+    }
+
+    setIsMusicUploading(true);
+    try {
+      for (const [fileIndex, file] of selectedFiles.entries()) {
+        await uploadMusicTrackFile(file, fileIndex);
+      }
+
+      setMusicUploadError('');
+    } catch {
+      // uploadMusicTrackFile already surfaced the file-specific error and cleanup.
     } finally {
       setIsMusicUploading(false);
     }
   }, [
     isManager,
-    musicSelectedFile,
-    musicUploadName,
     selectedMusicFolderId,
     user?.uid,
   ]);
@@ -2744,11 +2764,13 @@ export default function GrigliataPage() {
     });
   }, [deleteMusicPlaybackSession, runMusicPlaybackAction]);
 
-  const handleDeleteMusicTrack = useCallback(async (track) => {
+  const handleDeleteMusicTrack = useCallback(async (track, { skipConfirmation = false } = {}) => {
     if (!isManager || !user?.uid || !track?.id) return;
 
-    const confirmed = window.confirm(`Delete track "${track.name || 'Untitled Track'}" permanently?`);
-    if (!confirmed) return;
+    if (!skipConfirmation) {
+      const confirmed = window.confirm(`Delete track "${track.name || 'Untitled Track'}" permanently?`);
+      if (!confirmed) return;
+    }
 
     setDeletingMusicTrackId(track.id);
     setBoardError('');
@@ -2784,6 +2806,24 @@ export default function GrigliataPage() {
     normalizedMusicPlaybackState.trackId,
     deleteMusicPlaybackSession,
     persistMusicPlaybackState,
+    user?.uid,
+  ]);
+
+  const handleDeleteMusicTracks = useCallback(async (selectedTracks = []) => {
+    if (!isManager || !user?.uid) return;
+
+    const deletableTracks = selectedTracks.filter((track) => track?.id);
+    if (!deletableTracks.length) return;
+
+    const confirmed = window.confirm(`Delete ${deletableTracks.length} selected track${deletableTracks.length === 1 ? '' : 's'} permanently?`);
+    if (!confirmed) return;
+
+    for (const track of deletableTracks) {
+      await handleDeleteMusicTrack(track, { skipConfirmation: true });
+    }
+  }, [
+    handleDeleteMusicTrack,
+    isManager,
     user?.uid,
   ]);
 
@@ -6313,13 +6353,13 @@ export default function GrigliataPage() {
             </div>
 
             <div className={`min-h-0 xl:flex-1 xl:pr-1 custom-scroll ${
-              activeSidebarTab === 'gallery' ? 'xl:overflow-hidden' : 'xl:overflow-y-auto'
+              isCompactFullHeightSidebarTab ? 'xl:overflow-hidden' : 'xl:overflow-y-auto'
             }`}
             >
               <div
                 id={`grigliata-sidebar-panel-${activeSidebarTab}`}
                 role="tabpanel"
-                className={activeSidebarTab === 'gallery' ? 'xl:h-full xl:min-h-0' : 'space-y-3'}
+                className={isCompactFullHeightSidebarTab ? 'xl:h-full xl:min-h-0' : 'space-y-3'}
               >
                 {activeSidebarTab === 'tokens' && (
                   <MyTokenTray
@@ -6393,8 +6433,6 @@ export default function GrigliataPage() {
                     selectedFolderId={selectedMusicFolderId}
                     activePlaybackState={normalizedMusicPlaybackState}
                     activePlaybackSessions={musicPlaybackSessions}
-                    uploadName={musicUploadName}
-                    selectedFileName={musicSelectedFile?.name || ''}
                     uploadError={musicUploadError}
                     isUploading={isMusicUploading}
                     deletingTrackId={deletingMusicTrackId}
@@ -6407,16 +6445,7 @@ export default function GrigliataPage() {
                     onRenameMusicFolder={handleRenameMusicFolder}
                     onDeleteMusicFolder={handleDeleteMusicFolder}
                     onMoveTrackToFolder={handleMoveMusicTrackToFolder}
-                    onUploadNameChange={setMusicUploadName}
-                    onUploadFileChange={(event) => {
-                      const file = event.target.files?.[0] || null;
-                      setMusicSelectedFile(file);
-                      setMusicUploadError('');
-                      if (file && !musicUploadName.trim()) {
-                        setMusicUploadName(getDisplayNameFromFileName(file.name));
-                      }
-                    }}
-                    onUploadTrack={handleUploadMusicTrack}
+                    onUploadTrackFiles={handleUploadMusicTrackFiles}
                     onSharedVolumeChange={handleSharedMusicVolumeChange}
                     onSharedVolumeCommit={handleSharedMusicVolumeCommit}
                     onPlayTrack={handlePlayMusicTrack}
@@ -6426,6 +6455,7 @@ export default function GrigliataPage() {
                     onSeekTrack={handleSeekMusicTrack}
                     onStopTrack={handleStopMusicTrack}
                     onDeleteTrack={handleDeleteMusicTrack}
+                    onDeleteTracks={handleDeleteMusicTracks}
                   />
                 )}
 

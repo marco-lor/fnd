@@ -6415,36 +6415,41 @@ describe('GrigliataPage', () => {
     });
   });
 
-  test('uploads a music track and persists its metadata', async () => {
+  test('uploads multiple music tracks and persists filename-derived metadata', async () => {
     setManagerAuth();
     const storageApi = require('firebase/storage');
 
-    render(<GrigliataPage />);
+    const { container } = render(<GrigliataPage />);
 
     fireEvent.click(screen.getByRole('tab', { name: /music/i }));
 
     const file = new File(['audio-bytes'], 'battle-theme.mp3', { type: 'audio/mpeg' });
     Object.defineProperty(file, 'size', { value: 2048 });
+    const secondFile = new File(['drone-bytes'], 'cavern-drone.ogg', { type: 'audio/ogg' });
+    Object.defineProperty(secondFile, 'size', { value: 4096 });
 
-    fireEvent.change(screen.getByLabelText(/music track file/i), {
-      target: { files: [file] },
-    });
-
-    expect(screen.getByDisplayValue('battle theme')).toBeInTheDocument();
+    const uploadInput = container.querySelector('input[type="file"][accept="audio/*"]');
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /add track/i }));
+      fireEvent.change(uploadInput, {
+        target: { files: [file, secondFile] },
+      });
     });
 
     await waitFor(() => {
       expect(readAudioFileMetadata).toHaveBeenCalledWith(file);
+      expect(readAudioFileMetadata).toHaveBeenCalledWith(secondFile);
     });
 
     expect(storageApi.ref).toHaveBeenCalledWith(
       {},
       expect.stringMatching(/^grigliata\/music\/user-1\/battle_theme_\d+\.mp3$/)
     );
-    expect(storageApi.uploadBytes).toHaveBeenCalled();
+    expect(storageApi.ref).toHaveBeenCalledWith(
+      {},
+      expect.stringMatching(/^grigliata\/music\/user-1\/cavern_drone_\d+\.ogg$/)
+    );
+    expect(storageApi.uploadBytes).toHaveBeenCalledTimes(2);
 
     await waitFor(() => {
       expect(firestore.addDoc).toHaveBeenCalledWith(
@@ -6462,6 +6467,21 @@ describe('GrigliataPage', () => {
           updatedBy: 'user-1',
         })
       );
+      expect(firestore.addDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_tracks' }),
+        expect.objectContaining({
+          name: 'cavern drone',
+          fileName: 'cavern-drone.ogg',
+          audioUrl: 'https://example.com/uploaded-map.png',
+          audioPath: expect.stringMatching(/^grigliata\/music\/user-1\/cavern_drone_\d+\.ogg$/),
+          contentType: 'audio/ogg',
+          sizeBytes: 4096,
+          durationMs: 12_345,
+          musicFolderId: '',
+          createdBy: 'user-1',
+          updatedBy: 'user-1',
+        })
+      );
     });
   });
 
@@ -6469,19 +6489,19 @@ describe('GrigliataPage', () => {
     setManagerAuth();
     const storageApi = require('firebase/storage');
 
-    render(<GrigliataPage />);
+    const { container } = render(<GrigliataPage />);
 
     fireEvent.click(screen.getByRole('tab', { name: /music/i }));
 
     const file = new File(['audio-bytes'], 'battle-theme', { type: 'audio/mpeg' });
     Object.defineProperty(file, 'size', { value: 2048 });
 
-    fireEvent.change(screen.getByLabelText(/music track file/i), {
-      target: { files: [file] },
-    });
+    const uploadInput = container.querySelector('input[type="file"][accept="audio/*"]');
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /add track/i }));
+      fireEvent.change(uploadInput, {
+        target: { files: [file] },
+      });
     });
 
     await waitFor(() => {
@@ -6498,20 +6518,20 @@ describe('GrigliataPage', () => {
     const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     firestore.addDoc.mockRejectedValueOnce(new Error('write failed'));
 
-    render(<GrigliataPage />);
+    const { container } = render(<GrigliataPage />);
 
     fireEvent.click(screen.getByRole('tab', { name: /music/i }));
 
     const file = new File(['audio-bytes'], 'ambience.mp3', { type: 'audio/mpeg' });
     Object.defineProperty(file, 'size', { value: 1024 });
 
-    fireEvent.change(screen.getByLabelText(/music track file/i), {
-      target: { files: [file] },
-    });
+    const uploadInput = container.querySelector('input[type="file"][accept="audio/*"]');
 
     try {
       await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: /add track/i }));
+        fireEvent.change(uploadInput, {
+          target: { files: [file] },
+        });
       });
 
       await waitFor(() => {
@@ -6528,7 +6548,7 @@ describe('GrigliataPage', () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText(/failed to upload the selected audio track/i)).toBeInTheDocument();
+        expect(screen.getByText(/failed to upload "ambience\.mp3"/i)).toBeInTheDocument();
       });
     } finally {
       consoleErrorSpy.mockRestore();
@@ -6999,6 +7019,100 @@ describe('GrigliataPage', () => {
       expect.objectContaining({ path: 'grigliata_music_playback/current' }),
       expect.anything()
     );
+
+    confirmSpy.mockRestore();
+  });
+
+  test('bulk deletes selected music tracks after stopping their active sessions', async () => {
+    setManagerAuth();
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+
+    act(() => {
+      setCollectionData('grigliata_music_tracks', [
+        {
+          id: 'track-1',
+          name: 'Battle Theme',
+          fileName: 'battle-theme.mp3',
+          audioUrl: 'https://example.com/audio/battle-theme.mp3',
+          audioPath: 'grigliata/music/user-1/battle-theme.mp3',
+          contentType: 'audio/mpeg',
+          sizeBytes: 2048,
+          durationMs: 120_000,
+        },
+        {
+          id: 'track-2',
+          name: 'Cavern Drone',
+          fileName: 'cavern-drone.mp3',
+          audioUrl: 'https://example.com/audio/cavern-drone.mp3',
+          audioPath: 'grigliata/music/user-1/cavern-drone.mp3',
+          contentType: 'audio/mpeg',
+          sizeBytes: 4096,
+          durationMs: 240_000,
+        },
+      ]);
+      setCollectionData('grigliata_music_playback_sessions', [
+        {
+          id: 'track-1',
+          status: 'playing',
+          trackId: 'track-1',
+          trackName: 'Battle Theme',
+          audioUrl: 'https://example.com/audio/battle-theme.mp3',
+          durationMs: 120_000,
+          offsetMs: 0,
+          loop: false,
+          startedAt: { toMillis: () => Date.now() - 1_000 },
+          commandId: 'cmd-active-1',
+          updatedBy: 'user-1',
+        },
+        {
+          id: 'track-2',
+          status: 'paused',
+          trackId: 'track-2',
+          trackName: 'Cavern Drone',
+          audioUrl: 'https://example.com/audio/cavern-drone.mp3',
+          durationMs: 240_000,
+          offsetMs: 10_000,
+          loop: true,
+          startedAt: null,
+          commandId: 'cmd-active-2',
+          updatedBy: 'user-1',
+        },
+      ]);
+    });
+
+    render(<GrigliataPage />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /music/i }));
+    firestore.deleteDoc.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Organize Music' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all tracks' }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Delete selected tracks' }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.deleteDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_playback_sessions/track-1' })
+      );
+      expect(firestore.deleteDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_playback_sessions/track-2' })
+      );
+      expect(firestore.deleteDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_tracks/track-1' })
+      );
+      expect(firestore.deleteDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_music_tracks/track-2' })
+      );
+    });
+
+    const deletedPaths = firestore.deleteDoc.mock.calls.map(([target]) => target.path);
+    expect(deletedPaths.indexOf('grigliata_music_playback_sessions/track-1'))
+      .toBeLessThan(deletedPaths.indexOf('grigliata_music_tracks/track-1'));
+    expect(deletedPaths.indexOf('grigliata_music_playback_sessions/track-2'))
+      .toBeLessThan(deletedPaths.indexOf('grigliata_music_tracks/track-2'));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
 
     confirmSpy.mockRestore();
   });

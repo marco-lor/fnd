@@ -54,9 +54,7 @@ const buildProps = (overrides = {}) => ({
   onRenameMusicFolder: jest.fn(),
   onDeleteMusicFolder: jest.fn(),
   onMoveTrackToFolder: jest.fn(),
-  onUploadNameChange: jest.fn(),
-  onUploadFileChange: jest.fn(),
-  onUploadTrack: jest.fn(),
+  onUploadTrackFiles: jest.fn(),
   onSharedVolumeChange: jest.fn(),
   onSharedVolumeCommit: jest.fn(),
   onPlayTrack: jest.fn(),
@@ -66,6 +64,7 @@ const buildProps = (overrides = {}) => ({
   onSeekTrack: jest.fn(),
   onStopTrack: jest.fn(),
   onDeleteTrack: jest.fn(),
+  onDeleteTracks: jest.fn(),
   ...overrides,
 });
 
@@ -84,11 +83,50 @@ describe('MusicLibraryPanel', () => {
     expect(onSelectedFolderIdChange).toHaveBeenCalledWith('folder-a');
   });
 
+  test('uses a compact upload toolbar and uploads multiple files', () => {
+    const onUploadTrackFiles = jest.fn();
+    const file = new File(['audio-one'], 'battle-theme.mp3', { type: 'audio/mpeg' });
+    const secondFile = new File(['audio-two'], 'cavern-drone.ogg', { type: 'audio/ogg' });
+    const { container } = render(
+      <MusicLibraryPanel
+        {...buildProps({
+          onUploadTrackFiles,
+        })}
+      />
+    );
+
+    expect(screen.queryByLabelText('Music track name')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add track/i })).not.toBeInTheDocument();
+
+    const uploadInput = container.querySelector('input[type="file"]');
+    expect(uploadInput).toHaveAttribute('accept', 'audio/*');
+    expect(uploadInput).toHaveAttribute('multiple');
+
+    fireEvent.change(uploadInput, {
+      target: { files: [file, secondFile] },
+    });
+
+    expect(screen.getByRole('button', { name: 'Upload music tracks' })).toBeInTheDocument();
+    expect(onUploadTrackFiles).toHaveBeenCalledWith([file, secondFile]);
+    expect(uploadInput.value).toBe('');
+  });
+
+  test('shows a loading icon while music tracks are uploading', () => {
+    render(<MusicLibraryPanel {...buildProps({ isUploading: true })} />);
+
+    const uploadButton = screen.getByRole('button', { name: 'Uploading music tracks' });
+
+    expect(uploadButton).toBeDisabled();
+    expect(uploadButton).toHaveAttribute('aria-busy', 'true');
+    expect(uploadButton.querySelector('svg')).toHaveClass('animate-spin');
+  });
+
   test('opens the music organizer and creates, renames, deletes, and moves tracks', () => {
     const onCreateMusicFolder = jest.fn();
     const onRenameMusicFolder = jest.fn();
     const onDeleteMusicFolder = jest.fn();
     const onMoveTrackToFolder = jest.fn();
+    const onDeleteTrack = jest.fn();
     render(
       <MusicLibraryPanel
         {...buildProps({
@@ -96,6 +134,7 @@ describe('MusicLibraryPanel', () => {
           onRenameMusicFolder,
           onDeleteMusicFolder,
           onMoveTrackToFolder,
+          onDeleteTrack,
         })}
       />
     );
@@ -122,6 +161,79 @@ describe('MusicLibraryPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete Ambience' }));
     expect(onDeleteMusicFolder).toHaveBeenCalledWith(expect.objectContaining({ id: 'folder-b' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Battle Theme track' }));
+    expect(onDeleteTrack).toHaveBeenCalledWith(expect.objectContaining({ id: 'track-1' }));
+  });
+
+  test('selects tracks and moves or deletes them together from the organizer', () => {
+    const onMoveTrackToFolder = jest.fn();
+    const onDeleteTracks = jest.fn();
+    render(
+      <MusicLibraryPanel
+        {...buildProps({
+          onMoveTrackToFolder,
+          onDeleteTracks,
+        })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Organize Music' }));
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all tracks' }));
+    fireEvent.change(screen.getByLabelText('Move selected tracks to folder'), {
+      target: { value: 'folder-b' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Move selected tracks' }));
+
+    expect(onMoveTrackToFolder).toHaveBeenCalledWith('track-1', 'folder-b');
+    expect(onMoveTrackToFolder).toHaveBeenCalledWith('track-2', 'folder-b');
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Cavern Drone' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete selected tracks' }));
+
+    expect(onDeleteTracks).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 'track-2' }),
+    ]);
+  });
+
+  test('opens a local audio preview without starting shared playback', () => {
+    const onPlayTrack = jest.fn();
+    const onPlayTrackInLoop = jest.fn();
+    render(
+      <MusicLibraryPanel
+        {...buildProps({
+          onPlayTrack,
+          onPlayTrackInLoop,
+        })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview Battle Theme' }));
+
+    expect(onPlayTrack).not.toHaveBeenCalled();
+    expect(onPlayTrackInLoop).not.toHaveBeenCalled();
+
+    const previewOverlay = screen.getByTestId('music-library-preview-overlay');
+    expect(previewOverlay.parentElement).toBe(document.body);
+
+    const previewDialog = screen.getByRole('dialog', { name: 'Preview Battle Theme' });
+    const previewAudio = within(previewDialog).getByLabelText('Battle Theme preview');
+    expect(previewAudio).toHaveAttribute('src', tracks[0].audioUrl);
+
+    fireEvent.click(within(previewDialog).getByRole('button', { name: 'Close preview' }));
+
+    expect(screen.queryByRole('dialog', { name: 'Preview Battle Theme' })).not.toBeInTheDocument();
+  });
+
+  test('lets the track list fill the available desktop sidebar height', () => {
+    render(<MusicLibraryPanel {...buildProps()} />);
+
+    const trackList = screen.getByTestId('music-library-scroll-list');
+
+    expect(trackList).toHaveClass('xl:flex-1');
+    expect(trackList).toHaveClass('xl:min-h-0');
+    expect(trackList).toHaveClass('xl:max-h-none');
   });
 
   test('keeps controls for active playback sessions outside the selected folder', () => {
