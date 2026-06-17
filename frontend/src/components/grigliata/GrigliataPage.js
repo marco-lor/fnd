@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FaDiceD20 } from 'react-icons/fa';
+import { GiCrackedHelm } from 'react-icons/gi';
 import {
   addDoc,
   arrayRemove,
@@ -131,6 +133,7 @@ import {
   normalizeGrigliataLiveInteractionDraft,
 } from './liveInteractions';
 import MapCalibrationPanel from './MapCalibrationPanel';
+import GrigliataDicePanel from './GrigliataDicePanel';
 import MyTokenTray from './MyTokenTray';
 import {
   buildGrigliataMusicPlaybackSession,
@@ -383,6 +386,7 @@ const SIDEBAR_TAB_GRID_CLASS_NAMES = {
   3: 'grid grid-cols-3 gap-2',
   4: 'grid grid-cols-2 gap-2',
   5: 'grid grid-cols-2 gap-2',
+  6: 'grid grid-cols-2 gap-2',
 };
 const DEFAULT_SIDEBAR_TAB_GRID_CLASS_NAME = SIDEBAR_TAB_GRID_CLASS_NAMES[3];
 const MAX_DEFERRED_GALLERY_IMAGE_PRELOADS = 6;
@@ -1512,18 +1516,22 @@ export default function GrigliataPage() {
   const sidebarTabs = useMemo(() => (
     isManager
       ? [
-        { key: 'tokens', label: 'Tokens' },
+        { key: 'tokens', label: 'Tokens', Icon: GiCrackedHelm },
+        { key: 'dice', label: 'Dice', Icon: FaDiceD20 },
         { key: 'gallery', label: 'DM Gallery' },
         { key: 'music', label: 'Music' },
         { key: 'calibration', label: 'Map Calibration' },
         { key: 'lighting', label: 'Lighting' },
       ]
-      : [{ key: 'tokens', label: 'Tokens' }]
+      : [
+        { key: 'tokens', label: 'Tokens', Icon: GiCrackedHelm },
+        { key: 'dice', label: 'Dice', Icon: FaDiceD20 },
+      ]
   ), [isManager]);
   const sidebarTabListClassName = SIDEBAR_TAB_GRID_CLASS_NAMES[sidebarTabs.length]
     || DEFAULT_SIDEBAR_TAB_GRID_CLASS_NAME;
   const isGallerySidebarActive = isManager && activeSidebarTab === 'gallery';
-  const isCompactFullHeightSidebarTab = isManager && ['gallery', 'music'].includes(activeSidebarTab);
+  const isCompactFullHeightSidebarTab = activeSidebarTab === 'dice' || (isManager && ['gallery', 'music'].includes(activeSidebarTab));
   const immediateImageUrls = useMemo(() => collectUniqueImageUrls([
     getBackgroundImageUrlForPreload(combatBackground),
     getBackgroundImageUrlForPreload(displayBackground),
@@ -6330,6 +6338,7 @@ export default function GrigliataPage() {
               >
                 {sidebarTabs.map((tab) => {
                   const isActive = activeSidebarTab === tab.key;
+                  const TabIcon = tab.Icon;
 
                   return (
                     <button
@@ -6337,15 +6346,17 @@ export default function GrigliataPage() {
                       type="button"
                       role="tab"
                       aria-selected={isActive}
+                      aria-label={TabIcon ? tab.label : undefined}
                       aria-controls={`grigliata-sidebar-panel-${tab.key}`}
+                      title={TabIcon ? tab.label : undefined}
                       onClick={() => setActiveSidebarTab(tab.key)}
-                      className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition-colors ${
+                      className={`inline-flex items-center justify-center rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition-colors ${
                         isActive
                           ? 'bg-amber-400 text-black shadow-lg'
                           : 'border border-slate-700 bg-slate-900/70 text-slate-300 hover:bg-slate-800'
                       }`}
                     >
-                      {tab.label}
+                      {TabIcon ? <TabIcon className="h-4 w-4" aria-hidden="true" /> : tab.label}
                     </button>
                   );
                 })}
@@ -6383,6 +6394,14 @@ export default function GrigliataPage() {
                     savingSelectedTokenDetailsId={savingSelectedTokenDetailsId}
                     onUpdateFoeToken={handleUpdateFoeToken}
                     savingFoeTokenId={savingFoeTokenId}
+                  />
+                )}
+
+                {activeSidebarTab === 'dice' && (
+                  <GrigliataDicePanel
+                    currentUserId={currentUserId}
+                    userData={userData}
+                    isManager={isManager}
                   />
                 )}
 

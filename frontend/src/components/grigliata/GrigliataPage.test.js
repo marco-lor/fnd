@@ -60,7 +60,7 @@ const mockBatchInstances = [];
 const mockTransactionInstances = [];
 let mockGeneratedDocCounter = 0;
 
-const mockBuildCollectionTarget = (path) => ({ kind: 'collection', path });
+const mockBuildCollectionTarget = (...segments) => ({ kind: 'collection', path: segments.filter(Boolean).join('/') });
 const mockBuildDocTarget = (...segments) => ({ kind: 'doc', path: segments.join('/'), id: segments[segments.length - 1] });
 const mockBuildDocTargetFromArgs = (baseOrDb, ...segments) => {
   if (baseOrDb?.kind === 'collection') {
@@ -273,7 +273,7 @@ jest.mock('firebase/firestore', () => ({
   addDoc: jest.fn(() => Promise.resolve()),
   arrayRemove: jest.fn((value) => ({ __type: 'arrayRemove', value })),
   arrayUnion: jest.fn((...values) => mockArrayUnionSentinel(...values)),
-  collection: jest.fn((db, path) => mockBuildCollectionTarget(path)),
+  collection: jest.fn((db, ...segments) => mockBuildCollectionTarget(...segments)),
   deleteDoc: jest.fn(() => Promise.resolve()),
   deleteField: jest.fn(() => ({ __type: 'deleteField' })),
   doc: jest.fn((dbOrCollection, ...segments) => mockBuildDocTargetFromArgs(dbOrCollection, ...segments)),
@@ -315,6 +315,13 @@ jest.mock('firebase/firestore', () => ({
 
 jest.mock('./BackgroundGalleryPanel', () => jest.fn(() => <div data-testid="background-gallery-panel" />));
 jest.mock('./MapCalibrationPanel', () => jest.fn(() => <div data-testid="map-calibration-panel" />));
+jest.mock('../common/DiceRoller', () => function MockDiceRoller(props) {
+  return (
+    <div data-testid="dice-roller">
+      {`faces:${props.faces};count:${props.count};modifier:${props.modifier};description:${props.description}`}
+    </div>
+  );
+});
 jest.mock('./imageAssetRegistry', () => ({
   preloadImageAssets: jest.fn(() => Promise.resolve([])),
   scheduleImageAssetPreload: jest.fn(() => jest.fn()),
@@ -920,7 +927,7 @@ describe('GrigliataPage', () => {
     firestore.addDoc.mockClear().mockResolvedValue(undefined);
     firestore.arrayRemove.mockClear().mockImplementation((value) => ({ __type: 'arrayRemove', value }));
     firestore.arrayUnion.mockClear().mockImplementation((...values) => mockArrayUnionSentinel(...values));
-    firestore.collection.mockClear().mockImplementation((db, path) => mockBuildCollectionTarget(path));
+    firestore.collection.mockClear().mockImplementation((db, ...segments) => mockBuildCollectionTarget(...segments));
     firestore.deleteDoc.mockClear().mockResolvedValue(undefined);
     firestore.deleteField.mockClear().mockImplementation(() => ({ __type: 'deleteField' }));
     firestore.doc.mockClear().mockImplementation((dbOrCollection, ...segments) => mockBuildDocTargetFromArgs(dbOrCollection, ...segments));
@@ -6254,6 +6261,226 @@ describe('GrigliataPage', () => {
     rerender(<GrigliataPage />);
 
     expect(screen.getByRole('tab', { name: /music/i })).toBeInTheDocument();
+  });
+
+  test('shows a dice sidebar tab for players and managers', () => {
+    const { rerender } = render(<GrigliataPage />);
+
+    expect(screen.getByRole('tab', { name: /tokens/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /dice/i })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /music/i })).not.toBeInTheDocument();
+
+    setManagerAuth();
+    rerender(<GrigliataPage />);
+
+    expect(screen.getByRole('tab', { name: /tokens/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /dice/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /music/i })).toBeInTheDocument();
+  });
+
+  test('renders the tokens tab as an icon while keeping its accessible name', () => {
+    render(<GrigliataPage />);
+
+    const tokensTab = screen.getByRole('tab', { name: /tokens/i });
+
+    expect(tokensTab).toHaveAttribute('aria-label', 'Tokens');
+    expect(tokensTab).not.toHaveTextContent(/tokens/i);
+    expect(tokensTab.querySelector('svg')).toBeInTheDocument();
+  });
+
+  test('rolls current-user parameter dice with the anima die and parameter total', async () => {
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'player',
+        stats: {
+          level: 3,
+        },
+        Parametri: {
+          Base: {
+            Forza: { Tot: 4 },
+          },
+          Combattimento: {
+            Attacco: { Tot: 5 },
+          },
+        },
+        settings: {
+          grigliata_draw_color: 'ion-cyan',
+          grigliata_share_interactions: false,
+        },
+        imageUrl: '',
+        imagePath: '',
+      },
+      loading: false,
+    });
+    setDocData('utils/varie', {
+      dadiAnimaByLevel: [null, 'd4', 'd6', 'd8'],
+    });
+
+    render(<GrigliataPage />);
+    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
+
+    const attackRollButton = await screen.findByRole('button', { name: /roll attacco/i });
+    await waitFor(() => {
+      expect(attackRollButton).toBeEnabled();
+      expect(screen.getByText('d8 + 5')).toBeInTheDocument();
+    });
+    fireEvent.click(attackRollButton);
+
+    expect(screen.getByTestId('dice-roller')).toHaveTextContent(
+      'faces:8;count:1;modifier:5;description:Attacco (d8 + 5)'
+    );
+  });
+
+  test('renders base and combat parameters as compact side-by-side columns', async () => {
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'player',
+        stats: {
+          level: 3,
+        },
+        Parametri: {
+          Base: {
+            Forza: { Tot: 4 },
+          },
+          Combattimento: {
+            Attacco: { Tot: 5 },
+          },
+        },
+        settings: {
+          grigliata_draw_color: 'ion-cyan',
+          grigliata_share_interactions: false,
+        },
+        imageUrl: '',
+        imagePath: '',
+      },
+      loading: false,
+    });
+    setDocData('utils/varie', {
+      dadiAnimaByLevel: [null, 'd4', 'd6', 'd8'],
+    });
+
+    render(<GrigliataPage />);
+    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
+
+    const parameterGrid = await screen.findByTestId('grigliata-dice-parameter-grid');
+    expect(parameterGrid).toHaveClass('md:grid-cols-2');
+    expect(screen.getByRole('heading', { name: /^base$/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /^combat$/i })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /base parameters/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /combat parameters/i })).not.toBeInTheDocument();
+
+    const forzaRollButton = screen.getByRole('button', { name: /roll forza/i });
+    await waitFor(() => expect(forzaRollButton).toHaveTextContent('d8 + 4'));
+    expect(forzaRollButton).not.toHaveTextContent(/Roll/i);
+  });
+
+  test('rolls normal dice with the selected dice count and modifier', async () => {
+    render(<GrigliataPage />);
+    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
+
+    fireEvent.change(screen.getByLabelText(/dice count/i), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText(/dice modifier/i), { target: { value: '-2' } });
+    fireEvent.click(screen.getByRole('button', { name: /roll d6/i }));
+
+    expect(screen.getByTestId('dice-roller')).toHaveTextContent(
+      'faces:6;count:3;modifier:-2;description:Normal dice (3d6-2)'
+    );
+  });
+
+  test('shows the current user dice roll history in the dice tab', async () => {
+    setCollectionData('users/user-1/diceRolls', [{
+      id: 'roll-1',
+      total: 17,
+      createdAt: { toDate: () => new Date('2026-06-18T12:30:00.000Z') },
+      meta: {
+        count: 3,
+        faces: 6,
+        modifier: -1,
+        description: 'Normal dice (3d6-1)',
+        rolls: [6, 6, 6],
+      },
+    }]);
+
+    render(<GrigliataPage />);
+    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
+
+    const history = await screen.findByTestId('grigliata-current-dice-history');
+    expect(history.closest('[role="tabpanel"]')).toHaveClass('xl:h-full', 'xl:min-h-0');
+    expect(history).toHaveClass('flex', 'flex-col', 'xl:flex-1', 'xl:min-h-0');
+    expect(history).toHaveTextContent('Roll History');
+    expect(history).toHaveTextContent('17');
+    expect(history).toHaveTextContent('3d6-1');
+    expect(history).toHaveTextContent('Normal dice (3d6-1)');
+    expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'users/user-1/diceRolls')).toBe(true);
+    expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'users')).toBe(false);
+  });
+
+  test('shows all users dice roll logs only for managers', async () => {
+    setManagerAuth();
+    setCollectionData('users', [
+      {
+        id: 'user-1',
+        characterId: 'Dungeon Master',
+        role: 'dm',
+      },
+      {
+        id: 'user-2',
+        characterId: 'Bran',
+        role: 'player',
+      },
+    ]);
+    setCollectionData('users/user-2/diceRolls', [{
+      id: 'roll-1',
+      total: 13,
+      createdAt: { toDate: () => new Date('2026-06-18T12:30:00.000Z') },
+      meta: {
+        count: 1,
+        faces: 8,
+        modifier: 5,
+        description: 'Attacco (d8 + 5)',
+        rolls: [8],
+      },
+    }]);
+
+    const { rerender } = render(<GrigliataPage />);
+    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
+
+    expect(await screen.findByText('Bran')).toBeInTheDocument();
+    expect(screen.getByText('13')).toBeInTheDocument();
+    expect(screen.getByText('Attacco (d8 + 5)')).toBeInTheDocument();
+    expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'users')).toBe(true);
+    expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'users/user-2/diceRolls')).toBe(true);
+
+    firestore.collection.mockClear();
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'player',
+        settings: {
+          grigliata_draw_color: 'ion-cyan',
+          grigliata_share_interactions: false,
+        },
+        imageUrl: '',
+        imagePath: '',
+      },
+      loading: false,
+    });
+    rerender(<GrigliataPage />);
+    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
+
+    expect(screen.queryByText('Bran')).not.toBeInTheDocument();
+    expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'users')).toBe(false);
   });
 
   test('toggles the current user Grigliata music mute preference', async () => {
