@@ -4277,7 +4277,7 @@ describe('GrigliataBoard', () => {
     await screen.findByTestId('battlemap-image-active');
 
     expect(screen.getByTestId('narration-overlay-badge')).toHaveTextContent('Narration');
-    expect(screen.getByText(/Iron Keep\s+\|\s+Narration scene over Sunken Ruins/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Iron Keep\s+\|\s+Narration scene over Sunken Ruins/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId('grid-layer')).not.toBeInTheDocument();
     expect(screen.queryByTestId('token-node-current-user')).not.toBeInTheDocument();
     expect(screen.queryByTestId('aoe-figure-overlay-map-1__current-user__circle__1')).not.toBeInTheDocument();
