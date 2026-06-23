@@ -6423,6 +6423,28 @@ describe('GrigliataPage', () => {
     expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'users')).toBe(false);
   });
 
+  test('keeps dice sidebar sections height-constrained on full hd manager views', async () => {
+    setManagerAuth();
+
+    render(<GrigliataPage />);
+    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
+
+    const panel = await screen.findByTestId('grigliata-dice-panel');
+    const parameterGrid = screen.getByTestId('grigliata-dice-parameter-grid');
+    const history = screen.getByTestId('grigliata-current-dice-history');
+
+    expect(panel).toHaveClass(
+      'xl:grid',
+      'xl:h-full',
+      'xl:min-h-0',
+      'xl:overflow-hidden',
+      'xl:grid-rows-[auto_minmax(0,1fr)_minmax(8rem,0.45fr)_auto]'
+    );
+    expect(parameterGrid).toHaveClass('xl:min-h-0');
+    expect(parameterGrid).not.toHaveClass('xl:shrink-0');
+    expect(history).toHaveClass('xl:min-h-0');
+  });
+
   test('opens DM dice roll logs in an overlay and fetches only the selected user', async () => {
     setManagerAuth();
     setCollectionData('users', [
