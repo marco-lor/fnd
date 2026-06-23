@@ -546,8 +546,12 @@ export default function GrigliataDicePanel({ currentUserId, userData, isManager 
     });
   };
 
+  const panelGridRowsClassName = isManager
+    ? 'xl:grid-rows-[auto_minmax(0,1fr)_minmax(8rem,0.45fr)_auto]'
+    : 'xl:grid-rows-[auto_minmax(0,1fr)_minmax(8rem,0.45fr)]';
+
   const renderParameterGroup = (title, rows) => (
-    <section className="rounded-xl border border-slate-700 bg-slate-950/75 p-2.5 shadow-2xl backdrop-blur-sm">
+    <section className="flex min-h-0 flex-col rounded-xl border border-slate-700 bg-slate-950/75 p-2.5 shadow-2xl backdrop-blur-sm">
       <div className="mb-2.5 flex items-center justify-between gap-2">
         <h3 className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-300">{title}</h3>
         <span className="rounded-full border border-indigo-300/30 bg-indigo-400/10 px-1.5 py-0.5 text-[10px] font-medium text-indigo-200">
@@ -557,7 +561,7 @@ export default function GrigliataDicePanel({ currentUserId, userData, isManager 
       {!rows.length ? (
         <p className="text-xs italic text-slate-500">No parameters available.</p>
       ) : (
-        <div className="grid grid-cols-1 gap-2">
+        <div className="grid grid-cols-1 gap-2 xl:min-h-0 xl:overflow-y-auto xl:pr-1 custom-scroll">
           {rows.map((row) => (
             <button
               key={row.name}
@@ -582,7 +586,10 @@ export default function GrigliataDicePanel({ currentUserId, userData, isManager 
   );
 
   return (
-    <div className="flex flex-col gap-3 xl:h-full xl:min-h-0">
+    <div
+      data-testid="grigliata-dice-panel"
+      className={`flex flex-col gap-3 xl:grid xl:h-full xl:min-h-0 xl:overflow-hidden ${panelGridRowsClassName}`}
+    >
       <section className="rounded-2xl border border-slate-700 bg-slate-950/75 p-3 shadow-2xl backdrop-blur-sm xl:shrink-0">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
@@ -639,7 +646,7 @@ export default function GrigliataDicePanel({ currentUserId, userData, isManager 
         </div>
       </section>
 
-      <div data-testid="grigliata-dice-parameter-grid" className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:shrink-0">
+      <div data-testid="grigliata-dice-parameter-grid" className="grid min-h-0 grid-cols-1 gap-3 md:grid-cols-2 xl:min-h-0">
         {renderParameterGroup('Base', baseRows)}
         {renderParameterGroup('Combat', combatRows)}
       </div>
