@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import GrigliataPage from './GrigliataPage';
 import { useAuth } from '../../AuthContext';
 import { useShellLayout } from '../common/shellLayout';
@@ -6423,7 +6423,7 @@ describe('GrigliataPage', () => {
     expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'users')).toBe(false);
   });
 
-  test('shows all users dice roll logs only for managers', async () => {
+  test('opens DM dice roll logs in an overlay and fetches only the selected user', async () => {
     setManagerAuth();
     setCollectionData('users', [
       {
@@ -6450,36 +6450,199 @@ describe('GrigliataPage', () => {
       },
     }]);
 
-    const { rerender } = render(<GrigliataPage />);
+    render(<GrigliataPage />);
     fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
 
-    expect(await screen.findByText('Bran')).toBeInTheDocument();
-    expect(screen.getByText('13')).toBeInTheDocument();
-    expect(screen.getByText('Attacco (d8 + 5)')).toBeInTheDocument();
+    const dmLogsButton = await screen.findByRole('button', { name: /dm dice logs/i });
+    expect(dmLogsButton).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(screen.queryByRole('heading', { name: /dice roll logs/i })).not.toBeInTheDocument();
+    expect(screen.queryByText('Attacco (d8 + 5)')).not.toBeInTheDocument();
     expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'users')).toBe(true);
-    expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'users/user-2/diceRolls')).toBe(true);
+    expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'users/user-2/diceRolls')).toBe(false);
 
-    firestore.collection.mockClear();
-    useAuth.mockReturnValue({
-      user: {
-        uid: 'user-1',
-        email: 'user-1@example.com',
-      },
-      userData: {
+    fireEvent.click(dmLogsButton);
+
+    const dialog = await screen.findByRole('dialog', { name: /dm dice roll logs/i });
+    expect(dialog).toBeInTheDocument();
+    expect(dialog).toHaveClass('h-[min(760px,calc(100vh-3rem))]');
+    expect(dialog).not.toHaveClass('max-h-[min(760px,calc(100vh-3rem))]');
+    expect(within(dialog).getByRole('button', { name: /dungeon master/i })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /bran/i })).toHaveAttribute('aria-pressed', 'false');
+    await waitFor(() => expect(firestore.getDocs).toHaveBeenCalled());
+    firestore.getDocs.mockClear();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /bran/i }));
+
+    await waitFor(() => expect(within(dialog).getByText('Attacco (d8 + 5)')).toBeInTheDocument());
+    expect(within(dialog).getByText('Attacco (d8 + 5)')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /bran/i })).toHaveAttribute('aria-pressed', 'true');
+    expect(firestore.getDocs).toHaveBeenCalled();
+    expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'users/user-2/diceRolls')).toBe(true);
+    expect(firestore.getDocs.mock.calls.some(([target]) => target?.base?.path === 'users/user-2/diceRolls')).toBe(true);
+    expect(firestore.getDocs.mock.calls.some(([target]) => target?.base?.path === 'users/user-1/diceRolls')).toBe(false);
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => target?.base?.path === 'users/user-2/diceRolls')).toBe(false);
+  });
+
+  test('loads older selected-user dice logs with pagination in the DM overlay', async () => {
+    setManagerAuth();
+    setCollectionData('users', [
+      {
+        id: 'user-2',
+        characterId: 'Bran',
         role: 'player',
-        settings: {
-          grigliata_draw_color: 'ion-cyan',
-          grigliata_share_interactions: false,
-        },
-        imageUrl: '',
-        imagePath: '',
       },
-      loading: false,
+    ]);
+    const firstPageDoc = {
+      id: 'roll-first',
+      total: 13,
+      createdAt: { toDate: () => new Date('2026-06-18T12:30:00.000Z') },
+      meta: {
+        count: 1,
+        faces: 8,
+        modifier: 5,
+        description: 'Attacco (d8 + 5)',
+        rolls: [8],
+      },
+    };
+    const secondPageDoc = {
+      id: 'roll-second',
+      total: 4,
+      createdAt: { toDate: () => new Date('2026-06-18T11:30:00.000Z') },
+      meta: {
+        count: 1,
+        faces: 4,
+        modifier: 0,
+        description: 'Normal dice (1d4)',
+        rolls: [4],
+      },
+    };
+    const firstPageDocs = [
+      firstPageDoc,
+      ...Array.from({ length: 19 }, (_, index) => ({
+        id: `roll-filler-${index + 1}`,
+        total: index + 1,
+        createdAt: { toDate: () => new Date(`2026-06-18T10:${String(index).padStart(2, '0')}:00.000Z`) },
+        meta: {
+          count: 1,
+          faces: 6,
+          modifier: 0,
+          description: `Normal dice (1d6) ${index + 1}`,
+          rolls: [index + 1],
+        },
+      })),
+    ];
+    const branRollPages = [
+      mockCreateQuerySnapshot('users/user-2/diceRolls', firstPageDocs),
+      mockCreateQuerySnapshot('users/user-2/diceRolls', [secondPageDoc]),
+    ];
+    firestore.getDocs.mockImplementation((target) => {
+      if (target?.base?.path === 'users/user-2/diceRolls') {
+        return Promise.resolve(branRollPages.shift() || mockCreateQuerySnapshot('users/user-2/diceRolls', []));
+      }
+
+      return Promise.resolve(mockBuildSnapshotForTarget(target) || mockCreateQuerySnapshot('', []));
     });
-    rerender(<GrigliataPage />);
+
+    render(<GrigliataPage />);
+    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /dm dice logs/i }));
+    const dialog = await screen.findByRole('dialog', { name: /dm dice roll logs/i });
+
+    await waitFor(() => expect(within(dialog).getByText('Attacco (d8 + 5)')).toBeInTheDocument());
+    expect(within(dialog).queryByText('Normal dice (1d4)')).not.toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /load more/i }));
+
+    await waitFor(() => expect(within(dialog).getByText('Normal dice (1d4)')).toBeInTheDocument());
+    expect(firestore.getDocs.mock.calls.filter(([target]) => target?.base?.path === 'users/user-2/diceRolls')).toHaveLength(2);
+    expect(firestore.startAfter).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'roll-filler-19',
+    }));
+    expect(firestore.query.mock.calls[firestore.query.mock.calls.length - 1][1]).toEqual(expect.objectContaining({
+      kind: 'orderBy',
+      field: 'createdAt',
+    }));
+    expect(firestore.query.mock.calls[firestore.query.mock.calls.length - 1][2]).toEqual(expect.objectContaining({
+      kind: 'startAfter',
+    }));
+  });
+
+  test('keeps DM dice log content stable while switching users', async () => {
+    setManagerAuth();
+    setCollectionData('users', [
+      {
+        id: 'user-1',
+        characterId: 'Dungeon Master',
+        role: 'dm',
+      },
+      {
+        id: 'user-2',
+        characterId: 'Bran',
+        role: 'player',
+      },
+    ]);
+    const branLogs = createDeferred();
+    firestore.getDocs.mockImplementation((target) => {
+      if (target?.base?.path === 'users/user-1/diceRolls') {
+        return Promise.resolve(mockCreateQuerySnapshot('users/user-1/diceRolls', [{
+          id: 'dm-roll',
+          total: 20,
+          createdAt: { toDate: () => new Date('2026-06-18T12:30:00.000Z') },
+          meta: {
+            count: 1,
+            faces: 20,
+            modifier: 0,
+            description: 'DM setup (1d20)',
+            rolls: [20],
+          },
+        }]));
+      }
+
+      if (target?.base?.path === 'users/user-2/diceRolls') {
+        return branLogs.promise;
+      }
+
+      return Promise.resolve(mockBuildSnapshotForTarget(target) || mockCreateQuerySnapshot('', []));
+    });
+
+    render(<GrigliataPage />);
+    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /dm dice logs/i }));
+    const dialog = await screen.findByRole('dialog', { name: /dm dice roll logs/i });
+
+    await waitFor(() => expect(within(dialog).getByText('DM setup (1d20)')).toBeInTheDocument());
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /bran/i }));
+
+    await waitFor(() => expect(within(dialog).getByText('Loading')).toBeInTheDocument());
+    expect(within(dialog).getByRole('button', { name: /bran/i })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(dialog).getByText('DM setup (1d20)')).toBeInTheDocument();
+    expect(within(dialog).queryByText('No rolls found for this user.')).not.toBeInTheDocument();
+
+    await act(async () => {
+      branLogs.resolve(mockCreateQuerySnapshot('users/user-2/diceRolls', [{
+        id: 'bran-roll',
+        total: 9,
+        createdAt: { toDate: () => new Date('2026-06-18T12:35:00.000Z') },
+        meta: {
+          count: 1,
+          faces: 8,
+          modifier: 1,
+          description: 'Bran attack (1d8+1)',
+          rolls: [8],
+        },
+      }]));
+    });
+
+    await waitFor(() => expect(within(dialog).getByText('Bran attack (1d8+1)')).toBeInTheDocument());
+    expect(within(dialog).queryByText('DM setup (1d20)')).not.toBeInTheDocument();
+  });
+
+  test('does not show DM dice roll logs or subscribe to all users for players', async () => {
+    render(<GrigliataPage />);
     fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
 
-    expect(screen.queryByText('Bran')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /dm dice logs/i })).not.toBeInTheDocument();
     expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'users')).toBe(false);
   });
 
