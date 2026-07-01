@@ -6278,14 +6278,40 @@ describe('GrigliataPage', () => {
     expect(screen.getByRole('tab', { name: /music/i })).toBeInTheDocument();
   });
 
-  test('renders the tokens tab as an icon while keeping its accessible name', () => {
+  test('renders sidebar tabs as icons while keeping accessible names and hover titles', () => {
     render(<GrigliataPage />);
 
     const tokensTab = screen.getByRole('tab', { name: /tokens/i });
 
     expect(tokensTab).toHaveAttribute('aria-label', 'Tokens');
+    expect(tokensTab).toHaveAttribute('title', 'Tokens');
     expect(tokensTab).not.toHaveTextContent(/tokens/i);
     expect(tokensTab.querySelector('svg')).toBeInTheDocument();
+
+    setManagerAuth();
+    render(<GrigliataPage />);
+
+    ['DM Gallery', 'Music', 'Map Calibration', 'Lighting'].forEach((label) => {
+      const tab = screen.getByRole('tab', { name: label });
+
+      expect(tab).toHaveAttribute('aria-label', label);
+      expect(tab).toHaveAttribute('title', label);
+      expect(tab).not.toHaveTextContent(label);
+      expect(tab.querySelector('svg')).toBeInTheDocument();
+    });
+  });
+
+  test('lays out icon sidebar tabs as an equal-width wrapping strip', () => {
+    setManagerAuth();
+    render(<GrigliataPage />);
+
+    const tabList = screen.getByRole('tablist', { name: 'Grigliata sidebar tabs' });
+    const musicTab = screen.getByRole('tab', { name: 'Music' });
+
+    expect(tabList).toHaveClass('flex', 'flex-wrap', 'gap-2');
+    expect(tabList).not.toHaveClass('grid-cols-2');
+    expect(musicTab).toHaveClass('h-9', 'min-w-9', 'flex-1', 'p-0');
+    expect(musicTab).not.toHaveClass('w-9', 'flex-none');
   });
 
   test('rolls current-user parameter dice with the anima die and parameter total', async () => {

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FaDiceD20 } from 'react-icons/fa';
+import { FiImage, FiMap, FiMusic, FiSun } from 'react-icons/fi';
 import { GiCrackedHelm } from 'react-icons/gi';
 import {
   addDoc,
@@ -380,15 +381,7 @@ const isPermissionDeniedError = (error) => (
   || error?.code === 'firestore/permission-denied'
   || error?.code === 'functions/permission-denied'
 );
-const SIDEBAR_TAB_GRID_CLASS_NAMES = {
-  1: 'grid grid-cols-1 gap-2',
-  2: 'grid grid-cols-2 gap-2',
-  3: 'grid grid-cols-3 gap-2',
-  4: 'grid grid-cols-2 gap-2',
-  5: 'grid grid-cols-2 gap-2',
-  6: 'grid grid-cols-2 gap-2',
-};
-const DEFAULT_SIDEBAR_TAB_GRID_CLASS_NAME = SIDEBAR_TAB_GRID_CLASS_NAMES[3];
+const SIDEBAR_TAB_LIST_CLASS_NAME = 'flex flex-wrap gap-2';
 const MAX_DEFERRED_GALLERY_IMAGE_PRELOADS = 6;
 const collectUniqueImageUrls = (urls) => [...new Set(
   (urls || []).map((url) => (typeof url === 'string' ? url.trim() : '')).filter(Boolean)
@@ -1518,18 +1511,16 @@ export default function GrigliataPage() {
       ? [
         { key: 'tokens', label: 'Tokens', Icon: GiCrackedHelm },
         { key: 'dice', label: 'Dice', Icon: FaDiceD20 },
-        { key: 'gallery', label: 'DM Gallery' },
-        { key: 'music', label: 'Music' },
-        { key: 'calibration', label: 'Map Calibration' },
-        { key: 'lighting', label: 'Lighting' },
+        { key: 'gallery', label: 'DM Gallery', Icon: FiImage },
+        { key: 'music', label: 'Music', Icon: FiMusic },
+        { key: 'calibration', label: 'Map Calibration', Icon: FiMap },
+        { key: 'lighting', label: 'Lighting', Icon: FiSun },
       ]
       : [
         { key: 'tokens', label: 'Tokens', Icon: GiCrackedHelm },
         { key: 'dice', label: 'Dice', Icon: FaDiceD20 },
       ]
   ), [isManager]);
-  const sidebarTabListClassName = SIDEBAR_TAB_GRID_CLASS_NAMES[sidebarTabs.length]
-    || DEFAULT_SIDEBAR_TAB_GRID_CLASS_NAME;
   const isGallerySidebarActive = isManager && activeSidebarTab === 'gallery';
   const isCompactFullHeightSidebarTab = activeSidebarTab === 'dice' || (isManager && ['gallery', 'music'].includes(activeSidebarTab));
   const immediateImageUrls = useMemo(() => collectUniqueImageUrls([
@@ -6332,7 +6323,7 @@ export default function GrigliataPage() {
 
             <div className="rounded-2xl border border-slate-700 bg-slate-950/75 p-2 shadow-2xl backdrop-blur-sm">
               <div
-                className={sidebarTabListClassName}
+                className={SIDEBAR_TAB_LIST_CLASS_NAME}
                 role="tablist"
                 aria-label="Grigliata sidebar tabs"
               >
@@ -6346,17 +6337,17 @@ export default function GrigliataPage() {
                       type="button"
                       role="tab"
                       aria-selected={isActive}
-                      aria-label={TabIcon ? tab.label : undefined}
+                      aria-label={tab.label}
                       aria-controls={`grigliata-sidebar-panel-${tab.key}`}
-                      title={TabIcon ? tab.label : undefined}
+                      title={tab.label}
                       onClick={() => setActiveSidebarTab(tab.key)}
-                      className={`inline-flex items-center justify-center rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition-colors ${
+                      className={`inline-flex h-9 min-w-9 flex-1 items-center justify-center rounded-xl p-0 text-xs font-semibold uppercase tracking-[0.16em] transition-colors ${
                         isActive
                           ? 'bg-amber-400 text-black shadow-lg'
                           : 'border border-slate-700 bg-slate-900/70 text-slate-300 hover:bg-slate-800'
                       }`}
                     >
-                      {TabIcon ? <TabIcon className="h-4 w-4" aria-hidden="true" /> : tab.label}
+                      <TabIcon className="h-4 w-4" aria-hidden="true" />
                     </button>
                   );
                 })}
