@@ -19,6 +19,7 @@ import {
   FiImage,
   FiMinus,
   FiMoon,
+  FiMove,
   FiPlay,
   FiPlus,
   FiRotateCcw,
@@ -185,6 +186,7 @@ const isWaypointEligibleInteraction = (interaction) => (
 
 const shouldSuppressTokenTurnOrderMenu = (interaction) => (
   interaction?.type === 'token-candidate'
+  || interaction?.type === 'measure-candidate'
   || isWaypointEligibleInteraction(interaction)
 );
 
@@ -2349,6 +2351,7 @@ export default function GrigliataBoard({
   isTokenDragActive,
   activeTrayDragType = '',
   isRulerEnabled,
+  isRulerTokenMovementEnabled = false,
   activeAoeFigureType = '',
   isInteractionSharingEnabled = false,
   isMusicMuted = false,
@@ -2356,6 +2359,7 @@ export default function GrigliataBoard({
   drawTheme,
   onSelectMouseTool,
   onToggleRuler,
+  onToggleRulerTokenMovement,
   onChangeAoeFigureType,
   onToggleInteractionSharing,
   onToggleMusicMuted,
@@ -2422,6 +2426,7 @@ export default function GrigliataBoard({
   const interactionRef = useRef(null);
   const pingHoldTimeoutRef = useRef(null);
   const pingBroadcastClearTimeoutRef = useRef(null);
+  const suppressNextTokenContextMenuRef = useRef(false);
   const nextLocalPingIdRef = useRef(0);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
@@ -3162,6 +3167,37 @@ export default function GrigliataBoard({
     }, MAP_PING_BROADCAST_CLEAR_MS);
   }, [clearPingBroadcastTimer, resolvedDrawTheme.key, updateActiveSharedInteraction]);
 
+  const schedulePingHoldForActiveInteraction = useCallback((expectedTypes) => {
+    const activeInteraction = interactionRef.current;
+    const activePingPoint = activeInteraction?.pingWorld || activeInteraction?.startWorld;
+    if (
+      !activeInteraction?.canTriggerPing
+      || !Number.isFinite(activePingPoint?.x)
+      || !Number.isFinite(activePingPoint?.y)
+    ) {
+      return;
+    }
+
+    clearPingHoldTimer();
+    const expectedTypeSet = new Set(Array.isArray(expectedTypes) ? expectedTypes : [expectedTypes]);
+    pingHoldTimeoutRef.current = window.setTimeout(() => {
+      pingHoldTimeoutRef.current = null;
+      const currentInteraction = interactionRef.current;
+      if (
+        !expectedTypeSet.has(currentInteraction?.type)
+        || !currentInteraction.canTriggerPing
+      ) {
+        return;
+      }
+
+      spawnMapPing(currentInteraction.pingWorld || currentInteraction.startWorld, { broadcast: true });
+      interactionRef.current = {
+        ...currentInteraction,
+        type: 'ping-hold',
+      };
+    }, MAP_PING_HOLD_DELAY_MS);
+  }, [clearPingHoldTimer, spawnMapPing]);
+
   useEffect(() => {
     const element = containerRef.current;
     if (!element) return undefined;
@@ -3700,6 +3736,229 @@ export default function GrigliataBoard({
     syncSharedMeasureInteraction,
   ]);
 
+  const beginActiveBoardToolInteraction = useCallback((nativeEvent) => {
+    if (isNarrationOverlayActive || !isPrimaryMouseButton(nativeEvent)) {
+      return false;
+    }
+
+    const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
+    if (!pointerWorld) {
+      return false;
+    }
+
+    if (isWallToolActive && wallSourceControls?.onCreateWallSegment) {
+      clearPingHoldTimer();
+      nativeEvent.preventDefault?.();
+
+      if (isWallSourcePending) {
+        return true;
+      }
+
+      setMeasurementState(null);
+      setAoEPreviewState(null);
+      setSelectedAoEFigureId('');
+      clearActiveSharedInteraction();
+      setSelectedTokenIds([]);
+      setSelectedLightId('');
+      setSelectedDarknessId('');
+      setSelectedWallId('');
+      setSelectionBox(null);
+
+      const preview = {
+        startPoint: pointerWorld,
+        endPoint: pointerWorld,
+      };
+      setWallCreatePreview(preview);
+      interactionRef.current = {
+        type: 'wall-create',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startWorld: pointerWorld,
+        endPoint: pointerWorld,
+      };
+      return true;
+    }
+
+    if (isLightToolActive && lightSourceControls?.onCreateLightSource) {
+      clearPingHoldTimer();
+      nativeEvent.preventDefault?.();
+
+      if (isLightSourcePending) {
+        return true;
+      }
+
+      setMeasurementState(null);
+      setAoEPreviewState(null);
+      setSelectedAoEFigureId('');
+      clearActiveSharedInteraction();
+      setSelectedTokenIds([]);
+      setSelectedDarknessId('');
+      setSelectedWallId('');
+      setSelectionBox(null);
+
+      interactionRef.current = {
+        type: 'light-create',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startWorld: pointerWorld,
+        point: pointerWorld,
+      };
+      return true;
+    }
+
+    if (isDarknessToolActive && darknessSourceControls?.onCreateDarknessSource) {
+      clearPingHoldTimer();
+      nativeEvent.preventDefault?.();
+
+      if (isDarknessSourcePending) {
+        return true;
+      }
+
+      setMeasurementState(null);
+      setAoEPreviewState(null);
+      setSelectedAoEFigureId('');
+      clearActiveSharedInteraction();
+      setSelectedTokenIds([]);
+      setSelectedLightId('');
+      setSelectedDarknessId('');
+      setSelectedWallId('');
+      setSelectionBox(null);
+
+      interactionRef.current = {
+        type: 'darkness-create',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startWorld: pointerWorld,
+        point: pointerWorld,
+      };
+      return true;
+    }
+
+    if (isFogBrushToolActive && fogBrushControls?.onPaintFogBrush) {
+      clearPingHoldTimer();
+      nativeEvent.preventDefault?.();
+      setMeasurementState(null);
+      setAoEPreviewState(null);
+      setSelectedAoEFigureId('');
+      clearActiveSharedInteraction();
+      setSelectedTokenIds([]);
+      setSelectedLightId('');
+      setSelectedDarknessId('');
+      setSelectedWallId('');
+      setSelectionBox(null);
+
+      paintFogBrushAtPoint(pointerWorld);
+      interactionRef.current = {
+        type: 'fog-brush',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startWorld: pointerWorld,
+        lastWorld: pointerWorld,
+      };
+      return true;
+    }
+
+    if (activeAoeFigureType) {
+      clearPingHoldTimer();
+      nativeEvent.preventDefault?.();
+      setMeasurementState(null);
+      setAoEPreviewState(null);
+      setSelectedAoEFigureId('');
+      clearActiveSharedInteraction();
+      setSelectedTokenIds([]);
+      setSelectedLightId('');
+      setSelectedDarknessId('');
+      setSelectedWallId('');
+      setSelectionBox(null);
+
+      const startCell = snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center');
+      const draft = {
+        figureType: activeAoeFigureType,
+        originCell: {
+          col: startCell.col,
+          row: startCell.row,
+        },
+        targetCell: {
+          col: startCell.col,
+          row: startCell.row,
+        },
+      };
+
+      interactionRef.current = {
+        type: 'aoe-create',
+        source: 'aoe-create',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startWorld: pointerWorld,
+        draft,
+      };
+      setAoEPreviewState(buildAoEFigureForDraft(draft));
+      syncSharedAoEInteraction(draft, 'aoe-create');
+      return true;
+    }
+
+    if (isRulerEnabled) {
+      clearPingHoldTimer();
+      nativeEvent.preventDefault?.();
+      setMeasurementState(null);
+      setAoEPreviewState(null);
+      setSelectedAoEFigureId('');
+      clearActiveSharedInteraction();
+      setSelectedTokenIds([]);
+      setSelectedLightId('');
+      setSelectedDarknessId('');
+      setSelectedWallId('');
+      setSelectionBox(null);
+
+      const startCell = snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center');
+      interactionRef.current = {
+        type: 'measure-candidate',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startWorld: pointerWorld,
+        anchorCells: [startCell],
+        measurementSource: 'free',
+      };
+      return true;
+    }
+
+    return false;
+  }, [
+    activeAoeFigureType,
+    buildAoEFigureForDraft,
+    clearActiveSharedInteraction,
+    clearPingHoldTimer,
+    darknessSourceControls,
+    fogBrushControls,
+    getWorldPointFromClient,
+    isDarknessSourcePending,
+    isDarknessToolActive,
+    isFogBrushToolActive,
+    isLightSourcePending,
+    isLightToolActive,
+    isNarrationOverlayActive,
+    isRulerEnabled,
+    isWallSourcePending,
+    isWallToolActive,
+    lightSourceControls,
+    normalizedGrid,
+    paintFogBrushAtPoint,
+    syncSharedAoEInteraction,
+    wallSourceControls,
+  ]);
+
   const applyScale = (nextScale, pointer) => {
     const safeScale = Math.min(
       MAX_GRIGLIATA_VIEWPORT_SCALE,
@@ -3857,6 +4116,11 @@ export default function GrigliataBoard({
       return;
     }
 
+    if (activeInteraction.type === 'ping-candidate') {
+      clearActiveSharedInteraction();
+      return;
+    }
+
     if (isPingHoldInteraction(activeInteraction)) {
       return;
     }
@@ -3987,6 +4251,10 @@ export default function GrigliataBoard({
     }
 
     if (activeInteraction.type === 'pan') {
+      return;
+    }
+
+    if (activeInteraction.type === 'token-context-candidate') {
       return;
     }
 
@@ -4275,13 +4543,41 @@ export default function GrigliataBoard({
         return;
       }
 
-      const pointerWorld = getWorldPointFromClient(event.clientX, event.clientY);
-      if (!pointerWorld) return;
-
       const hasMovedBeyondThreshold = (
         Math.abs(event.clientX - activeInteraction.startClient.x) >= POINTER_DRAG_THRESHOLD_PX
         || Math.abs(event.clientY - activeInteraction.startClient.y) >= POINTER_DRAG_THRESHOLD_PX
       );
+
+      if (activeInteraction.type === 'token-context-candidate') {
+        if (!hasMovedBeyondThreshold) return;
+
+        suppressNextTokenContextMenuRef.current = true;
+        const nextInteraction = {
+          type: 'pan',
+          startClient: activeInteraction.startClient,
+          startViewport: activeInteraction.startViewport,
+        };
+        interactionRef.current = nextInteraction;
+        setViewport({
+          ...activeInteraction.startViewport,
+          x: activeInteraction.startViewport.x + (event.clientX - activeInteraction.startClient.x),
+          y: activeInteraction.startViewport.y + (event.clientY - activeInteraction.startClient.y),
+        });
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      if (activeInteraction.type === 'ping-candidate') {
+        if (!hasMovedBeyondThreshold) return;
+
+        clearPingHoldTimer();
+        interactionRef.current = null;
+        clearActiveSharedInteraction();
+        return;
+      }
+
+      const pointerWorld = getWorldPointFromClient(event.clientX, event.clientY);
+      if (!pointerWorld) return;
 
       if (activeInteraction.type === 'fog-brush') {
         paintFogBrushAtPoint(pointerWorld);
@@ -4516,20 +4812,21 @@ export default function GrigliataBoard({
       if (activeInteraction.type === 'token-candidate') {
         if (!hasMovedBeyondThreshold) return;
 
+        clearPingHoldTimer();
+        const draggedOriginToken = activeInteraction.originTokens.find(
+          (originToken) => originToken.tokenId === activeInteraction.draggedTokenId
+        );
+        const shouldMeasureTokenDrag = activeInteraction.measurementSource === 'token-drag';
         const nextInteraction = {
           ...activeInteraction,
           type: 'token-drag',
-          anchorCells: isRulerEnabled
+          anchorCells: shouldMeasureTokenDrag
             ? [{
-              col: activeInteraction.originTokens.find(
-                (originToken) => originToken.tokenId === activeInteraction.draggedTokenId
-              )?.col ?? 0,
-              row: activeInteraction.originTokens.find(
-                (originToken) => originToken.tokenId === activeInteraction.draggedTokenId
-              )?.row ?? 0,
+              col: draggedOriginToken?.col ?? 0,
+              row: draggedOriginToken?.row ?? 0,
             }]
             : null,
-          measurementSource: isRulerEnabled ? 'token-drag' : null,
+          measurementSource: shouldMeasureTokenDrag ? 'token-drag' : null,
         };
         interactionRef.current = nextInteraction;
         currentInteraction = nextInteraction;
@@ -4546,7 +4843,10 @@ export default function GrigliataBoard({
           deltaWorld: dragMeasurement.deltaWorld,
         });
 
-        if (isRulerEnabled && Array.isArray(currentInteraction.anchorCells)) {
+        if (
+          currentInteraction.measurementSource === 'token-drag'
+          && Array.isArray(currentInteraction.anchorCells)
+        ) {
           setMeasurementState(buildMeasurementForCells(
             currentInteraction.anchorCells,
             dragMeasurement.liveEndCell
@@ -4563,6 +4863,8 @@ export default function GrigliataBoard({
       if (!activeInteraction) return;
 
       if (activeInteraction.type === 'pan') {
+        if (!isSecondaryMouseButton(event)) return;
+      } else if (activeInteraction.type === 'token-context-candidate') {
         if (!isSecondaryMouseButton(event)) return;
       } else if (!isPrimaryMouseButton(event)) {
         return;
@@ -4756,6 +5058,18 @@ export default function GrigliataBoard({
     setPinnedOverflowTokenId('');
     clearPingHoldTimer();
 
+    if (
+      activeAoeFigureType
+      || isRulerEnabled
+      || isDarknessToolActive
+      || isWallToolActive
+      || isFogBrushToolActive
+    ) {
+      if (beginActiveBoardToolInteraction(nativeEvent)) {
+        return;
+      }
+    }
+
     if (!light?.id || isNarrationOverlayActive || activeAoeFigureType || isRulerEnabled || isLightSourcePending) {
       return;
     }
@@ -4790,13 +5104,17 @@ export default function GrigliataBoard({
     };
   }, [
     activeAoeFigureType,
+    beginActiveBoardToolInteraction,
     clearActiveSharedInteraction,
     clearPingHoldTimer,
     getWorldPointFromClient,
     handleSelectLightSource,
+    isDarknessToolActive,
+    isFogBrushToolActive,
     isNarrationOverlayActive,
     isLightSourcePending,
     isRulerEnabled,
+    isWallToolActive,
   ]);
 
   const handleDarknessSourceMouseDown = useCallback((darkness, event) => {
@@ -4807,6 +5125,18 @@ export default function GrigliataBoard({
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
     clearPingHoldTimer();
+
+    if (
+      activeAoeFigureType
+      || isRulerEnabled
+      || isLightToolActive
+      || isWallToolActive
+      || isFogBrushToolActive
+    ) {
+      if (beginActiveBoardToolInteraction(nativeEvent)) {
+        return;
+      }
+    }
 
     if (!darkness?.id || isNarrationOverlayActive || activeAoeFigureType || isRulerEnabled || isDarknessSourcePending) {
       return;
@@ -4844,13 +5174,17 @@ export default function GrigliataBoard({
     };
   }, [
     activeAoeFigureType,
+    beginActiveBoardToolInteraction,
     clearActiveSharedInteraction,
     clearPingHoldTimer,
     getWorldPointFromClient,
     handleSelectDarknessSource,
     isDarknessSourcePending,
+    isFogBrushToolActive,
+    isLightToolActive,
     isNarrationOverlayActive,
     isRulerEnabled,
+    isWallToolActive,
   ]);
 
   const handleSelectWallSource = useCallback((wallId) => {
@@ -4875,6 +5209,18 @@ export default function GrigliataBoard({
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
     clearPingHoldTimer();
+
+    if (
+      activeAoeFigureType
+      || isRulerEnabled
+      || isLightToolActive
+      || isDarknessToolActive
+      || isFogBrushToolActive
+    ) {
+      if (beginActiveBoardToolInteraction(nativeEvent)) {
+        return;
+      }
+    }
 
     if (!wall?.id || isNarrationOverlayActive || !isWallToolActive || isWallSourcePending) {
       return;
@@ -4908,11 +5254,17 @@ export default function GrigliataBoard({
       startWorld: pointerWorld,
     };
   }, [
+    activeAoeFigureType,
+    beginActiveBoardToolInteraction,
     clearActiveSharedInteraction,
     clearPingHoldTimer,
     getWorldPointFromClient,
     handleSelectWallSource,
+    isDarknessToolActive,
+    isFogBrushToolActive,
+    isLightToolActive,
     isNarrationOverlayActive,
+    isRulerEnabled,
     isWallSourcePending,
     isWallToolActive,
   ]);
@@ -4925,6 +5277,18 @@ export default function GrigliataBoard({
     setHoveredOverflowTokenId('');
     setPinnedOverflowTokenId('');
     clearPingHoldTimer();
+
+    if (
+      activeAoeFigureType
+      || isRulerEnabled
+      || isLightToolActive
+      || isDarknessToolActive
+      || isFogBrushToolActive
+    ) {
+      if (beginActiveBoardToolInteraction(nativeEvent)) {
+        return;
+      }
+    }
 
     if (!wall?.id || isNarrationOverlayActive || !isWallToolActive || isWallSourcePending) {
       return;
@@ -4957,18 +5321,23 @@ export default function GrigliataBoard({
       startWorld: pointerWorld,
     };
   }, [
+    activeAoeFigureType,
+    beginActiveBoardToolInteraction,
     clearActiveSharedInteraction,
     clearPingHoldTimer,
     getWorldPointFromClient,
     handleSelectWallSource,
+    isDarknessToolActive,
+    isFogBrushToolActive,
+    isLightToolActive,
     isNarrationOverlayActive,
+    isRulerEnabled,
     isWallSourcePending,
     isWallToolActive,
   ]);
 
   const handleStageMouseDown = (event) => {
     if (isTokenDragActive) return;
-    if (event.target !== stageRef.current) return;
 
     const nativeEvent = event.evt;
     setTurnOrderContextMenu(null);
@@ -5017,150 +5386,17 @@ export default function GrigliataBoard({
 
     clearPingHoldTimer();
 
-    if (isWallToolActive && wallSourceControls?.onCreateWallSegment && isWallSourcePending) {
-      return;
-    }
-
-    if (isLightToolActive && lightSourceControls?.onCreateLightSource && isLightSourcePending) {
-      return;
-    }
-
-    if (isDarknessToolActive && darknessSourceControls?.onCreateDarknessSource && isDarknessSourcePending) {
+    if (beginActiveBoardToolInteraction(nativeEvent)) {
       return;
     }
 
     setMeasurementState(null);
     setAoEPreviewState(null);
     setSelectedAoEFigureId('');
-    clearActiveSharedInteraction();
-
-    if (isWallToolActive && wallSourceControls?.onCreateWallSegment) {
-      setSelectedTokenIds([]);
-      setSelectedLightId('');
-      setSelectedDarknessId('');
-      setSelectedWallId('');
-      setSelectionBox(null);
-      const preview = {
-        startPoint: pointerWorld,
-        endPoint: pointerWorld,
-      };
-      setWallCreatePreview(preview);
-      interactionRef.current = {
-        type: 'wall-create',
-        startClient: {
-          x: nativeEvent.clientX,
-          y: nativeEvent.clientY,
-        },
-        startWorld: pointerWorld,
-        endPoint: pointerWorld,
-      };
-      return;
-    }
-
-    if (isLightToolActive && lightSourceControls?.onCreateLightSource) {
-      setSelectedTokenIds([]);
-      setSelectedDarknessId('');
-      setSelectionBox(null);
-      setSelectedWallId('');
-      interactionRef.current = {
-        type: 'light-create',
-        startClient: {
-          x: nativeEvent.clientX,
-          y: nativeEvent.clientY,
-        },
-        startWorld: pointerWorld,
-        point: pointerWorld,
-      };
-      return;
-    }
-
-    if (isDarknessToolActive && darknessSourceControls?.onCreateDarknessSource) {
-      setSelectedTokenIds([]);
-      setSelectedLightId('');
-      setSelectedDarknessId('');
-      setSelectedWallId('');
-      setSelectionBox(null);
-      interactionRef.current = {
-        type: 'darkness-create',
-        startClient: {
-          x: nativeEvent.clientX,
-          y: nativeEvent.clientY,
-        },
-        startWorld: pointerWorld,
-        point: pointerWorld,
-      };
-      return;
-    }
-
-    if (isFogBrushToolActive && fogBrushControls?.onPaintFogBrush) {
-      setSelectedTokenIds([]);
-      setSelectedLightId('');
-      setSelectedDarknessId('');
-      setSelectedWallId('');
-      setSelectionBox(null);
-      paintFogBrushAtPoint(pointerWorld);
-      interactionRef.current = {
-        type: 'fog-brush',
-        startClient: {
-          x: nativeEvent.clientX,
-          y: nativeEvent.clientY,
-        },
-        startWorld: pointerWorld,
-        lastWorld: pointerWorld,
-      };
-      return;
-    }
-
     setSelectedLightId('');
     setSelectedDarknessId('');
     setSelectedWallId('');
-
-    if (activeAoeFigureType) {
-      setSelectedTokenIds([]);
-      setSelectionBox(null);
-      const startCell = snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center');
-      const draft = {
-        figureType: activeAoeFigureType,
-        originCell: {
-          col: startCell.col,
-          row: startCell.row,
-        },
-        targetCell: {
-          col: startCell.col,
-          row: startCell.row,
-        },
-      };
-      interactionRef.current = {
-        type: 'aoe-create',
-        source: 'aoe-create',
-        startClient: {
-          x: nativeEvent.clientX,
-          y: nativeEvent.clientY,
-        },
-        startWorld: pointerWorld,
-        draft,
-      };
-      setAoEPreviewState(buildAoEFigureForDraft(draft));
-      syncSharedAoEInteraction(draft, 'aoe-create');
-      return;
-    }
-
-    if (isRulerEnabled) {
-      setSelectedTokenIds([]);
-      setSelectionBox(null);
-      const startCell = snapBoardPointToGrid(pointerWorld, normalizedGrid, 'center');
-      interactionRef.current = {
-        type: 'measure-candidate',
-        startClient: {
-          x: nativeEvent.clientX,
-          y: nativeEvent.clientY,
-        },
-        startWorld: pointerWorld,
-        anchorCells: [startCell],
-        measurementSource: 'free',
-      };
-      return;
-    }
+    clearActiveSharedInteraction();
 
     interactionRef.current = {
       type: 'selection-candidate',
@@ -5172,23 +5408,7 @@ export default function GrigliataBoard({
       canTriggerPing: isPointWithinBounds(pointerWorld, boardBounds),
     };
 
-    if (!isPointWithinBounds(pointerWorld, boardBounds)) {
-      return;
-    }
-
-    pingHoldTimeoutRef.current = window.setTimeout(() => {
-      pingHoldTimeoutRef.current = null;
-      const activeInteraction = interactionRef.current;
-      if (activeInteraction?.type !== 'selection-candidate' || !activeInteraction.canTriggerPing) {
-        return;
-      }
-
-      spawnMapPing(activeInteraction.startWorld, { broadcast: true });
-      interactionRef.current = {
-        ...activeInteraction,
-        type: 'ping-hold',
-      };
-    }, MAP_PING_HOLD_DELAY_MS);
+    schedulePingHoldForActiveInteraction('selection-candidate');
   };
 
   const handleTokenMouseDown = (token, event) => {
@@ -5200,11 +5420,8 @@ export default function GrigliataBoard({
     setPinnedOverflowTokenId('');
     clearPingHoldTimer();
 
-    if (activeAoeFigureType) {
-      return;
-    }
-
     if (isSecondaryMouseButton(nativeEvent)) {
+      suppressNextTokenContextMenuRef.current = false;
       nativeEvent.preventDefault();
       const activeInteraction = interactionRef.current;
 
@@ -5218,14 +5435,37 @@ export default function GrigliataBoard({
         }
       }
 
-      if (openTurnOrderContextMenu(token, nativeEvent)) {
-        return;
-      }
-
+      interactionRef.current = {
+        type: 'token-context-candidate',
+        tokenId: token?.tokenId || '',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startViewport: viewport,
+      };
       return;
     }
 
     if (!isPrimaryMouseButton(nativeEvent)) return;
+
+    const shouldMoveTokenWhileMeasuring = !!(
+      isRulerEnabled
+      && isRulerTokenMovementEnabled
+      && token?.canMove
+    );
+    if (!shouldMoveTokenWhileMeasuring && beginActiveBoardToolInteraction(nativeEvent)) {
+      return;
+    }
+
+    const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
+    if (!pointerWorld) return;
+    const tokenPingWorld = token?.position
+      ? {
+        x: token.position.x + (token.position.size / 2),
+        y: token.position.y + (token.position.size / 2),
+      }
+      : pointerWorld;
 
     setMeasurementState(null);
     setAoEPreviewState(null);
@@ -5237,11 +5477,20 @@ export default function GrigliataBoard({
 
     if (!token?.canMove) {
       setSelectedTokenIds([]);
+      interactionRef.current = {
+        type: 'ping-candidate',
+        tokenId: token?.tokenId || '',
+        startClient: {
+          x: nativeEvent.clientX,
+          y: nativeEvent.clientY,
+        },
+        startWorld: pointerWorld,
+        canTriggerPing: true,
+        pingWorld: tokenPingWorld,
+      };
+      schedulePingHoldForActiveInteraction('ping-candidate');
       return;
     }
-
-    const pointerWorld = getWorldPointFromClient(nativeEvent.clientX, nativeEvent.clientY);
-    if (!pointerWorld) return;
 
     const nextSelectedTokenIds = selectedTokenIdSet.has(token.tokenId)
       ? selectedTokenIds
@@ -5258,6 +5507,9 @@ export default function GrigliataBoard({
         y: nativeEvent.clientY,
       },
       startWorld: pointerWorld,
+      canTriggerPing: !isRulerEnabled,
+      pingWorld: tokenPingWorld,
+      measurementSource: shouldMoveTokenWhileMeasuring ? 'token-drag' : null,
       originTokens: nextSelectedTokenIds
         .map((selectedTokenId) => tokenItemsById.get(selectedTokenId))
         .filter(Boolean)
@@ -5274,19 +5526,32 @@ export default function GrigliataBoard({
           x: selectedToken.position.x,
           y: selectedToken.position.y,
           size: selectedToken.position.size,
-      })),
+        })),
     };
+
+    if (!isRulerEnabled) {
+      schedulePingHoldForActiveInteraction('token-candidate');
+    }
   };
 
   const handleTokenContextMenu = (token, event) => {
     event.cancelBubble = true;
     event.evt?.preventDefault?.();
 
+    if (suppressNextTokenContextMenuRef.current) {
+      suppressNextTokenContextMenuRef.current = false;
+      return;
+    }
+
     const activeInteraction = interactionRef.current;
 
     if (isRulerEnabled && shouldSuppressTokenTurnOrderMenu(activeInteraction)) {
       commitMeasurementWaypoint(event.evt?.clientX, event.evt?.clientY);
       return;
+    }
+
+    if (activeInteraction?.type === 'token-context-candidate') {
+      interactionRef.current = null;
     }
 
     openTurnOrderContextMenu(token, event.evt);
@@ -5301,7 +5566,17 @@ export default function GrigliataBoard({
     setPinnedOverflowTokenId('');
     clearPingHoldTimer();
 
-    if (activeAoeFigureType || isRulerEnabled) {
+    if (
+      activeAoeFigureType
+      || isRulerEnabled
+      || isLightToolActive
+      || isDarknessToolActive
+      || isWallToolActive
+      || isFogBrushToolActive
+    ) {
+      if (beginActiveBoardToolInteraction(nativeEvent)) {
+        return;
+      }
       return;
     }
 
@@ -5797,17 +6072,33 @@ export default function GrigliataBoard({
               disabled={isNarrationOverlayActive}
             />
           </div>
-          <button
-            type="button"
-            onClick={onToggleRuler}
-            disabled={isNarrationOverlayActive}
-            title={isRulerEnabled ? 'Disable ruler mode' : 'Enable ruler mode'}
-            aria-label={isRulerEnabled ? 'Disable ruler mode' : 'Enable ruler mode'}
-            aria-pressed={isRulerEnabled}
-            className={`${getQuickControlButtonClassName(isRulerEnabled)} disabled:cursor-not-allowed disabled:opacity-60`}
-          >
-            <FaRulerHorizontal className="h-4 w-4" />
-          </button>
+          <div className="pointer-events-auto flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onToggleRuler}
+              disabled={isNarrationOverlayActive}
+              title={isRulerEnabled ? 'Disable ruler mode' : 'Enable ruler mode'}
+              aria-label={isRulerEnabled ? 'Disable ruler mode' : 'Enable ruler mode'}
+              aria-pressed={isRulerEnabled}
+              className={`${getQuickControlButtonClassName(isRulerEnabled)} disabled:cursor-not-allowed disabled:opacity-60`}
+            >
+              <FaRulerHorizontal className="h-4 w-4" />
+            </button>
+            {isRulerEnabled && (
+              <button
+                type="button"
+                onClick={onToggleRulerTokenMovement}
+                disabled={isNarrationOverlayActive || !onToggleRulerTokenMovement}
+                title="Move tokens while measuring"
+                aria-label="Move tokens while measuring"
+                aria-pressed={isRulerTokenMovementEnabled}
+                data-testid="ruler-token-move-toggle"
+                className={`${getQuickControlButtonClassName(isRulerTokenMovementEnabled)} h-8 w-8 rounded-xl p-1.5 disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                <FiMove className="h-4 w-4" />
+              </button>
+            )}
+          </div>
           <div className="pointer-events-auto">
             <AoETemplatePicker
               activeFigureType={activeAoeFigureType}

@@ -154,6 +154,30 @@ const syncSelectedTokenDirtyFields = ({ dirtyFields, draft, persistedDraft }) =>
   shieldCurrent: dirtyFields.shieldCurrent && draft.shieldCurrent !== persistedDraft.shieldCurrent,
   notes: dirtyFields.notes && draft.notes !== persistedDraft.notes,
 });
+const hasDirtySelectedTokenDraft = (dirtyFields) => (
+  !!(
+    dirtyFields?.hpCurrent
+    || dirtyFields?.manaCurrent
+    || dirtyFields?.shieldCurrent
+    || dirtyFields?.notes
+  )
+);
+const buildSelectedTokenDetailsPayload = (token, draft) => ({
+  tokenId: token.tokenId,
+  tokenType: token.tokenType,
+  ownerUid: token.ownerUid,
+  characterId: token.characterId || '',
+  label: token.label || '',
+  imageUrl: token.imageUrl || '',
+  imagePath: token.imagePath || '',
+  hpCurrent: draft.hpCurrent,
+  hpTotal: n(token.hpTotal, 0),
+  manaCurrent: draft.manaCurrent,
+  manaTotal: n(token.manaTotal, 0),
+  shieldCurrent: draft.shieldCurrent,
+  shieldTotal: n(token.shieldTotal, 0),
+  notes: draft.notes,
+});
 const getSelectedTokenLoadingMessage = (token) => (
   token?.loadingMessage
   || (token?.tokenType === 'custom'
@@ -325,7 +349,11 @@ function SelectedResourceTokenDetailsPanel({
 }) {
   const [draft, setDraft] = useState(EMPTY_SELECTED_TOKEN_DRAFT);
   const [dirtyFields, setDirtyFields] = useState(EMPTY_SELECTED_TOKEN_DIRTY_STATE);
+  const [isAutosaving, setIsAutosaving] = useState(false);
   const previousTokenIdRef = useRef('');
+  const draftRef = useRef(EMPTY_SELECTED_TOKEN_DRAFT);
+  const dirtyFieldsRef = useRef(EMPTY_SELECTED_TOKEN_DIRTY_STATE);
+  const autosavePromiseRef = useRef(null);
   const persistedDraft = useMemo(() => buildSelectedTokenDraft(token), [
     token?.tokenId,
     token?.hpCurrent,
@@ -333,6 +361,9 @@ function SelectedResourceTokenDetailsPanel({
     token?.shieldCurrent,
     token?.notes,
   ]);
+
+  draftRef.current = draft;
+  dirtyFieldsRef.current = dirtyFields;
 
   useEffect(() => {
     const nextTokenId = token?.tokenId || '';
@@ -402,7 +433,7 @@ function SelectedResourceTokenDetailsPanel({
 
   const isSaving = savingSelectedTokenDetailsId === token.tokenId;
   const isReady = token.isReady !== false;
-  const isBusy = isSaving || !isReady;
+  const isBusy = !isReady;
   const panelTitle = getSelectedTokenPanelTitle(token.tokenType);
   const badgeLabel = getSelectedTokenBadgeLabel(token.tokenType);
   const missingResourceTotals = token.missingResourceTotals || {};
@@ -420,6 +451,70 @@ function SelectedResourceTokenDetailsPanel({
         ? currentDirtyFields
         : { ...currentDirtyFields, [field]: true }
     ));
+  };
+  const commitSelectedTokenDraft = async () => {
+    if (
+      !isReady
+      || isSaving
+      || isAutosaving
+      || autosavePromiseRef.current
+      || !hasDirtySelectedTokenDraft(dirtyFieldsRef.current)
+      || !onSaveSelectedTokenDetails
+    ) {
+      return false;
+    }
+
+    const savedDraft = { ...draftRef.current };
+    const savePromise = Promise.resolve(onSaveSelectedTokenDetails(
+      buildSelectedTokenDetailsPayload(token, savedDraft)
+    ));
+
+    autosavePromiseRef.current = savePromise;
+    setIsAutosaving(true);
+
+    try {
+      const didSave = await savePromise;
+      if (!didSave) {
+        return false;
+      }
+
+      setDirtyFields((currentDirtyFields) => {
+        const latestDraft = draftRef.current;
+        const nextDirtyFields = {
+          hpCurrent: currentDirtyFields.hpCurrent && latestDraft.hpCurrent !== savedDraft.hpCurrent,
+          manaCurrent: currentDirtyFields.manaCurrent && latestDraft.manaCurrent !== savedDraft.manaCurrent,
+          shieldCurrent: currentDirtyFields.shieldCurrent && latestDraft.shieldCurrent !== savedDraft.shieldCurrent,
+          notes: currentDirtyFields.notes && latestDraft.notes !== savedDraft.notes,
+        };
+
+        return areSelectedTokenDirtyStatesEqual(currentDirtyFields, nextDirtyFields)
+          ? currentDirtyFields
+          : nextDirtyFields;
+      });
+
+      return true;
+    } finally {
+      if (autosavePromiseRef.current === savePromise) {
+        autosavePromiseRef.current = null;
+        setIsAutosaving(false);
+      }
+    }
+  };
+  const handleDraftFieldKeyDown = (event) => {
+    if (event.key !== 'Enter') {
+      return;
+    }
+
+    event.preventDefault();
+    void commitSelectedTokenDraft();
+  };
+  const handleNotesKeyDown = (event) => {
+    if (event.key !== 'Enter' || event.shiftKey) {
+      return;
+    }
+
+    event.preventDefault();
+    void commitSelectedTokenDraft();
   };
 
   return (
@@ -448,6 +543,8 @@ function SelectedResourceTokenDetailsPanel({
             type="number"
             value={draft.hpCurrent}
             onChange={(event) => updateDraftField('hpCurrent', n(event.target.value, 0))}
+            onBlur={() => { void commitSelectedTokenDraft(); }}
+            onKeyDown={handleDraftFieldKeyDown}
             disabled={isBusy}
             className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-300"
           />
@@ -460,6 +557,8 @@ function SelectedResourceTokenDetailsPanel({
             type="number"
             value={draft.manaCurrent}
             onChange={(event) => updateDraftField('manaCurrent', n(event.target.value, 0))}
+            onBlur={() => { void commitSelectedTokenDraft(); }}
+            onKeyDown={handleDraftFieldKeyDown}
             disabled={isBusy}
             className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-300"
           />
@@ -473,6 +572,8 @@ function SelectedResourceTokenDetailsPanel({
               type="number"
               value={draft.shieldCurrent}
               onChange={(event) => updateDraftField('shieldCurrent', n(event.target.value, 0))}
+              onBlur={() => { void commitSelectedTokenDraft(); }}
+              onKeyDown={handleDraftFieldKeyDown}
               disabled={isBusy}
               className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-300"
             />
@@ -500,38 +601,17 @@ function SelectedResourceTokenDetailsPanel({
           rows={4}
           value={draft.notes}
           onChange={(event) => updateDraftField('notes', event.target.value)}
+          onBlur={() => { void commitSelectedTokenDraft(); }}
+          onKeyDown={handleNotesKeyDown}
           placeholder="Add token notes"
           disabled={isBusy}
           className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-emerald-300"
         />
       </div>
 
-      <div className="mt-4 flex justify-end">
-        <button
-          type="button"
-          onClick={() => onSaveSelectedTokenDetails?.({
-            tokenId: token.tokenId,
-            tokenType: token.tokenType,
-            ownerUid: token.ownerUid,
-            characterId: token.characterId || '',
-            label: token.label || '',
-            imageUrl: token.imageUrl || '',
-            imagePath: token.imagePath || '',
-            hpCurrent: draft.hpCurrent,
-            hpTotal: n(token.hpTotal, 0),
-            manaCurrent: draft.manaCurrent,
-            manaTotal: n(token.manaTotal, 0),
-            shieldCurrent: draft.shieldCurrent,
-            shieldTotal: n(token.shieldTotal, 0),
-            notes: draft.notes,
-          })}
-          disabled={isBusy}
-          className="inline-flex items-center gap-2 rounded-xl border border-emerald-300/45 bg-emerald-400 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-black transition-colors hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-55"
-        >
-          <FiCheck className="h-4 w-4" />
-          {isSaving ? 'Saving' : (isReady ? 'Save Details' : 'Loading')}
-        </button>
-      </div>
+      {(isSaving || isAutosaving) && (
+        <p className="mt-4 text-right text-xs font-medium text-emerald-100">Saving token details...</p>
+      )}
     </div>
   );
 }
