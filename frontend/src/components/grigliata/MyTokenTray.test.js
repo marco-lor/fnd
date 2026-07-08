@@ -540,7 +540,7 @@ describe('MyTokenTray', () => {
     }));
   });
 
-  test('renders and saves selected character token details for the owner', async () => {
+  test('auto-saves selected character token details on Enter without a manual save button', async () => {
     const onSaveSelectedTokenDetails = jest.fn(() => Promise.resolve(true));
 
     renderTray({
@@ -565,12 +565,13 @@ describe('MyTokenTray', () => {
     });
 
     expect(screen.getByText('Selected Character')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save details/i })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Current HP'), { target: { value: '24' } });
     fireEvent.change(screen.getByLabelText('Current Shield'), { target: { value: '9' } });
     fireEvent.change(screen.getByDisplayValue('Frontline'), { target: { value: 'Hold the bridge' } });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /save details/i }));
+      fireEvent.keyDown(screen.getByLabelText('Current HP'), { key: 'Enter', code: 'Enter' });
     });
 
     expect(onSaveSelectedTokenDetails).toHaveBeenCalledWith(expect.objectContaining({
@@ -582,7 +583,7 @@ describe('MyTokenTray', () => {
     }));
   });
 
-  test('renders and saves selected custom token details above the displayed totals', async () => {
+  test('auto-saves selected custom token details on blur without a manual save button', async () => {
     const onSaveSelectedTokenDetails = jest.fn(() => Promise.resolve(true));
 
     renderTray({
@@ -606,12 +607,13 @@ describe('MyTokenTray', () => {
     });
 
     expect(screen.getByText('Selected Custom Token')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save details/i })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Current Mana'), { target: { value: '9' } });
     fireEvent.change(screen.getByLabelText('Current Shield'), { target: { value: '11' } });
     fireEvent.change(screen.getByDisplayValue('Companion'), { target: { value: 'Guard companion' } });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /save details/i }));
+      fireEvent.blur(screen.getByLabelText('Current Mana'));
     });
 
     expect(onSaveSelectedTokenDetails).toHaveBeenCalledWith(expect.objectContaining({
@@ -621,6 +623,69 @@ describe('MyTokenTray', () => {
       shieldCurrent: 11,
       notes: 'Guard companion',
     }));
+  });
+
+  test('does not auto-save selected token details when an unchanged field blurs', async () => {
+    const onSaveSelectedTokenDetails = jest.fn(() => Promise.resolve(true));
+
+    renderTray({
+      selectedTokenDetails: {
+        tokenId: 'token-2',
+        ownerUid: 'user-1',
+        tokenType: 'custom',
+        label: 'Wolf',
+        imageUrl: 'https://example.com/wolf.png',
+        imagePath: 'grigliata/tokens/user-1/wolf.png',
+        hpCurrent: 12,
+        hpTotal: 12,
+        manaCurrent: 4,
+        manaTotal: 4,
+        shieldCurrent: 5,
+        shieldTotal: 5,
+        hasShield: true,
+        notes: 'Companion',
+      },
+      onSaveSelectedTokenDetails,
+    });
+
+    await act(async () => {
+      fireEvent.blur(screen.getByLabelText('Current HP'));
+    });
+
+    expect(onSaveSelectedTokenDetails).not.toHaveBeenCalled();
+  });
+
+  test('keeps Shift+Enter available for selected token notes without saving', () => {
+    const onSaveSelectedTokenDetails = jest.fn(() => Promise.resolve(true));
+
+    renderTray({
+      selectedTokenDetails: {
+        tokenId: 'token-2',
+        ownerUid: 'user-1',
+        tokenType: 'custom',
+        label: 'Wolf',
+        imageUrl: 'https://example.com/wolf.png',
+        imagePath: 'grigliata/tokens/user-1/wolf.png',
+        hpCurrent: 12,
+        hpTotal: 12,
+        manaCurrent: 4,
+        manaTotal: 4,
+        shieldCurrent: 5,
+        shieldTotal: 5,
+        hasShield: true,
+        notes: 'Companion',
+      },
+      onSaveSelectedTokenDetails,
+    });
+
+    const notesInput = screen.getByDisplayValue('Companion');
+    fireEvent.change(notesInput, { target: { value: 'Guard companion' } });
+    const shiftEnterEvent = createEvent.keyDown(notesInput, { key: 'Enter', code: 'Enter', shiftKey: true });
+
+    fireEvent(notesInput, shiftEnterEvent);
+
+    expect(shiftEnterEvent.defaultPrevented).toBe(false);
+    expect(onSaveSelectedTokenDetails).not.toHaveBeenCalled();
   });
 
   test('hydrates selected token details when async data for the same token becomes ready', async () => {
@@ -651,7 +716,7 @@ describe('MyTokenTray', () => {
     expect(screen.getByText('Selected Custom Token')).toBeInTheDocument();
     expect(screen.getByText('Loading the current token values...')).toBeInTheDocument();
     expect(screen.getByLabelText('Current HP')).toBeDisabled();
-    expect(screen.getByRole('button', { name: /loading/i })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /loading/i })).not.toBeInTheDocument();
 
     rerender(
       <MyTokenTray
@@ -678,7 +743,7 @@ describe('MyTokenTray', () => {
     });
     expect(screen.getByLabelText('Current HP')).not.toBeDisabled();
     expect(screen.getByDisplayValue('Companion')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /save details/i })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /save details/i })).not.toBeInTheDocument();
   });
 
   test('preserves same-token draft edits when the selected token object rerenders', () => {

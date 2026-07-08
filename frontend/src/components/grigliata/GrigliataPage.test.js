@@ -5296,7 +5296,7 @@ describe('GrigliataPage', () => {
     fireEvent.change(screen.getByDisplayValue('Front line'), { target: { value: 'Hold the line' } });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /save details/i }));
+      fireEvent.keyDown(screen.getByLabelText('Current HP'), { key: 'Enter', code: 'Enter' });
     });
 
     expect(firestore.updateDoc).toHaveBeenCalledWith(
@@ -5400,7 +5400,7 @@ describe('GrigliataPage', () => {
     fireEvent.change(screen.getByDisplayValue('Scout'), { target: { value: 'Advance scout' } });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /save details/i }));
+      fireEvent.blur(screen.getByLabelText('Current HP'));
     });
 
     expect(firestore.updateDoc).toHaveBeenCalledWith(
@@ -5432,7 +5432,7 @@ describe('GrigliataPage', () => {
     fireEvent.change(screen.getByDisplayValue('Companion'), { target: { value: 'Guard companion' } });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /save details/i }));
+      fireEvent.keyDown(screen.getByLabelText('Current Shield'), { key: 'Enter', code: 'Enter' });
     });
 
     expect(firestore.setDoc).toHaveBeenCalledWith(
@@ -5550,7 +5550,7 @@ describe('GrigliataPage', () => {
     });
 
     expect(await screen.findByDisplayValue('Scout')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /save details/i })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /save details/i })).not.toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /select custom token/i }));
@@ -5558,7 +5558,7 @@ describe('GrigliataPage', () => {
 
     expect(await screen.findByText('Selected Custom Token')).toBeInTheDocument();
     expect(screen.getByText('Loading the current token values...')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /loading/i })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /loading/i })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Current HP')).toBeDisabled();
     expect(screen.queryByDisplayValue('Scout')).not.toBeInTheDocument();
 
@@ -5572,7 +5572,7 @@ describe('GrigliataPage', () => {
       expect(screen.getByDisplayValue('Companion')).toBeInTheDocument();
     });
     expect(screen.getByLabelText('Current HP')).toHaveValue(18);
-    expect(screen.getByRole('button', { name: /save details/i })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /save details/i })).not.toBeInTheDocument();
   });
 
   test('migrates missing custom token totals from the current values on first save', async () => {
@@ -5618,7 +5618,7 @@ describe('GrigliataPage', () => {
     fireEvent.change(screen.getByLabelText('Current Shield'), { target: { value: '11' } });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /save details/i }));
+      fireEvent.blur(screen.getByLabelText('Current Shield'));
     });
 
     expect(firestore.setDoc).toHaveBeenCalledWith(
