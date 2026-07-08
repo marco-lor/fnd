@@ -365,6 +365,8 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-turn-order-count">{String(props.turnOrderEntries?.length || 0)}</div>
       <div data-testid="board-active-turn-token">{props.activeTurnTokenId || ''}</div>
       <div data-testid="board-turn-order-order">{(props.turnOrderEntries || []).map((entry) => entry.tokenId).join(',')}</div>
+      <div data-testid="board-ruler-enabled">{String(!!props.isRulerEnabled)}</div>
+      <div data-testid="board-ruler-token-movement">{String(!!props.isRulerTokenMovementEnabled)}</div>
       <div data-testid="board-aoe-tool">{props.activeAoeFigureType || ''}</div>
       <div data-testid="board-draw-color">{props.drawTheme?.key || ''}</div>
       <div data-testid="board-grid-size">{String(props.grid?.cellSizePx || '')}</div>
@@ -397,6 +399,12 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-fog-brush-radius">{String(props.fogBrushControls?.radiusSquares || '')}</div>
         <button type="button" onClick={() => props.onSelectMouseTool?.()}>
           select mouse tool
+        </button>
+        <button type="button" onClick={() => props.onToggleRuler?.()}>
+          toggle ruler tool
+        </button>
+        <button type="button" onClick={() => props.onToggleRulerTokenMovement?.()}>
+          toggle ruler token movement
         </button>
         <button type="button" onClick={() => props.onToggleInteractionSharing?.()}>
           toggle interaction sharing
@@ -10043,6 +10051,81 @@ describe('GrigliataPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /select mouse tool/i }));
     expect(screen.getByTestId('board-aoe-tool')).toHaveTextContent('');
+  });
+
+  test('keeps ruler token movement opt-in and resets it when switching tools', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_backgrounds', [{
+      id: 'map-1',
+      name: 'Sunken Ruins',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+      isGridVisible: true,
+      isTurnOrderEnabled: false,
+      fogOfWarEnabled: true,
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-ruler-enabled')).toHaveTextContent('false');
+      expect(screen.getByTestId('board-ruler-token-movement')).toHaveTextContent('false');
+    });
+
+    const enableRulerMovement = async () => {
+      fireEvent.click(screen.getByRole('button', { name: /toggle ruler tool/i }));
+      await waitFor(() => {
+        expect(screen.getByTestId('board-ruler-enabled')).toHaveTextContent('true');
+        expect(screen.getByTestId('board-ruler-token-movement')).toHaveTextContent('false');
+      });
+      fireEvent.click(screen.getByRole('button', { name: /toggle ruler token movement/i }));
+      await waitFor(() => {
+        expect(screen.getByTestId('board-ruler-token-movement')).toHaveTextContent('true');
+      });
+    };
+
+    await enableRulerMovement();
+    fireEvent.click(screen.getByRole('button', { name: /select mouse tool/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId('board-ruler-enabled')).toHaveTextContent('false');
+      expect(screen.getByTestId('board-ruler-token-movement')).toHaveTextContent('false');
+    });
+
+    await enableRulerMovement();
+    fireEvent.click(screen.getByRole('button', { name: /activate circle tool/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId('board-ruler-enabled')).toHaveTextContent('false');
+      expect(screen.getByTestId('board-ruler-token-movement')).toHaveTextContent('false');
+      expect(screen.getByTestId('board-aoe-tool')).toHaveTextContent('circle');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /select mouse tool/i }));
+    await enableRulerMovement();
+    fireEvent.click(screen.getByRole('button', { name: /toggle light source tool/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId('board-light-tool-active')).toHaveTextContent('true');
+      expect(screen.getByTestId('board-ruler-token-movement')).toHaveTextContent('false');
+    });
+
+    await enableRulerMovement();
+    fireEvent.click(screen.getByRole('button', { name: /toggle darkness source tool/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId('board-darkness-tool-active')).toHaveTextContent('true');
+      expect(screen.getByTestId('board-ruler-token-movement')).toHaveTextContent('false');
+    });
+
+    await enableRulerMovement();
+    fireEvent.click(screen.getByRole('button', { name: /toggle wall source tool/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId('board-wall-tool-active')).toHaveTextContent('true');
+      expect(screen.getByTestId('board-ruler-token-movement')).toHaveTextContent('false');
+    });
+
+    await enableRulerMovement();
+    fireEvent.click(screen.getByRole('button', { name: /toggle fog brush tool/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-brush-active')).toHaveTextContent('true');
+      expect(screen.getByTestId('board-ruler-token-movement')).toHaveTextContent('false');
+    });
   });
 
   test('ignores stale remote interactions before passing them to the board', async () => {

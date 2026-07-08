@@ -555,6 +555,7 @@ export default function GrigliataPage() {
   const [boardError, setBoardError] = useState('');
   const [activeTrayDragType, setActiveTrayDragType] = useState('');
   const [isRulerEnabled, setIsRulerEnabled] = useState(false);
+  const [isRulerTokenMovementEnabled, setIsRulerTokenMovementEnabled] = useState(false);
   const [activeAoeFigureType, setActiveAoeFigureType] = useState('');
   const [isLightToolActive, setIsLightToolActive] = useState(false);
   const [isDarknessToolActive, setIsDarknessToolActive] = useState(false);
@@ -1215,6 +1216,7 @@ export default function GrigliataPage() {
     setIsDarknessToolActive(false);
     setIsWallToolActive(false);
     setIsFogBrushToolActive(false);
+    setIsRulerTokenMovementEnabled(false);
   }, [activeBackgroundId, isFogOfWarEnabled, isNarrationOverlayActive]);
   const drawTheme = useMemo(
     () => getGrigliataDrawTheme(drawColorKey),
@@ -1635,6 +1637,7 @@ export default function GrigliataPage() {
     setIsWallToolActive(false);
     setIsFogBrushToolActive(false);
     setIsRulerEnabled(false);
+    setIsRulerTokenMovementEnabled(false);
     setSelectedBoardTokenIds([]);
     setLocalLiveInteraction(null);
   }, [isNarrationOverlayActive]);
@@ -4853,6 +4856,7 @@ export default function GrigliataPage() {
     setIsWallToolActive(false);
     setActiveAoeFigureType('');
     setIsRulerEnabled(false);
+    setIsRulerTokenMovementEnabled(false);
   }, [activeBackgroundId, isFogOfWarEnabled, isManager]);
 
   const handleChangeFogBrushMode = useCallback((nextMode) => {
@@ -5215,6 +5219,7 @@ export default function GrigliataPage() {
     setIsFogBrushToolActive(false);
     setActiveAoeFigureType('');
     setIsRulerEnabled(false);
+    setIsRulerTokenMovementEnabled(false);
   }, [activeBackgroundId, isManager]);
 
   const handleCreateLightSource = useCallback(async (point) => {
@@ -5379,6 +5384,7 @@ export default function GrigliataPage() {
     setIsFogBrushToolActive(false);
     setActiveAoeFigureType('');
     setIsRulerEnabled(false);
+    setIsRulerTokenMovementEnabled(false);
   }, [activeBackgroundId, isManager]);
 
   const handleCreateDarknessSource = useCallback(async (point) => {
@@ -5505,6 +5511,7 @@ export default function GrigliataPage() {
     setIsFogBrushToolActive(false);
     setActiveAoeFigureType('');
     setIsRulerEnabled(false);
+    setIsRulerTokenMovementEnabled(false);
   }, [activeBackgroundId, isManager]);
 
   const handleCreateWallSegment = useCallback(async (startPoint, endPoint) => {
@@ -5846,6 +5853,7 @@ export default function GrigliataPage() {
     setIsWallToolActive(false);
     setIsFogBrushToolActive(false);
     setIsRulerEnabled(false);
+    setIsRulerTokenMovementEnabled(false);
   }, []);
 
   const handleToggleRuler = useCallback(() => {
@@ -5855,7 +5863,13 @@ export default function GrigliataPage() {
     setIsDarknessToolActive(false);
     setIsWallToolActive(false);
     setIsFogBrushToolActive(false);
+    setIsRulerTokenMovementEnabled(false);
     setIsRulerEnabled((currentValue) => !currentValue);
+  }, []);
+
+  const handleToggleRulerTokenMovement = useCallback(() => {
+    setBoardError('');
+    setIsRulerTokenMovementEnabled((currentValue) => !currentValue);
   }, []);
 
   const handleChangeAoeFigureType = useCallback((nextFigureType) => {
@@ -5867,6 +5881,7 @@ export default function GrigliataPage() {
       setIsWallToolActive(false);
       setIsFogBrushToolActive(false);
       setIsRulerEnabled(false);
+      setIsRulerTokenMovementEnabled(false);
     }
   }, []);
 
@@ -6166,6 +6181,7 @@ export default function GrigliataPage() {
                 isTokenDragActive={isTrayDragging && !isNarrationOverlayActive}
                 activeTrayDragType={activeTrayDragType}
                 isRulerEnabled={isRulerEnabled}
+                isRulerTokenMovementEnabled={isRulerTokenMovementEnabled}
                 activeAoeFigureType={isNarrationOverlayActive ? '' : activeAoeFigureType}
                 isInteractionSharingEnabled={isInteractionSharingEnabled}
                 isMusicMuted={isMusicMuted}
@@ -6173,6 +6189,7 @@ export default function GrigliataPage() {
                 drawTheme={drawTheme}
                 onSelectMouseTool={isNarrationOverlayActive ? null : handleSelectMouseTool}
                 onToggleRuler={isNarrationOverlayActive ? null : handleToggleRuler}
+                onToggleRulerTokenMovement={isNarrationOverlayActive ? null : handleToggleRulerTokenMovement}
                 onChangeAoeFigureType={isNarrationOverlayActive ? null : handleChangeAoeFigureType}
                 onToggleInteractionSharing={isNarrationOverlayActive ? null : handleToggleInteractionSharing}
                 onToggleMusicMuted={handleToggleMusicMuted}

@@ -228,6 +228,7 @@ const buildProps = (overrides = {}) => ({
   isTokenDragActive: false,
   activeTrayDragType: '',
   isRulerEnabled: false,
+  isRulerTokenMovementEnabled: false,
   activeAoeFigureType: '',
   isInteractionSharingEnabled: false,
   isMusicMuted: false,
@@ -235,6 +236,7 @@ const buildProps = (overrides = {}) => ({
   drawTheme: getGrigliataDrawTheme('aurora-fuchsia'),
   onSelectMouseTool: jest.fn(),
   onToggleRuler: jest.fn(),
+  onToggleRulerTokenMovement: jest.fn(),
   onChangeAoeFigureType: jest.fn(),
   onToggleInteractionSharing: jest.fn(),
   onToggleMusicMuted: jest.fn(),
@@ -2604,7 +2606,7 @@ describe('GrigliataBoard', () => {
     expect(onMoveWallSegment).not.toHaveBeenCalled();
   });
 
-  test('keeps token dragging above fog brush interaction', async () => {
+  test('paints fog from a token-covered cell while the fog brush is active', async () => {
     const onMoveTokens = jest.fn(() => Promise.resolve(true));
     const onPaintFogBrush = jest.fn(() => Promise.resolve(true));
 
@@ -2647,9 +2649,16 @@ describe('GrigliataBoard', () => {
     fireEvent.mouseUp(window, { button: 0, clientX: 245, clientY: 245, buttons: 0 });
 
     await waitFor(() => {
-      expect(onMoveTokens).toHaveBeenCalled();
+      expect(onPaintFogBrush).toHaveBeenCalledWith(expect.objectContaining({
+        mode: 'reveal',
+        radiusSquares: 2,
+        point: expect.objectContaining({
+          x: expect.any(Number),
+          y: expect.any(Number),
+        }),
+      }));
     });
-    expect(onPaintFogBrush).not.toHaveBeenCalled();
+    expect(onMoveTokens).not.toHaveBeenCalled();
   });
 
   test('keeps the old battlemap briefly while fading it out on deactivation', async () => {
@@ -3256,6 +3265,49 @@ describe('GrigliataBoard', () => {
     expect(screen.getByTestId('music-mute-trigger').className).not.toContain('bg-gradient-to-br');
   });
 
+  test('shows the ruler token movement toggle only while ruler mode is active', () => {
+    const onToggleRulerTokenMovement = jest.fn();
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          onToggleRulerTokenMovement,
+        })}
+      />
+    );
+
+    expect(screen.queryByTestId('ruler-token-move-toggle')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isRulerEnabled: true,
+          isRulerTokenMovementEnabled: false,
+          onToggleRulerTokenMovement,
+        })}
+      />
+    );
+
+    const movementToggle = screen.getByTestId('ruler-token-move-toggle');
+    expect(movementToggle).toHaveAttribute('aria-pressed', 'false');
+    expect(movementToggle.className).not.toContain('bg-gradient-to-br');
+
+    fireEvent.click(movementToggle);
+    expect(onToggleRulerTokenMovement).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          isRulerEnabled: true,
+          isRulerTokenMovementEnabled: true,
+          onToggleRulerTokenMovement,
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('ruler-token-move-toggle')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('ruler-token-move-toggle').className).toContain('bg-gradient-to-br');
+  });
+
   test('renders the music toggle beneath reset view and exposes state plus action labels', () => {
     const onToggleMusicMuted = jest.fn();
     const { rerender } = render(
@@ -3379,6 +3431,373 @@ describe('GrigliataBoard', () => {
     });
 
     expect(onSelectedTokenIdsChange).toHaveBeenLastCalledWith(['foe-token-1']);
+  });
+
+  test('starts a ruler measurement from a movable token without moving it by default', async () => {
+    const onMoveTokens = jest.fn(() => Promise.resolve(true));
+    const { container } = render(
+      <GrigliataBoard
+        {...buildProps({
+          isRulerEnabled: true,
+          currentUserId: 'user-1',
+          onMoveTokens,
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Ilya',
+            imageUrl: '',
+            placed: true,
+            col: 1,
+            row: 1,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    const tokenNode = screen.getByTestId('token-node-user-1');
+    const stage = container.querySelector('[data-konva-type="Stage"]');
+    const viewportLeft = getNumericKonvaProp(stage, 'data-x');
+    const viewportTop = getNumericKonvaProp(stage, 'data-y');
+    const viewportScale = getNumericKonvaProp(stage, 'data-scalex') || 1;
+    const tokenWorldX = getNumericKonvaProp(tokenNode, 'data-x');
+    const tokenWorldY = getNumericKonvaProp(tokenNode, 'data-y');
+    const toClientPoint = (worldX, worldY) => ({
+      clientX: viewportLeft + (worldX * viewportScale),
+      clientY: viewportTop + (worldY * viewportScale),
+    });
+
+    fireEvent.mouseDown(tokenNode, {
+      button: 0,
+      buttons: 1,
+      ...toClientPoint(tokenWorldX, tokenWorldY),
+    });
+    fireEvent.mouseMove(window, {
+      button: 0,
+      buttons: 1,
+      ...toClientPoint(tokenWorldX + (grid.cellSizePx * 2), tokenWorldY),
+    });
+
+    expect(await screen.findByTestId('measurement-overlay-local')).toHaveTextContent('10 ft (2 squares)');
+    expect(onMoveTokens).not.toHaveBeenCalled();
+
+    fireEvent.mouseUp(window, {
+      button: 0,
+      buttons: 0,
+      ...toClientPoint(tokenWorldX + (grid.cellSizePx * 2), tokenWorldY),
+    });
+
+    expect(onMoveTokens).not.toHaveBeenCalled();
+  });
+
+  test('starts a ruler measurement from a token the user cannot control', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isRulerEnabled: true,
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-2',
+            id: 'user-2',
+            ownerUid: 'user-2',
+            tokenType: 'character',
+            label: 'Bryn',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-2'), {
+      button: 0,
+      buttons: 1,
+      clientX: 175,
+      clientY: 175,
+    });
+    fireEvent.mouseMove(window, {
+      button: 0,
+      buttons: 1,
+      clientX: 315,
+      clientY: 175,
+    });
+
+    expect(await screen.findByTestId('measurement-overlay-local')).toBeInTheDocument();
+  });
+
+  test('moves a token while measuring only when the ruler movement toggle is enabled', async () => {
+    const onMoveTokens = jest.fn(() => Promise.resolve(true));
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isRulerEnabled: true,
+          isRulerTokenMovementEnabled: true,
+          currentUserId: 'user-1',
+          onMoveTokens,
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Ilya',
+            imageUrl: '',
+            placed: true,
+            col: 1,
+            row: 1,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 175,
+      clientY: 175,
+    });
+    fireEvent.mouseMove(window, {
+      button: 0,
+      buttons: 1,
+      clientX: 315,
+      clientY: 175,
+    });
+
+    expect(await screen.findByTestId('measurement-overlay-local')).toBeInTheDocument();
+
+    fireEvent.mouseUp(window, {
+      button: 0,
+      buttons: 0,
+      clientX: 315,
+      clientY: 175,
+    });
+
+    await waitFor(() => {
+      expect(onMoveTokens).toHaveBeenCalledWith([
+        expect.objectContaining({
+          tokenId: 'user-1',
+        }),
+      ]);
+    });
+  });
+
+  test('starts AoE placement from a token-covered map cell', async () => {
+    const onCreateAoEFigure = jest.fn(() => Promise.resolve(true));
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          activeAoeFigureType: 'circle',
+          onCreateAoEFigure,
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Ilya',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 175,
+      clientY: 175,
+    });
+    fireEvent.mouseMove(window, { clientX: 315, clientY: 175, buttons: 1 });
+
+    expect(screen.getByTestId('aoe-figure-overlay-local')).toBeInTheDocument();
+
+    fireEvent.mouseUp(window, { button: 0, clientX: 315, clientY: 175, buttons: 0 });
+
+    await waitFor(() => {
+      expect(onCreateAoEFigure).toHaveBeenCalledWith(expect.objectContaining({
+        figureType: 'circle',
+      }));
+    });
+  });
+
+  test('emits a local and shared ping after a long press on a token', () => {
+    jest.useFakeTimers();
+    const onSharedInteractionChange = jest.fn();
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          onSharedInteractionChange,
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Ilya',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    onSharedInteractionChange.mockClear();
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 175,
+      clientY: 175,
+    });
+
+    act(() => {
+      jest.advanceTimersByTime(MAP_PING_HOLD_DELAY_MS);
+    });
+
+    expect(document.querySelectorAll('[data-testid^="map-ping-overlay-local-ping-"]')).toHaveLength(1);
+    expect(onSharedInteractionChange).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'ping',
+      source: 'free',
+      point: expect.objectContaining({
+        x: expect.any(Number),
+        y: expect.any(Number),
+      }),
+    }));
+  });
+
+  test('cancels a token-started long-press ping when the token drag begins', () => {
+    jest.useFakeTimers();
+    const onSharedInteractionChange = jest.fn();
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          onSharedInteractionChange,
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Ilya',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    onSharedInteractionChange.mockClear();
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 175,
+      clientY: 175,
+    });
+    fireEvent.mouseMove(window, { clientX: 245, clientY: 175, buttons: 1 });
+
+    act(() => {
+      jest.advanceTimersByTime(MAP_PING_HOLD_DELAY_MS + 80);
+    });
+
+    expect(document.querySelectorAll('[data-testid^="map-ping-overlay-local-ping-"]')).toHaveLength(0);
+    expect(onSharedInteractionChange.mock.calls.find(([interaction]) => interaction?.type === 'ping')).toBeUndefined();
+  });
+
+  test('right-dragging from a token pans the map without opening the token menu', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Ilya',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+            isInTurnOrder: false,
+          }],
+        })}
+      />
+    );
+
+    const stage = document.querySelector('[data-konva-type="Stage"]');
+    const startViewportX = getNumericKonvaProp(stage, 'data-x');
+    const tokenNode = screen.getByTestId('token-node-user-1');
+
+    fireEvent.mouseDown(tokenNode, { button: 2, buttons: 2, clientX: 175, clientY: 175 });
+    fireEvent.mouseMove(window, { button: 2, buttons: 2, clientX: 245, clientY: 175 });
+    fireEvent.mouseUp(window, { button: 2, buttons: 0, clientX: 245, clientY: 175 });
+    fireEvent.contextMenu(tokenNode, { button: 2, clientX: 245, clientY: 175 });
+
+    await waitFor(() => {
+      expect(getNumericKonvaProp(stage, 'data-x')).toBeGreaterThan(startViewportX);
+    });
+    expect(screen.queryByTestId('turn-order-context-menu')).not.toBeInTheDocument();
+  });
+
+  test('right-clicking a token without dragging still opens the token menu', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Ilya',
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+            isInTurnOrder: false,
+          }],
+        })}
+      />
+    );
+
+    const tokenNode = screen.getByTestId('token-node-user-1');
+    fireEvent.mouseDown(tokenNode, { button: 2, buttons: 2, clientX: 175, clientY: 175 });
+    fireEvent.mouseUp(window, { button: 2, buttons: 0, clientX: 175, clientY: 175 });
+    fireEvent.contextMenu(tokenNode, { button: 2, clientX: 175, clientY: 175 });
+
+    expect(await screen.findByTestId('turn-order-context-menu')).toBeInTheDocument();
   });
 
   test('shows token names only while hovering the token', () => {
@@ -4458,6 +4877,7 @@ describe('GrigliataBoard', () => {
       <GrigliataBoard
         {...buildProps({
           isRulerEnabled: true,
+          isRulerTokenMovementEnabled: true,
           currentUserId: 'user-1',
           tokens: [{
             tokenId: 'user-1',
