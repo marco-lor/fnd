@@ -1,5 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FiEye, FiEyeOff, FiMaximize, FiMinus, FiPlus, FiSun } from 'react-icons/fi';
+import {
+  FiChevronDown,
+  FiChevronUp,
+  FiEye,
+  FiEyeOff,
+  FiLayers,
+  FiMaximize,
+  FiMinus,
+  FiPlus,
+  FiSun,
+} from 'react-icons/fi';
 import { GiAura, GiDeathSkull } from 'react-icons/gi';
 import { normalizeTokenSizeSquares } from './boardUtils';
 import GrigliataTokenVisionPopover from './GrigliataTokenVisionPopover';
@@ -397,11 +407,13 @@ export default function GrigliataTokenActions({
   isTokenStatusActionPending = false,
   isTokenSizeActionPending = false,
   isTokenVisionActionPending = false,
+  isTokenLayerActionPending = false,
   onSetSelectedTokensVisibility,
   onSetSelectedTokensDeadState,
   onUpdateTokenStatuses,
   onSetSelectedTokenSize,
   onSetSelectedTokenVision,
+  onMoveTokenLayer,
 }) {
   const [isStatusPopoverOpen, setIsStatusPopoverOpen] = useState(false);
   const [isSizePopoverOpen, setIsSizePopoverOpen] = useState(false);
@@ -542,6 +554,14 @@ export default function GrigliataTokenActions({
     ? `Edit vision for ${actionState.visionToken.label || 'token'}`
     : 'Edit token vision';
   const VisibilityIcon = actionState.nextIsVisibleToPlayers ? FiEye : FiEyeOff;
+  const renderLayerIcon = (direction) => (
+    <span className="relative flex h-[52%] w-[52%] items-center justify-center" aria-hidden="true">
+      <FiLayers className="h-full w-full" />
+      {direction === 'backward'
+        ? <FiChevronDown className="absolute -bottom-[28%] -right-[28%] h-[58%] w-[58%] rounded-full bg-slate-950" />
+        : <FiChevronUp className="absolute -right-[28%] -top-[28%] h-[58%] w-[58%] rounded-full bg-slate-950" />}
+    </span>
+  );
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20">
@@ -689,6 +709,47 @@ export default function GrigliataTokenActions({
               >
                 <FiSun className="h-[44%] w-[44%]" />
               </button>
+            )}
+
+            {actionState.layerToken && (
+              <>
+                <button
+                  type="button"
+                  aria-label={`Move ${actionState.layerToken.label || 'token'} one overlapping layer backward`}
+                  title={`Move ${actionState.layerToken.label || 'token'} one overlapping layer backward`}
+                  disabled={isTokenLayerActionPending || !actionState.layerToken.canMoveBackward}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onMoveTokenLayer?.(actionState.layerToken.tokenId, 'backward');
+                  }}
+                  className="flex items-center justify-center rounded-[1.15rem] border border-slate-300/40 bg-slate-800/90 text-slate-50 shadow-lg transition-transform duration-150 hover:scale-[1.03] disabled:cursor-not-allowed disabled:opacity-40"
+                  style={{
+                    width: actionState.layerButtonSize || actionState.buttonSize,
+                    height: actionState.layerButtonSize || actionState.buttonSize,
+                  }}
+                >
+                  {renderLayerIcon('backward')}
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Move ${actionState.layerToken.label || 'token'} one overlapping layer forward`}
+                  title={`Move ${actionState.layerToken.label || 'token'} one overlapping layer forward`}
+                  disabled={isTokenLayerActionPending || !actionState.layerToken.canMoveForward}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onMoveTokenLayer?.(actionState.layerToken.tokenId, 'forward');
+                  }}
+                  className="flex items-center justify-center rounded-[1.15rem] border border-amber-300/45 bg-amber-500/18 text-amber-50 shadow-lg transition-transform duration-150 hover:scale-[1.03] disabled:cursor-not-allowed disabled:opacity-40"
+                  style={{
+                    width: actionState.layerButtonSize || actionState.buttonSize,
+                    height: actionState.layerButtonSize || actionState.buttonSize,
+                  }}
+                >
+                  {renderLayerIcon('forward')}
+                </button>
+              </>
             )}
           </div>
 

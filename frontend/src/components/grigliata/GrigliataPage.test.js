@@ -397,6 +397,7 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-fog-brush-active">{String(!!props.fogBrushControls?.isFogBrushToolActive)}</div>
       <div data-testid="board-fog-brush-mode">{props.fogBrushControls?.mode || ''}</div>
       <div data-testid="board-fog-brush-radius">{String(props.fogBrushControls?.radiusSquares || '')}</div>
+      <div data-testid="board-token-layer-pending">{String(!!props.isTokenLayerActionPending)}</div>
         <button type="button" onClick={() => props.onSelectMouseTool?.()}>
           select mouse tool
         </button>
@@ -798,6 +799,13 @@ jest.mock('./GrigliataBoard', () => {
           ])}
         >
           move token placement
+        </button>
+        <button
+          type="button"
+          disabled={props.isTokenLayerActionPending}
+          onClick={() => props.onMoveTokenLayer?.('middle', 'forward')}
+        >
+          move token layer forward
         </button>
         <button
           type="button"
@@ -5176,6 +5184,116 @@ describe('GrigliataPage', () => {
         { merge: true }
       );
     });
+  });
+
+  test('persists a canonical token layer order for a legacy battlemap', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_token_placements', [
+      {
+        id: 'map-1__bottom',
+        backgroundId: 'map-1',
+        tokenId: 'bottom',
+        ownerUid: 'user-1',
+        label: 'Bottom',
+        col: 0,
+        row: 0,
+        sizeSquares: 1,
+        isVisibleToPlayers: true,
+        isDead: false,
+      },
+      {
+        id: 'map-1__elsewhere',
+        backgroundId: 'map-1',
+        tokenId: 'elsewhere',
+        ownerUid: 'user-1',
+        label: 'Elsewhere',
+        col: 8,
+        row: 8,
+        sizeSquares: 1,
+        isVisibleToPlayers: true,
+        isDead: false,
+      },
+      {
+        id: 'map-1__middle',
+        backgroundId: 'map-1',
+        tokenId: 'middle',
+        ownerUid: 'user-1',
+        label: 'Middle',
+        col: 0,
+        row: 0,
+        sizeSquares: 1,
+        isVisibleToPlayers: true,
+        isDead: false,
+      },
+      {
+        id: 'map-1__top',
+        backgroundId: 'map-1',
+        tokenId: 'top',
+        ownerUid: 'user-1',
+        label: 'Top',
+        col: 0,
+        row: 0,
+        sizeSquares: 1,
+        isVisibleToPlayers: true,
+        isDead: false,
+      },
+    ]);
+    const deferredWrite = createDeferred();
+    firestore.updateDoc.mockReturnValueOnce(deferredWrite.promise);
+
+    render(<GrigliataPage />);
+    fireEvent.click(screen.getByRole('button', { name: /move token layer forward/i }));
+
+    expect(screen.getByTestId('board-token-layer-pending')).toHaveTextContent('true');
+    expect(firestore.updateDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+      {
+        tokenLayerOrder: ['bottom', 'elsewhere', 'top', 'middle'],
+        updatedAt: { __type: 'serverTimestamp' },
+        updatedBy: 'user-1',
+      }
+    );
+
+    await act(async () => {
+      deferredWrite.resolve();
+      await deferredWrite.promise;
+    });
+    expect(screen.getByTestId('board-token-layer-pending')).toHaveTextContent('false');
+  });
+
+  test('reports a token layering persistence failure', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_token_placements', [
+      {
+        id: 'map-1__middle',
+        backgroundId: 'map-1',
+        tokenId: 'middle',
+        ownerUid: 'user-1',
+        col: 0,
+        row: 0,
+        sizeSquares: 1,
+        isVisibleToPlayers: true,
+        isDead: false,
+      },
+      {
+        id: 'map-1__top',
+        backgroundId: 'map-1',
+        tokenId: 'top',
+        ownerUid: 'user-1',
+        col: 0,
+        row: 0,
+        sizeSquares: 1,
+        isVisibleToPlayers: true,
+        isDead: false,
+      },
+    ]);
+    firestore.updateDoc.mockRejectedValueOnce(new Error('write failed'));
+
+    render(<GrigliataPage />);
+    fireEvent.click(screen.getByRole('button', { name: /move token layer forward/i }));
+
+    expect(await screen.findByText('Unable to update that token layer right now.')).toBeInTheDocument();
+    expect(screen.getByTestId('board-token-layer-pending')).toHaveTextContent('false');
   });
 
   test('creates a custom token from the token tab and uploads its image', async () => {

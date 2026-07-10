@@ -102,6 +102,7 @@ import {
   MIN_FOG_BRUSH_RADIUS_SQUARES,
   normalizeFogBrushSettings,
 } from './fogBrushEditing';
+import { sortTokensByLayerOrder } from './tokenLayering';
 import {
   buildBackgroundMap,
   buildInitialNarrationPlacement,
@@ -2400,6 +2401,8 @@ export default function GrigliataBoard({
   isTokenSizeActionPending = false,
   onSetSelectedTokenVision,
   isTokenVisionActionPending = false,
+  onMoveTokenLayer,
+  isTokenLayerActionPending = false,
   selectedTokenDetails = null,
   onDropCurrentToken,
   onSelectedTokenIdsChange,
@@ -2759,7 +2762,7 @@ export default function GrigliataBoard({
   );
 
   const tokenItems = useMemo(
-    () => placedTokens.map((token) => {
+    () => sortTokensByLayerOrder(placedTokens, resolvedBackground?.tokenLayerOrder).map((token) => {
       const tokenId = token.id || token.ownerUid;
       const canMove = !!tokenId && (isManager || token.ownerUid === currentUserId || tokenId === currentUserId);
       return {
@@ -2769,7 +2772,7 @@ export default function GrigliataBoard({
         position: getTokenPositionPx(token, normalizedGrid),
       };
     }),
-    [placedTokens, isManager, currentUserId, normalizedGrid]
+    [placedTokens, resolvedBackground?.tokenLayerOrder, isManager, currentUserId, normalizedGrid]
   );
 
   const tokenItemsById = useMemo(() => {
@@ -5662,6 +5665,8 @@ export default function GrigliataBoard({
 
     return buildSelectedTokenActionState({
       selectedTokens,
+      allTokens: renderedTokens,
+      tokenLayerOrder: resolvedBackground?.tokenLayerOrder,
       isManager,
       stageSize,
       viewport,
@@ -5679,6 +5684,8 @@ export default function GrigliataBoard({
     selectedLight,
     selectedWall,
     selectedTokens,
+    renderedTokens,
+    resolvedBackground?.tokenLayerOrder,
     selectionBox,
     stageSize.height,
     stageSize.width,
@@ -7034,6 +7041,8 @@ export default function GrigliataBoard({
           onSetSelectedTokenSize={onSetSelectedTokenSize}
           isTokenVisionActionPending={isTokenVisionActionPending}
           onSetSelectedTokenVision={onSetSelectedTokenVision}
+          isTokenLayerActionPending={isTokenLayerActionPending}
+          onMoveTokenLayer={onMoveTokenLayer}
         />
 
         {visibleSelectedAoEFigureActionState && (
