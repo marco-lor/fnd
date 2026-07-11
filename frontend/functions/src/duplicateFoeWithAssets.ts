@@ -97,12 +97,12 @@ export const duplicateFoeWithAssets = onCall<DuplicatePayload>(
       const destPath = `${destFolder}/${destName}`;
       const destFile = bucket.file(destPath);
       await srcFile.copy(destFile);
-      // Preserve contentType and add a reasonable cacheControl, ensure download token exists
+      // Copied files use unique paths, so they are safe to cache as immutable assets.
       const [dmeta] = await destFile.getMetadata();
       let token = dmeta?.metadata?.firebaseStorageDownloadTokens as string | undefined;
       if (!token) token = randomUUID();
       const newMeta: any = {
-        cacheControl: meta?.cacheControl || "public, max-age=3600, immutable",
+        cacheControl: "private, max-age=31536000, immutable",
         metadata: {
           ...(dmeta?.metadata || {}),
           firebaseStorageDownloadTokens: token,

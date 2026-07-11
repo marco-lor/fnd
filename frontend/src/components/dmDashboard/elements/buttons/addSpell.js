@@ -9,6 +9,7 @@ import {
 import {
   ref, uploadBytes, getDownloadURL,
 } from "firebase/storage";
+import { uploadCacheableImage } from "../../../common/imageStorage";
 
 /* ------------------------------------------------------------------ */
 /*  A. Pure button – API unchanged                                    */
@@ -83,8 +84,7 @@ export function AddSpellOverlay({ userId, onClose, savePath = null }) {
 
       if (imageFile) {
         const imgRef  = ref(storage, `spells/${safeBase}_image`);
-        await uploadBytes(imgRef, imageFile);
-        spellData.image_url = await getDownloadURL(imgRef);
+        spellData.image_url = (await uploadCacheableImage(imgRef, imageFile)).downloadUrl;
       }
       if (videoFile) {
         const vidRef  = ref(storage, `spells/videos/${safeBase}_video`);

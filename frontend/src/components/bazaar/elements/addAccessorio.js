@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, useContext } from 'rea
 import VisibilitySelector from '../../common/VisibilitySelector';
 import { collection, doc, addDoc, updateDoc, getDocs, onSnapshot, getDoc, setDoc } from "firebase/firestore";
 import { getStorage, ref, uploadBytesResumable, getDownloadURL, uploadBytes, deleteObject } from "firebase/storage";
+import { uploadCacheableImage } from "../../common/imageStorage";
 import { db, storage } from '../../firebaseConfig';
 import { AuthContext } from '../../../AuthContext';
 import { AddWeaponOverlay } from './addWeapon';
@@ -376,8 +377,7 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
             if (imageFile) {
                 const accessorioImgFileName = `accessorio_${docId}_${Date.now()}_${imageFile.name}`;
                 const accessorioImgRef = ref(storage, 'items/' + accessorioImgFileName);
-                await uploadBytes(accessorioImgRef, imageFile);
-                newImageUrl = await getDownloadURL(accessorioImgRef);
+                newImageUrl = (await uploadCacheableImage(accessorioImgRef, imageFile)).downloadUrl;
                 if (!inventoryEditMode && editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
                     try {
                         const oldPath = decodeURIComponent(initialData.General.image_url.split('/o/')[1].split('?')[0]);
@@ -404,8 +404,7 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                 
                 if (customSpell.imageFile) {
                     const spellImageRef = ref(storage, `spell_images/${Date.now()}_${customSpell.imageFile.name}`);
-                    const spellImageSnapshot = await uploadBytes(spellImageRef, customSpell.imageFile);
-                    spellImageUrlToSave = await getDownloadURL(spellImageSnapshot.ref);
+                    spellImageUrlToSave = (await uploadCacheableImage(spellImageRef, customSpell.imageFile)).downloadUrl;
                 }
                 
                 if (customSpell.videoFile) {

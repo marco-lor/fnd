@@ -2,10 +2,11 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { db, storage } from "../firebaseConfig"; 
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { ref } from "firebase/storage";
 import { doc, getDoc, updateDoc, setDoc } from "firebase/firestore";
 import { useAuth } from "../../AuthContext";
 import GlobalAuroraBackground from "../backgrounds/GlobalAuroraBackground";
+import { uploadCacheableImage } from "../common/imageStorage";
 // Import the components for each step
 import RaceSelection from "./elements/RaceSelection";
 import AnimaShardSelection from "./elements/AnimaShardSelection";
@@ -252,8 +253,7 @@ function CharacterCreation() {
         const safeFileName = `${characterName.trim().replace(/\s+/g, '_')}_${user.uid}_${Date.now()}`;
         const imagePath = `characters/${safeFileName}`;
         const imageRef = ref(storage, imagePath);
-        await uploadBytes(imageRef, imageFile);
-        const imageUrl = await getDownloadURL(imageRef);
+        const { downloadUrl: imageUrl } = await uploadCacheableImage(imageRef, imageFile);
         characterUpdateData.imageUrl = imageUrl;
         characterUpdateData.imagePath = imagePath;
       } else if (userDocSnap.exists() && userDocSnap.data()?.imageUrl) {

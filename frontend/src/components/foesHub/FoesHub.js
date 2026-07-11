@@ -12,7 +12,7 @@ import {
   serverTimestamp,
   updateDoc,
 } from 'firebase/firestore';
-import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { ref as storageRef, deleteObject } from 'firebase/storage';
 import { httpsCallable } from 'firebase/functions';
 import { FiPlus, FiChevronDown, FiChevronRight, FiEdit2, FiTrash2, FiX, FiCopy } from 'react-icons/fi';
 import { computeParamTotals, deepClone, Pill, SectionTitle } from './elements/utils';
@@ -21,6 +21,7 @@ import { ParametersEditor, ParamTotalsPreview } from './elements/ParamEditors';
 import StatsEditor from './elements/StatsEditor';
 import TecnicheEditor from './elements/TecnicheEditor';
 import SpellsEditor from './elements/SpellsEditor';
+import { uploadCacheableImage } from '../common/imageStorage';
 
 // Allow only persisted HTTP(S) image URLs when reading/saving.
 // This prevents storing temporary blob:/data: URLs in Firestore.
@@ -540,8 +541,7 @@ const FoesHub = () => {
         const fileName = `${safeName}_${Date.now()}`;
         const path = `foes/${fileName}`;
         const fileRef = storageRef(storage, path);
-        await uploadBytes(fileRef, imageFile);
-        imageUrl = await getDownloadURL(fileRef);
+        ({ downloadUrl: imageUrl } = await uploadCacheableImage(fileRef, imageFile));
         imagePath = path;
       }
 
@@ -560,8 +560,7 @@ const FoesHub = () => {
           const fname = `${safe}_${Date.now()}`;
           const path = `foes/${folder}/${fname}`;
           const ref = storageRef(storage, path);
-          await uploadBytes(ref, entry.imageFile);
-          eUrl = await getDownloadURL(ref);
+          ({ downloadUrl: eUrl } = await uploadCacheableImage(ref, entry.imageFile));
           ePath = path;
         } else if (entry.removeImage) {
           eUrl = '';

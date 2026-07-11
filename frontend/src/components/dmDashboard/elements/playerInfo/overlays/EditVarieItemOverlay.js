@@ -1,8 +1,9 @@
 import React, { useRef, useState } from "react";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
+import { ref as storageRef, deleteObject } from "firebase/storage";
 
 import { db, storage } from "../../../../firebaseConfig";
+import { uploadCacheableImage } from "../../../../common/imageStorage";
 
 const EditVarieItemOverlay = ({ userId, initialData, inventoryItemId, onClose }) => {
   const [name, setName] = useState(initialData?.name || initialData?.General?.Nome || "");
@@ -41,8 +42,7 @@ const EditVarieItemOverlay = ({ userId, initialData, inventoryItemId, onClose })
         const safe = cleanName.replace(/[^a-zA-Z0-9]/g, "_");
         const fileName = `varie_${userId}_${safe}_${Date.now()}_${imageFile.name}`;
         const imageRef = storageRef(storage, `items/${fileName}`);
-        await uploadBytes(imageRef, imageFile);
-        newImageUrl = await getDownloadURL(imageRef);
+        ({ downloadUrl: newImageUrl } = await uploadCacheableImage(imageRef, imageFile));
         if (originalUrlRef.current && originalUrlRef.current !== newImageUrl) {
           setRemoveExisting(true);
         }

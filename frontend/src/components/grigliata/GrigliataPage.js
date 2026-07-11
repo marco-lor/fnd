@@ -29,6 +29,7 @@ import { httpsCallable } from 'firebase/functions';
 import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
 import { useAuth } from '../../AuthContext';
 import { auth, db, functions, storage } from '../firebaseConfig';
+import { uploadCacheableImage } from '../common/imageStorage';
 import BackgroundGalleryPanel from './BackgroundGalleryPanel';
 import GrigliataLightingImportPanel from './GrigliataLightingImportPanel';
 import MusicLibraryPanel from './MusicLibraryPanel';
@@ -3060,8 +3061,7 @@ export default function GrigliataPage() {
     const imagePath = `grigliata/tokens/${currentUserId}/${safeName}_${Date.now()}${fileExtension}`;
     const imageRef = storageRef(storage, imagePath);
 
-    await uploadBytes(imageRef, file);
-    const imageUrl = await getDownloadURL(imageRef);
+    const { downloadUrl: imageUrl } = await uploadCacheableImage(imageRef, file);
 
     return {
       imageUrl,
@@ -3447,9 +3447,14 @@ export default function GrigliataPage() {
         ? await readFileVideoMetadata(file)
         : await readFileImageDimensions(file);
       const fileRef = storageRef(storage, storagePath);
-      await uploadBytes(fileRef, file);
+      const imageUpload = assetType === 'image'
+        ? await uploadCacheableImage(fileRef, file)
+        : null;
+      if (assetType === 'video') {
+        await uploadBytes(fileRef, file);
+      }
       uploadedPath = storagePath;
-      const imageUrl = await getDownloadURL(fileRef);
+      const imageUrl = imageUpload?.downloadUrl || await getDownloadURL(fileRef);
 
       const backgroundPayload = {
         name: mapName || 'Untitled Map',
