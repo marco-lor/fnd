@@ -38,6 +38,10 @@ const buildTrayProps = (props = {}) => {
 
 const renderTray = (props = {}) => render(<MyTokenTray {...buildTrayProps(props)} />);
 
+const openCreateDialog = () => {
+  fireEvent.click(screen.getByTestId('open-custom-token-dialog'));
+};
+
 const createDataTransfer = () => ({
   setData: jest.fn(),
   effectAllowed: '',
@@ -98,7 +102,7 @@ describe('MyTokenTray', () => {
     expect(screen.queryByText('Aldor')).not.toBeInTheDocument();
     expect(screen.getByText('Wolf')).toBeInTheDocument();
     expect(screen.getByText('Foes Hub')).toBeInTheDocument();
-    expect(screen.getByText('Add Custom Token')).toBeInTheDocument();
+    expect(screen.getByText('Add New Custom Token')).toBeInTheDocument();
   });
 
   test('shows the hidden-by-dm state and disables dragging for the main token', () => {
@@ -208,10 +212,86 @@ describe('MyTokenTray', () => {
     expect(onDragStart).not.toHaveBeenCalled();
   });
 
+  test('renders a token-sized custom-token trigger inside the themed tray scroller', () => {
+    renderTray();
+
+    const scroller = screen.getByTestId('my-token-tray-scroll');
+    const tokenCard = screen.getByText('Aldor').closest('[draggable]');
+    const trigger = screen.getByTestId('open-custom-token-dialog');
+    const scrollerChildren = Array.from(scroller.children);
+
+    expect(trigger).toHaveTextContent('Add New Custom Token');
+    expect(trigger).toHaveClass('h-24', 'w-full');
+    expect(trigger).toHaveAttribute('draggable', 'false');
+    expect(scrollerChildren.indexOf(trigger)).toBeGreaterThan(scrollerChildren.indexOf(tokenCard));
+    expect(scroller).toHaveClass('custom-scroll', 'xl:overflow-y-auto', 'xl:overscroll-contain', 'xl:[scrollbar-gutter:stable]');
+    expect(screen.queryByRole('dialog', { name: /add new custom token/i })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Summoned Wolf')).not.toBeInTheDocument();
+  });
+
+  test('opens an accessible custom-token dialog and preserves its draft when dismissed', async () => {
+    renderTray();
+
+    const trigger = screen.getByTestId('open-custom-token-dialog');
+    openCreateDialog();
+
+    const dialog = screen.getByRole('dialog', { name: /add new custom token/i });
+    const nameInput = screen.getByPlaceholderText('Summoned Wolf');
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    await waitFor(() => expect(nameInput).toHaveFocus());
+
+    fireEvent.change(nameInput, { target: { value: 'Draft Wolf' } });
+    const headerClose = screen.getByRole('button', { name: 'Close custom token creator' });
+    headerClose.focus();
+    fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+    expect(screen.getByRole('button', { name: /create token/i })).toHaveFocus();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: /add new custom token/i })).not.toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
+
+    openCreateDialog();
+    expect(screen.getByPlaceholderText('Summoned Wolf')).toHaveValue('Draft Wolf');
+    fireEvent.mouseDown(screen.getByTestId('create-custom-token-overlay'));
+    expect(screen.queryByRole('dialog', { name: /add new custom token/i })).not.toBeInTheDocument();
+  });
+
+  test('keeps the custom-token dialog and draft open when creation fails', async () => {
+    const onCreateCustomToken = jest.fn(() => Promise.resolve(false));
+    renderTray({ onCreateCustomToken });
+    openCreateDialog();
+
+    fireEvent.change(screen.getByPlaceholderText('Summoned Wolf'), {
+      target: { value: 'Unfinished Token' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /create token/i }));
+    });
+
+    expect(onCreateCustomToken).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('dialog', { name: /add new custom token/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Summoned Wolf')).toHaveValue('Unfinished Token');
+  });
+
+  test('prevents duplicate submission and dismissal while custom-token creation is pending', () => {
+    const { rerender } = renderTray();
+    openCreateDialog();
+
+    rerender(<MyTokenTray {...buildTrayProps({ isCreatingCustomToken: true })} />);
+
+    expect(screen.getByRole('button', { name: /creating/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Close custom token creator' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^close$/i })).toBeDisabled();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.mouseDown(screen.getByTestId('create-custom-token-overlay'));
+    expect(screen.getByRole('dialog', { name: /add new custom token/i })).toBeInTheDocument();
+  });
+
   test('creates a custom token through the tray form', async () => {
     const onCreateCustomToken = jest.fn(() => Promise.resolve(true));
     const file = new File(['wolf'], 'wolf.png', { type: 'image/png' });
     renderTray({ onCreateCustomToken });
+    openCreateDialog();
 
     fireEvent.change(screen.getByPlaceholderText('Summoned Wolf'), {
       target: { value: 'Summoned Wolf' },
@@ -238,6 +318,7 @@ describe('MyTokenTray', () => {
   test('creates a custom token with resource values and notes', async () => {
     const onCreateCustomToken = jest.fn(() => Promise.resolve(true));
     renderTray({ onCreateCustomToken });
+    openCreateDialog();
 
     fireEvent.change(screen.getByPlaceholderText('Summoned Wolf'), {
       target: { value: 'Arcane Echo' },
@@ -273,6 +354,7 @@ describe('MyTokenTray', () => {
     const file = new File(['wolf'], 'wolf.png', { type: 'image/png' });
 
     renderTray({ onCreateCustomToken });
+    openCreateDialog();
 
     const originalInput = screen.getByLabelText('Image');
     fireEvent.change(screen.getByPlaceholderText('Summoned Wolf'), {
@@ -287,8 +369,11 @@ describe('MyTokenTray', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Image')).not.toBe(originalInput);
+      expect(screen.queryByRole('dialog', { name: /add new custom token/i })).not.toBeInTheDocument();
     });
+    openCreateDialog();
+    expect(screen.getByLabelText('Image')).not.toBe(originalInput);
+    expect(screen.getByPlaceholderText('Summoned Wolf')).toHaveValue('');
   });
 
   test('edits a custom token from the tray', async () => {

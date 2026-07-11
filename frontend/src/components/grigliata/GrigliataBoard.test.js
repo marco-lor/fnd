@@ -30,7 +30,7 @@ import {
   normalizeFogRasterMemoryTileDoc,
 } from './fogRasterMemory';
 
-const MAP_PING_EPIC_ACCENT = '#f97316';
+const MAP_PING_ACCENT = '#fbbf24';
 const STATUS_BADGE_FILL = '#7c3aed';
 const STATUS_BADGE_STROKE = '#f8fafc';
 const OVERFLOW_BADGE_FILL = 'rgba(2, 6, 23, 0.94)';
@@ -66,6 +66,16 @@ jest.mock('./useImageAsset', () => ({
     error: null,
   })),
 }));
+jest.mock('../common/DiceRoller', () => function MockDiceRoller(props) {
+  return (
+    <div data-testid="turn-order-initiative-dice-roller">
+      <span>{`faces:${props.faces};count:${props.count};modifier:${props.modifier};description:${props.description}`}</span>
+      <button type="button" onClick={() => props.onComplete(13)}>
+        Complete initiative dice roll
+      </button>
+    </div>
+  );
+});
 jest.mock('./tokenStatuses', () => ({
   getTokenStatusDefinition: jest.fn(() => null),
   normalizeTokenStatuses: jest.fn((statuses) => (Array.isArray(statuses) ? statuses : [])),
@@ -255,6 +265,7 @@ const buildProps = (overrides = {}) => ({
   onResetTurnOrder: null,
   isTurnOrderResetPending: false,
   onJoinTurnOrder: jest.fn(),
+  onResolveTurnOrderInitiativeRoll: null,
   onLeaveTurnOrder: jest.fn(),
   turnOrderActionTokenId: '',
   onSaveTurnOrderInitiative: jest.fn(),
@@ -594,6 +605,33 @@ describe('GrigliataBoard', () => {
 
     const activeImage = await screen.findByTestId('battlemap-image-active');
     expect(activeImage).toHaveAttribute('data-opacity', '0');
+
+    await act(async () => {
+      jest.advanceTimersByTime(240);
+    });
+
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-opacity', '1');
+    expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
+  });
+
+  test('does not freeze a cached battlemap fade when same-source hydration refreshes its metadata', async () => {
+    jest.useFakeTimers();
+    const buildBackground = (name) => ({
+      id: 'map-1',
+      name,
+      imageUrl: 'https://example.com/map-1.png',
+      imageWidth: 1280,
+      imageHeight: 720,
+    });
+    const { rerender } = render(
+      <GrigliataBoard {...buildProps({ activeBackground: buildBackground('Cached map') })} />
+    );
+
+    expect(await screen.findByTestId('battlemap-image-active')).toHaveAttribute('data-opacity', '0');
+
+    rerender(
+      <GrigliataBoard {...buildProps({ activeBackground: buildBackground('Hydrated map') })} />
+    );
 
     await act(async () => {
       jest.advanceTimersByTime(240);
@@ -4981,6 +5019,8 @@ describe('GrigliataBoard', () => {
     expect(screen.queryByTestId('turn-order-hidden-overlay-visible-token')).not.toBeInTheDocument();
     expect(screen.getByTestId('turn-order-entry-hidden-image')).toHaveAttribute('data-hidden-from-players', 'true');
     expect(screen.getByTestId('turn-order-entry-hidden-image')).toHaveAttribute('data-active-turn', 'true');
+    expect(screen.getByTestId('turn-order-entry-hidden-image')).toHaveAttribute('aria-current', 'step');
+    expect(screen.getByTestId('turn-order-active-marker-hidden-image')).toBeInTheDocument();
     expect(screen.getByTestId('turn-order-entry-visible-token')).toHaveAttribute('data-hidden-from-players', 'false');
   });
 
@@ -5223,6 +5263,190 @@ describe('GrigliataBoard', () => {
     });
 
     expect(screen.getByTestId('turn-order-context-action-user-1')).toHaveTextContent('Remove from turn order');
+  });
+
+  test('keeps multi-digit initiative input after the initial focus selection frame', async () => {
+    jest.useFakeTimers();
+    const onJoinTurnOrder = jest.fn(() => Promise.resolve());
+    const token = {
+      id: 'user-1',
+      tokenId: 'user-1',
+      ownerUid: 'current-user',
+      label: 'Ilya',
+      tokenType: 'character',
+      imageUrl: '',
+      placed: true,
+      col: 1,
+      row: 1,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+      isInTurnOrder: false,
+    };
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          tokens: [token],
+          onJoinTurnOrder,
+        })}
+      />
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('token-node-user-1'), {
+      clientX: 160,
+      clientY: 160,
+      button: 2,
+    });
+    fireEvent.click(screen.getByTestId('turn-order-context-action-user-1'));
+
+    act(() => {
+      jest.advanceTimersByTime(16);
+    });
+
+    const initiativeInput = screen.getByTestId('turn-order-join-initiative-input');
+    fireEvent.change(initiativeInput, { target: { value: '1' } });
+    initiativeInput.setSelectionRange(1, 1);
+
+    act(() => {
+      jest.advanceTimersByTime(16);
+    });
+
+    expect(initiativeInput).toHaveValue('1');
+    expect(initiativeInput.selectionStart).toBe(1);
+    expect(initiativeInput.selectionEnd).toBe(1);
+
+    fireEvent.change(initiativeInput, { target: { value: '13' } });
+    fireEvent.click(screen.getByTestId('turn-order-join-confirm'));
+
+    expect(onJoinTurnOrder).toHaveBeenCalledWith('user-1', 13);
+    await act(async () => {});
+    expect(screen.queryByTestId('turn-order-join-overlay')).not.toBeInTheDocument();
+  });
+
+  test('rolls Destrezza into the initiative draft and waits for confirmation before joining', async () => {
+    const onJoinTurnOrder = jest.fn(() => Promise.resolve());
+    const onResolveTurnOrderInitiativeRoll = jest.fn(() => Promise.resolve({
+      faces: 8,
+      count: 1,
+      modifier: 4,
+      formula: 'd8 + 4',
+      description: 'Destrezza (d8 + 4)',
+    }));
+    const token = {
+      id: 'user-1',
+      tokenId: 'user-1',
+      ownerUid: 'current-user',
+      label: 'Ilya',
+      tokenType: 'character',
+      imageUrl: '',
+      placed: true,
+      col: 1,
+      row: 1,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+      isInTurnOrder: false,
+    };
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          tokens: [token],
+          onJoinTurnOrder,
+          onResolveTurnOrderInitiativeRoll,
+        })}
+      />
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('token-node-user-1'), {
+      clientX: 160,
+      clientY: 160,
+      button: 2,
+    });
+    fireEvent.click(screen.getByTestId('turn-order-context-action-user-1'));
+
+    expect(screen.getByTestId('turn-order-initiative-roll-loading')).toHaveTextContent('Checking Destrezza');
+    const rollButton = await screen.findByRole('button', { name: 'Roll Destrezza for Ilya' });
+    expect(rollButton).toHaveTextContent('d8 + 4');
+    expect(onResolveTurnOrderInitiativeRoll).toHaveBeenCalledWith('user-1');
+
+    fireEvent.click(rollButton);
+
+    expect(screen.getByTestId('turn-order-initiative-dice-roller')).toHaveTextContent(
+      'faces:8;count:1;modifier:4;description:Destrezza (d8 + 4)'
+    );
+    expect(onJoinTurnOrder).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Complete initiative dice roll' }));
+
+    expect(screen.getByTestId('turn-order-join-initiative-input')).toHaveValue('13');
+    expect(onJoinTurnOrder).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('turn-order-join-confirm'));
+    await waitFor(() => expect(onJoinTurnOrder).toHaveBeenCalledWith('user-1', 13));
+  });
+
+  test('keeps manual initiative available when Destrezza is unavailable or resolution fails', async () => {
+    const token = {
+      id: 'user-1',
+      tokenId: 'user-1',
+      ownerUid: 'current-user',
+      label: 'Ilya',
+      tokenType: 'character',
+      imageUrl: '',
+      placed: true,
+      col: 1,
+      row: 1,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+      isInTurnOrder: false,
+    };
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          tokens: [token],
+          onResolveTurnOrderInitiativeRoll: jest.fn(() => Promise.resolve(null)),
+        })}
+      />
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('token-node-user-1'), {
+      clientX: 160,
+      clientY: 160,
+      button: 2,
+    });
+    fireEvent.click(screen.getByTestId('turn-order-context-action-user-1'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('turn-order-initiative-roll-loading')).not.toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('turn-order-initiative-roll-button')).not.toBeInTheDocument();
+    expect(screen.getByTestId('turn-order-join-initiative-input')).toBeEnabled();
+
+    fireEvent.click(screen.getByTestId('turn-order-join-cancel'));
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          tokens: [token],
+          onResolveTurnOrderInitiativeRoll: jest.fn(() => Promise.reject(new Error('offline'))),
+        })}
+      />
+    );
+    fireEvent.contextMenu(screen.getByTestId('token-node-user-1'), {
+      clientX: 160,
+      clientY: 160,
+      button: 2,
+    });
+    fireEvent.click(screen.getByTestId('turn-order-context-action-user-1'));
+
+    expect(await screen.findByTestId('turn-order-initiative-roll-error')).toHaveTextContent(
+      'Enter initiative manually'
+    );
+    expect(screen.getByTestId('turn-order-join-initiative-input')).toBeEnabled();
+    warnSpy.mockRestore();
   });
 
   test('does not open the token turn-order menu while adding a ruler waypoint during token movement', async () => {
@@ -5532,10 +5756,30 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    expect(screen.getByTestId('turn-order-entry-user-2')).toHaveAttribute('data-active-turn', 'true');
-    expect(screen.getByTestId('turn-order-entry-user-1')).toHaveAttribute('data-active-turn', 'false');
+    const activeEntry = screen.getByTestId('turn-order-entry-user-2');
+    const inactiveEntry = screen.getByTestId('turn-order-entry-user-1');
+    expect(activeEntry).toHaveAttribute('data-active-turn', 'true');
+    expect(activeEntry).toHaveAttribute('aria-current', 'step');
+    expect(activeEntry).toHaveTextContent('Current turn');
+    expect(activeEntry.className).toContain('py-1.5');
+    expect(activeEntry.className).not.toContain('bg-gradient-to-l');
+    expect(screen.getByTestId('turn-order-active-marker-user-2')).toBeInTheDocument();
+    expect(inactiveEntry).toHaveAttribute('data-active-turn', 'false');
+    expect(inactiveEntry).not.toHaveAttribute('aria-current');
+    expect(inactiveEntry.className).toContain('py-1.5');
+    expect(screen.queryByTestId('turn-order-active-marker-user-1')).not.toBeInTheDocument();
     expect(screen.getByTestId('token-node-user-2')).toHaveAttribute('data-active-turn', 'true');
     expect(screen.getByTestId('token-node-user-1')).toHaveAttribute('data-active-turn', 'false');
+    expect(screen.getByTestId('token-active-turn-underlay-user-2')).toHaveAttribute(
+      'data-stroke',
+      'rgba(2, 6, 23, 0.88)'
+    );
+    expect(screen.getByTestId('token-active-turn-ring-user-2')).toHaveAttribute(
+      'data-stroke',
+      'rgba(251, 191, 36, 0.98)'
+    );
+    expect(screen.getByTestId('token-active-turn-ring-user-2')).not.toHaveAttribute('data-fill');
+    expect(screen.queryByTestId('token-active-turn-ring-user-1')).not.toBeInTheDocument();
   });
 
   test('saves initiative on submit and discards unsaved edits on Escape without showing a save button', async () => {
@@ -5696,7 +5940,8 @@ describe('GrigliataBoard', () => {
 
     expect(pingOverlay).toBeInTheDocument();
     expect(pingOverlay.querySelector('[data-stroke="#38bdf8"]')).not.toBeNull();
-    expect(pingOverlay.querySelector(`[data-stroke="${MAP_PING_EPIC_ACCENT}"]`)).not.toBeNull();
+    expect(pingOverlay.querySelector(`[data-stroke="${MAP_PING_ACCENT}"]`)).not.toBeNull();
+    expect(pingOverlay.querySelectorAll('[data-konva-type="Line"]')).toHaveLength(0);
 
     act(() => {
       jest.advanceTimersByTime(MAP_PING_VISIBLE_MS + 64);
@@ -5752,7 +5997,7 @@ describe('GrigliataBoard', () => {
     const localPingOverlays = document.querySelectorAll('[data-testid^="map-ping-overlay-local-ping-"]');
     expect(localPingOverlays).toHaveLength(1);
     expect(localPingOverlays[0].querySelector('[data-stroke="#f472b6"]')).not.toBeNull();
-    expect(localPingOverlays[0].querySelector(`[data-stroke="${MAP_PING_EPIC_ACCENT}"]`)).not.toBeNull();
+    expect(localPingOverlays[0].querySelector(`[data-stroke="${MAP_PING_ACCENT}"]`)).not.toBeNull();
     expect(onSharedInteractionChange).toHaveBeenCalledWith(expect.objectContaining({
       type: 'ping',
       source: 'free',
@@ -5803,7 +6048,7 @@ describe('GrigliataBoard', () => {
     const pingOverlay = screen.getByTestId('map-ping-overlay-shared-other-user');
 
     expect(pingOverlay.querySelector('[data-stroke="#38bdf8"]')).not.toBeNull();
-    expect(pingOverlay.querySelector(`[data-stroke="${MAP_PING_EPIC_ACCENT}"]`)).not.toBeNull();
+    expect(pingOverlay.querySelector(`[data-stroke="${MAP_PING_ACCENT}"]`)).not.toBeNull();
     expect(pingOverlay.querySelector('[data-fill="#38bdf8"]')).not.toBeNull();
   });
 

@@ -342,6 +342,7 @@ jest.mock('./GrigliataBoard', () => {
   const React = require('react');
 
     return function MockGrigliataBoard(props) {
+    const [initiativeRollResult, setInitiativeRollResult] = React.useState('');
     React.useEffect(() => (
       () => {
         props.onSharedInteractionChange?.(null);
@@ -366,6 +367,7 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-active-turn-token">{props.activeTurnTokenId || ''}</div>
       <div data-testid="board-turn-order-order">{(props.turnOrderEntries || []).map((entry) => entry.tokenId).join(',')}</div>
       <div data-testid="board-turn-order-visibility">{(props.turnOrderEntries || []).map((entry) => `${entry.tokenId}:${entry.isVisibleToPlayers === false ? 'hidden' : 'visible'}`).join(',')}</div>
+      <div data-testid="board-initiative-roll-result">{initiativeRollResult}</div>
       <div data-testid="board-ruler-enabled">{String(!!props.isRulerEnabled)}</div>
       <div data-testid="board-ruler-token-movement">{String(!!props.isRulerTokenMovementEnabled)}</div>
       <div data-testid="board-aoe-tool">{props.activeAoeFigureType || ''}</div>
@@ -760,6 +762,22 @@ jest.mock('./GrigliataBoard', () => {
         <button type="button" onClick={() => props.onJoinTurnOrder?.('user-2', 11)}>
           join other turn order
         </button>
+        {['user-1', 'user-2', 'foe-token-1', 'custom-token-1'].map((tokenId) => (
+          <button
+            key={`resolve-${tokenId}`}
+            type="button"
+            onClick={async () => {
+              try {
+                const result = await props.onResolveTurnOrderInitiativeRoll?.(tokenId);
+                setInitiativeRollResult(result ? JSON.stringify(result) : 'unavailable');
+              } catch (error) {
+                setInitiativeRollResult(`error:${error.message}`);
+              }
+            }}
+          >
+            resolve initiative roll {tokenId}
+          </button>
+        ))}
         <button type="button" onClick={() => props.onLeaveTurnOrder?.('user-2')}>
           leave other turn order
         </button>
@@ -5302,6 +5320,7 @@ describe('GrigliataPage', () => {
     const storageApi = require('firebase/storage');
 
     render(<GrigliataPage />);
+    fireEvent.click(screen.getByTestId('open-custom-token-dialog'));
 
     fireEvent.change(screen.getByLabelText('Name'), {
       target: { value: 'Summoned Wolf' },
@@ -5914,7 +5933,7 @@ describe('GrigliataPage', () => {
     });
 
     expect(screen.getByText('Foes Hub')).toBeInTheDocument();
-    expect(screen.getByText('Add Custom Token')).toBeInTheDocument();
+    expect(screen.getByText('Add New Custom Token')).toBeInTheDocument();
     expect(screen.queryByText('MarcoDM')).not.toBeInTheDocument();
   });
 
@@ -5937,7 +5956,7 @@ describe('GrigliataPage', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByTestId('foe-library-content')).toBeInTheDocument();
     expect(screen.getByText('Test One')).toBeInTheDocument();
-    expect(screen.getByText('Add Custom Token')).toBeInTheDocument();
+    expect(screen.getByText('Add New Custom Token')).toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(toggle);
@@ -5950,7 +5969,7 @@ describe('GrigliataPage', () => {
     });
     expect(screen.getByText('Foes Hub')).toBeInTheDocument();
     expect(screen.queryByLabelText('Search Foes')).not.toBeInTheDocument();
-    expect(screen.getByText('Add Custom Token')).toBeInTheDocument();
+    expect(screen.getByText('Add New Custom Token')).toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(toggle);
@@ -6441,6 +6460,19 @@ describe('GrigliataPage', () => {
     expect(musicTab).not.toHaveClass('w-9', 'flex-none');
   });
 
+  test('gives the tokens tab one full-height themed internal scroller', () => {
+    render(<GrigliataPage />);
+
+    const tokenPanel = document.getElementById('grigliata-sidebar-panel-tokens');
+    const sidebarPanelWrapper = tokenPanel.parentElement;
+    const trayScroller = screen.getByTestId('my-token-tray-scroll');
+
+    expect(tokenPanel).toHaveClass('xl:h-full', 'xl:min-h-0');
+    expect(sidebarPanelWrapper).toHaveClass('xl:overflow-hidden');
+    expect(sidebarPanelWrapper).not.toHaveClass('xl:overflow-y-auto');
+    expect(trayScroller).toHaveClass('custom-scroll', 'xl:overflow-y-auto', 'xl:overscroll-contain');
+  });
+
   test('rolls current-user parameter dice with the anima die and parameter total', async () => {
     useAuth.mockReturnValue({
       user: {
@@ -6486,6 +6518,129 @@ describe('GrigliataPage', () => {
     expect(screen.getByTestId('dice-roller')).toHaveTextContent(
       'faces:8;count:1;modifier:5;description:Attacco (d8 + 5)'
     );
+  });
+
+  test('resolves current-player Destrezza initiative with the shared Anima die metadata', async () => {
+    useAuth.mockReturnValue({
+      user: { uid: 'user-1', email: 'user-1@example.com' },
+      userData: {
+        role: 'player',
+        stats: { level: 3 },
+        Parametri: { Base: { Destrezza: { Tot: 4 } } },
+        settings: {},
+        imageUrl: '',
+        imagePath: '',
+      },
+      loading: false,
+    });
+    setDocData('utils/varie', { dadiAnimaByLevel: [null, 'd4', 'd6', 'd8'] });
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-1',
+      backgroundId: 'map-1',
+      tokenId: 'user-1',
+      ownerUid: 'user-1',
+      col: 1,
+      row: 1,
+      isVisibleToPlayers: true,
+    }]);
+
+    render(<GrigliataPage />);
+    await waitFor(() => expect(screen.getByTestId('board-token-ids')).toHaveTextContent('user-1'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'resolve initiative roll user-1' }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-initiative-roll-result')).toHaveTextContent(
+        '"faces":8,"count":1,"modifier":4,"formula":"d8 + 4"'
+      );
+    });
+  });
+
+  test('resolves foe and external-player initiative rolls while excluding custom tokens', async () => {
+    setManagerAuth();
+    setDocData('utils/varie', { dadiAnimaByLevel: [null, 'd4', 'd6', 'd8'] });
+    setDocData('users/user-2', {
+      characterId: 'Mira',
+      stats: { level: 3 },
+      Parametri: { Base: { destrezza: { Tot: 2 } } },
+    });
+    setCollectionData('grigliata_tokens', [
+      {
+        id: 'foe-token-1',
+        ownerUid: 'user-1',
+        tokenType: 'foe',
+        label: 'Warden',
+        dadoAnima: 'd10',
+        Parametri: { Base: { Destrezza: { Tot: -1 } } },
+      },
+      {
+        id: 'custom-token-1',
+        ownerUid: 'user-1',
+        tokenType: 'custom',
+        label: 'Marker',
+      },
+    ]);
+    setCollectionData('grigliata_token_placements', [
+      {
+        id: 'map-1__user-2',
+        backgroundId: 'map-1',
+        tokenId: 'user-2',
+        ownerUid: 'user-2',
+        tokenType: 'character',
+        col: 1,
+        row: 1,
+      },
+      {
+        id: 'map-1__foe-token-1',
+        backgroundId: 'map-1',
+        tokenId: 'foe-token-1',
+        ownerUid: 'user-1',
+        tokenType: 'foe',
+        col: 2,
+        row: 2,
+      },
+      {
+        id: 'map-1__custom-token-1',
+        backgroundId: 'map-1',
+        tokenId: 'custom-token-1',
+        ownerUid: 'user-1',
+        tokenType: 'custom',
+        col: 3,
+        row: 3,
+      },
+    ]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-token-ids')).toHaveTextContent('user-2,foe-token-1,custom-token-1');
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'resolve initiative roll foe-token-1' }));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('board-initiative-roll-result')).toHaveTextContent(
+        '"faces":10,"count":1,"modifier":-1,"formula":"d10 - 1"'
+      );
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'resolve initiative roll user-2' }));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('board-initiative-roll-result')).toHaveTextContent(
+        '"faces":8,"count":1,"modifier":2,"formula":"d8 + 2"'
+      );
+    });
+    expect(firestore.getDoc).toHaveBeenCalledWith(expect.objectContaining({ path: 'users/user-2' }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'resolve initiative roll custom-token-1' }));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('board-initiative-roll-result')).toHaveTextContent('unavailable');
+    });
   });
 
   test('renders base and combat parameters as compact side-by-side columns', async () => {

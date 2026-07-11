@@ -91,6 +91,22 @@ describe('imageAssetRegistry', () => {
     unsubscribe();
   });
 
+  test('keeps snapshots referentially stable until the asset state changes', async () => {
+    const src = 'https://example.com/stable-map.png';
+    const loadPromise = ensureImageAsset(src);
+    const loadingSnapshot = getImageAssetSnapshot(src);
+
+    expect(getImageAssetSnapshot(src)).toBe(loadingSnapshot);
+    expect(loadingSnapshot.status).toBe('loading');
+
+    await loadPromise;
+
+    const loadedSnapshot = getImageAssetSnapshot(src);
+    expect(loadedSnapshot).not.toBe(loadingSnapshot);
+    expect(getImageAssetSnapshot(src)).toBe(loadedSnapshot);
+    expect(loadedSnapshot.status).toBe('loaded');
+  });
+
   test('falls back to timer-based deferred preloads when requestIdleCallback is unavailable', () => {
     jest.useFakeTimers();
     window.requestIdleCallback = undefined;

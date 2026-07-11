@@ -1,9 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, startAfter } from 'firebase/firestore';
+import { collection, getDocs, limit, onSnapshot, orderBy, query, startAfter } from 'firebase/firestore';
 import { FaDiceD20, FaTimes } from 'react-icons/fa';
 import DiceRoller from '../common/DiceRoller';
 import { getParamDisplayName } from '../common/paramMetadata';
 import { db } from '../firebaseConfig';
+import {
+  buildParameterRollConfig,
+  formatParameterFormula,
+  parseDiceFaces,
+  resolveAnimaDieLabel,
+} from './initiativeDice';
 
 const NORMAL_DICE_FACES = [4, 6, 8, 10, 12, 20, 100];
 const MAX_NORMAL_DICE_COUNT = 20;
@@ -18,27 +24,6 @@ const clampDiceCount = (value) => {
 const parseDiceModifier = (value) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const resolveAnimaDieLabel = (dadiAnimaByLevel, level) => {
-  if (!level) return '';
-  if (Array.isArray(dadiAnimaByLevel)) {
-    return typeof dadiAnimaByLevel[level] === 'string' ? dadiAnimaByLevel[level] : '';
-  }
-
-  if (dadiAnimaByLevel && typeof dadiAnimaByLevel === 'object') {
-    const value = dadiAnimaByLevel[level] || dadiAnimaByLevel[String(level)];
-    return typeof value === 'string' ? value : '';
-  }
-
-  return '';
-};
-
-const parseDiceFaces = (diceLabel) => {
-  const match = /^d(\d+)$/i.exec(typeof diceLabel === 'string' ? diceLabel.trim() : '');
-  if (!match) return 0;
-  const faces = Number.parseInt(match[1], 10);
-  return Number.isFinite(faces) && faces > 0 ? faces : 0;
 };
 
 const buildParameterRows = (params = {}) => (
@@ -56,15 +41,6 @@ const formatDiceFormula = (meta = {}) => {
   const modifier = Number(meta.modifier) || 0;
   return `${meta.count}d${meta.faces}${modifier ? (modifier > 0 ? `+${modifier}` : `${modifier}`) : ''}`;
 };
-
-const formatSpacedModifier = (modifier) => {
-  const value = Number(modifier) || 0;
-  return `${value >= 0 ? '+' : '-'} ${Math.abs(value)}`;
-};
-
-const formatParameterFormula = (dieLabel, modifier) => (
-  `${dieLabel || 'd?'} ${formatSpacedModifier(modifier)}`
-);
 
 const formatRollTime = (createdAt) => (
   createdAt?.toDate
@@ -406,7 +382,7 @@ function DmDiceLogsOverlay({
   );
 }
 
-export default function GrigliataDicePanel({ currentUserId, userData, isManager }) {
+export default function GrigliataDicePanel({ currentUserId, userData, isManager, loadDiceMetadata }) {
   const [dadiAnimaByLevel, setDadiAnimaByLevel] = useState([]);
   const [normalDiceCount, setNormalDiceCount] = useState(1);
   const [normalDiceModifier, setNormalDiceModifier] = useState(0);
@@ -420,10 +396,9 @@ export default function GrigliataDicePanel({ currentUserId, userData, isManager 
   useEffect(() => {
     let isActive = true;
 
-    getDoc(doc(db, 'utils', 'varie'))
-      .then((snapshot) => {
-        if (!isActive || !snapshot.exists()) return;
-        setDadiAnimaByLevel(snapshot.data().dadiAnimaByLevel || []);
+    Promise.resolve(loadDiceMetadata?.())
+      .then((nextDadiAnimaByLevel) => {
+        if (isActive) setDadiAnimaByLevel(nextDadiAnimaByLevel || []);
       })
       .catch((error) => {
         console.warn('Failed to load Grigliata dice metadata:', error);
@@ -432,7 +407,7 @@ export default function GrigliataDicePanel({ currentUserId, userData, isManager 
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [loadDiceMetadata]);
 
   useEffect(() => {
     if (!currentUserId) {
@@ -524,13 +499,12 @@ export default function GrigliataDicePanel({ currentUserId, userData, isManager 
   );
 
   const handleRollParameter = (row) => {
-    if (!animaFaces) return;
-    setRoller({
-      faces: animaFaces,
-      count: 1,
-      modifier: row.total,
-      description: `${row.displayName} (${formatParameterFormula(animaDieLabel, row.total)})`,
+    const rollConfig = buildParameterRollConfig({
+      parameterName: row.name,
+      parameterTotal: row.total,
+      dieLabel: animaDieLabel,
     });
+    if (rollConfig) setRoller(rollConfig);
   };
 
   const handleRollNormalDice = (faces) => {

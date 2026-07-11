@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { FiCheck, FiChevronDown, FiEdit2, FiPlus, FiTrash2, FiX } from 'react-icons/fi';
 import { FOE_LIBRARY_DRAG_TYPE, TRAY_DRAG_MIME } from './constants';
@@ -189,6 +190,163 @@ const getSelectedTokenTotalText = (label, totalValue, isMissing) => (
     ? `${label}: will use current value on save`
     : `${label}: ${n(totalValue, 0)}`
 );
+
+function CreateCustomTokenDialog({
+  isOpen,
+  isCreating,
+  label,
+  imageFile,
+  hpCurrent,
+  manaCurrent,
+  shieldCurrent,
+  notes,
+  imageInputKey,
+  triggerRef,
+  onChangeLabel,
+  onChangeImageFile,
+  onChangeHpCurrent,
+  onChangeManaCurrent,
+  onChangeShieldCurrent,
+  onChangeNotes,
+  onClose,
+  onSubmit,
+}) {
+  const dialogRef = useRef(null);
+  const nameInputRef = useRef(null);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const focusFrame = window.requestAnimationFrame(() => {
+      nameInputRef.current?.focus();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      triggerRef.current?.focus();
+    };
+  }, [isOpen, triggerRef]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        if (!isCreating) {
+          event.preventDefault();
+          onClose();
+        }
+        return;
+      }
+
+      if (event.key !== 'Tab') return;
+
+      const focusableElements = Array.from(dialogRef.current?.querySelectorAll(
+        'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+      ) || []).filter((element) => element.getAttribute('aria-hidden') !== 'true');
+      if (!focusableElements.length) {
+        event.preventDefault();
+        dialogRef.current?.focus();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      const activeElement = document.activeElement;
+      if (event.shiftKey && (activeElement === firstElement || !dialogRef.current?.contains(activeElement))) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isCreating, isOpen, onClose]);
+
+  if (!isOpen || typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div
+      data-testid="create-custom-token-overlay"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-950/85 p-3 backdrop-blur-sm sm:p-5"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !isCreating) onClose();
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-custom-token-title"
+        aria-describedby="create-custom-token-description"
+        tabIndex={-1}
+        className="flex max-h-[calc(100dvh-2rem)] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl shadow-black/70"
+      >
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-800 px-4 py-3 sm:px-5 sm:py-4">
+          <div className="min-w-0">
+            <h3 id="create-custom-token-title" className="text-sm font-semibold uppercase tracking-[0.16em] text-amber-300">
+              Add New Custom Token
+            </h3>
+            <p id="create-custom-token-description" className="mt-1 text-xs leading-relaxed text-slate-400">
+              Create a reusable token for summons, companions, disguises, or alternate forms.
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close custom token creator"
+            title="Close"
+            onClick={onClose}
+            disabled={isCreating}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-300 transition-colors hover:border-slate-500 hover:bg-slate-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-55"
+          >
+            <FiX className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+
+        <form className="flex min-h-0 flex-1 flex-col" onSubmit={(event) => { event.preventDefault(); onSubmit(); }}>
+          <div className="custom-scroll min-h-0 flex-1 space-y-4 overflow-x-hidden overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable] sm:p-5">
+            <div>
+              <label htmlFor="create-custom-token-name" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Name</label>
+              <input ref={nameInputRef} id="create-custom-token-name" type="text" value={label} onChange={(event) => onChangeLabel(event.target.value)} placeholder="Summoned Wolf" className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-amber-300" />
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="min-w-0">
+                <label htmlFor="create-custom-token-hp" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">HP</label>
+                <input id="create-custom-token-hp" type="number" value={hpCurrent} onChange={(event) => onChangeHpCurrent(n(event.target.value, 0))} className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-300" />
+              </div>
+              <div className="min-w-0">
+                <label htmlFor="create-custom-token-mana" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Mana</label>
+                <input id="create-custom-token-mana" type="number" value={manaCurrent} onChange={(event) => onChangeManaCurrent(n(event.target.value, 0))} className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-300" />
+              </div>
+              <div className="min-w-0">
+                <label htmlFor="create-custom-token-shield" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Shield</label>
+                <input id="create-custom-token-shield" type="number" value={shieldCurrent} onChange={(event) => onChangeShieldCurrent(n(event.target.value, 0))} className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-300" />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="create-custom-token-notes" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Notes</label>
+              <textarea id="create-custom-token-notes" rows={4} value={notes} onChange={(event) => onChangeNotes(event.target.value)} placeholder="Optional notes" className="w-full resize-y rounded-xl border border-slate-700 bg-slate-900 px-3 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-amber-300" />
+            </div>
+            <div className="min-w-0">
+              <label htmlFor="create-custom-token-image" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Image</label>
+              <input key={`create-custom-token-image-${imageInputKey}`} id="create-custom-token-image" type="file" accept="image/*" onChange={(event) => onChangeImageFile(event.target.files?.[0] || null)} className="block w-full min-w-0 text-xs text-slate-300 file:mr-3 file:rounded-xl file:border-0 file:bg-amber-400 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-black hover:file:bg-amber-300" />
+              <p className="mt-1 break-words text-[11px] text-slate-500">{imageFile?.name || 'Upload an image to use as the token portrait.'}</p>
+            </div>
+          </div>
+
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-slate-800 px-4 py-3 sm:px-5">
+            <button type="button" onClick={onClose} disabled={isCreating} className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-200 hover:border-slate-500 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-55"><FiX className="h-4 w-4" />Close</button>
+            <button type="submit" disabled={isCreating} className="inline-flex items-center gap-2 rounded-xl border border-amber-300/45 bg-amber-400 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-55"><FiPlus className="h-4 w-4" />{isCreating ? 'Creating' : 'Create Token'}</button>
+          </div>
+        </form>
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 function FoeLibrarySection({ currentUserId, foeLibrary = [], hasActiveMap, onDragStart, onDragEnd }) {
   const [query, setQuery] = useState('');
@@ -880,10 +1038,12 @@ export default function MyTokenTray({
   const [createShieldCurrent, setCreateShieldCurrent] = useState(0);
   const [createNotes, setCreateNotes] = useState('');
   const [createImageInputKey, setCreateImageInputKey] = useState(0);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [editingTokenId, setEditingTokenId] = useState('');
   const [editingLabel, setEditingLabel] = useState('');
   const [editingImageFile, setEditingImageFile] = useState(null);
   const [editImageInputKey, setEditImageInputKey] = useState(0);
+  const createDialogTriggerRef = useRef(null);
 
   const trayTokens = useMemo(() => [currentUserToken, ...customTokens].filter(Boolean), [currentUserToken, customTokens]);
 
@@ -895,6 +1055,25 @@ export default function MyTokenTray({
     setCreateShieldCurrent(0);
     setCreateNotes('');
     setCreateImageInputKey((key) => key + 1);
+  };
+
+  const closeCreateDialog = useCallback(() => {
+    if (!isCreatingCustomToken) setIsCreateDialogOpen(false);
+  }, [isCreatingCustomToken]);
+
+  const handleCreateCustomToken = async () => {
+    const didCreate = await onCreateCustomToken?.({
+      label: createLabel,
+      imageFile: createImageFile,
+      hpCurrent: createHpCurrent,
+      manaCurrent: createManaCurrent,
+      shieldCurrent: createShieldCurrent,
+      notes: createNotes,
+    });
+    if (didCreate) {
+      resetCreateForm();
+      setIsCreateDialogOpen(false);
+    }
   };
 
   const resetEditForm = () => {
@@ -924,13 +1103,13 @@ export default function MyTokenTray({
   };
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-700 bg-slate-950/75 shadow-2xl backdrop-blur-sm">
-      <div className="border-b border-slate-800 px-4 py-3">
+    <section className="overflow-hidden rounded-2xl border border-slate-700 bg-slate-950/75 shadow-2xl backdrop-blur-sm xl:flex xl:h-full xl:min-h-0 xl:flex-col">
+      <div className="shrink-0 border-b border-slate-800 px-4 py-3">
         <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-300">My Tokens</h2>
         <p className="mt-1 text-xs leading-relaxed text-slate-400">{getTraySummaryText(hasActiveMap)}</p>
       </div>
 
-      <div className="space-y-3 p-4">
+      <div data-testid="my-token-tray-scroll" className="custom-scroll space-y-3 p-4 xl:min-h-0 xl:flex-1 xl:overflow-x-hidden xl:overflow-y-auto xl:overscroll-contain xl:[scrollbar-gutter:stable]">
         {selectedTokenDetails?.tokenType === 'foe' && isManager && (
           <SelectedFoeDetailsPanel
             token={selectedTokenDetails}
@@ -1009,51 +1188,46 @@ export default function MyTokenTray({
           );
         })}
 
+        <button
+          ref={createDialogTriggerRef}
+          type="button"
+          data-testid="open-custom-token-dialog"
+          draggable={false}
+          onClick={() => setIsCreateDialogOpen(true)}
+          className="flex h-24 w-full items-center gap-3 rounded-2xl border border-dashed border-amber-400/45 bg-slate-900/70 px-4 py-4 text-left transition-colors hover:border-amber-300 hover:bg-amber-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+          aria-haspopup="dialog"
+        >
+          <span className="inline-flex h-16 w-16 shrink-0 items-center justify-center rounded-full border-2 border-amber-300/45 bg-amber-500/10 text-amber-200">
+            <FiPlus className="h-6 w-6" aria-hidden="true" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold uppercase tracking-[0.16em] text-slate-100">Add New Custom Token</span>
+          </span>
+        </button>
+
         {isManager && <FoeLibrarySection currentUserId={currentUserId} foeLibrary={foeLibrary} hasActiveMap={hasActiveMap} onDragStart={onDragStart} onDragEnd={onDragEnd} />}
-
-        <div className="rounded-2xl border border-slate-700/80 bg-slate-900/70 p-4">
-          <div className="flex items-center gap-2">
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-amber-300/35 bg-amber-500/10 text-amber-200"><FiPlus className="h-4 w-4" /></span>
-            <div>
-              <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-100">Add Custom Token</h3>
-              <p className="mt-1 text-xs text-slate-400">Create extra tokens for summons, companions, disguises, or alternate forms.</p>
-            </div>
-          </div>
-
-          <div className="mt-4 space-y-3">
-            <div>
-              <label htmlFor="create-custom-token-name" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Name</label>
-              <input id="create-custom-token-name" type="text" value={createLabel} onChange={(event) => setCreateLabel(event.target.value)} placeholder="Summoned Wolf" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-amber-300" />
-            </div>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <div>
-                <label htmlFor="create-custom-token-hp" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">HP</label>
-                <input id="create-custom-token-hp" type="number" value={createHpCurrent} onChange={(event) => setCreateHpCurrent(n(event.target.value, 0))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-300" />
-              </div>
-              <div>
-                <label htmlFor="create-custom-token-mana" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Mana</label>
-                <input id="create-custom-token-mana" type="number" value={createManaCurrent} onChange={(event) => setCreateManaCurrent(n(event.target.value, 0))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-300" />
-              </div>
-              <div>
-                <label htmlFor="create-custom-token-shield" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Shield</label>
-                <input id="create-custom-token-shield" type="number" value={createShieldCurrent} onChange={(event) => setCreateShieldCurrent(n(event.target.value, 0))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-300" />
-              </div>
-            </div>
-            <div>
-              <label htmlFor="create-custom-token-notes" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Notes</label>
-              <textarea id="create-custom-token-notes" rows={4} value={createNotes} onChange={(event) => setCreateNotes(event.target.value)} placeholder="Optional notes" className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-amber-300" />
-            </div>
-            <div>
-              <label htmlFor="create-custom-token-image" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Image</label>
-              <input key={`create-custom-token-image-${createImageInputKey}`} id="create-custom-token-image" type="file" accept="image/*" onChange={(event) => setCreateImageFile(event.target.files?.[0] || null)} className="block w-full text-xs text-slate-300 file:mr-3 file:rounded-xl file:border-0 file:bg-amber-400 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-black hover:file:bg-amber-300" />
-              <p className="mt-1 text-[11px] text-slate-500">{createImageFile?.name || 'Upload an image to use as the token portrait.'}</p>
-            </div>
-            <div className="flex justify-end">
-              <button type="button" onClick={async () => { const didCreate = await onCreateCustomToken?.({ label: createLabel, imageFile: createImageFile, hpCurrent: createHpCurrent, manaCurrent: createManaCurrent, shieldCurrent: createShieldCurrent, notes: createNotes }); if (didCreate) resetCreateForm(); }} disabled={isCreatingCustomToken} className="inline-flex items-center gap-2 rounded-xl border border-amber-300/45 bg-amber-400 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-55"><FiPlus className="h-4 w-4" />{isCreatingCustomToken ? 'Creating' : 'Create Token'}</button>
-            </div>
-          </div>
-        </div>
       </div>
+
+      <CreateCustomTokenDialog
+        isOpen={isCreateDialogOpen}
+        isCreating={isCreatingCustomToken}
+        label={createLabel}
+        imageFile={createImageFile}
+        hpCurrent={createHpCurrent}
+        manaCurrent={createManaCurrent}
+        shieldCurrent={createShieldCurrent}
+        notes={createNotes}
+        imageInputKey={createImageInputKey}
+        triggerRef={createDialogTriggerRef}
+        onChangeLabel={setCreateLabel}
+        onChangeImageFile={setCreateImageFile}
+        onChangeHpCurrent={setCreateHpCurrent}
+        onChangeManaCurrent={setCreateManaCurrent}
+        onChangeShieldCurrent={setCreateShieldCurrent}
+        onChangeNotes={setCreateNotes}
+        onClose={closeCreateDialog}
+        onSubmit={handleCreateCustomToken}
+      />
     </section>
   );
 }
