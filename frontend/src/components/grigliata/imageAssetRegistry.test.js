@@ -5,7 +5,7 @@ import {
   preloadImageAssets,
   scheduleImageAssetPreload,
   subscribeToImageAsset,
-} from './imageAssetRegistry';
+} from '../common/imageAssets/imageAssetRegistry';
 
 describe('imageAssetRegistry', () => {
   const originalImage = global.Image;

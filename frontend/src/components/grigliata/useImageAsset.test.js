@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
-import useImageAsset, { useImageAssetSnapshot } from './useImageAsset';
-import { __resetImageAssetRegistry, ensureImageAsset } from './imageAssetRegistry';
+import useImageAsset, { useImageAssetSnapshot } from '../common/imageAssets/useImageAsset';
+import { __resetImageAssetRegistry, ensureImageAsset } from '../common/imageAssets/imageAssetRegistry';
 
 function ImageAssetSnapshotProbe({ src }) {
   const snapshot = useImageAssetSnapshot(src);

@@ -7,7 +7,7 @@ import {
   GRIGLIATA_LIVE_INTERACTION_STALE_MS,
   GRIGLIATA_LIVE_INTERACTION_THROTTLE_MS,
 } from './liveInteractions';
-import { preloadImageAssets, scheduleImageAssetPreload } from './imageAssetRegistry';
+import { preloadImageAssets, scheduleImageAssetPreload } from '../common/imageAssets/imageAssetRegistry';
 import { readAudioFileMetadata } from './music';
 import {
   buildFogRasterTilePayload,
@@ -322,7 +322,7 @@ jest.mock('../common/DiceRoller', () => function MockDiceRoller(props) {
     </div>
   );
 });
-jest.mock('./imageAssetRegistry', () => ({
+jest.mock('../common/imageAssets/imageAssetRegistry', () => ({
   preloadImageAssets: jest.fn(() => Promise.resolve([])),
   scheduleImageAssetPreload: jest.fn(() => jest.fn()),
 }));

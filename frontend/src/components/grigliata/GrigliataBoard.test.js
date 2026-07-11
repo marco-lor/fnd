@@ -21,7 +21,7 @@ import {
   splitTokenStatusesForDisplay,
   useTokenStatusIconImages,
 } from './tokenStatuses';
-import useImageAsset, { useImageAssetSnapshot } from './useImageAsset';
+import useImageAsset, { useImageAssetSnapshot } from '../common/imageAssets/useImageAsset';
 import {
   FOG_RASTER_MASK_ENCODING,
   FOG_RASTER_PROFILE_ID,
@@ -57,7 +57,7 @@ jest.mock('framer-motion', () => {
   };
 });
 
-jest.mock('./useImageAsset', () => ({
+jest.mock('../common/imageAssets/useImageAsset', () => ({
   __esModule: true,
   default: jest.fn(() => null),
   useImageAssetSnapshot: jest.fn(() => ({

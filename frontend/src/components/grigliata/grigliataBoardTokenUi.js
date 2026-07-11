@@ -20,7 +20,7 @@ import {
   getTokenStatusDefinition,
   splitTokenStatusesForDisplay,
 } from './tokenStatuses';
-import useImageAsset from './useImageAsset';
+import useImageAsset from '../common/imageAssets/useImageAsset';
 import { normalizeTokenVisionSettings } from './lightingVisibility';
 import { buildTokenLayerStepState } from './tokenLayering';
 

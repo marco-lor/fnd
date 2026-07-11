@@ -166,7 +166,7 @@ import {
   GRIGLIATA_PAGE_PRESENCE_COLLECTION,
   GRIGLIATA_PAGE_PRESENCE_HEARTBEAT_MS,
 } from './presence';
-import { preloadImageAssets, scheduleImageAssetPreload } from './imageAssetRegistry';
+import { preloadImageAssets, scheduleImageAssetPreload } from '../common/imageAssets/imageAssetRegistry';
 import {
   buildTurnOrderActiveState,
   buildShieldTurnEffect,
