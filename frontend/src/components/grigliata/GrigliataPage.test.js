@@ -365,6 +365,7 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-turn-order-count">{String(props.turnOrderEntries?.length || 0)}</div>
       <div data-testid="board-active-turn-token">{props.activeTurnTokenId || ''}</div>
       <div data-testid="board-turn-order-order">{(props.turnOrderEntries || []).map((entry) => entry.tokenId).join(',')}</div>
+      <div data-testid="board-turn-order-visibility">{(props.turnOrderEntries || []).map((entry) => `${entry.tokenId}:${entry.isVisibleToPlayers === false ? 'hidden' : 'visible'}`).join(',')}</div>
       <div data-testid="board-ruler-enabled">{String(!!props.isRulerEnabled)}</div>
       <div data-testid="board-ruler-token-movement">{String(!!props.isRulerTokenMovementEnabled)}</div>
       <div data-testid="board-aoe-tool">{props.activeAoeFigureType || ''}</div>
@@ -397,6 +398,7 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-fog-brush-active">{String(!!props.fogBrushControls?.isFogBrushToolActive)}</div>
       <div data-testid="board-fog-brush-mode">{props.fogBrushControls?.mode || ''}</div>
       <div data-testid="board-fog-brush-radius">{String(props.fogBrushControls?.radiusSquares || '')}</div>
+      <div data-testid="board-token-layer-pending">{String(!!props.isTokenLayerActionPending)}</div>
         <button type="button" onClick={() => props.onSelectMouseTool?.()}>
           select mouse tool
         </button>
@@ -798,6 +800,13 @@ jest.mock('./GrigliataBoard', () => {
           ])}
         >
           move token placement
+        </button>
+        <button
+          type="button"
+          disabled={props.isTokenLayerActionPending}
+          onClick={() => props.onMoveTokenLayer?.('middle', 'forward')}
+        >
+          move token layer forward
         </button>
         <button
           type="button"
@@ -5178,6 +5187,116 @@ describe('GrigliataPage', () => {
     });
   });
 
+  test('persists a canonical token layer order for a legacy battlemap', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_token_placements', [
+      {
+        id: 'map-1__bottom',
+        backgroundId: 'map-1',
+        tokenId: 'bottom',
+        ownerUid: 'user-1',
+        label: 'Bottom',
+        col: 0,
+        row: 0,
+        sizeSquares: 1,
+        isVisibleToPlayers: true,
+        isDead: false,
+      },
+      {
+        id: 'map-1__elsewhere',
+        backgroundId: 'map-1',
+        tokenId: 'elsewhere',
+        ownerUid: 'user-1',
+        label: 'Elsewhere',
+        col: 8,
+        row: 8,
+        sizeSquares: 1,
+        isVisibleToPlayers: true,
+        isDead: false,
+      },
+      {
+        id: 'map-1__middle',
+        backgroundId: 'map-1',
+        tokenId: 'middle',
+        ownerUid: 'user-1',
+        label: 'Middle',
+        col: 0,
+        row: 0,
+        sizeSquares: 1,
+        isVisibleToPlayers: true,
+        isDead: false,
+      },
+      {
+        id: 'map-1__top',
+        backgroundId: 'map-1',
+        tokenId: 'top',
+        ownerUid: 'user-1',
+        label: 'Top',
+        col: 0,
+        row: 0,
+        sizeSquares: 1,
+        isVisibleToPlayers: true,
+        isDead: false,
+      },
+    ]);
+    const deferredWrite = createDeferred();
+    firestore.updateDoc.mockReturnValueOnce(deferredWrite.promise);
+
+    render(<GrigliataPage />);
+    fireEvent.click(screen.getByRole('button', { name: /move token layer forward/i }));
+
+    expect(screen.getByTestId('board-token-layer-pending')).toHaveTextContent('true');
+    expect(firestore.updateDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+      {
+        tokenLayerOrder: ['bottom', 'elsewhere', 'top', 'middle'],
+        updatedAt: { __type: 'serverTimestamp' },
+        updatedBy: 'user-1',
+      }
+    );
+
+    await act(async () => {
+      deferredWrite.resolve();
+      await deferredWrite.promise;
+    });
+    expect(screen.getByTestId('board-token-layer-pending')).toHaveTextContent('false');
+  });
+
+  test('reports a token layering persistence failure', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_token_placements', [
+      {
+        id: 'map-1__middle',
+        backgroundId: 'map-1',
+        tokenId: 'middle',
+        ownerUid: 'user-1',
+        col: 0,
+        row: 0,
+        sizeSquares: 1,
+        isVisibleToPlayers: true,
+        isDead: false,
+      },
+      {
+        id: 'map-1__top',
+        backgroundId: 'map-1',
+        tokenId: 'top',
+        ownerUid: 'user-1',
+        col: 0,
+        row: 0,
+        sizeSquares: 1,
+        isVisibleToPlayers: true,
+        isDead: false,
+      },
+    ]);
+    firestore.updateDoc.mockRejectedValueOnce(new Error('write failed'));
+
+    render(<GrigliataPage />);
+    fireEvent.click(screen.getByRole('button', { name: /move token layer forward/i }));
+
+    expect(await screen.findByText('Unable to update that token layer right now.')).toBeInTheDocument();
+    expect(screen.getByTestId('board-token-layer-pending')).toHaveTextContent('false');
+  });
+
   test('creates a custom token from the token tab and uploads its image', async () => {
     const file = new File(['wolf'], 'wolf.png', { type: 'image/png' });
     const storageApi = require('firebase/storage');
@@ -8470,6 +8589,280 @@ describe('GrigliataPage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('board-turn-order-enabled')).toHaveTextContent('true');
+    });
+  });
+
+  test('marks hidden turn order entries for the DM', async () => {
+    setManagerAuth();
+    act(() => {
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__visible-1',
+        backgroundId: 'map-1',
+        tokenId: 'visible-1',
+        ownerUid: 'user-2',
+        label: 'Ilya',
+        col: 1,
+        row: 2,
+        isVisibleToPlayers: true,
+        isInTurnOrder: true,
+        turnOrderInitiative: 18,
+        turnOrderJoinedAt: { seconds: 123 },
+      }, {
+        id: 'map-1__hidden-1',
+        backgroundId: 'map-1',
+        tokenId: 'hidden-1',
+        ownerUid: 'user-1',
+        label: 'Veiled Stalker',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: false,
+        isInTurnOrder: true,
+        turnOrderInitiative: 12,
+        turnOrderJoinedAt: { seconds: 124 },
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-turn-order-count')).toHaveTextContent('2');
+      expect(screen.getByTestId('board-turn-order-visibility')).toHaveTextContent(
+        'visible-1:visible,hidden-1:hidden'
+      );
+    });
+  });
+
+  test('does not expose a hidden active turn entry to players', async () => {
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        turnOrderActive: {
+          tokenId: 'hidden-1',
+          initiative: 12,
+          joinedAt: { seconds: 124 },
+          label: 'Veiled Stalker',
+          startedAt: { seconds: 999 },
+        },
+      }]);
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__visible-1',
+        backgroundId: 'map-1',
+        tokenId: 'visible-1',
+        ownerUid: 'user-1',
+        label: 'Ilya',
+        col: 1,
+        row: 2,
+        isVisibleToPlayers: true,
+        isInTurnOrder: true,
+        turnOrderInitiative: 18,
+        turnOrderJoinedAt: { seconds: 123 },
+      }, {
+        id: 'map-1__hidden-1',
+        backgroundId: 'map-1',
+        tokenId: 'hidden-1',
+        ownerUid: 'user-1',
+        label: 'Veiled Stalker',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: false,
+        isInTurnOrder: true,
+        turnOrderInitiative: 12,
+        turnOrderJoinedAt: { seconds: 124 },
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-turn-order-order')).toHaveTextContent('visible-1');
+      expect(screen.getByTestId('board-turn-order-count')).toHaveTextContent('1');
+    });
+    expect(screen.getByTestId('board-turn-order-order')).not.toHaveTextContent('hidden-1');
+    expect(screen.getByTestId('board-active-turn-token')).toHaveTextContent('');
+  });
+
+  test('keeps hidden entries out of DM player preview when fog is disabled', async () => {
+    setManagerAuth();
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        fogOfWarEnabled: false,
+        turnOrderActive: {
+          tokenId: 'hidden-1',
+          initiative: 12,
+          joinedAt: { seconds: 124 },
+          label: 'Veiled Stalker',
+          startedAt: { seconds: 999 },
+        },
+      }]);
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__user-2',
+        backgroundId: 'map-1',
+        tokenId: 'user-2',
+        ownerUid: 'user-2',
+        label: 'Ilya',
+        col: 1,
+        row: 2,
+        isVisibleToPlayers: true,
+        isInTurnOrder: true,
+        turnOrderInitiative: 18,
+        turnOrderJoinedAt: { seconds: 123 },
+      }, {
+        id: 'map-1__hidden-1',
+        backgroundId: 'map-1',
+        tokenId: 'hidden-1',
+        ownerUid: 'user-1',
+        label: 'Veiled Stalker',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: false,
+        isInTurnOrder: true,
+        turnOrderInitiative: 12,
+        turnOrderJoinedAt: { seconds: 124 },
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-turn-order-count')).toHaveTextContent('2');
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: /view as player/i }), {
+      target: { value: 'user-2' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-fog-enabled')).toHaveTextContent('false');
+      expect(screen.getByTestId('board-turn-order-order')).toHaveTextContent('user-2');
+      expect(screen.getByTestId('board-turn-order-count')).toHaveTextContent('1');
+    });
+    expect(screen.getByTestId('board-turn-order-order')).not.toHaveTextContent('hidden-1');
+    expect(screen.getByTestId('board-active-turn-token')).toHaveTextContent('');
+  });
+
+  test('advances through a hidden turn order entry without skipping its turn', async () => {
+    setManagerAuth();
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        turnOrderActive: {
+          tokenId: 'visible-1',
+          initiative: 30,
+          joinedAt: { seconds: 123 },
+          label: 'Ilya',
+          startedAt: { seconds: 999 },
+        },
+      }]);
+      setCollectionData('grigliata_token_placements', [{
+        id: 'map-1__visible-1',
+        backgroundId: 'map-1',
+        tokenId: 'visible-1',
+        ownerUid: 'user-2',
+        label: 'Ilya',
+        col: 1,
+        row: 2,
+        isVisibleToPlayers: true,
+        isInTurnOrder: true,
+        turnOrderInitiative: 30,
+        turnOrderJoinedAt: { seconds: 123 },
+      }, {
+        id: 'map-1__hidden-1',
+        backgroundId: 'map-1',
+        tokenId: 'hidden-1',
+        ownerUid: 'user-1',
+        label: 'Veiled Stalker',
+        col: 3,
+        row: 4,
+        isVisibleToPlayers: false,
+        isInTurnOrder: true,
+        turnOrderInitiative: 20,
+        turnOrderJoinedAt: { seconds: 124 },
+      }, {
+        id: 'map-1__visible-2',
+        backgroundId: 'map-1',
+        tokenId: 'visible-2',
+        ownerUid: 'user-3',
+        label: 'Boros',
+        col: 5,
+        row: 6,
+        isVisibleToPlayers: true,
+        isInTurnOrder: true,
+        turnOrderInitiative: 10,
+        turnOrderJoinedAt: { seconds: 125 },
+      }]);
+    });
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-active-turn-token')).toHaveTextContent('visible-1');
+      expect(screen.getByTestId('board-turn-order-visibility')).toHaveTextContent(
+        'visible-1:visible,hidden-1:hidden,visible-2:visible'
+      );
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /advance turn order/i }));
+    });
+
+    await waitFor(() => {
+      const committedBatch = getLastCommittedBatch();
+      expect(committedBatch?.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+        expect.objectContaining({
+          turnOrderActive: expect.objectContaining({ tokenId: 'hidden-1' }),
+        }),
+        { merge: true }
+      );
+      expect(committedBatch?.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_token_placements/map-1__hidden-1' }),
+        expect.objectContaining({ turnCounter: 1 }),
+        { merge: true }
+      );
+    });
+
+    mockBatchInstances.splice(0, mockBatchInstances.length);
+    act(() => {
+      setCollectionData('grigliata_backgrounds', [{
+        id: 'map-1',
+        name: 'Sunken Ruins',
+        grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+        isGridVisible: true,
+        turnOrderActive: {
+          tokenId: 'hidden-1',
+          initiative: 20,
+          joinedAt: { seconds: 124 },
+          label: 'Veiled Stalker',
+          startedAt: { seconds: 999 },
+        },
+      }]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-active-turn-token')).toHaveTextContent('hidden-1');
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /advance turn order/i }));
+    });
+
+    await waitFor(() => {
+      const committedBatch = getLastCommittedBatch();
+      expect(committedBatch?.set).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_backgrounds/map-1' }),
+        expect.objectContaining({
+          turnOrderActive: expect.objectContaining({ tokenId: 'visible-2' }),
+        }),
+        { merge: true }
+      );
     });
   });
 

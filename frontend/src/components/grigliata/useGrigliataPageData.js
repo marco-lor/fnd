@@ -932,6 +932,7 @@ export default function useGrigliataPageData({
         label: token.label || token.characterId || token.ownerUid || 'Token',
         imageUrl: token.imageUrl || '',
         tokenType: token.tokenType || 'character',
+        isVisibleToPlayers: token.isVisibleToPlayers !== false,
         initiative: Number.isInteger(token.turnOrderInitiative) ? token.turnOrderInitiative : 0,
         joinedAt: token.turnOrderJoinedAt || null,
         joinedAtMs: token.turnOrderJoinedAt ? timestampToMillis(token.turnOrderJoinedAt) : Number.MAX_SAFE_INTEGER,

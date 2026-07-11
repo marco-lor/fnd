@@ -80,6 +80,67 @@ describe('GrigliataTokenActions', () => {
     expect(screen.queryByRole('button', { name: /edit vision/i })).not.toBeInTheDocument();
   });
 
+  test('moves a DM-selected token one overlapping layer in either direction', () => {
+    const onMoveTokenLayer = jest.fn();
+    render(
+      <GrigliataTokenActions
+        actionState={buildActionState({
+          layerToken: {
+            tokenId: 'token-1',
+            label: 'Aldor',
+            canMoveBackward: true,
+            canMoveForward: true,
+          },
+        })}
+        viewportSize={{ width: 1000, height: 700 }}
+        onMoveTokenLayer={onMoveTokenLayer}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /move aldor one overlapping layer backward/i }));
+    fireEvent.click(screen.getByRole('button', { name: /move aldor one overlapping layer forward/i }));
+
+    expect(onMoveTokenLayer).toHaveBeenNthCalledWith(1, 'token-1', 'backward');
+    expect(onMoveTokenLayer).toHaveBeenNthCalledWith(2, 'token-1', 'forward');
+  });
+
+  test('disables layer controls at stack boundaries and while a layer write is pending', () => {
+    const { rerender } = render(
+      <GrigliataTokenActions
+        actionState={buildActionState({
+          layerToken: {
+            tokenId: 'token-1',
+            label: 'Aldor',
+            canMoveBackward: false,
+            canMoveForward: true,
+          },
+        })}
+        viewportSize={{ width: 1000, height: 700 }}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /move aldor one overlapping layer backward/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /move aldor one overlapping layer forward/i })).toBeEnabled();
+
+    rerender(
+      <GrigliataTokenActions
+        actionState={buildActionState({
+          layerToken: {
+            tokenId: 'token-1',
+            label: 'Aldor',
+            canMoveBackward: true,
+            canMoveForward: true,
+          },
+        })}
+        viewportSize={{ width: 1000, height: 700 }}
+        isTokenLayerActionPending
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /move aldor one overlapping layer backward/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /move aldor one overlapping layer forward/i })).toBeDisabled();
+  });
+
   test('does not show status editing for multi-select manager actions', () => {
     render(
       <GrigliataTokenActions
@@ -89,6 +150,7 @@ describe('GrigliataTokenActions', () => {
           showDeadAction: true,
           statusToken: null,
           sizeToken: null,
+          layerToken: null,
         })}
         viewportSize={{ width: 1000, height: 700 }}
       />
@@ -96,6 +158,7 @@ describe('GrigliataTokenActions', () => {
 
     expect(screen.queryByRole('button', { name: /edit statuses/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /resize/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /overlapping layer/i })).not.toBeInTheDocument();
   });
 
   test('toggling a status calls onUpdateTokenStatuses with the next status order', () => {

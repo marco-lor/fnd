@@ -102,6 +102,7 @@ import {
   MIN_FOG_BRUSH_RADIUS_SQUARES,
   normalizeFogBrushSettings,
 } from './fogBrushEditing';
+import { sortTokensByLayerOrder } from './tokenLayering';
 import {
   buildBackgroundMap,
   buildInitialNarrationPlacement,
@@ -2094,6 +2095,8 @@ const TurnOrderPanel = ({
   const prefersReducedMotion = useReducedMotion();
   const [initiativeEditors, setInitiativeEditors] = useState({});
   const panelRef = useRef(null);
+  const scrollContainerRef = useRef(null);
+  const entryRefs = useRef(new Map());
   const [hoveredEntryTooltip, setHoveredEntryTooltip] = useState(null);
 
   useEffect(() => {
@@ -2198,8 +2201,53 @@ const TurnOrderPanel = ({
     ));
   }, []);
 
+  const setEntryRef = useCallback((tokenId, element) => {
+    if (!tokenId) {
+      return;
+    }
+
+    if (element) {
+      entryRefs.current.set(tokenId, element);
+      return;
+    }
+
+    entryRefs.current.delete(tokenId);
+  }, []);
+
+  useEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+    const activeEntry = entryRefs.current.get(activeTurnTokenId);
+    if (!scrollContainer || !activeEntry || !activeTurnTokenId) {
+      return;
+    }
+
+    const containerRect = scrollContainer.getBoundingClientRect();
+    const entryRect = activeEntry.getBoundingClientRect();
+    let scrollDelta = 0;
+
+    if (entryRect.top < containerRect.top) {
+      scrollDelta = entryRect.top - containerRect.top;
+    } else if (entryRect.bottom > containerRect.bottom) {
+      scrollDelta = entryRect.bottom - containerRect.bottom;
+    }
+
+    if (!scrollDelta) {
+      return;
+    }
+
+    const maxScrollTop = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight);
+    const nextScrollTop = Math.min(
+      maxScrollTop,
+      Math.max(0, scrollContainer.scrollTop + scrollDelta),
+    );
+    scrollContainer.scrollTo({
+      top: nextScrollTop,
+      behavior: prefersReducedMotion ? 'auto' : 'smooth',
+    });
+  }, [activeTurnTokenId, entries, prefersReducedMotion]);
+
   return (
-    <div ref={panelRef} className="pointer-events-auto relative min-h-0 w-full overflow-visible">
+    <div ref={panelRef} className="pointer-events-auto relative flex h-full min-h-0 w-full flex-col overflow-visible">
       {hoveredEntryTooltip && (
         <div
           data-testid={`turn-order-tooltip-${hoveredEntryTooltip.tokenId}`}
@@ -2215,7 +2263,12 @@ const TurnOrderPanel = ({
           {hoveredEntryTooltip.label}
         </div>
       )}
-      <div className="relative flex max-h-[calc(100vh-12rem)] min-h-0 flex-col items-end gap-2 overflow-x-hidden overflow-y-auto pb-8 pl-3 pr-0 pt-1">
+      <div
+        ref={scrollContainerRef}
+        data-testid="turn-order-scroll-container"
+        onScroll={() => setHoveredEntryTooltip(null)}
+        className="custom-scroll relative flex h-full min-h-0 flex-1 flex-col items-end gap-2 overflow-x-hidden overflow-y-auto overscroll-contain pb-8 pl-3 pr-1 pt-1 [scrollbar-gutter:stable]"
+      >
         {entries.length > 0 && (
           <motion.div
             aria-hidden="true"
@@ -2228,6 +2281,7 @@ const TurnOrderPanel = ({
         )}
         {entries.length ? entries.map((entry) => {
           const isActiveTurn = entry.tokenId === activeTurnTokenId;
+          const isHiddenFromPlayers = entry.isVisibleToPlayers === false;
           const canEdit = !isReadOnly && canEditTurnOrderEntry({
             entry,
             currentUserId,
@@ -2242,8 +2296,10 @@ const TurnOrderPanel = ({
           return (
             <motion.div
               key={entry.tokenId}
+              ref={(element) => setEntryRef(entry.tokenId, element)}
               data-testid={`turn-order-entry-${entry.tokenId}`}
               data-active-turn={isActiveTurn ? 'true' : 'false'}
+              data-hidden-from-players={isHiddenFromPlayers ? 'true' : 'false'}
               className={`relative z-10 flex max-w-full items-center gap-3 ${isActiveTurn
                 ? 'rounded-[1.1rem] bg-gradient-to-l from-fuchsia-500/14 via-fuchsia-500/5 to-transparent px-2 py-2 shadow-[0_0_18px_rgba(217,70,239,0.18)] ring-1 ring-fuchsia-300/25'
                 : 'py-1.5'}`}
@@ -2315,6 +2371,25 @@ const TurnOrderPanel = ({
                     ? 'border border-fuchsia-300/75 text-fuchsia-50 shadow-[0_0_16px_rgba(217,70,239,0.22)]'
                     : 'border border-slate-700/80 text-slate-200'}`}>
                     {getInitials(entry.label)}
+                  </div>
+                )}
+                {isHiddenFromPlayers && (
+                  <div
+                    data-testid={`turn-order-hidden-overlay-${entry.tokenId}`}
+                    className="pointer-events-none absolute inset-px z-10 overflow-hidden rounded-[0.9rem] bg-slate-950/60"
+                  >
+                    <span
+                      aria-hidden="true"
+                      data-testid={`turn-order-hidden-slash-${entry.tokenId}`}
+                      className="absolute left-1/2 top-1/2 h-0.5 w-12 -translate-x-1/2 -translate-y-1/2 -rotate-45 rounded-full bg-slate-100 shadow-[0_0_0_2px_rgba(15,23,42,0.92)]"
+                    />
+                    <span
+                      aria-hidden="true"
+                      className="absolute right-0.5 top-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-100/90 bg-slate-950/95 text-slate-100 shadow-sm shadow-black/60"
+                    >
+                      <FiEyeOff className="h-2.5 w-2.5" />
+                    </span>
+                    <span className="sr-only">Invisible to players</span>
                   </div>
                 )}
               </div>
@@ -2400,6 +2475,8 @@ export default function GrigliataBoard({
   isTokenSizeActionPending = false,
   onSetSelectedTokenVision,
   isTokenVisionActionPending = false,
+  onMoveTokenLayer,
+  isTokenLayerActionPending = false,
   selectedTokenDetails = null,
   onDropCurrentToken,
   onSelectedTokenIdsChange,
@@ -2759,7 +2836,7 @@ export default function GrigliataBoard({
   );
 
   const tokenItems = useMemo(
-    () => placedTokens.map((token) => {
+    () => sortTokensByLayerOrder(placedTokens, resolvedBackground?.tokenLayerOrder).map((token) => {
       const tokenId = token.id || token.ownerUid;
       const canMove = !!tokenId && (isManager || token.ownerUid === currentUserId || tokenId === currentUserId);
       return {
@@ -2769,7 +2846,7 @@ export default function GrigliataBoard({
         position: getTokenPositionPx(token, normalizedGrid),
       };
     }),
-    [placedTokens, isManager, currentUserId, normalizedGrid]
+    [placedTokens, resolvedBackground?.tokenLayerOrder, isManager, currentUserId, normalizedGrid]
   );
 
   const tokenItemsById = useMemo(() => {
@@ -5662,6 +5739,8 @@ export default function GrigliataBoard({
 
     return buildSelectedTokenActionState({
       selectedTokens,
+      allTokens: renderedTokens,
+      tokenLayerOrder: resolvedBackground?.tokenLayerOrder,
       isManager,
       stageSize,
       viewport,
@@ -5679,6 +5758,8 @@ export default function GrigliataBoard({
     selectedLight,
     selectedWall,
     selectedTokens,
+    renderedTokens,
+    resolvedBackground?.tokenLayerOrder,
     selectionBox,
     stageSize.height,
     stageSize.width,
@@ -6374,10 +6455,10 @@ export default function GrigliataBoard({
                 key="turn-order-panel"
                 id={turnOrderPanelBodyId}
                 data-testid="turn-order-panel"
-                className="pointer-events-none flex min-h-0 w-full flex-1 items-start overflow-visible"
-                initial={prefersReducedMotion ? { opacity: 1, height: 'auto' } : { opacity: 0, height: 0, y: -8 }}
-                animate={{ opacity: 1, height: 'auto', y: 0 }}
-                exit={prefersReducedMotion ? { opacity: 0, height: 0 } : { opacity: 0, height: 0, y: -8 }}
+                className="pointer-events-none flex min-h-0 w-full flex-1 items-stretch overflow-visible"
+                initial={prefersReducedMotion ? { opacity: 1 } : { opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
                 transition={prefersReducedMotion ? { duration: 0.01 } : TURN_ORDER_DRAWER_TRANSITION}
               >
                 <TurnOrderPanel
@@ -7034,6 +7115,8 @@ export default function GrigliataBoard({
           onSetSelectedTokenSize={onSetSelectedTokenSize}
           isTokenVisionActionPending={isTokenVisionActionPending}
           onSetSelectedTokenVision={onSetSelectedTokenVision}
+          isTokenLayerActionPending={isTokenLayerActionPending}
+          onMoveTokenLayer={onMoveTokenLayer}
         />
 
         {visibleSelectedAoEFigureActionState && (

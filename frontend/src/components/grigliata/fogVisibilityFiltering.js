@@ -382,9 +382,8 @@ export const filterFogVisibleTurnOrderEntries = ({
   entries = [],
   tokens = [],
   isManager = false,
-  fogOfWar = null,
 } = {}) => {
-  if (isManager || !fogOfWar) {
+  if (isManager) {
     return entries;
   }
 

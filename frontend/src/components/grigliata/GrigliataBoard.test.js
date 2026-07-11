@@ -273,6 +273,8 @@ const buildProps = (overrides = {}) => ({
   isTokenDeadActionPending: false,
   onUpdateTokenStatuses: jest.fn(),
   isTokenStatusActionPending: false,
+  onMoveTokenLayer: jest.fn(),
+  isTokenLayerActionPending: false,
   selectedTokenDetails: null,
   onDropCurrentToken: jest.fn(),
   onSelectedTokenIdsChange: jest.fn(),
@@ -832,7 +834,7 @@ describe('GrigliataBoard', () => {
     expect(screen.getByTestId('lighting-light-bright-polygon')).toBeInTheDocument();
     expect(screen.getAllByTestId('lighting-token-vision-cutout').map((node) => (
       node.getAttribute('data-tokenid')
-    ))).toEqual(['user-1', 'custom-1']);
+    ))).toEqual(['custom-1', 'user-1']);
     expect(screen.queryByTestId('lighting-light-clip-group')).not.toBeInTheDocument();
 
     rerender(
@@ -1249,7 +1251,7 @@ describe('GrigliataBoard', () => {
     expect(await screen.findByTestId('lighting-mask-layer')).toBeInTheDocument();
     expect(screen.getAllByTestId('lighting-token-vision-cutout').map((node) => (
       node.getAttribute('data-tokenid')
-    ))).toEqual(['user-1', 'custom-1']);
+    ))).toEqual(['custom-1', 'user-1']);
     expect(screen.getByTestId('lighting-light-clip-group')).toBeInTheDocument();
   });
 
@@ -3433,6 +3435,168 @@ describe('GrigliataBoard', () => {
     expect(onSelectedTokenIdsChange).toHaveBeenLastCalledWith(['foe-token-1']);
   });
 
+  test('renders tokens in the battlemap layer order without bringing a selected token forward', () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          activeBackground: {
+            id: 'map-1',
+            name: 'Sunken Ruins',
+            grid,
+            imageWidth: 0,
+            imageHeight: 0,
+            tokenLayerOrder: ['large', 'small'],
+          },
+          tokens: [
+            {
+              tokenId: 'small',
+              id: 'small',
+              ownerUid: 'user-2',
+              label: 'Small',
+              imageUrl: '',
+              placed: true,
+              col: 1,
+              row: 1,
+              sizeSquares: 1,
+              isVisibleToPlayers: true,
+              statuses: [],
+            },
+            {
+              tokenId: 'large',
+              id: 'large',
+              ownerUid: 'user-1',
+              label: 'Large',
+              imageUrl: '',
+              placed: true,
+              col: 0,
+              row: 0,
+              sizeSquares: 3,
+              isVisibleToPlayers: true,
+              statuses: [],
+            },
+          ],
+        })}
+      />
+    );
+
+    const largeToken = screen.getByTestId('token-node-large');
+    const smallToken = screen.getByTestId('token-node-small');
+    const assertLargeRendersBeforeSmall = () => {
+      expect(largeToken.compareDocumentPosition(smallToken) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    };
+
+    assertLargeRendersBeforeSmall();
+    fireEvent.mouseDown(largeToken, {
+      button: 0,
+      buttons: 1,
+      clientX: 70,
+      clientY: 70,
+    });
+    assertLargeRendersBeforeSmall();
+  });
+
+  test('shows overlap-aware layer controls for one DM-selected token', () => {
+    const onMoveTokenLayer = jest.fn();
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          currentUserId: 'dm-1',
+          onMoveTokenLayer,
+          activeBackground: {
+            id: 'map-1',
+            name: 'Sunken Ruins',
+            grid,
+            imageWidth: 0,
+            imageHeight: 0,
+            tokenLayerOrder: ['bottom', 'middle', 'top'],
+          },
+          tokens: ['bottom', 'middle', 'top'].map((tokenId) => ({
+            tokenId,
+            id: tokenId,
+            ownerUid: 'dm-1',
+            label: tokenId === 'middle' ? 'Middle Token' : tokenId,
+            imageUrl: '',
+            placed: true,
+            col: 2,
+            row: 2,
+            sizeSquares: 1,
+            isVisibleToPlayers: true,
+            statuses: [],
+          })),
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-middle'), {
+      button: 0,
+      buttons: 1,
+      clientX: 175,
+      clientY: 175,
+    });
+
+    const backwardButton = screen.getByRole('button', {
+      name: /move middle token one overlapping layer backward/i,
+    });
+    const forwardButton = screen.getByRole('button', {
+      name: /move middle token one overlapping layer forward/i,
+    });
+    expect(backwardButton).toBeEnabled();
+    expect(forwardButton).toBeEnabled();
+
+    fireEvent.click(backwardButton);
+    fireEvent.click(forwardButton);
+
+    expect(onMoveTokenLayer).toHaveBeenNthCalledWith(1, 'middle', 'backward');
+    expect(onMoveTokenLayer).toHaveBeenNthCalledWith(2, 'middle', 'forward');
+  });
+
+  test('does not expose token layer controls to players', () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          currentUserId: 'user-1',
+          tokens: [
+            {
+              tokenId: 'user-1',
+              id: 'user-1',
+              ownerUid: 'user-1',
+              label: 'Player Token',
+              imageUrl: '',
+              placed: true,
+              col: 1,
+              row: 1,
+              isVisibleToPlayers: true,
+              statuses: [],
+            },
+            {
+              tokenId: 'user-2',
+              id: 'user-2',
+              ownerUid: 'user-2',
+              label: 'Other Token',
+              imageUrl: '',
+              placed: true,
+              col: 1,
+              row: 1,
+              isVisibleToPlayers: true,
+              statuses: [],
+            },
+          ],
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 105,
+      clientY: 105,
+    });
+
+    expect(screen.queryByRole('button', { name: /overlapping layer/i })).not.toBeInTheDocument();
+  });
+
   test('starts a ruler measurement from a movable token without moving it by default', async () => {
     const onMoveTokens = jest.fn(() => Promise.resolve(true));
     const { container } = render(
@@ -4758,6 +4922,195 @@ describe('GrigliataBoard', () => {
     const turnOrderScrollContainer = screen.getByTestId('turn-order-panel').querySelector('.overflow-y-auto');
     expect(turnOrderScrollContainer).toBeTruthy();
     expect(turnOrderScrollContainer.className).toContain('overflow-x-hidden');
+    expect(turnOrderScrollContainer).toHaveAttribute('data-testid', 'turn-order-scroll-container');
+    expect(turnOrderScrollContainer.className).toContain('custom-scroll');
+    expect(turnOrderScrollContainer.className).toContain('flex-1');
+    expect(turnOrderScrollContainer.className).toContain('min-h-0');
+    expect(turnOrderScrollContainer.className).toContain('overscroll-contain');
+    expect(turnOrderScrollContainer.className).toContain('[scrollbar-gutter:stable]');
+    expect(turnOrderScrollContainer.className).not.toContain('max-h-');
+
+    fireEvent.mouseEnter(chip);
+    expect(screen.getByTestId('turn-order-tooltip-user-1')).toBeInTheDocument();
+    fireEvent.scroll(turnOrderScrollContainer);
+    expect(screen.queryByTestId('turn-order-tooltip-user-1')).not.toBeInTheDocument();
+  });
+
+  test('marks hidden turn order portraits while leaving visible portraits unchanged', () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          activeTurnTokenId: 'hidden-image',
+          isTurnOrderStarted: true,
+          turnOrderEntries: [{
+            tokenId: 'hidden-image',
+            ownerUid: 'dm-1',
+            label: 'Veiled Stalker',
+            imageUrl: 'https://example.com/hidden.png',
+            tokenType: 'foe',
+            isVisibleToPlayers: false,
+            initiative: 18,
+            joinedAtMs: 10,
+          }, {
+            tokenId: 'hidden-initials',
+            ownerUid: 'dm-1',
+            label: 'Secret Shade',
+            imageUrl: '',
+            tokenType: 'foe',
+            isVisibleToPlayers: false,
+            initiative: 12,
+            joinedAtMs: 20,
+          }, {
+            tokenId: 'visible-token',
+            ownerUid: 'user-2',
+            label: 'Ilya',
+            imageUrl: '',
+            tokenType: 'character',
+            isVisibleToPlayers: true,
+            initiative: 8,
+            joinedAtMs: 30,
+          }],
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('turn-order-hidden-overlay-hidden-image')).toHaveTextContent('Invisible to players');
+    expect(screen.getByTestId('turn-order-hidden-slash-hidden-image')).toBeInTheDocument();
+    expect(screen.getByTestId('turn-order-hidden-overlay-hidden-initials')).toHaveTextContent('Invisible to players');
+    expect(screen.queryByTestId('turn-order-hidden-overlay-visible-token')).not.toBeInTheDocument();
+    expect(screen.getByTestId('turn-order-entry-hidden-image')).toHaveAttribute('data-hidden-from-players', 'true');
+    expect(screen.getByTestId('turn-order-entry-hidden-image')).toHaveAttribute('data-active-turn', 'true');
+    expect(screen.getByTestId('turn-order-entry-visible-token')).toHaveAttribute('data-hidden-from-players', 'false');
+  });
+
+  test('keeps a long turn order rendered inside the constrained scroll container', () => {
+    const turnOrderEntries = Array.from({ length: 40 }, (_, index) => ({
+      tokenId: `token-${index + 1}`,
+      ownerUid: `user-${index + 1}`,
+      label: `Token ${index + 1}`,
+      imageUrl: '',
+      tokenType: 'character',
+      isVisibleToPlayers: true,
+      initiative: 40 - index,
+      joinedAtMs: index,
+    }));
+
+    render(
+      <GrigliataBoard {...buildProps({ turnOrderEntries })} />
+    );
+
+    const scrollContainer = screen.getByTestId('turn-order-scroll-container');
+    expect(scrollContainer).toContainElement(screen.getByTestId('turn-order-entry-token-1'));
+    expect(scrollContainer).toContainElement(screen.getByTestId('turn-order-entry-token-40'));
+    expect(scrollContainer.className).toContain('h-full');
+    expect(scrollContainer.className).toContain('overflow-y-auto');
+    expect(screen.getByTestId('turn-order-panel').className).toContain('flex-1');
+  });
+
+  test('scrolls only an off-screen active turn entry into view', () => {
+    const turnOrderEntries = [{
+      tokenId: 'visible-entry',
+      label: 'Visible Entry',
+      initiative: 20,
+      joinedAtMs: 10,
+    }, {
+      tokenId: 'offscreen-entry',
+      label: 'Offscreen Entry',
+      initiative: 10,
+      joinedAtMs: 20,
+    }];
+    getBoundingClientRectSpy.mockImplementation(function getTestRect() {
+      if (this.dataset?.testid === 'turn-order-scroll-container') {
+        return { width: 180, height: 200, top: 100, left: 0, right: 180, bottom: 300 };
+      }
+      if (this.dataset?.testid === 'turn-order-entry-visible-entry') {
+        return { width: 100, height: 40, top: 120, left: 0, right: 100, bottom: 160 };
+      }
+      if (this.dataset?.testid === 'turn-order-entry-offscreen-entry') {
+        return { width: 100, height: 40, top: 340, left: 0, right: 100, bottom: 380 };
+      }
+      return { width: 920, height: 640, top: 0, left: 0, right: 920, bottom: 640 };
+    });
+
+    const { rerender } = render(
+      <GrigliataBoard {...buildProps({ turnOrderEntries })} />
+    );
+    const scrollContainer = screen.getByTestId('turn-order-scroll-container');
+    const scrollTo = jest.fn();
+    Object.defineProperties(scrollContainer, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, value: 0, writable: true },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          activeTurnTokenId: 'offscreen-entry',
+          isTurnOrderStarted: true,
+          turnOrderEntries,
+        })}
+      />
+    );
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 80, behavior: 'smooth' });
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          activeTurnTokenId: 'visible-entry',
+          isTurnOrderStarted: true,
+          turnOrderEntries,
+        })}
+      />
+    );
+
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+  });
+
+  test('uses immediate active-entry scrolling when reduced motion is requested', () => {
+    useReducedMotion.mockReturnValue(true);
+    const turnOrderEntries = [{
+      tokenId: 'offscreen-entry',
+      label: 'Offscreen Entry',
+      initiative: 10,
+      joinedAtMs: 20,
+    }];
+    getBoundingClientRectSpy.mockImplementation(function getTestRect() {
+      if (this.dataset?.testid === 'turn-order-scroll-container') {
+        return { width: 180, height: 200, top: 100, left: 0, right: 180, bottom: 300 };
+      }
+      if (this.dataset?.testid === 'turn-order-entry-offscreen-entry') {
+        return { width: 100, height: 40, top: 330, left: 0, right: 100, bottom: 370 };
+      }
+      return { width: 920, height: 640, top: 0, left: 0, right: 920, bottom: 640 };
+    });
+
+    const { rerender } = render(
+      <GrigliataBoard {...buildProps({ turnOrderEntries })} />
+    );
+    const scrollContainer = screen.getByTestId('turn-order-scroll-container');
+    const scrollTo = jest.fn();
+    Object.defineProperties(scrollContainer, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, value: 0, writable: true },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          activeTurnTokenId: 'offscreen-entry',
+          isTurnOrderStarted: true,
+          turnOrderEntries,
+        })}
+      />
+    );
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 70, behavior: 'auto' });
   });
 
   test('persists the turn order panel collapsed state across remounts', () => {

@@ -192,6 +192,15 @@ describe('fogVisibilityFiltering', () => {
     })).toEqual([{ tokenId: 'user-1' }, { tokenId: 'user-2' }]);
   });
 
+  test('filters player turn order entries to rendered token ids when fog is disabled', () => {
+    expect(filterFogVisibleTurnOrderEntries({
+      entries: [{ tokenId: 'visible-1' }, { tokenId: 'hidden-1' }],
+      tokens: [buildToken({ tokenId: 'visible-1', id: 'visible-1' })],
+      isManager: false,
+      fogOfWar: null,
+    })).toEqual([{ tokenId: 'visible-1' }]);
+  });
+
   test('separates retained main tokens above fog without adding current cutouts', () => {
     const hiddenMainLayers = splitFogVisibleTokenRenderLayers({
       tokens: [

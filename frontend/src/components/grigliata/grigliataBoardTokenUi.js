@@ -22,6 +22,7 @@ import {
 } from './tokenStatuses';
 import useImageAsset from './useImageAsset';
 import { normalizeTokenVisionSettings } from './lightingVisibility';
+import { buildTokenLayerStepState } from './tokenLayering';
 
 const SHAPE_OUTLINE_STROKE_WIDTH = 4;
 const TOKEN_STATUS_VISIBLE_BADGE_COUNT = 3;
@@ -526,6 +527,8 @@ export const GridLayer = ({ bounds, grid }) => {
 
 export const buildSelectedTokenActionState = ({
   selectedTokens,
+  allTokens = [],
+  tokenLayerOrder = [],
   isManager = false,
   stageSize,
   viewport,
@@ -591,15 +594,36 @@ export const buildSelectedTokenActionState = ({
       ...normalizeTokenVisionSettings(selectedToken),
     }
     : null;
-  const actionCount = (isManager ? 2 : 0)
+  const tokenLayerStepState = selectedToken && isManager
+    ? buildTokenLayerStepState({
+      tokens: allTokens,
+      tokenLayerOrder,
+      tokenId: selectedToken.tokenId,
+    })
+    : null;
+  const layerToken = selectedToken && isManager
+    ? {
+      tokenId: selectedToken.tokenId,
+      label: selectedToken.label || 'token',
+      canMoveBackward: tokenLayerStepState?.canMoveBackward === true,
+      canMoveForward: tokenLayerStepState?.canMoveForward === true,
+    }
+    : null;
+  const standardActionCount = (isManager ? 2 : 0)
     + (statusToken ? 1 : 0)
     + (sizeToken ? 1 : 0)
     + (visionToken ? 1 : 0);
+  const layerActionCount = layerToken ? 2 : 0;
+  const actionCount = standardActionCount + layerActionCount;
   if (actionCount < 1) {
     return null;
   }
 
-  const toolbarWidth = (buttonSize * actionCount) + (Math.max(0, actionCount - 1) * 8) + 16;
+  const layerButtonSize = Math.max(36, Math.min(48, Math.round(buttonSize * 0.62)));
+  const toolbarWidth = (buttonSize * standardActionCount)
+    + (layerButtonSize * layerActionCount)
+    + (Math.max(0, actionCount - 1) * 8)
+    + 16;
   const toolbarHeight = buttonSize + 16;
   const allSelectedTokensHidden = selectedTokens.every((token) => token.isVisibleToPlayers === false);
   const allSelectedTokensDead = selectedTokens.every((token) => token.isDead === true);
@@ -615,6 +639,7 @@ export const buildSelectedTokenActionState = ({
   return {
     tokenIds: normalizedTokenIds,
     buttonSize,
+    layerButtonSize,
     toolbarWidth,
     toolbarHeight,
     showVisibilityAction: isManager,
@@ -622,6 +647,7 @@ export const buildSelectedTokenActionState = ({
     statusToken,
     sizeToken,
     visionToken,
+    layerToken,
     nextIsVisibleToPlayers: allSelectedTokensHidden,
     nextIsDead: !allSelectedTokensDead,
     visibilityTitle: allSelectedTokensHidden

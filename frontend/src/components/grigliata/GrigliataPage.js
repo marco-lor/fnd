@@ -86,6 +86,10 @@ import {
   snapBoardPointToGrid,
 } from './boardUtils';
 import {
+  buildTokenLayerStepState,
+  moveTokenOneOverlappingLayer,
+} from './tokenLayering';
+import {
   DEFAULT_GRID,
   FOE_LIBRARY_DRAG_TYPE,
   getGrigliataDrawTheme,
@@ -607,6 +611,7 @@ export default function GrigliataPage() {
   const [isTokenStatusActionPending, setIsTokenStatusActionPending] = useState(false);
   const [isTokenSizeActionPending, setIsTokenSizeActionPending] = useState(false);
   const [isTokenVisionActionPending, setIsTokenVisionActionPending] = useState(false);
+  const [isTokenLayerActionPending, setIsTokenLayerActionPending] = useState(false);
   const [isCreatingCustomToken, setIsCreatingCustomToken] = useState(false);
   const [updatingCustomTokenId, setUpdatingCustomTokenId] = useState('');
   const [deletingCustomTokenId, setDeletingCustomTokenId] = useState('');
@@ -4534,6 +4539,55 @@ export default function GrigliataPage() {
     }
   };
 
+  const handleMoveTokenLayer = async (tokenId, direction) => {
+    if (
+      !isManager
+      || !user?.uid
+      || !activeBackgroundId
+      || !tokenId
+      || !['backward', 'forward'].includes(direction)
+      || isTokenLayerActionPending
+    ) {
+      return false;
+    }
+
+    const layerState = buildTokenLayerStepState({
+      tokens: boardTokens,
+      tokenLayerOrder: combatBackground?.tokenLayerOrder,
+      tokenId,
+    });
+    const canMove = direction === 'backward'
+      ? layerState.canMoveBackward
+      : layerState.canMoveForward;
+    if (!canMove) {
+      return false;
+    }
+
+    const nextTokenLayerOrder = moveTokenOneOverlappingLayer({
+      tokens: boardTokens,
+      tokenLayerOrder: combatBackground?.tokenLayerOrder,
+      tokenId,
+      direction,
+    });
+
+    setBoardError('');
+    setIsTokenLayerActionPending(true);
+    try {
+      await updateDoc(doc(db, 'grigliata_backgrounds', activeBackgroundId), {
+        tokenLayerOrder: nextTokenLayerOrder,
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to update token layering:', error);
+      setBoardError('Unable to update that token layer right now.');
+      return false;
+    } finally {
+      setIsTokenLayerActionPending(false);
+    }
+  };
+
   const handleClearTokensForBackground = async (background) => {
     if (!isManager || !user?.uid || !background?.id) return;
 
@@ -6230,6 +6284,8 @@ export default function GrigliataPage() {
                 isTokenSizeActionPending={isTokenSizeActionPending}
                 onSetSelectedTokenVision={isManager && !isNarrationOverlayActive ? handleSetSelectedTokenVision : null}
                 isTokenVisionActionPending={isTokenVisionActionPending}
+                onMoveTokenLayer={isManager && !isNarrationOverlayActive ? handleMoveTokenLayer : null}
+                isTokenLayerActionPending={isTokenLayerActionPending}
                 selectedTokenDetails={isNarrationOverlayActive ? null : boardRenderSelectedTokenDetails}
                 sharedInteractions={boardRenderSharedInteractions}
                 activeViewers={activePageViewers}
