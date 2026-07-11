@@ -139,6 +139,10 @@ import {
 } from './liveInteractions';
 import MapCalibrationPanel from './MapCalibrationPanel';
 import GrigliataDicePanel from './GrigliataDicePanel';
+import {
+  buildDestrezzaInitiativeRollConfig,
+  resolveAnimaDieLabel,
+} from './initiativeDice';
 import MyTokenTray from './MyTokenTray';
 import {
   buildGrigliataMusicPlaybackSession,
@@ -557,6 +561,7 @@ export default function GrigliataPage() {
   const [isFogResetPending, setIsFogResetPending] = useState(false);
   const [isLightingDebugOverlayVisible, setIsLightingDebugOverlayVisible] = useState(true);
   const [boardError, setBoardError] = useState('');
+  const diceMetadataRequestRef = useRef(null);
   const [activeTrayDragType, setActiveTrayDragType] = useState('');
   const [isRulerEnabled, setIsRulerEnabled] = useState(false);
   const [isRulerTokenMovementEnabled, setIsRulerTokenMovementEnabled] = useState(false);
@@ -620,6 +625,21 @@ export default function GrigliataPage() {
   const [selectedExternalTokenState, setSelectedExternalTokenState] = useState(() => buildEmptySelectedExternalTokenState());
   const [savingSelectedTokenDetailsId, setSavingSelectedTokenDetailsId] = useState('');
   const isTrayDragging = !!activeTrayDragType;
+
+  const loadDiceMetadata = useCallback(() => {
+    if (!diceMetadataRequestRef.current) {
+      diceMetadataRequestRef.current = getDoc(doc(db, 'utils', 'varie'))
+        .then((snapshot) => (
+          snapshot.exists() ? snapshot.data().dadiAnimaByLevel || [] : []
+        ))
+        .catch((error) => {
+          diceMetadataRequestRef.current = null;
+          throw error;
+        });
+    }
+
+    return diceMetadataRequestRef.current;
+  }, []);
 
   const role = (userData?.role || '').toLowerCase();
   const isManager = isManagerRole(role);
@@ -4283,6 +4303,53 @@ export default function GrigliataPage() {
     }
   };
 
+  const handleResolveTurnOrderInitiativeRoll = useCallback(async (tokenId) => {
+    const targetToken = boardTokens.find((token) => token?.tokenId === tokenId);
+    if (!targetToken) return null;
+
+    const tokenType = targetToken.tokenType || 'character';
+    const ownerUid = targetToken.ownerUid || targetToken.tokenId || '';
+    const isOwnedByCurrentUser = ownerUid === currentUserId || targetToken.tokenId === currentUserId;
+    if (!isManager && !isOwnedByCurrentUser) return null;
+
+    if (tokenType === 'foe') {
+      return buildDestrezzaInitiativeRollConfig({
+        Parametri: targetToken.Parametri,
+        dieLabel: targetToken.dadoAnima,
+      });
+    }
+
+    if (tokenType !== 'character') return null;
+
+    let characterData = userData;
+    let nextDadiAnimaByLevel;
+
+    if (!isOwnedByCurrentUser) {
+      if (!isManager || !ownerUid) return null;
+
+      const [userSnapshot, loadedDiceMetadata] = await Promise.all([
+        getDoc(doc(db, 'users', ownerUid)),
+        loadDiceMetadata(),
+      ]);
+      if (!userSnapshot.exists()) return null;
+
+      characterData = userSnapshot.data();
+      nextDadiAnimaByLevel = loadedDiceMetadata;
+    } else {
+      nextDadiAnimaByLevel = await loadDiceMetadata();
+    }
+
+    const dieLabel = resolveAnimaDieLabel(
+      nextDadiAnimaByLevel,
+      Number(characterData?.stats?.level) || 0
+    );
+
+    return buildDestrezzaInitiativeRollConfig({
+      Parametri: characterData?.Parametri,
+      dieLabel,
+    });
+  }, [boardTokens, currentUserId, isManager, loadDiceMetadata, userData]);
+
   const handleLeaveTurnOrder = async (tokenId) => {
     if (!currentUserId || !activeBackgroundId || !tokenId) {
       return;
@@ -6262,6 +6329,7 @@ export default function GrigliataPage() {
                 onResetTurnOrder={isManager && !isNarrationOverlayActive ? handleResetTurnOrder : null}
                 isTurnOrderResetPending={isTurnOrderResetPending}
                 onJoinTurnOrder={isNarrationOverlayActive ? null : handleJoinTurnOrder}
+                onResolveTurnOrderInitiativeRoll={isNarrationOverlayActive ? null : handleResolveTurnOrderInitiativeRoll}
                 onLeaveTurnOrder={isNarrationOverlayActive ? null : handleLeaveTurnOrder}
                 turnOrderActionTokenId={turnOrderActionTokenId}
                 onSaveTurnOrderInitiative={isNarrationOverlayActive ? null : handleSaveTurnOrderInitiative}
@@ -6466,6 +6534,7 @@ export default function GrigliataPage() {
                     currentUserId={currentUserId}
                     userData={userData}
                     isManager={isManager}
+                    loadDiceMetadata={loadDiceMetadata}
                   />
                 )}
 

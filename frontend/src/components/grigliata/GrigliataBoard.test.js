@@ -66,6 +66,16 @@ jest.mock('./useImageAsset', () => ({
     error: null,
   })),
 }));
+jest.mock('../common/DiceRoller', () => function MockDiceRoller(props) {
+  return (
+    <div data-testid="turn-order-initiative-dice-roller">
+      <span>{`faces:${props.faces};count:${props.count};modifier:${props.modifier};description:${props.description}`}</span>
+      <button type="button" onClick={() => props.onComplete(13)}>
+        Complete initiative dice roll
+      </button>
+    </div>
+  );
+});
 jest.mock('./tokenStatuses', () => ({
   getTokenStatusDefinition: jest.fn(() => null),
   normalizeTokenStatuses: jest.fn((statuses) => (Array.isArray(statuses) ? statuses : [])),
@@ -255,6 +265,7 @@ const buildProps = (overrides = {}) => ({
   onResetTurnOrder: null,
   isTurnOrderResetPending: false,
   onJoinTurnOrder: jest.fn(),
+  onResolveTurnOrderInitiativeRoll: null,
   onLeaveTurnOrder: jest.fn(),
   turnOrderActionTokenId: '',
   onSaveTurnOrderInitiative: jest.fn(),
@@ -5311,6 +5322,131 @@ describe('GrigliataBoard', () => {
     expect(onJoinTurnOrder).toHaveBeenCalledWith('user-1', 13);
     await act(async () => {});
     expect(screen.queryByTestId('turn-order-join-overlay')).not.toBeInTheDocument();
+  });
+
+  test('rolls Destrezza into the initiative draft and waits for confirmation before joining', async () => {
+    const onJoinTurnOrder = jest.fn(() => Promise.resolve());
+    const onResolveTurnOrderInitiativeRoll = jest.fn(() => Promise.resolve({
+      faces: 8,
+      count: 1,
+      modifier: 4,
+      formula: 'd8 + 4',
+      description: 'Destrezza (d8 + 4)',
+    }));
+    const token = {
+      id: 'user-1',
+      tokenId: 'user-1',
+      ownerUid: 'current-user',
+      label: 'Ilya',
+      tokenType: 'character',
+      imageUrl: '',
+      placed: true,
+      col: 1,
+      row: 1,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+      isInTurnOrder: false,
+    };
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          tokens: [token],
+          onJoinTurnOrder,
+          onResolveTurnOrderInitiativeRoll,
+        })}
+      />
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('token-node-user-1'), {
+      clientX: 160,
+      clientY: 160,
+      button: 2,
+    });
+    fireEvent.click(screen.getByTestId('turn-order-context-action-user-1'));
+
+    expect(screen.getByTestId('turn-order-initiative-roll-loading')).toHaveTextContent('Checking Destrezza');
+    const rollButton = await screen.findByRole('button', { name: 'Roll Destrezza for Ilya' });
+    expect(rollButton).toHaveTextContent('d8 + 4');
+    expect(onResolveTurnOrderInitiativeRoll).toHaveBeenCalledWith('user-1');
+
+    fireEvent.click(rollButton);
+
+    expect(screen.getByTestId('turn-order-initiative-dice-roller')).toHaveTextContent(
+      'faces:8;count:1;modifier:4;description:Destrezza (d8 + 4)'
+    );
+    expect(onJoinTurnOrder).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Complete initiative dice roll' }));
+
+    expect(screen.getByTestId('turn-order-join-initiative-input')).toHaveValue('13');
+    expect(onJoinTurnOrder).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('turn-order-join-confirm'));
+    await waitFor(() => expect(onJoinTurnOrder).toHaveBeenCalledWith('user-1', 13));
+  });
+
+  test('keeps manual initiative available when Destrezza is unavailable or resolution fails', async () => {
+    const token = {
+      id: 'user-1',
+      tokenId: 'user-1',
+      ownerUid: 'current-user',
+      label: 'Ilya',
+      tokenType: 'character',
+      imageUrl: '',
+      placed: true,
+      col: 1,
+      row: 1,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+      isInTurnOrder: false,
+    };
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          tokens: [token],
+          onResolveTurnOrderInitiativeRoll: jest.fn(() => Promise.resolve(null)),
+        })}
+      />
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('token-node-user-1'), {
+      clientX: 160,
+      clientY: 160,
+      button: 2,
+    });
+    fireEvent.click(screen.getByTestId('turn-order-context-action-user-1'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('turn-order-initiative-roll-loading')).not.toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('turn-order-initiative-roll-button')).not.toBeInTheDocument();
+    expect(screen.getByTestId('turn-order-join-initiative-input')).toBeEnabled();
+
+    fireEvent.click(screen.getByTestId('turn-order-join-cancel'));
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          tokens: [token],
+          onResolveTurnOrderInitiativeRoll: jest.fn(() => Promise.reject(new Error('offline'))),
+        })}
+      />
+    );
+    fireEvent.contextMenu(screen.getByTestId('token-node-user-1'), {
+      clientX: 160,
+      clientY: 160,
+      button: 2,
+    });
+    fireEvent.click(screen.getByTestId('turn-order-context-action-user-1'));
+
+    expect(await screen.findByTestId('turn-order-initiative-roll-error')).toHaveTextContent(
+      'Enter initiative manually'
+    );
+    expect(screen.getByTestId('turn-order-join-initiative-input')).toBeEnabled();
+    warnSpy.mockRestore();
   });
 
   test('does not open the token turn-order menu while adding a ruler waypoint during token movement', async () => {

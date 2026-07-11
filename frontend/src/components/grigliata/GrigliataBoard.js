@@ -10,7 +10,7 @@ import {
   Stage,
   Text,
 } from 'react-konva';
-import { FaHandPointer, FaRulerHorizontal } from 'react-icons/fa';
+import { FaDiceD20, FaHandPointer, FaRulerHorizontal } from 'react-icons/fa';
 import { GiHearts, GiMagicSwirl, GiShield } from 'react-icons/gi';
 import {
   FiClock,
@@ -57,6 +57,7 @@ import {
   timestampToMillis,
 } from './boardUtils';
 import GrigliataTokenActions, { TokenStatusSummaryCard } from './GrigliataTokenActions';
+import DiceRoller from '../common/DiceRoller';
 import {
   splitTokenStatusesForDisplay,
   useTokenStatusIconImages,
@@ -2367,6 +2368,7 @@ export default function GrigliataBoard({
   onResetTurnOrder,
   isTurnOrderResetPending = false,
   onJoinTurnOrder,
+  onResolveTurnOrderInitiativeRoll,
   onLeaveTurnOrder,
   turnOrderActionTokenId = '',
   onSaveTurnOrderInitiative,
@@ -2458,6 +2460,12 @@ export default function GrigliataBoard({
   const turnOrderPanelBodyId = useId();
   const [turnOrderContextMenu, setTurnOrderContextMenu] = useState(null);
   const [turnOrderJoinPrompt, setTurnOrderJoinPrompt] = useState(null);
+  const [turnOrderInitiativeRollState, setTurnOrderInitiativeRollState] = useState({
+    tokenId: '',
+    status: 'idle',
+    config: null,
+  });
+  const [turnOrderInitiativeRoller, setTurnOrderInitiativeRoller] = useState(null);
   const turnOrderJoinPromptTokenId = turnOrderJoinPrompt?.tokenId || '';
   const activeBackgroundAssetType = getBackgroundAssetType(activeBackground);
   const backgroundImageAssetSnapshot = useImageAssetSnapshot(
@@ -2834,6 +2842,54 @@ export default function GrigliataBoard({
       setTurnOrderJoinPrompt(null);
     }
   }, [activeTurnOrderJoinToken, turnOrderJoinPrompt]);
+
+  useEffect(() => {
+    setTurnOrderInitiativeRoller(null);
+
+    if (
+      !turnOrderJoinPromptTokenId
+      || !activeTurnOrderJoinToken
+      || !['character', 'foe'].includes(activeTurnOrderJoinToken.tokenType || 'character')
+      || !onResolveTurnOrderInitiativeRoll
+    ) {
+      setTurnOrderInitiativeRollState({ tokenId: '', status: 'idle', config: null });
+      return undefined;
+    }
+
+    let isActive = true;
+    setTurnOrderInitiativeRollState({
+      tokenId: turnOrderJoinPromptTokenId,
+      status: 'loading',
+      config: null,
+    });
+
+    Promise.resolve(onResolveTurnOrderInitiativeRoll(turnOrderJoinPromptTokenId))
+      .then((config) => {
+        if (!isActive) return;
+        setTurnOrderInitiativeRollState({
+          tokenId: turnOrderJoinPromptTokenId,
+          status: config ? 'available' : 'unavailable',
+          config: config || null,
+        });
+      })
+      .catch((error) => {
+        if (!isActive) return;
+        console.warn('Failed to resolve the token initiative roll:', error);
+        setTurnOrderInitiativeRollState({
+          tokenId: turnOrderJoinPromptTokenId,
+          status: 'error',
+          config: null,
+        });
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [
+    activeTurnOrderJoinToken,
+    onResolveTurnOrderInitiativeRoll,
+    turnOrderJoinPromptTokenId,
+  ]);
 
   const movableTokenIds = useMemo(
     () => new Set(tokenItems.filter((token) => token.canMove).map((token) => token.tokenId)),
@@ -7041,6 +7097,52 @@ export default function GrigliataBoard({
                     }}
                     className="w-full rounded-xl border border-slate-700/90 bg-slate-950/95 px-3 py-2 text-center text-sm font-semibold text-slate-100 outline-none transition-colors duration-150 focus:border-fuchsia-300/75 disabled:cursor-not-allowed disabled:opacity-60"
                   />
+                  {turnOrderInitiativeRollState.tokenId === activeTurnOrderJoinToken.tokenId
+                    && turnOrderInitiativeRollState.status === 'loading' && (
+                    <div
+                      data-testid="turn-order-initiative-roll-loading"
+                      className="flex items-center justify-center gap-2 rounded-xl border border-slate-800/90 bg-slate-900/55 px-3 py-2 text-[11px] text-slate-400"
+                      role="status"
+                    >
+                      <span className="h-3 w-3 animate-spin rounded-full border border-slate-500 border-t-indigo-300" aria-hidden="true" />
+                      Checking Destrezza...
+                    </div>
+                  )}
+                  {turnOrderInitiativeRollState.tokenId === activeTurnOrderJoinToken.tokenId
+                    && turnOrderInitiativeRollState.status === 'available'
+                    && turnOrderInitiativeRollState.config && (
+                    <button
+                      type="button"
+                      data-testid="turn-order-initiative-roll-button"
+                      aria-label={`Roll Destrezza for ${activeTurnOrderJoinToken.label}`}
+                      disabled={
+                        turnOrderActionTokenId === activeTurnOrderJoinToken.tokenId
+                        || !!turnOrderInitiativeRoller
+                      }
+                      onClick={() => setTurnOrderInitiativeRoller({
+                        tokenId: activeTurnOrderJoinToken.tokenId,
+                        ...turnOrderInitiativeRollState.config,
+                      })}
+                      className="flex w-full items-center justify-between gap-3 rounded-xl border border-indigo-300/35 bg-indigo-400/10 px-3 py-2 text-left text-xs text-indigo-100 transition-colors duration-150 hover:border-indigo-200/60 hover:bg-indigo-400/15 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <span className="inline-flex min-w-0 items-center gap-2 font-semibold">
+                        <FaDiceD20 className="h-4 w-4 shrink-0 text-indigo-200" aria-hidden="true" />
+                        <span className="truncate">Roll Destrezza</span>
+                      </span>
+                      <span className="shrink-0 font-mono text-[11px] text-slate-400">
+                        {turnOrderInitiativeRollState.config.formula}
+                      </span>
+                    </button>
+                  )}
+                  {turnOrderInitiativeRollState.tokenId === activeTurnOrderJoinToken.tokenId
+                    && turnOrderInitiativeRollState.status === 'error' && (
+                    <p
+                      data-testid="turn-order-initiative-roll-error"
+                      className="text-center text-[11px] text-amber-300/85"
+                    >
+                      Dice roll unavailable. Enter initiative manually.
+                    </p>
+                  )}
                   <div className="flex items-center justify-end gap-2">
                     <button
                       type="button"
@@ -7065,6 +7167,27 @@ export default function GrigliataBoard({
                   </div>
                 </form>
               </div>
+              {turnOrderInitiativeRoller
+                && turnOrderInitiativeRoller.tokenId === activeTurnOrderJoinToken.tokenId && (
+                <DiceRoller
+                  faces={turnOrderInitiativeRoller.faces}
+                  count={turnOrderInitiativeRoller.count}
+                  modifier={turnOrderInitiativeRoller.modifier}
+                  description={turnOrderInitiativeRoller.description}
+                  onComplete={(total) => {
+                    const rolledTokenId = turnOrderInitiativeRoller.tokenId;
+                    setTurnOrderInitiativeRoller(null);
+                    setTurnOrderJoinPrompt((currentPrompt) => (
+                      currentPrompt?.tokenId === rolledTokenId && Number.isInteger(total)
+                        ? { ...currentPrompt, draft: String(total) }
+                        : currentPrompt
+                    ));
+                    window.requestAnimationFrame(() => {
+                      turnOrderJoinInputRef.current?.focus();
+                    });
+                  }}
+                />
+              )}
             </div>
           )}
 
