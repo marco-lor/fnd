@@ -30,7 +30,7 @@ import {
   normalizeFogRasterMemoryTileDoc,
 } from './fogRasterMemory';
 
-const MAP_PING_EPIC_ACCENT = '#f97316';
+const MAP_PING_ACCENT = '#fbbf24';
 const STATUS_BADGE_FILL = '#7c3aed';
 const STATUS_BADGE_STROKE = '#f8fafc';
 const OVERFLOW_BADGE_FILL = 'rgba(2, 6, 23, 0.94)';
@@ -5008,6 +5008,8 @@ describe('GrigliataBoard', () => {
     expect(screen.queryByTestId('turn-order-hidden-overlay-visible-token')).not.toBeInTheDocument();
     expect(screen.getByTestId('turn-order-entry-hidden-image')).toHaveAttribute('data-hidden-from-players', 'true');
     expect(screen.getByTestId('turn-order-entry-hidden-image')).toHaveAttribute('data-active-turn', 'true');
+    expect(screen.getByTestId('turn-order-entry-hidden-image')).toHaveAttribute('aria-current', 'step');
+    expect(screen.getByTestId('turn-order-active-marker-hidden-image')).toBeInTheDocument();
     expect(screen.getByTestId('turn-order-entry-visible-token')).toHaveAttribute('data-hidden-from-players', 'false');
   });
 
@@ -5618,10 +5620,30 @@ describe('GrigliataBoard', () => {
       />
     );
 
-    expect(screen.getByTestId('turn-order-entry-user-2')).toHaveAttribute('data-active-turn', 'true');
-    expect(screen.getByTestId('turn-order-entry-user-1')).toHaveAttribute('data-active-turn', 'false');
+    const activeEntry = screen.getByTestId('turn-order-entry-user-2');
+    const inactiveEntry = screen.getByTestId('turn-order-entry-user-1');
+    expect(activeEntry).toHaveAttribute('data-active-turn', 'true');
+    expect(activeEntry).toHaveAttribute('aria-current', 'step');
+    expect(activeEntry).toHaveTextContent('Current turn');
+    expect(activeEntry.className).toContain('py-1.5');
+    expect(activeEntry.className).not.toContain('bg-gradient-to-l');
+    expect(screen.getByTestId('turn-order-active-marker-user-2')).toBeInTheDocument();
+    expect(inactiveEntry).toHaveAttribute('data-active-turn', 'false');
+    expect(inactiveEntry).not.toHaveAttribute('aria-current');
+    expect(inactiveEntry.className).toContain('py-1.5');
+    expect(screen.queryByTestId('turn-order-active-marker-user-1')).not.toBeInTheDocument();
     expect(screen.getByTestId('token-node-user-2')).toHaveAttribute('data-active-turn', 'true');
     expect(screen.getByTestId('token-node-user-1')).toHaveAttribute('data-active-turn', 'false');
+    expect(screen.getByTestId('token-active-turn-underlay-user-2')).toHaveAttribute(
+      'data-stroke',
+      'rgba(2, 6, 23, 0.88)'
+    );
+    expect(screen.getByTestId('token-active-turn-ring-user-2')).toHaveAttribute(
+      'data-stroke',
+      'rgba(251, 191, 36, 0.98)'
+    );
+    expect(screen.getByTestId('token-active-turn-ring-user-2')).not.toHaveAttribute('data-fill');
+    expect(screen.queryByTestId('token-active-turn-ring-user-1')).not.toBeInTheDocument();
   });
 
   test('saves initiative on submit and discards unsaved edits on Escape without showing a save button', async () => {
@@ -5782,7 +5804,8 @@ describe('GrigliataBoard', () => {
 
     expect(pingOverlay).toBeInTheDocument();
     expect(pingOverlay.querySelector('[data-stroke="#38bdf8"]')).not.toBeNull();
-    expect(pingOverlay.querySelector(`[data-stroke="${MAP_PING_EPIC_ACCENT}"]`)).not.toBeNull();
+    expect(pingOverlay.querySelector(`[data-stroke="${MAP_PING_ACCENT}"]`)).not.toBeNull();
+    expect(pingOverlay.querySelectorAll('[data-konva-type="Line"]')).toHaveLength(0);
 
     act(() => {
       jest.advanceTimersByTime(MAP_PING_VISIBLE_MS + 64);
@@ -5838,7 +5861,7 @@ describe('GrigliataBoard', () => {
     const localPingOverlays = document.querySelectorAll('[data-testid^="map-ping-overlay-local-ping-"]');
     expect(localPingOverlays).toHaveLength(1);
     expect(localPingOverlays[0].querySelector('[data-stroke="#f472b6"]')).not.toBeNull();
-    expect(localPingOverlays[0].querySelector(`[data-stroke="${MAP_PING_EPIC_ACCENT}"]`)).not.toBeNull();
+    expect(localPingOverlays[0].querySelector(`[data-stroke="${MAP_PING_ACCENT}"]`)).not.toBeNull();
     expect(onSharedInteractionChange).toHaveBeenCalledWith(expect.objectContaining({
       type: 'ping',
       source: 'free',
@@ -5889,7 +5912,7 @@ describe('GrigliataBoard', () => {
     const pingOverlay = screen.getByTestId('map-ping-overlay-shared-other-user');
 
     expect(pingOverlay.querySelector('[data-stroke="#38bdf8"]')).not.toBeNull();
-    expect(pingOverlay.querySelector(`[data-stroke="${MAP_PING_EPIC_ACCENT}"]`)).not.toBeNull();
+    expect(pingOverlay.querySelector(`[data-stroke="${MAP_PING_ACCENT}"]`)).not.toBeNull();
     expect(pingOverlay.querySelector('[data-fill="#38bdf8"]')).not.toBeNull();
   });
 

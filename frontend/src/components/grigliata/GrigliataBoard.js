@@ -38,7 +38,6 @@ import {
   getGrigliataDrawTheme,
   GRIGLIATA_DRAW_THEMES,
   MAX_GRIGLIATA_VIEWPORT_SCALE,
-  MAP_PING_ANIMATION_INTERVAL_MS,
   MAP_PING_BROADCAST_CLEAR_MS,
   MAP_PING_HOLD_DELAY_MS,
   MAP_PING_VISIBLE_MS,
@@ -148,9 +147,9 @@ const SCREEN_AOE_PRIMARY_FONT_SIZE = 16;
 const SCREEN_AOE_SECONDARY_FONT_SIZE = 12;
 const SCREEN_AOE_LINE_GAP = 2;
 const TOKEN_STATUS_VISIBLE_BADGE_COUNT = 3;
-const MAP_PING_EPIC_ACCENT = '#f97316';
-const MAP_PING_EPIC_HIGHLIGHT = '#fde047';
-const MAP_PING_EPIC_SHADOW = 'rgba(249, 115, 22, 0.58)';
+const MAP_PING_ACCENT = '#fbbf24';
+const MAP_PING_HIGHLIGHT = '#fef3c7';
+const MAP_PING_ACCENT_GLOW = 'rgba(251, 191, 36, 0.34)';
 const DRAW_PICKER_EASE = [0.22, 1, 0.36, 1];
 const BATTLEMAP_IMAGE_FADE_DURATION_MS = 1000;
 const QUICK_CONTROL_NEUTRAL_SURFACE_CLASS = 'border-slate-700/90 bg-slate-950/92 shadow-lg shadow-slate-950/35';
@@ -1079,21 +1078,14 @@ const MapPingOverlay = ({
 
   const progress = clampToRange(ageMs / MAP_PING_VISIBLE_MS, 0, 1);
   const easedProgress = easeOutCubic(progress);
-  const pulseStrength = Math.sin(progress * Math.PI);
-  const fadeOpacity = 1 - progress;
-  const haloRadius = prefersReducedMotion ? 42 : 22 + (easedProgress * 76);
-  const flareRadius = prefersReducedMotion ? 68 : 30 + (easedProgress * 138);
-  const outerRadius = prefersReducedMotion ? 60 : 28 + (easedProgress * 128);
-  const innerRadius = prefersReducedMotion ? 34 : 16 + (easedProgress * 66);
-  const sigilRadius = prefersReducedMotion ? 28 : 18 + (pulseStrength * 14);
-  const coreRadius = prefersReducedMotion ? 10 : 9 + (pulseStrength * 7);
-  const rayInnerRadius = prefersReducedMotion ? 16 : 14 + (easedProgress * 14);
-  const rayOuterRadius = prefersReducedMotion ? 62 : 44 + (easedProgress * 62);
-  const rayStrokeWidth = prefersReducedMotion ? 3 : Math.max(2.8, 4.8 - (progress * 1.4));
-  const rayAngles = Array.from({ length: 8 }, (_, index) => (Math.PI / 4) * index);
-  const diamondRadius = prefersReducedMotion ? 18 : 12 + (pulseStrength * 10);
-  const accentOpacity = prefersReducedMotion ? 0.92 : fadeOpacity * 0.92;
-  const glowOpacity = prefersReducedMotion ? 0.86 : fadeOpacity * 0.86;
+  const secondaryProgress = easeOutCubic(clampToRange((progress - 0.08) / 0.92, 0, 1));
+  const fadeProgress = easeOutCubic(clampToRange((progress - 0.58) / 0.42, 0, 1));
+  const fadeOpacity = prefersReducedMotion ? 0.88 : 1 - fadeProgress;
+  const pulseStrength = prefersReducedMotion ? 0 : Math.sin(progress * Math.PI);
+  const haloRadius = prefersReducedMotion ? 42 : 24 + (easedProgress * 34);
+  const primaryRadius = prefersReducedMotion ? 40 : 18 + (easedProgress * 52);
+  const secondaryRadius = prefersReducedMotion ? 24 : 12 + (secondaryProgress * 38);
+  const coreRadius = prefersReducedMotion ? 5 : 4 + (pulseStrength * 1.5);
 
   return (
     <Group
@@ -1103,144 +1095,56 @@ const MapPingOverlay = ({
       data-testid={overlayId ? `map-ping-overlay-${overlayId}` : undefined}
     >
       <Circle
-        radius={flareRadius}
-        fill={drawTheme.stroke}
-        opacity={prefersReducedMotion ? 0.12 : 0.06 + (fadeOpacity * 0.16)}
-        shadowColor={drawTheme.glow}
-        shadowBlur={prefersReducedMotion ? 18 : 34}
-        shadowOpacity={glowOpacity * 0.46}
-      />
-      <Circle
         radius={haloRadius}
-        fill={MAP_PING_EPIC_ACCENT}
-        opacity={prefersReducedMotion ? 0.12 : 0.05 + (fadeOpacity * 0.12)}
-        shadowColor={MAP_PING_EPIC_SHADOW}
-        shadowBlur={prefersReducedMotion ? 14 : 26}
-        shadowOpacity={accentOpacity * 0.42}
-      />
-      <Circle
-        radius={outerRadius}
-        stroke={drawTheme.outlineStroke}
-        strokeWidth={Math.max(6, 9 - (progress * 2.2))}
-        opacity={0.22 + (fadeOpacity * 0.16)}
-      />
-      <Circle
-        radius={outerRadius}
-        stroke={drawTheme.stroke}
-        strokeWidth={Math.max(3.6, 6.4 - (progress * 1.6))}
-        opacity={glowOpacity}
-        shadowColor={drawTheme.glow}
-        shadowBlur={prefersReducedMotion ? 18 : 34}
-        shadowOpacity={glowOpacity * 0.62}
-      />
-      <Circle
-        radius={Math.max(24, outerRadius - 12)}
-        stroke={MAP_PING_EPIC_ACCENT}
-        strokeWidth={Math.max(2.8, 4.4 - progress)}
-        opacity={accentOpacity * 0.62}
-        shadowColor={MAP_PING_EPIC_SHADOW}
-        shadowBlur={prefersReducedMotion ? 12 : 20}
-        shadowOpacity={accentOpacity * 0.42}
-      />
-      <Circle
-        radius={innerRadius}
         fill={drawTheme.stroke}
-        opacity={prefersReducedMotion ? 0.12 : 0.08 + (fadeOpacity * 0.16)}
+        opacity={0.08 * fadeOpacity}
         shadowColor={drawTheme.glow}
-        shadowBlur={prefersReducedMotion ? 18 : 30}
-        shadowOpacity={glowOpacity * 0.38}
+        shadowBlur={prefersReducedMotion ? 12 : 18}
+        shadowOpacity={0.32 * fadeOpacity}
       />
       <Circle
-        radius={Math.max(14, innerRadius * 0.68)}
-        fill={MAP_PING_EPIC_HIGHLIGHT}
-        opacity={prefersReducedMotion ? 0.16 : 0.05 + (fadeOpacity * 0.14)}
-        shadowColor={MAP_PING_EPIC_SHADOW}
-        shadowBlur={prefersReducedMotion ? 10 : 20}
-        shadowOpacity={accentOpacity * 0.36}
+        radius={primaryRadius}
+        stroke={drawTheme.outlineStroke}
+        strokeWidth={4.5}
+        opacity={0.24 * fadeOpacity}
       />
       <Circle
-        radius={sigilRadius}
-        stroke={MAP_PING_EPIC_HIGHLIGHT}
-        strokeWidth={prefersReducedMotion ? 2.4 : 2.1}
-        dash={prefersReducedMotion ? [14, 10] : [12, 8]}
-        opacity={accentOpacity * (prefersReducedMotion ? 0.84 : 0.74)}
-      />
-      <Circle
-        radius={sigilRadius}
+        radius={primaryRadius}
         stroke={drawTheme.stroke}
-        strokeWidth={prefersReducedMotion ? 1.8 : 1.5}
-        dash={prefersReducedMotion ? [14, 10] : [12, 8]}
-        opacity={glowOpacity * (prefersReducedMotion ? 0.76 : 0.62)}
+        strokeWidth={2.4}
+        opacity={0.92 * fadeOpacity}
+        shadowColor={drawTheme.glow}
+        shadowBlur={prefersReducedMotion ? 10 : 16}
+        shadowOpacity={0.52 * fadeOpacity}
       />
-      <Line
-        points={[0, -diamondRadius, diamondRadius, 0, 0, diamondRadius, -diamondRadius, 0]}
-        closed
-        stroke={MAP_PING_EPIC_ACCENT}
-        strokeWidth={prefersReducedMotion ? 2.4 : 2}
-        lineJoin="round"
-        opacity={accentOpacity * 0.82}
-        shadowColor={MAP_PING_EPIC_SHADOW}
-        shadowBlur={prefersReducedMotion ? 10 : 14}
-        shadowOpacity={accentOpacity * 0.34}
+      <Circle
+        radius={secondaryRadius}
+        stroke={MAP_PING_ACCENT}
+        strokeWidth={1.4}
+        opacity={0.58 * fadeOpacity}
+        shadowColor={MAP_PING_ACCENT_GLOW}
+        shadowBlur={prefersReducedMotion ? 5 : 8}
+        shadowOpacity={0.38 * fadeOpacity}
       />
-      {!prefersReducedMotion && rayAngles.map((angle) => (
-        <React.Fragment key={`ping-ray-${angle}`}>
-          <Line
-            points={[
-              Math.cos(angle) * rayInnerRadius,
-              Math.sin(angle) * rayInnerRadius,
-              Math.cos(angle) * rayOuterRadius,
-              Math.sin(angle) * rayOuterRadius,
-            ]}
-            stroke={drawTheme.outlineStroke}
-            strokeWidth={rayStrokeWidth + 2.6}
-            lineCap="round"
-            opacity={fadeOpacity * 0.28}
-          />
-          <Line
-            points={[
-              Math.cos(angle) * rayInnerRadius,
-              Math.sin(angle) * rayInnerRadius,
-              Math.cos(angle) * rayOuterRadius,
-              Math.sin(angle) * rayOuterRadius,
-            ]}
-            stroke={drawTheme.stroke}
-            strokeWidth={rayStrokeWidth}
-            lineCap="round"
-            opacity={glowOpacity * 0.76}
-            shadowColor={drawTheme.stroke}
-            shadowBlur={18}
-            shadowOpacity={glowOpacity * 0.4}
-          />
-          <Line
-            points={[
-              Math.cos(angle) * rayInnerRadius,
-              Math.sin(angle) * rayInnerRadius,
-              Math.cos(angle) * rayOuterRadius,
-              Math.sin(angle) * rayOuterRadius,
-            ]}
-            stroke={MAP_PING_EPIC_ACCENT}
-            strokeWidth={Math.max(1.4, rayStrokeWidth - 1.8)}
-            lineCap="round"
-            opacity={accentOpacity * 0.82}
-            shadowColor={MAP_PING_EPIC_SHADOW}
-            shadowBlur={12}
-            shadowOpacity={accentOpacity * 0.34}
-          />
-        </React.Fragment>
-      ))}
+      <Circle
+        radius={coreRadius + 3}
+        fill="rgba(15, 23, 42, 0.9)"
+        stroke={drawTheme.stroke}
+        strokeWidth={1.5}
+        opacity={fadeOpacity}
+        shadowColor={drawTheme.glow}
+        shadowBlur={prefersReducedMotion ? 8 : 12}
+        shadowOpacity={0.5 * fadeOpacity}
+      />
       <Circle
         radius={coreRadius}
-        fill={MAP_PING_EPIC_HIGHLIGHT}
-        opacity={prefersReducedMotion ? 0.96 : 0.36 + (fadeOpacity * 0.64)}
-        shadowColor={MAP_PING_EPIC_SHADOW}
-        shadowBlur={prefersReducedMotion ? 14 : 20}
-        shadowOpacity={accentOpacity * 0.46}
+        fill={drawTheme.stroke}
+        opacity={0.94 * fadeOpacity}
       />
       <Circle
-        radius={Math.max(2.5, coreRadius * 0.42)}
-        fill={drawTheme.stroke}
-        opacity={glowOpacity}
+        radius={1.75}
+        fill={MAP_PING_HIGHLIGHT}
+        opacity={0.88 * fadeOpacity}
       />
     </Group>
   );
@@ -2300,14 +2204,14 @@ const TurnOrderPanel = ({
               data-testid={`turn-order-entry-${entry.tokenId}`}
               data-active-turn={isActiveTurn ? 'true' : 'false'}
               data-hidden-from-players={isHiddenFromPlayers ? 'true' : 'false'}
-              className={`relative z-10 flex max-w-full items-center gap-3 ${isActiveTurn
-                ? 'rounded-[1.1rem] bg-gradient-to-l from-fuchsia-500/14 via-fuchsia-500/5 to-transparent px-2 py-2 shadow-[0_0_18px_rgba(217,70,239,0.18)] ring-1 ring-fuchsia-300/25'
-                : 'py-1.5'}`}
+              aria-current={isActiveTurn ? 'step' : undefined}
+              className="relative z-10 flex max-w-full items-center gap-3 py-1.5"
               initial={prefersReducedMotion ? false : { opacity: 0, y: -10, x: 6 }}
               animate={{ opacity: 1, y: 0, x: 0 }}
               exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -10, x: 6 }}
               transition={prefersReducedMotion ? { duration: 0.01 } : TURN_ORDER_ENTRY_TRANSITION}
             >
+              {isActiveTurn && <span className="sr-only">Current turn</span>}
               <div className="min-w-0 text-right">
                 {canEdit ? (
                   <form
@@ -2336,14 +2240,14 @@ const TurnOrderPanel = ({
                         handleDiscardInitiative(entry.tokenId);
                       }}
                       className={`w-10 rounded-lg bg-slate-950/95 px-1.5 py-1 text-center text-xs font-semibold outline-none transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60 ${isActiveTurn
-                        ? 'border border-fuchsia-300/70 text-fuchsia-50 shadow-[0_0_12px_rgba(217,70,239,0.16)] focus:border-fuchsia-200/85'
+                        ? 'border border-amber-300/70 text-amber-100 shadow-[0_0_10px_rgba(251,191,36,0.14)] focus:border-amber-200/85'
                         : 'border border-slate-700/90 text-slate-100 focus:border-fuchsia-300/75'}`}
                     />
                   </form>
                 ) : (
                   <div
                     data-testid={`turn-order-initiative-value-${entry.tokenId}`}
-                    className={`mt-1 text-xs font-semibold ${isActiveTurn ? 'text-fuchsia-200' : 'text-slate-400'}`}
+                    className={`mt-1 text-xs font-semibold ${isActiveTurn ? 'text-amber-200' : 'text-slate-400'}`}
                   >
                     {entry.initiative}
                   </div>
@@ -2362,13 +2266,13 @@ const TurnOrderPanel = ({
                   <img
                     src={entry.imageUrl}
                     alt=""
-                    className={`h-10 w-10 shrink-0 rounded-2xl object-cover ${isActiveTurn
-                      ? 'border border-fuchsia-300/75 shadow-[0_0_16px_rgba(217,70,239,0.22)]'
+                    className={`h-10 w-10 shrink-0 rounded-2xl object-cover transition-[border-color,box-shadow] duration-150 ${isActiveTurn
+                      ? 'border-2 border-amber-300/90 shadow-[0_0_12px_rgba(251,191,36,0.24)]'
                       : 'border border-slate-700/80'}`}
                   />
                 ) : (
-                  <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-800/90 text-xs font-bold uppercase tracking-[0.18em] ${isActiveTurn
-                    ? 'border border-fuchsia-300/75 text-fuchsia-50 shadow-[0_0_16px_rgba(217,70,239,0.22)]'
+                  <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-800/90 text-xs font-bold uppercase tracking-[0.18em] transition-[border-color,box-shadow] duration-150 ${isActiveTurn
+                    ? 'border-2 border-amber-300/90 text-amber-50 shadow-[0_0_12px_rgba(251,191,36,0.24)]'
                     : 'border border-slate-700/80 text-slate-200'}`}>
                     {getInitials(entry.label)}
                   </div>
@@ -2391,6 +2295,16 @@ const TurnOrderPanel = ({
                     </span>
                     <span className="sr-only">Invisible to players</span>
                   </div>
+                )}
+                {isActiveTurn && (
+                  <motion.span
+                    aria-hidden="true"
+                    data-testid={`turn-order-active-marker-${entry.tokenId}`}
+                    className="pointer-events-none absolute -right-2 top-1/2 z-20 h-3 w-1 -translate-y-1/2 rounded-full bg-amber-300 shadow-[0_0_8px_rgba(251,191,36,0.6)]"
+                    initial={prefersReducedMotion ? false : { opacity: 0, scaleY: 0.55 }}
+                    animate={{ opacity: 1, scaleY: 1 }}
+                    transition={prefersReducedMotion ? { duration: 0.01 } : { duration: 0.14, ease: 'easeOut' }}
+                  />
                 )}
               </div>
             </motion.div>
@@ -3437,12 +3351,40 @@ export default function GrigliataBoard({
       return undefined;
     }
 
-    const intervalId = window.setInterval(() => {
-      setPingAnimationClock(Date.now());
-    }, MAP_PING_ANIMATION_INTERVAL_MS);
+    if (prefersReducedMotion) {
+      const expirationTimes = [
+        ...localPings.map((ping) => ping.startedAtMs + MAP_PING_VISIBLE_MS),
+        ...(sharedInteractions || [])
+          .filter((interaction) => interaction?.type === 'ping' && interaction.ownerUid !== currentUserId)
+          .map((interaction) => interaction.startedAtMs + MAP_PING_VISIBLE_MS),
+      ].filter((expiresAtMs) => Number.isFinite(expiresAtMs) && expiresAtMs > Date.now());
+      const nextExpirationMs = expirationTimes.length
+        ? Math.min(...expirationTimes)
+        : Date.now() + MAP_PING_VISIBLE_MS;
+      const timeoutId = window.setTimeout(() => {
+        setPingAnimationClock(Date.now());
+      }, Math.max(0, nextExpirationMs - Date.now()) + 16);
 
-    return () => window.clearInterval(intervalId);
-  }, [hasVisibleRemotePing, visibleLocalPings.length]);
+      return () => window.clearTimeout(timeoutId);
+    }
+
+    let frameHandle = null;
+    const updatePingFrame = () => {
+      setPingAnimationClock(Date.now());
+      frameHandle = requestAnimationFrameSafe(updatePingFrame);
+    };
+
+    frameHandle = requestAnimationFrameSafe(updatePingFrame);
+
+    return () => cancelAnimationFrameSafe(frameHandle);
+  }, [
+    currentUserId,
+    hasVisibleRemotePing,
+    localPings,
+    prefersReducedMotion,
+    sharedInteractions,
+    visibleLocalPings.length,
+  ]);
 
   useEffect(() => (
     () => {

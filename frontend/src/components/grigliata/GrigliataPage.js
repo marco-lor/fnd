@@ -1529,7 +1529,7 @@ export default function GrigliataPage() {
       ]
   ), [isManager]);
   const isGallerySidebarActive = isManager && activeSidebarTab === 'gallery';
-  const isCompactFullHeightSidebarTab = activeSidebarTab === 'dice' || (isManager && ['gallery', 'music'].includes(activeSidebarTab));
+  const isCompactFullHeightSidebarTab = ['tokens', 'dice'].includes(activeSidebarTab) || (isManager && ['gallery', 'music'].includes(activeSidebarTab));
   const immediateImageUrls = useMemo(() => collectUniqueImageUrls([
     getBackgroundImageUrlForPreload(combatBackground),
     getBackgroundImageUrlForPreload(displayBackground),

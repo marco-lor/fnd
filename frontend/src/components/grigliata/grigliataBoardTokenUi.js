@@ -36,9 +36,8 @@ const DEAD_TOKEN_SCRIM = 'rgba(15, 23, 42, 0.34)';
 const DEAD_TOKEN_BANNER_FILL = 'rgba(127, 29, 29, 0.88)';
 const DEAD_TOKEN_LABEL = '#fecaca';
 const ACTIVE_TURN_PRIMARY = 'rgba(251, 191, 36, 0.98)';
-const ACTIVE_TURN_SECONDARY = '#fef3c7';
-const ACTIVE_TURN_GLOW = 'rgba(245, 158, 11, 0.42)';
-const ACTIVE_TURN_FILL = 'rgba(245, 158, 11, 0.16)';
+const ACTIVE_TURN_UNDERLAY = 'rgba(2, 6, 23, 0.88)';
+const ACTIVE_TURN_GLOW = 'rgba(245, 158, 11, 0.3)';
 const GRID_LINE_STROKE = 'rgba(248, 250, 252, 0.14)';
 const GRID_LINE_STROKE_WIDTH = 1;
 
@@ -300,36 +299,25 @@ export const TokenNode = ({
       {isActiveTurn && (
         <>
           <Circle
+            data-testid={token?.tokenId ? `token-active-turn-underlay-${token.tokenId}` : undefined}
             x={size / 2}
             y={size / 2}
-            radius={(size / 2) + 18}
-            fill="rgba(245, 158, 11, 0.1)"
-            shadowColor={ACTIVE_TURN_GLOW}
-            shadowBlur={30}
-            shadowOpacity={0.48}
+            radius={(size / 2) + 6}
+            stroke={ACTIVE_TURN_UNDERLAY}
+            strokeWidth={Math.max(4.5, size * 0.1)}
+            opacity={0.9}
             listening={false}
           />
           <Circle
+            data-testid={token?.tokenId ? `token-active-turn-ring-${token.tokenId}` : undefined}
             x={size / 2}
             y={size / 2}
-            radius={(size / 2) + 11}
-            fill={ACTIVE_TURN_FILL}
-            stroke="rgba(254, 243, 199, 0.92)"
-            strokeWidth={Math.max(2.5, size * 0.06)}
-            shadowColor={ACTIVE_TURN_GLOW}
-            shadowBlur={22}
-            shadowOpacity={0.44}
-            listening={false}
-          />
-          <Circle
-            x={size / 2}
-            y={size / 2}
-            radius={(size / 2) + 16}
+            radius={(size / 2) + 6}
             stroke={ACTIVE_TURN_PRIMARY}
             strokeWidth={Math.max(1.8, size * 0.045)}
             shadowColor={ACTIVE_TURN_GLOW}
-            shadowBlur={14}
-            shadowOpacity={0.34}
+            shadowBlur={10}
+            shadowOpacity={0.42}
             listening={false}
           />
         </>
