@@ -17,7 +17,8 @@ import {
   writeBatch,
   updateDoc
 } from 'firebase/firestore';
-import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { ref as storageRef, deleteObject } from 'firebase/storage';
+import { uploadCacheableImage } from '../common/imageStorage';
 
 const MAX_NPC_IMAGE_BYTES = 5 * 1024 * 1024;
 const HOVER_CARD_WIDTH = 344;
@@ -839,9 +840,8 @@ export default function NpcSidebar({
 
     setIsCreatingNpc(true);
     try {
-      await uploadBytes(imageRef, createImageFile);
+      const { downloadUrl: imageUrl } = await uploadCacheableImage(imageRef, createImageFile);
       uploaded = true;
-      const imageUrl = await getDownloadURL(imageRef);
 
       await addDoc(collection(db, 'echi_npcs'), {
         nome,
@@ -930,8 +930,7 @@ export default function NpcSidebar({
         const safeNome = nome.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'npc';
         uploadedNewPath = `echi_npcs/${user?.uid || 'unknown'}/${safeNome}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${safeExt}`;
         const imageRef = storageRef(storage, uploadedNewPath);
-        await uploadBytes(imageRef, editImageFile);
-        const imageUrl = await getDownloadURL(imageRef);
+        const { downloadUrl: imageUrl } = await uploadCacheableImage(imageRef, editImageFile);
         payload.imageUrl = imageUrl;
         payload.imagePath = uploadedNewPath;
       }

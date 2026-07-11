@@ -3,6 +3,7 @@ import React, { useState, useEffect, useContext, useCallback, useRef } from 'rea
 import { db, storage } from '../../firebaseConfig';
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
+import { uploadCacheableImage } from "../../common/imageStorage";
 import { AuthContext } from '../../../AuthContext';
 import { computeValue } from '../../common/computeFormula';
 import { AddSpellButton } from '../../dmDashboard/elements/buttons/addSpell';
@@ -416,8 +417,7 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
             if (imageFile) {
                 const weaponImgFileName = `weapon_${docId}_${Date.now()}_${imageFile.name}`;
                 const weaponImgRef = ref(storage, 'items/' + weaponImgFileName);
-                await uploadBytes(weaponImgRef, imageFile);
-                newImageUrl = await getDownloadURL(weaponImgRef);
+                newImageUrl = (await uploadCacheableImage(weaponImgRef, imageFile)).downloadUrl;
                 if (!inventoryEditMode && editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
                     try {
                         const oldPath = decodeURIComponent(initialData.General.image_url.split('/o/')[1].split('?')[0]);
@@ -447,8 +447,7 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
 
                 if (spellObj.imageFile) {
                     const spellImgRef = ref(storage, `spells/${safeBase}_image`);
-                    await uploadBytes(spellImgRef, spellObj.imageFile);
-                    spellImageUrlToSave = await getDownloadURL(spellImgRef);
+                    spellImageUrlToSave = (await uploadCacheableImage(spellImgRef, spellObj.imageFile)).downloadUrl;
                     if (!inventoryEditMode && initialSpellFromData.image_url && initialSpellFromData.image_url !== spellImageUrlToSave) {
                         try { await deleteObject(ref(storage, decodeURIComponent(initialSpellFromData.image_url.split('/o/')[1].split('?')[0]))); } catch (e) { console.warn("Failed to delete old spell image for", spellNameKey, e); }
                     }

@@ -2,11 +2,12 @@ import React, { useContext, useEffect, useState } from 'react';
 import { AuthContext } from '../../../AuthContext';
 import { db, storage } from '../../firebaseConfig';
 import { doc, onSnapshot, getDoc, updateDoc } from 'firebase/firestore';
-import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { ref as storageRef, deleteObject } from 'firebase/storage';
 import { FiPackage, FiSearch, FiTrash2, FiPlus, FiMinus } from 'react-icons/fi';
 import { FaCoins } from 'react-icons/fa';
 import ItemDetailsModal from './ItemDetailsModal';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
+import { uploadCacheableImage } from '../../common/imageStorage';
 
 // Simple inventory browser to occupy the right column
 // Shows a searchable, grouped list of items in user's inventory
@@ -261,8 +262,7 @@ const Inventory = () => {
 					const safe = name.replace(/[^a-zA-Z0-9]/g, '_');
 					const fileName = `varie_${user.uid}_${safe}_${Date.now()}_${vImageFile.name}`;
 					const imgRef = storageRef(storage, 'items/' + fileName);
-					await uploadBytes(imgRef, vImageFile);
-					image_url = await getDownloadURL(imgRef);
+					({ downloadUrl: image_url } = await uploadCacheableImage(imgRef, vImageFile));
 				} catch (e) {
 					console.error('Failed to upload varie image', e);
 				}

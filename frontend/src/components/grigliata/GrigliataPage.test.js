@@ -1655,6 +1655,28 @@ describe('GrigliataPage', () => {
       });
 
       expect(storageApi.uploadBytes).toHaveBeenCalledTimes(2);
+      expect(storageApi.uploadBytes).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          path: expect.stringMatching(/^grigliata\/backgrounds\/user-1\/train_yard_\d+\.png$/),
+        }),
+        firstFile,
+        {
+          cacheControl: 'private, max-age=31536000, immutable',
+          contentType: 'image/png',
+        }
+      );
+      expect(storageApi.uploadBytes).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          path: expect.stringMatching(/^grigliata\/backgrounds\/user-1\/signal_room_\d+\.jpg$/),
+        }),
+        secondFile,
+        {
+          cacheControl: 'private, max-age=31536000, immutable',
+          contentType: 'image/jpeg',
+        }
+      );
       expect(firestore.addDoc).toHaveBeenCalledTimes(2);
       expect(firestore.addDoc).toHaveBeenNthCalledWith(
         1,

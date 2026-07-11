@@ -2794,7 +2794,7 @@ describe('GrigliataBoard', () => {
     expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
   });
 
-  test('swaps to the narration battlemap immediately without showing the combat map underneath', async () => {
+  test('fades into the narration battlemap without showing the combat map underneath', async () => {
     jest.useFakeTimers();
 
     const { rerender } = render(
@@ -2838,8 +2838,147 @@ describe('GrigliataBoard', () => {
     );
 
     expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-width', '1920');
-    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-opacity', '1');
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-opacity', '0');
     expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
+
+    await act(async () => {
+      jest.advanceTimersByTime(1100);
+    });
+
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-opacity', '1');
+  });
+
+  test('replaces narration with sequential half-duration fades in one second total', async () => {
+    jest.useFakeTimers();
+    window.requestAnimationFrame = (callback) => window.setTimeout(() => callback(performance.now()), 16);
+
+    const firstBackground = {
+      id: 'map-2',
+      name: 'Iron Keep',
+      imageUrl: 'https://example.com/map-2.png',
+      imageWidth: 1920,
+      imageHeight: 1080,
+    };
+    const secondBackground = {
+      id: 'map-3',
+      name: 'Frost Hall',
+      imageUrl: 'https://example.com/map-3.png',
+      imageWidth: 1600,
+      imageHeight: 900,
+    };
+    const buildNarrationProps = (background) => ({
+      activeBackground: background,
+      isNarrationOverlayActive: true,
+      narrationBackgrounds: [background],
+      narrationPlacements: [{
+        id: `background:${background.id}`,
+        backgroundId: background.id,
+        x: 0,
+        y: 0,
+        width: background.imageWidth,
+        height: background.imageHeight,
+        order: 0,
+        mode: 'free',
+        attachedSide: '',
+      }],
+    });
+
+    const { rerender } = render(
+      <GrigliataBoard {...buildProps(buildNarrationProps(firstBackground))} />
+    );
+
+    await act(async () => {
+      jest.advanceTimersByTime(1050);
+    });
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-opacity', '1');
+
+    rerender(<GrigliataBoard {...buildProps(buildNarrationProps(secondBackground))} />);
+
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-width', '1920');
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-transition-role', 'outgoing');
+
+    await act(async () => {
+      jest.advanceTimersByTime(520);
+    });
+
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-width', '1600');
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-transition-role', 'incoming');
+    expect(Number(screen.getByTestId('battlemap-image-active').getAttribute('data-opacity'))).toBeLessThan(0.2);
+
+    await act(async () => {
+      jest.advanceTimersByTime(520);
+    });
+
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-width', '1600');
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-opacity', '1');
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-transition-role', 'stable');
+  });
+
+  test('retains and fades narration out before restoring the combat battlemap', async () => {
+    jest.useFakeTimers();
+    window.requestAnimationFrame = (callback) => window.setTimeout(() => callback(performance.now()), 16);
+
+    const combatBackground = {
+      id: 'map-1',
+      name: 'Sunken Ruins',
+      imageUrl: 'https://example.com/map-1.png',
+      imageWidth: 1280,
+      imageHeight: 720,
+    };
+    const narrationBackground = {
+      id: 'map-2',
+      name: 'Iron Keep',
+      imageUrl: 'https://example.com/map-2.png',
+      imageWidth: 1920,
+      imageHeight: 1080,
+    };
+    const narrationPlacement = {
+      id: 'background:map-2',
+      backgroundId: 'map-2',
+      x: 0,
+      y: 0,
+      width: 1920,
+      height: 1080,
+      order: 0,
+      mode: 'free',
+      attachedSide: '',
+    };
+
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: narrationBackground,
+          isNarrationOverlayActive: true,
+          narrationBackgrounds: [narrationBackground],
+          narrationPlacements: [narrationPlacement],
+        })}
+      />
+    );
+    await act(async () => {
+      jest.advanceTimersByTime(1050);
+    });
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: combatBackground,
+          isNarrationOverlayActive: false,
+          narrationBackgrounds: [],
+          narrationPlacements: [],
+        })}
+      />
+    );
+
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-width', '1920');
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-transition-role', 'outgoing');
+    expect(screen.queryByTestId('grid-layer')).not.toBeInTheDocument();
+
+    await act(async () => {
+      jest.advanceTimersByTime(1050);
+    });
+
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-width', '1280');
+    expect(screen.getByTestId('grid-layer')).toBeInTheDocument();
   });
 
   test('centers and maximizes the narration image using image bounds while combat maps keep board fit', async () => {
@@ -2970,6 +3109,80 @@ describe('GrigliataBoard', () => {
     fireEvent.dragEnd(secondaryImage);
 
     expect(onMoveNarrationPlacement).toHaveBeenCalledWith('background:map-3', { x: 2100, y: 120 });
+  });
+
+  test('fades only placements added to or removed from multi-image narration', async () => {
+    jest.useFakeTimers();
+    window.requestAnimationFrame = (callback) => window.setTimeout(() => callback(performance.now()), 16);
+
+    const backgrounds = [{
+      id: 'map-2',
+      name: 'Iron Keep',
+      imageUrl: 'https://example.com/map-2.png',
+      imageWidth: 1920,
+      imageHeight: 1080,
+    }, {
+      id: 'map-3',
+      name: 'Frost Hall',
+      imageUrl: 'https://example.com/map-3.png',
+      imageWidth: 1600,
+      imageHeight: 900,
+    }];
+    const primaryPlacement = {
+      id: 'background:map-2',
+      backgroundId: 'map-2',
+      x: 0,
+      y: 0,
+      width: 1920,
+      height: 1080,
+      order: 0,
+      mode: 'free',
+      attachedSide: '',
+    };
+    const secondaryPlacement = {
+      id: 'background:map-3',
+      backgroundId: 'map-3',
+      x: 1920,
+      y: 90,
+      width: 1600,
+      height: 900,
+      order: 1,
+      mode: 'magnetic',
+      attachedSide: 'right',
+    };
+    const buildMultiProps = (placements) => buildProps({
+      activeBackground: backgrounds[0],
+      isNarrationOverlayActive: true,
+      narrationBackgrounds: backgrounds,
+      narrationPlacements: placements,
+    });
+
+    const { rerender } = render(<GrigliataBoard {...buildMultiProps([primaryPlacement])} />);
+    await act(async () => {
+      jest.advanceTimersByTime(1050);
+    });
+
+    rerender(<GrigliataBoard {...buildMultiProps([primaryPlacement, secondaryPlacement])} />);
+
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-opacity', '1');
+    expect(screen.getByTestId('narration-image-placement-background:map-3')).toHaveAttribute('data-opacity', '0');
+    expect(screen.getByTestId('narration-image-placement-background:map-3')).toHaveAttribute('data-transition-role', 'incoming');
+
+    await act(async () => {
+      jest.advanceTimersByTime(1050);
+    });
+    expect(screen.getByTestId('narration-image-placement-background:map-3')).toHaveAttribute('data-opacity', '1');
+
+    rerender(<GrigliataBoard {...buildMultiProps([primaryPlacement])} />);
+
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-opacity', '1');
+    expect(screen.getByTestId('narration-image-placement-background:map-3')).toHaveAttribute('data-transition-role', 'outgoing');
+
+    await act(async () => {
+      jest.advanceTimersByTime(1050);
+    });
+    expect(screen.queryByTestId('narration-image-placement-background:map-3')).not.toBeInTheDocument();
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-opacity', '1');
   });
 
   test('hides the combat battlemap while the narration image is still loading', async () => {

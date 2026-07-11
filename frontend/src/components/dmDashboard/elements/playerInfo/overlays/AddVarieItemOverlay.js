@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { ref as storageRef } from "firebase/storage";
 
 import { db, storage } from "../../../../firebaseConfig";
+import { uploadCacheableImage } from "../../../../common/imageStorage";
 
 // Overlay to add a new custom Varie item to a user's inventory (DM side)
 // Mirrors the fields used by player Inventory add-varie overlay for consistency.
@@ -36,8 +37,7 @@ const AddVarieItemOverlay = ({ userId, onClose }) => {
           const safe = cleanName.replace(/[^a-zA-Z0-9]/g, "_");
           const fileName = `varie_${userId}_${safe}_${Date.now()}_${imageFile.name}`;
           const imgRef = storageRef(storage, `items/${fileName}`);
-          await uploadBytes(imgRef, imageFile);
-          image_url = await getDownloadURL(imgRef);
+          ({ downloadUrl: image_url } = await uploadCacheableImage(imgRef, imageFile));
         } catch (e) {
           console.warn("Failed uploading varie image", e);
         }

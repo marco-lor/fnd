@@ -15,10 +15,11 @@ import {
 } from 'react-icons/gi';
 import { FiBookOpen, FiCompass, FiLogOut, FiMenu, FiSettings, FiShield, FiShoppingBag, FiX } from 'react-icons/fi';
 import { GoSidebarCollapse, GoSidebarExpand } from 'react-icons/go';
-import { ref as storageRef, deleteObject, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref as storageRef, deleteObject } from 'firebase/storage';
 import { deleteDoc, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { useShellLayout } from './shellLayout';
 import { GRIGLIATA_PAGE_PRESENCE_COLLECTION } from '../grigliata/presence';
+import { uploadCacheableImage } from './imageStorage';
 
 const NAV_ITEMS = [
   {
@@ -433,8 +434,7 @@ const Navbar = () => {
       const safeFileName = `${safeName}_${user.uid}_${Date.now()}`;
       const imagePath = `characters/${safeFileName}`;
       const fileRef = storageRef(storage, imagePath);
-      await uploadBytes(fileRef, selectedFile);
-      const url = await getDownloadURL(fileRef);
+      const { downloadUrl: url } = await uploadCacheableImage(fileRef, selectedFile);
       // update both URL and storage path
       await updateDoc(doc(db, 'users', user.uid), { imageUrl: url, imagePath });
       setIsUploadOpen(false);

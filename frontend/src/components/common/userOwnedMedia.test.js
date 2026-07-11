@@ -40,6 +40,7 @@ const { auth: mockAuth, storage: mockStorage } = jest.requireMock("../firebaseCo
 describe("saveTecnicaForUser", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockRef.mockReturnValue(mockStorageRef);
     mockAuth.currentUser = null;
 
     mockGetDoc.mockResolvedValue({
@@ -75,6 +76,14 @@ describe("saveTecnicaForUser", () => {
       expect.stringMatching(/^tecnicas\/tecnica_target-user_Fire_Ball_\d+_image$/)
     );
     expect(mockUploadBytes).toHaveBeenCalledTimes(1);
+    expect(mockUploadBytes).toHaveBeenCalledWith(
+      mockStorageRef,
+      imageFile,
+      {
+        cacheControl: "private, max-age=31536000, immutable",
+        contentType: "image/png",
+      }
+    );
     expect(mockUpdateDoc).toHaveBeenCalledTimes(1);
     expect(mockUpdateDoc.mock.calls[0][1]).toEqual(
       expect.objectContaining({

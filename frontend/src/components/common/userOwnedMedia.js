@@ -2,6 +2,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { auth, db, storage } from "../firebaseConfig";
+import { uploadCacheableImage } from "./imageStorage";
 
 const COLLECTION_CONFIG = {
   tecniche: {
@@ -141,8 +142,9 @@ async function uploadFile(collectionKey, userId, itemName, suffix, file, folder)
   const storageRef = ref(storage, storagePath);
   await ensureStorageUploadAuth();
 
-  await uploadBytes(storageRef, file);
-  const downloadUrl = await getDownloadURL(storageRef);
+  const downloadUrl = file?.type?.startsWith("image/")
+    ? (await uploadCacheableImage(storageRef, file)).downloadUrl
+    : await uploadBytes(storageRef, file).then((snapshot) => getDownloadURL(snapshot?.ref || storageRef));
 
   return { downloadUrl, storagePath };
 }

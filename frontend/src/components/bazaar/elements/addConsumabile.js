@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef, useContext } from 'react';
 import { collection, doc, addDoc, updateDoc, getDocs, onSnapshot, getDoc, setDoc } from "firebase/firestore";
 import { getStorage, ref, uploadBytesResumable, getDownloadURL, uploadBytes, deleteObject } from "firebase/storage";
+import { uploadCacheableImage } from "../../common/imageStorage";
 import { db, storage } from '../../firebaseConfig';
 import { AuthContext } from '../../../AuthContext';
 import { WeaponOverlay } from '../../common/WeaponOverlay';
@@ -381,8 +382,7 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
             if (imageFile) {
                 const consumabileImgFileName = `consumabile_${docId}_${Date.now()}_${imageFile.name}`;
                 const consumabileImgRef = ref(storage, 'items/' + consumabileImgFileName);
-                await uploadBytes(consumabileImgRef, imageFile);
-                newImageUrl = await getDownloadURL(consumabileImgRef);
+                newImageUrl = (await uploadCacheableImage(consumabileImgRef, imageFile)).downloadUrl;
                 if (!inventoryEditMode && editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
                     try {
                         const oldPath = decodeURIComponent(initialData.General.image_url.split('/o/')[1].split('?')[0]);
@@ -409,8 +409,7 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
                 
                 if (customSpell.imageFile) {
                     const spellImageRef = ref(storage, `spell_images/${Date.now()}_${customSpell.imageFile.name}`);
-                    const spellImageSnapshot = await uploadBytes(spellImageRef, customSpell.imageFile);
-                    spellImageUrlToSave = await getDownloadURL(spellImageSnapshot.ref);
+                    spellImageUrlToSave = (await uploadCacheableImage(spellImageRef, customSpell.imageFile)).downloadUrl;
                 }
                 
                 if (customSpell.videoFile) {
