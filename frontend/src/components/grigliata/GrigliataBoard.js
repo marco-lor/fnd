@@ -153,6 +153,8 @@ const MAP_PING_HIGHLIGHT = '#fef3c7';
 const MAP_PING_ACCENT_GLOW = 'rgba(251, 191, 36, 0.34)';
 const DRAW_PICKER_EASE = [0.22, 1, 0.36, 1];
 const BATTLEMAP_IMAGE_FADE_DURATION_MS = 1000;
+const NARRATION_IMAGE_FADE_DURATION_MS = 1000;
+const NARRATION_IMAGE_REPLACEMENT_PHASE_DURATION_MS = NARRATION_IMAGE_FADE_DURATION_MS / 2;
 const QUICK_CONTROL_NEUTRAL_SURFACE_CLASS = 'border-slate-700/90 bg-slate-950/92 shadow-lg shadow-slate-950/35';
 const QUICK_CONTROL_NEON_SURFACE_CLASS = 'border-fuchsia-300/70 bg-gradient-to-br from-fuchsia-500/28 via-violet-500/24 to-pink-500/34 shadow-lg shadow-fuchsia-950/45 ring-1 ring-fuchsia-200/20';
 const QUICK_CONTROL_BUTTON_BASE_CLASS = 'pointer-events-auto inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border p-2 text-sm font-medium backdrop-blur-md transition-all duration-200 hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950';
@@ -754,6 +756,8 @@ const buildBattlemapImageLayer = ({ background, image, opacity = 1 }) => {
 const NarrationPlacementImage = ({
   placement,
   background,
+  opacity = 1,
+  transitionRole = 'stable',
   isPrimary = false,
   isManager = false,
   onMoveNarrationPlacement = null,
@@ -771,12 +775,13 @@ const NarrationPlacementImage = ({
     <KonvaImage
       data-testid={isPrimary ? 'battlemap-image-active' : `narration-image-placement-${placement.id}`}
       data-asset-type={assetType}
+      data-transition-role={transitionRole}
       image={assetSnapshot.image}
       x={placement.x}
       y={placement.y}
       width={placement.width}
       height={placement.height}
-      opacity={1}
+      opacity={opacity}
       draggable={!!(isManager && onMoveNarrationPlacement)}
       listening={!!(isManager && onMoveNarrationPlacement)}
       onDragEnd={(event) => {
@@ -2484,7 +2489,14 @@ export default function GrigliataBoard({
     visibleLayer: null,
     fadingOutLayer: null,
   });
+  const [narrationImageTransition, setNarrationImageTransition] = useState({
+    entries: [],
+    boundsPlacements: [],
+  });
   const battlemapImageTransitionRef = useRef(battlemapImageTransition);
+  const narrationImageTransitionRef = useRef(narrationImageTransition);
+  const previousNarrationEntriesRef = useRef([]);
+  const narrationImageAnimationHandleRef = useRef(null);
   const battlemapImageAnimationHandleRef = useRef(null);
   const battlemapImageAnimationLayersRef = useRef(null);
   const battlemapVideoFrameAnimationHandleRef = useRef(null);
@@ -2535,10 +2547,18 @@ export default function GrigliataBoard({
     cancelAnimationFrameSafe(battlemapVideoFrameAnimationHandleRef.current);
     battlemapVideoFrameAnimationHandleRef.current = null;
   }, []);
+  const cancelNarrationImageAnimation = useCallback(() => {
+    cancelAnimationFrameSafe(narrationImageAnimationHandleRef.current);
+    narrationImageAnimationHandleRef.current = null;
+  }, []);
 
   useEffect(() => {
     battlemapImageTransitionRef.current = battlemapImageTransition;
   }, [battlemapImageTransition]);
+
+  useEffect(() => {
+    narrationImageTransitionRef.current = narrationImageTransition;
+  }, [narrationImageTransition]);
 
   useEffect(() => (
     () => {
@@ -2551,6 +2571,12 @@ export default function GrigliataBoard({
       cancelBattlemapVideoFrameAnimation();
     }
   ), [cancelBattlemapVideoFrameAnimation]);
+
+  useEffect(() => (
+    () => {
+      cancelNarrationImageAnimation();
+    }
+  ), [cancelNarrationImageAnimation]);
 
   const normalizedGrid = useMemo(() => normalizeGridConfig(grid), [grid]);
 
@@ -2573,6 +2599,200 @@ export default function GrigliataBoard({
     const fallbackPlacement = buildInitialNarrationPlacement(resolvedBackground);
     return fallbackPlacement ? [fallbackPlacement] : [];
   }, [isNarrationOverlayActive, narrationPlacements, resolvedBackground]);
+
+  const canonicalNarrationEntries = useMemo(() => (
+    isNarrationOverlayActive
+      ? resolvedNarrationPlacements.map((placement, index) => ({
+        key: placement.id,
+        placement,
+        background: narrationBackgroundsById.get(placement.backgroundId)
+          || (index === 0 ? resolvedBackground : null),
+        isPrimary: index === 0,
+        opacity: 1,
+        transitionRole: 'stable',
+      }))
+      : []
+  ), [isNarrationOverlayActive, narrationBackgroundsById, resolvedBackground, resolvedNarrationPlacements]);
+  const canonicalNarrationKey = useMemo(() => JSON.stringify(
+    canonicalNarrationEntries.map((entry) => ({
+      id: entry.placement.id,
+      backgroundId: entry.placement.backgroundId,
+      imageUrl: entry.background?.imageUrl || '',
+      x: entry.placement.x,
+      y: entry.placement.y,
+      width: entry.placement.width,
+      height: entry.placement.height,
+      order: entry.placement.order,
+    }))
+  ), [canonicalNarrationEntries]);
+
+  useEffect(() => {
+    cancelNarrationImageAnimation();
+
+    const previousEntries = previousNarrationEntriesRef.current;
+    const currentVisualEntries = narrationImageTransitionRef.current.entries;
+    const currentVisualByKey = new Map(currentVisualEntries.map((entry) => [entry.key, entry]));
+    const previousKeys = new Set(previousEntries.map((entry) => entry.key));
+    const nextKeys = new Set(canonicalNarrationEntries.map((entry) => entry.key));
+    const sharedKeys = [...nextKeys].filter((key) => previousKeys.has(key));
+    const entriesHaveChanged = previousEntries.length !== canonicalNarrationEntries.length
+      || previousEntries.some((entry) => !nextKeys.has(entry.key));
+    previousNarrationEntriesRef.current = canonicalNarrationEntries;
+
+    const commitTransition = (nextState) => {
+      narrationImageTransitionRef.current = nextState;
+      setNarrationImageTransition(nextState);
+    };
+
+    if (prefersReducedMotion) {
+      commitTransition({
+        entries: canonicalNarrationEntries,
+        boundsPlacements: canonicalNarrationEntries.map((entry) => entry.placement),
+      });
+      return undefined;
+    }
+
+    const animateEntries = ({ startEntries, endEntries, boundsPlacements, durationMs, onComplete }) => {
+      const endOpacityByKey = new Map(endEntries.map((entry) => [entry.key, entry.opacity]));
+      const startedAtMs = getAnimationTimestamp();
+      commitTransition({ entries: startEntries, boundsPlacements });
+
+      const step = (timestamp) => {
+        const easedProgress = easeOutCubic(
+          clampToRange((timestamp - startedAtMs) / durationMs, 0, 1)
+        );
+        const nextEntries = startEntries.map((entry) => ({
+          ...entry,
+          opacity: entry.opacity + (((endOpacityByKey.get(entry.key) ?? entry.opacity) - entry.opacity) * easedProgress),
+        }));
+        commitTransition({ entries: nextEntries, boundsPlacements });
+
+        if (easedProgress >= 1) {
+          narrationImageAnimationHandleRef.current = null;
+          onComplete?.();
+          return;
+        }
+
+        narrationImageAnimationHandleRef.current = requestAnimationFrameSafe(step);
+      };
+
+      narrationImageAnimationHandleRef.current = requestAnimationFrameSafe(step);
+    };
+
+    if (!previousEntries.length && canonicalNarrationEntries.length) {
+      const incomingEntries = canonicalNarrationEntries.map((entry) => ({
+        ...entry,
+        opacity: 0,
+        transitionRole: 'incoming',
+      }));
+      animateEntries({
+        startEntries: incomingEntries,
+        endEntries: canonicalNarrationEntries,
+        boundsPlacements: canonicalNarrationEntries.map((entry) => entry.placement),
+        durationMs: NARRATION_IMAGE_FADE_DURATION_MS,
+        onComplete: () => commitTransition({
+          entries: canonicalNarrationEntries,
+          boundsPlacements: canonicalNarrationEntries.map((entry) => entry.placement),
+        }),
+      });
+      return cancelNarrationImageAnimation;
+    }
+
+    if (previousEntries.length && !canonicalNarrationEntries.length) {
+      const outgoingEntries = previousEntries.map((entry) => ({
+        ...entry,
+        opacity: currentVisualByKey.get(entry.key)?.opacity ?? 1,
+        transitionRole: 'outgoing',
+      }));
+      animateEntries({
+        startEntries: outgoingEntries,
+        endEntries: outgoingEntries.map((entry) => ({ ...entry, opacity: 0 })),
+        boundsPlacements: previousEntries.map((entry) => entry.placement),
+        durationMs: NARRATION_IMAGE_FADE_DURATION_MS,
+        onComplete: () => commitTransition({ entries: [], boundsPlacements: [] }),
+      });
+      return cancelNarrationImageAnimation;
+    }
+
+    if (previousEntries.length && canonicalNarrationEntries.length && sharedKeys.length === 0) {
+      const outgoingEntries = previousEntries.map((entry) => ({
+        ...entry,
+        opacity: currentVisualByKey.get(entry.key)?.opacity ?? 1,
+        transitionRole: 'outgoing',
+      }));
+      animateEntries({
+        startEntries: outgoingEntries,
+        endEntries: outgoingEntries.map((entry) => ({ ...entry, opacity: 0 })),
+        boundsPlacements: previousEntries.map((entry) => entry.placement),
+        durationMs: NARRATION_IMAGE_REPLACEMENT_PHASE_DURATION_MS,
+        onComplete: () => {
+          const incomingEntries = canonicalNarrationEntries.map((entry) => ({
+            ...entry,
+            opacity: 0,
+            transitionRole: 'incoming',
+          }));
+          animateEntries({
+            startEntries: incomingEntries,
+            endEntries: canonicalNarrationEntries,
+            boundsPlacements: canonicalNarrationEntries.map((entry) => entry.placement),
+            durationMs: NARRATION_IMAGE_REPLACEMENT_PHASE_DURATION_MS,
+            onComplete: () => commitTransition({
+              entries: canonicalNarrationEntries,
+              boundsPlacements: canonicalNarrationEntries.map((entry) => entry.placement),
+            }),
+          });
+        },
+      });
+      return cancelNarrationImageAnimation;
+    }
+
+    if (entriesHaveChanged) {
+      const nextByKey = new Map(canonicalNarrationEntries.map((entry) => [entry.key, entry]));
+      const unionKeys = [...new Set([...previousEntries.map((entry) => entry.key), ...nextByKey.keys()])];
+      const startEntries = unionKeys.map((key) => {
+        const nextEntry = nextByKey.get(key);
+        const previousEntry = previousEntries.find((entry) => entry.key === key);
+        const currentEntry = currentVisualByKey.get(key);
+        if (nextEntry) {
+          return {
+            ...nextEntry,
+            opacity: currentEntry?.opacity ?? (previousEntry ? 1 : 0),
+            transitionRole: previousEntry ? 'stable' : 'incoming',
+          };
+        }
+        return {
+          ...previousEntry,
+          opacity: currentEntry?.opacity ?? 1,
+          isPrimary: false,
+          transitionRole: 'outgoing',
+        };
+      });
+      const endEntries = startEntries.map((entry) => ({
+        ...entry,
+        opacity: nextByKey.has(entry.key) ? 1 : 0,
+      }));
+      animateEntries({
+        startEntries,
+        endEntries,
+        boundsPlacements: startEntries.map((entry) => entry.placement),
+        durationMs: NARRATION_IMAGE_FADE_DURATION_MS,
+        onComplete: () => commitTransition({
+          entries: canonicalNarrationEntries,
+          boundsPlacements: canonicalNarrationEntries.map((entry) => entry.placement),
+        }),
+      });
+      return cancelNarrationImageAnimation;
+    }
+
+    commitTransition({
+      entries: canonicalNarrationEntries,
+      boundsPlacements: canonicalNarrationEntries.map((entry) => entry.placement),
+    });
+    return undefined;
+  // canonicalNarrationKey is the stable scene contract; entry objects may be rebuilt
+  // when callers rely on default array props even though the scene is unchanged.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cancelNarrationImageAnimation, canonicalNarrationKey, prefersReducedMotion]);
 
   const targetBattlemapImageLayer = useMemo(
     () => buildBattlemapImageLayer({
@@ -3081,11 +3301,12 @@ export default function GrigliataBoard({
     () => getBoardBounds({ background: resolvedBackground, grid: normalizedGrid, tokens: placedTokens }),
     [resolvedBackground, normalizedGrid, placedTokens]
   );
+  const isNarrationVisualActive = narrationImageTransition.entries.length > 0;
   const narrationImageBounds = useMemo(
-    () => (isNarrationOverlayActive
-      ? buildNarrationPlacementBounds(resolvedNarrationPlacements) || buildNarrationImageBounds(resolvedBackground)
+    () => (isNarrationVisualActive
+      ? buildNarrationPlacementBounds(narrationImageTransition.boundsPlacements) || buildNarrationImageBounds(resolvedBackground)
       : null),
-    [isNarrationOverlayActive, resolvedNarrationPlacements, resolvedBackground]
+    [isNarrationVisualActive, narrationImageTransition.boundsPlacements, resolvedBackground]
   );
   const viewportFitBounds = narrationImageBounds || boardBounds;
   const backplateBounds = narrationImageBounds || boardBounds;
@@ -6059,9 +6280,10 @@ export default function GrigliataBoard({
     () => sortTurnOrderEntries(turnOrderEntries),
     [turnOrderEntries]
   );
-  const areTurnOrderControlsDisabled = isNarrationOverlayActive;
-  const visibleRenderedAoEFigures = isNarrationOverlayActive ? [] : renderedAoEFigures;
-  const visibleRenderedTokens = isNarrationOverlayActive ? [] : fogVisibleRenderedTokens;
+  const isNarrationPresentationActive = isNarrationOverlayActive || isNarrationVisualActive;
+  const areTurnOrderControlsDisabled = isNarrationPresentationActive;
+  const visibleRenderedAoEFigures = isNarrationPresentationActive ? [] : renderedAoEFigures;
+  const visibleRenderedTokens = isNarrationPresentationActive ? [] : fogVisibleRenderedTokens;
   const visibleTokenRenderLayers = useMemo(
     () => splitFogVisibleTokenRenderLayers({
       tokens: visibleRenderedTokens,
@@ -6074,18 +6296,18 @@ export default function GrigliataBoard({
   );
   const visibleRenderedTokensBelowFog = visibleTokenRenderLayers.belowFogTokens;
   const visibleRenderedTokensAboveFog = visibleTokenRenderLayers.aboveFogTokens;
-  const visibleRenderedSharedInteractions = isNarrationOverlayActive ? [] : renderedSharedInteractions;
-  const visibleLocalPingsForRender = isNarrationOverlayActive ? [] : visibleLocalPings;
-  const visibleMeasurementState = isNarrationOverlayActive ? null : measurementState;
-  const visibleAoEPreviewState = isNarrationOverlayActive ? null : aoePreviewState;
-  const visibleSelectedTokenHud = isNarrationOverlayActive ? null : selectedSingleTokenHudState;
-  const visibleOverflowToken = isNarrationOverlayActive ? null : activeOverflowToken;
-  const visibleHoveredTokenTooltip = isNarrationOverlayActive ? null : hoveredTokenTooltip;
-  const visibleSelectedAoEFigureActionState = isNarrationOverlayActive ? null : selectedAoEFigureActionState;
-  const visibleSelectedTokenActionState = isNarrationOverlayActive ? null : selectedTokenActionState;
+  const visibleRenderedSharedInteractions = isNarrationPresentationActive ? [] : renderedSharedInteractions;
+  const visibleLocalPingsForRender = isNarrationPresentationActive ? [] : visibleLocalPings;
+  const visibleMeasurementState = isNarrationPresentationActive ? null : measurementState;
+  const visibleAoEPreviewState = isNarrationPresentationActive ? null : aoePreviewState;
+  const visibleSelectedTokenHud = isNarrationPresentationActive ? null : selectedSingleTokenHudState;
+  const visibleOverflowToken = isNarrationPresentationActive ? null : activeOverflowToken;
+  const visibleHoveredTokenTooltip = isNarrationPresentationActive ? null : hoveredTokenTooltip;
+  const visibleSelectedAoEFigureActionState = isNarrationPresentationActive ? null : selectedAoEFigureActionState;
+  const visibleSelectedTokenActionState = isNarrationPresentationActive ? null : selectedTokenActionState;
   const narrationExtraImageCount = isNarrationOverlayActive ? Math.max(0, resolvedNarrationPlacements.length - 1) : 0;
   const visibleTokenVisionSources = useMemo(
-    () => (isNarrationOverlayActive ? [] : resolveViewerTokenVisionSources({
+    () => (isNarrationPresentationActive ? [] : resolveViewerTokenVisionSources({
       tokens: visibleRenderedTokens,
       currentUserId: resolvedFogViewerUserId,
       isManager: resolvedIsFogViewerManager,
@@ -6093,7 +6315,7 @@ export default function GrigliataBoard({
       backgroundId: resolvedBackground?.id || '',
     })),
     [
-      isNarrationOverlayActive,
+      isNarrationPresentationActive,
       normalizedGrid.cellSizePx,
       resolvedBackground?.id,
       resolvedFogViewerUserId,
@@ -6106,13 +6328,13 @@ export default function GrigliataBoard({
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-700 bg-slate-950/80 shadow-2xl">
       <div className="flex flex-col gap-3 border-b border-slate-800 px-4 py-3">
         <div className="flex items-center gap-2">
-          {!isNarrationOverlayActive && (
+          {!isNarrationPresentationActive && (
             <p className="text-xs text-slate-400">
               {resolvedBackground?.name || 'Grid only'}
               {` | ${normalizedGrid.cellSizePx}px squares | 5 ft per square`}
             </p>
           )}
-          {isNarrationOverlayActive && (
+          {isNarrationPresentationActive && (
             <span
               data-testid="narration-overlay-badge"
               className="rounded-full border border-amber-400/35 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200"
@@ -6159,7 +6381,7 @@ export default function GrigliataBoard({
           <button
             type="button"
             onClick={onSelectMouseTool}
-            disabled={isNarrationOverlayActive}
+            disabled={isNarrationPresentationActive}
             title={isMouseSelectionActive ? 'Mouse selection mode is active' : 'Return to mouse selection'}
             aria-label="Return to mouse selection"
             aria-pressed={isMouseSelectionActive}
@@ -6172,14 +6394,14 @@ export default function GrigliataBoard({
             <DrawColorPicker
               activeColorKey={resolvedDrawTheme.key}
               onChange={onChangeDrawColor}
-              disabled={isNarrationOverlayActive}
+              disabled={isNarrationPresentationActive}
             />
           </div>
           <div className="pointer-events-auto flex items-center gap-2">
             <button
               type="button"
               onClick={onToggleRuler}
-              disabled={isNarrationOverlayActive}
+              disabled={isNarrationPresentationActive}
               title={isRulerEnabled ? 'Disable ruler mode' : 'Enable ruler mode'}
               aria-label={isRulerEnabled ? 'Disable ruler mode' : 'Enable ruler mode'}
               aria-pressed={isRulerEnabled}
@@ -6191,7 +6413,7 @@ export default function GrigliataBoard({
               <button
                 type="button"
                 onClick={onToggleRulerTokenMovement}
-                disabled={isNarrationOverlayActive || !onToggleRulerTokenMovement}
+                disabled={isNarrationPresentationActive || !onToggleRulerTokenMovement}
                 title="Move tokens while measuring"
                 aria-label="Move tokens while measuring"
                 aria-pressed={isRulerTokenMovementEnabled}
@@ -6206,14 +6428,14 @@ export default function GrigliataBoard({
             <AoETemplatePicker
               activeFigureType={activeAoeFigureType}
               onChange={onChangeAoeFigureType}
-              disabled={isNarrationOverlayActive}
+              disabled={isNarrationPresentationActive}
             />
           </div>
-          {!isNarrationOverlayActive && isManager && lightSourceControls?.onCreateLightSource && (
+          {!isNarrationPresentationActive && isManager && lightSourceControls?.onCreateLightSource && (
             <button
               type="button"
               onClick={() => lightSourceControls?.onToggleLightTool?.()}
-              disabled={isNarrationOverlayActive || isLightSourcePending || !lightSourceControls?.onToggleLightTool}
+              disabled={isNarrationPresentationActive || isLightSourcePending || !lightSourceControls?.onToggleLightTool}
               title={isLightToolActive ? 'Disable light source tool' : 'Enable light source tool'}
               aria-label={isLightToolActive ? 'Disable light source tool' : 'Enable light source tool'}
               aria-pressed={isLightToolActive}
@@ -6223,11 +6445,11 @@ export default function GrigliataBoard({
               <FiSun className="h-4 w-4" />
             </button>
           )}
-          {!isNarrationOverlayActive && isManager && darknessSourceControls?.onToggleDarknessTool && (
+          {!isNarrationPresentationActive && isManager && darknessSourceControls?.onToggleDarknessTool && (
             <button
               type="button"
               onClick={() => darknessSourceControls?.onToggleDarknessTool?.()}
-              disabled={isNarrationOverlayActive || isDarknessSourcePending || !darknessSourceControls?.onToggleDarknessTool}
+              disabled={isNarrationPresentationActive || isDarknessSourcePending || !darknessSourceControls?.onToggleDarknessTool}
               title={isDarknessToolActive ? 'Disable darkness source tool' : 'Enable darkness source tool'}
               aria-label={isDarknessToolActive ? 'Disable darkness source tool' : 'Enable darkness source tool'}
               aria-pressed={isDarknessToolActive}
@@ -6237,11 +6459,11 @@ export default function GrigliataBoard({
               <FiMoon className="h-4 w-4" />
             </button>
           )}
-          {!isNarrationOverlayActive && isManager && wallSourceControls?.onToggleWallTool && (
+          {!isNarrationPresentationActive && isManager && wallSourceControls?.onToggleWallTool && (
             <button
               type="button"
               onClick={() => wallSourceControls?.onToggleWallTool?.()}
-              disabled={isNarrationOverlayActive || isWallSourcePending || !wallSourceControls?.onToggleWallTool}
+              disabled={isNarrationPresentationActive || isWallSourcePending || !wallSourceControls?.onToggleWallTool}
               title={isWallToolActive ? 'Disable wall authoring tool' : 'Enable wall authoring tool'}
               aria-label={isWallToolActive ? 'Disable wall authoring tool' : 'Enable wall authoring tool'}
               aria-pressed={isWallToolActive}
@@ -6251,13 +6473,13 @@ export default function GrigliataBoard({
               <FiMinus className="h-4 w-4" />
             </button>
           )}
-          {!isNarrationOverlayActive && isManager && fogBrushControls?.onToggleFogBrushTool && (
+          {!isNarrationPresentationActive && isManager && fogBrushControls?.onToggleFogBrushTool && (
             <div className="pointer-events-auto relative z-10 h-10 w-10 shrink-0">
               <div className="absolute left-0 top-0 z-20 flex items-start gap-2">
                 <button
                   type="button"
                   onClick={() => fogBrushControls?.onToggleFogBrushTool?.()}
-                  disabled={isNarrationOverlayActive || isFogBrushPending || !fogBrushControls?.onToggleFogBrushTool}
+                  disabled={isNarrationPresentationActive || isFogBrushPending || !fogBrushControls?.onToggleFogBrushTool}
                   title={isFogBrushToolActive ? 'Disable manual fog brush' : 'Enable manual fog brush'}
                   aria-label={isFogBrushToolActive ? 'Disable manual fog brush' : 'Enable manual fog brush'}
                   aria-pressed={isFogBrushToolActive}
@@ -6344,7 +6566,7 @@ export default function GrigliataBoard({
           <button
             type="button"
             onClick={onToggleInteractionSharing}
-            disabled={isNarrationOverlayActive}
+            disabled={isNarrationPresentationActive}
             title={isInteractionSharingEnabled ? 'Stop sharing live interactions' : 'Share live interactions'}
             aria-label={isInteractionSharingEnabled ? 'Stop sharing live interactions' : 'Share live interactions'}
             aria-pressed={isInteractionSharingEnabled}
@@ -6388,7 +6610,7 @@ export default function GrigliataBoard({
                 <button
                   type="button"
                   onClick={() => onToggleGridVisibility?.(activeBackground?.id || '')}
-                  disabled={isNarrationOverlayActive || isGridVisibilityToggleDisabled}
+                  disabled={isNarrationPresentationActive || isGridVisibilityToggleDisabled}
                   title={isGridVisible ? 'Hide the shared grid for everyone' : 'Show the shared grid for everyone'}
                   aria-label={isGridVisible ? 'Hide Grid' : 'Show Grid'}
                   aria-pressed={isGridVisible}
@@ -6399,7 +6621,7 @@ export default function GrigliataBoard({
                 <button
                   type="button"
                   onClick={() => onDeactivateActiveBackground?.()}
-                  disabled={isNarrationOverlayActive || isDeactivateActiveBackgroundDisabled}
+                  disabled={isNarrationPresentationActive || isDeactivateActiveBackgroundDisabled}
                   title="Deactivate active map"
                   aria-label="Deactivate active map"
                   className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
@@ -6409,7 +6631,7 @@ export default function GrigliataBoard({
                 <button
                   type="button"
                   onClick={() => onAdjustGridSize?.(1)}
-                  disabled={isNarrationOverlayActive || isGridSizeAdjustmentDisabled}
+                  disabled={isNarrationPresentationActive || isGridSizeAdjustmentDisabled}
                   title="Increase square size"
                   aria-label="Increase square size"
                   className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
@@ -6419,7 +6641,7 @@ export default function GrigliataBoard({
                 <button
                   type="button"
                   onClick={() => onAdjustGridSize?.(-1)}
-                  disabled={isNarrationOverlayActive || isGridSizeAdjustmentDisabled}
+                  disabled={isNarrationPresentationActive || isGridSizeAdjustmentDisabled}
                   title="Decrease square size"
                   aria-label="Decrease square size"
                   className={`${getQuickControlButtonClassName(false)} disabled:cursor-not-allowed disabled:opacity-60`}
@@ -6490,7 +6712,7 @@ export default function GrigliataBoard({
                   activeTurnTokenId={activeTurnTokenId}
                   onSaveTurnOrderInitiative={onSaveTurnOrderInitiative}
                   savingTurnOrderInitiativeTokenId={savingTurnOrderInitiativeTokenId}
-                  isReadOnly={isNarrationOverlayActive}
+                  isReadOnly={isNarrationPresentationActive}
                 />
               </motion.div>
             )}
@@ -6520,23 +6742,22 @@ export default function GrigliataBoard({
                 listening={false}
               />
 
-              {isNarrationOverlayActive && resolvedNarrationPlacements.map((placement, index) => {
-                const placementBackground = narrationBackgroundsById.get(placement.backgroundId)
-                  || (index === 0 ? resolvedBackground : null);
-
+              {narrationImageTransition.entries.map((entry) => {
                 return (
                   <NarrationPlacementImage
-                    key={placement.id}
-                    placement={placement}
-                    background={placementBackground}
-                    isPrimary={index === 0}
-                    isManager={isManager}
-                    onMoveNarrationPlacement={onMoveNarrationPlacement}
+                    key={entry.key}
+                    placement={entry.placement}
+                    background={entry.background}
+                    opacity={entry.opacity}
+                    transitionRole={entry.transitionRole}
+                    isPrimary={entry.isPrimary}
+                    isManager={isManager && entry.transitionRole !== 'outgoing'}
+                    onMoveNarrationPlacement={entry.transitionRole === 'outgoing' ? null : onMoveNarrationPlacement}
                   />
                 );
               })}
 
-              {!isNarrationOverlayActive && battlemapImageTransition.fadingOutLayer && battlemapImageTransition.fadingOutLayer.imageWidth > 0 && battlemapImageTransition.fadingOutLayer.imageHeight > 0 && (
+              {!isNarrationVisualActive && battlemapImageTransition.fadingOutLayer && battlemapImageTransition.fadingOutLayer.imageWidth > 0 && battlemapImageTransition.fadingOutLayer.imageHeight > 0 && (
                 <KonvaImage
                   data-testid="battlemap-image-outgoing"
                   data-asset-type={battlemapImageTransition.fadingOutLayer.assetType}
@@ -6550,7 +6771,7 @@ export default function GrigliataBoard({
                 />
               )}
 
-              {!isNarrationOverlayActive && battlemapImageTransition.visibleLayer && battlemapImageTransition.visibleLayer.imageWidth > 0 && battlemapImageTransition.visibleLayer.imageHeight > 0 && (
+              {!isNarrationVisualActive && battlemapImageTransition.visibleLayer && battlemapImageTransition.visibleLayer.imageWidth > 0 && battlemapImageTransition.visibleLayer.imageHeight > 0 && (
                 <KonvaImage
                   data-testid="battlemap-image-active"
                   data-asset-type={battlemapImageTransition.visibleLayer.assetType}
@@ -6573,10 +6794,10 @@ export default function GrigliataBoard({
                 listening={false}
               />
 
-              {!isNarrationOverlayActive && isGridVisible && <GridLayer bounds={boardBounds} grid={normalizedGrid} />}
+              {!isNarrationVisualActive && isGridVisible && <GridLayer bounds={boardBounds} grid={normalizedGrid} />}
             </Layer>
 
-            {!isNarrationOverlayActive && lightingRenderInput && (
+            {!isNarrationVisualActive && lightingRenderInput && (
               <Layer listening={false}>
                 <GrigliataLightingMask
                   bounds={boardBounds}
@@ -6591,7 +6812,7 @@ export default function GrigliataBoard({
             )}
 
             <Layer>
-              {!isNarrationOverlayActive && isManager && isWallToolActive && wallSourceControls && (
+              {!isNarrationVisualActive && isManager && isWallToolActive && wallSourceControls && (
                 <GrigliataWallAuthoringControls
                   walls={renderedWallSources}
                   selectedWallId={selectedWallId}
@@ -6612,7 +6833,7 @@ export default function GrigliataBoard({
                 />
               )}
 
-              {!isNarrationOverlayActive && isManager && !isWallToolActive && onToggleWallRuntimeSegment && (
+              {!isNarrationVisualActive && isManager && !isWallToolActive && onToggleWallRuntimeSegment && (
                 <GrigliataWallRuntimeControls
                   walls={wallRuntimeSegments || lightingRenderInput?.walls}
                   viewportScale={viewport.scale}
@@ -6620,7 +6841,7 @@ export default function GrigliataBoard({
                 />
               )}
 
-              {!isNarrationOverlayActive && isManager && showLightingDebugOverlay && lightingDebugMetadata && (
+              {!isNarrationVisualActive && isManager && showLightingDebugOverlay && lightingDebugMetadata && (
                 <GrigliataLightingDebugOverlay
                   metadata={lightingDebugMetadata}
                   viewportScale={viewport.scale}
@@ -6667,7 +6888,7 @@ export default function GrigliataBoard({
                 />
               ))}
 
-              {!isNarrationOverlayActive && isManager && renderedLightSources.length > 0 && (
+              {!isNarrationVisualActive && isManager && renderedLightSources.length > 0 && (
                 <GrigliataLightControls
                   lights={renderedLightSources}
                   selectedLightId={selectedLightId}
@@ -6677,7 +6898,7 @@ export default function GrigliataBoard({
                 />
               )}
 
-              {!isNarrationOverlayActive && isManager && renderedDarknessSources.length > 0 && (
+              {!isNarrationVisualActive && isManager && renderedDarknessSources.length > 0 && (
                 <GrigliataDarknessControls
                   darknessSources={renderedDarknessSources}
                   selectedDarknessId={selectedDarknessId}
@@ -6726,7 +6947,7 @@ export default function GrigliataBoard({
               ))}
             </Layer>
 
-            {!isNarrationOverlayActive && fogOfWar && (
+            {!isNarrationVisualActive && fogOfWar && (
               <Layer listening={false}>
                 <GrigliataFogOfWarMask
                   bounds={boardBounds}
@@ -6879,7 +7100,7 @@ export default function GrigliataBoard({
 
         <ActiveViewersOverlay viewers={activeViewers} />
 
-        {!isNarrationOverlayActive && isManager && (lightSourceControls || darknessSourceControls || wallSourceControls) && (
+        {!isNarrationPresentationActive && isManager && (lightSourceControls || darknessSourceControls || wallSourceControls) && (
           <div className="pointer-events-none absolute inset-0 z-[27]">
             <div data-testid="lighting-diagnostics-anchor" className="pointer-events-auto absolute bottom-20 left-4">
               <GrigliataLightingDiagnostics
@@ -6891,7 +7112,7 @@ export default function GrigliataBoard({
           </div>
         )}
 
-        {!isNarrationOverlayActive && isManager && selectedLight && (
+        {!isNarrationPresentationActive && isManager && selectedLight && (
           <div className="pointer-events-none absolute inset-0 z-[28]">
             <div className="pointer-events-auto absolute left-16 top-4">
               <GrigliataSelectedLightPanel
@@ -6917,7 +7138,7 @@ export default function GrigliataBoard({
           </div>
         )}
 
-        {!isNarrationOverlayActive && isManager && selectedDarkness && (
+        {!isNarrationPresentationActive && isManager && selectedDarkness && (
           <div className="pointer-events-none absolute inset-0 z-[28]">
             <div className="pointer-events-auto absolute left-16 top-4">
               <GrigliataSelectedDarknessPanel
@@ -6943,7 +7164,7 @@ export default function GrigliataBoard({
           </div>
         )}
 
-        {!isNarrationOverlayActive && isManager && selectedWall && (
+        {!isNarrationPresentationActive && isManager && selectedWall && (
           <div className="pointer-events-none absolute inset-0 z-[28]">
             <div className="pointer-events-auto absolute left-16 top-4">
               <GrigliataSelectedWallPanel
@@ -6984,7 +7205,7 @@ export default function GrigliataBoard({
           </div>
         )}
 
-          {!isNarrationOverlayActive && turnOrderContextMenu && activeTurnOrderContextToken && (
+          {!isNarrationPresentationActive && turnOrderContextMenu && activeTurnOrderContextToken && (
             <div className="pointer-events-none absolute inset-0 z-[32]">
               <div
                 ref={turnOrderContextMenuRef}
@@ -7027,7 +7248,7 @@ export default function GrigliataBoard({
             </div>
           )}
 
-          {!isNarrationOverlayActive && turnOrderJoinPrompt && activeTurnOrderJoinToken && (
+          {!isNarrationPresentationActive && turnOrderJoinPrompt && activeTurnOrderJoinToken && (
             <div className="pointer-events-auto absolute inset-0 z-[34] flex items-center justify-center">
               <button
                 type="button"
