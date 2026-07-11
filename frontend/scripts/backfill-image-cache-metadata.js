@@ -16,17 +16,19 @@ const readArg = (name) => {
 const projectId = readArg('--project') || process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || '';
 const bucketName = readArg('--bucket') || process.env.FIREBASE_STORAGE_BUCKET || '';
 const prefix = readArg('--prefix');
+const authMode = readArg('--auth') || 'admin';
 
 const printHelp = () => {
   console.log([
     'Backfill browser-cache metadata on existing Firebase Storage images.',
     '',
     'Usage:',
-    '  npm run images:backfill-cache -- --project <project-id> --bucket <bucket-name> [--prefix <path>] [--write]',
+    '  npm run images:backfill-cache -- --project <project-id> --bucket <bucket-name> [--auth admin|firebase-cli] [--prefix <path>] [--write]',
     '',
     'The default is a dry run. Only image/* objects whose cacheControl differs are selected.',
     `Write mode sets Cache-Control to: ${LEGACY_IMAGE_CACHE_CONTROL}`,
-    'Authentication uses Application Default Credentials or GOOGLE_APPLICATION_CREDENTIALS.',
+    'Default authentication uses Application Default Credentials or GOOGLE_APPLICATION_CREDENTIALS.',
+    'Use --auth firebase-cli to reuse the local Firebase CLI login.',
   ].join('\n'));
 };
 
@@ -89,6 +91,66 @@ async function mapWithConcurrency(items, concurrency, worker) {
   return results;
 }
 
+function createAdminBackend() {
+  admin.initializeApp({ projectId, storageBucket: bucketName });
+  const bucket = admin.storage().bucket(bucketName);
+
+  return {
+    label: 'Admin SDK',
+    listFiles: () => listAllFiles(bucket, prefix),
+  };
+}
+
+async function createFirebaseCliBackend() {
+  const api = require('firebase-tools/lib/api');
+  const apiv2 = require('firebase-tools/lib/apiv2');
+  const auth = require('firebase-tools/lib/auth');
+  const { requireAuth } = require('firebase-tools/lib/requireAuth');
+  const options = { cwd: process.cwd(), project: projectId };
+  const account = auth.selectAccount(undefined, process.cwd());
+
+  if (!account) {
+    throw new Error('No Firebase CLI account is logged in. Run firebase login first.');
+  }
+
+  auth.setActiveAccount(options, account);
+  await requireAuth(options, true);
+
+  const client = new apiv2.Client({
+    auth: true,
+    urlPrefix: api.storageOrigin(),
+  });
+  const objectPath = (name) => `/storage/v1/b/${encodeURIComponent(bucketName)}/o/${encodeURIComponent(name)}`;
+
+  return {
+    label: `Firebase CLI (${account.user?.email || 'logged-in account'})`,
+    listFiles: async () => {
+      const objects = [];
+      let pageToken = '';
+
+      do {
+        const response = await client.get(`/storage/v1/b/${encodeURIComponent(bucketName)}/o`, {
+          queryParams: {
+            maxResults: 1000,
+            ...(prefix ? { prefix } : {}),
+            ...(pageToken ? { pageToken } : {}),
+          },
+        });
+        objects.push(...(response.body.items || []).map((metadata) => ({
+          name: metadata.name,
+          getMetadata: async () => [metadata],
+          setMetadata: async (nextMetadata) => {
+            await client.patch(objectPath(metadata.name), nextMetadata);
+          },
+        })));
+        pageToken = response.body.nextPageToken || '';
+      } while (pageToken);
+
+      return objects;
+    },
+  };
+}
+
 async function main() {
   if (shouldShowHelp) {
     printHelp();
@@ -98,19 +160,25 @@ async function main() {
   requireArgValue('--project');
   requireArgValue('--bucket');
   requireArgValue('--prefix');
+  requireArgValue('--auth');
 
   if (!projectId || !bucketName) {
     throw new Error('Both --project and --bucket are required unless provided by environment variables.');
   }
 
-  admin.initializeApp({ projectId, storageBucket: bucketName });
-  const bucket = admin.storage().bucket(bucketName);
-  const files = await listAllFiles(bucket, prefix);
+  if (!['admin', 'firebase-cli'].includes(authMode)) {
+    throw new Error(`Unsupported --auth value "${authMode}". Use "admin" or "firebase-cli".`);
+  }
+
+  const backend = authMode === 'firebase-cli'
+    ? await createFirebaseCliBackend()
+    : createAdminBackend();
+  const files = await backend.listFiles();
   const inspected = await mapWithConcurrency(files, 12, inspectImage);
   const images = inspected.filter((entry) => entry.isImage);
   const pending = images.filter(needsBackfill);
 
-  console.log(`Image cache metadata backfill (${shouldWrite ? 'write' : 'dry-run'} mode)`);
+  console.log(`Image cache metadata backfill (${shouldWrite ? 'write' : 'dry-run'} mode, ${backend.label})`);
   console.log(`Bucket: ${bucketName}${prefix ? `, prefix: ${prefix}` : ''}`);
   console.log(`Objects scanned: ${files.length}`);
   console.log(`Images found: ${images.length}`);
