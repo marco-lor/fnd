@@ -603,6 +603,33 @@ describe('GrigliataBoard', () => {
     expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
   });
 
+  test('does not freeze a cached battlemap fade when same-source hydration refreshes its metadata', async () => {
+    jest.useFakeTimers();
+    const buildBackground = (name) => ({
+      id: 'map-1',
+      name,
+      imageUrl: 'https://example.com/map-1.png',
+      imageWidth: 1280,
+      imageHeight: 720,
+    });
+    const { rerender } = render(
+      <GrigliataBoard {...buildProps({ activeBackground: buildBackground('Cached map') })} />
+    );
+
+    expect(await screen.findByTestId('battlemap-image-active')).toHaveAttribute('data-opacity', '0');
+
+    rerender(
+      <GrigliataBoard {...buildProps({ activeBackground: buildBackground('Hydrated map') })} />
+    );
+
+    await act(async () => {
+      jest.advanceTimersByTime(240);
+    });
+
+    expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-opacity', '1');
+    expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
+  });
+
   test('renders video battlemap backgrounds through the existing Konva image layer', async () => {
     useReducedMotion.mockReturnValue(true);
     const originalCreateElement = document.createElement.bind(document);
@@ -5223,6 +5250,65 @@ describe('GrigliataBoard', () => {
     });
 
     expect(screen.getByTestId('turn-order-context-action-user-1')).toHaveTextContent('Remove from turn order');
+  });
+
+  test('keeps multi-digit initiative input after the initial focus selection frame', async () => {
+    jest.useFakeTimers();
+    const onJoinTurnOrder = jest.fn(() => Promise.resolve());
+    const token = {
+      id: 'user-1',
+      tokenId: 'user-1',
+      ownerUid: 'current-user',
+      label: 'Ilya',
+      tokenType: 'character',
+      imageUrl: '',
+      placed: true,
+      col: 1,
+      row: 1,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+      isInTurnOrder: false,
+    };
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          tokens: [token],
+          onJoinTurnOrder,
+        })}
+      />
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('token-node-user-1'), {
+      clientX: 160,
+      clientY: 160,
+      button: 2,
+    });
+    fireEvent.click(screen.getByTestId('turn-order-context-action-user-1'));
+
+    act(() => {
+      jest.advanceTimersByTime(16);
+    });
+
+    const initiativeInput = screen.getByTestId('turn-order-join-initiative-input');
+    fireEvent.change(initiativeInput, { target: { value: '1' } });
+    initiativeInput.setSelectionRange(1, 1);
+
+    act(() => {
+      jest.advanceTimersByTime(16);
+    });
+
+    expect(initiativeInput).toHaveValue('1');
+    expect(initiativeInput.selectionStart).toBe(1);
+    expect(initiativeInput.selectionEnd).toBe(1);
+
+    fireEvent.change(initiativeInput, { target: { value: '13' } });
+    fireEvent.click(screen.getByTestId('turn-order-join-confirm'));
+
+    expect(onJoinTurnOrder).toHaveBeenCalledWith('user-1', 13);
+    await act(async () => {});
+    expect(screen.queryByTestId('turn-order-join-overlay')).not.toBeInTheDocument();
   });
 
   test('does not open the token turn-order menu while adding a ruler waypoint during token movement', async () => {

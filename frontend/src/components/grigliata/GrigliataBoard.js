@@ -2544,6 +2544,7 @@ export default function GrigliataBoard({
   const turnOrderPanelBodyId = useId();
   const [turnOrderContextMenu, setTurnOrderContextMenu] = useState(null);
   const [turnOrderJoinPrompt, setTurnOrderJoinPrompt] = useState(null);
+  const turnOrderJoinPromptTokenId = turnOrderJoinPrompt?.tokenId || '';
   const activeBackgroundAssetType = getBackgroundAssetType(activeBackground);
   const backgroundImageAssetSnapshot = useImageAssetSnapshot(
     activeBackgroundAssetType === 'image' ? activeBackground?.imageUrl || '' : ''
@@ -2563,6 +2564,7 @@ export default function GrigliataBoard({
   });
   const battlemapImageTransitionRef = useRef(battlemapImageTransition);
   const battlemapImageAnimationHandleRef = useRef(null);
+  const battlemapImageAnimationLayersRef = useRef(null);
   const battlemapVideoFrameAnimationHandleRef = useRef(null);
   const previousNarrationOverlayActiveRef = useRef(isNarrationOverlayActive);
   const lastFitKeyRef = useRef('');
@@ -2605,6 +2607,7 @@ export default function GrigliataBoard({
   const cancelBattlemapImageAnimation = useCallback(() => {
     cancelAnimationFrameSafe(battlemapImageAnimationHandleRef.current);
     battlemapImageAnimationHandleRef.current = null;
+    battlemapImageAnimationLayersRef.current = null;
   }, []);
   const cancelBattlemapVideoFrameAnimation = useCallback(() => {
     cancelAnimationFrameSafe(battlemapVideoFrameAnimationHandleRef.current);
@@ -2675,6 +2678,7 @@ export default function GrigliataBoard({
       ? { ...fromLayer, opacity: fromLayer.opacity ?? 1 }
       : null;
     const startedAtMs = getAnimationTimestamp();
+    battlemapImageAnimationLayersRef.current = { fromLayer, toLayer };
 
     setBattlemapImageTransition({
       visibleLayer: initialVisibleLayer,
@@ -2682,23 +2686,27 @@ export default function GrigliataBoard({
     });
 
     const step = (timestamp) => {
+      const animationLayers = battlemapImageAnimationLayersRef.current;
+      const currentFromLayer = animationLayers?.fromLayer || null;
+      const currentToLayer = animationLayers?.toLayer || null;
       const easedProgress = easeOutCubic(
         clampToRange((timestamp - startedAtMs) / BATTLEMAP_IMAGE_FADE_DURATION_MS, 0, 1)
       );
 
       setBattlemapImageTransition({
-        visibleLayer: toLayer
-          ? { ...toLayer, opacity: easedProgress }
+        visibleLayer: currentToLayer
+          ? { ...currentToLayer, opacity: easedProgress }
           : null,
-        fadingOutLayer: fromLayer
-          ? { ...fromLayer, opacity: 1 - easedProgress }
+        fadingOutLayer: currentFromLayer
+          ? { ...currentFromLayer, opacity: 1 - easedProgress }
           : null,
       });
 
       if (easedProgress >= 1) {
         battlemapImageAnimationHandleRef.current = null;
+        battlemapImageAnimationLayersRef.current = null;
         setBattlemapImageTransition({
-          visibleLayer: toLayer ? { ...toLayer, opacity: 1 } : null,
+          visibleLayer: currentToLayer ? { ...currentToLayer, opacity: 1 } : null,
           fadingOutLayer: null,
         });
         return;
@@ -2750,10 +2758,26 @@ export default function GrigliataBoard({
         || (!currentTransition.fadingOutLayer && dominantLayer?.src === targetBattlemapImageLayer.src)
       )
     ) {
-      cancelBattlemapImageAnimation();
+      const activeAnimationLayers = battlemapImageAnimationLayersRef.current;
+      const isAnimatingSameSource = !!battlemapImageAnimationHandleRef.current
+        && activeAnimationLayers?.toLayer?.src === targetBattlemapImageLayer.src;
+
+      if (isAnimatingSameSource) {
+        activeAnimationLayers.toLayer = {
+          ...activeAnimationLayers.toLayer,
+          ...targetBattlemapImageLayer,
+        };
+      } else {
+        cancelBattlemapImageAnimation();
+      }
+
       setBattlemapImageTransition((currentState) => ({
         visibleLayer: currentState.visibleLayer?.src === targetBattlemapImageLayer.src
-          ? { ...currentState.visibleLayer, ...targetBattlemapImageLayer, opacity: currentState.visibleLayer.opacity ?? 1 }
+          ? {
+            ...currentState.visibleLayer,
+            ...targetBattlemapImageLayer,
+            opacity: isAnimatingSameSource ? currentState.visibleLayer.opacity ?? 0 : 1,
+          }
           : { ...targetBattlemapImageLayer, opacity: 1 },
         fadingOutLayer: currentState.fadingOutLayer?.src === targetBattlemapImageLayer.src
           ? null
@@ -3456,7 +3480,7 @@ export default function GrigliataBoard({
   }, [turnOrderContextMenu]);
 
   useEffect(() => {
-    if (!turnOrderJoinPrompt) {
+    if (!turnOrderJoinPromptTokenId) {
       return undefined;
     }
 
@@ -3476,7 +3500,7 @@ export default function GrigliataBoard({
       window.cancelAnimationFrame(focusHandle);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [turnOrderJoinPrompt]);
+  }, [turnOrderJoinPromptTokenId]);
 
   useEffect(() => {
     onSharedInteractionChange?.(activeSharedInteraction);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import {
   ensureImageAsset,
   getImageAssetSnapshot,
@@ -7,19 +7,23 @@ import {
 
 export function useImageAssetSnapshot(src) {
   const normalizedSrc = typeof src === 'string' ? src.trim() : '';
-  const [snapshot, setSnapshot] = useState(() => getImageAssetSnapshot(normalizedSrc));
+  const subscribe = useCallback(
+    (listener) => subscribeToImageAsset(normalizedSrc, listener),
+    [normalizedSrc]
+  );
+  const getSnapshot = useCallback(
+    () => getImageAssetSnapshot(normalizedSrc),
+    [normalizedSrc]
+  );
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   useEffect(() => {
     if (!normalizedSrc) {
-      setSnapshot(getImageAssetSnapshot(''));
       return undefined;
     }
 
-    setSnapshot(getImageAssetSnapshot(normalizedSrc));
-    const unsubscribe = subscribeToImageAsset(normalizedSrc, setSnapshot);
     ensureImageAsset(normalizedSrc).catch(() => null);
-
-    return () => unsubscribe();
+    return undefined;
   }, [normalizedSrc]);
 
   return snapshot;

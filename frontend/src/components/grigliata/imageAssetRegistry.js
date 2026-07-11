@@ -10,15 +10,14 @@ const normalizeImageAssetSrc = (src) => (
   typeof src === 'string' ? src.trim() : ''
 );
 
-const buildImageAssetSnapshot = (record) => (
-  record
-    ? {
-      status: record.status,
-      image: record.image,
-      error: record.error,
-    }
-    : EMPTY_IMAGE_ASSET_SNAPSHOT
-);
+const buildImageAssetSnapshot = (record) => record?.snapshot || EMPTY_IMAGE_ASSET_SNAPSHOT;
+
+const updateImageAssetRecord = (record, { status, image, error }) => {
+  record.status = status;
+  record.image = image;
+  record.error = error;
+  record.snapshot = { status, image, error };
+};
 
 const notifyImageAssetListeners = (record) => {
   const snapshot = buildImageAssetSnapshot(record);
@@ -55,6 +54,7 @@ const getOrCreateImageAssetRecord = (src) => {
     status: 'idle',
     image: null,
     error: null,
+    snapshot: EMPTY_IMAGE_ASSET_SNAPSHOT,
     promise: null,
     listeners: new Set(),
   };
@@ -78,23 +78,31 @@ const loadImageAssetRecord = (record) => {
   const ImageConstructor = getImageConstructor();
   if (!ImageConstructor) {
     const missingImageError = new Error('Image loading is not available in this environment.');
-    record.status = 'error';
-    record.error = missingImageError;
+    updateImageAssetRecord(record, {
+      status: 'error',
+      image: null,
+      error: missingImageError,
+    });
     notifyImageAssetListeners(record);
     return Promise.reject(missingImageError);
   }
 
-  record.status = 'loading';
-  record.error = null;
+  updateImageAssetRecord(record, {
+    status: 'loading',
+    image: null,
+    error: null,
+  });
   notifyImageAssetListeners(record);
 
   const loadPromise = new Promise((resolve, reject) => {
     const nextImage = new ImageConstructor();
 
     const finalizeSuccess = () => {
-      record.status = 'loaded';
-      record.image = nextImage;
-      record.error = null;
+      updateImageAssetRecord(record, {
+        status: 'loaded',
+        image: nextImage,
+        error: null,
+      });
       notifyImageAssetListeners(record);
       resolve(nextImage);
     };
@@ -104,9 +112,11 @@ const loadImageAssetRecord = (record) => {
         ? errorEvent
         : new Error(`Failed to load image asset: ${record.src}`);
 
-      record.status = 'error';
-      record.image = null;
-      record.error = nextError;
+      updateImageAssetRecord(record, {
+        status: 'error',
+        image: null,
+        error: nextError,
+      });
       record.promise = null;
       notifyImageAssetListeners(record);
       reject(nextError);
