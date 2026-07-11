@@ -62,7 +62,7 @@ import {
   splitTokenStatusesForDisplay,
   useTokenStatusIconImages,
 } from './tokenStatuses';
-import { useImageAssetSnapshot } from './useImageAsset';
+import { useImageAssetSnapshot } from '../common/imageAssets/useImageAsset';
 import {
   buildAoEFigureFromGrigliataLiveInteraction,
   buildMeasurementFromGrigliataLiveInteraction,
