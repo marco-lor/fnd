@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { FiCheck, FiChevronDown, FiEdit2, FiPlus, FiTrash2, FiX } from 'react-icons/fi';
 import { FOE_LIBRARY_DRAG_TYPE, TRAY_DRAG_MIME } from './constants';
+import { GRIGLIATA_ANIMA_VISUAL, GRIGLIATA_RESOURCE_VISUALS } from './resourceVisuals';
 
 const buildTokenDragPayload = (token) => JSON.stringify({
   type: 'grigliata-token',
@@ -66,6 +67,66 @@ const n = (value, fallback = 0) => {
   return Number.isFinite(numericValue) ? numericValue : fallback;
 };
 
+function ResourceValueBadge({ resource, current, total, showTotal = false, testId }) {
+  const visual = GRIGLIATA_RESOURCE_VISUALS[resource];
+  if (!visual) return null;
+
+  const currentValue = Math.max(0, n(current, 0));
+  const displayValue = showTotal
+    ? `${currentValue}/${Math.max(0, n(total, 0))}`
+    : String(currentValue);
+
+  return (
+    <span
+      data-testid={testId}
+      aria-label={`${visual.label} ${displayValue}`}
+      title={`${visual.label} ${displayValue}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-semibold ${visual.subtleClassName}`}
+    >
+      <visual.Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span>{displayValue}</span>
+    </span>
+  );
+}
+
+function SelectedResourceField({
+  resource,
+  tokenId,
+  value,
+  totalText,
+  disabled = false,
+  onChange,
+  onBlur,
+  onKeyDown,
+}) {
+  const visual = GRIGLIATA_RESOURCE_VISUALS[resource];
+  const inputId = `selected-token-${resource}-${tokenId}`;
+  const visibleTotalText = totalText.replace(new RegExp(`\\s*${visual.label}`, 'i'), '');
+
+  return (
+    <div data-testid={`selected-token-${resource}-resource`} className={`rounded-2xl border p-3 ${visual.subtleClassName}`}>
+      <label htmlFor={inputId} className="mb-2 flex items-center text-xs font-semibold uppercase tracking-[0.16em]">
+        <span aria-hidden="true" title={visual.label} className="inline-flex items-center">
+          <visual.Icon className="h-6 w-6 shrink-0" />
+        </span>
+        <span className="sr-only">Current {visual.label}</span>
+      </label>
+      <input
+        id={inputId}
+        aria-label={`Current ${visual.label}`}
+        type="number"
+        value={value}
+        onChange={onChange}
+        onBlur={onBlur}
+        onKeyDown={onKeyDown}
+        disabled={disabled}
+        className={`w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none ${visual.focusClassName}`}
+      />
+      <p className="mt-1 text-[11px] text-slate-400">{visibleTotalText}</p>
+    </div>
+  );
+}
+
 const PARAM_GROUPS = ['Base', 'Combattimento', 'Special'];
 const FOE_LIBRARY_COLLAPSE_EASE = [0.22, 1, 0.36, 1];
 const FOE_LIBRARY_CONTENT_ID = 'grigliata-foe-library-content';
@@ -101,12 +162,6 @@ const buildCollapsedFoeParamGroups = (sections = []) => sections.reduce((nextSta
 }, {});
 
 const getFoeParamSectionContentId = (groupKey) => `selected-foe-parametri-${groupKey.toLowerCase()}-content`;
-
-const getSelectedTokenPanelTitle = (tokenType) => {
-  if (tokenType === 'foe') return 'Selected Foe';
-  if (tokenType === 'custom') return 'Selected Custom Token';
-  return 'Selected Character';
-};
 
 const getSelectedTokenBadgeLabel = (tokenType) => {
   if (tokenType === 'foe') return 'Instance';
@@ -190,6 +245,34 @@ const getSelectedTokenTotalText = (label, totalValue, isMissing) => (
     ? `${label}: will use current value on save`
     : `${label}: ${n(totalValue, 0)}`
 );
+
+const EMPTY_SELECTED_FOE_DRAFT = {
+  stats: {},
+  parametri: {},
+  notes: '',
+};
+const EMPTY_SELECTED_FOE_DIRTY_STATE = {
+  stats: false,
+  parametri: false,
+  notes: false,
+};
+const buildSelectedFoeDraft = (token) => ({
+  stats: token?.stats || {},
+  parametri: token?.Parametri || {},
+  notes: token?.notes || '',
+});
+const areFoeDraftValuesEqual = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+const areSelectedFoeDraftsEqual = (left, right) => (
+  areFoeDraftValuesEqual(left.stats, right.stats)
+  && areFoeDraftValuesEqual(left.parametri, right.parametri)
+  && left.notes === right.notes
+);
+const areSelectedFoeDirtyStatesEqual = (left, right) => (
+  left.stats === right.stats
+  && left.parametri === right.parametri
+  && left.notes === right.notes
+);
+const hasDirtySelectedFoeDraft = (dirtyFields) => Object.values(dirtyFields || {}).some(Boolean);
 
 function CreateCustomTokenDialog({
   isOpen,
@@ -482,9 +565,19 @@ function FoeLibrarySection({ currentUserId, foeLibrary = [], hasActiveMap, onDra
                           </div>
                           <p className="mt-1 truncate text-xs text-slate-400">Lv {n(foe?.stats?.level, 1)} | {foe?.category || 'Unknown'} | {foe?.rank || 'Unranked'}</p>
                           <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-300">
-                            <span className="rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2 py-1">HP {n(foe?.stats?.hpCurrent, hpTotal)}/{hpTotal}</span>
-                            <span className="rounded-full border border-sky-400/25 bg-sky-500/10 px-2 py-1">Mana {n(foe?.stats?.manaCurrent, manaTotal)}/{manaTotal}</span>
-                            {foe?.dadoAnima && <span className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-1">Anima {foe.dadoAnima}</span>}
+                            <ResourceValueBadge resource="hp" current={n(foe?.stats?.hpCurrent, hpTotal)} total={hpTotal} showTotal testId={`foe-library-${foe.id}-hp`} />
+                            <ResourceValueBadge resource="mana" current={n(foe?.stats?.manaCurrent, manaTotal)} total={manaTotal} showTotal testId={`foe-library-${foe.id}-mana`} />
+                            {foe?.dadoAnima && (
+                              <span
+                                data-testid={`foe-library-${foe.id}-anima`}
+                                aria-label={`Anima ${foe.dadoAnima}`}
+                                title={`Anima ${foe.dadoAnima}`}
+                                className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-semibold ${GRIGLIATA_ANIMA_VISUAL.subtleClassName}`}
+                              >
+                                <GRIGLIATA_ANIMA_VISUAL.Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                                <span>{foe.dadoAnima}</span>
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -592,7 +685,6 @@ function SelectedResourceTokenDetailsPanel({
   const isSaving = savingSelectedTokenDetailsId === token.tokenId;
   const isReady = token.isReady !== false;
   const isBusy = !isReady;
-  const panelTitle = getSelectedTokenPanelTitle(token.tokenType);
   const badgeLabel = getSelectedTokenBadgeLabel(token.tokenType);
   const missingResourceTotals = token.missingResourceTotals || {};
   const isLegacyCustomToken = token.tokenType === 'custom'
@@ -682,11 +774,10 @@ function SelectedResourceTokenDetailsPanel({
           {token?.imageUrl ? <img src={token.imageUrl} alt={token?.label || 'Token'} className="h-full w-full object-cover" /> : <span>{(token?.label || '?').charAt(0).toUpperCase()}</span>}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-100">{panelTitle}</h3>
-            <span className="rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-100">{badgeLabel}</span>
+          <div className="flex items-start justify-between gap-2">
+            <h3 data-testid="selected-token-name" className="min-w-0 truncate text-lg font-semibold text-slate-100">{token?.label || 'Token'}</h3>
+            <span data-testid="selected-token-type" className="shrink-0 rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-100">{badgeLabel}</span>
           </div>
-          <p className="mt-1 truncate text-lg font-semibold text-slate-100">{token?.label || 'Token'}</p>
           <p className="mt-1 truncate text-xs text-slate-400">
             {token.tokenType === 'custom' ? 'Update the live token values used on the board.' : 'Linked to the character sheet values for this player.'}
           </p>
@@ -694,49 +785,37 @@ function SelectedResourceTokenDetailsPanel({
       </div>
 
       <div className={`mt-4 grid grid-cols-1 gap-3 ${token.hasShield ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
-        <div>
-          <label htmlFor={`selected-token-hp-${token.tokenId}`} className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Current HP</label>
-          <input
-            id={`selected-token-hp-${token.tokenId}`}
-            type="number"
-            value={draft.hpCurrent}
-            onChange={(event) => updateDraftField('hpCurrent', n(event.target.value, 0))}
-            onBlur={() => { void commitSelectedTokenDraft(); }}
-            onKeyDown={handleDraftFieldKeyDown}
-            disabled={isBusy}
-            className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-300"
-          />
-          <p className="mt-1 text-[11px] text-slate-500">{getSelectedTokenTotalText('Total HP', token.hpTotal, missingResourceTotals.hpTotal)}</p>
-        </div>
-        <div>
-          <label htmlFor={`selected-token-mana-${token.tokenId}`} className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Current Mana</label>
-          <input
-            id={`selected-token-mana-${token.tokenId}`}
-            type="number"
-            value={draft.manaCurrent}
-            onChange={(event) => updateDraftField('manaCurrent', n(event.target.value, 0))}
-            onBlur={() => { void commitSelectedTokenDraft(); }}
-            onKeyDown={handleDraftFieldKeyDown}
-            disabled={isBusy}
-            className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-300"
-          />
-          <p className="mt-1 text-[11px] text-slate-500">{getSelectedTokenTotalText('Total Mana', token.manaTotal, missingResourceTotals.manaTotal)}</p>
-        </div>
+        <SelectedResourceField
+          resource="hp"
+          tokenId={token.tokenId}
+          value={draft.hpCurrent}
+          totalText={getSelectedTokenTotalText('Total HP', token.hpTotal, missingResourceTotals.hpTotal)}
+          disabled={isBusy}
+          onChange={(event) => updateDraftField('hpCurrent', n(event.target.value, 0))}
+          onBlur={() => { void commitSelectedTokenDraft(); }}
+          onKeyDown={handleDraftFieldKeyDown}
+        />
+        <SelectedResourceField
+          resource="mana"
+          tokenId={token.tokenId}
+          value={draft.manaCurrent}
+          totalText={getSelectedTokenTotalText('Total Mana', token.manaTotal, missingResourceTotals.manaTotal)}
+          disabled={isBusy}
+          onChange={(event) => updateDraftField('manaCurrent', n(event.target.value, 0))}
+          onBlur={() => { void commitSelectedTokenDraft(); }}
+          onKeyDown={handleDraftFieldKeyDown}
+        />
         {token.hasShield && (
-          <div>
-            <label htmlFor={`selected-token-shield-${token.tokenId}`} className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Current Shield</label>
-            <input
-              id={`selected-token-shield-${token.tokenId}`}
-              type="number"
-              value={draft.shieldCurrent}
-              onChange={(event) => updateDraftField('shieldCurrent', n(event.target.value, 0))}
-              onBlur={() => { void commitSelectedTokenDraft(); }}
-              onKeyDown={handleDraftFieldKeyDown}
-              disabled={isBusy}
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-300"
-            />
-            <p className="mt-1 text-[11px] text-slate-500">{getSelectedTokenTotalText('Total Shield', token.shieldTotal, missingResourceTotals.shieldTotal)}</p>
-          </div>
+          <SelectedResourceField
+            resource="shield"
+            tokenId={token.tokenId}
+            value={draft.shieldCurrent}
+            totalText={getSelectedTokenTotalText('Total Shield', token.shieldTotal, missingResourceTotals.shieldTotal)}
+            disabled={isBusy}
+            onChange={(event) => updateDraftField('shieldCurrent', n(event.target.value, 0))}
+            onBlur={() => { void commitSelectedTokenDraft(); }}
+            onKeyDown={handleDraftFieldKeyDown}
+          />
         )}
       </div>
 
@@ -775,25 +854,60 @@ function SelectedResourceTokenDetailsPanel({
 }
 
 function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) {
-  const [label, setLabel] = useState('');
-  const [dadoAnima, setDadoAnima] = useState('');
-  const [stats, setStats] = useState({});
-  const [parametri, setParametri] = useState({});
-  const [notes, setNotes] = useState('');
+  const [draft, setDraft] = useState(EMPTY_SELECTED_FOE_DRAFT);
+  const [dirtyFields, setDirtyFields] = useState(EMPTY_SELECTED_FOE_DIRTY_STATE);
+  const [isAutosaving, setIsAutosaving] = useState(false);
   const [collapsedParamGroups, setCollapsedParamGroups] = useState({});
+  const previousFoeDraftTokenIdRef = useRef('');
   const previousTokenIdRef = useRef('');
+  const draftRef = useRef(EMPTY_SELECTED_FOE_DRAFT);
+  const dirtyFieldsRef = useRef(EMPTY_SELECTED_FOE_DIRTY_STATE);
+  const autosavePromiseRef = useRef(null);
   const prefersReducedMotion = useReducedMotion();
+  const persistedDraft = useMemo(() => buildSelectedFoeDraft(token), [token]);
+
+  draftRef.current = draft;
+  dirtyFieldsRef.current = dirtyFields;
 
   useEffect(() => {
-    if (!token) return;
-    setLabel(token.label || '');
-    setDadoAnima(token.dadoAnima || '');
-    setStats(token.stats || {});
-    setParametri(token.Parametri || {});
-    setNotes(token.notes || '');
-  }, [token]);
+    const nextTokenId = token?.tokenId || '';
+    if (!nextTokenId) {
+      previousFoeDraftTokenIdRef.current = '';
+      setDraft(EMPTY_SELECTED_FOE_DRAFT);
+      setDirtyFields(EMPTY_SELECTED_FOE_DIRTY_STATE);
+      return;
+    }
 
-  const sections = useMemo(() => buildFoeParamSections(parametri), [parametri]);
+    if (previousFoeDraftTokenIdRef.current !== nextTokenId) {
+      previousFoeDraftTokenIdRef.current = nextTokenId;
+      setDraft(persistedDraft);
+      setDirtyFields(EMPTY_SELECTED_FOE_DIRTY_STATE);
+      return;
+    }
+
+    setDraft((currentDraft) => {
+      const nextDraft = Object.keys(EMPTY_SELECTED_FOE_DRAFT).reduce((result, field) => ({
+        ...result,
+        [field]: dirtyFields[field] ? currentDraft[field] : persistedDraft[field],
+      }), {});
+      return areSelectedFoeDraftsEqual(currentDraft, nextDraft) ? currentDraft : nextDraft;
+    });
+  }, [dirtyFields, persistedDraft, token?.tokenId]);
+
+  useEffect(() => {
+    if (!token?.tokenId) return;
+    setDirtyFields((currentDirtyFields) => {
+      const nextDirtyFields = Object.keys(EMPTY_SELECTED_FOE_DIRTY_STATE).reduce((result, field) => ({
+        ...result,
+        [field]: currentDirtyFields[field] && !areFoeDraftValuesEqual(draft[field], persistedDraft[field]),
+      }), {});
+      return areSelectedFoeDirtyStatesEqual(currentDirtyFields, nextDirtyFields)
+        ? currentDirtyFields
+        : nextDirtyFields;
+    });
+  }, [draft, persistedDraft, token?.tokenId]);
+
+  const sections = useMemo(() => buildFoeParamSections(draft.parametri), [draft.parametri]);
 
   useEffect(() => {
     const nextTokenId = token?.tokenId || '';
@@ -833,12 +947,77 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
 
   if (!token) return null;
 
-  const hpTotal = n(stats?.hpTotal, 0);
-  const manaTotal = n(stats?.manaTotal, 0);
+  const hpTotal = n(draft.stats?.hpTotal, 0);
+  const manaTotal = n(draft.stats?.manaTotal, 0);
+  const shieldTotal = n(draft.stats?.shieldTotal, 0);
   const isSaving = savingFoeTokenId === token.tokenId;
   const contentTransition = prefersReducedMotion
     ? { duration: 0.01 }
     : { duration: 0.28, ease: FOE_LIBRARY_COLLAPSE_EASE };
+  const updateDraftField = (field, value) => {
+    const nextDraft = { ...draftRef.current, [field]: value };
+    const nextDirtyFields = dirtyFieldsRef.current[field]
+      ? dirtyFieldsRef.current
+      : { ...dirtyFieldsRef.current, [field]: true };
+    draftRef.current = nextDraft;
+    dirtyFieldsRef.current = nextDirtyFields;
+    setDraft(nextDraft);
+    setDirtyFields(nextDirtyFields);
+  };
+  const commitSelectedFoeDraft = async () => {
+    if (
+      isSaving
+      || isAutosaving
+      || autosavePromiseRef.current
+      || !hasDirtySelectedFoeDraft(dirtyFieldsRef.current)
+      || !onUpdateFoeToken
+    ) {
+      return false;
+    }
+
+    const savedDraft = draftRef.current;
+    const savePromise = Promise.resolve(onUpdateFoeToken({
+      tokenId: token.tokenId,
+      label: token.label,
+      dadoAnima: token.dadoAnima,
+      stats: savedDraft.stats,
+      Parametri: savedDraft.parametri,
+      notes: savedDraft.notes,
+    }));
+    autosavePromiseRef.current = savePromise;
+    setIsAutosaving(true);
+
+    try {
+      const didSave = await savePromise;
+      if (!didSave) return false;
+
+      setDirtyFields((currentDirtyFields) => {
+        const latestDraft = draftRef.current;
+        const nextDirtyFields = Object.keys(EMPTY_SELECTED_FOE_DIRTY_STATE).reduce((result, field) => ({
+          ...result,
+          [field]: currentDirtyFields[field] && !areFoeDraftValuesEqual(latestDraft[field], savedDraft[field]),
+        }), {});
+        dirtyFieldsRef.current = nextDirtyFields;
+        return areSelectedFoeDirtyStatesEqual(currentDirtyFields, nextDirtyFields)
+          ? currentDirtyFields
+          : nextDirtyFields;
+      });
+      return true;
+    } finally {
+      autosavePromiseRef.current = null;
+      setIsAutosaving(false);
+    }
+  };
+  const handleFoeFieldKeyDown = (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    void commitSelectedFoeDraft();
+  };
+  const handleFoeNotesKeyDown = (event) => {
+    if (event.key !== 'Enter' || event.shiftKey) return;
+    event.preventDefault();
+    void commitSelectedFoeDraft();
+  };
 
   return (
     <div className="rounded-2xl border border-cyan-500/25 bg-cyan-950/10 p-4">
@@ -847,34 +1026,55 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
           {token?.imageUrl ? <img src={token.imageUrl} alt={token?.label || 'Foe'} className="h-full w-full object-cover" /> : <span>{(token?.label || '?').charAt(0).toUpperCase()}</span>}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-cyan-100">Selected Foe</h3>
-            <span className="rounded-full border border-cyan-400/25 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-100">Instance</span>
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="min-w-0 truncate text-lg font-semibold text-slate-100">{token?.label || 'Foe Token'}</h3>
+            <div className="flex shrink-0 flex-col items-end gap-2">
+              <span data-testid="selected-foe-type" className="rounded-full border border-cyan-400/25 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-100">Foe</span>
+              {token?.dadoAnima && (
+                <span
+                  data-testid="selected-foe-anima"
+                  aria-label={`Anima ${token.dadoAnima}`}
+                  title={`Anima ${token.dadoAnima}`}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-semibold ${GRIGLIATA_ANIMA_VISUAL.subtleClassName}`}
+                >
+                  <GRIGLIATA_ANIMA_VISUAL.Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span>{token.dadoAnima}</span>
+                </span>
+              )}
+            </div>
           </div>
-          <p className="mt-1 truncate text-lg font-semibold text-slate-100">{token?.label || 'Foe Token'}</p>
-          <p className="mt-1 truncate text-xs text-slate-400">Lv {n(stats?.level, 1)} | {token?.category || 'Unknown'} | {token?.rank || 'Unranked'}</p>
+          <p className="mt-1 truncate text-xs text-slate-400">Lv {n(draft.stats?.level, 1)} | {token?.category || 'Unknown'} | {token?.rank || 'Unranked'}</p>
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-        <div>
-          <label htmlFor="selected-foe-label" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Foe Name</label>
-          <input id="selected-foe-label" type="text" value={label} onChange={(event) => setLabel(event.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-300" />
-        </div>
-        <div>
-          <label htmlFor="selected-foe-anima" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Dado Anima</label>
-          <input id="selected-foe-anima" type="text" value={dadoAnima} onChange={(event) => setDadoAnima(event.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-300" />
-        </div>
-        <div>
-          <label htmlFor="selected-foe-hp-current" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Current HP</label>
-          <input id="selected-foe-hp-current" type="number" value={n(stats?.hpCurrent, hpTotal)} onChange={(event) => setStats((current) => ({ ...current, hpCurrent: n(event.target.value, 0) }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-300" />
-          <p className="mt-1 text-[11px] text-slate-500">Total HP: {hpTotal}</p>
-        </div>
-        <div>
-          <label htmlFor="selected-foe-mana-current" className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Current Mana</label>
-          <input id="selected-foe-mana-current" type="number" value={n(stats?.manaCurrent, manaTotal)} onChange={(event) => setStats((current) => ({ ...current, manaCurrent: n(event.target.value, 0) }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-300" />
-          <p className="mt-1 text-[11px] text-slate-500">Total Mana: {manaTotal}</p>
-        </div>
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <SelectedResourceField
+          resource="hp"
+          tokenId={`foe-${token.tokenId}`}
+          value={n(draft.stats?.hpCurrent, hpTotal)}
+          totalText={`Total HP: ${hpTotal}`}
+          onChange={(event) => updateDraftField('stats', { ...draftRef.current.stats, hpCurrent: n(event.target.value, 0) })}
+          onBlur={() => { void commitSelectedFoeDraft(); }}
+          onKeyDown={handleFoeFieldKeyDown}
+        />
+        <SelectedResourceField
+          resource="mana"
+          tokenId={`foe-${token.tokenId}`}
+          value={n(draft.stats?.manaCurrent, manaTotal)}
+          totalText={`Total Mana: ${manaTotal}`}
+          onChange={(event) => updateDraftField('stats', { ...draftRef.current.stats, manaCurrent: n(event.target.value, 0) })}
+          onBlur={() => { void commitSelectedFoeDraft(); }}
+          onKeyDown={handleFoeFieldKeyDown}
+        />
+        <SelectedResourceField
+          resource="shield"
+          tokenId={`foe-${token.tokenId}`}
+          value={n(draft.stats?.shieldCurrent, shieldTotal)}
+          totalText={`Total Shield: ${shieldTotal}`}
+          onChange={(event) => updateDraftField('stats', { ...draftRef.current.stats, shieldCurrent: n(event.target.value, 0) })}
+          onBlur={() => { void commitSelectedFoeDraft(); }}
+          onKeyDown={handleFoeFieldKeyDown}
+        />
       </div>
 
       <div className="mt-4">
@@ -882,8 +1082,10 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
         <textarea
           id={`selected-foe-notes-${token.tokenId}`}
           rows={4}
-          value={notes}
-          onChange={(event) => setNotes(event.target.value)}
+          value={draft.notes}
+          onChange={(event) => updateDraftField('notes', event.target.value)}
+          onBlur={() => { void commitSelectedFoeDraft(); }}
+          onKeyDown={handleFoeNotesKeyDown}
           placeholder="Optional foe notes"
           className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-cyan-300"
         />
@@ -936,13 +1138,15 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
                               id={`selected-foe-${groupKey}-${paramKey}`}
                               type="number"
                               value={n(paramValue?.Tot, 0)}
-                              onChange={(event) => setParametri((current) => ({
-                                ...current,
+                              onChange={(event) => updateDraftField('parametri', {
+                                ...draftRef.current.parametri,
                                 [groupKey]: {
-                                  ...(current?.[groupKey] || {}),
-                                  [paramKey]: { ...((current?.[groupKey] || {})[paramKey] || {}), Tot: n(event.target.value, 0) },
+                                  ...(draftRef.current.parametri?.[groupKey] || {}),
+                                  [paramKey]: { ...((draftRef.current.parametri?.[groupKey] || {})[paramKey] || {}), Tot: n(event.target.value, 0) },
                                 },
-                              }))}
+                              })}
+                              onBlur={() => { void commitSelectedFoeDraft(); }}
+                              onKeyDown={handleFoeFieldKeyDown}
                               className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-300"
                             />
                           </div>
@@ -994,17 +1198,9 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
         );
       })}
 
-      <div className="mt-4 flex justify-end">
-        <button
-          type="button"
-          onClick={() => onUpdateFoeToken?.({ tokenId: token.tokenId, label, dadoAnima, stats, Parametri: parametri, notes })}
-          disabled={isSaving}
-          className="inline-flex items-center gap-2 rounded-xl border border-cyan-300/45 bg-cyan-400 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-black transition-colors hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-55"
-        >
-          <FiCheck className="h-4 w-4" />
-          {isSaving ? 'Saving' : 'Save Foe'}
-        </button>
-      </div>
+      {(isSaving || isAutosaving) && (
+        <p className="mt-4 text-right text-xs font-medium text-cyan-100">Saving foe details...</p>
+      )}
     </div>
   );
 }
@@ -1163,6 +1359,16 @@ export default function MyTokenTray({
                   </div>
                 )}
               </div>
+
+              {isCustomToken && !isEditing && (
+                <div className="mt-3 flex flex-wrap gap-2" data-testid={`custom-token-${tokenId}-resources`}>
+                  <ResourceValueBadge resource="hp" current={token.hpCurrent} testId={`custom-token-${tokenId}-hp`} />
+                  <ResourceValueBadge resource="mana" current={token.manaCurrent} testId={`custom-token-${tokenId}-mana`} />
+                  {token.hasShield !== false && (
+                    <ResourceValueBadge resource="shield" current={token.shieldCurrent} testId={`custom-token-${tokenId}-shield`} />
+                  )}
+                </div>
+              )}
 
               {getTokenHelpText(token, hasActiveMap) && <p className="mt-3 text-xs text-slate-300">{getTokenHelpText(token, hasActiveMap)}</p>}
               {isCustomToken && !isEditing && (isUpdating || isDeleting) && <p className="mt-3 text-xs font-medium text-slate-300">{isDeleting ? 'Deleting custom token...' : 'Saving custom token...'}</p>}

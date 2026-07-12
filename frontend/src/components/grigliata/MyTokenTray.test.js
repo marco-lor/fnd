@@ -80,6 +80,30 @@ describe('MyTokenTray', () => {
     expect(screen.queryByText(/On Sunken Ruins at/i)).not.toBeInTheDocument();
   });
 
+  test('shows battlemap resource icons and current values on custom token cards', () => {
+    renderTray({
+      customTokens: [{
+        tokenId: 'token-2',
+        ownerUid: 'user-1',
+        tokenType: 'custom',
+        label: 'Wolf',
+        imageUrl: 'https://example.com/wolf.png',
+        hpCurrent: 12,
+        manaCurrent: 4,
+        shieldCurrent: 0,
+        hasShield: true,
+        isHiddenByManager: false,
+      }],
+    });
+
+    expect(screen.getByTestId('custom-token-token-2-hp')).toHaveAccessibleName('HP 12');
+    expect(screen.getByTestId('custom-token-token-2-mana')).toHaveAccessibleName('Mana 4');
+    expect(screen.getByTestId('custom-token-token-2-shield')).toHaveAccessibleName('Shield 0');
+    expect(screen.getByTestId('custom-token-token-2-hp').querySelector('svg')).toBeInTheDocument();
+    expect(screen.getByTestId('custom-token-token-2-mana').querySelector('svg')).toBeInTheDocument();
+    expect(screen.getByTestId('custom-token-token-2-shield').querySelector('svg')).toBeInTheDocument();
+  });
+
   test('hides the dm character card while keeping custom token controls visible', () => {
     renderTray({
       currentUserId: 'user-1',
@@ -503,6 +527,10 @@ describe('MyTokenTray', () => {
     expect(screen.getByText('Foes Hub')).toBeInTheDocument();
     expect(screen.getByText('Test One')).toBeInTheDocument();
     expect(screen.queryByText('1 saved')).not.toBeInTheDocument();
+    expect(screen.getByTestId('foe-library-foe-1-hp')).toHaveAccessibleName('HP 60/60');
+    expect(screen.getByTestId('foe-library-foe-1-mana')).toHaveAccessibleName('Mana 20/20');
+    expect(screen.getByTestId('foe-library-foe-1-anima')).toHaveAccessibleName('Anima d10');
+    expect(screen.getByTestId('foe-library-foe-1-anima').querySelector('svg')).toBeInTheDocument();
 
     const dragTarget = screen.getByTestId('foe-library-card-foe-1');
     const dataTransfer = createDataTransfer();
@@ -572,7 +600,7 @@ describe('MyTokenTray', () => {
     expect(screen.getByLabelText('Attacco')).toBeInTheDocument();
   });
 
-  test('renders and saves the selected foe token details after expanding a parametri group', async () => {
+  test('auto-saves selected foe token details on blur without a manual save button', async () => {
     const onUpdateFoeToken = jest.fn(() => Promise.resolve(true));
 
     renderTray({
@@ -596,33 +624,66 @@ describe('MyTokenTray', () => {
       onUpdateFoeToken,
     });
 
-    expect(screen.getByText('Selected Foe')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Test One' })).toBeInTheDocument();
+    expect(screen.getByTestId('selected-foe-type')).toHaveTextContent('Foe');
+    expect(screen.queryByText('Selected Foe')).not.toBeInTheDocument();
+    expect(screen.queryByText('Instance')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Dado Anima')).not.toBeInTheDocument();
+    expect(screen.getByTestId('selected-foe-anima')).toHaveAccessibleName('Anima d10');
+    expect(screen.getByTestId('selected-token-shield-resource')).toBeInTheDocument();
     expect(screen.getByText('Hex')).toBeInTheDocument();
     expect(screen.getByText('Claw')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Foe Name')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save foe/i })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Expand Base parameters' }));
 
     expect(await screen.findByLabelText('Forza')).toHaveValue(7);
-    fireEvent.change(screen.getByLabelText('Foe Name'), { target: { value: 'Test One Prime' } });
     fireEvent.change(screen.getByLabelText('Current HP'), { target: { value: '84' } });
     fireEvent.change(screen.getByLabelText('Current Mana'), { target: { value: '33' } });
+    fireEvent.change(screen.getByLabelText('Current Shield'), { target: { value: '4' } });
     fireEvent.change(screen.getByLabelText('Forza'), { target: { value: '9' } });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /save foe/i }));
+      fireEvent.blur(screen.getByLabelText('Forza'));
     });
 
     expect(onUpdateFoeToken).toHaveBeenCalledWith(expect.objectContaining({
       tokenId: 'foe-token-1',
-      label: 'Test One Prime',
+      label: 'Test One',
       notes: 'Alpha foe',
       Parametri: expect.objectContaining({
         Base: expect.objectContaining({
           Forza: expect.objectContaining({ Tot: 9 }),
         }),
       }),
-      stats: expect.objectContaining({ hpCurrent: 84, hpTotal: 60, manaCurrent: 33, manaTotal: 20 }),
+      dadoAnima: 'd10',
+      stats: expect.objectContaining({ hpCurrent: 84, hpTotal: 60, manaCurrent: 33, manaTotal: 20, shieldCurrent: 4 }),
     }));
+  });
+
+  test('does not auto-save selected foe details when an unchanged field blurs', async () => {
+    const onUpdateFoeToken = jest.fn(() => Promise.resolve(true));
+
+    renderTray({
+      isManager: true,
+      selectedTokenDetails: {
+        tokenId: 'foe-token-1',
+        tokenType: 'foe',
+        label: 'Test One',
+        dadoAnima: 'd10',
+        notes: 'Alpha foe',
+        stats: { hpTotal: 60, hpCurrent: 60, manaTotal: 20, manaCurrent: 20 },
+        Parametri: {},
+      },
+      onUpdateFoeToken,
+    });
+
+    await act(async () => {
+      fireEvent.blur(screen.getByLabelText('Current HP'));
+    });
+
+    expect(onUpdateFoeToken).not.toHaveBeenCalled();
   });
 
   test('auto-saves selected character token details on Enter without a manual save button', async () => {
@@ -649,8 +710,16 @@ describe('MyTokenTray', () => {
       onSaveSelectedTokenDetails,
     });
 
-    expect(screen.getByText('Selected Character')).toBeInTheDocument();
+    expect(screen.getByTestId('selected-token-name')).toHaveTextContent('Aldor');
+    expect(screen.getByTestId('selected-token-type')).toHaveTextContent('Character');
+    expect(screen.queryByText('Selected Character')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save details/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId('selected-token-hp-resource').querySelector('svg')).toBeInTheDocument();
+    expect(screen.getByTitle('HP')).toBeInTheDocument();
+    expect(screen.getByTitle('Mana')).toBeInTheDocument();
+    expect(screen.getByTitle('Shield')).toBeInTheDocument();
+    expect(screen.queryByText('Total HP: 18')).not.toBeInTheDocument();
+    expect(screen.getByText('Total: 18')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Current HP'), { target: { value: '24' } });
     fireEvent.change(screen.getByLabelText('Current Shield'), { target: { value: '9' } });
     fireEvent.change(screen.getByDisplayValue('Frontline'), { target: { value: 'Hold the bridge' } });
@@ -691,7 +760,9 @@ describe('MyTokenTray', () => {
       onSaveSelectedTokenDetails,
     });
 
-    expect(screen.getByText('Selected Custom Token')).toBeInTheDocument();
+    expect(screen.getByTestId('selected-token-name')).toHaveTextContent('Wolf');
+    expect(screen.getByTestId('selected-token-type')).toHaveTextContent('Custom');
+    expect(screen.queryByText('Selected Custom Token')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save details/i })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Current Mana'), { target: { value: '9' } });
     fireEvent.change(screen.getByLabelText('Current Shield'), { target: { value: '11' } });
@@ -798,7 +869,9 @@ describe('MyTokenTray', () => {
       onSaveSelectedTokenDetails,
     });
 
-    expect(screen.getByText('Selected Custom Token')).toBeInTheDocument();
+    expect(screen.getByTestId('selected-token-name')).toHaveTextContent('Wolf');
+    expect(screen.getByTestId('selected-token-type')).toHaveTextContent('Custom');
+    expect(screen.queryByText('Selected Custom Token')).not.toBeInTheDocument();
     expect(screen.getByText('Loading the current token values...')).toBeInTheDocument();
     expect(screen.getByLabelText('Current HP')).toBeDisabled();
     expect(screen.queryByRole('button', { name: /loading/i })).not.toBeInTheDocument();

@@ -11,7 +11,6 @@ import {
   Text,
 } from 'react-konva';
 import { FaDiceD20, FaHandPointer, FaRulerHorizontal } from 'react-icons/fa';
-import { GiHearts, GiMagicSwirl, GiShield } from 'react-icons/gi';
 import {
   FiClock,
   FiEye,
@@ -57,6 +56,7 @@ import {
   timestampToMillis,
 } from './boardUtils';
 import GrigliataTokenActions, { TokenStatusSummaryCard } from './GrigliataTokenActions';
+import { GRIGLIATA_RESOURCE_VISUALS } from './resourceVisuals';
 import DiceRoller from '../common/DiceRoller';
 import {
   splitTokenStatusesForDisplay,
@@ -840,9 +840,9 @@ const SelectedTokenResourceHud = ({
   }
 
   const statChips = [
-    { key: 'hp', label: 'HP', value: token.hpCurrent, icon: GiHearts, className: 'border-emerald-100/90 bg-emerald-600/95 text-white' },
-    { key: 'mana', label: 'Mana', value: token.manaCurrent, icon: GiMagicSwirl, className: 'border-cyan-100/90 bg-sky-600/95 text-white' },
-    ...(token.hasShield ? [{ key: 'shield', label: 'Shield', value: token.shieldCurrent, icon: GiShield, className: 'border-amber-100/95 bg-amber-500/95 text-white' }] : []),
+    { ...GRIGLIATA_RESOURCE_VISUALS.hp, value: token.hpCurrent },
+    { ...GRIGLIATA_RESOURCE_VISUALS.mana, value: token.manaCurrent },
+    ...(token.hasShield ? [{ ...GRIGLIATA_RESOURCE_VISUALS.shield, value: token.shieldCurrent }] : []),
   ];
   const chipTransition = prefersReducedMotion
     ? { duration: 0.01 }
@@ -871,7 +871,7 @@ const SelectedTokenResourceHud = ({
               key={chip.key}
               data-testid={`selected-token-resource-chip-${chip.key}`}
               aria-label={`${chip.label} ${Math.max(0, Number(chip.value) || 0)}`}
-              className={`inline-flex items-center justify-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold shadow-2xl shadow-black/55 ring-1 ring-black/35 ${chip.className}`}
+              className={`inline-flex items-center justify-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold shadow-2xl shadow-black/55 ring-1 ring-black/35 ${chip.boardClassName}`}
               style={hudState.chipColumns === 2 && statChips.length % 2 === 1 && index === statChips.length - 1
                 ? { gridColumn: '1 / -1', justifySelf: 'center' }
                 : undefined}
@@ -880,7 +880,7 @@ const SelectedTokenResourceHud = ({
               exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 5 }}
               transition={prefersReducedMotion ? { duration: 0.01 } : { ...chipTransition, delay: index * 0.04 }}
             >
-              <chip.icon className="h-4 w-4 shrink-0 drop-shadow-[0_1px_2px_rgba(2,6,23,0.45)]" aria-hidden="true" />
+              <chip.Icon className="h-4 w-4 shrink-0 drop-shadow-[0_1px_2px_rgba(2,6,23,0.45)]" aria-hidden="true" />
               <span>{Math.max(0, Number(chip.value) || 0)}</span>
             </motion.div>
           ))}
