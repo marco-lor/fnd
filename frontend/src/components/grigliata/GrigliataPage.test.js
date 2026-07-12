@@ -5455,7 +5455,9 @@ describe('GrigliataPage', () => {
       fireEvent.click(screen.getByRole('button', { name: /select self character token/i }));
     });
 
-    expect(await screen.findByText('Selected Character')).toBeInTheDocument();
+    expect(await screen.findByTestId('selected-token-name')).toHaveTextContent('Aldor');
+    expect(screen.getByTestId('selected-token-type')).toHaveTextContent('Character');
+    expect(screen.queryByText('Selected Character')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Current HP')).toHaveValue(22);
     expect(screen.getByLabelText('Current Mana')).toHaveValue(15);
     expect(screen.getByLabelText('Current Shield')).toHaveValue(8);
@@ -5560,7 +5562,9 @@ describe('GrigliataPage', () => {
       fireEvent.click(screen.getByRole('button', { name: /select character token/i }));
     });
 
-    expect(await screen.findByText('Selected Character')).toBeInTheDocument();
+    expect(await screen.findByTestId('selected-token-name')).toHaveTextContent('Bran');
+    expect(screen.getByTestId('selected-token-type')).toHaveTextContent('Character');
+    expect(screen.queryByText('Selected Character')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Current HP')).toHaveValue(28);
     expect(screen.getByLabelText('Current Mana')).toHaveValue(13);
     expect(screen.getByLabelText('Current Shield')).toHaveValue(6);
@@ -5592,7 +5596,9 @@ describe('GrigliataPage', () => {
       fireEvent.click(screen.getByRole('button', { name: /select custom token/i }));
     });
 
-    expect(await screen.findByText('Selected Custom Token')).toBeInTheDocument();
+    expect(await screen.findByTestId('selected-token-name')).toHaveTextContent('Wolf');
+    expect(screen.getByTestId('selected-token-type')).toHaveTextContent('Custom');
+    expect(screen.queryByText('Selected Custom Token')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Current HP')).toHaveValue(18);
     expect(screen.getByLabelText('Current Mana')).toHaveValue(7);
     expect(screen.getByLabelText('Current Shield')).toHaveValue(9);
@@ -5724,7 +5730,9 @@ describe('GrigliataPage', () => {
       fireEvent.click(screen.getByRole('button', { name: /select custom token/i }));
     });
 
-    expect(await screen.findByText('Selected Custom Token')).toBeInTheDocument();
+    expect(await screen.findByTestId('selected-token-name')).toHaveTextContent('Wolf');
+    expect(screen.getByTestId('selected-token-type')).toHaveTextContent('Custom');
+    expect(screen.queryByText('Selected Custom Token')).not.toBeInTheDocument();
     expect(screen.getByText('Loading the current token values...')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /loading/i })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Current HP')).toBeDisabled();
@@ -5779,7 +5787,9 @@ describe('GrigliataPage', () => {
       fireEvent.click(screen.getByRole('button', { name: /select custom token/i }));
     });
 
-    expect(await screen.findByText('Selected Custom Token')).toBeInTheDocument();
+    expect(await screen.findByTestId('selected-token-name')).toHaveTextContent('Wolf');
+    expect(screen.getByTestId('selected-token-type')).toHaveTextContent('Custom');
+    expect(screen.queryByText('Selected Custom Token')).not.toBeInTheDocument();
     expect(screen.getByText(/missing one or more saved totals/i)).toBeInTheDocument();
     firestore.setDoc.mockClear();
 
@@ -6111,21 +6121,26 @@ describe('GrigliataPage', () => {
       fireEvent.click(screen.getByRole('button', { name: /select foe token/i }));
     });
 
-    expect(await screen.findByText('Selected Foe')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Test One')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Test One' })).toBeInTheDocument();
+    expect(screen.getByTestId('selected-foe-type')).toHaveTextContent('Foe');
+    expect(screen.queryByText('Selected Foe')).not.toBeInTheDocument();
+    expect(screen.queryByText('Instance')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Foe Name')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Dado Anima')).not.toBeInTheDocument();
+    expect(screen.getByTestId('selected-foe-anima')).toHaveAccessibleName('Anima d10');
     expect(screen.getByText('Claw')).toBeInTheDocument();
     expect(screen.getByText('Hex')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save foe/i })).not.toBeInTheDocument();
 
     mockBatchInstances.splice(0, mockBatchInstances.length);
 
-    fireEvent.change(screen.getByLabelText('Foe Name'), { target: { value: 'Test One Prime' } });
     fireEvent.change(screen.getByLabelText('Current HP'), { target: { value: '84' } });
     fireEvent.change(screen.getByLabelText('Current Mana'), { target: { value: '28' } });
-    fireEvent.change(screen.getByLabelText('Dado Anima'), { target: { value: 'd12' } });
+    fireEvent.change(screen.getByLabelText('Current Shield'), { target: { value: '6' } });
     fireEvent.change(screen.getByDisplayValue('Alpha foe'), { target: { value: 'Prime foe' } });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /save foe/i }));
+      fireEvent.blur(screen.getByDisplayValue('Prime foe'));
     });
 
     const batch = getLastCommittedBatch();
@@ -6133,16 +6148,16 @@ describe('GrigliataPage', () => {
     expect(batch.set).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'grigliata_tokens/foe-token-1' }),
       expect.objectContaining({
-        label: 'Test One Prime',
-        dadoAnima: 'd12',
+        label: 'Test One',
+        dadoAnima: 'd10',
         notes: 'Prime foe',
-        stats: expect.objectContaining({ hpCurrent: 84, hpTotal: 60, manaCurrent: 28, manaTotal: 20 }),
+        stats: expect.objectContaining({ hpCurrent: 84, hpTotal: 60, manaCurrent: 28, manaTotal: 20, shieldCurrent: 6 }),
       }),
       { merge: true }
     );
     expect(batch.set).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'grigliata_token_placements/map-1__foe-token-1' }),
-      expect.objectContaining({ label: 'Test One Prime' }),
+      expect.objectContaining({ label: 'Test One' }),
       { merge: true }
     );
   });

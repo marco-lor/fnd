@@ -108,6 +108,11 @@ const normalizeOptionalVisionRadiusSquares = (visionRadiusSquares) => {
     : undefined;
 };
 
+const normalizeResourceValue = (value, fallback = 0) => {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? Math.max(0, numericValue) : fallback;
+};
+
 export default function useGrigliataPageData({
   currentUserId = '',
   currentCharacterId = '',
@@ -1031,6 +1036,10 @@ export default function useGrigliataPageData({
   const customUserTokens = useMemo(
     () => customUserTokenProfiles.map((tokenProfile) => {
       const activePlacementCount = activeCustomPlacementCountsByTemplateId.get(tokenProfile.id) || 0;
+      const stats = tokenProfile?.stats || {};
+      const hpTotal = normalizeResourceValue(stats.hpTotal, normalizeResourceValue(stats.hpCurrent, 0));
+      const manaTotal = normalizeResourceValue(stats.manaTotal, normalizeResourceValue(stats.manaCurrent, 0));
+      const shieldTotal = normalizeResourceValue(stats.shieldTotal, normalizeResourceValue(stats.shieldCurrent, 0));
 
       return {
         id: tokenProfile.id,
@@ -1053,6 +1062,13 @@ export default function useGrigliataPageData({
         isDead: false,
         statuses: [],
         isHiddenByManager: false,
+        hpCurrent: normalizeResourceValue(stats.hpCurrent, hpTotal),
+        hpTotal,
+        manaCurrent: normalizeResourceValue(stats.manaCurrent, manaTotal),
+        manaTotal,
+        shieldCurrent: normalizeResourceValue(stats.shieldCurrent, shieldTotal),
+        shieldTotal,
+        hasShield: true,
         createdAt: tokenProfile.createdAt || null,
         updatedAt: tokenProfile.updatedAt || null,
       };
