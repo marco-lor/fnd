@@ -10,6 +10,7 @@ const scorecardPath = path.join(frontendRoot, 'performance', 'baselines', 'v1.md
 const budgetsPath = path.join(frontendRoot, 'performance', 'budgets.json');
 const scenariosPath = path.join(frontendRoot, 'performance', 'scenarios.json');
 const fixtureManifestPath = path.join(frontendRoot, 'performance', 'fixture-manifest.json');
+const authoritativeResultsDir = path.join(resultsDir, 'authoritative');
 const projectId = process.env.FND_PERF_PROJECT_ID || 'demo-fnd-perf';
 
 const resolvePortableJavaHome = () => {
@@ -50,6 +51,13 @@ const assertDemoProject = (candidate = projectId) => {
   return candidate;
 };
 
+const assertSchemaVersion = (value, label = 'performance document', supported = 1) => {
+  if (value?.schemaVersion !== supported) {
+    throw new Error(`${label} uses unsupported schemaVersion ${value?.schemaVersion ?? 'missing'}; expected ${supported}.`);
+  }
+  return value;
+};
+
 const percentile = (values, quantile) => {
   const sorted = [...values].filter(Number.isFinite).sort((left, right) => left - right);
   if (!sorted.length) return null;
@@ -61,6 +69,8 @@ const median = (values) => percentile(values, 0.5);
 
 module.exports = {
   assertDemoProject,
+  assertSchemaVersion,
+  authoritativeResultsDir,
   baselinePath,
   budgetsPath,
   ensureDirectory,

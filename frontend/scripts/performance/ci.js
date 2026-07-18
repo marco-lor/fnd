@@ -20,6 +20,7 @@ run(process.execPath, ['--test',
   path.join(__dirname, 'fixtures.test.js'),
   path.join(__dirname, 'compare.test.js'),
   path.join(__dirname, 'report.test.js'),
+  path.join(__dirname, 'repeatability.test.js'),
 ]);
 run(process.execPath, [path.join(__dirname, 'fixtures.js'), 'determinism']);
 run(process.execPath, [path.join(frontendRoot, 'scripts', 'build-production.js')]);

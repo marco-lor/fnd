@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { expect } = require('@playwright/test');
 const { resultsDir, writeJson } = require('../../../scripts/performance/common');
+const fixtureManifest = require('../../fixture-manifest.json');
 
 const AUTH_DIRECTORY = path.resolve(__dirname, '..', '..', '..', 'playwright', '.auth');
 const ACCOUNT = {
@@ -23,17 +24,24 @@ const storageStateForRole = (role) => {
 };
 
 const installBootstrap = async (context, scenario, iteration) => {
-  await context.addInitScript(({ scenarioId, role, runIteration }) => {
+  await context.addInitScript(({ scenarioId, role, runIteration, benchmarkRunId, fixtureVersion }) => {
     window.__FND_PERF_BOOTSTRAP__ = {
-      runId: `${scenarioId}-${runIteration}`,
+      runId: `${benchmarkRunId}:${scenarioId}-${runIteration}`,
       scenarioId,
       routeId: scenarioId,
       actorRole: role,
       release: 'task-01',
       browserProfile: 'desktop-1440x900-dpr1',
       connectionProfile: 'local-emulator',
+      fixtureVersion,
     };
-  }, { scenarioId: scenario.id, role: scenario.role, runIteration: iteration });
+  }, {
+    scenarioId: scenario.id,
+    role: scenario.role,
+    runIteration: iteration,
+    benchmarkRunId: process.env.FND_PERF_RUN_ID || 'local',
+    fixtureVersion: fixtureManifest.version,
+  });
 };
 
 const waitForBridge = async (page) => {

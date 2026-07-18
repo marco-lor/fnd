@@ -91,6 +91,11 @@ for (const scenario of scenarios) {
       expect(resourcesAfterCleanup).toBe(0);
 
       if (iteration > 0) writeScenarioResult(scenario, iteration, {
+        environment: {
+          projectName: testInfo.project.name,
+          browserName: testInfo.project.use.browserName || testInfo.project.name,
+          browserVersion: browser.version(),
+        },
         metrics: aggregateMetrics(capture, cleanup),
         eventCount: capture.snapshot.events.length,
         readiness: Object.fromEntries(['shell-visible', 'data-ready', 'interactive'].map((phase) => [phase, phases.has(phase)])),

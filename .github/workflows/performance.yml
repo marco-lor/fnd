@@ -119,12 +119,8 @@ jobs:
         with: { distribution: temurin, java-version: 21 }
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm run build:production
-      - run: npm run perf:verify-disabled
-      - run: npm run perf:build
-      - run: npm run perf:run
-        env: { FND_PERF_ITERATIONS: '3', FND_PERF_AUTHORITATIVE: '1' }
-      - run: npm run perf:compare
+      - run: npm run perf:authoritative
+        env: { FND_PERF_REFERENCE_MACHINE: 'github-hosted-runner' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

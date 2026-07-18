@@ -21,7 +21,7 @@ const countRouteResources = (resources, route) => Object.entries(resources || {}
   .filter(([key]) => !key.startsWith(`${route}::timeout`))
   .reduce((total, [, count]) => total + Number(count || 0), 0);
 
-test('grigliata five-peer placement convergence', async ({ browser, baseURL }) => {
+test('grigliata five-peer placement convergence', async ({ browser, baseURL }, testInfo) => {
   test.skip(process.env.FND_PERF_SKIP_MULTI === '1', 'Explicitly disabled for a reduced smoke run.');
   const contexts = [];
   const pages = [];
@@ -87,6 +87,11 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }) =
     expect(leakedRouteListeners).toBe(0);
     expect(leakedRouteResources).toBe(0);
     writeScenarioResult(scenario, 1, {
+      environment: {
+        projectName: testInfo.project.name,
+        browserName: testInfo.project.use.browserName || testInfo.project.name,
+        browserVersion: browser.version(),
+      },
       metrics: {
         'runtime.peerConvergenceMs': convergenceMs,
         'runtime.consoleErrors': pages.reduce((total, peer) => total + peer.failures.length, 0),

@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const childProcess = require('child_process');
 const {
   budgetsPath,
   fixtureManifestPath,
@@ -10,7 +11,21 @@ const {
   readJson,
   resultsDir,
   scenariosPath,
+  repoRoot,
 } = require('./common');
+
+const resolveGitCommit = () => {
+  if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA;
+  try {
+    return childProcess.execFileSync(
+      'git',
+      ['-c', `safe.directory=${repoRoot.replace(/\\/g, '/')}`, 'rev-parse', 'HEAD'],
+      { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+    ).trim();
+  } catch (_error) {
+    return 'unknown';
+  }
+};
 
 const readOptionalJson = (filePath) => (
   fs.existsSync(filePath) ? readJson(filePath) : null
@@ -58,6 +73,15 @@ const collectCurrentReport = () => {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     projectId,
+    commit: resolveGitCommit(),
+    run: {
+      id: process.env.FND_PERF_RUN_ID || browserReport?.environment?.runId || 'local',
+      authoritative: process.env.FND_PERF_AUTHORITATIVE === '1'
+        || browserReport?.environment?.authoritative === true,
+      retainedIterations: Number(
+        process.env.FND_PERF_ITERATIONS || browserReport?.environment?.retainedIterations || 1
+      ),
+    },
     environment: {
       platform: process.platform,
       architecture: process.arch,
@@ -80,4 +104,4 @@ const collectCurrentReport = () => {
   return report;
 };
 
-module.exports = { buildMetricMap, collectCurrentReport };
+module.exports = { buildMetricMap, collectCurrentReport, resolveGitCommit };

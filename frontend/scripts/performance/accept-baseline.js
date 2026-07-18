@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
+const path = require('path');
 const {
+  assertSchemaVersion,
   baselinePath,
+  readJson,
+  resultsDir,
   scorecardPath,
+  sha256,
   writeJson,
 } = require('./common');
-const { collectCurrentReport } = require('./report');
 const { evaluateBudget, evaluateStructuralGates, worstBudgetEvaluation } = require('./compare');
 
 if (!process.argv.includes('--accept')) {
@@ -14,7 +18,20 @@ if (!process.argv.includes('--accept')) {
   process.exit(1);
 }
 
-const report = collectCurrentReport();
+const repeatabilityPath = path.join(resultsDir, 'repeatability-report.json');
+const aggregatePath = path.join(resultsDir, 'authoritative-aggregate.json');
+if (!fs.existsSync(repeatabilityPath) || !fs.existsSync(aggregatePath)) {
+  console.error('Two compatible authoritative runs and a passing repeatability report are required.');
+  process.exit(1);
+}
+const repeatability = assertSchemaVersion(readJson(repeatabilityPath), 'repeatability report');
+const aggregateBytes = fs.readFileSync(aggregatePath);
+if (repeatability.status !== 'pass' || repeatability.aggregateSha256 !== sha256(aggregateBytes)) {
+  console.error('The authoritative aggregate is stale or its repeatability gate did not pass.');
+  process.exit(1);
+}
+const report = JSON.parse(aggregateBytes.toString('utf8'));
+assertSchemaVersion(report, 'authoritative aggregate');
 if (!report.build || !report.fixture || !report.browser) {
   console.error('A complete build, fixture, and browser report is required before accepting a baseline.');
   process.exit(1);
@@ -40,6 +57,12 @@ const lines = [
   `Generated: ${report.generatedAt}`,
   '',
   `Fixture hash: \`${report.fixture.hash}\``,
+  '',
+  '## Repeatability',
+  '',
+  `- Runs: ${repeatability.runIds.join(', ')}`,
+  `- Maximum allowed timing variance: ${repeatability.maximumVariancePercent}%`,
+  `- Maximum observed timing variance: ${repeatability.observedMaximumVariancePercent.toFixed(2)}%`,
   '',
   '## Scenario coverage',
   '',
@@ -67,6 +90,6 @@ const lines = [
   'This file is generated. Use `npm run perf:baseline -- --accept` to replace it.',
   '',
 ];
-fs.mkdirSync(require('path').dirname(scorecardPath), { recursive: true });
+fs.mkdirSync(path.dirname(scorecardPath), { recursive: true });
 fs.writeFileSync(scorecardPath, lines.join('\n'), 'utf8');
 console.log(`Accepted baseline: ${baselinePath}`);

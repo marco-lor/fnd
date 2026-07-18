@@ -16,6 +16,12 @@ module.exports = async () => {
     .filter((name) => name.endsWith('.json'))
     .sort()
     .map((name) => readJson(path.join(scenarioDirectory, name)));
+  const browsers = Array.from(new Map(scenarios
+    .filter((scenario) => scenario.environment?.browserName && scenario.environment?.browserVersion)
+    .map((scenario) => [
+      `${scenario.environment.browserName}:${scenario.environment.browserVersion}`,
+      scenario.environment,
+    ])).values());
 
   writeJson(path.join(resultsDir, 'browser-report.json'), {
     schemaVersion: 1,
@@ -28,6 +34,10 @@ module.exports = async () => {
       cpuCount: os.cpus().length,
       totalMemoryBytes: os.totalmem(),
       projectId: 'demo-fnd-perf',
+      runId: process.env.FND_PERF_RUN_ID || 'local',
+      authoritative: process.env.FND_PERF_AUTHORITATIVE === '1',
+      retainedIterations: Number(process.env.FND_PERF_ITERATIONS || 1),
+      browsers,
     },
     scenarios,
   });

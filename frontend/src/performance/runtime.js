@@ -9,6 +9,7 @@ const SAFE_METADATA_KEYS = new Set([
   'browserProfile',
   'connectionProfile',
   'scenarioId',
+  'fixtureVersion',
 ]);
 
 let events = [];
