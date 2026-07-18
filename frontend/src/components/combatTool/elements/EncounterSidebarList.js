@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { db } from "../../firebaseConfig";
 import { useAuth } from "../../../AuthContext";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { collection, onSnapshot, query, where } from "../../../performance/firestore";
 import { Section } from "./ui";
 
 const EncounterSidebarList = ({ isDM, onSelect, selectedId, actions }) => {

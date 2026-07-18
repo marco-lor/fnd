@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import Konva from 'konva/lib/index';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { installKonvaInstrumentation } from '../../performance/runtime';
 import {
   Circle,
   Group,
@@ -108,6 +110,8 @@ import {
   buildInitialNarrationPlacement,
   buildNarrationPlacementBounds,
 } from './narrationScene';
+
+installKonvaInstrumentation(Konva);
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
 const RULER_LABEL_MIN_WIDTH = 90;

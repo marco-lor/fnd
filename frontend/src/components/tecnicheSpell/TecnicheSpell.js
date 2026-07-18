@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useAuth } from "../../AuthContext";
-import { doc, onSnapshot, getDoc } from "firebase/firestore";
+import { doc, onSnapshot, getDoc } from "../../performance/firestore";
 import { db } from "../firebaseConfig";
 import TecnicheSide from "./elements/tecniche_side";
 import SpellSide from "./elements/spell_side";

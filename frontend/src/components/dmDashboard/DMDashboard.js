@@ -1,7 +1,7 @@
 // file: ./frontend/src/components/dmDashboard/DMDashboard.js
 import React, { useState, useEffect } from "react";
 import { db, app } from "../firebaseConfig";
-import { collection, doc, updateDoc, increment, onSnapshot } from "firebase/firestore";
+import { collection, doc, updateDoc, increment, onSnapshot } from "../../performance/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { useAuth } from "../../AuthContext";
 import { useNavigate } from "react-router-dom";

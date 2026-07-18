@@ -4,7 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { db, storage } from '../../../firebaseConfig';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from '../../../../performance/firestore';
 import { ref, deleteObject } from 'firebase/storage';
 
 /**

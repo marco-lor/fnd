@@ -1,7 +1,7 @@
 // file: ./frontend/src/components/bazaar/Bazaar.js
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { collection, onSnapshot, query, where, or, and, doc, getDoc } from "firebase/firestore";
+import { collection, onSnapshot, query, where, or, and, doc, getDoc } from "../../performance/firestore";
 import { db } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
 import { AddWeaponOverlay } from './elements/addWeapon';

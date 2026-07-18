@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "budgets": [
+    {
+      "id": "entry-javascript-regression",
+      "scenario": "build",
+      "metric": "javascript.entry.gzipBytes",
+      "severity": "blocking",
+      "comparison": "relative-to-baseline",
+      "maximum": null,
+      "tolerance": {
+        "percent": 10,
+        "absoluteBytes": 30720
+      },
+      "ownerTask": "01"
+    },
+    {
+      "id": "login-entry-target",
+      "scenario": "login-cold",
+      "metric": "resource.javascript.gzipBytes",
+      "severity": "target",
+      "comparison": "absolute",
+      "maximum": 256000,
+      "tolerance": null,
+      "ownerTask": "03"
+    },
+    {
+      "id": "no-console-errors",
+      "scenario": "all",
+      "metric": "runtime.consoleErrors",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "01"
+    },
+    {
+      "id": "no-unhandled-errors",
+      "scenario": "all",
+      "metric": "runtime.unhandledErrors",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "01"
+    },
+    {
+      "id": "no-failed-requests",
+      "scenario": "all",
+      "metric": "runtime.failedRequests",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "01"
+    },
+    {
+      "id": "no-route-listener-leaks",
+      "scenario": "all",
+      "metric": "firestore.activeListenersAfterCleanup",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "01"
+    },
+    {
+      "id": "no-route-resource-leaks",
+      "scenario": "all",
+      "metric": "runtime.activeResourcesAfterCleanup",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "01"
+    },
+    {
+      "id": "route-javascript-transfer-regression",
+      "scenario": "all",
+      "metric": "resource.javascript.gzipBytes",
+      "severity": "blocking",
+      "comparison": "relative-to-baseline",
+      "maximum": null,
+      "tolerance": { "percent": 10, "absoluteBytes": 30720 },
+      "ownerTask": "01"
+    },
+    {
+      "id": "initial-collection-view-bounded-target",
+      "scenario": "all",
+      "metric": "firestore.documentsDelivered",
+      "severity": "target",
+      "comparison": "absolute",
+      "maximum": 500,
+      "tolerance": null,
+      "ownerTask": "04"
+    },
+    {
+      "id": "no-sync-network-target",
+      "scenario": "login-cold",
+      "metric": "runtime.synchronousNetworkCalls",
+      "severity": "target",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "02"
+    },
+    {
+      "id": "lcp-target",
+      "scenario": "all",
+      "metric": "web-vital.LCP",
+      "severity": "target",
+      "comparison": "absolute",
+      "maximum": 2500,
+      "tolerance": null,
+      "ownerTask": "22"
+    },
+    {
+      "id": "inp-target",
+      "scenario": "all",
+      "metric": "web-vital.INP",
+      "severity": "target",
+      "comparison": "absolute",
+      "maximum": 200,
+      "tolerance": null,
+      "ownerTask": "22"
+    },
+    {
+      "id": "cls-target",
+      "scenario": "all",
+      "metric": "web-vital.CLS",
+      "severity": "target",
+      "comparison": "absolute",
+      "maximum": 0.1,
+      "tolerance": null,
+      "ownerTask": "22"
+    },
+    {
+      "id": "grigliata-long-task-target",
+      "scenario": "grigliata-player",
+      "metric": "runtime.maxLongTaskMs",
+      "severity": "target",
+      "comparison": "absolute",
+      "maximum": 50,
+      "tolerance": null,
+      "ownerTask": "17"
+    }
+  ]
+}

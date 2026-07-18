@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, fetchSignInMethodsForEmail } from "firebase/auth";
 import { auth, db } from "./firebaseConfig";
 import { useNavigate } from "react-router-dom";
-import { setDoc, doc, getDoc } from "firebase/firestore";
+import { setDoc, doc, getDoc } from "../performance/firestore";
 import AuroraBackground from "./backgrounds/AuroraBackground";
 import "./LoginAnimations.css"; // Added import
 import LoginCreateButton from "./LoginCreateButton";

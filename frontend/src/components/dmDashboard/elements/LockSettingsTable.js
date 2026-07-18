@@ -1,7 +1,7 @@
 // frontend/src/components/dmDashboard/elements/LockSettingsTable.js
 import React, { useEffect, useState } from 'react';
 import { db } from '../../firebaseConfig';
-import { doc, updateDoc, writeBatch } from 'firebase/firestore';
+import { doc, updateDoc, writeBatch } from '../../../performance/firestore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faLock, faLockOpen } from '@fortawesome/free-solid-svg-icons';
 

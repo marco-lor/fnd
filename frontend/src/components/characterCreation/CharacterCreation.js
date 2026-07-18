@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { db, storage } from "../firebaseConfig"; 
 import { ref } from "firebase/storage";
-import { doc, getDoc, updateDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc, setDoc } from "../../performance/firestore";
 import { useAuth } from "../../AuthContext";
 import GlobalAuroraBackground from "../backgrounds/GlobalAuroraBackground";
 import { uploadCacheableImage } from "../common/imageStorage";

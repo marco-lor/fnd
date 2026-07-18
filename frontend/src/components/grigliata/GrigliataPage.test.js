@@ -878,6 +878,17 @@ jest.mock('./GrigliataBoard', () => {
 
 const BackgroundGalleryPanelMock = jest.requireMock('./BackgroundGalleryPanel');
 
+const clickAndFlush = async (element) => {
+  await act(async () => {
+    fireEvent.click(element);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+};
+
+const openDiceSidebar = () => clickAndFlush(screen.getByRole('tab', { name: /dice/i }));
+
 describe('GrigliataPage', () => {
   let firestore;
 
@@ -5303,6 +5314,7 @@ describe('GrigliataPage', () => {
   });
 
   test('reports a token layering persistence failure', async () => {
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     setManagerAuth();
     setCollectionData('grigliata_token_placements', [
       {
@@ -5335,6 +5347,11 @@ describe('GrigliataPage', () => {
 
     expect(await screen.findByText('Unable to update that token layer right now.')).toBeInTheDocument();
     expect(screen.getByTestId('board-token-layer-pending')).toHaveTextContent('false');
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'Failed to update token layering:',
+      expect.objectContaining({ message: 'write failed' })
+    );
+    consoleErrorSpy.mockRestore();
   });
 
   test('creates a custom token from the token tab and uploads its image', async () => {
@@ -6543,7 +6560,7 @@ describe('GrigliataPage', () => {
     });
 
     render(<GrigliataPage />);
-    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
+    await openDiceSidebar();
 
     const attackRollButton = await screen.findByRole('button', { name: /roll attacco/i });
     await waitFor(() => {
@@ -6713,7 +6730,7 @@ describe('GrigliataPage', () => {
     });
 
     render(<GrigliataPage />);
-    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
+    await openDiceSidebar();
 
     const parameterGrid = await screen.findByTestId('grigliata-dice-parameter-grid');
     expect(parameterGrid).toHaveClass('md:grid-cols-2');
@@ -6729,7 +6746,7 @@ describe('GrigliataPage', () => {
 
   test('rolls normal dice with the selected dice count and modifier', async () => {
     render(<GrigliataPage />);
-    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
+    await openDiceSidebar();
 
     fireEvent.change(screen.getByLabelText(/dice count/i), { target: { value: '3' } });
     fireEvent.change(screen.getByLabelText(/dice modifier/i), { target: { value: '-2' } });
@@ -6755,7 +6772,7 @@ describe('GrigliataPage', () => {
     }]);
 
     render(<GrigliataPage />);
-    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
+    await openDiceSidebar();
 
     const history = await screen.findByTestId('grigliata-current-dice-history');
     expect(history.closest('[role="tabpanel"]')).toHaveClass('xl:h-full', 'xl:min-h-0');
@@ -6772,7 +6789,7 @@ describe('GrigliataPage', () => {
     setManagerAuth();
 
     render(<GrigliataPage />);
-    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
+    await openDiceSidebar();
 
     const panel = await screen.findByTestId('grigliata-dice-panel');
     const parameterGrid = screen.getByTestId('grigliata-dice-parameter-grid');
@@ -6818,7 +6835,7 @@ describe('GrigliataPage', () => {
     }]);
 
     render(<GrigliataPage />);
-    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
+    await openDiceSidebar();
 
     const dmLogsButton = await screen.findByRole('button', { name: /dm dice logs/i });
     expect(dmLogsButton).toHaveAttribute('aria-haspopup', 'dialog');
@@ -6827,7 +6844,7 @@ describe('GrigliataPage', () => {
     expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'users')).toBe(true);
     expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'users/user-2/diceRolls')).toBe(false);
 
-    fireEvent.click(dmLogsButton);
+    await clickAndFlush(dmLogsButton);
 
     const dialog = await screen.findByRole('dialog', { name: /dm dice roll logs/i });
     expect(dialog).toBeInTheDocument();
@@ -6911,14 +6928,14 @@ describe('GrigliataPage', () => {
     });
 
     render(<GrigliataPage />);
-    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /dm dice logs/i }));
+    await openDiceSidebar();
+    await clickAndFlush(await screen.findByRole('button', { name: /dm dice logs/i }));
     const dialog = await screen.findByRole('dialog', { name: /dm dice roll logs/i });
 
     await waitFor(() => expect(within(dialog).getByText('Attacco (d8 + 5)')).toBeInTheDocument());
     expect(within(dialog).queryByText('Normal dice (1d4)')).not.toBeInTheDocument();
 
-    fireEvent.click(within(dialog).getByRole('button', { name: /load more/i }));
+    await clickAndFlush(within(dialog).getByRole('button', { name: /load more/i }));
 
     await waitFor(() => expect(within(dialog).getByText('Normal dice (1d4)')).toBeInTheDocument());
     expect(firestore.getDocs.mock.calls.filter(([target]) => target?.base?.path === 'users/user-2/diceRolls')).toHaveLength(2);
@@ -6973,8 +6990,8 @@ describe('GrigliataPage', () => {
     });
 
     render(<GrigliataPage />);
-    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /dm dice logs/i }));
+    await openDiceSidebar();
+    await clickAndFlush(await screen.findByRole('button', { name: /dm dice logs/i }));
     const dialog = await screen.findByRole('dialog', { name: /dm dice roll logs/i });
 
     await waitFor(() => expect(within(dialog).getByText('DM setup (1d20)')).toBeInTheDocument());
@@ -7007,7 +7024,7 @@ describe('GrigliataPage', () => {
 
   test('does not show DM dice roll logs or subscribe to all users for players', async () => {
     render(<GrigliataPage />);
-    fireEvent.click(screen.getByRole('tab', { name: /dice/i }));
+    await openDiceSidebar();
 
     expect(screen.queryByRole('button', { name: /dm dice logs/i })).not.toBeInTheDocument();
     expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'users')).toBe(false);
@@ -8596,7 +8613,10 @@ describe('GrigliataPage', () => {
       jest.advanceTimersByTime(GRIGLIATA_LIVE_INTERACTION_THROTTLE_MS);
     });
 
-    expect(firestore.setDoc).not.toHaveBeenCalled();
+    expect(firestore.setDoc.mock.calls.every(([, payload]) => (
+      payload?.legacyTokenPlacementCleanupCompletedAt
+      || payload?.legacyPlacementDeadStateCleanupCompletedAt
+    ))).toBe(true);
     expect(firestore.updateDoc).not.toHaveBeenCalled();
     expect(getCommittedBatches()).toHaveLength(0);
   });

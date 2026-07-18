@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { collection, getDocs, limit, onSnapshot, orderBy, query, startAfter } from 'firebase/firestore';
+import { collection, getDocs, limit, onSnapshot, orderBy, query, startAfter } from '../../performance/firestore';
 import { FaDiceD20, FaTimes } from 'react-icons/fa';
 import DiceRoller from '../common/DiceRoller';
 import { getParamDisplayName } from '../common/paramMetadata';

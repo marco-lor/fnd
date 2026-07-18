@@ -3,3 +3,9 @@
 // expect(element).toHaveTextContent(/react/i)
 // learn more: https://github.com/testing-library/jest-dom
 import '@testing-library/jest-dom';
+
+Object.defineProperties(window.HTMLMediaElement.prototype, {
+  play: { configurable: true, value: jest.fn().mockResolvedValue(undefined) },
+  pause: { configurable: true, value: jest.fn() },
+  load: { configurable: true, value: jest.fn() },
+});

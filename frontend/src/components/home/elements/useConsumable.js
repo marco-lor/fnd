@@ -2,7 +2,7 @@
 // Handles: determining dice count based on player level thresholds (1,4,7,10), rolling dice via overlay,
 // applying Bonus Creazione multiplier, updating HP or Mana, decrementing inventory quantity, and clearing slot if empty.
 
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from '../../../performance/firestore';
 import { db } from '../../firebaseConfig';
 import React from 'react';
 import { createRoot } from 'react-dom/client';

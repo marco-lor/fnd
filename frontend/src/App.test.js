@@ -12,6 +12,7 @@ jest.mock('react-router-dom', () => ({
   ),
   Navigate: ({ to }) => <div data-testid={`navigate-${to.replace(/[^a-z0-9]+/gi, '-')}`} />,
   Outlet: () => <div data-testid="route-outlet" />,
+  useLocation: () => ({ pathname: '/' }),
 }), { virtual: true });
 
 jest.mock('./AuthContext', () => ({

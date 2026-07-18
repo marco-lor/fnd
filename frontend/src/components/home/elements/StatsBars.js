@@ -1,7 +1,7 @@
 // file: ./frontend/src/components/home/elements/StatsBars.js
 import React, { useEffect, useState, useRef, useContext } from 'react';
 import { createPortal } from 'react-dom';
-import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc } from '../../../performance/firestore';
 import { db } from '../../firebaseConfig';
 import { AuthContext } from '../../../AuthContext';
 import { FaAngleRight, FaAngleLeft, FaAnglesRight, FaAnglesLeft, FaDroplet } from 'react-icons/fa6';
@@ -22,6 +22,12 @@ const StatsBars = () => {
   const manaIntervalRef = useRef(null);
   const essenzaIntervalRef = useRef(null);
   const barrieraIntervalRef = useRef(null);
+  useEffect(() => () => {
+    [hpIntervalRef, manaIntervalRef, essenzaIntervalRef, barrieraIntervalRef].forEach((intervalRef) => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    });
+  }, []);
   // Activation overlay state for Barriera
   const [showBarrieraActivate, setShowBarrieraActivate] = useState(false);
   const [barrieraActivateValue, setBarrieraActivateValue] = useState('');

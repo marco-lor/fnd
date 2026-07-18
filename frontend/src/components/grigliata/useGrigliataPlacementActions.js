@@ -6,7 +6,7 @@ import {
   serverTimestamp,
   setDoc,
   writeBatch,
-} from 'firebase/firestore';
+} from '../../performance/firestore';
 import { db } from '../firebaseConfig';
 import {
   buildPlacementDocId,

@@ -1,7 +1,7 @@
 // file: ./frontend/src/components/bazaar/elements/comparisonComponent.js
 import React, { useContext, useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';               // kept for possible outer animations
-import { deleteDoc, doc, onSnapshot, getDoc } from 'firebase/firestore';
+import { deleteDoc, doc, onSnapshot, getDoc } from '../../../performance/firestore';
 import { ref, deleteObject } from 'firebase/storage';
 import { db, storage } from '../../firebaseConfig';
 import { computeValue } from '../../common/computeFormula';

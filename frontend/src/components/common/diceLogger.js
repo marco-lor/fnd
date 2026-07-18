@@ -1,7 +1,7 @@
 // Utility to log dice rolls for a user, keeping only the latest 20 entries.
 // Each entry schema:
 // { total: number, meta: { rolls, modifier, faces, count, description }, createdAt: serverTimestamp() }
-import { collection, addDoc, query, orderBy, limit, getDocs, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, query, orderBy, limit, getDocs, deleteDoc, serverTimestamp } from '../../performance/firestore';
 import { db } from '../firebaseConfig';
 
 /**

@@ -16,7 +16,7 @@ import {
 import { FiBookOpen, FiCompass, FiLogOut, FiMenu, FiSettings, FiShield, FiShoppingBag, FiX } from 'react-icons/fi';
 import { GoSidebarCollapse, GoSidebarExpand } from 'react-icons/go';
 import { ref as storageRef, deleteObject } from 'firebase/storage';
-import { deleteDoc, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { deleteDoc, doc, getDoc, updateDoc } from '../../performance/firestore';
 import { useShellLayout } from './shellLayout';
 import { GRIGLIATA_PAGE_PRESENCE_COLLECTION } from '../grigliata/presence';
 import { uploadCacheableImage } from './imageStorage';

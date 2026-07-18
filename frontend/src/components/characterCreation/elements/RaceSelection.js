@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc } from "../../../performance/firestore";
 import { db } from "../../../components/firebaseConfig"; // Update path if needed
 
 function RaceSelection({ user, onRaceSelect, selectedRace }) {

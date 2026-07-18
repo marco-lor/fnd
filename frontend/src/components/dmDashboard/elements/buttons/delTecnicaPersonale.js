@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { db } from '../../../firebaseConfig';
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc } from "../../../../performance/firestore";
 import { deleteTecnicaForUser } from '../../../common/userOwnedMedia';
 
 export function DelTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose }) {

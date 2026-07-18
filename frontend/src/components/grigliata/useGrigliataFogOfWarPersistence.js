@@ -4,7 +4,7 @@ import {
   getDoc,
   serverTimestamp,
   setDoc,
-} from 'firebase/firestore';
+} from '../../performance/firestore';
 import { db } from '../firebaseConfig';
 import {
   getTokenPositionPx,

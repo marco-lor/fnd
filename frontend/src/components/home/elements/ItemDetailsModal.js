@@ -5,7 +5,7 @@ import { useAuth } from '../../../AuthContext';
 import { computeValue } from '../../common/computeFormula';
 import { db, storage } from '../../firebaseConfig';
 import { ref as storageRef, deleteObject } from 'firebase/storage';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from '../../../performance/firestore';
 import { FiTrash2 } from 'react-icons/fi';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
 

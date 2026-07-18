@@ -12,7 +12,7 @@ import {
     getDocs,
     addDoc,
     runTransaction,
-} from "firebase/firestore";
+} from "../../../performance/firestore";
 import DiceRoller from "../../common/DiceRoller";
 import { Button } from "./ui";
 import { advanceTurn as advanceTurnUtil } from "./buttons/advanceTurn";
@@ -42,7 +42,7 @@ const EncounterDetails = ({ encounter, isDM }) => {
     useEffect(() => {
         (async () => {
             try {
-                const snap = await import("firebase/firestore").then(({ doc, getDoc }) =>
+                const snap = await import("../../../performance/firestore").then(({ doc, getDoc }) =>
                     getDoc(doc(db, "utils", "varie"))
                 );
                 if (snap.exists()) setDadiAnimaByLevel(snap.data().dadiAnimaByLevel || []);

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { db } from '../../../firebaseConfig';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from '../../../../performance/firestore';
 
 export function EditConoscenzaPersonaleOverlay({ userId, conoscenzaName, onClose }) {
   const [livello, setLivello] = useState('Base');

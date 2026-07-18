@@ -2,12 +2,14 @@
 import { initializeApp } from "firebase/app";
 import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 // import { getAnalytics } from "firebase/analytics";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
-import { getFunctions } from "firebase/functions";
-import { getStorage } from "firebase/storage";
+import { connectAuthEmulator, getAuth } from "firebase/auth";
+import { connectFirestoreEmulator, getFirestore } from "../performance/firestore";
+import { connectFunctionsEmulator, getFunctions } from "firebase/functions";
+import { connectStorageEmulator, getStorage } from "firebase/storage";
 
 const firebaseConfigEndpoint = "/fatins-runtime/firebase-client";
+const performanceMode = process.env.REACT_APP_FND_PERF === "1";
+const performanceProjectId = process.env.REACT_APP_FND_PERF_PROJECT_ID || "demo-fnd-perf";
 const requiredConfigKeys = [
   "apiKey",
   "authDomain",
@@ -39,6 +41,18 @@ const validateFirebaseConfig = (config) => {
 };
 
 const loadFirebaseConfig = () => {
+  if (performanceMode) {
+    if (!performanceProjectId.startsWith("demo-")) {
+      throw new Error(`Performance mode requires a demo Firebase project, received: ${performanceProjectId}`);
+    }
+    return {
+      ...testFirebaseConfig,
+      authDomain: `${performanceProjectId}.firebaseapp.com`,
+      projectId: performanceProjectId,
+      storageBucket: `${performanceProjectId}.appspot.com`,
+    };
+  }
+
   if (process.env.NODE_ENV === "test") {
     return testFirebaseConfig;
   }
@@ -78,6 +92,13 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app); // Initialize Storage
 const functions = getFunctions(app, 'europe-west1');
+
+if (performanceMode) {
+  connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+  connectFirestoreEmulator(db, "127.0.0.1", 8080);
+  connectStorageEmulator(storage, "127.0.0.1", 9199);
+  connectFunctionsEmulator(functions, "127.0.0.1", 5001);
+}
 
 // Export Firebase services
 export { auth, db, storage, app, functions };

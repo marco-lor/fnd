@@ -1,7 +1,7 @@
 // file ./frontend/src/AuthContext.js
 import React, { createContext, useState, useEffect, useContext, useRef } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { onSnapshot, doc } from 'firebase/firestore';
+import { onSnapshot, doc, labelFirestoreTarget } from './performance/firestore';
 import { auth, db } from './components/firebaseConfig';
 
 export const AuthContext = createContext();
@@ -47,7 +47,7 @@ export const AuthProvider = ({ children }) => {
 
       if (currentUser) {
         // Set up real-time listener for user data
-        const userRef = doc(db, "users", currentUser.uid);
+        const userRef = labelFirestoreTarget(doc(db, "users", currentUser.uid), 'authenticated-user-profile', 'shell');
         userSnapshotUnsubscribe.current = onSnapshot(
           userRef,
           (docSnap) => {

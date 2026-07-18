@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import NpcSidebar from './NpcSidebar';
-import { onSnapshot } from 'firebase/firestore';
+import { onSnapshot } from '../../performance/firestore';
 
 jest.mock('../firebaseConfig', () => ({
   db: {},
   storage: {},
 }));
 
-jest.mock('firebase/firestore', () => ({
+jest.mock('../../performance/firestore', () => ({
   addDoc: jest.fn(() => Promise.resolve()),
   collection: jest.fn((db, ...segments) => ({ path: segments.join('/') })),
   deleteDoc: jest.fn(() => Promise.resolve()),

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import PerformanceProfiler from '../../performance/PerformanceProfiler';
 import { FaDiceD20 } from 'react-icons/fa';
 import { FiImage, FiMap, FiMusic, FiSun } from 'react-icons/fi';
 import { GiCrackedHelm } from 'react-icons/gi';
@@ -24,7 +25,7 @@ import {
   updateDoc,
   where,
   writeBatch,
-} from 'firebase/firestore';
+} from '../../performance/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
 import { useAuth } from '../../AuthContext';
@@ -6292,7 +6293,8 @@ export default function GrigliataPage() {
         <div className="grid flex-1 min-h-0 gap-3 xl:grid-cols-[minmax(0,1fr)_22rem]">
           <div className={`min-w-0 xl:min-h-0 ${isTrayDragging ? 'rounded-3xl ring-2 ring-amber-400/20' : ''}`}>
             <div className="h-full min-h-[480px] xl:min-h-0">
-              <GrigliataBoard
+              <PerformanceProfiler id="grigliata-board">
+                <GrigliataBoard
                 key={activeBackgroundId || '__grid__'}
                 activeBackground={displayBackground}
                 combatBackgroundName={combatBackground?.name || ''}
@@ -6422,7 +6424,8 @@ export default function GrigliataPage() {
                 narrationPlacements={presentationPlacements}
                 narrationBackgrounds={presentationBackgrounds}
                 onMoveNarrationPlacement={isManager ? handleMoveNarrationPlacement : null}
-              />
+                />
+              </PerformanceProfiler>
             </div>
           </div>
 

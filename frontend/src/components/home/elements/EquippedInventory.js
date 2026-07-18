@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useContext } from 'react';
 import { AuthContext } from '../../../AuthContext';
-import { doc, onSnapshot, updateDoc, increment } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, increment } from '../../../performance/firestore';
 import { db } from '../../firebaseConfig';
 import { FaTimes } from 'react-icons/fa';
 import { GiChestArmor, GiBroadsword, GiShield, GiRing, GiCrackedHelm, GiBlackBelt, GiSteeltoeBoots, GiScabbard, GiPotionBall, GiDrinkMe } from 'react-icons/gi';

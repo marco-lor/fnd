@@ -1,6 +1,6 @@
 // file: ./frontend/src/components/echiDiViaggio/EchiDiViaggio.js
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot } from '../../performance/firestore';
 import { useAuth } from '../../AuthContext';
 import mappaArt from '../../assets/images/maps/mappa_art.png';
 import mappaPrecisa from '../../assets/images/maps/mappa_precisa.png';

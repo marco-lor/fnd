@@ -2,11 +2,11 @@
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import { db } from '../../firebaseConfig';
-import { doc, updateDoc, FieldValue } from 'firebase/firestore'; // Import FieldValue
+import { doc, updateDoc, FieldValue } from '../../../performance/firestore'; // Import FieldValue
 import { FaTrashAlt, FaSpinner, FaCheckCircle, FaTimesCircle, FaExclamationTriangle } from 'react-icons/fa';
 
 // Need FieldValue to delete a map key
-import { deleteField } from 'firebase/firestore'; // Correct import for v9+
+import { deleteField } from '../../../performance/firestore'; // Correct import for v9+
 
 function DeleteItemButton({ categoryKey, itemKey }) {
   const [isOverlayVisible, setIsOverlayVisible] = useState(false);

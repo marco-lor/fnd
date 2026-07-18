@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { GiSpellBook, GiMagicSwirl } from "react-icons/gi";
 import { FaPen } from "react-icons/fa";
-import { doc, updateDoc, getFirestore, getDoc } from "firebase/firestore";
+import { doc, updateDoc, getFirestore, getDoc } from "../../../performance/firestore";
 
 // Cache for dadi anima data to prevent repeated fetches
 const dadiAnimaCache = {

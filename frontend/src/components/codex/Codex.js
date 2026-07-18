@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import CodexBackground from '../backgrounds/CodexBackground';
 import { useAuth } from '../../AuthContext';
 import { db } from '../firebaseConfig';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot } from '../../performance/firestore';
 
 // Import the button components
 import AggiungiButton from './buttons/AggiungiButton';

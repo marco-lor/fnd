@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc } from "../../../../../performance/firestore";
 import { ref as storageRef, deleteObject } from "firebase/storage";
 
 import { db, storage } from "../../../../firebaseConfig";

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   doc,
   onSnapshot,
-} from 'firebase/firestore';
+} from '../../performance/firestore';
 import { db } from '../firebaseConfig';
 import {
   GRIGLIATA_WALL_STATE_COLLECTION,

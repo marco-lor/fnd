@@ -15,7 +15,17 @@ import EchiDiViaggio from "./components/echiDiViaggio/EchiDiViaggio"; // Import 
 import GrigliataPage from "./components/grigliata/GrigliataPage";
 import Layout from "./components/common/Layout"; // Import our new Layout component
 import { AuthProvider, useAuth } from "./AuthContext";
+import PerformanceProfiler from "./performance/PerformanceProfiler";
+import RoutePerformanceObserver from "./performance/RoutePerformanceObserver";
 import "./App.css";
+
+const performanceMode = process.env.REACT_APP_FND_PERF === "1";
+
+const PerformanceCleanupRoute = () => (
+  performanceMode
+    ? <main aria-label="Performance cleanup route" />
+    : <Navigate to="/home" />
+);
 
 // Protected route component for authenticated users that applies the Layout
 const AuthenticatedRoute = () => {
@@ -56,6 +66,7 @@ function AppRoutes() {
       {/* Public routes */}
       <Route path="/" element={<Login />} />
       <Route path="/character-creation" element={<CharacterCreation />} />
+      <Route path="/__fnd_perf_cleanup__" element={<PerformanceCleanupRoute />} />
       
       {/* Authenticated routes with shared Layout */}
       <Route element={<AuthenticatedRoute />}>
@@ -101,7 +112,10 @@ function AppRoutes() {
 function App() {
   return (
     <AuthProvider>
-      <AppRoutes />
+      <RoutePerformanceObserver />
+      <PerformanceProfiler id="route">
+        <AppRoutes />
+      </PerformanceProfiler>
     </AuthProvider>
   );
 }

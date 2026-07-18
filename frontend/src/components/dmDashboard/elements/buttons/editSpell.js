@@ -5,7 +5,7 @@ import { db } from "../../../firebaseConfig";
 import { saveSpellForUser } from "../../../common/userOwnedMedia";
 import {
   doc, getDoc,
-} from "firebase/firestore";
+} from "../../../../performance/firestore";
 
 /**
  * EditSpellOverlay – API unchanged for callers.

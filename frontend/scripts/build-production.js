@@ -81,6 +81,7 @@ if (!verifyOnly) {
       env: {
         ...process.env,
         GENERATE_SOURCEMAP: "false",
+        REACT_APP_FND_PERF: "0",
       },
       stdio: "inherit",
     }

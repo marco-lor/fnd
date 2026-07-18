@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { GiCrossedSwords, GiMinotaur } from "react-icons/gi";
 import { FaPen } from "react-icons/fa";
-import { doc, updateDoc, getFirestore } from "firebase/firestore";
+import { doc, updateDoc, getFirestore } from "../../../performance/firestore";
 
 // Cache dismissal timeouts to prevent flickering
 const timeoutCache = new Map();

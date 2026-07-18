@@ -16,7 +16,7 @@ import {
   where,
   writeBatch,
   updateDoc
-} from 'firebase/firestore';
+} from '../../performance/firestore';
 import { ref as storageRef, deleteObject } from 'firebase/storage';
 import { uploadCacheableImage } from '../common/imageStorage';
 

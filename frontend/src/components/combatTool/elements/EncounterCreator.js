@@ -8,7 +8,7 @@ import {
     where,
     writeBatch,
     doc,
-} from "firebase/firestore";
+} from "../../../performance/firestore";
 import { Button, Section, TextInput, Chip } from "./ui";
 
 const normalize = (s) => (s || "").trim().toLowerCase();

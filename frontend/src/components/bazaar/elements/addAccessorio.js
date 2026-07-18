@@ -1,7 +1,7 @@
 // addAccessorio.js
 import React, { useState, useEffect, useCallback, useRef, useContext } from 'react';
 import VisibilitySelector from '../../common/VisibilitySelector';
-import { collection, doc, addDoc, updateDoc, getDocs, onSnapshot, getDoc, setDoc } from "firebase/firestore";
+import { collection, doc, addDoc, updateDoc, getDocs, onSnapshot, getDoc, setDoc } from "../../../performance/firestore";
 import { getStorage, ref, uploadBytesResumable, getDownloadURL, uploadBytes, deleteObject } from "firebase/storage";
 import { uploadCacheableImage } from "../../common/imageStorage";
 import { db, storage } from '../../firebaseConfig';

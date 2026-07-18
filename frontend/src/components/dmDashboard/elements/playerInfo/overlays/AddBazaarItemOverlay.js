@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { doc, getDoc, runTransaction } from 'firebase/firestore';
+import { doc, getDoc, runTransaction } from '../../../../../performance/firestore';
 import { db } from '../../../../firebaseConfig';
 
 /*

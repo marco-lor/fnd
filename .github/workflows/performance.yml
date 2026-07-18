@@ -1,0 +1,136 @@
+name: Performance and deterministic integration
+
+on:
+  pull_request:
+  push:
+    branches: [main, devs]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * 2'
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  frontend-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+      - run: npm run perf:test
+      - run: npm run perf:check-firestore-imports
+      - run: npm test -- --watch=false --runInBand --watchman=false
+        env: { CI: 'true' }
+
+  functions-checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/functions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/functions/package-lock.json }
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+
+  emulator-rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - run: npm ci
+      - run: npx firebase emulators:exec --project demo-fnd-perf --only auth,firestore,storage "node scripts/performance/rules-exec.js"
+
+  hardened-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+      - run: npm run build:production
+      - run: npm run perf:verify-disabled
+      - run: npm run perf:build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hardened-build-reports
+          path: frontend/performance-results/*.json
+
+  chromium-route-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build:production
+      - run: npm run perf:verify-disabled
+      - run: npm run perf:build
+      - run: npm run perf:run
+      - run: npm run perf:compare
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chromium-performance-smoke
+          path: |
+            frontend/performance-results/
+            frontend/test-results/performance/
+            frontend/playwright-report/performance/
+
+  cross-browser-readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - run: npm ci
+      - run: npx playwright install --with-deps firefox webkit
+      - run: npm run perf:build
+      - run: npm run perf:smoke-cross-browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cross-browser-readiness
+          path: |
+            frontend/test-results/performance/
+            frontend/playwright-report/performance/
+
+  full-benchmark:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build:production
+      - run: npm run perf:verify-disabled
+      - run: npm run perf:build
+      - run: npm run perf:run
+        env: { FND_PERF_ITERATIONS: '3', FND_PERF_AUTHORITATIVE: '1' }
+      - run: npm run perf:compare
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-performance-benchmark
+          retention-days: 30
+          path: |
+            frontend/performance-results/
+            frontend/test-results/performance/
+            frontend/playwright-report/performance/

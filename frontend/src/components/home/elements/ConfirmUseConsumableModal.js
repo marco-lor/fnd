@@ -4,7 +4,7 @@ import { GiDrinkMe } from 'react-icons/gi';
 
 // Confirmation dialog for using a consumable. If both HP & Mana regeneration are available, user chooses.
 // mode selection passed to parent on confirm.
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc } from '../../../performance/firestore';
 import { db } from '../../firebaseConfig';
 
 const LEVEL_THRESHOLDS = [1,4,7,10];

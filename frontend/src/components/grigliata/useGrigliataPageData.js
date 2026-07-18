@@ -5,7 +5,7 @@ import {
   onSnapshot,
   query,
   where,
-} from 'firebase/firestore';
+} from '../../performance/firestore';
 import { db } from '../firebaseConfig';
 import {
   buildGrigliataAoEFigureDocId,

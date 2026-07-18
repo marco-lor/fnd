@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, limit, onSnapshot } from '../../../../../performance/firestore';
 // Path correction: this file is at components/dmDashboard/elements/playerInfo/sections -> need to go up 4 levels to reach components/firebaseConfig.js
 import { db } from '../../../../firebaseConfig';
 

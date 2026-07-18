@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import Bazaar from './Bazaar';
 import { useAuth } from '../../AuthContext';
 import { useShellLayout } from '../common/shellLayout';
-import { onSnapshot } from 'firebase/firestore';
+import { onSnapshot } from '../../performance/firestore';
 
 jest.mock('../../AuthContext', () => ({
   useAuth: jest.fn(),
@@ -44,7 +44,7 @@ jest.mock('../firebaseConfig', () => ({
   db: {},
 }));
 
-jest.mock('firebase/firestore', () => ({
+jest.mock('../../performance/firestore', () => ({
   and: jest.fn(),
   collection: jest.fn((db, path) => ({ path })),
   doc: jest.fn((db, ...segments) => ({ path: segments.join('/') })),

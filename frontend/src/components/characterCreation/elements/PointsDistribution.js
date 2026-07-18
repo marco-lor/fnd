@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'; // added useCallback
-import { doc, onSnapshot, getDoc } from 'firebase/firestore';
+import { doc, onSnapshot, getDoc } from '../../../performance/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from "../../firebaseConfig";
 import { useAuth } from '../../../AuthContext';

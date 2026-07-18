@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import { db } from '../../firebaseConfig';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc } from '../../../performance/firestore';
 import { FaEdit, FaSpinner, FaCheckCircle, FaTimesCircle } from 'react-icons/fa';
 
 function EditItemButton({ categoryKey, itemKey, currentValue }) {

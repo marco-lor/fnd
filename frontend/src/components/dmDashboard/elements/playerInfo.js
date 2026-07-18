@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { faEdit, faTrash, faPlus, faMinus, faCoins } from "@fortawesome/free-solid-svg-icons";
-import { collection, getDocs, doc, getDoc, updateDoc } from "firebase/firestore";
+import { collection, getDocs, doc, getDoc, updateDoc } from "../../../performance/firestore";
 import { MdKeyboardDoubleArrowDown, MdKeyboardDoubleArrowUp } from "react-icons/md";
 
 import { db } from "../../firebaseConfig";

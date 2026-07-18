@@ -19,6 +19,15 @@ frontend/build/
 frontend/.firebase/
 frontend/pglite-debug.log
 frontend/functions/pglite-debug.log
+frontend/performance-results/
+frontend/playwright/.auth/
+frontend/playwright-report/
+frontend/test-results/
+frontend/.perf-emulator-data/
+frontend/.perf-tools/
+frontend/firebase-debug.log
+frontend/firestore-debug.log
+frontend/debug.log
 
 # Dependencies
 frontend/node_modules/

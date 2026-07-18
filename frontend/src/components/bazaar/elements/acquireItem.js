@@ -4,7 +4,7 @@
 // (1:1 copy per purchase, not just an id pointer). Uses a Firestore transaction
 // to avoid race conditions on concurrent purchases.
 
-import { doc, runTransaction } from 'firebase/firestore';
+import { doc, runTransaction } from '../../../performance/firestore';
 import { db } from '../../firebaseConfig';
 
 /**

@@ -6,6 +6,15 @@ import { FirebaseProvider } from "./context/FirebaseContext";
 import "./index.css";
 import App from "./App";
 import reportWebVitals from "./reportWebVitals";
+import {
+  installPerformanceRuntime,
+  isPerformanceEnabled,
+  recordPerfEvent,
+} from "./performance/runtime";
+import { installGrigliataBenchmarkBridge } from "./performance/grigliataBenchmarks";
+
+installPerformanceRuntime();
+if (process.env.REACT_APP_FND_PERF === '1') installGrigliataBenchmarkBridge();
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(
@@ -18,4 +27,14 @@ root.render(
   </React.StrictMode>
 );
 
-reportWebVitals();
+if (isPerformanceEnabled()) {
+  reportWebVitals((metric) => {
+    recordPerfEvent({
+      category: "web-vital",
+      metric: metric.name,
+      value: metric.value,
+      unit: metric.name === "CLS" ? "score" : "ms",
+      tags: { rating: metric.rating, navigationType: metric.navigationType },
+    });
+  });
+}

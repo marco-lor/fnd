@@ -5,7 +5,7 @@ import StatsBars from "./elements/StatsBars";
 import EquippedInventory from "./elements/EquippedInventory";
 import Inventory from "./elements/Inventory";
 import { MergedStatsTable } from "./elements/paramTables";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc } from "../../performance/firestore";
 import { db } from "../firebaseConfig";
 import { FaDiceD20 } from "react-icons/fa";
 import DiceRoller from "../common/DiceRoller";

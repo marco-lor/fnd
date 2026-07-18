@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import React, { useState, useEffect, useRef } from "react";
-import { doc, updateDoc, onSnapshot, getDoc } from "firebase/firestore";
+import { doc, updateDoc, onSnapshot, getDoc } from "../../../performance/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../../firebaseConfig";
 import { useAuth } from "../../../AuthContext";

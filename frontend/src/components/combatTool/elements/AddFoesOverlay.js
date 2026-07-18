@@ -8,7 +8,7 @@ import {
   serverTimestamp,
   writeBatch,
   arrayUnion,
-} from "firebase/firestore";
+} from "../../../performance/firestore";
 import { Button } from "./ui";
 
 // DM-only control to add foes (from foes hub) to an encounter

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { db } from "../../firebaseConfig";
-import { collection, onSnapshot, query, orderBy, limit } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, limit } from "../../../performance/firestore";
 import { Section } from "./ui";
 
 const tsToDate = (ts) => {

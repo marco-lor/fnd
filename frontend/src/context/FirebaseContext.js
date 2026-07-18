@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { auth, db } from "../components/firebaseConfig";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc } from "../performance/firestore";
 
 // Create Context
 const FirebaseContext = createContext();

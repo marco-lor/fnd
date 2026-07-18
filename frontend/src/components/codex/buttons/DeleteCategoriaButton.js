@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import { db } from '../../firebaseConfig';
-import { doc, updateDoc, deleteField } from 'firebase/firestore';
+import { doc, updateDoc, deleteField } from '../../../performance/firestore';
 import { FaTrashAlt, FaSpinner, FaTimesCircle, FaExclamationTriangle, FaCheckCircle } from 'react-icons/fa';
 
 /*

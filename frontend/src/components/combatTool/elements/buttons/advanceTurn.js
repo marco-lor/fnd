@@ -1,6 +1,6 @@
 // Dedicated script for handling the "Avanza" (advance turn) button logic.
 // Extracted from EncounterDetails to keep component lean.
-import { collection, addDoc, doc, runTransaction, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, doc, runTransaction, serverTimestamp } from "../../../../performance/firestore";
 
 /**
  * Advance the encounter turn order.

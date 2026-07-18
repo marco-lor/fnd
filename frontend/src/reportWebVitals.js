@@ -1,11 +1,11 @@
 const reportWebVitals = onPerfEntry => {
   if (onPerfEntry && onPerfEntry instanceof Function) {
-    import('web-vitals').then(({ getCLS, getFID, getFCP, getLCP, getTTFB }) => {
-      getCLS(onPerfEntry);
-      getFID(onPerfEntry);
-      getFCP(onPerfEntry);
-      getLCP(onPerfEntry);
-      getTTFB(onPerfEntry);
+    import('web-vitals').then(({ onCLS, onINP, onLCP, onTTFB }) => {
+      const options = { reportAllChanges: true };
+      onCLS(onPerfEntry, options);
+      onINP(onPerfEntry, options);
+      onLCP(onPerfEntry, options);
+      onTTFB(onPerfEntry, options);
     });
   }
 };

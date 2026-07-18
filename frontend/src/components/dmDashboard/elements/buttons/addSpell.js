@@ -5,7 +5,7 @@ import { db, storage } from "../../../firebaseConfig";
 import { saveSpellForUser } from "../../../common/userOwnedMedia";
 import {
   doc, getDoc, updateDoc,
-} from "firebase/firestore";
+} from "../../../../performance/firestore";
 import {
   ref, uploadBytes, getDownloadURL,
 } from "firebase/storage";

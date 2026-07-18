@@ -11,7 +11,7 @@ import {
   onSnapshot,
   serverTimestamp,
   updateDoc,
-} from 'firebase/firestore';
+} from '../../performance/firestore';
 import { ref as storageRef, deleteObject } from 'firebase/storage';
 import { httpsCallable } from 'firebase/functions';
 import { FiPlus, FiChevronDown, FiChevronRight, FiEdit2, FiTrash2, FiX, FiCopy } from 'react-icons/fi';

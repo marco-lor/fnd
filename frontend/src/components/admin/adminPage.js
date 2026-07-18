@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../AuthContext'; // Assuming this provides logged-in user info
 import { db, app } from '../firebaseConfig';
-import { collection, doc, getDocs, getDoc } from 'firebase/firestore';
+import { collection, doc, getDocs, getDoc } from '../../performance/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
 const DEFAULT_ROLES = ['player', 'dm', 'webmaster'];
