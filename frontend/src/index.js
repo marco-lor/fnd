@@ -1,10 +1,10 @@
 // file ./frontend/src/index.js # do not remove this line
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter } from "react-router-dom"; // BrowserRouter is here!
-import { FirebaseProvider } from "./context/FirebaseContext";
+import { BrowserRouter } from "react-router-dom";
 import "./index.css";
-import App from "./App";
+import BootstrapScreen from "./BootstrapScreen";
+import { initializeFirebase } from "./components/firebaseConfig";
 import reportWebVitals from "./reportWebVitals";
 import {
   installPerformanceRuntime,
@@ -14,18 +14,44 @@ import {
 import { installGrigliataBenchmarkBridge } from "./performance/grigliataBenchmarks";
 
 installPerformanceRuntime();
-if (process.env.REACT_APP_FND_PERF === '1') installGrigliataBenchmarkBridge();
+if (process.env.REACT_APP_FND_PERF === "1") installGrigliataBenchmarkBridge();
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(
-  <React.StrictMode>
-    <FirebaseProvider>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    </FirebaseProvider>
-  </React.StrictMode>
-);
+let bootstrapAttempt = 0;
+
+const renderBootstrap = (phase, onRetry) => {
+  root.render(<BootstrapScreen phase={phase} onRetry={onRetry} />);
+};
+
+const startApplication = async () => {
+  const attempt = ++bootstrapAttempt;
+
+  try {
+    await initializeFirebase({
+      onPhase: (phase) => {
+        if (attempt === bootstrapAttempt) renderBootstrap(phase);
+      },
+    });
+
+    if (attempt !== bootstrapAttempt) return;
+    renderBootstrap("app-loading");
+    const { default: App } = await import("./App");
+    if (attempt !== bootstrapAttempt) return;
+
+    root.render(
+      <React.StrictMode>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </React.StrictMode>
+    );
+  } catch (_error) {
+    if (attempt !== bootstrapAttempt) return;
+    renderBootstrap("error", startApplication);
+  }
+};
+
+startApplication();
 
 if (isPerformanceEnabled()) {
   reportWebVitals((metric) => {

@@ -1,9 +1,10 @@
 // file: ./frontend/src/components/Login.js
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, fetchSignInMethodsForEmail } from "firebase/auth";
 import { auth, db } from "./firebaseConfig";
 import { useNavigate } from "react-router-dom";
 import { setDoc, doc, getDoc } from "../performance/firestore";
+import { useAuthSession, useProfileState } from "../AuthContext";
 import AuroraBackground from "./backgrounds/AuroraBackground";
 import "./LoginAnimations.css"; // Added import
 import LoginCreateButton from "./LoginCreateButton";
@@ -19,7 +20,55 @@ function Login() {
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [pendingLoginUid, setPendingLoginUid] = useState(null);
+  const missingProfileCreationUid = useRef(null);
   const navigate = useNavigate();
+  const { user, authStatus } = useAuthSession();
+  const { userData, profileStatus } = useProfileState();
+
+  useEffect(() => {
+    if (!pendingLoginUid || user?.uid !== pendingLoginUid) return;
+
+    if (authStatus === "error" || profileStatus === "error") {
+      setError("Login succeeded, but the character profile could not be loaded. Please try again.");
+      setIsLoggingIn(false);
+      setPendingLoginUid(null);
+      return;
+    }
+
+    if (profileStatus === "missing" && missingProfileCreationUid.current !== pendingLoginUid) {
+      missingProfileCreationUid.current = pendingLoginUid;
+      const basicUserData = {
+        email: user.email,
+        role: "player",
+        created_at: new Date().toISOString(),
+        flags: { characterCreationDone: false },
+      };
+
+      setDoc(doc(db, "users", pendingLoginUid), basicUserData).catch((profileError) => {
+        console.error("Login profile creation error:", profileError);
+        setError("Login succeeded, but the character profile could not be created. Please try again.");
+        setIsLoggingIn(false);
+        setPendingLoginUid(null);
+        missingProfileCreationUid.current = null;
+      });
+      return;
+    }
+
+    if (profileStatus !== "fresh" || !userData) return;
+
+    setIsLoggingIn(false);
+    setPendingLoginUid(null);
+    missingProfileCreationUid.current = null;
+    navigate(userData.flags?.characterCreationDone ? "/home" : "/character-creation");
+  }, [
+    authStatus,
+    navigate,
+    pendingLoginUid,
+    profileStatus,
+    user,
+    userData,
+  ]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -34,35 +83,8 @@ function Login() {
 
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-      
-      // Check if user has completed character creation
-      const userDocRef = doc(db, "users", user.uid);
-      const userDocSnap = await getDoc(userDocRef);
-      
-      if (userDocSnap.exists()) {
-        const userData = userDocSnap.data();
-        // Check if flags.characterCreationDone is false or doesn't exist
-        if (!userData.flags?.characterCreationDone) {
-          // Redirect to character creation
-          navigate("/character-creation");
-        } else {
-          // Normal login flow
-          navigate("/home");
-        }
-      } else {
-        // This is unlikely but handle the case where user exists in auth but not in Firestore
-        const basicUserData = {
-          email: user.email,
-          role: "player",
-          created_at: new Date().toISOString(),
-          flags: {
-            characterCreationDone: false
-          }
-        };
-        await setDoc(doc(db, "users", user.uid), basicUserData);
-        navigate("/character-creation");
-      }
+      missingProfileCreationUid.current = null;
+      setPendingLoginUid(userCredential.user.uid);
     } catch (err) {
       console.error("Login error:", err);
       setError("Login failed. Check credentials and try again.");

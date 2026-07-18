@@ -50,4 +50,39 @@ describe('performance runtime', () => {
     expect(window.__FND_PERF__.snapshot().activeResources).toEqual({});
     runtime.teardownPerformanceRuntimeForTests();
   });
+
+  test('can assign persistent shell resources independently of route timing', () => {
+    const runtime = loadRuntime(true);
+    window.__FND_PERF_BOOTSTRAP__ = { runId: 'shell-owner-test', actorRole: 'anonymous' };
+    runtime.installPerformanceRuntime();
+    runtime.startRouteMeasurement('/', 'anonymous');
+    let interval;
+
+    runtime.withAsyncResourceOwner('shell', () => {
+      interval = window.setInterval(() => {}, 60_000);
+    });
+
+    expect(window.__FND_PERF__.snapshot().activeResources).toEqual({ 'shell::interval': 1 });
+    window.clearInterval(interval);
+    runtime.teardownPerformanceRuntimeForTests();
+  });
+
+  test('keeps asynchronously-created startup resources under a leased shell owner', () => {
+    const runtime = loadRuntime(true);
+    window.__FND_PERF_BOOTSTRAP__ = { runId: 'shell-lease-test', actorRole: 'anonymous' };
+    runtime.installPerformanceRuntime();
+    runtime.startRouteMeasurement('/', 'anonymous');
+    const release = runtime.beginAsyncResourceOwner('shell');
+    const shellInterval = window.setInterval(() => {}, 60_000);
+    release();
+    const routeInterval = window.setInterval(() => {}, 60_000);
+
+    expect(window.__FND_PERF__.snapshot().activeResources).toEqual({
+      'shell::interval': 1,
+      '/::interval': 1,
+    });
+    window.clearInterval(shellInterval);
+    window.clearInterval(routeInterval);
+    runtime.teardownPerformanceRuntimeForTests();
+  });
 });

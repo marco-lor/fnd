@@ -1,9 +1,8 @@
 // file: ./frontend/src/components/common/navbar.js
 import React, { useMemo, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { signOut } from 'firebase/auth';
-import { auth, db, storage } from '../firebaseConfig';
-import { useAuth } from '../../AuthContext';
+import { db, storage } from '../firebaseConfig';
+import { useAuthSession, useShellProfile } from '../../AuthContext';
 import { HiMagnifyingGlassPlus } from 'react-icons/hi2';
 import { LuImageUp } from 'react-icons/lu';
 import {
@@ -337,7 +336,15 @@ const SidebarProfileCard = ({
 const Navbar = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, userData } = useAuth();
+  const { user, logout, getCurrentProfile } = useAuthSession();
+  const { shellProfile } = useShellProfile();
+  const userData = useMemo(() => shellProfile ? ({
+    role: shellProfile.role,
+    characterId: shellProfile.characterId,
+    race: shellProfile.race,
+    stats: { level: shellProfile.level },
+    imageUrl: shellProfile.avatarUrl,
+  }) : null, [shellProfile]);
   const {
     closeMobileNav,
     dimensions,
@@ -384,8 +391,7 @@ const Navbar = () => {
       setIsLoggingOut(true);
       closeMobileNav();
       await clearGrigliataPagePresenceBeforeLogout();
-      await signOut(auth);
-      // AuthContext will handle clearing localStorage and state
+      await logout();
       navigate('/');
     } catch (error) {
       console.error('Logout failed:', error);
@@ -419,9 +425,10 @@ const Navbar = () => {
     if (!selectedFile || !user) return;
     setIsUploading(true);
     // delete old image
-    if (userData?.imagePath) {
+    const liveProfile = getCurrentProfile();
+    if (liveProfile?.imagePath) {
       try {
-        await deleteObject(storageRef(storage, userData.imagePath));
+        await deleteObject(storageRef(storage, liveProfile.imagePath));
       } catch (err) {
         console.error('Old image deletion failed:', err);
       }

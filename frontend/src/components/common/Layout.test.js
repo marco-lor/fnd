@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import Layout from './Layout';
-import { useAuth } from '../../AuthContext';
+import { useAuthSession, useShellProfile } from '../../AuthContext';
 
 jest.mock('react-router-dom', () => {
   const React = require('react');
@@ -65,7 +65,8 @@ jest.mock('react-router-dom', () => {
 }, { virtual: true });
 
 jest.mock('../../AuthContext', () => ({
-  useAuth: jest.fn(),
+  useAuthSession: jest.fn(),
+  useShellProfile: jest.fn(),
 }));
 
 jest.mock('../backgrounds/GlobalAuroraBackground', () => () => <div data-testid="global-aurora-background" />);
@@ -75,10 +76,6 @@ jest.mock('../firebaseConfig', () => ({
   auth: {},
   db: {},
   storage: {},
-}));
-
-jest.mock('firebase/auth', () => ({
-  signOut: jest.fn(() => Promise.resolve()),
 }));
 
 jest.mock('firebase/storage', () => ({
@@ -111,6 +108,26 @@ const buildAuthState = (role = 'dm') => ({
     },
   },
 });
+
+const logout = jest.fn(() => Promise.resolve());
+
+const setAuthState = (role = 'dm') => {
+  const state = buildAuthState(role);
+  useAuthSession.mockReturnValue({
+    user: state.user,
+    logout,
+    getCurrentProfile: () => state.userData,
+  });
+  useShellProfile.mockReturnValue({
+    shellProfile: {
+      role: state.userData.role,
+      characterId: state.userData.characterId,
+      race: state.userData.race,
+      level: state.userData.stats.level,
+      avatarUrl: state.userData.imageUrl,
+    },
+  });
+};
 
 const setDesktopMatch = (matches) => {
   Object.defineProperty(window, 'innerWidth', {
@@ -145,10 +162,8 @@ const renderLayout = (initialEntries = ['/home']) => render(
 describe('Layout shell', () => {
   beforeEach(() => {
     window.localStorage.clear();
-    useAuth.mockReturnValue(buildAuthState('dm'));
-
-    const firebaseAuth = require('firebase/auth');
-    firebaseAuth.signOut.mockClear().mockResolvedValue(undefined);
+    setAuthState('dm');
+    logout.mockClear().mockResolvedValue(undefined);
 
     const firestore = require('firebase/firestore');
     firestore.deleteDoc.mockClear().mockResolvedValue(undefined);
@@ -167,7 +182,7 @@ describe('Layout shell', () => {
     expect(screen.getByText('Foes Hub')).toBeInTheDocument();
     expect(screen.queryByText('Admin')).not.toBeInTheDocument();
 
-    useAuth.mockReturnValue(buildAuthState('webmaster'));
+    setAuthState('webmaster');
 
     rerender(
       <MemoryRouter initialEntries={['/home']}>
@@ -230,9 +245,7 @@ describe('Layout shell', () => {
 
   test('clears Grigliata page presence before signing out from Grigliata', async () => {
     setDesktopMatch(true);
-    useAuth.mockReturnValue(buildAuthState('player'));
-
-    const firebaseAuth = require('firebase/auth');
+    setAuthState('player');
     const firestore = require('firebase/firestore');
     firestore.getDoc.mockResolvedValue({ exists: () => true });
 
@@ -241,7 +254,7 @@ describe('Layout shell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Logout' }));
 
     await waitFor(() => {
-      expect(firebaseAuth.signOut).toHaveBeenCalled();
+      expect(logout).toHaveBeenCalled();
     });
 
     expect(firestore.doc).toHaveBeenCalledWith(
@@ -256,15 +269,13 @@ describe('Layout shell', () => {
       expect.objectContaining({ path: 'grigliata_page_presence/user-1' })
     );
     expect(firestore.deleteDoc.mock.invocationCallOrder[0]).toBeLessThan(
-      firebaseAuth.signOut.mock.invocationCallOrder[0]
+      logout.mock.invocationCallOrder[0]
     );
   });
 
   test('does not query Grigliata page presence when logging out elsewhere', async () => {
     setDesktopMatch(true);
-    useAuth.mockReturnValue(buildAuthState('player'));
-
-    const firebaseAuth = require('firebase/auth');
+    setAuthState('player');
     const firestore = require('firebase/firestore');
 
     renderLayout(['/home']);
@@ -272,7 +283,7 @@ describe('Layout shell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Logout' }));
 
     await waitFor(() => {
-      expect(firebaseAuth.signOut).toHaveBeenCalled();
+      expect(logout).toHaveBeenCalled();
     });
 
     expect(firestore.getDoc).not.toHaveBeenCalled();

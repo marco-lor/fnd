@@ -24,6 +24,8 @@ let activeAsyncResources = new Map();
 let originalTimers = null;
 let observerPatches = [];
 const observerResourceKeys = new WeakMap();
+let asyncResourceOwnerOverride = null;
+let asyncResourceOwnerLeases = [];
 
 const redactString = (value) => {
   const text = String(value ?? '').slice(0, 160);
@@ -53,7 +55,10 @@ const currentRouteId = () => (
 );
 
 const registerAsyncResource = (type, ownerOverride) => {
-  const ownerRoute = ownerOverride || (routeState ? redactString(routeState.routeId) : 'shell');
+  const ownerRoute = ownerOverride
+    || asyncResourceOwnerOverride
+    || asyncResourceOwnerLeases[asyncResourceOwnerLeases.length - 1]?.owner
+    || (routeState ? redactString(routeState.routeId) : 'shell');
   const key = `${ownerRoute}::${type}::${++asyncResourceSequence}`;
   activeAsyncResources.set(key, { type, ownerRoute });
   let closed = false;
@@ -65,6 +70,29 @@ const registerAsyncResource = (type, ownerOverride) => {
 };
 
 export const isPerformanceEnabled = () => PERFORMANCE_ENABLED;
+
+export const withAsyncResourceOwner = (owner, callback) => {
+  if (!PERFORMANCE_ENABLED) return callback();
+  const previousOwner = asyncResourceOwnerOverride;
+  asyncResourceOwnerOverride = redactString(owner || 'shell');
+  try {
+    return callback();
+  } finally {
+    asyncResourceOwnerOverride = previousOwner;
+  }
+};
+
+export const beginAsyncResourceOwner = (owner = 'shell') => {
+  if (!PERFORMANCE_ENABLED) return () => {};
+  const lease = { owner: redactString(owner) };
+  asyncResourceOwnerLeases.push(lease);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    asyncResourceOwnerLeases = asyncResourceOwnerLeases.filter((candidate) => candidate !== lease);
+  };
+};
 
 export const recordPerfEvent = ({
   category,
@@ -396,6 +424,8 @@ export const teardownPerformanceRuntimeForTests = () => {
   metadata = {};
   activeListeners = new Map();
   activeAsyncResources = new Map();
+  asyncResourceOwnerOverride = null;
+  asyncResourceOwnerLeases = [];
   asyncResourceSequence = 0;
   routeState = null;
   if (originalXhrOpen && typeof XMLHttpRequest !== 'undefined') {

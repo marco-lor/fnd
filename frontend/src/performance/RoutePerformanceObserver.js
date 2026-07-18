@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { useAuth } from '../AuthContext';
+import { useShellProfile } from '../AuthContext';
 import {
   isPerformanceEnabled,
   markRouteEffectsMounted,
@@ -10,8 +10,8 @@ import {
 
 export default function RoutePerformanceObserver() {
   const location = useLocation();
-  const { userData } = useAuth();
-  const role = userData?.role || (location.pathname === '/' ? 'anonymous' : 'unknown');
+  const { shellProfile } = useShellProfile();
+  const role = shellProfile?.role || (location.pathname === '/' ? 'anonymous' : 'unknown');
 
   useLayoutEffect(() => {
     if (!isPerformanceEnabled()) return;
