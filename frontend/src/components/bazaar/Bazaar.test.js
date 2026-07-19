@@ -43,6 +43,7 @@ jest.mock('./elements/FiltersSection', () => jest.fn(() => <div data-testid="fil
 jest.mock('../firebaseConfig', () => ({
   db: {},
 }));
+jest.mock('../firebaseStorage', () => ({ storage: {} }));
 
 jest.mock('../../performance/firestore', () => ({
   and: jest.fn(),

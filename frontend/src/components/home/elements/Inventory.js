@@ -1,11 +1,12 @@
 import React, { useContext, useEffect, useState } from 'react';
 import { AuthContext } from '../../../AuthContext';
-import { db, storage } from '../../firebaseConfig';
+import { db } from '../../firebaseConfig';
+import { storage } from '../../firebaseStorage';
 import { doc, onSnapshot, getDoc, updateDoc } from '../../../performance/firestore';
 import { ref as storageRef, deleteObject } from 'firebase/storage';
 import { FiPackage, FiSearch, FiTrash2, FiPlus, FiMinus } from 'react-icons/fi';
 import { FaCoins } from 'react-icons/fa';
-import ItemDetailsModal from './ItemDetailsModal';
+import { LazyItemDetailsModal as ItemDetailsModal } from './lazyHomeFeatures';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
 import { uploadCacheableImage } from '../../common/imageStorage';
 

@@ -3,7 +3,8 @@ import React, { useState, useEffect, useCallback, useRef, useContext } from 'rea
 import { collection, doc, addDoc, updateDoc, getDocs, onSnapshot, getDoc, setDoc } from "../../../performance/firestore";
 import { getStorage, ref, uploadBytesResumable, getDownloadURL, uploadBytes, deleteObject } from "firebase/storage";
 import { uploadCacheableImage } from "../../common/imageStorage";
-import { db, storage } from '../../firebaseConfig';
+import { db } from '../../firebaseConfig';
+import { storage } from '../../firebaseStorage';
 import { AuthContext } from '../../../AuthContext';
 import { WeaponOverlay } from '../../common/WeaponOverlay';
 import { SpellOverlay } from '../../common/SpellOverlay';

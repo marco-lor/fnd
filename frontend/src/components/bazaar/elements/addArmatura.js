@@ -1,6 +1,7 @@
 // file: ./frontend/src/components/bazaar/elements/addArmatura.js
 import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
-import { db, storage } from '../../firebaseConfig';
+import { db } from '../../firebaseConfig';
+import { storage } from '../../firebaseStorage';
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from "../../../performance/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { uploadCacheableImage } from "../../common/imageStorage";

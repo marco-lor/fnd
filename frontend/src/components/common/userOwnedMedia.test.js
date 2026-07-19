@@ -4,10 +4,9 @@ var mockStorageRef = { fullPath: "tecnicas/tecnica_target_Fire_Ball_123_image" }
 jest.mock("../firebaseConfig", () => {
   const auth = { currentUser: null };
   const db = { __type: "db" };
-  const storage = { __type: "storage" };
-
-  return { auth, db, storage };
+  return { auth, db };
 });
+jest.mock("../firebaseStorage", () => ({ storage: { __type: "storage" } }));
 
 var mockOnAuthStateChanged = jest.fn();
 jest.mock("firebase/auth", () => ({
@@ -35,7 +34,8 @@ jest.mock("firebase/storage", () => ({
 
 import { saveTecnicaForUser } from "./userOwnedMedia";
 
-const { auth: mockAuth, storage: mockStorage } = jest.requireMock("../firebaseConfig");
+const { auth: mockAuth } = jest.requireMock("../firebaseConfig");
+const { storage: mockStorage } = jest.requireMock("../firebaseStorage");
 
 describe("saveTecnicaForUser", () => {
   beforeEach(() => {

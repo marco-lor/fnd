@@ -3,7 +3,8 @@
 // Supports both catalog-referenced string entries and embedded object entries (including Varie custom objects)
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
-import { db, storage } from '../../../firebaseConfig';
+import { db } from '../../../firebaseConfig';
+import { storage } from '../../../firebaseStorage';
 import { doc, getDoc, updateDoc } from '../../../../performance/firestore';
 import { ref, deleteObject } from 'firebase/storage';
 

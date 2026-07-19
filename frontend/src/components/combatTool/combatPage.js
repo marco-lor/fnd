@@ -3,11 +3,25 @@ import { GoSidebarCollapse, GoSidebarExpand } from "react-icons/go";
 import { useAuth } from "../../AuthContext";
 import EncounterCreator from "./elements/EncounterCreator";
 import EncounterSidebarList from "./elements/EncounterSidebarList";
-import EncounterDetails from "./elements/EncounterDetails";
 import EncounterLog from "./elements/EncounterLog";
 import { Section } from "./elements/ui";
-import AddFoesOverlay from "./elements/AddFoesOverlay";
 import { useShellLayout } from "../common/shellLayout";
+import { createModuleLoader, RetryableLazyBoundary } from "../common/lazyLoading";
+
+const encounterDetailsDescriptor = createModuleLoader({
+	chunkName: 'feature-combat-encounter-details',
+	importer: () => import(/* webpackChunkName: "feature-combat-encounter-details" */ './elements/EncounterDetails'),
+});
+const addFoesDescriptor = createModuleLoader({
+	chunkName: 'feature-combat-add-foes',
+	importer: () => import(/* webpackChunkName: "feature-combat-add-foes" */ './elements/AddFoesOverlay'),
+});
+const EncounterDetails = (props) => (
+	<RetryableLazyBoundary descriptor={encounterDetailsDescriptor} fallbackLabel="Loading encounter details..." componentProps={props} />
+);
+const AddFoesOverlay = (props) => (
+	<RetryableLazyBoundary descriptor={addFoesDescriptor} fallbackLabel="Loading foe controls..." componentProps={props} />
+);
 
 const CombatPage = () => {
 	const { user, userData } = useAuth();

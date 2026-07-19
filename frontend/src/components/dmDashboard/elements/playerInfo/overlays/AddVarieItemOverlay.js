@@ -2,7 +2,8 @@ import React, { useState } from "react";
 import { doc, getDoc, updateDoc } from "../../../../../performance/firestore";
 import { ref as storageRef } from "firebase/storage";
 
-import { db, storage } from "../../../../firebaseConfig";
+import { db } from "../../../../firebaseConfig";
+import { storage } from "../../../../firebaseStorage";
 import { uploadCacheableImage } from "../../../../common/imageStorage";
 
 // Overlay to add a new custom Varie item to a user's inventory (DM side)

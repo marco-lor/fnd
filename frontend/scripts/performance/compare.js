@@ -88,6 +88,15 @@ const evaluateStructuralGates = (current) => {
   const buildValid = current.build?.sourceMapsPresent === false
     && current.build?.instrumentationMarkerPresent === true;
   const disabledBuildValid = current.normalBuildVerification?.instrumentationAbsent === true;
+  const actualChunkNames = new Set((current.build?.chunkInventory || []).map((chunk) => chunk.logicalName));
+  const requiredChunkNames = [
+    ...(current.build?.requiredChunks?.routes || []),
+    ...(current.build?.requiredChunks?.features || []),
+  ];
+  const missingChunks = requiredChunkNames.filter((chunkName) => !actualChunkNames.has(chunkName));
+  const moduleEvidenceValid = Number(current.build?.webpackModuleEvidence?.moduleCount) > 0
+    && Array.isArray(current.build?.webpackModuleEvidence?.loginModuleViolations)
+    && current.build.webpackModuleEvidence.loginModuleViolations.length === 0;
   return [
     {
       id: 'scenario-completeness', severity: 'blocking', status: missing.length ? 'fail' : 'pass',
@@ -106,6 +115,14 @@ const evaluateStructuralGates = (current) => {
     },
     {
       id: 'normal-build-instrumentation-absent', severity: 'blocking', status: disabledBuildValid ? 'pass' : 'fail',
+    },
+    {
+      id: 'route-feature-chunk-inventory', severity: 'blocking', status: requiredChunkNames.length && !missingChunks.length ? 'pass' : 'fail',
+      missing: missingChunks,
+    },
+    {
+      id: 'login-module-isolation', severity: 'blocking', status: moduleEvidenceValid ? 'pass' : 'fail',
+      violations: current.build?.webpackModuleEvidence?.loginModuleViolations || [],
     },
   ];
 };

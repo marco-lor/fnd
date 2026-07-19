@@ -1,7 +1,8 @@
 // file: ./frontend/src/components/dmDashboard/elements/buttons/addSpell.js
 import React, { useEffect, useState } from "react";
 import { SpellOverlay } from "../../../common/SpellOverlay";
-import { db, storage } from "../../../firebaseConfig";
+import { db } from "../../../firebaseConfig";
+import { storage } from "../../../firebaseStorage";
 import { saveSpellForUser } from "../../../common/userOwnedMedia";
 import {
   doc, getDoc, updateDoc,

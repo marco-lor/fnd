@@ -7,24 +7,31 @@ import { MdKeyboardDoubleArrowDown, MdKeyboardDoubleArrowUp } from "react-icons/
 
 import { db } from "../../firebaseConfig";
 
-import { AddTecnicaPersonaleOverlay } from "./buttons/addTecnicaPersonale";
-import { EditTecnicaPersonale } from "./buttons/editTecnicaPersonale";
-import { DelTecnicaPersonale } from "./buttons/delTecnicaPersonale";
-import { AddSpellOverlay } from "./buttons/addSpell";
-import { EditSpellOverlay } from "./buttons/editSpell";
-import { DelSpellOverlay } from "./buttons/delSpell";
-import { AddLinguaPersonaleOverlay } from "./buttons/addLinguaPersonale";
-import { DelLinguaPersonaleOverlay } from "./buttons/delLinguaPersonale";
-import { AddConoscenzaPersonaleOverlay } from "./buttons/addConoscenzaPersonale";
-import { DelConoscenzaPersonaleOverlay } from "./buttons/delConoscenzaPersonale";
-import { EditConoscenzaPersonaleOverlay } from "./buttons/editConoscenzaPersonale";
-import { AddProfessionePersonaleOverlay } from "./buttons/addProfessionePersonale";
-import { DelProfessionePersonaleOverlay } from "./buttons/delProfessionePersonale";
-import { EditProfessionePersonaleOverlay } from "./buttons/editProfessionePersonale";
-import { AddWeaponOverlay } from "../../bazaar/elements/addWeapon";
-import { AddArmaturaOverlay } from "../../bazaar/elements/addArmatura";
-import { AddAccessorioOverlay } from "../../bazaar/elements/addAccessorio";
-import { AddConsumabileOverlay } from "../../bazaar/elements/addConsumabile";
+import {
+  AddConoscenzaPersonaleOverlay,
+  AddLinguaPersonaleOverlay,
+  AddProfessionePersonaleOverlay,
+  AddSpellOverlay,
+  AddTecnicaPersonaleOverlay,
+  AddVarieItemOverlay,
+  DelConoscenzaPersonaleOverlay,
+  DelLinguaPersonaleOverlay,
+  DelProfessionePersonaleOverlay,
+  DelSpellOverlay,
+  DelTecnicaPersonale,
+  EditConoscenzaPersonaleOverlay,
+  EditProfessionePersonaleOverlay,
+  EditSpellOverlay,
+  EditTecnicaPersonale,
+  EditVarieItemOverlay,
+  GoldAdjustmentOverlay,
+} from './lazyPlayerInfoOverlays';
+import {
+  AddAccessorioOverlay,
+  AddArmaturaOverlay,
+  AddConsumabileOverlay,
+  AddWeaponOverlay,
+} from '../../bazaar/lazyBazaarEditors';
 
 import PlayerInfoActionsRow from "./playerInfo/sections/PlayerInfoActionsRow";
 import PlayerInfoTecnicheRow from "./playerInfo/sections/PlayerInfoTecnicheRow";
@@ -34,9 +41,6 @@ import PlayerInfoProfessioniRow from "./playerInfo/sections/PlayerInfoProfession
 import PlayerInfoLingueRow from "./playerInfo/sections/PlayerInfoLingueRow";
 import PlayerInfoInventoryRow from "./playerInfo/sections/PlayerInfoInventoryRow";
 import PlayerInfoDiceRollsRow from "./playerInfo/sections/PlayerInfoDiceRollsRow";
-import GoldAdjustmentOverlay from "./playerInfo/overlays/GoldAdjustmentOverlay";
-import EditVarieItemOverlay from "./playerInfo/overlays/EditVarieItemOverlay";
-import AddVarieItemOverlay from "./playerInfo/overlays/AddVarieItemOverlay";
 
 library.add(faEdit, faTrash, faPlus, faMinus, faCoins);
 
@@ -714,7 +718,7 @@ const PlayerInfo = ({
       {variant !== "card" && <h2 className="mb-3 text-slate-100 text-xl font-semibold tracking-tight">Player Info</h2>}
       {content}
 
-      <GoldAdjustmentOverlay
+      {goldOverlay && <GoldAdjustmentOverlay
         visible={!!goldOverlay}
         direction={goldOverlay?.direction || 1}
         userLabel={activeGoldLabel}
@@ -724,7 +728,7 @@ const PlayerInfo = ({
         onClose={closeGoldOverlay}
         onChange={handleGoldOverlayValueChange}
         onConfirm={confirmGoldOverlay}
-      />
+      />}
 
       {showTecnicaOverlay && selectedUserId && (
         <AddTecnicaPersonaleOverlay

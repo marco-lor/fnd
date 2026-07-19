@@ -1,7 +1,8 @@
 // file: ./frontend/src/components/characterCreation/CharacterCreation.js
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { db, storage } from "../firebaseConfig"; 
+import { db } from "../firebaseConfig";
+import { storage } from "../firebaseStorage";
 import { ref } from "firebase/storage";
 import { doc, getDoc, updateDoc, setDoc } from "../../performance/firestore";
 import { useAuth } from "../../AuthContext";

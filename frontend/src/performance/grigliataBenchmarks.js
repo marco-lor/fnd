@@ -86,5 +86,9 @@ export const runGrigliataMicrobenchmarks = () => {
 };
 
 export const installGrigliataBenchmarkBridge = () => {
-  window.__FND_PERF_BENCHMARKS__ = { runAll: runGrigliataMicrobenchmarks };
+  const bridge = { runAll: runGrigliataMicrobenchmarks };
+  window.__FND_PERF_BENCHMARKS__ = bridge;
+  return () => {
+    if (window.__FND_PERF_BENCHMARKS__ === bridge) delete window.__FND_PERF_BENCHMARKS__;
+  };
 };

@@ -1,19 +1,7 @@
 // file ./frontend/src/App.js # do not remove this line
 import React from "react";
 import { Routes, Route, Navigate, Outlet } from "react-router-dom";
-import Login from "./components/Login";
-import CharacterCreation from "./components/characterCreation/CharacterCreation";
-import Home from "./components/home/Home";
-import Bazaar from "./components/bazaar/Bazaar";
-import DMDashboard from "./components/dmDashboard/DMDashboard";
-import FoesHub from "./components/foesHub/FoesHub";
-import TecnicheSpell from "./components/tecnicheSpell/TecnicheSpell";
-import CombatPage from "./components/combatTool/combatPage";
-import AdminPage from "./components/admin/adminPage";
-import Codex from "./components/codex/Codex";
-import EchiDiViaggio from "./components/echiDiViaggio/EchiDiViaggio";
-import GrigliataPage from "./components/grigliata/GrigliataPage";
-import Layout from "./components/common/Layout";
+import { createModuleLoader, RetryableLazyBoundary } from "./components/common/lazyLoading";
 import {
   AuthProvider,
   BOOTSTRAP_V2_ENABLED,
@@ -23,14 +11,38 @@ import {
 } from "./AuthContext";
 import PerformanceProfiler from "./performance/PerformanceProfiler";
 import RoutePerformanceObserver from "./performance/RoutePerformanceObserver";
+import { ROUTE_DESCRIPTORS } from "./routes/routeRegistry";
 import "./App.css";
 
 const performanceMode = process.env.REACT_APP_FND_PERF === "1";
+
+const authenticatedLayoutDescriptor = createModuleLoader({
+  chunkName: 'feature-authenticated-layout',
+  importer: () => import(/* webpackChunkName: "feature-authenticated-layout" */ './components/common/Layout'),
+});
+
+const AuthenticatedLayout = ({ children }) => (
+  <RetryableLazyBoundary
+    descriptor={authenticatedLayoutDescriptor}
+    fallbackLabel="Loading application layout..."
+    variant="route"
+    componentProps={{ children }}
+  />
+);
 
 const PerformanceCleanupRoute = () => (
   performanceMode
     ? <main aria-label="Performance cleanup route" />
     : <Navigate to="/home" />
+);
+
+const RoutePage = ({ descriptor, label }) => (
+  <RetryableLazyBoundary
+    descriptor={descriptor}
+    fallbackLabel={`Loading ${label}...`}
+    variant="route"
+    retryResetKey={descriptor.chunkName}
+  />
 );
 
 const StatusPanel = ({ title, message, onRetry, onLogout }) => (
@@ -58,7 +70,7 @@ const StatusPanel = ({ title, message, onRetry, onLogout }) => (
 
 const AuthenticatedStatus = ({ children }) => {
   const { shellProfile } = useShellProfile();
-  return BOOTSTRAP_V2_ENABLED && shellProfile ? <Layout>{children}</Layout> : children;
+  return BOOTSTRAP_V2_ENABLED && shellProfile ? <AuthenticatedLayout>{children}</AuthenticatedLayout> : children;
 };
 
 export const AuthenticatedRoute = () => {
@@ -75,9 +87,9 @@ export const AuthenticatedRoute = () => {
 
   if (profileFresh) {
     return (
-      <Layout>
+      <AuthenticatedLayout>
         <Outlet />
-      </Layout>
+      </AuthenticatedLayout>
     );
   }
 
@@ -150,21 +162,21 @@ export function AppRoutes() {
 
   return (
     <Routes>
-      <Route path="/" element={<Login />} />
-      <Route path="/character-creation" element={<CharacterCreation />} />
+      <Route path="/" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.login} label="Login" />} />
+      <Route path="/character-creation" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.characterCreation} label="Character Creation" />} />
       <Route path="/__fnd_perf_cleanup__" element={<PerformanceCleanupRoute />} />
 
       <Route element={<AuthenticatedRoute />}>
-        <Route path="/home" element={<Home />} />
-        <Route path="/bazaar" element={<Bazaar />} />
-        <Route path="/combat" element={<CombatPage />} />
-        <Route path="/tecniche-spell" element={<TecnicheSpell />} />
-        <Route path="/codex" element={<Codex />} />
-        <Route path="/echi-di-viaggio" element={<EchiDiViaggio />} />
-        <Route path="/grigliata" element={<GrigliataPage />} />
-        <Route path="/dm-dashboard" element={<ProtectedDMRoute><DMDashboard /></ProtectedDMRoute>} />
-        <Route path="/foes-hub" element={<ProtectedDMRoute><FoesHub /></ProtectedDMRoute>} />
-        <Route path="/admin" element={<ProtectedWebmasterRoute><AdminPage /></ProtectedWebmasterRoute>} />
+        <Route path="/home" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.home} label="Home" />} />
+        <Route path="/bazaar" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.bazaar} label="Bazaar" />} />
+        <Route path="/combat" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.combat} label="Combat" />} />
+        <Route path="/tecniche-spell" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.tecnicheSpell} label="Tecniche and Spell" />} />
+        <Route path="/codex" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.codex} label="Codex" />} />
+        <Route path="/echi-di-viaggio" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.echiDiViaggio} label="Echi di Viaggio" />} />
+        <Route path="/grigliata" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.grigliata} label="Grigliata" />} />
+        <Route path="/dm-dashboard" element={<ProtectedDMRoute><RoutePage descriptor={ROUTE_DESCRIPTORS.dmDashboard} label="DM Dashboard" /></ProtectedDMRoute>} />
+        <Route path="/foes-hub" element={<ProtectedDMRoute><RoutePage descriptor={ROUTE_DESCRIPTORS.foesHub} label="Foes Hub" /></ProtectedDMRoute>} />
+        <Route path="/admin" element={<ProtectedWebmasterRoute><RoutePage descriptor={ROUTE_DESCRIPTORS.admin} label="Admin" /></ProtectedWebmasterRoute>} />
       </Route>
 
       <Route path="*" element={<Navigate to="/home" />} />

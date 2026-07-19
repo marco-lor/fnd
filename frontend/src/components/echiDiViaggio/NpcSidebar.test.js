@@ -7,6 +7,7 @@ jest.mock('../firebaseConfig', () => ({
   db: {},
   storage: {},
 }));
+jest.mock('../firebaseStorage', () => ({ storage: {} }));
 
 jest.mock('../../performance/firestore', () => ({
   addDoc: jest.fn(() => Promise.resolve()),

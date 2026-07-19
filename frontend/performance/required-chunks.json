@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "routes": [
+    "route-login",
+    "route-character-creation",
+    "route-home",
+    "route-bazaar",
+    "route-combat",
+    "route-tecniche-spell",
+    "route-codex",
+    "route-echi-di-viaggio",
+    "route-grigliata",
+    "route-dm-dashboard",
+    "route-foes-hub",
+    "route-admin"
+  ],
+  "features": [
+    "feature-authenticated-layout",
+    "feature-profile-media",
+    "feature-grigliata-dice",
+    "feature-grigliata-gallery",
+    "feature-grigliata-music",
+    "feature-grigliata-calibration",
+    "feature-grigliata-lighting",
+    "feature-grigliata-narration-placement",
+    "feature-bazaar-weapon-editor",
+    "feature-bazaar-armatura-editor",
+    "feature-bazaar-accessorio-editor",
+    "feature-bazaar-consumabile-editor",
+    "feature-dm-technique-editors",
+    "feature-dm-spell-editors",
+    "feature-dm-language-editors",
+    "feature-dm-knowledge-editors",
+    "feature-dm-profession-editors",
+    "feature-dm-gold-dialog",
+    "feature-dm-misc-item-editors",
+    "feature-foes-editor",
+    "feature-combat-encounter-details",
+    "feature-combat-add-foes",
+    "feature-home-item-details",
+    "feature-home-consumable-dialog"
+  ]
+}
+

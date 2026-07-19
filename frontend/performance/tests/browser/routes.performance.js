@@ -18,6 +18,26 @@ const scenarios = manifest.scenarios.filter((scenario) => scenario.role !== 'fiv
 const iterations = process.env.FND_PERF_ITERATIONS ? Number(process.env.FND_PERF_ITERATIONS) : 1;
 const includeWarmup = process.env.FND_PERF_AUTHORITATIVE === '1';
 
+const assertChunkIsolation = (scenario, diagnostics) => {
+  const scriptPaths = diagnostics.networkRecords
+    .filter((record) => record.resourceType === 'script')
+    .map((record) => record.path);
+  const noneMatch = (pattern, message) => {
+    expect(scriptPaths.some((assetPath) => pattern.test(assetPath)), `${message}\n${scriptPaths.join('\n')}`).toBe(false);
+  };
+
+  if (scenario.id === 'login-cold' || scenario.id === 'login-warm') {
+    noneMatch(/route-(?:grigliata|echi-di-viaggio|dm-dashboard|foes-hub|admin|bazaar)/, 'Login requested an inactive route chunk.');
+    noneMatch(/feature-(?:grigliata|bazaar|dm-)/, 'Login requested an inactive feature chunk.');
+  }
+  if (scenario.id === 'home') {
+    noneMatch(/route-grigliata|feature-grigliata/, 'Home requested Grigliata code.');
+  }
+  if (scenario.id === 'bazaar') {
+    noneMatch(/feature-bazaar-.*-editor/, 'Ordinary Bazaar requested an editor chunk.');
+  }
+};
+
 for (const scenario of scenarios) {
   for (let iteration = includeWarmup ? 0 : 1; iteration <= iterations; iteration += 1) {
     const runLabel = iteration === 0 ? 'warmup' : `iteration ${iteration}`;
@@ -62,6 +82,7 @@ for (const scenario of scenarios) {
         await waitForReadiness(page);
       }
       await runInteraction(page, scenario);
+      assertChunkIsolation(scenario, diagnostics);
       await page.waitForFunction(() => window.__FND_PERF__.snapshot().routeState?.interactive);
       const capture = await captureBrowserMetrics(page, diagnostics);
       if (iteration > 0) writeScenarioRaw(scenario, iteration, capture);

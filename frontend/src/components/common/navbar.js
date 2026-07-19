@@ -1,7 +1,7 @@
 // file: ./frontend/src/components/common/navbar.js
 import React, { useMemo, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { db, storage } from '../firebaseConfig';
+import { db } from '../firebaseConfig';
 import { useAuthSession, useShellProfile } from '../../AuthContext';
 import { HiMagnifyingGlassPlus } from 'react-icons/hi2';
 import { LuImageUp } from 'react-icons/lu';
@@ -14,11 +14,12 @@ import {
 } from 'react-icons/gi';
 import { FiBookOpen, FiCompass, FiLogOut, FiMenu, FiSettings, FiShield, FiShoppingBag, FiX } from 'react-icons/fi';
 import { GoSidebarCollapse, GoSidebarExpand } from 'react-icons/go';
-import { ref as storageRef, deleteObject } from 'firebase/storage';
 import { deleteDoc, doc, getDoc, updateDoc } from '../../performance/firestore';
 import { useShellLayout } from './shellLayout';
 import { GRIGLIATA_PAGE_PRESENCE_COLLECTION } from '../grigliata/presence';
-import { uploadCacheableImage } from './imageStorage';
+import { canPrefetchModules } from './lazyLoading';
+import { prefetchRoute } from '../../routes/routeRegistry';
+import ProfileMediaDialogs from './lazyProfileMedia';
 
 const NAV_ITEMS = [
   {
@@ -157,7 +158,7 @@ const ProfileActions = ({
   </div>
 );
 
-const NavList = ({ collapsed, navItems, onNavigate }) => (
+const NavList = ({ collapsed, navItems, onNavigate, onPrefetch }) => (
   <nav className="custom-scroll flex-1 overflow-y-auto pr-1" aria-label="Primary">
     <ul className="space-y-2">
       {navItems.map((item) => {
@@ -169,6 +170,8 @@ const NavList = ({ collapsed, navItems, onNavigate }) => (
               to={item.path}
               end={item.end}
               onClick={onNavigate}
+              onMouseEnter={() => onPrefetch(item.path)}
+              onFocus={() => onPrefetch(item.path)}
               className={({ isActive }) => [
                 BASE_NAV_ITEM_CLASS,
                 isActive ? ACTIVE_NAV_ITEM_CLASS : INACTIVE_NAV_ITEM_CLASS,
@@ -368,6 +371,10 @@ const Navbar = () => {
   const activeRouteLabel = useMemo(() => (
     NAV_ITEMS.find((item) => item.path === location.pathname)?.label || 'Navigation'
   ), [location.pathname]);
+  const prefetchNavigationRoute = (path) => {
+    if (!canPrefetchModules()) return;
+    prefetchRoute(path, role).catch(() => {});
+  };
 
   const clearGrigliataPagePresenceBeforeLogout = async () => {
     if (location.pathname !== '/grigliata' || !user?.uid) {
@@ -424,17 +431,25 @@ const Navbar = () => {
   const handleUpload = async () => {
     if (!selectedFile || !user) return;
     setIsUploading(true);
-    // delete old image
-    const liveProfile = getCurrentProfile();
-    if (liveProfile?.imagePath) {
-      try {
-        await deleteObject(storageRef(storage, liveProfile.imagePath));
-      } catch (err) {
-        console.error('Old image deletion failed:', err);
-      }
-    }
-    // upload new image
     try {
+      const [storageModule, storageApi, imageStorage] = await Promise.all([
+      import(/* webpackChunkName: "feature-profile-media" */ '../firebaseStorage'),
+      import(/* webpackChunkName: "feature-profile-media" */ 'firebase/storage'),
+      import(/* webpackChunkName: "feature-profile-media" */ './imageStorage'),
+      ]);
+      const { storage } = storageModule;
+      const { ref: storageRef, deleteObject } = storageApi;
+      const { uploadCacheableImage } = imageStorage;
+      // delete old image
+      const liveProfile = getCurrentProfile();
+      if (liveProfile?.imagePath) {
+        try {
+          await deleteObject(storageRef(storage, liveProfile.imagePath));
+        } catch (err) {
+          console.error('Old image deletion failed:', err);
+        }
+      }
+      // upload new image
       // construct filename same as CharacterCreation: characterId_uid_timestamp
       const characterId = userData?.characterId || (user && user.email.split('@')[0]);
       const safeName = characterId.replace(/\s+/g, '_');
@@ -474,7 +489,7 @@ const Navbar = () => {
               onToggleNav={toggleNav}
             />
 
-            <NavList collapsed={isNavCollapsed} navItems={navItems} onNavigate={noop} />
+            <NavList collapsed={isNavCollapsed} navItems={navItems} onNavigate={noop} onPrefetch={prefetchNavigationRoute} />
 
             <button
               type="button"
@@ -593,7 +608,12 @@ const Navbar = () => {
               </div>
 
               <div className="mt-4 flex flex-1 flex-col">
-                <NavList collapsed={false} navItems={navItems} onNavigate={closeMobileNav} />
+                <NavList
+                  collapsed={false}
+                  navItems={navItems}
+                  onNavigate={closeMobileNav}
+                  onPrefetch={prefetchNavigationRoute}
+                />
 
                 <button
                   type="button"
@@ -610,51 +630,22 @@ const Navbar = () => {
         </>
       )}
 
-      {isPreviewOpen && (
-        <div
-          className="fixed inset-0 z-[120] flex items-center justify-center bg-black bg-opacity-75"
-          onClick={() => setIsPreviewOpen(false)}
-        >
-          <img
-            src={userData?.imageUrl}
-            alt="Profile Preview"
-            className="max-w-full max-h-full rounded-lg"
-          />
-        </div>
-      )}
-      {isUploadOpen && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black bg-opacity-75">
-          <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-sm">
-            <h2 className="text-xl text-white mb-4">Upload New Profile Image</h2>
-            <div className="bg-red-900 bg-opacity-25 border border-red-700 rounded p-4 mb-4">
-              <p className="text-white">Uploading a new image will permanently delete your previous one.</p>
-            </div>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleFileChange}
-              className="block w-full text-white mb-4"
-            />
-            {uploadError && <p className="text-red-500 mb-2">{uploadError}</p>}
-            <div className="flex justify-end space-x-2">
-              <button
-                onClick={() => { setIsUploadOpen(false); setSelectedFile(null); }}
-                className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
-                disabled={isUploading}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleUpload}
-                disabled={!selectedFile || isUploading}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isUploading ? 'Uploading...' : 'Upload'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {isPreviewOpen || isUploadOpen ? (
+        <ProfileMediaDialogs
+          mode={isPreviewOpen ? 'preview' : 'upload'}
+          imageUrl={userData?.imageUrl}
+          isUploading={isUploading}
+          onClose={() => {
+            setIsPreviewOpen(false);
+            setIsUploadOpen(false);
+            setSelectedFile(null);
+          }}
+          onFileChange={handleFileChange}
+          onUpload={handleUpload}
+          selectedFile={selectedFile}
+          uploadError={uploadError}
+        />
+      ) : null}
     </>
   );
 };

@@ -11,10 +11,8 @@ import {
   isPerformanceEnabled,
   recordPerfEvent,
 } from "./performance/runtime";
-import { installGrigliataBenchmarkBridge } from "./performance/grigliataBenchmarks";
 
 installPerformanceRuntime();
-if (process.env.REACT_APP_FND_PERF === "1") installGrigliataBenchmarkBridge();
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 let bootstrapAttempt = 0;
@@ -35,7 +33,7 @@ const startApplication = async () => {
 
     if (attempt !== bootstrapAttempt) return;
     renderBootstrap("app-loading");
-    const { default: App } = await import("./App");
+    const { default: App } = await import(/* webpackChunkName: "app-shell" */ "./App");
     if (attempt !== bootstrapAttempt) return;
 
     root.render(

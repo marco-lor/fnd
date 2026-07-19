@@ -4,10 +4,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { collection, onSnapshot, query, where, or, and, doc, getDoc } from "../../performance/firestore";
 import { db } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
-import { AddWeaponOverlay } from './elements/addWeapon';
-import { AddArmaturaOverlay } from './elements/addArmatura';
-import { AddAccessorioOverlay } from './elements/addAccessorio';
-import { AddConsumabileOverlay } from './elements/addConsumabile';
 import ComparisonPanel from './elements/comparisonComponent';
 import { acquireItem } from './elements/acquireItem';
 import PurchaseConfirmModal from './elements/PurchaseConfirmModal';
@@ -15,6 +11,14 @@ import FiltersSection from './elements/FiltersSection';
 import { SPECIAL_PARAM_SCHEMA_IDS } from '../common/paramMetadata';
 import { useShellLayout } from '../common/shellLayout';
 import { FiShoppingBag } from 'react-icons/fi';
+import { canPrefetchModules } from '../common/lazyLoading';
+import {
+  AddAccessorioOverlay,
+  AddArmaturaOverlay,
+  AddConsumabileOverlay,
+  AddWeaponOverlay,
+  BAZAAR_EDITOR_DESCRIPTORS,
+} from './lazyBazaarEditors';
 
 function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purchasing, userGold }) {
   const [imageError, setImageError] = useState(false);
@@ -253,6 +257,10 @@ export default function Bazaar() {
   const [pendingPurchaseItem, setPendingPurchaseItem] = useState(null);
   const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
   const isDM = userData?.role === 'dm'; // DMs can see all items regardless of custom visibility
+  const prefetchEditor = (kind) => {
+    if (!isAdmin || !canPrefetchModules()) return;
+    BAZAAR_EDITOR_DESCRIPTORS[kind]?.preload().catch(() => {});
+  };
 
   // Listen to items respecting visibility
   useEffect(() => {
@@ -706,24 +714,32 @@ export default function Bazaar() {
             <div className="mb-4">
               <div className="flex flex-wrap gap-2">                <button
                   onClick={handleAddWeaponClick}
+                  onMouseEnter={() => prefetchEditor('weapon')}
+                  onFocus={() => prefetchEditor('weapon')}
                   className="px-3 py-1.5 text-sm bg-green-700 text-white rounded hover:bg-green-600 transition-colors"
                 >
                   {lockedItem && lockedItem.item_type === "weapon" ? "Modifica Arma" : "+ Arma"}
                 </button>
                 <button 
-                  onClick={handleAddArmaturaClick} 
+                  onClick={handleAddArmaturaClick}
+                  onMouseEnter={() => prefetchEditor('armatura')}
+                  onFocus={() => prefetchEditor('armatura')}
                   className="px-3 py-1.5 text-sm bg-blue-700 text-white rounded hover:bg-blue-600 transition-colors"
                 > 
                   {lockedItem && lockedItem.item_type === "armatura" ? "Modifica Armatura" : "+ Armatura"}
                 </button>
                 <button 
-                  onClick={handleAddAccessorioClick} 
+                  onClick={handleAddAccessorioClick}
+                  onMouseEnter={() => prefetchEditor('accessorio')}
+                  onFocus={() => prefetchEditor('accessorio')}
                   className="px-3 py-1.5 text-sm bg-purple-700 text-white rounded hover:bg-purple-600 transition-colors"
                 > 
                   {lockedItem && lockedItem.item_type === "accessorio" ? "Modifica Accessorio" : "+ Accessorio"}
                 </button>
                 <button
                   onClick={handleAddConsumabileClick}
+                  onMouseEnter={() => prefetchEditor('consumabile')}
+                  onFocus={() => prefetchEditor('consumabile')}
                   className="px-3 py-1.5 text-sm bg-yellow-700 text-white rounded hover:bg-yellow-600 transition-colors"
                 >
                   {lockedItem && lockedItem.item_type === "consumabile" ? "Modifica Consumabile" : "+ Consumabile"}

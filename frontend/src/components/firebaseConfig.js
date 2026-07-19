@@ -3,8 +3,6 @@ import { getApp, getApps, initializeApp } from "firebase/app";
 import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 import { connectAuthEmulator, getAuth } from "firebase/auth";
 import { connectFirestoreEmulator, getFirestore } from "../performance/firestore";
-import { connectFunctionsEmulator, getFunctions } from "firebase/functions";
-import { connectStorageEmulator, getStorage } from "firebase/storage";
 
 export const FIREBASE_CONFIG_ENDPOINT = "/fatins-runtime/firebase-client";
 
@@ -31,8 +29,6 @@ export const testFirebaseConfig = {
 export let app;
 export let auth;
 export let db;
-export let storage;
-export let functions;
 
 let initializationPromise = null;
 let appCheckInitialized = false;
@@ -121,8 +117,8 @@ const initializeFirebaseServices = (config, {
   production = process.env.NODE_ENV === "production",
   appCheckSiteKey = process.env.REACT_APP_RECAPTCHA_V3_SITE_KEY,
 } = {}) => {
-  if (app && auth && db && storage && functions) {
-    return { app, auth, db, storage, functions };
+  if (app && auth && db) {
+    return { app, auth, db };
   }
 
   app = getApps().length ? getApp() : initializeApp(validateFirebaseConfig(config));
@@ -141,23 +137,19 @@ const initializeFirebaseServices = (config, {
 
   auth = getAuth(app);
   db = getFirestore(app);
-  storage = getStorage(app);
-  functions = getFunctions(app, "europe-west1");
 
   if (performanceMode && !emulatorsConnected) {
     connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
     connectFirestoreEmulator(db, "127.0.0.1", 8080);
-    connectStorageEmulator(storage, "127.0.0.1", 9199);
-    connectFunctionsEmulator(functions, "127.0.0.1", 5001);
     emulatorsConnected = true;
   }
 
-  return { app, auth, db, storage, functions };
+  return { app, auth, db };
 };
 
 export const initializeFirebase = ({ fetchImpl, onPhase, forceRuntime = false } = {}) => {
-  if (app && auth && db && storage && functions) {
-    return Promise.resolve({ app, auth, db, storage, functions });
+  if (app && auth && db) {
+    return Promise.resolve({ app, auth, db });
   }
 
   if (initializationPromise) return initializationPromise;
@@ -181,8 +173,6 @@ export const __resetFirebaseForTests = () => {
   app = undefined;
   auth = undefined;
   db = undefined;
-  storage = undefined;
-  functions = undefined;
   initializationPromise = null;
   appCheckInitialized = false;
   emulatorsConnected = false;
@@ -201,5 +191,5 @@ export const __initializeFirebaseServicesForTests = (config, options) => {
 const staticFirebaseConfig = getStaticFirebaseConfig();
 if (staticFirebaseConfig) {
   initializeFirebaseServices(staticFirebaseConfig);
-  initializationPromise = Promise.resolve({ app, auth, db, storage, functions });
+  initializationPromise = Promise.resolve({ app, auth, db });
 }

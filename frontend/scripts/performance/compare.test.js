@@ -45,9 +45,19 @@ test('structural gates reject missing scenarios and enabled normal builds', () =
     scenarioManifest: { scenarios: [{ id: 'login-cold' }, { id: 'home' }] },
     browser: { scenarios: [{ scenarioId: 'login-cold' }] },
     fixture: { hash: 'abc', projectId: 'demo-fnd-perf', documentCount: 1 },
-    build: { sourceMapsPresent: false, instrumentationMarkerPresent: true },
+    build: {
+      sourceMapsPresent: false,
+      instrumentationMarkerPresent: true,
+      requiredChunks: { routes: ['route-login'], features: ['feature-editor'] },
+      chunkInventory: [{ logicalName: 'route-login' }],
+      webpackModuleEvidence: { moduleCount: 10, loginModuleViolations: [] },
+    },
     normalBuildVerification: { instrumentationAbsent: false },
   });
   assert.equal(evaluations.find((gate) => gate.id === 'scenario-completeness').status, 'fail');
   assert.equal(evaluations.find((gate) => gate.id === 'normal-build-instrumentation-absent').status, 'fail');
+  assert.deepEqual(
+    evaluations.find((gate) => gate.id === 'route-feature-chunk-inventory').missing,
+    ['feature-editor']
+  );
 });

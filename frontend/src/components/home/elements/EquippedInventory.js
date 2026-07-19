@@ -4,8 +4,10 @@ import { doc, onSnapshot, updateDoc, increment } from '../../../performance/fire
 import { db } from '../../firebaseConfig';
 import { FaTimes } from 'react-icons/fa';
 import { GiChestArmor, GiBroadsword, GiShield, GiRing, GiCrackedHelm, GiBlackBelt, GiSteeltoeBoots, GiScabbard, GiPotionBall, GiDrinkMe } from 'react-icons/gi';
-import ItemDetailsModal from './ItemDetailsModal';
-import ConfirmUseConsumableModal from './ConfirmUseConsumableModal';
+import {
+  LazyConfirmUseConsumableModal as ConfirmUseConsumableModal,
+  LazyItemDetailsModal as ItemDetailsModal,
+} from './lazyHomeFeatures';
 // Utility (not a React hook) renamed locally to avoid hook lint rule triggering.
 import consumeConsumable from './useConsumable';
 import { computeValue } from '../../common/computeFormula';

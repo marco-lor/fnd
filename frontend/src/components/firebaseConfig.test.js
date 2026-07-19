@@ -31,14 +31,6 @@ describe("Firebase async bootstrap", () => {
       connectFirestoreEmulator: jest.fn(),
       getFirestore: jest.fn(() => ({ service: "db" })),
     }));
-    jest.doMock("firebase/functions", () => ({
-      connectFunctionsEmulator: jest.fn(),
-      getFunctions: jest.fn(() => ({ service: "functions" })),
-    }));
-    jest.doMock("firebase/storage", () => ({
-      connectStorageEmulator: jest.fn(),
-      getStorage: jest.fn(() => ({ service: "storage" })),
-    }));
     return require("./firebaseConfig");
   };
 
@@ -130,8 +122,6 @@ describe("Firebase async bootstrap", () => {
       expect(fetchImpl).not.toHaveBeenCalled();
       expect(require("firebase/auth").connectAuthEmulator).toHaveBeenCalledTimes(1);
       expect(require("../performance/firestore").connectFirestoreEmulator).toHaveBeenCalledTimes(1);
-      expect(require("firebase/functions").connectFunctionsEmulator).toHaveBeenCalledTimes(1);
-      expect(require("firebase/storage").connectStorageEmulator).toHaveBeenCalledTimes(1);
     } finally {
       if (previousPerformanceMode === undefined) delete process.env.REACT_APP_FND_PERF;
       else process.env.REACT_APP_FND_PERF = previousPerformanceMode;

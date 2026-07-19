@@ -225,14 +225,38 @@ jest.mock('../common/shellLayout', () => ({
   useShellLayout: jest.fn(),
 }));
 
+jest.mock('../common/lazyLoading', () => {
+  const React = require('react');
+  const modules = {
+    'feature-grigliata-dice': './GrigliataDicePanel',
+    'feature-grigliata-gallery': './BackgroundGalleryPanel',
+    'feature-grigliata-music': './MusicLibraryPanel',
+    'feature-grigliata-calibration': './MapCalibrationPanel',
+    'feature-grigliata-lighting': './GrigliataLightingImportPanel',
+    'feature-grigliata-narration-placement': './NarrationPlacementPicker',
+  };
+  return {
+    canPrefetchModules: () => true,
+    createModuleLoader: ({ chunkName }) => ({
+      chunkName,
+      preload: jest.fn(() => Promise.resolve()),
+    }),
+    RetryableLazyBoundary: ({ descriptor, componentProps }) => {
+      const loaded = require(modules[descriptor.chunkName]);
+      const Component = loaded.default || loaded;
+      return React.createElement(Component, componentProps);
+    },
+  };
+});
+
 jest.mock('../firebaseConfig', () => ({
   auth: {
     currentUser: { uid: 'user-1' },
   },
   db: {},
-  functions: {},
-  storage: {},
 }));
+jest.mock('../firebaseFunctions', () => ({ functions: {} }));
+jest.mock('../firebaseStorage', () => ({ storage: {} }));
 
 jest.mock('firebase/functions', () => ({
   httpsCallable: jest.fn((functions, functionName) => {

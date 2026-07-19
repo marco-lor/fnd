@@ -28,6 +28,7 @@ jest.mock('./MapEditor', () => ({
 jest.mock('../firebaseConfig', () => ({
   db: {},
 }));
+jest.mock('../firebaseStorage', () => ({ storage: {} }));
 
 jest.mock('firebase/firestore', () => ({
   collection: jest.fn((db, path) => ({ path })),

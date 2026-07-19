@@ -3,13 +3,17 @@ import React, { useContext, useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';               // kept for possible outer animations
 import { deleteDoc, doc, onSnapshot, getDoc } from '../../../performance/firestore';
 import { ref, deleteObject } from 'firebase/storage';
-import { db, storage } from '../../firebaseConfig';
+import { db } from '../../firebaseConfig';
+import { storage } from '../../firebaseStorage';
 import { computeValue } from '../../common/computeFormula';
 import { AuthContext } from '../../../AuthContext';
-import { AddWeaponOverlay } from './addWeapon';
-import { AddArmaturaOverlay } from './addArmatura';
-import { AddAccessorioOverlay } from './addAccessorio';
-import { AddConsumabileOverlay } from './addConsumabile';
+import {
+  AddAccessorioOverlay,
+  AddArmaturaOverlay,
+  AddConsumabileOverlay,
+  AddWeaponOverlay,
+  prefetchBazaarEditor,
+} from '../lazyBazaarEditors';
 import { FaTrash, FaEdit } from 'react-icons/fa';
 import { GiSpellBook, GiMagicSwirl } from "react-icons/gi";
 
@@ -743,6 +747,8 @@ export default function ComparisonPanel({ item, showMessage }) {
           <div className="absolute top-3 right-3 z-40 flex space-x-2">
             <button
               onClick={handleEditClick}
+              onMouseEnter={() => prefetchBazaarEditor(item?.item_type || 'weapon')}
+              onFocus={() => prefetchBazaarEditor(item?.item_type || 'weapon')}
               title="Modifica Oggetto"
               className="p-1.5 bg-gray-700 bg-opacity-70 rounded-full hover:bg-blue-600 transition-colors"
             >

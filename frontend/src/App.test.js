@@ -21,6 +21,18 @@ jest.mock("./AuthContext", () => ({
   useShellProfile: () => mockShellState,
 }));
 
+jest.mock("./components/common/lazyLoading", () => {
+  const actual = jest.requireActual("./components/common/lazyLoading");
+  return {
+    ...actual,
+    RetryableLazyBoundary: ({ descriptor, componentProps }) => (
+      descriptor.chunkName === 'feature-authenticated-layout'
+        ? <div data-testid="layout">{componentProps?.children}</div>
+        : <div>{descriptor.chunkName}</div>
+    ),
+  };
+});
+
 jest.mock("./components/Login", () => () => <div>Login Page</div>);
 jest.mock("./components/characterCreation/CharacterCreation", () => () => <div>Character Creation Page</div>);
 jest.mock("./components/home/Home", () => () => <div>Home Page</div>);
@@ -137,9 +149,9 @@ describe("App route authorization states", () => {
   test("retains public, authenticated, direct-role, and wildcard route elements", () => {
     render(<AppRoutes />);
     expect(screen.getByTestId("routes")).toBeInTheDocument();
-    expect(screen.getByText("Login Page")).toBeInTheDocument();
-    expect(screen.getByText("Character Creation Page")).toBeInTheDocument();
-    expect(screen.getByText("Grigliata Page")).toBeInTheDocument();
+    expect(screen.getByText("route-login")).toBeInTheDocument();
+    expect(screen.getByText("route-character-creation")).toBeInTheDocument();
+    expect(screen.getByText("route-grigliata")).toBeInTheDocument();
     expect(screen.getAllByTestId("navigate").some((node) => node.textContent === "/home")).toBe(true);
   });
 });

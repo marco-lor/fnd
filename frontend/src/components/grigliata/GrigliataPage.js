@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PerformanceProfiler from '../../performance/PerformanceProfiler';
+import { installGrigliataBenchmarkBridge } from '../../performance/grigliataBenchmarks';
 import { FaDiceD20 } from 'react-icons/fa';
 import { FiImage, FiMap, FiMusic, FiSun } from 'react-icons/fi';
 import { GiCrackedHelm } from 'react-icons/gi';
@@ -29,12 +30,10 @@ import {
 import { httpsCallable } from 'firebase/functions';
 import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
 import { useAuth } from '../../AuthContext';
-import { auth, db, functions, storage } from '../firebaseConfig';
+import { auth, db } from '../firebaseConfig';
+import { storage } from '../firebaseStorage';
+import { functions } from '../firebaseFunctions';
 import { uploadCacheableImage } from '../common/imageStorage';
-import BackgroundGalleryPanel from './BackgroundGalleryPanel';
-import GrigliataLightingImportPanel from './GrigliataLightingImportPanel';
-import MusicLibraryPanel from './MusicLibraryPanel';
-import NarrationPlacementPicker from './NarrationPlacementPicker';
 import {
   buildGrigliataLightingSummary,
   GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION,
@@ -139,8 +138,6 @@ import {
   GRIGLIATA_LIVE_INTERACTION_THROTTLE_MS,
   normalizeGrigliataLiveInteractionDraft,
 } from './liveInteractions';
-import MapCalibrationPanel from './MapCalibrationPanel';
-import GrigliataDicePanel from './GrigliataDicePanel';
 import {
   buildDestrezzaInitiativeRollConfig,
   resolveAnimaDieLabel,
@@ -216,6 +213,54 @@ import {
   filterFogVisibleTurnOrderEntries,
 } from './fogVisibilityFiltering';
 import { useShellLayout } from '../common/shellLayout';
+import {
+  canPrefetchModules,
+  createModuleLoader,
+  RetryableLazyBoundary,
+} from '../common/lazyLoading';
+
+const GRIGLIATA_FEATURE_DESCRIPTORS = Object.freeze({
+  dice: createModuleLoader({
+    chunkName: 'feature-grigliata-dice',
+    importer: () => import(/* webpackChunkName: "feature-grigliata-dice" */ './GrigliataDicePanel'),
+  }),
+  gallery: createModuleLoader({
+    chunkName: 'feature-grigliata-gallery',
+    importer: () => import(/* webpackChunkName: "feature-grigliata-gallery" */ './BackgroundGalleryPanel'),
+  }),
+  music: createModuleLoader({
+    chunkName: 'feature-grigliata-music',
+    importer: () => import(/* webpackChunkName: "feature-grigliata-music" */ './MusicLibraryPanel'),
+  }),
+  calibration: createModuleLoader({
+    chunkName: 'feature-grigliata-calibration',
+    importer: () => import(/* webpackChunkName: "feature-grigliata-calibration" */ './MapCalibrationPanel'),
+  }),
+  lighting: createModuleLoader({
+    chunkName: 'feature-grigliata-lighting',
+    importer: () => import(/* webpackChunkName: "feature-grigliata-lighting" */ './GrigliataLightingImportPanel'),
+  }),
+  narrationPlacement: createModuleLoader({
+    chunkName: 'feature-grigliata-narration-placement',
+    importer: () => import(/* webpackChunkName: "feature-grigliata-narration-placement" */ './NarrationPlacementPicker'),
+  }),
+});
+
+const buildLazyFeature = (descriptor, fallbackLabel) => (props) => (
+  <RetryableLazyBoundary
+    descriptor={descriptor}
+    fallbackLabel={fallbackLabel}
+    componentProps={props}
+    onClose={props.onClose}
+  />
+);
+
+const GrigliataDicePanel = buildLazyFeature(GRIGLIATA_FEATURE_DESCRIPTORS.dice, 'Loading dice...');
+const BackgroundGalleryPanel = buildLazyFeature(GRIGLIATA_FEATURE_DESCRIPTORS.gallery, 'Loading DM Gallery...');
+const MusicLibraryPanel = buildLazyFeature(GRIGLIATA_FEATURE_DESCRIPTORS.music, 'Loading music library...');
+const MapCalibrationPanel = buildLazyFeature(GRIGLIATA_FEATURE_DESCRIPTORS.calibration, 'Loading map calibration...');
+const GrigliataLightingImportPanel = buildLazyFeature(GRIGLIATA_FEATURE_DESCRIPTORS.lighting, 'Loading lighting controls...');
+const NarrationPlacementPicker = buildLazyFeature(GRIGLIATA_FEATURE_DESCRIPTORS.narrationPlacement, 'Loading narration placement...');
 
 const MAX_BACKGROUND_IMAGE_FILE_BYTES = 15 * 1024 * 1024;
 const MAX_BACKGROUND_VIDEO_FILE_BYTES = 25 * 1024 * 1024;
@@ -510,6 +555,11 @@ const normalizeFoeParametri = (value, fallback = {}) => {
 };
 
 export default function GrigliataPage() {
+  useEffect(() => {
+    if (process.env.REACT_APP_FND_PERF !== '1') return undefined;
+    return installGrigliataBenchmarkBridge();
+  }, []);
+
   const { user, userData, loading } = useAuth();
   const { topInset } = useShellLayout();
   const currentUserId = user?.uid || '';
@@ -6280,7 +6330,7 @@ export default function GrigliataPage() {
           </div>
         )}
 
-        <NarrationPlacementPicker
+        {narrationPlacementPromptBackground && <NarrationPlacementPicker
           isOpen={!!narrationPlacementPromptBackground}
           background={narrationPlacementPromptBackground}
           backgrounds={backgrounds}
@@ -6288,7 +6338,7 @@ export default function GrigliataPage() {
           isPending={isNarrationActionPending}
           onClose={() => setNarrationPlacementPromptBackground(null)}
           onSelectPlacement={(placementMode) => handleAddNarrationPlacement(narrationPlacementPromptBackground, placementMode)}
-        />
+        />}
 
         <div className="grid flex-1 min-h-0 gap-3 xl:grid-cols-[minmax(0,1fr)_22rem]">
           <div className={`min-w-0 xl:min-h-0 ${isTrayDragging ? 'rounded-3xl ring-2 ring-amber-400/20' : ''}`}>
@@ -6490,6 +6540,12 @@ export default function GrigliataPage() {
                       aria-controls={`grigliata-sidebar-panel-${tab.key}`}
                       title={tab.label}
                       onClick={() => setActiveSidebarTab(tab.key)}
+                      onMouseEnter={() => {
+                        if (canPrefetchModules()) GRIGLIATA_FEATURE_DESCRIPTORS[tab.key]?.preload().catch(() => {});
+                      }}
+                      onFocus={() => {
+                        if (canPrefetchModules()) GRIGLIATA_FEATURE_DESCRIPTORS[tab.key]?.preload().catch(() => {});
+                      }}
                       className={`inline-flex h-9 min-w-9 flex-1 items-center justify-center rounded-xl p-0 text-xs font-semibold uppercase tracking-[0.16em] transition-colors ${
                         isActive
                           ? 'bg-amber-400 text-black shadow-lg'

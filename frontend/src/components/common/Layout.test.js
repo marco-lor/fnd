@@ -77,6 +77,7 @@ jest.mock('../firebaseConfig', () => ({
   db: {},
   storage: {},
 }));
+jest.mock('../firebaseStorage', () => ({ storage: {} }));
 
 jest.mock('firebase/storage', () => ({
   deleteObject: jest.fn(() => Promise.resolve()),

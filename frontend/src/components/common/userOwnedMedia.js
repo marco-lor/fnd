@@ -1,7 +1,8 @@
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "../../performance/firestore";
 import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
-import { auth, db, storage } from "../firebaseConfig";
+import { auth, db } from "../firebaseConfig";
+import { storage } from "../firebaseStorage";
 import { uploadCacheableImage } from "./imageStorage";
 
 const COLLECTION_CONFIG = {
