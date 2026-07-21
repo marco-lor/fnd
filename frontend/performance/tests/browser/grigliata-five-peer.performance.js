@@ -21,6 +21,40 @@ const countRouteResources = (resources, route) => Object.entries(resources || {}
   .filter(([key]) => !key.startsWith(`${route}::timeout`))
   .reduce((total, [, count]) => total + Number(count || 0), 0);
 
+const waitForRouteCleanup = async ({ page, role }) => {
+  try {
+    await page.waitForFunction(() => (
+      Object.entries(window.__FND_PERF__.snapshot().activeResources || {})
+        .filter(([key]) => key.startsWith('/grigliata::'))
+        .filter(([key]) => !key.startsWith('/grigliata::timeout'))
+        .reduce((total, [, value]) => total + Number(value || 0), 0) === 0
+    ), null, { polling: 100, timeout: 10_000 });
+  } catch (error) {
+    const diagnostics = await page.evaluate(() => {
+      const snapshot = window.__FND_PERF__.snapshot();
+      return {
+        routeState: snapshot.routeState,
+        activeResources: Object.fromEntries(
+          Object.entries(snapshot.activeResources || {})
+            .filter(([key]) => key.startsWith('/grigliata::'))
+        ),
+        activeListeners: Object.fromEntries(
+          Object.entries(snapshot.activeListeners || {})
+            .filter(([key]) => key.startsWith('/grigliata::'))
+        ),
+      };
+    }).catch((diagnosticError) => ({
+      diagnosticError: diagnosticError.message,
+    }));
+    throw new Error(
+      `Five-peer cleanup did not settle for ${role}: ${JSON.stringify(diagnostics)}`,
+      { cause: error }
+    );
+  }
+
+  return page.evaluate(() => window.__FND_PERF__.snapshot());
+};
+
 test('grigliata five-peer placement convergence', async ({ browser, baseURL }, testInfo) => {
   test.skip(process.env.FND_PERF_SKIP_MULTI === '1', 'Explicitly disabled for a reduced smoke run.');
   const contexts = [];
@@ -61,15 +95,9 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
     const snapshots = await Promise.all(pages.map(({ page }) => page.evaluate(() => window.__FND_PERF__.snapshot())));
     for (const { failures } of pages) expect(failures, failures.join('\n')).toHaveLength(0);
     const cleanupSnapshots = [];
-    for (const { page } of pages) {
+    for (const { page, role } of pages) {
       await navigateToCleanup(page);
-      await page.waitForFunction(() => (
-        Object.entries(window.__FND_PERF__.snapshot().activeResources || {})
-          .filter(([key]) => key.startsWith('/grigliata::'))
-          .filter(([key]) => !key.startsWith('/grigliata::timeout'))
-          .reduce((total, [, value]) => total + Number(value || 0), 0) === 0
-      ), null, { timeout: 10_000 });
-      cleanupSnapshots.push(await page.evaluate(() => window.__FND_PERF__.snapshot()));
+      cleanupSnapshots.push(await waitForRouteCleanup({ page, role }));
     }
     const leakedRouteListeners = cleanupSnapshots.reduce((total, snapshot) => (
       total + Object.entries(snapshot.activeListeners || {})

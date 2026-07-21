@@ -34,7 +34,6 @@ const DEAD_TOKEN_PRIMARY = 'rgba(254, 226, 226, 0.96)';
 const DEAD_TOKEN_SECONDARY = 'rgba(248, 113, 113, 0.95)';
 const DEAD_TOKEN_SCRIM = 'rgba(15, 23, 42, 0.34)';
 const DEAD_TOKEN_BANNER_FILL = 'rgba(127, 29, 29, 0.88)';
-const DEAD_TOKEN_LABEL = '#fecaca';
 const ACTIVE_TURN_PRIMARY = 'rgba(251, 191, 36, 0.98)';
 const ACTIVE_TURN_UNDERLAY = 'rgba(2, 6, 23, 0.88)';
 const ACTIVE_TURN_GLOW = 'rgba(245, 158, 11, 0.3)';

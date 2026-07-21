@@ -341,7 +341,7 @@ export default function Bazaar() {
         }
       }
     }
-  }, [items, lockedItem?.id, hoveredItem]);
+  }, [items, lockedItem, hoveredItem]);
 
   useEffect(() => {
     let isMounted = true;
@@ -425,25 +425,6 @@ export default function Bazaar() {
   const baseParams = ['All', ...Array.from(new Set(items.flatMap(item => 
     item.Parametri?.Base ? Object.keys(item.Parametri.Base) : []
   )))];
-    // Debug logging for combat params (remove after testing)
-  useEffect(() => {
-    if (selectedCombatParams.length > 0 && !selectedCombatParams.includes('All')) {
-      console.log('Selected combat params:', selectedCombatParams);
-      console.log('Available combat params:', combatParams);
-      const sampleItem = items.find(item => item.Parametri?.Combattimento);
-      if (sampleItem) {
-        console.log('Sample item combat params:', sampleItem.Parametri.Combattimento);
-      }
-    }
-    if (selectedBaseParams.length > 0 && !selectedBaseParams.includes('All')) {
-      console.log('Selected base params:', selectedBaseParams);
-      console.log('Available base params:', baseParams);
-      const sampleItem = items.find(item => item.Parametri?.Base);
-      if (sampleItem) {
-        console.log('Sample item base params:', sampleItem.Parametri.Base);
-      }
-    }
-  }, [selectedCombatParams, selectedBaseParams, combatParams, baseParams, items]);
 
   // Generic toggle utility and specific handlers (restored after refactor)
   const toggleFilter = (currentFilters, setFilters, value) => {

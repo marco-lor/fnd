@@ -1,6 +1,5 @@
 // file: ./frontend/src/components/bazaar/elements/comparisonComponent.js
 import React, { useContext, useState, useEffect, useRef, useMemo } from 'react';
-import { motion } from 'framer-motion';               // kept for possible outer animations
 import { deleteDoc, doc, onSnapshot, getDoc } from '../../../performance/firestore';
 import { ref, deleteObject } from 'firebase/storage';
 import { db } from '../../firebaseConfig';
@@ -15,7 +14,7 @@ import {
   prefetchBazaarEditor,
 } from '../lazyBazaarEditors';
 import { FaTrash, FaEdit } from 'react-icons/fa';
-import { GiSpellBook, GiMagicSwirl } from "react-icons/gi";
+import { GiSpellBook } from "react-icons/gi";
 
 // Cache for dadi anima data to prevent repeated fetches
 const dadiAnimaCache = {
@@ -669,6 +668,9 @@ export default function ComparisonPanel({ item, showMessage }) {
   const handleCloseEditOverlay = () => setShowEditOverlay(false);
 
   const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
+  const allowedUsersSignature = JSON.stringify(
+    Array.isArray(item?.allowed_users) ? item.allowed_users : []
+  );
 
   /* ----------------------------------------------------------------------- */
   /*  Resolve allowed user IDs to character names (for custom visibility)    */
@@ -676,14 +678,15 @@ export default function ComparisonPanel({ item, showMessage }) {
   useEffect(() => {
     let cancelled = false;
     const fetchAllowedUsers = async () => {
-      if (!isAdmin || item?.visibility !== 'custom' || !Array.isArray(item?.allowed_users) || item.allowed_users.length === 0) {
+      const allowedUserIds = JSON.parse(allowedUsersSignature);
+      if (!isAdmin || item?.visibility !== 'custom' || allowedUserIds.length === 0) {
         setAllowedUsersNames([]);
         return;
       }
       setAllowedUsersLoading(true);
       try {
         const names = [];
-        for (const uid of item.allowed_users) {
+        for (const uid of allowedUserIds) {
           try {
             const snap = await getDoc(doc(db, 'users', uid));
             if (snap.exists()) {
@@ -703,7 +706,7 @@ export default function ComparisonPanel({ item, showMessage }) {
     };
     fetchAllowedUsers();
     return () => { cancelled = true; };
-  }, [isAdmin, item?.visibility, item?.allowed_users && item.allowed_users.join(',')]);
+  }, [allowedUsersSignature, isAdmin, item?.visibility]);
 
   /* ----------------------------------------------------------------------- */
   /*  Render                                                                 */

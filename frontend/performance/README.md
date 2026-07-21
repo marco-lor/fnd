@@ -20,6 +20,18 @@ From `frontend/`:
 3. `npm run perf:compare` evaluates blocking budgets and non-blocking remediation targets.
 4. `npm run perf:ci` performs the complete local CI sequence.
 
+The fixture command verifies the Functions runtime, temporarily disables and flushes
+background triggers for the bulk demo seed, then re-enables and verifies triggers before
+the rules matrix runs. The harness then disables background triggers for the measurement
+window because fixture-derived totals are already seeded, re-enables them during global
+teardown, and fails if any background invocation ran while measurement was active.
+Emulator startup replaces only the current ignored debug logs, uses INFO verbosity, and
+fails if `firebase-debug.log` exceeds 25 MiB.
+
+Run `npm run verify:start` for the development-workflow smoke gate. It invokes the
+unchanged `npm start` on port 3001 with `BROWSER=none`, requires a successful compile and
+an HTTP 200 HTML response from `/home`, and stops only the process tree it created.
+
 Use `npm run perf:authoritative` on the named reference machine to perform two compatible runs. Each run produces one discarded warmup and three retained measurements per single-context scenario. `npm run perf:repeatability` requires deterministic metrics and build assets to match and timing medians to remain within 15%; the accepted aggregate therefore contains six retained measurements. GitHub's scheduled authoritative command exercises the same workflow but remains informational because hosted-runner timing is not a baseline source.
 
 Use `npm run perf:baseline -- --accept` only after reviewing a passing `performance-results/repeatability-report.json`. Baseline acceptance verifies the aggregate checksum so stale or hand-combined results cannot be accepted.

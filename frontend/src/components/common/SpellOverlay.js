@@ -65,7 +65,6 @@ export function SpellOverlay({
    }), []); // Empty dependency array assuming schema structure doesn't change based on props/state here
 
   /* initialise on mount / when schema/initialData changes */
-  // eslint-disable-next-line
   useEffect(() => {
     if (!schema) return;
     // Deep copy initialData if provided to avoid modifying the original object
@@ -81,13 +80,19 @@ export function SpellOverlay({
      setImageRemoved(false);
      setVideoRemoved(false);
 
-      // Cleanup URLs on component unmount or before setting new ones
-     return () => {
-       if (imagePreviewUrl && imagePreviewUrl.startsWith('blob:')) URL.revokeObjectURL(imagePreviewUrl);
-       if (videoPreviewUrl && videoPreviewUrl.startsWith('blob:')) URL.revokeObjectURL(videoPreviewUrl);
-     };
-
   }, [schema, initialData, buildEmptySpell]); // buildEmptySpell is memoized
+
+  useEffect(() => () => {
+    if (imagePreviewUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(imagePreviewUrl);
+    }
+  }, [imagePreviewUrl]);
+
+  useEffect(() => () => {
+    if (videoPreviewUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(videoPreviewUrl);
+    }
+  }, [videoPreviewUrl]);
 
   /* generic nested-field setter */
  const handleNestedChange = useCallback((cat, sub, key, val) =>
@@ -112,13 +117,6 @@ export function SpellOverlay({
    /* ---------- media previews ---------- */
    const preview = (e, isImg) => {
      const file = e.target.files?.[0];
-     const currentPreviewUrl = isImg ? imagePreviewUrl : videoPreviewUrl;
-
-     // Revoke previous blob URL if it exists
-     if (currentPreviewUrl && currentPreviewUrl.startsWith('blob:')) {
-       URL.revokeObjectURL(currentPreviewUrl);
-     }
-
      if (!file) {
        // Clear state if file is removed
        if (isImg) {
@@ -349,18 +347,13 @@ export function SpellOverlay({
         {/* Image Upload */}
         <div>
           <label className="block text-white text-sm mb-1">Immagine (Opzionale)</label>
-          <input type="file" accept="image/*" onChange={(e) => preview(e, true)}
+          <input type="file" accept="image/*" aria-label="Spell image file" onChange={(e) => preview(e, true)}
                  className="w-full text-sm text-white file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
           {imagePreviewUrl && (
              <div className="mt-2 relative w-24 h-24">
                 <img src={imagePreviewUrl} alt="Preview" className="w-full h-full object-cover rounded border border-gray-600" />
                  {/* Add a clear button */}
                   <button type="button" onClick={() => { 
-                    // Only revoke blob URLs to prevent memory leaks
-                    if (imagePreviewUrl?.startsWith('blob:')) {
-                      URL.revokeObjectURL(imagePreviewUrl); 
-                    }
-                    // Always clear the state regardless of URL type
                     setImageFile(null); 
                     setImagePreviewUrl(null);
                     setImageRemoved(true); // Mark as explicitly removed
@@ -373,18 +366,13 @@ export function SpellOverlay({
          {/* Video Upload */}
          <div>
            <label className="block text-white text-sm mb-1">Video (Opzionale)</label>
-           <input type="file" accept="video/*" onChange={(e) => preview(e, false)}
+           <input type="file" accept="video/*" aria-label="Spell video file" onChange={(e) => preview(e, false)}
                    className="w-full text-sm text-white file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
            {videoPreviewUrl && (
              <div className="mt-2 relative max-w-xs">
                 <video src={videoPreviewUrl} controls className="w-full max-h-48 rounded border border-gray-600" />
                 {/* Add a clear button */}
                 <button type="button" onClick={() => { 
-                  // Only revoke blob URLs to prevent memory leaks
-                  if (videoPreviewUrl?.startsWith('blob:')) {
-                    URL.revokeObjectURL(videoPreviewUrl); 
-                  }
-                  // Always clear the state regardless of URL type
                   setVideoFile(null); 
                   setVideoPreviewUrl(null);
                   setVideoRemoved(true); // Mark as explicitly removed

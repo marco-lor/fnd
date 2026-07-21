@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FiChevronDown,
   FiChevronUp,
@@ -198,7 +198,7 @@ export function TokenSizePopover({
   const normalizedDraftSize = normalizeTokenSizeSquares(draftSizeSquares);
   const presetSizes = [1, 2, 3, 4];
 
-  const commitSize = (nextSizeSquares) => {
+  const commitSize = useCallback((nextSizeSquares) => {
     const normalizedSizeSquares = normalizeTokenSizeSquares(nextSizeSquares);
     setDraftSizeSquares(normalizedSizeSquares);
     if (lastCommittedSizeRef.current !== normalizedSizeSquares) {
@@ -206,14 +206,14 @@ export function TokenSizePopover({
       onCommitSize?.(normalizedSizeSquares);
     }
     return normalizedSizeSquares;
-  };
+  }, [onCommitSize]);
 
-  const handleClose = ({ commitDraft = false } = {}) => {
+  const handleClose = useCallback(({ commitDraft = false } = {}) => {
     if (commitDraft) {
       commitSize(draftSizeSquares);
     }
     onRequestClose?.();
-  };
+  }, [commitSize, draftSizeSquares, onRequestClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -243,7 +243,7 @@ export function TokenSizePopover({
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [draftSizeSquares, onRequestClose, open, withinRef, onCommitSize]);
+  }, [handleClose, open, withinRef]);
 
   if (!open) {
     return null;

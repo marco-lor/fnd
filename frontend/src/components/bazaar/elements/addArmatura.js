@@ -292,7 +292,7 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
             }
         };
         fetchData();
-    }, [user, initialData?.id, customSpells, showMessage]);
+    }, [user, initialData?.id, initialData?.General?.ridCostoTecSingola, initialData?.General?.spells, customSpells, showMessage]);
 
     const handleSpellCreate = useCallback((result) => {
         console.log("Spell Create/Edit Result:", result);

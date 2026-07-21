@@ -1,5 +1,20 @@
-import React, { useMemo, useEffect, useRef, useState } from "react";
+import React, { useCallback, useMemo, useEffect, useRef, useState } from "react";
+import { withAsyncResourceOwner } from "../../performance/runtime";
 import "./aurora.css";
+
+const SHOOTING_STAR_COLORS = [
+  { name: 'white', rgb: [255, 255, 255] },
+  { name: 'blue', rgb: [96, 165, 250] },
+  { name: 'green', rgb: [94, 234, 212] },
+  { name: 'red', rgb: [248, 113, 113] },
+];
+
+const getViewport = () => ({
+  w: typeof window !== 'undefined' ? window.innerWidth : 1920,
+  h: typeof window !== 'undefined' ? window.innerHeight : 1080,
+});
+
+const rgba = (rgb, alpha) => `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})`;
 
 /**
  * GlobalAuroraBackground
@@ -28,22 +43,7 @@ const GlobalAuroraBackground = ({ density = 120, blur = true, className = "" }) 
   const [shootingStars, setShootingStars] = useState([]);
   const timeoutsRef = useRef([]);
 
-  // Utility to get viewport size safely
-  const getViewport = () => ({
-    w: typeof window !== 'undefined' ? window.innerWidth : 1920,
-    h: typeof window !== 'undefined' ? window.innerHeight : 1080,
-  });
-
-  const COLORS = [
-    { name: 'white', rgb: [255, 255, 255] },
-    { name: 'blue', rgb: [96, 165, 250] },   // tailwind sky-400
-    { name: 'green', rgb: [94, 234, 212] }, // teal-300
-    { name: 'red', rgb: [248, 113, 113] },  // red-400
-  ];
-
-  const rgba = (rgb, a) => `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${a})`;
-
-  const spawnShootingStar = (origin) => {
+  const spawnShootingStar = useCallback((origin) => {
     const { w, h } = getViewport();
     // Tail length and radius random ranges (px)
     const tail = 120 + Math.random() * 220;   // 120..340
@@ -51,7 +51,7 @@ const GlobalAuroraBackground = ({ density = 120, blur = true, className = "" }) 
     const duration = 900 + Math.random() * 1200; // 0.9s..2.1s
 
     // Choose color
-    const color = COLORS[Math.floor(Math.random() * COLORS.length)].rgb;
+    const color = SHOOTING_STAR_COLORS[Math.floor(Math.random() * SHOOTING_STAR_COLORS.length)].rgb;
 
     // Angle: mostly from upper-left to lower-right (realistic look)
     // Randomize between 20deg and 40deg downward trajectory; flip horizontally sometimes
@@ -83,20 +83,20 @@ const GlobalAuroraBackground = ({ density = 120, blur = true, className = "" }) 
     });
 
     // Cleanup after animation
-    const t = setTimeout(() => {
+    const t = withAsyncResourceOwner('shell', () => setTimeout(() => {
       setShootingStars((prev) => prev.filter((s) => s.id !== id));
-    }, duration + 100);
+    }, duration + 100));
     timeoutsRef.current.push(t);
-  };
+  }, []);
 
   // Random spawns loop
   useEffect(() => {
-    const interval = setInterval(() => {
+    const interval = withAsyncResourceOwner('shell', () => setInterval(() => {
       // 50% chance to spawn on tick, tick every 6s for subtlety
       if (Math.random() < 0.5) spawnShootingStar();
-    }, 6000);
+    }, 6000));
     return () => clearInterval(interval);
-  }, []);
+  }, [spawnShootingStar]);
 
   // Spawn on any page click (background doesn’t intercept clicks)
   useEffect(() => {
@@ -105,7 +105,7 @@ const GlobalAuroraBackground = ({ density = 120, blur = true, className = "" }) 
     };
     window.addEventListener('click', onClick);
     return () => window.removeEventListener('click', onClick);
-  }, []);
+  }, [spawnShootingStar]);
 
   // Clear timeouts on unmount
   useEffect(() => () => { timeoutsRef.current.forEach(clearTimeout); }, []);

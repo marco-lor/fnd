@@ -55,7 +55,6 @@ import {
   getTokenPositionPx,
   normalizeGridConfig,
   snapBoardPointToGrid,
-  timestampToMillis,
 } from './boardUtils';
 import GrigliataTokenActions, { TokenStatusSummaryCard } from './GrigliataTokenActions';
 import { GRIGLIATA_RESOURCE_VISUALS } from './resourceVisuals';
@@ -115,14 +114,6 @@ installKonvaInstrumentation(Konva);
 
 const POINTER_DRAG_THRESHOLD_PX = 4;
 const RULER_LABEL_MIN_WIDTH = 90;
-const AOE_LABEL_MIN_WIDTH = 112;
-const AOE_LABEL_MAX_WIDTH = 220;
-const AOE_LABEL_SIDE_PADDING = 12;
-const AOE_LABEL_TOP_PADDING = 8;
-const AOE_LABEL_LINE_HEIGHT = 17;
-const AOE_LABEL_AVG_CHAR_WIDTH_PX = 7.4;
-const AOE_LABEL_GAP_PX = 12;
-const AOE_LABEL_EDGE_PADDING = 8;
 const DEFAULT_DRAW_THEME = getGrigliataDrawTheme(DEFAULT_GRIGLIATA_DRAW_COLOR_KEY);
 const MEASUREMENT_OUTLINE_STROKE_WIDTH = 7;
 const SHAPE_OUTLINE_STROKE_WIDTH = 4;
@@ -172,6 +163,7 @@ const TURN_ORDER_PANEL_WIDTH_CLASS = 'w-[min(12rem,calc(100vw-2rem))]';
 const TURN_ORDER_PANEL_STORAGE_PREFIX = 'grigliata.turnOrderCollapsed';
 const TURN_ORDER_DRAWER_TRANSITION = { duration: 0.26, ease: DRAW_PICKER_EASE };
 const TURN_ORDER_ENTRY_TRANSITION = { duration: 0.18, ease: DRAW_PICKER_EASE };
+const EMPTY_RENDERED_TOKENS = Object.freeze([]);
 
 const isPrimaryMouseButton = (nativeEvent) => nativeEvent?.button === 0;
 const isSecondaryMouseButton = (nativeEvent) => nativeEvent?.button === 2;
@@ -1158,244 +1150,6 @@ const MapPingOverlay = ({
       />
     </Group>
   );
-};
-
-const estimateAoELabelWidth = (line) => (
-  Math.round((String(line || '').length * AOE_LABEL_AVG_CHAR_WIDTH_PX) + (AOE_LABEL_SIDE_PADDING * 2))
-);
-
-const splitAoEFigureMeasurementLines = (figure, maxWidth) => {
-  const measurement = figure?.measurement;
-  const label = measurement?.label;
-  if (!label) {
-    return [];
-  }
-
-  if (figure.figureType !== 'cone' || estimateAoELabelWidth(label) <= maxWidth) {
-    return [label];
-  }
-
-  return [
-    `L ${measurement.lengthFeet} ft • W ${measurement.widthFeet} ft`,
-    `${measurement.angleDegrees}°`,
-  ];
-};
-
-const buildAoEFigureMeasurementBadgeLayout = ({ figure, boardBounds }) => {
-  if (!figure?.measurement?.label || !figure?.bounds) {
-    return null;
-  }
-
-  const boardWidth = Math.max(0, boardBounds?.width || 0);
-  const availableWidth = boardWidth - (AOE_LABEL_EDGE_PADDING * 2);
-  const boundedWidth = clampToRange(
-    availableWidth,
-    AOE_LABEL_MIN_WIDTH,
-    AOE_LABEL_MAX_WIDTH
-  );
-  const lines = splitAoEFigureMeasurementLines(figure, boundedWidth);
-  if (!lines.length) {
-    return null;
-  }
-
-  const contentWidth = Math.max(
-    AOE_LABEL_MIN_WIDTH,
-    ...lines.map((line) => estimateAoELabelWidth(line))
-  );
-  const width = Math.min(boundedWidth, contentWidth);
-  const textHeight = lines.length * AOE_LABEL_LINE_HEIGHT;
-  const height = textHeight + (AOE_LABEL_TOP_PADDING * 2);
-  const unclampedX = figure.bounds.maxX + AOE_LABEL_GAP_PX;
-  const unclampedY = figure.bounds.minY;
-  const minX = (boardBounds?.minX ?? figure.bounds.minX) + AOE_LABEL_EDGE_PADDING;
-  const maxX = (boardBounds?.maxX ?? (figure.bounds.maxX + width + AOE_LABEL_EDGE_PADDING)) - width - AOE_LABEL_EDGE_PADDING;
-  const minY = (boardBounds?.minY ?? figure.bounds.minY) + AOE_LABEL_EDGE_PADDING;
-  const maxY = (boardBounds?.maxY ?? (figure.bounds.maxY + height + AOE_LABEL_EDGE_PADDING)) - height - AOE_LABEL_EDGE_PADDING;
-
-  return {
-    lines,
-    width,
-    height,
-    x: clampToRange(unclampedX, minX, Math.max(minX, maxX)),
-    y: clampToRange(unclampedY, minY, Math.max(minY, maxY)),
-  };
-};
-
-const AoEFigureOverlay = ({
-  figure,
-  drawTheme = DEFAULT_DRAW_THEME,
-  overlayId = '',
-  isSelected = false,
-  onMouseDown,
-  listening = true,
-  boardBounds = null,
-}) => {
-  if (!figure?.figureType) {
-    return null;
-  }
-
-  const overlayProps = {
-    listening,
-    onMouseDown,
-    'data-testid': overlayId ? `aoe-figure-overlay-${overlayId}` : undefined,
-  };
-  const outlineStroke = isSelected ? 'rgba(248, 250, 252, 0.96)' : drawTheme.outlineStroke;
-  const accentStroke = isSelected ? '#ffffff' : drawTheme.stroke;
-  const outlineStrokeWidth = isSelected ? SHAPE_OUTLINE_STROKE_WIDTH + 1 : SHAPE_OUTLINE_STROKE_WIDTH;
-  const accentStrokeWidth = isSelected ? 2.6 : 1.75;
-  const shadowBlur = isSelected ? 16 : 10;
-  const measurementLayout = buildAoEFigureMeasurementBadgeLayout({ figure, boardBounds });
-
-  const measurementBadge = measurementLayout ? (
-    <Group
-      x={measurementLayout.x}
-      y={measurementLayout.y}
-      listening={false}
-      data-testid={overlayId ? `aoe-figure-measurement-${overlayId}` : undefined}
-    >
-      <Rect
-        width={measurementLayout.width}
-        height={measurementLayout.height}
-        cornerRadius={10}
-        stroke={outlineStroke}
-        strokeWidth={SHAPE_OUTLINE_STROKE_WIDTH}
-      />
-      <Rect
-        width={measurementLayout.width}
-        height={measurementLayout.height}
-        cornerRadius={10}
-        fill="rgba(2, 6, 23, 0.94)"
-        stroke={drawTheme.labelBorder}
-        strokeWidth={1.5}
-        shadowColor={drawTheme.glow}
-        shadowBlur={10}
-        shadowOpacity={0.24}
-      />
-      <Text
-        x={AOE_LABEL_SIDE_PADDING}
-        y={AOE_LABEL_TOP_PADDING}
-        width={measurementLayout.width - (AOE_LABEL_SIDE_PADDING * 2)}
-        height={measurementLayout.height - (AOE_LABEL_TOP_PADDING * 2)}
-        align="center"
-        verticalAlign="middle"
-        fontSize={15}
-        fontStyle="bold"
-        lineHeight={1.15}
-        fill={drawTheme.labelText}
-        text={measurementLayout.lines.join('\n')}
-      />
-    </Group>
-  ) : null;
-
-  if (figure.figureType === 'circle') {
-    return (
-      <Group {...overlayProps}>
-        <Circle
-          x={figure.centerPoint.x}
-          y={figure.centerPoint.y}
-          radius={figure.radius}
-          stroke={outlineStroke}
-          strokeWidth={outlineStrokeWidth}
-        />
-        <Circle
-          x={figure.centerPoint.x}
-          y={figure.centerPoint.y}
-          radius={figure.radius}
-          fill={drawTheme.fill}
-          stroke={accentStroke}
-          strokeWidth={accentStrokeWidth}
-          shadowColor={drawTheme.glow}
-          shadowBlur={shadowBlur}
-          shadowOpacity={0.24}
-        />
-        {measurementBadge}
-      </Group>
-    );
-  }
-
-  if (figure.figureType === 'square') {
-    return (
-      <Group {...overlayProps}>
-        <Rect
-          x={figure.x}
-          y={figure.y}
-          width={figure.width}
-          height={figure.height}
-          stroke={outlineStroke}
-          strokeWidth={outlineStrokeWidth}
-        />
-        <Rect
-          x={figure.x}
-          y={figure.y}
-          width={figure.width}
-          height={figure.height}
-          fill={drawTheme.fill}
-          stroke={accentStroke}
-          strokeWidth={accentStrokeWidth}
-          shadowColor={drawTheme.glow}
-          shadowBlur={shadowBlur}
-          shadowOpacity={0.24}
-        />
-        {measurementBadge}
-      </Group>
-    );
-  }
-
-  if (figure.figureType === 'rectangle') {
-    return (
-      <Group {...overlayProps}>
-        <Rect
-          x={figure.x}
-          y={figure.y}
-          width={figure.width}
-          height={figure.height}
-          stroke={outlineStroke}
-          strokeWidth={outlineStrokeWidth}
-        />
-        <Rect
-          x={figure.x}
-          y={figure.y}
-          width={figure.width}
-          height={figure.height}
-          fill={drawTheme.fill}
-          stroke={accentStroke}
-          strokeWidth={accentStrokeWidth}
-          shadowColor={drawTheme.glow}
-          shadowBlur={shadowBlur}
-          shadowOpacity={0.24}
-        />
-        {measurementBadge}
-      </Group>
-    );
-  }
-
-  if (figure.figureType === 'cone') {
-    return (
-      <Group {...overlayProps}>
-        <Line
-          points={figure.flatPoints}
-          closed
-          stroke={outlineStroke}
-          strokeWidth={outlineStrokeWidth}
-          lineJoin="round"
-        />
-        <Line
-          points={figure.flatPoints}
-          closed
-          fill={drawTheme.fill}
-          stroke={accentStroke}
-          strokeWidth={accentStrokeWidth}
-          lineJoin="round"
-          shadowColor={drawTheme.glow}
-          shadowBlur={shadowBlur}
-          shadowOpacity={0.24}
-        />
-        {measurementBadge}
-      </Group>
-    );
-  }
-
-  return null;
 };
 
 const EnhancedAoEFigureOverlay = ({
@@ -4840,6 +4594,7 @@ export default function GrigliataBoard({
     onCreateAoEFigure,
     onMoveAoEFigure,
     onMoveTokens,
+    onSelectMouseTool,
     selectionBox,
     tokenDragState,
     tokenItems,
@@ -5955,6 +5710,11 @@ export default function GrigliataBoard({
     () => fogVisibleRenderedTokens.filter((token) => selectedTokenIdSet.has(token.tokenId)),
     [fogVisibleRenderedTokens, selectedTokenIdSet]
   );
+  const stageWidth = stageSize.width;
+  const stageHeight = stageSize.height;
+  const viewportX = viewport.x;
+  const viewportY = viewport.y;
+  const viewportScale = viewport.scale;
   useEffect(() => {
     const nextSelectedTokenIds = selectedTokens.map((token) => token.tokenId);
     if (areStringArraysEqual(lastReportedSelectedTokenIdsRef.current, nextSelectedTokenIds)) {
@@ -5989,8 +5749,8 @@ export default function GrigliataBoard({
       allTokens: renderedTokens,
       tokenLayerOrder: resolvedBackground?.tokenLayerOrder,
       isManager,
-      stageSize,
-      viewport,
+      stageSize: { width: stageWidth, height: stageHeight },
+      viewport: { x: viewportX, y: viewportY, scale: viewportScale },
     });
   }, [
     activeAoeFigureType,
@@ -6008,13 +5768,13 @@ export default function GrigliataBoard({
     renderedTokens,
     resolvedBackground?.tokenLayerOrder,
     selectionBox,
-    stageSize.height,
-    stageSize.width,
+    stageHeight,
+    stageWidth,
     tokenDragState,
     wallDragState,
-    viewport.scale,
-    viewport.x,
-    viewport.y,
+    viewportScale,
+    viewportX,
+    viewportY,
   ]);
   const selectedSingleTokenHudState = useMemo(() => {
     if (
@@ -6287,7 +6047,7 @@ export default function GrigliataBoard({
   const isNarrationPresentationActive = isNarrationOverlayActive || isNarrationVisualActive;
   const areTurnOrderControlsDisabled = isNarrationPresentationActive;
   const visibleRenderedAoEFigures = isNarrationPresentationActive ? [] : renderedAoEFigures;
-  const visibleRenderedTokens = isNarrationPresentationActive ? [] : fogVisibleRenderedTokens;
+  const visibleRenderedTokens = isNarrationPresentationActive ? EMPTY_RENDERED_TOKENS : fogVisibleRenderedTokens;
   const visibleTokenRenderLayers = useMemo(
     () => splitFogVisibleTokenRenderLayers({
       tokens: visibleRenderedTokens,

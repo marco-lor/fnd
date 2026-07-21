@@ -1075,7 +1075,6 @@ export default function useGrigliataPageData({
     }),
     [
       activeCustomPlacementCountsByTemplateId,
-      currentUserId,
       customUserTokenProfiles,
     ]
   );

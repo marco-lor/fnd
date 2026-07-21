@@ -72,7 +72,8 @@ export const useMapEditing = ({ user, canEdit, collectionPath }) => {
             return () => {};
         }
 
-        const unsubscribe = onSnapshot(collection(db, ...collectionPath), (snapshot) => {
+        const pathSegments = collectionKey.split('/');
+        const unsubscribe = onSnapshot(collection(db, ...pathSegments), (snapshot) => {
             const loadedMarkers = snapshot.docs.map(docSnap => ({
                 id: docSnap.id,
                 ...docSnap.data()

@@ -554,6 +554,20 @@ const normalizeFoeParametri = (value, fallback = {}) => {
   }, {});
 };
 
+const getMusicUploadValidationError = (file) => {
+  const fileName = file?.name || 'selected file';
+
+  if (!file?.type?.startsWith('audio/')) {
+    return `"${fileName}" must be an audio file.`;
+  }
+
+  if (file.size > MAX_GRIGLIATA_MUSIC_FILE_BYTES) {
+    return `"${fileName}" must be 25 MB or smaller.`;
+  }
+
+  return '';
+};
+
 export default function GrigliataPage() {
   useEffect(() => {
     if (process.env.REACT_APP_FND_PERF !== '1') return undefined;
@@ -748,7 +762,6 @@ export default function GrigliataPage() {
     galleryFolders,
     grid,
     isActivePlacementsReady,
-    isCurrentUserTokenHiddenOnActiveMap,
     isGridVisible,
     isTurnOrderEnabled,
     isTurnOrderStarted,
@@ -2643,25 +2656,11 @@ export default function GrigliataPage() {
     isManager,
   ]);
 
-  const getMusicUploadValidationError = (file) => {
-    const fileName = file?.name || 'selected file';
-
-    if (!file?.type?.startsWith('audio/')) {
-      return `"${fileName}" must be an audio file.`;
-    }
-
-    if (file.size > MAX_GRIGLIATA_MUSIC_FILE_BYTES) {
-      return `"${fileName}" must be 25 MB or smaller.`;
-    }
-
-    return '';
-  };
-
-  const uploadMusicTrackFile = async (file, fileIndex) => {
+  const uploadMusicTrackFile = useCallback(async (file, fileIndex) => {
     const trackName = getDisplayNameFromFileName(file.name).trim();
     const safeName = buildStorageSafeName(trackName, 'grigliata_music');
     const fileExtension = getFileExtension(file.name) || getFileExtensionFromContentType(file.type);
-    const storagePath = `grigliata/music/${user.uid}/${safeName}_${Date.now() + fileIndex}${fileExtension}`;
+    const storagePath = `grigliata/music/${currentUserId}/${safeName}_${Date.now() + fileIndex}${fileExtension}`;
     let uploadedPath = '';
 
     try {
@@ -2683,9 +2682,9 @@ export default function GrigliataPage() {
         musicFolderAssignedAt: null,
         musicFolderAssignedBy: '',
         createdAt: serverTimestamp(),
-        createdBy: user.uid,
+        createdBy: currentUserId,
         updatedAt: serverTimestamp(),
-        updatedBy: user.uid,
+        updatedBy: currentUserId,
       });
     } catch (error) {
       console.error('Failed to upload Grigliata music track:', error);
@@ -2701,10 +2700,10 @@ export default function GrigliataPage() {
 
       throw error;
     }
-  };
+  }, [currentUserId, selectedMusicFolderId]);
 
   const handleUploadMusicTrackFiles = useCallback(async (files) => {
-    if (!isManager || !user?.uid) return;
+    if (!isManager || !currentUserId) return;
 
     setMusicUploadError('');
     const selectedFiles = Array.from(files || []).filter(Boolean);
@@ -2736,9 +2735,9 @@ export default function GrigliataPage() {
       setIsMusicUploading(false);
     }
   }, [
+    currentUserId,
     isManager,
-    selectedMusicFolderId,
-    user?.uid,
+    uploadMusicTrackFile,
   ]);
 
   const handleStartMusicTrack = useCallback(async (track, { loop = false } = {}) => {
@@ -4012,6 +4011,7 @@ export default function GrigliataPage() {
   }, [
     boardTokensById,
     buildCharacterShieldTurnEffect,
+    getActiveMapPlacementContexts,
     getCharacterTurnEffectSource,
   ]);
 

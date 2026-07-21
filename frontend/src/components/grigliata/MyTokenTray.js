@@ -300,13 +300,14 @@ function CreateCustomTokenDialog({
   useEffect(() => {
     if (!isOpen) return undefined;
 
+    const returnFocusElement = triggerRef.current;
     const focusFrame = window.requestAnimationFrame(() => {
       nameInputRef.current?.focus();
     });
 
     return () => {
       window.cancelAnimationFrame(focusFrame);
-      triggerRef.current?.focus();
+      returnFocusElement?.focus();
     };
   }, [isOpen, triggerRef]);
 
@@ -605,12 +606,20 @@ function SelectedResourceTokenDetailsPanel({
   const draftRef = useRef(EMPTY_SELECTED_TOKEN_DRAFT);
   const dirtyFieldsRef = useRef(EMPTY_SELECTED_TOKEN_DIRTY_STATE);
   const autosavePromiseRef = useRef(null);
-  const persistedDraft = useMemo(() => buildSelectedTokenDraft(token), [
-    token?.tokenId,
-    token?.hpCurrent,
-    token?.manaCurrent,
-    token?.shieldCurrent,
-    token?.notes,
+  const persistedHpCurrent = token?.hpCurrent;
+  const persistedManaCurrent = token?.manaCurrent;
+  const persistedShieldCurrent = token?.shieldCurrent;
+  const persistedNotes = token?.notes;
+  const persistedDraft = useMemo(() => buildSelectedTokenDraft({
+    hpCurrent: persistedHpCurrent,
+    manaCurrent: persistedManaCurrent,
+    shieldCurrent: persistedShieldCurrent,
+    notes: persistedNotes,
+  }), [
+    persistedHpCurrent,
+    persistedManaCurrent,
+    persistedNotes,
+    persistedShieldCurrent,
   ]);
 
   draftRef.current = draft;

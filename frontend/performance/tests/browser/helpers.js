@@ -4,6 +4,8 @@ const { expect } = require('@playwright/test');
 const { resultsDir, writeJson } = require('../../../scripts/performance/common');
 const fixtureManifest = require('../../fixture-manifest.json');
 
+const GOOGLE_FONT_URL = /^https:\/\/fonts\.(?:googleapis|gstatic)\.com\//;
+
 const AUTH_DIRECTORY = path.resolve(__dirname, '..', '..', '..', 'playwright', '.auth');
 const ACCOUNT = {
   'new-player': { uid: 'perf-new-player', state: 'new-player.json' },
@@ -21,6 +23,18 @@ const storageStateForRole = (role) => {
   const account = ACCOUNT[role];
   if (!account) throw new Error(`No performance account configured for role ${role}`);
   return path.join(AUTH_DIRECTORY, account.state);
+};
+
+const installDeterministicFontRoutes = async (context) => {
+  await context.route(GOOGLE_FONT_URL, (route) => route.fulfill({
+    status: 204,
+    body: '',
+  }));
+};
+
+const drainPageConnections = async (page) => {
+  if (!page || page.isClosed()) return;
+  await page.goto('about:blank', { waitUntil: 'commit', timeout: 5_000 });
 };
 
 const installBootstrap = async (context, scenario, iteration) => {
@@ -57,6 +71,7 @@ const waitForReadiness = async (page) => {
 };
 
 const navigateToCleanup = async (page) => {
+  await page.bringToFront();
   await page.evaluate(() => {
     window.history.pushState({}, '', '/__fnd_perf_cleanup__');
     window.dispatchEvent(new PopStateEvent('popstate'));
@@ -64,7 +79,7 @@ const navigateToCleanup = async (page) => {
   await page.waitForFunction(() => (
     window.location.pathname === '/__fnd_perf_cleanup__'
     && window.__FND_PERF__?.snapshot().routeState?.routeId === '/__fnd_perf_cleanup__'
-  ));
+  ), null, { polling: 100 });
 };
 
 const countRouteResources = (resources, route, { includeTimeouts = false } = {}) => (
@@ -80,6 +95,16 @@ const visibleFirst = async (locators) => {
     if (await candidate.isVisible().catch(() => false)) return candidate;
   }
   throw new Error('None of the deterministic interaction targets was visible.');
+};
+
+const locateDmDashboardPlayerCard = (page, playerName) => {
+  const escapedName = playerName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const playerHeading = page.locator('div.text-lg.font-bold').filter({
+    hasText: new RegExp(`^\\s*${escapedName}\\s*$`),
+  });
+  return playerHeading.locator(
+    'xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " rounded-lg ")][1]'
+  );
 };
 
 const runInteraction = async (page, scenario) => {
@@ -126,10 +151,8 @@ const runInteraction = async (page, scenario) => {
       break;
     }
     case 'codex': {
-      const category = await visibleFirst([
-        page.getByText('Categoria 00', { exact: false }),
-        page.locator('main button'),
-      ]);
+      const category = page.getByRole('button', { name: 'Categoria 00', exact: true });
+      await expect(category).toBeVisible();
       await category.click();
       await expect(page.getByText('Codex 0-42', { exact: false }).first()).toBeVisible();
       break;
@@ -140,25 +163,25 @@ const runInteraction = async (page, scenario) => {
       break;
     }
     case 'echi-di-viaggio': {
-      const marker = await visibleFirst([
-        page.getByLabel(/Zoom image for Fixture NPC/i),
-        page.getByText(/Fixture NPC/i),
-      ]);
+      const marker = page.getByRole('button', { name: /Fixture NPC 0/i });
+      await expect(marker).toBeVisible();
       await marker.hover();
       break;
     }
     case 'dm-dashboard': {
-      const player = await visibleFirst([
-        page.getByText('Performance Hero 2', { exact: false }),
-        page.locator('main button'),
-      ]);
-      await player.click();
+      const playerCard = locateDmDashboardPlayerCard(page, 'Performance Hero 2');
+      await expect(playerCard).toHaveCount(1);
+      await expect(playerCard).toBeVisible();
+      const expandButton = playerCard.getByRole('button', { name: 'Espandi', exact: true });
+      await expect(expandButton).toBeVisible();
+      await expandButton.click();
+      await expect(playerCard.getByRole('button', { name: 'Comprimi', exact: true })).toBeVisible();
       break;
     }
     case 'foes-hub': {
-      const filter = page.locator('main input[type="text"]').first();
-      if (await filter.isVisible().catch(() => false)) await filter.fill('Fixture foe 42');
-      await page.getByLabel('expand').first().click();
+      const row = page.locator('[role="button"]').filter({ hasText: 'Fixture foe 42' }).first();
+      await expect(row).toBeVisible();
+      await row.getByLabel('expand').click();
       break;
     }
     case 'admin': {
@@ -300,6 +323,24 @@ const writeScenarioRaw = (scenario, iteration, capture) => {
   });
 };
 
+const scenarioRestorePatch = (scenarioId, currentData = {}) => {
+  if (scenarioId === 'home') {
+    return currentData?.stats?.hpCurrent === 45 ? null : { 'stats.hpCurrent': 45 };
+  }
+  if (['grigliata-manager', 'grigliata-five-peer'].includes(scenarioId)) {
+    const expected = {
+      col: 0,
+      row: 0,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      updatedBy: 'perf-dm',
+    };
+    return Object.entries(expected).every(([key, value]) => currentData?.[key] === value)
+      ? null
+      : expected;
+  }
+  return null;
+};
+
 const restoreScenarioState = async (scenarioId) => {
   if (!['home', 'grigliata-manager', 'grigliata-five-peer'].includes(scenarioId)) return;
   process.env.GCLOUD_PROJECT ||= 'demo-fnd-perf';
@@ -310,15 +351,16 @@ const restoreScenarioState = async (scenarioId) => {
   const db = getFirestore(app);
   try {
     if (scenarioId === 'home') {
-      await db.doc('users/perf-player').update({ 'stats.hpCurrent': 45 });
+      const reference = db.doc('users/perf-player');
+      const snapshot = await reference.get();
+      const patch = scenarioRestorePatch(scenarioId, snapshot.data());
+      if (patch) await reference.update(patch);
       return;
     }
-    await db.doc('grigliata_token_placements/perf-map__perf-token-0000').update({
-      col: 0,
-      row: 0,
-      updatedAt: '2026-01-01T00:00:00.000Z',
-      updatedBy: 'perf-dm',
-    });
+    const reference = db.doc('grigliata_token_placements/perf-map__perf-token-0000');
+    const snapshot = await reference.get();
+    const patch = scenarioRestorePatch(scenarioId, snapshot.data());
+    if (patch) await reference.update(patch);
   } finally {
     await deleteApp(app);
   }
@@ -329,10 +371,14 @@ module.exports = {
   aggregateMetrics,
   captureBrowserMetrics,
   countRouteResources,
+  drainPageConnections,
   installBootstrap,
+  installDeterministicFontRoutes,
+  locateDmDashboardPlayerCard,
   navigateToCleanup,
   restoreScenarioState,
   runInteraction,
+  scenarioRestorePatch,
   storageStateForRole,
   waitForBridge,
   waitForReadiness,

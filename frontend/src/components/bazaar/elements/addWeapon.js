@@ -296,7 +296,7 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
             }
         };
         fetchData();
-    }, [user, initialData?.id, customSpells, showMessage]); // Use initialData.id for stability
+    }, [user, initialData?.id, initialData?.General?.ridCostoTecSingola, initialData?.General?.spells, customSpells, showMessage]); // Use initialData.id for stability
 
     const handleSpellCreate = useCallback((result) => {
         console.log("Spell Create/Edit Result:", result);

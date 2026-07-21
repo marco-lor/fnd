@@ -10,6 +10,54 @@ describe('performance runtime', () => {
     delete window.__FND_PERF_BOOTSTRAP__;
   });
 
+  test('revokes premature readiness when route work begins and settles on painted frames', () => {
+    const originalAnimationFrame = window.requestAnimationFrame;
+    const originalCancelAnimationFrame = window.cancelAnimationFrame;
+    const frames = [];
+    window.requestAnimationFrame = (callback) => {
+      frames.push(callback);
+      return frames.length;
+    };
+    window.cancelAnimationFrame = jest.fn();
+    const flushFrames = () => {
+      while (frames.length) frames.shift()(performance.now());
+    };
+    const runtime = loadRuntime(true);
+    try {
+      window.__FND_PERF_BOOTSTRAP__ = { runId: 'readiness-test', actorRole: 'player' };
+      runtime.installPerformanceRuntime();
+      runtime.startRouteMeasurement('/codex', 'player');
+      runtime.markRouteShellVisible();
+      runtime.markRouteEffectsMounted();
+      flushFrames();
+
+      expect(window.__FND_PERF__.snapshot().routeState).toMatchObject({
+        dataReady: true,
+        interactive: true,
+        pending: 0,
+      });
+
+      const complete = runtime.beginRouteAsyncWork('late-listener');
+      expect(window.__FND_PERF__.snapshot().routeState).toMatchObject({
+        dataReady: false,
+        interactive: false,
+        pending: 1,
+      });
+
+      complete();
+      flushFrames();
+      expect(window.__FND_PERF__.snapshot().routeState).toMatchObject({
+        dataReady: true,
+        interactive: true,
+        pending: 0,
+      });
+    } finally {
+      runtime.teardownPerformanceRuntimeForTests();
+      window.requestAnimationFrame = originalAnimationFrame;
+      window.cancelAnimationFrame = originalCancelAnimationFrame;
+    }
+  });
+
   test('is completely disabled for a normal production mode', () => {
     const runtime = loadRuntime(false);
     runtime.installPerformanceRuntime();

@@ -161,7 +161,6 @@ export default async function useConsumable({ user, userData, item, slotKey, mod
   } catch (e) {
     // silent fallback to default animaDieFaces
   }
-  const modifier = 0; // no flat modifier in consumable regen; bonus applied after roll
   const potentialBonusAdd = bonusCreazione * diceCount;
   // Use DiceRoller modifier so the returned total already includes bonus; display full formula.
   const modifierValue = potentialBonusAdd; // bonusCreazione * diceCount

@@ -23,6 +23,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
+    "verify:start": "node scripts/verify-start.js",
     "build": "react-scripts build",
     "build:production": "node scripts/build-production.js",
     "verify:production-build": "node scripts/build-production.js --verify-only",
@@ -44,7 +45,7 @@
     "perf:authoritative": "node scripts/performance/authoritative.js",
     "perf:ci": "node scripts/performance/ci.js",
     "perf:baseline": "node scripts/performance/accept-baseline.js",
-    "perf:test": "node --test scripts/performance/common.test.js scripts/performance/fixtures.test.js scripts/performance/compare.test.js scripts/performance/report.test.js scripts/performance/repeatability.test.js",
+    "perf:test": "node --test scripts/verify-start.test.js scripts/performance/common.test.js scripts/performance/emulator-control.test.js scripts/performance/emulators.test.js scripts/performance/fixtures.test.js scripts/performance/compare.test.js scripts/performance/report.test.js scripts/performance/repeatability.test.js performance/global-setup.test.js performance/tests/browser/helpers.test.js",
     "perf:rules": "node --test performance/tests/firestore-rules.test.js",
     "perf:check-firestore-imports": "node scripts/performance/migrate-firestore-imports.js --check",
     "test": "react-scripts test",

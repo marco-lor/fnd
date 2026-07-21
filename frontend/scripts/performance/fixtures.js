@@ -8,6 +8,7 @@ const {
   sha256,
   writeJson,
 } = require('./common');
+const { withBackgroundTriggersDisabled } = require('./emulator-control');
 
 assertDemoProject(projectId);
 
@@ -512,11 +513,14 @@ const readLiveDocuments = async (documents) => {
   const live = [];
   for (let offset = 0; offset < documents.length; offset += 200) {
     const slice = documents.slice(offset, offset + 200);
-    const snapshots = await db.getAll(...slice.map((entry) => db.doc(entry.path)));
-    snapshots.forEach((snapshot, index) => {
+    const references = [];
+    for (const entry of slice) references.push(db.doc(entry.path));
+    const snapshots = await db.getAll(...references);
+    for (let index = 0; index < snapshots.length; index += 1) {
+      const snapshot = snapshots[index];
       if (!snapshot.exists) throw new Error(`Fixture document is missing: ${slice[index].path}`);
       live.push({ path: slice[index].path, data: snapshot.data() });
-    });
+    }
   }
   return live;
 };
@@ -550,17 +554,50 @@ const verifyFixture = async () => {
   return report;
 };
 
+const writeFixtureMetadata = async (manifest) => {
+  await db.doc('perf_meta/fixture').set(manifest);
+};
+
+const runSeedFixture = async ({
+  waitForFunctionsReadyImpl = waitForFunctionsReady,
+  withBackgroundTriggersDisabledImpl = withBackgroundTriggersDisabled,
+  clearEmulatorsImpl = clearEmulators,
+  seedAccountsImpl = seedAccounts,
+  writeDocumentsImpl = writeDocuments,
+  seedStorageImpl = seedStorage,
+  waitForDerivedStateImpl = waitForDerivedState,
+  writeFixtureMetadataImpl = writeFixtureMetadata,
+  verifyFixtureImpl = verifyFixture,
+  documents = buildDocuments(),
+  manifest = buildManifest(documents),
+} = {}) => {
+  // Prove the Functions runtime before suppressing the bulk seed. Disabling
+  // background triggers also flushes every event produced by this sentinel.
+  await waitForFunctionsReadyImpl();
+
+  await withBackgroundTriggersDisabledImpl(async () => {
+    await clearEmulatorsImpl();
+    await seedAccountsImpl();
+    await writeDocumentsImpl(documents);
+    await seedStorageImpl();
+    await waitForDerivedStateImpl();
+    await writeFixtureMetadataImpl(manifest);
+  });
+
+  // Re-enabling reloads trigger definitions. Exercise one real trigger, then
+  // use an empty suppression scope as a deterministic queue flush so browser
+  // scenarios never race fixture-derived background work.
+  await waitForFunctionsReadyImpl();
+  await withBackgroundTriggersDisabledImpl(async () => {});
+
+  return verifyFixtureImpl();
+};
+
 const seedFixture = async () => {
-  await clearEmulators();
-  await waitForFunctionsReady();
+  initializeAdmin();
   const documents = buildDocuments();
   const manifest = buildManifest(documents);
-  await seedAccounts();
-  await writeDocuments(documents);
-  await seedStorage();
-  await waitForDerivedState();
-  await db.doc('perf_meta/fixture').set(manifest);
-  return verifyFixture();
+  return runSeedFixture({ documents, manifest });
 };
 
 if (require.main === module) {
@@ -587,4 +624,9 @@ if (require.main === module) {
   });
 }
 
-module.exports = { buildDocuments, buildManifest, FIXTURE_VERSION };
+module.exports = {
+  buildDocuments,
+  buildManifest,
+  FIXTURE_VERSION,
+  runSeedFixture,
+};

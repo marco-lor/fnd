@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { useShellProfile } from '../AuthContext';
+import { useAuthSession, useShellProfile } from '../AuthContext';
 import {
   isPerformanceEnabled,
   markRouteEffectsMounted,
@@ -10,6 +10,7 @@ import {
 
 export default function RoutePerformanceObserver() {
   const location = useLocation();
+  const { authReady } = useAuthSession();
   const { shellProfile } = useShellProfile();
   const role = shellProfile?.role || (location.pathname === '/' ? 'anonymous' : 'unknown');
 
@@ -20,9 +21,10 @@ export default function RoutePerformanceObserver() {
   }, [location.pathname, role]);
 
   useEffect(() => {
+    if (!isPerformanceEnabled() || !authReady) return;
     const frameId = requestAnimationFrame(() => markRouteEffectsMounted());
     return () => cancelAnimationFrame(frameId);
-  }, [location.pathname, role]);
+  }, [authReady, location.pathname, role]);
 
   return null;
 }

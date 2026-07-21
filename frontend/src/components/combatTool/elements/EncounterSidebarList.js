@@ -10,9 +10,11 @@ const EncounterSidebarList = ({ isDM, onSelect, selectedId, actions }) => {
     const [encByUid, setEncByUid] = useState([]); // non-DM by user uid
     const [encByCid, setEncByCid] = useState([]); // non-DM by characterId
     const [loading, setLoading] = useState(true);
+    const userId = user?.uid || null;
+    const characterId = userData?.characterId || null;
 
     useEffect(() => {
-        if (!user) return;
+        if (!userId) return;
         const baseColl = collection(db, "encounters");
         if (isDM) {
             const unsubAll = onSnapshot(baseColl, (snap) => {
@@ -40,7 +42,7 @@ const EncounterSidebarList = ({ isDM, onSelect, selectedId, actions }) => {
         const unsubs = [];
 
         unsubs.push(
-            onSnapshot(query(baseColl, where("participantIds", "array-contains", user.uid)), (snap) => {
+            onSnapshot(query(baseColl, where("participantIds", "array-contains", userId)), (snap) => {
                 const rows = [];
                 snap.forEach((d) => {
                     const data = d.data();
@@ -59,10 +61,9 @@ const EncounterSidebarList = ({ isDM, onSelect, selectedId, actions }) => {
             })
         );
 
-        const cid = userData?.characterId;
-        if (cid) {
+        if (characterId) {
             unsubs.push(
-                onSnapshot(query(baseColl, where("participantCharacterIds", "array-contains", cid)), (snap) => {
+                onSnapshot(query(baseColl, where("participantCharacterIds", "array-contains", characterId)), (snap) => {
                     const rows = [];
                     snap.forEach((d) => {
                         const data = d.data();
@@ -85,7 +86,7 @@ const EncounterSidebarList = ({ isDM, onSelect, selectedId, actions }) => {
         }
 
         return () => unsubs.forEach((u) => u());
-    }, [isDM, user?.uid, userData?.characterId]);
+    }, [isDM, userId, characterId]);
 
     const encounters = useMemo(() => {
         const rows = isDM ? encountersAll : [...encByUid, ...encByCid];

@@ -1,7 +1,7 @@
 // addConsumabile.js
 import React, { useState, useEffect, useCallback, useRef, useContext } from 'react';
-import { collection, doc, addDoc, updateDoc, getDocs, onSnapshot, getDoc, setDoc } from "../../../performance/firestore";
-import { getStorage, ref, uploadBytesResumable, getDownloadURL, uploadBytes, deleteObject } from "firebase/storage";
+import { collection, doc, updateDoc, getDocs, onSnapshot, getDoc, setDoc } from "../../../performance/firestore";
+import { ref, getDownloadURL, uploadBytes, deleteObject } from "firebase/storage";
 import { uploadCacheableImage } from "../../common/imageStorage";
 import { db } from '../../firebaseConfig';
 import { storage } from '../../firebaseStorage';
@@ -308,7 +308,7 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
                 if (showMessage) showMessage("Errore nel caricamento dei dati utente.", "error");
             }
         };        fetchData();
-    }, [user, initialData?.id, customSpells, showMessage]);
+    }, [user, initialData?.id, initialData?.General?.spells, initialData?.ridTecniche, customSpells, showMessage]);
 
     // This effect runs on mount and when editMode changes.
     useEffect(() => {
@@ -591,7 +591,7 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
         }
         setShowSpellOverlay(false);
         setEditingSpellIndex(null);
-    }, [customSpells, editingSpellIndex, showMessage]);
+    }, [editingSpellIndex, showMessage]);
 
     // Render functions
     const renderSpecificFields = () => {

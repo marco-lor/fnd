@@ -119,12 +119,12 @@ export const recordPerfEvent = ({
 const markReadyIfSettled = () => {
   const state = routeState;
   if (!PERFORMANCE_ENABLED || !state || state.dataReady || !state.shellVisible || !state.effectsMounted || state.pending > 0) return;
-  queueMicrotask(() => {
-    if (routeState !== state || state.pending > 0 || state.dataReady) return;
+  requestAnimationFrame(() => {
+    if (routeState !== state || state.pending > 0 || state.dataReady || !state.effectsMounted) return;
     state.dataReady = true;
     recordPerfEvent({ category: 'route', metric: 'data-ready', tags: { phase: 'data-ready' } });
     requestAnimationFrame(() => {
-      if (routeState !== state || state.interactive) return;
+      if (routeState !== state || state.pending > 0 || !state.dataReady || state.interactive) return;
       state.interactive = true;
       recordPerfEvent({ category: 'route', metric: 'interactive', tags: { phase: 'interactive' } });
     });
@@ -165,6 +165,8 @@ export const markRouteEffectsMounted = () => {
 export const beginRouteAsyncWork = (kind = 'data') => {
   if (!PERFORMANCE_ENABLED || !routeState) return () => {};
   const owner = routeState;
+  owner.dataReady = false;
+  owner.interactive = false;
   owner.pending += 1;
   let completed = false;
   return () => {

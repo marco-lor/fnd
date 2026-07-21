@@ -2,10 +2,9 @@
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import { db } from '../../firebaseConfig';
-import { doc, updateDoc, FieldValue } from '../../../performance/firestore'; // Import FieldValue
-import { FaTrashAlt, FaSpinner, FaCheckCircle, FaTimesCircle, FaExclamationTriangle } from 'react-icons/fa';
+import { doc, updateDoc } from '../../../performance/firestore';
+import { FaTrashAlt, FaSpinner, FaTimesCircle, FaExclamationTriangle } from 'react-icons/fa';
 
-// Need FieldValue to delete a map key
 import { deleteField } from '../../../performance/firestore'; // Correct import for v9+
 
 function DeleteItemButton({ categoryKey, itemKey }) {

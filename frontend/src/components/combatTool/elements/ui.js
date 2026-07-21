@@ -83,10 +83,12 @@ export const Button = ({ children, onClick, kind = "primary", disabled, title, s
     );
 };
 
-export default {
+const combatUi = {
     Chip,
     Section,
     TextInput,
     TextArea,
     Button,
 };
+
+export default combatUi;

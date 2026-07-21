@@ -2,18 +2,18 @@ import React, { useState, useEffect } from "react";
 import { doc, getDoc } from "../../../performance/firestore";
 import { db } from "../../../components/firebaseConfig"; // Update path if needed
 
+// Always-available placeholder race with no creation bonuses.
+const PLACEHOLDER_RACE = {
+  id: "Evocazione Permanente",
+  description:
+    "Placeholder per evocazioni permanenti. Nessun bonus di creazione. Usa Anima e i costi di distribuzione punti standard.",
+};
+
 function RaceSelection({ user, onRaceSelect, selectedRace }) {
   // Local state for race selection component
   const [races, setRaces] = useState([]);
   const [loadingRaces, setLoadingRaces] = useState(true);
   const [error, setError] = useState("");
-
-  // Always-available placeholder race with no creation bonuses
-  const PLACEHOLDER_RACE = {
-    id: "Evocazione Permanente",
-    description:
-      "Placeholder per evocazioni permanenti. Nessun bonus di creazione. Usa Anima e i costi di distribuzione punti standard.",
-  };
 
   // --- Fetch races from Firestore (Map Structure) ---
   useEffect(() => {

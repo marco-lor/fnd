@@ -4,7 +4,9 @@ const {
   aggregateMetrics,
   captureBrowserMetrics,
   countRouteResources,
+  drainPageConnections,
   installBootstrap,
+  installDeterministicFontRoutes,
   navigateToCleanup,
   restoreScenarioState,
   runInteraction,
@@ -51,6 +53,7 @@ for (const scenario of scenarios) {
           baseURL,
           storageState: storageStateForRole(scenario.role),
         });
+        await installDeterministicFontRoutes(context);
         await installBootstrap(context, scenario, iteration);
         page = await context.newPage();
       page.on('console', (message) => {
@@ -102,7 +105,7 @@ for (const scenario of scenarios) {
           .filter(([key]) => key.startsWith(`${route}::`))
           .filter(([key]) => !key.startsWith(`${route}::timeout`))
           .reduce((total, [, value]) => total + Number(value || 0), 0) === 0
-      ), { route: scenario.route }, { timeout: 10_000 });
+      ), { route: scenario.route }, { polling: 100, timeout: 10_000 });
       const cleanup = await page.evaluate(() => window.__FND_PERF__.snapshot());
       const activeAfterCleanup = Object.entries(cleanup.activeListeners || {})
         .filter(([key]) => key.startsWith(`${scenario.route}::`))
@@ -130,7 +133,7 @@ for (const scenario of scenarios) {
       } catch (error) {
         if (page && !page.isClosed()) {
           const state = await page.evaluate(() => ({
-            url: location.href,
+            url: window.location.href,
             title: document.title,
             text: document.body?.innerText?.slice(0, 12000) || '',
             perf: window.__FND_PERF__?.snapshot?.() || null,
@@ -146,6 +149,7 @@ for (const scenario of scenarios) {
         }
         throw error;
       } finally {
+        await drainPageConnections(page).catch(() => {});
         await context?.close().catch(() => {});
         await restoreScenarioState(scenario.id);
       }

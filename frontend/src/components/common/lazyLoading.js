@@ -1,4 +1,5 @@
-import React, { Suspense, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
+import { beginRouteAsyncWork } from '../../performance/runtime';
 
 const CHUNK_ERROR_PATTERNS = [
   /chunkloaderror/i,
@@ -49,29 +50,33 @@ export const createModuleLoader = ({ importer, exportName = 'default', chunkName
   return Object.freeze({ chunkName, exportName, load, preload: load });
 };
 
-export const LazyLoadFallback = ({ label = 'Loading content', variant = 'feature', onClose }) => (
-  <div
-    className={variant === 'route'
-      ? 'flex min-h-[16rem] w-full items-center justify-center px-6 py-10 text-white'
-      : 'flex min-h-[8rem] w-full items-center justify-center rounded-2xl border border-slate-700 bg-slate-950/70 p-5 text-slate-200'}
-    role="status"
-    aria-live="polite"
-    data-testid={`lazy-${variant}-fallback`}
-  >
-    <div className="text-center">
-      <p className="text-sm font-semibold">{label}</p>
-      {onClose ? (
-        <button
-          type="button"
-          onClick={onClose}
-          className="mt-3 rounded-lg border border-slate-500 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
-        >
-          Close
-        </button>
-      ) : null}
+export const LazyLoadFallback = ({ label = 'Loading content', variant = 'feature', onClose }) => {
+  useEffect(() => beginRouteAsyncWork(`lazy-${variant}`), [variant]);
+
+  return (
+    <div
+      className={variant === 'route'
+        ? 'flex min-h-[16rem] w-full items-center justify-center px-6 py-10 text-white'
+        : 'flex min-h-[8rem] w-full items-center justify-center rounded-2xl border border-slate-700 bg-slate-950/70 p-5 text-slate-200'}
+      role="status"
+      aria-live="polite"
+      data-testid={`lazy-${variant}-fallback`}
+    >
+      <div className="text-center">
+        <p className="text-sm font-semibold">{label}</p>
+        {onClose ? (
+          <button
+            type="button"
+            onClick={onClose}
+            className="mt-3 rounded-lg border border-slate-500 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
+          >
+            Close
+          </button>
+        ) : null}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 class LazyErrorBoundary extends React.Component {
   constructor(props) {

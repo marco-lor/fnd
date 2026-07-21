@@ -1,13 +1,34 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import {
   canPrefetchModules,
   createModuleLoader,
   isChunkLoadError,
+  LazyLoadFallback,
   RetryableLazyBoundary,
 } from './lazyLoading';
+import { beginRouteAsyncWork } from '../../performance/runtime';
+
+jest.mock('../../performance/runtime', () => ({
+  beginRouteAsyncWork: jest.fn(() => jest.fn()),
+}));
 
 describe('lazy loading infrastructure', () => {
+  beforeEach(() => {
+    beginRouteAsyncWork.mockReset();
+    beginRouteAsyncWork.mockReturnValue(jest.fn());
+  });
+
+  test('keeps route readiness pending while a lazy fallback is mounted', () => {
+    const complete = jest.fn();
+    beginRouteAsyncWork.mockReturnValueOnce(complete);
+    const view = render(<LazyLoadFallback label="Loading route..." variant="route" />);
+
+    expect(beginRouteAsyncWork).toHaveBeenCalledWith('lazy-route');
+    view.unmount();
+    expect(complete).toHaveBeenCalledTimes(1);
+  });
+
   test('coalesces preload calls and adapts a named export', async () => {
     const NamedView = () => <div>Named view</div>;
     const importer = jest.fn().mockResolvedValue({ NamedView });
@@ -45,7 +66,7 @@ describe('lazy loading infrastructure', () => {
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Refresh application' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Retry loading' }));
-    await waitFor(() => expect(screen.getByText('Recovered view')).toBeInTheDocument());
+    expect(await screen.findByText('Recovered view')).toBeInTheDocument();
     expect(importer).toHaveBeenCalledTimes(2);
     warn.mockRestore();
     error.mockRestore();

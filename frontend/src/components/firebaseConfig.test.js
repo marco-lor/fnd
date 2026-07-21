@@ -30,6 +30,7 @@ describe("Firebase async bootstrap", () => {
     jest.doMock("../performance/firestore", () => ({
       connectFirestoreEmulator: jest.fn(),
       getFirestore: jest.fn(() => ({ service: "db" })),
+      initializeFirestore: jest.fn(() => ({ service: "db" })),
     }));
     return require("./firebaseConfig");
   };
@@ -122,6 +123,11 @@ describe("Firebase async bootstrap", () => {
       expect(fetchImpl).not.toHaveBeenCalled();
       expect(require("firebase/auth").connectAuthEmulator).toHaveBeenCalledTimes(1);
       expect(require("../performance/firestore").connectFirestoreEmulator).toHaveBeenCalledTimes(1);
+      expect(require("../performance/firestore").initializeFirestore).toHaveBeenCalledWith(
+        expect.anything(),
+        { experimentalAutoDetectLongPolling: false }
+      );
+      expect(require("../performance/firestore").getFirestore).not.toHaveBeenCalled();
     } finally {
       if (previousPerformanceMode === undefined) delete process.env.REACT_APP_FND_PERF;
       else process.env.REACT_APP_FND_PERF = previousPerformanceMode;

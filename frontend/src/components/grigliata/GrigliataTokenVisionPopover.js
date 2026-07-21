@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FiMinus, FiPlus } from 'react-icons/fi';
 import {
   MAX_TOKEN_VISION_RADIUS_SQUARES,
@@ -32,7 +32,7 @@ export default function GrigliataTokenVisionPopover({
   const [draftVisionEnabled, setDraftVisionEnabled] = useState(() => normalizeVisionEnabled(visionEnabled));
   const [draftRadiusSquares, setDraftRadiusSquares] = useState(() => normalizeTokenVisionRadiusSquares(visionRadiusSquares));
 
-  const commitVision = (nextSettings) => {
+  const commitVision = useCallback((nextSettings) => {
     const normalizedSettings = {
       visionEnabled: normalizeVisionEnabled(nextSettings?.visionEnabled),
       visionRadiusSquares: normalizeTokenVisionRadiusSquares(nextSettings?.visionRadiusSquares),
@@ -44,9 +44,9 @@ export default function GrigliataTokenVisionPopover({
       lastCommittedSettingsRef.current = normalizedSettings;
       onCommitVision?.(normalizedSettings);
     }
-  };
+  }, [onCommitVision]);
 
-  const handleClose = ({ commitDraft = false } = {}) => {
+  const handleClose = useCallback(({ commitDraft = false } = {}) => {
     if (commitDraft) {
       commitVision({
         visionEnabled: draftVisionEnabled,
@@ -54,7 +54,7 @@ export default function GrigliataTokenVisionPopover({
       });
     }
     onRequestClose?.();
-  };
+  }, [commitVision, draftRadiusSquares, draftVisionEnabled, onRequestClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -89,7 +89,7 @@ export default function GrigliataTokenVisionPopover({
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [draftRadiusSquares, draftVisionEnabled, onRequestClose, open, withinRef, onCommitVision]);
+  }, [handleClose, open, withinRef]);
 
   if (!open) {
     return null;
