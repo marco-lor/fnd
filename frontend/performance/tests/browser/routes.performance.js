@@ -113,6 +113,11 @@ for (const scenario of scenarios) {
       expect(activeAfterCleanup).toBe(0);
       const resourcesAfterCleanup = countRouteResources(cleanup.activeResources, scenario.route);
       expect(resourcesAfterCleanup).toBe(0);
+      const timeoutsAfterCleanup = Object.entries(cleanup.activeResources || {})
+        .filter(([key]) => key.startsWith(`${scenario.route}::timeout`))
+        .reduce((total, [, value]) => total + Number(value || 0), 0);
+      expect(timeoutsAfterCleanup).toBe(0);
+      expect(Number(cleanup.media?.activeSources || 0)).toBe(0);
 
       if (iteration > 0) writeScenarioResult(scenario, iteration, {
         environment: {

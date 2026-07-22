@@ -26,6 +26,7 @@ frontend/test-results/
 frontend/.perf-emulator-data/
 frontend/.perf-tools/
 frontend/firebase-debug.log
+frontend/firebase-debug.[1-9].log
 frontend/firestore-debug.log
 frontend/debug.log
 

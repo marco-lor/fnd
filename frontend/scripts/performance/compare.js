@@ -74,6 +74,8 @@ const evaluateStructuralGates = (current) => {
     'runtime.failedRequests',
     'firestore.activeListenersAfterCleanup',
     'runtime.activeResourcesAfterCleanup',
+    'runtime.activeTimeoutsAfterCleanup',
+    'runtime.activeMediaAfterCleanup',
   ];
   const missingMetrics = expected.flatMap((scenarioId) => requiredMetrics
     .filter((metric) => !Number.isFinite(current.metrics?.[`${scenarioId}:${metric}`]))
@@ -97,6 +99,22 @@ const evaluateStructuralGates = (current) => {
   const moduleEvidenceValid = Number(current.build?.webpackModuleEvidence?.moduleCount) > 0
     && Array.isArray(current.build?.webpackModuleEvidence?.loginModuleViolations)
     && current.build.webpackModuleEvidence.loginModuleViolations.length === 0;
+  const fivePeerScenarios = (current.browser?.scenarios || []).filter((scenario) => (
+    (scenario.scenarioId || scenario.id) === 'grigliata-five-peer'
+  ));
+  const explainedWarningMetricsComplete = fivePeerScenarios.length > 0
+    && fivePeerScenarios.every((scenario) => Number.isFinite(
+      scenario.metrics?.['runtime.explainedFirestoreEmulatorStartupWarnings']
+    ));
+  const explainedStartupWarnings = fivePeerScenarios.reduce((total, scenario) => (
+    total + Number(scenario.metrics?.['runtime.explainedFirestoreEmulatorStartupWarnings'] || 0)
+  ), 0);
+  const authSetupDiagnostics = current.browser?.environment?.authSetupDiagnostics;
+  const authMetrics = authSetupDiagnostics?.metrics;
+  const authSetupValid = authSetupDiagnostics?.status === 'passed'
+    && authSetupDiagnostics.completedAccountCount === authSetupDiagnostics.expectedAccountCount
+    && ['consoleErrors', 'explainedFirestoreEmulatorStartupWarnings', 'unhandledErrors', 'failedRequests', 'cleanupErrors']
+      .every((metric) => Number(authMetrics?.[metric]) === 0);
   return [
     {
       id: 'scenario-completeness', severity: 'blocking', status: missing.length ? 'fail' : 'pass',
@@ -105,6 +123,18 @@ const evaluateStructuralGates = (current) => {
     {
       id: 'metric-completeness', severity: 'blocking', status: missingMetrics.length ? 'fail' : 'pass',
       missing: missingMetrics,
+    },
+    {
+      id: 'emulator-startup-warning-free', severity: 'blocking',
+      status: explainedWarningMetricsComplete && explainedStartupWarnings === 0 ? 'pass' : 'fail',
+      actual: explainedStartupWarnings,
+      maximum: 0,
+      complete: explainedWarningMetricsComplete,
+    },
+    {
+      id: 'auth-setup-diagnostics', severity: 'blocking',
+      status: authSetupValid ? 'pass' : 'fail',
+      actual: authSetupDiagnostics || null,
     },
     {
       id: 'fixture-integrity', severity: 'blocking', status: fixtureValid ? 'pass' : 'fail',

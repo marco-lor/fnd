@@ -5,7 +5,7 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const {
-  assertDemoProject,
+  assertPerformanceProject,
   ensureDirectory,
   frontendRoot,
   projectId,
@@ -32,12 +32,16 @@ const EMULATOR_PORT_RELEASE_TIMEOUT_MS = 60 * 1000;
 const EMULATOR_PORT_RELEASE_INTERVAL_MS = 250;
 const EMULATOR_PORT_RELEASE_STABLE_SAMPLES = 2;
 
-const previousLogPaths = (root = frontendRoot) => [
+const firebaseDebugLogPaths = (root = frontendRoot) => [
   path.join(root, 'firebase-debug.log'),
   ...Array.from(
     { length: 9 },
     (_unused, index) => path.join(root, `firebase-debug.${index + 1}.log`)
   ),
+];
+
+const previousLogPaths = (root = frontendRoot) => [
+  ...firebaseDebugLogPaths(root),
   path.join(root, 'firestore-debug.log'),
   path.join(root, '.perf-emulator-data', 'emulator.log'),
 ];
@@ -131,6 +135,39 @@ const waitForEmulatorPortsFree = async ({
   }
 };
 
+const withEmulatorPortCleanup = async (operation, {
+  waitForPorts = waitForEmulatorPortsFree,
+  label = 'Performance emulator run',
+} = {}) => {
+  if (typeof operation !== 'function' || typeof waitForPorts !== 'function') {
+    throw new TypeError('Emulator operation and port cleanup must be functions.');
+  }
+  let result;
+  let operationError;
+  try {
+    result = await operation();
+  } catch (error) {
+    operationError = error instanceof Error ? error : new Error(String(error));
+  }
+
+  let cleanupError;
+  try {
+    await waitForPorts();
+  } catch (error) {
+    cleanupError = error instanceof Error ? error : new Error(String(error));
+  }
+
+  if (operationError && cleanupError) {
+    throw new global.AggregateError(
+      [operationError, cleanupError],
+      `${label} failed and its owned emulator ports did not become free.`
+    );
+  }
+  if (operationError) throw operationError;
+  if (cleanupError) throw cleanupError;
+  return result;
+};
+
 const readBoundedTail = (filePath, maximumBytes = PREVIOUS_LOG_TAIL_BYTES) => {
   const stats = fs.statSync(filePath);
   const tailBytes = Math.min(stats.size, maximumBytes);
@@ -200,8 +237,58 @@ const archiveAndDeletePreviousLogs = ({
   return report;
 };
 
+const requestOwnedWindowsProcessTreeTermination = (child, {
+  spawnSyncImpl = childProcess.spawnSync,
+} = {}) => {
+  if (!Number.isInteger(child?.pid) || child.pid <= 0) {
+    throw new Error('Owned Firebase emulator child PID is unavailable.');
+  }
+  const result = spawnSyncImpl('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  if (result.error) {
+    throw new Error(`Failed to request owned Firebase emulator process-tree termination: ${result.error.message}`);
+  }
+  return {
+    status: result.status,
+    stdout: String(result.stdout || '').trim(),
+    stderr: String(result.stderr || '').trim(),
+  };
+};
+
+const requestOwnedPosixProcessGroupTermination = (child, signal = 'SIGTERM', {
+  killImpl = process.kill,
+} = {}) => {
+  if (!Number.isInteger(child?.pid) || child.pid <= 0) {
+    throw new Error('Owned Firebase emulator child PID is unavailable.');
+  }
+  killImpl(-child.pid, signal);
+  return { processGroupId: child.pid, signal };
+};
+
+const hasOwnedChildExited = (child) => (
+  child.exitCode !== null || child.signalCode !== null
+);
+
+const waitForOwnedChildExit = (child, timeoutMs = 10_000) => {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      child.removeListener('exit', onExit);
+      reject(new Error(`Owned Firebase emulator process did not exit within ${timeoutMs} ms.`));
+    }, timeoutMs);
+    timer.unref?.();
+    child.once('exit', onExit);
+  });
+};
+
 const run = async () => {
-  assertDemoProject(projectId);
+  assertPerformanceProject(projectId);
 
   const preflight = childProcess.spawnSync(
     process.execPath,
@@ -265,46 +352,99 @@ const run = async () => {
       },
       stdio: ['ignore', emulatorLog, emulatorLog],
       shell: false,
+      detached: process.platform !== 'win32',
     }
   );
 
   let shuttingDown = false;
+  let shutdownPromise = null;
+  let emulatorLogClosed = false;
+  const closeEmulatorLog = () => {
+    if (emulatorLogClosed) return;
+    emulatorLogClosed = true;
+    fs.closeSync(emulatorLog);
+  };
   const shutdown = (signal = 'SIGINT') => {
-    if (shuttingDown) return;
+    if (shutdownPromise) return shutdownPromise;
     shuttingDown = true;
-    if (process.platform === 'win32') {
-      childProcess.spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
-        stdio: 'ignore',
-        windowsHide: true,
-      });
+    shutdownPromise = (async () => {
+      const errors = [];
+      let windowsTermination = null;
+      if (process.platform === 'win32') {
+        try {
+          windowsTermination = requestOwnedWindowsProcessTreeTermination(child);
+        } catch (error) {
+          errors.push(error);
+        }
+      } else if (!hasOwnedChildExited(child)) {
+        try {
+          requestOwnedPosixProcessGroupTermination(child, signal);
+        } catch (error) {
+          if (!hasOwnedChildExited(child)) errors.push(error);
+        }
+      }
+
+      try {
+        await waitForOwnedChildExit(child);
+      } catch (gracefulExitError) {
+        if (process.platform === 'win32' || hasOwnedChildExited(child)) {
+          errors.push(gracefulExitError);
+        } else {
+          try {
+            requestOwnedPosixProcessGroupTermination(child, 'SIGKILL');
+          } catch (error) {
+            if (!hasOwnedChildExited(child)) errors.push(error);
+          }
+          try {
+            await waitForOwnedChildExit(child);
+          } catch (forcedExitError) {
+            errors.push(new global.AggregateError(
+              [gracefulExitError, forcedExitError],
+              'Owned Firebase emulator process group ignored graceful and forced termination.'
+            ));
+          }
+        }
+      }
+
+      try {
+        await waitForEmulatorPortsFree();
+      } catch (error) {
+        const terminationDetail = windowsTermination && windowsTermination.status !== 0
+          ? ` taskkill status=${windowsTermination.status}, stderr=${windowsTermination.stderr || 'none'}.`
+          : '';
+        errors.push(new Error(`${error.message}${terminationDetail}`, { cause: error }));
+      }
+
+      fs.rmSync(playwrightMarker, { force: true });
+      closeEmulatorLog();
+      if (errors.length) {
+        console.error(new global.AggregateError(errors, 'Owned Firebase emulator shutdown failed.'));
+        process.exit(1);
+      }
       process.exit(0);
-    }
-    if (!child.killed) child.kill(signal);
-    const forceTimer = setTimeout(() => {
-      if (!child.killed) child.kill('SIGKILL');
-      process.exit(0);
-    }, 10_000);
-    forceTimer.unref();
+    })();
+    return shutdownPromise;
   };
   const webServerParentPid = process.ppid;
   const parentMonitor = setInterval(() => {
     if (process.env.FND_PERF_PLAYWRIGHT_WEBSERVER === '1' && !fs.existsSync(playwrightMarker)) {
-      shutdown('SIGTERM');
+      void shutdown('SIGTERM');
       return;
     }
     try {
       process.kill(webServerParentPid, 0);
     } catch (_error) {
-      shutdown('SIGTERM');
+      void shutdown('SIGTERM');
     }
   }, 1_000);
   parentMonitor.unref();
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('disconnect', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => { void shutdown('SIGINT'); });
+  process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
+  process.on('disconnect', () => { void shutdown('SIGTERM'); });
   child.on('exit', (code) => {
-    fs.closeSync(emulatorLog);
-    process.exit(shuttingDown ? 0 : (code || 0));
+    if (shuttingDown) return;
+    closeEmulatorLog();
+    process.exit(code || 0);
   });
 };
 
@@ -324,8 +464,13 @@ module.exports = {
   archiveAndDeletePreviousLogs,
   assertEmulatorPortsFree,
   canBindPort,
+  firebaseDebugLogPaths,
   previousLogPaths,
   readBoundedTail,
+  requestOwnedPosixProcessGroupTermination,
+  requestOwnedWindowsProcessTreeTermination,
   run,
   waitForEmulatorPortsFree,
+  waitForOwnedChildExit,
+  withEmulatorPortCleanup,
 };

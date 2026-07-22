@@ -78,6 +78,22 @@ test('timing instability and deterministic drift fail repeatability', () => {
   );
 });
 
+test('explained Firestore startup warning drift fails repeatability', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1000);
+  const metricKey = 'home:runtime.explainedFirestoreEmulatorStartupWarnings';
+  left.metrics[metricKey] = 1;
+  right.metrics[metricKey] = 0;
+
+  const result = compareReports(left, right, 15);
+
+  assert.equal(result.status, 'fail');
+  assert.deepEqual(
+    result.deterministic.find(({ key }) => key === metricKey),
+    { key: metricKey, left: 1, right: 0, status: 'fail' }
+  );
+});
+
 test('different commits, browsers, or build assets cannot be compared', () => {
   const left = report('run-a', 1000);
   const right = report('run-b', 1000);

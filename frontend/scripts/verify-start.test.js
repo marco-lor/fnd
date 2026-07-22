@@ -202,6 +202,115 @@ test("reports an early npm exit and still verifies cleanup", async () => {
   assert.equal(releaseChecked, true);
 });
 
+test("cleanup-only failures include the bounded npm start output tail", async () => {
+  const child = createFakeChild();
+  let releaseChecked = false;
+  const verification = runStartVerification({
+    timeoutMs: 100,
+    checkPortAvailableImpl: async () => true,
+    spawnImpl: () => {
+      setImmediate(() => child.stdout.write("diagnostic-tail\nCompiled successfully!\n"));
+      return child;
+    },
+    requestHomeImpl: async () => ({
+      statusCode: 200,
+      contentType: "text/html",
+      body: '<div id="root"></div>',
+    }),
+    terminateProcessTreeImpl: async () => {
+      throw new Error("owned cleanup failed");
+    },
+    waitForPortReleaseImpl: async () => {
+      releaseChecked = true;
+    },
+    logger: silentLogger(),
+  });
+
+  await assert.rejects(verification, (error) => {
+    assert.match(error.message, /owned cleanup failed/);
+    assert.match(error.message, /Bounded npm start output tail/);
+    assert.match(error.message, /diagnostic-tail/);
+    return true;
+  });
+  assert.equal(releaseChecked, true);
+});
+
+test("aggregates termination and port-release failures with bounded output tails", async () => {
+  const child = createFakeChild();
+  let releaseChecked = false;
+  const verification = runStartVerification({
+    timeoutMs: 100,
+    checkPortAvailableImpl: async () => true,
+    spawnImpl: () => {
+      setImmediate(() => child.stdout.write("dual-cleanup-tail\nCompiled successfully!\n"));
+      return child;
+    },
+    requestHomeImpl: async () => ({
+      statusCode: 200,
+      contentType: "text/html",
+      body: '<div id="root"></div>',
+    }),
+    terminateProcessTreeImpl: async () => {
+      throw new Error("termination failed");
+    },
+    waitForPortReleaseImpl: async () => {
+      releaseChecked = true;
+      throw new Error("release verification failed");
+    },
+    logger: silentLogger(),
+  });
+
+  await assert.rejects(verification, (error) => {
+    assert.equal(error instanceof global.AggregateError, true);
+    assert.match(error.message, /termination and port-release verification both failed/);
+    assert.equal(error.errors.length, 2);
+    assert.match(error.errors[0].message, /termination failed/);
+    assert.match(error.errors[1].message, /release verification failed/);
+    for (const cleanupError of error.errors) {
+      assert.match(cleanupError.message, /Bounded npm start output tail/);
+      assert.match(cleanupError.message, /dual-cleanup-tail/);
+    }
+    return true;
+  });
+  assert.equal(releaseChecked, true);
+});
+
+test("preserves primary plus aggregated cleanup failure reporting", async () => {
+  const child = createFakeChild();
+  const verification = runStartVerification({
+    timeoutMs: 100,
+    checkPortAvailableImpl: async () => true,
+    spawnImpl: () => {
+      setImmediate(() => {
+        child.stderr.write("primary-cleanup-tail\n");
+        child.exitCode = 1;
+        child.emit("exit", 1, null);
+      });
+      return child;
+    },
+    terminateProcessTreeImpl: async () => {
+      throw new Error("termination failed after primary failure");
+    },
+    waitForPortReleaseImpl: async () => {
+      throw new Error("release failed after primary failure");
+    },
+    logger: silentLogger(),
+  });
+
+  await assert.rejects(verification, (error) => {
+    assert.equal(error instanceof global.AggregateError, true);
+    assert.match(error.message, /verification failed and its owned-process cleanup also failed/);
+    assert.equal(error.errors.length, 2);
+    assert.match(error.errors[0].message, /exited before compilation/);
+    assert.match(error.errors[0].message, /primary-cleanup-tail/);
+    assert.equal(error.errors[1] instanceof global.AggregateError, true);
+    assert.equal(error.errors[1].errors.length, 2);
+    assert.match(error.errors[1].errors[0].message, /termination failed after primary failure/);
+    assert.match(error.errors[1].errors[1].message, /release failed after primary failure/);
+    return true;
+  });
+});
+
 test("Windows cleanup invokes taskkill for only the captured PID tree", async () => {
   const child = createFakeChild(9876);
   let invocation = null;

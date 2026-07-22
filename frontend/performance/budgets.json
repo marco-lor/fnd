@@ -75,6 +75,26 @@
       "ownerTask": "01"
     },
     {
+      "id": "no-route-timeout-leaks",
+      "scenario": "all",
+      "metric": "runtime.activeTimeoutsAfterCleanup",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "03"
+    },
+    {
+      "id": "no-active-media-after-cleanup",
+      "scenario": "all",
+      "metric": "runtime.activeMediaAfterCleanup",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "03"
+    },
+    {
       "id": "route-javascript-transfer-regression",
       "scenario": "all",
       "metric": "resource.javascript.gzipBytes",

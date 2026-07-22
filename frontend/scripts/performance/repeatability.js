@@ -44,7 +44,7 @@ const isTimingMetric = (key) => {
 
 const isDeterministicMetric = (key) => {
   const base = baseMetricKey(key);
-  return /:runtime\.(consoleErrors|unhandledErrors|failedRequests|synchronousNetworkCalls|activeListenersAfterCleanup|activeResourcesAfterCleanup|activeTimeoutsAfterCleanup|activeMediaAfterCleanup)$/.test(base)
+  return /:runtime\.(consoleErrors|unhandledErrors|failedRequests|synchronousNetworkCalls|explainedFirestoreEmulatorStartupWarnings|activeListenersAfterCleanup|activeResourcesAfterCleanup|activeTimeoutsAfterCleanup|activeMediaAfterCleanup)$/.test(base)
     || /:firestore\./.test(base)
     || /:resource\.[^.]+\.(gzipBytes|count)$/.test(base)
     || base.startsWith('build:');

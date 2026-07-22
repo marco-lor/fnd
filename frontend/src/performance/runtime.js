@@ -1,6 +1,7 @@
 const PERFORMANCE_ENABLED = process.env.REACT_APP_FND_PERF === '1';
 const EVENT_SCHEMA_VERSION = 1;
 const MAX_EVENTS = 50000;
+const FIRESTORE_TRANSPORT_PROVENANCE_WINDOW_MS = 5_000;
 const SAFE_METADATA_KEYS = new Set([
   'runId',
   'routeId',
@@ -26,6 +27,7 @@ let observerPatches = [];
 const observerResourceKeys = new WeakMap();
 let asyncResourceOwnerOverride = null;
 let asyncResourceOwnerLeases = [];
+let lastFirestoreTransportOwnershipAt = null;
 
 const redactString = (value) => {
   const text = String(value ?? '').slice(0, 160);
@@ -54,19 +56,57 @@ const currentRouteId = () => (
   || (typeof window !== 'undefined' ? window.location.pathname : 'unknown')
 );
 
-const registerAsyncResource = (type, ownerOverride) => {
+const registerAsyncResource = (type, ownerOverride, diagnostics = null) => {
   const ownerRoute = ownerOverride
     || asyncResourceOwnerOverride
     || asyncResourceOwnerLeases[asyncResourceOwnerLeases.length - 1]?.owner
     || (routeState ? redactString(routeState.routeId) : 'shell');
   const key = `${ownerRoute}::${type}::${++asyncResourceSequence}`;
-  activeAsyncResources.set(key, { type, ownerRoute });
+  activeAsyncResources.set(key, { diagnostics, type, ownerRoute });
   let closed = false;
-  return { key, close: () => {
+  return { key, ownerRoute, close: () => {
     if (closed) return;
     closed = true;
     activeAsyncResources.delete(key);
   } };
+};
+
+const describeTimerCallback = (callback) => {
+  if (typeof callback !== 'function') return { callback: typeof callback };
+  try {
+    return {
+      callback: Function.prototype.toString.call(callback).replace(/\s+/g, ' ').slice(0, 240),
+    };
+  } catch (_error) {
+    return { callback: 'unavailable' };
+  }
+};
+
+const isFirestoreTransportDelayedOperation = (callback, delay) => {
+  if (typeof callback !== 'function' || Number(delay) < 1_000) return false;
+  try {
+    const source = Function.prototype.toString.call(callback).replace(/\s+/g, '');
+    // Firestore's pinned SDK schedules persistent listen/write stream idle work
+    // through DelayedOperation callbacks with this method name. These timers
+    // survive route listener cleanup because they belong to the shared client
+    // transport, not the route that happened to initiate the stream.
+    if (source === '()=>this.handleDelayElapsed()') return true;
+
+    // The pinned WebChannel transport also owns a 45-second request watchdog.
+    // CRA's production minifier reduces its Closure-bound callback to this
+    // exact signature, removing every useful method name. Keep the match exact
+    // so unrelated application timers, including other 45-second timers, stay
+    // attributed to their route and continue to fail cleanup checks.
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const hasRecentTransportProvenance = Number.isFinite(lastFirestoreTransportOwnershipAt)
+      && now - lastFirestoreTransportOwnershipAt >= 0
+      && now - lastFirestoreTransportOwnershipAt <= FIRESTORE_TRANSPORT_PROVENANCE_WINDOW_MS;
+    return Number(delay) === 45_000
+      && source === 'function(){e()}'
+      && hasRecentTransportProvenance;
+  } catch (_error) {
+    return false;
+  }
 };
 
 export const isPerformanceEnabled = () => PERFORMANCE_ENABLED;
@@ -75,6 +115,11 @@ export const withAsyncResourceOwner = (owner, callback) => {
   if (!PERFORMANCE_ENABLED) return callback();
   const previousOwner = asyncResourceOwnerOverride;
   asyncResourceOwnerOverride = redactString(owner || 'shell');
+  if (asyncResourceOwnerOverride === 'firestore-transport') {
+    lastFirestoreTransportOwnershipAt = typeof performance !== 'undefined'
+      ? performance.now()
+      : Date.now();
+  }
   try {
     return callback();
   } finally {
@@ -145,6 +190,7 @@ export const startRouteMeasurement = (routeId, actorRole = 'unknown') => {
     dataReady: false,
     interactive: false,
     pending: 0,
+    pendingKinds: {},
   };
   recordPerfEvent({ category: 'route', metric: 'start' });
 };
@@ -165,15 +211,20 @@ export const markRouteEffectsMounted = () => {
 export const beginRouteAsyncWork = (kind = 'data') => {
   if (!PERFORMANCE_ENABLED || !routeState) return () => {};
   const owner = routeState;
+  const safeKind = redactString(kind);
   owner.dataReady = false;
   owner.interactive = false;
   owner.pending += 1;
+  owner.pendingKinds[safeKind] = (owner.pendingKinds[safeKind] || 0) + 1;
   let completed = false;
   return () => {
     if (completed) return;
     completed = true;
     owner.pending = Math.max(0, owner.pending - 1);
-    recordPerfEvent({ category: 'route', metric: 'async-complete', tags: { kind } });
+    const remainingKindCount = Math.max(0, (owner.pendingKinds[safeKind] || 1) - 1);
+    if (remainingKindCount) owner.pendingKinds[safeKind] = remainingKindCount;
+    else delete owner.pendingKinds[safeKind];
+    recordPerfEvent({ category: 'route', metric: 'async-complete', tags: { kind: safeKind } });
     if (routeState === owner) markReadyIfSettled();
   };
 };
@@ -264,6 +315,11 @@ const runtimeSnapshot = () => ({
       return counts;
     }, new Map())
   ),
+  activeResourceDiagnostics: Array.from(activeAsyncResources.values()).map((resource) => ({
+    ownerRoute: resource.ownerRoute,
+    type: resource.type,
+    ...(resource.diagnostics || {}),
+  })),
   media: typeof document !== 'undefined'
     ? {
       elements: document.querySelectorAll('audio,video').length,
@@ -271,7 +327,10 @@ const runtimeSnapshot = () => ({
         .filter((element) => Boolean(element.currentSrc || element.getAttribute('src'))).length,
     }
     : { elements: 0, activeSources: 0 },
-  routeState: routeState ? { ...routeState } : null,
+  routeState: routeState ? {
+    ...routeState,
+    pendingKinds: { ...routeState.pendingKinds },
+  } : null,
   resources: aggregateResources(),
   heap: typeof performance !== 'undefined' && performance.memory
     ? {
@@ -330,11 +389,20 @@ export const installPerformanceRuntime = () => {
     const intervals = new Map();
     const frames = new Map();
     window.setTimeout = (callback, delay, ...args) => {
-      const resource = registerAsyncResource('timeout');
+      const resource = registerAsyncResource(
+        'timeout',
+        isFirestoreTransportDelayedOperation(callback, delay)
+          ? 'firestore-transport'
+          : undefined,
+        {
+          ...describeTimerCallback(callback),
+          delayMs: Number(delay) || 0,
+        }
+      );
       const id = originalTimers.setTimeout((...callbackArgs) => {
         resource.close();
         timeouts.delete(id);
-        callback(...callbackArgs);
+        withAsyncResourceOwner(resource.ownerRoute, () => callback(...callbackArgs));
       }, delay, ...args);
       timeouts.set(id, resource);
       return id;
@@ -345,8 +413,18 @@ export const installPerformanceRuntime = () => {
       return originalTimers.clearTimeout(id);
     };
     window.setInterval = (callback, delay, ...args) => {
-      const resource = registerAsyncResource('interval');
-      const id = originalTimers.setInterval(callback, delay, ...args);
+      const resource = registerAsyncResource('interval', undefined, {
+        ...describeTimerCallback(callback),
+        delayMs: Number(delay) || 0,
+      });
+      const id = originalTimers.setInterval(
+        (...callbackArgs) => withAsyncResourceOwner(
+          resource.ownerRoute,
+          () => callback(...callbackArgs)
+        ),
+        delay,
+        ...args
+      );
       intervals.set(id, resource);
       return id;
     };
@@ -360,7 +438,7 @@ export const installPerformanceRuntime = () => {
       const id = originalTimers.requestAnimationFrame((timestamp) => {
         resource.close();
         frames.delete(id);
-        callback(timestamp);
+        withAsyncResourceOwner(resource.ownerRoute, () => callback(timestamp));
       });
       frames.set(id, resource);
       return id;
@@ -428,6 +506,7 @@ export const teardownPerformanceRuntimeForTests = () => {
   activeAsyncResources = new Map();
   asyncResourceOwnerOverride = null;
   asyncResourceOwnerLeases = [];
+  lastFirestoreTransportOwnershipAt = null;
   asyncResourceSequence = 0;
   routeState = null;
   if (originalXhrOpen && typeof XMLHttpRequest !== 'undefined') {

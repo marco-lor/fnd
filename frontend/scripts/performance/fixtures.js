@@ -2,20 +2,20 @@
 
 const path = require('path');
 const {
-  assertDemoProject,
+  OWNED_PERFORMANCE_ENVIRONMENT,
+  assertPerformanceProject,
+  configureOwnedPerformanceEnvironment,
   projectId,
   resultsDir,
   sha256,
   writeJson,
 } = require('./common');
+
+configureOwnedPerformanceEnvironment();
+assertPerformanceProject(projectId);
+
 const { withBackgroundTriggersDisabled } = require('./emulator-control');
-
-assertDemoProject(projectId);
-
-process.env.GCLOUD_PROJECT = projectId;
-process.env.FIRESTORE_EMULATOR_HOST ||= '127.0.0.1:8080';
-process.env.FIREBASE_AUTH_EMULATOR_HOST ||= '127.0.0.1:9099';
-process.env.STORAGE_EMULATOR_HOST ||= 'http://127.0.0.1:9199';
+const PERFORMANCE_STORAGE_BUCKET = `${projectId}.appspot.com`;
 
 let auth;
 let db;
@@ -29,7 +29,7 @@ const initializeAdmin = () => {
   const { getStorage } = require('firebase-admin/storage');
   const app = getApps()[0] || initializeApp({
     projectId,
-    storageBucket: `${projectId}.appspot.com`,
+    storageBucket: PERFORMANCE_STORAGE_BUCKET,
   });
   auth = getAuth(app);
   db = getFirestore(app);
@@ -46,7 +46,7 @@ const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
 const fixtureEmail = (uid) => `${uid}@example.test`;
 const mediaUrl = (index) => {
   const objectName = `performance/image-${pad(index % 128, 3)}.svg`;
-  return `http://127.0.0.1:9199/v0/b/${projectId}.appspot.com/o/${encodeURIComponent(objectName)}?alt=media&token=performance-token`;
+  return `${OWNED_PERFORMANCE_ENVIRONMENT.STORAGE_EMULATOR_HOST}/v0/b/${PERFORMANCE_STORAGE_BUCKET}/o/${encodeURIComponent(objectName)}?alt=media&token=performance-token`;
 };
 
 const accountDefinitions = [
@@ -365,18 +365,29 @@ const buildDocuments = () => {
   return documents.sort((left, right) => left.path.localeCompare(right.path));
 };
 
-const clearEmulators = async () => {
-  initializeAdmin();
+const clearEmulators = async ({
+  fetchImpl = global.fetch,
+  getBucketImpl = () => bucket,
+  initializeAdminImpl = initializeAdmin,
+} = {}) => {
+  initializeAdminImpl();
+  const storageBucket = getBucketImpl();
+  if (storageBucket?.name !== PERFORMANCE_STORAGE_BUCKET) {
+    throw new Error(
+      `Performance fixture cleanup requires Storage bucket ${PERFORMANCE_STORAGE_BUCKET}; `
+      + `found ${storageBucket?.name || 'missing'}.`
+    );
+  }
   const endpoints = [
-    `http://127.0.0.1:9099/emulator/v1/projects/${projectId}/accounts`,
-    `http://127.0.0.1:8080/emulator/v1/projects/${projectId}/databases/(default)/documents`,
+    `http://${OWNED_PERFORMANCE_ENVIRONMENT.FIREBASE_AUTH_EMULATOR_HOST}/emulator/v1/projects/${projectId}/accounts`,
+    `http://${OWNED_PERFORMANCE_ENVIRONMENT.FIRESTORE_EMULATOR_HOST}/emulator/v1/projects/${projectId}/databases/(default)/documents`,
   ];
   for (const endpoint of endpoints) {
-    const response = await fetch(endpoint, { method: 'DELETE' });
+    const response = await fetchImpl(endpoint, { method: 'DELETE' });
     if (!response.ok) throw new Error(`Failed to clear emulator at ${endpoint}: ${response.status}`);
   }
   try {
-    await bucket.deleteFiles({ prefix: 'performance/' });
+    await storageBucket.deleteFiles();
   } catch (error) {
     if (!/not found/i.test(error.message)) throw error;
   }
@@ -627,6 +638,8 @@ if (require.main === module) {
 module.exports = {
   buildDocuments,
   buildManifest,
+  clearEmulators,
   FIXTURE_VERSION,
+  PERFORMANCE_STORAGE_BUCKET,
   runSeedFixture,
 };

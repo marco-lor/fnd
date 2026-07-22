@@ -762,6 +762,7 @@ export default function GrigliataPage() {
     galleryFolders,
     grid,
     isActivePlacementsReady,
+    isBoardStateReady,
     isGridVisible,
     isTurnOrderEnabled,
     isTurnOrderStarted,
@@ -1846,7 +1847,7 @@ export default function GrigliataPage() {
   const legacyPlacementVisibilityCleanupCompletedAt = boardState?.[LEGACY_PLACEMENT_VISIBILITY_CLEANUP_FIELD];
 
   useEffect(() => {
-    if (!currentUserId || !isManager) return undefined;
+    if (!currentUserId || !isManager || !isBoardStateReady) return undefined;
     if (legacyCleanupCompletedAt || legacyCleanupStartedRef.current) return undefined;
 
     let cancelled = false;
@@ -1893,10 +1894,10 @@ export default function GrigliataPage() {
     return () => {
       cancelled = true;
     };
-  }, [currentUserId, isManager, legacyCleanupCompletedAt, runPaginatedWriteBatch]);
+  }, [currentUserId, isBoardStateReady, isManager, legacyCleanupCompletedAt, runPaginatedWriteBatch]);
 
   useEffect(() => {
-    if (!currentUserId || !isManager) return undefined;
+    if (!currentUserId || !isManager || !isBoardStateReady) return undefined;
     if (
       legacyPlacementDeadStateCleanupCompletedAt
       || legacyPlacementDeadStateCleanupStartedRef.current
@@ -1963,13 +1964,14 @@ export default function GrigliataPage() {
     };
   }, [
     currentUserId,
+    isBoardStateReady,
     isManager,
     legacyPlacementDeadStateCleanupCompletedAt,
     runPaginatedWriteBatch,
   ]);
 
   useEffect(() => {
-    if (!currentUserId || !isManager) return undefined;
+    if (!currentUserId || !isManager || !isBoardStateReady) return undefined;
     if (!legacyPlacementDeadStateCleanupCompletedAt) return undefined;
     if (legacyPlacementVisibilityCleanupCompletedAt || legacyPlacementVisibilityCleanupStartedRef.current) {
       return undefined;
@@ -2034,6 +2036,7 @@ export default function GrigliataPage() {
     };
   }, [
     currentUserId,
+    isBoardStateReady,
     isManager,
     legacyPlacementDeadStateCleanupCompletedAt,
     legacyPlacementVisibilityCleanupCompletedAt,

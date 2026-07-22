@@ -4922,6 +4922,55 @@ describe('GrigliataPage', () => {
     );
   });
 
+  test('waits for board-state hydration before deciding whether legacy cleanup is required', async () => {
+    setManagerAuth();
+    setDocData('grigliata_state/current', {
+      activeBackgroundId: 'map-1',
+      legacyTokenPlacementCleanupCompletedAt: { seconds: 1 },
+      legacyPlacementDeadStateCleanupCompletedAt: { seconds: 1 },
+      legacyPlacementVisibilityCleanupCompletedAt: { seconds: 1 },
+    });
+
+    let delayedBoardStateListener = null;
+    firestore.onSnapshot.mockClear().mockImplementation((target, onNext) => {
+      const listener = { target, onNext };
+      mockFirestoreListeners.push(listener);
+      if (target?.path === 'grigliata_state/current') {
+        delayedBoardStateListener = listener;
+      } else {
+        onNext(mockBuildSnapshotForTarget(target));
+      }
+
+      return () => {
+        const listenerIndex = mockFirestoreListeners.indexOf(listener);
+        if (listenerIndex >= 0) mockFirestoreListeners.splice(listenerIndex, 1);
+      };
+    });
+    firestore.getDocs.mockClear();
+
+    render(<GrigliataPage />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const cleanupReads = () => firestore.getDocs.mock.calls.filter(([target]) => (
+      ['grigliata_tokens', 'grigliata_token_placements'].includes(target?.base?.path)
+    ));
+    expect(delayedBoardStateListener).not.toBeNull();
+    expect(cleanupReads()).toHaveLength(0);
+
+    act(() => {
+      delayedBoardStateListener.onNext(mockBuildSnapshotForTarget(delayedBoardStateListener.target));
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(cleanupReads()).toHaveLength(0);
+  });
+
   test('applies selected-token visibility changes from the board actions', async () => {
     setManagerAuth();
 

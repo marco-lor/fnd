@@ -9,17 +9,32 @@ const {
   writeJson,
 } = require('./common');
 const { collectCurrentReport } = require('./report');
+const { assertCleanWorktree } = require('./authoritative');
 
 const argumentValue = (name) => {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : null;
 };
 
-const snapshotAuthoritativeRun = (runId = argumentValue('--run-id')) => {
+const assertAuthoritativeCommit = (commit) => {
+  if (!/^[0-9a-f]{40}$/i.test(String(commit || ''))) {
+    throw new Error(`Authoritative snapshots require a real Git HEAD, received ${commit || 'unknown'}.`);
+  }
+};
+
+const snapshotAuthoritativeRun = (
+  runId = argumentValue('--run-id'),
+  {
+    assertClean = assertCleanWorktree,
+    collectReport = collectCurrentReport,
+  } = {}
+) => {
   if (!runId || !/^[a-zA-Z0-9._-]+$/.test(runId)) {
     throw new Error('Provide a filesystem-safe authoritative run ID with --run-id.');
   }
-  const report = collectCurrentReport();
+  assertClean({ label: `authoritative snapshot ${runId}` });
+  const report = collectReport();
+  assertAuthoritativeCommit(report.commit);
   const manifest = assertSchemaVersion(readJson(scenariosPath), 'scenario manifest');
   assertSchemaVersion(report, 'authoritative report');
   const browserEnvironment = report.browser?.environment || {};
@@ -46,4 +61,4 @@ const snapshotAuthoritativeRun = (runId = argumentValue('--run-id')) => {
 
 if (require.main === module) snapshotAuthoritativeRun();
 
-module.exports = { snapshotAuthoritativeRun };
+module.exports = { assertAuthoritativeCommit, snapshotAuthoritativeRun };

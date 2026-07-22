@@ -42,6 +42,7 @@ describe('performance runtime', () => {
         dataReady: false,
         interactive: false,
         pending: 1,
+        pendingKinds: { 'late-listener': 1 },
       });
 
       complete();
@@ -50,6 +51,7 @@ describe('performance runtime', () => {
         dataReady: true,
         interactive: true,
         pending: 0,
+        pendingKinds: {},
       });
     } finally {
       runtime.teardownPerformanceRuntimeForTests();
@@ -96,6 +98,86 @@ describe('performance runtime', () => {
     expect(window.__FND_PERF__.snapshot().activeResources['/home::interval']).toBe(1);
     window.clearInterval(interval);
     expect(window.__FND_PERF__.snapshot().activeResources).toEqual({});
+    runtime.teardownPerformanceRuntimeForTests();
+  });
+
+  test('propagates Firestore transport ownership through timer callbacks without hiding route timeouts', async () => {
+    const runtime = loadRuntime(true);
+    window.__FND_PERF_BOOTSTRAP__ = { runId: 'transport-timer-test', actorRole: 'dm' };
+    runtime.installPerformanceRuntime();
+    runtime.startRouteMeasurement('/grigliata', 'dm');
+    let transportTimeout;
+    await new Promise((resolve) => {
+      runtime.withAsyncResourceOwner('firestore-transport', () => {
+        window.setTimeout(() => {
+          transportTimeout = window.setTimeout(() => {}, 60_000);
+          resolve();
+        }, 0);
+      });
+    });
+    class PinnedDelayedOperationShape {
+      handleDelayElapsed() {}
+
+      schedule() {
+        return window.setTimeout(() => this.handleDelayElapsed(), 60_000);
+      }
+    }
+    const delayedOperationTimeout = new PinnedDelayedOperationShape().schedule();
+    const minifiedWebChannelWatchdog = new Function(
+      'e',
+      'return function(){e()}'
+    )(() => {});
+    runtime.withAsyncResourceOwner('firestore-transport', () => {});
+    const webChannelWatchdogTimeout = window.setTimeout(
+      minifiedWebChannelWatchdog,
+      45_000
+    );
+    const routeTimeout = window.setTimeout(() => {}, 45_000);
+
+    const snapshot = window.__FND_PERF__.snapshot();
+    expect(snapshot.activeResources).toEqual({
+      'firestore-transport::timeout': 3,
+      '/grigliata::timeout': 1,
+    });
+    expect(snapshot.activeResourceDiagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ownerRoute: 'firestore-transport', type: 'timeout', delayMs: 60_000 }),
+      expect.objectContaining({ ownerRoute: 'firestore-transport', type: 'timeout', delayMs: 45_000, callback: 'function(){e()}' }),
+      expect.objectContaining({ ownerRoute: '/grigliata', type: 'timeout', delayMs: 45_000, callback: '() => {}' }),
+    ]));
+    expect(snapshot.activeResourceDiagnostics.every(({ callback = '' }) => callback.length <= 240)).toBe(true);
+
+    window.clearTimeout(transportTimeout);
+    window.clearTimeout(delayedOperationTimeout);
+    window.clearTimeout(webChannelWatchdogTimeout);
+    window.clearTimeout(routeTimeout);
+    expect(window.__FND_PERF__.snapshot().activeResources).toEqual({});
+    runtime.teardownPerformanceRuntimeForTests();
+  });
+
+  test('keeps callback-text collisions route-owned without Firestore transport provenance', () => {
+    const runtime = loadRuntime(true);
+    window.__FND_PERF_BOOTSTRAP__ = { runId: 'transport-collision-test', actorRole: 'dm' };
+    runtime.installPerformanceRuntime();
+    runtime.startRouteMeasurement('/grigliata', 'dm');
+    const minifiedApplicationCallback = new Function(
+      'e',
+      'return function(){e()}'
+    )(() => {});
+    const watchdogCollision = window.setTimeout(minifiedApplicationCallback, 45_000);
+    const applicationDelayedOperation = { handleDelayElapsed: jest.fn() };
+    const delayedOperationCollision = window.setTimeout(
+      () => {
+        applicationDelayedOperation.handleDelayElapsed();
+      },
+      60_000
+    );
+
+    expect(window.__FND_PERF__.snapshot().activeResources).toEqual({
+      '/grigliata::timeout': 2,
+    });
+
+    window.clearTimeout(watchdogCollision);
+    window.clearTimeout(delayedOperationCollision);
     runtime.teardownPerformanceRuntimeForTests();
   });
 

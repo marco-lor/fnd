@@ -4,9 +4,13 @@ import {
   isPerformanceEnabled,
   recordPerfEvent,
   registerActiveListener,
+  withAsyncResourceOwner,
 } from './runtime';
 
 const performanceTargetMetadata = new WeakMap();
+const runFirestoreTransport = (operation) => (
+  withAsyncResourceOwner('firestore-transport', operation)
+);
 
 export const labelFirestoreTarget = (target, label, ownership = 'route') => {
   if (target && typeof target === 'object') {
@@ -149,7 +153,7 @@ export const onSnapshot = (target, ...args) => {
   const targetMetadata = performanceTargetMetadata.get(target);
   const metricKey = targetMetadata?.label || describeTarget(target);
   const closeListener = registerActiveListener(metricKey, targetMetadata?.ownership || 'route');
-  const completeInitial = beginRouteAsyncWork('firestore-listener');
+  const completeInitial = beginRouteAsyncWork(`firestore-listener:${metricKey}`);
   const wrappedArgs = [...args];
   const observerIndex = wrappedArgs.findIndex((value) => value && typeof value === 'object' && typeof value.next === 'function');
 
@@ -180,7 +184,7 @@ export const onSnapshot = (target, ...args) => {
 
   let unsubscribe;
   try {
-    unsubscribe = firestore.onSnapshot(target, ...wrappedArgs);
+    unsubscribe = runFirestoreTransport(() => firestore.onSnapshot(target, ...wrappedArgs));
   } catch (error) {
     completeInitial();
     closeListener();
@@ -199,10 +203,10 @@ export const onSnapshot = (target, ...args) => {
 const trackedRead = async (operation, target, args) => {
   if (!isPerformanceEnabled()) return operation(target, ...args);
   const metricKey = describeTarget(target);
-  const complete = beginRouteAsyncWork('firestore-read');
+  const complete = beginRouteAsyncWork(`firestore-read:${metricKey}`);
   const start = performance.now();
   try {
-    const snapshot = await operation(target, ...args);
+    const snapshot = await runFirestoreTransport(() => operation(target, ...args));
     recordPerfEvent({
       category: 'firestore',
       metric: 'one-shot-documents-delivered',
@@ -232,7 +236,7 @@ const trackedWrite = async (operationName, operation, target, args, payloadIndex
   const payloadBytes = estimatePayloadBytes(args[payloadIndex]);
   recordPerfEvent({ category: 'firestore', metric: 'write-attempt', value: payloadBytes, unit: 'bytes', tags: { target: metricKey, operation: operationName } });
   try {
-    const result = await operation(target, ...args);
+    const result = await runFirestoreTransport(() => operation(target, ...args));
     recordPerfEvent({ category: 'firestore', metric: 'write-success', tags: { target: metricKey, operation: operationName } });
     return result;
   } catch (error) {
@@ -262,7 +266,7 @@ const trackedTransactionOrBatch = (target, operationName, state) => new Proxy(ta
       return async (...args) => {
         recordPerfEvent({ category: 'firestore', metric: 'write-attempt', value: state.payloadBytes, unit: 'bytes', tags: { operation: operationName, operations: state.operations } });
         try {
-          const result = await value.apply(subject, args);
+          const result = await runFirestoreTransport(() => value.apply(subject, args));
           recordPerfEvent({ category: 'firestore', metric: 'write-success', tags: { operation: operationName, operations: state.operations } });
           return result;
         } catch (error) {
@@ -287,7 +291,7 @@ export const runTransaction = (db, updateFunction, ...args) => {
   if (!isPerformanceEnabled()) return firestore.runTransaction(db, updateFunction, ...args);
   let latestState = { operations: 0, payloadBytes: 0 };
   let attempt = 0;
-  return firestore.runTransaction(db, (transaction) => {
+  return runFirestoreTransport(() => firestore.runTransaction(db, (transaction) => {
     attempt += 1;
     const state = { operations: 0, payloadBytes: 0, targets: new Set(), proxy: null };
     latestState = state;
@@ -302,7 +306,7 @@ export const runTransaction = (db, updateFunction, ...args) => {
       });
       return result;
     });
-  }, ...args).then((result) => {
+  }, ...args)).then((result) => {
     recordPerfEvent({ category: 'firestore', metric: 'write-success', tags: { operation: 'transaction', operations: latestState.operations, attempts: attempt } });
     return result;
   }, (error) => {

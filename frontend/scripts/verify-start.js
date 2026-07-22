@@ -416,6 +416,22 @@ function appendOutputTail(error, output) {
   return wrapped;
 }
 
+function combineCleanupErrors(errors, output) {
+  if (errors.length === 0) {
+    return null;
+  }
+
+  const errorsWithOutput = errors.map((error) => appendOutputTail(error, output));
+  if (errorsWithOutput.length === 1) {
+    return errorsWithOutput[0];
+  }
+
+  return new global.AggregateError(
+    errorsWithOutput,
+    "Owned npm start process termination and port-release verification both failed."
+  );
+}
+
 async function runStartVerification({
   cwd = path.resolve(__dirname, ".."),
   environment = process.env,
@@ -478,17 +494,23 @@ async function runStartVerification({
   }
 
   monitor.dispose();
-  let cleanupError = null;
+  const cleanupErrors = [];
   try {
     await terminateProcessTreeImpl(child, { platform });
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+
+  try {
     await waitForPortReleaseImpl({
       checkPortAvailableImpl,
       now,
       sleep,
     });
   } catch (error) {
-    cleanupError = error;
+    cleanupErrors.push(error);
   }
+  const cleanupError = combineCleanupErrors(cleanupErrors, output);
 
   if (primaryError && cleanupError) {
     throw new global.AggregateError(

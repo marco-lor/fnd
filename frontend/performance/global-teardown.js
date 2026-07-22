@@ -10,12 +10,67 @@ const {
   summarizeTriggerActivity,
 } = require('./global-setup');
 const {
+  assertPerformanceProject,
   frontendRoot,
   projectId,
   readJson,
   resultsDir,
   writeJson,
 } = require('../scripts/performance/common');
+const { firebaseDebugLogPaths } = require('../scripts/performance/emulators');
+
+const collectTeardownEvidence = ({
+  healthReport,
+  emulatorLogPath,
+  firebaseDebugLogPath,
+  firebaseDebugLogPaths: firebaseDebugCandidates,
+  lifecycleProjectId = projectId,
+  summarizeTriggerActivityImpl = summarizeTriggerActivity,
+  assertMeasurementTriggerSuppressionImpl = assertMeasurementTriggerSuppression,
+  assertLogWithinBudgetImpl = assertLogWithinBudget,
+}) => {
+  const errors = [];
+  let logBudget;
+  let measurementTriggerActivity;
+  let suppression;
+
+  try {
+    measurementTriggerActivity = summarizeTriggerActivityImpl(emulatorLogPath);
+  } catch (error) {
+    measurementTriggerActivity = error.triggerActivity || null;
+    errors.push(error);
+  }
+
+  if (healthReport && measurementTriggerActivity) {
+    try {
+      suppression = assertMeasurementTriggerSuppressionImpl(
+        healthReport.measurementWindow?.triggerActivityBaseline,
+        measurementTriggerActivity
+      );
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+
+  try {
+    logBudget = assertLogWithinBudgetImpl({
+      ...(firebaseDebugCandidates
+        ? { logPaths: firebaseDebugCandidates }
+        : { logPath: firebaseDebugLogPath }),
+      projectId: lifecycleProjectId,
+    });
+  } catch (error) {
+    logBudget = error.logBudget || null;
+    errors.push(error);
+  }
+
+  return {
+    errors,
+    logBudget,
+    measurementTriggerActivity,
+    suppression,
+  };
+};
 
 module.exports = async () => {
   const webServerMarker = path.join(
@@ -27,38 +82,32 @@ module.exports = async () => {
   let logBudget;
   let measurementTriggerActivity;
   let suppression;
+  let demoProjectValidated = false;
   try {
-    try {
-      await setBackgroundTriggersEnabled(true, { projectId });
-    } catch (error) {
-      errors.push(error);
-    }
+    assertPerformanceProject(projectId);
+    demoProjectValidated = true;
 
+    let healthReport = null;
+    const healthReportPath = path.join(resultsDir, 'emulator-health.json');
     try {
-      const healthReportPath = path.join(resultsDir, 'emulator-health.json');
       if (!fs.existsSync(healthReportPath)) {
         throw new Error('Emulator health report is missing; measurement trigger suppression cannot be verified.');
       }
-      const healthReport = readJson(healthReportPath);
-      measurementTriggerActivity = summarizeTriggerActivity(
-        path.join(frontendRoot, '.perf-emulator-data', 'emulator.log')
-      );
-      suppression = assertMeasurementTriggerSuppression(
-        healthReport.measurementWindow?.triggerActivityBaseline,
-        measurementTriggerActivity
-      );
+      healthReport = readJson(healthReportPath);
     } catch (error) {
       errors.push(error);
     }
 
-    try {
-      logBudget = assertLogWithinBudget({
-        logPath: path.join(frontendRoot, 'firebase-debug.log'),
-        projectId,
-      });
-    } catch (error) {
-      errors.push(error);
-    }
+    const evidence = collectTeardownEvidence({
+      healthReport,
+      emulatorLogPath: path.join(frontendRoot, '.perf-emulator-data', 'emulator.log'),
+      firebaseDebugLogPaths: firebaseDebugLogPaths(frontendRoot),
+      lifecycleProjectId: projectId,
+    });
+    logBudget = evidence.logBudget;
+    measurementTriggerActivity = evidence.measurementTriggerActivity;
+    suppression = evidence.suppression;
+    errors.push(...evidence.errors);
 
     try {
       const scenarioDirectory = path.join(resultsDir, 'scenarios');
@@ -73,6 +122,10 @@ module.exports = async () => {
             `${scenario.environment.browserName}:${scenario.environment.browserVersion}`,
             scenario.environment,
           ])).values());
+        const authDiagnosticsPath = path.join(resultsDir, 'auth-setup-diagnostics.json');
+        const authSetupDiagnostics = fs.existsSync(authDiagnosticsPath)
+          ? readJson(authDiagnosticsPath)
+          : null;
 
         writeJson(path.join(resultsDir, 'browser-report.json'), {
           schemaVersion: 1,
@@ -84,11 +137,12 @@ module.exports = async () => {
             cpuModel: os.cpus()[0]?.model || 'unknown',
             cpuCount: os.cpus().length,
             totalMemoryBytes: os.totalmem(),
-            projectId: 'demo-fnd-perf',
+            projectId,
             runId: process.env.FND_PERF_RUN_ID || 'local',
             authoritative: process.env.FND_PERF_AUTHORITATIVE === '1',
             retainedIterations: Number(process.env.FND_PERF_ITERATIONS || 1),
             browsers,
+            authSetupDiagnostics,
             emulatorLogs: { firebaseDebug: logBudget || null },
             measurementTriggerSuppression: {
               ...suppression,
@@ -101,7 +155,16 @@ module.exports = async () => {
     } catch (error) {
       errors.push(error);
     }
+  } catch (error) {
+    errors.push(error);
   } finally {
+    if (demoProjectValidated) {
+      try {
+        await setBackgroundTriggersEnabled(true, { projectId });
+      } catch (error) {
+        errors.push(error);
+      }
+    }
     fs.rmSync(webServerMarker, { force: true });
   }
 
@@ -110,3 +173,5 @@ module.exports = async () => {
     throw new global.AggregateError(errors, 'Performance emulator teardown failed multiple gates.');
   }
 };
+
+module.exports.collectTeardownEvidence = collectTeardownEvidence;

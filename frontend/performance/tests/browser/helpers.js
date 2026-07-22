@@ -1,10 +1,24 @@
 const fs = require('fs');
 const path = require('path');
 const { expect } = require('@playwright/test');
-const { resultsDir, writeJson } = require('../../../scripts/performance/common');
+const {
+  configureOwnedPerformanceEnvironment,
+  projectId,
+  resultsDir,
+  writeJson,
+} = require('../../../scripts/performance/common');
 const fixtureManifest = require('../../fixture-manifest.json');
 
 const GOOGLE_FONT_URL = /^https:\/\/fonts\.(?:googleapis|gstatic)\.com\//;
+const FIRESTORE_EMULATOR_STARTUP_WARNING = /^(?:\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\]\s+)?@firebase\/firestore:\s+Firestore \(\d+\.\d+\.\d+\): Could not reach Cloud Firestore backend\. Backend didn't respond within 10 seconds\.\s+This typically indicates that your device does not have a healthy Internet connection at the moment\. The client will operate in offline mode until it is able to successfully connect to the backend\.$/;
+const FIRESTORE_STREAM_PATH = /^\/google\.firestore\.v1\.Firestore\/(Listen|Write)\/channel$/;
+const FIRESTORE_EMULATOR_ORIGIN = 'http://127.0.0.1:8080';
+const FIRESTORE_EMULATOR_DATABASE = 'projects/demo-fnd-perf/databases/(default)';
+const LIFECYCLE_STREAM_OPERATIONS = {
+  'auth-transition': new Set(['Listen']),
+  'connection-drain': new Set(['Listen', 'Write']),
+  'route-cleanup': new Set(['Listen', 'Write']),
+};
 
 const AUTH_DIRECTORY = path.resolve(__dirname, '..', '..', '..', 'playwright', '.auth');
 const ACCOUNT = {
@@ -25,6 +39,56 @@ const storageStateForRole = (role) => {
   return path.join(AUTH_DIRECTORY, account.state);
 };
 
+const isKnownDemoFirestoreStartupWarning = (text, {
+  baseURL,
+  beforeReadiness,
+  firebaseProjectId = projectId,
+} = {}) => {
+  if (firebaseProjectId !== 'demo-fnd-perf' || beforeReadiness !== true) return false;
+  let hostname;
+  try {
+    hostname = new URL(baseURL).hostname;
+  } catch (_error) {
+    return false;
+  }
+  if (!['127.0.0.1', 'localhost', '::1'].includes(hostname)) return false;
+  return FIRESTORE_EMULATOR_STARTUP_WARNING.test(String(text || '').trim());
+};
+
+const isExpectedFirestoreLifecycleCancellation = ({
+  lifecyclePhase,
+  resourceType,
+  failure,
+  url,
+  firebaseProjectId = projectId,
+} = {}) => {
+  const allowedOperations = LIFECYCLE_STREAM_OPERATIONS[lifecyclePhase];
+  if (
+    firebaseProjectId !== 'demo-fnd-perf'
+    || !allowedOperations
+    || resourceType !== 'fetch'
+    || failure !== 'net::ERR_ABORTED'
+  ) {
+    return false;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (_error) {
+    return false;
+  }
+  if (
+    parsed.origin !== FIRESTORE_EMULATOR_ORIGIN
+    || parsed.searchParams.get('database') !== FIRESTORE_EMULATOR_DATABASE
+  ) {
+    return false;
+  }
+
+  const match = parsed.pathname.match(FIRESTORE_STREAM_PATH);
+  return Boolean(match && allowedOperations.has(match[1]));
+};
+
 const installDeterministicFontRoutes = async (context) => {
   await context.route(GOOGLE_FONT_URL, (route) => route.fulfill({
     status: 204,
@@ -34,7 +98,36 @@ const installDeterministicFontRoutes = async (context) => {
 
 const drainPageConnections = async (page) => {
   if (!page || page.isClosed()) return;
-  await page.goto('about:blank', { waitUntil: 'commit', timeout: 5_000 });
+  await page.goto('about:blank', { waitUntil: 'load', timeout: 5_000 });
+};
+
+const createPageAssetTracker = ({
+  now = Date.now,
+  quietWindowMs = 500,
+} = {}) => {
+  const trackedResourceTypes = new Set(['document', 'script', 'stylesheet', 'image', 'font']);
+  const pending = new Set();
+  let lastActivityAt = now();
+  const touch = () => {
+    lastActivityAt = now();
+  };
+  return {
+    begin(request) {
+      if (!trackedResourceTypes.has(request.resourceType())) return;
+      pending.add(request);
+      touch();
+    },
+    complete(request) {
+      if (!pending.delete(request)) return;
+      touch();
+    },
+    isQuiet() {
+      return pending.size === 0 && now() - lastActivityAt >= quietWindowMs;
+    },
+    pendingCount() {
+      return pending.size;
+    },
+  };
 };
 
 const installBootstrap = async (context, scenario, iteration) => {
@@ -59,15 +152,83 @@ const installBootstrap = async (context, scenario, iteration) => {
 };
 
 const waitForBridge = async (page) => {
-  await page.waitForFunction(() => Boolean(window.__FND_PERF__?.snapshot));
+  await page.waitForFunction(
+    () => Boolean(window.__FND_PERF__?.snapshot),
+    null,
+    { polling: 100 }
+  );
 };
 
-const waitForReadiness = async (page) => {
+const isRouteReadyInPage = (expectedPathname = null) => {
+  const state = window.__FND_PERF__.snapshot().routeState;
+  return Boolean(
+    state?.shellVisible
+    && state?.dataReady
+    && state?.interactive
+    && (!expectedPathname || (
+      window.location.pathname === expectedPathname
+      && state.routeId === expectedPathname
+    ))
+    && !document.querySelector('[data-testid="lazy-route-fallback"]')
+  );
+};
+
+const waitForReadiness = async (page, { timeoutMs, expectedPathname } = {}) => {
+  await page.bringToFront();
   await waitForBridge(page);
-  await page.waitForFunction(() => {
-    const state = window.__FND_PERF__.snapshot().routeState;
-    return state?.shellVisible && state?.dataReady && state?.interactive;
-  });
+  const destinationPathname = expectedPathname || new URL(page.url()).pathname;
+  try {
+    await page.waitForFunction(isRouteReadyInPage, destinationPathname, {
+      polling: 100,
+      ...(timeoutMs == null ? {} : { timeout: timeoutMs }),
+    });
+  } catch (error) {
+    const diagnostics = await page.evaluate(() => {
+      const snapshot = window.__FND_PERF__?.snapshot?.();
+      return {
+        pathname: window.location.pathname,
+        routeState: snapshot?.routeState || null,
+        activeListeners: snapshot?.activeListeners || {},
+        activeResources: snapshot?.activeResources || {},
+        lazyFallbackVisible: Boolean(document.querySelector('[data-testid="lazy-route-fallback"]')),
+      };
+    }).catch((diagnosticError) => ({ diagnosticError: diagnosticError.message }));
+    throw new Error(
+      `Route readiness did not settle: ${JSON.stringify(diagnostics)}`,
+      { cause: error }
+    );
+  }
+};
+
+const collectKonvaTokenPositionsInPage = (tokenId) => {
+  const stages = Array.isArray(window.Konva?.stages) ? window.Konva.stages : [];
+  return stages.flatMap((stage) => (
+    Array.from(stage.find((node) => node.getAttr?.('data-testid') === `token-node-${tokenId}`))
+      .map((node) => ({ x: node.x(), y: node.y() }))
+  ));
+};
+
+const readKonvaTokenPositions = async (page, tokenId) => (
+  page.evaluate(collectKonvaTokenPositionsInPage, tokenId)
+);
+
+const waitForKonvaTokenMove = async (page, {
+  tokenId,
+  from,
+  deltaX,
+  deltaY,
+}) => {
+  const expectedX = from.x + deltaX;
+  const expectedY = from.y + deltaY;
+  await expect.poll(async () => {
+    const positions = await readKonvaTokenPositions(page, tokenId);
+    return positions.length === 1
+      && Math.abs(positions[0].x - expectedX) < 0.001
+      && Math.abs(positions[0].y - expectedY) < 0.001;
+  }, {
+    intervals: [25],
+    message: `Expected one rendered ${tokenId} node at ${expectedX},${expectedY}.`,
+  }).toBe(true);
 };
 
 const navigateToCleanup = async (page) => {
@@ -343,8 +504,7 @@ const scenarioRestorePatch = (scenarioId, currentData = {}) => {
 
 const restoreScenarioState = async (scenarioId) => {
   if (!['home', 'grigliata-manager', 'grigliata-five-peer'].includes(scenarioId)) return;
-  process.env.GCLOUD_PROJECT ||= 'demo-fnd-perf';
-  process.env.FIRESTORE_EMULATOR_HOST ||= '127.0.0.1:8080';
+  configureOwnedPerformanceEnvironment();
   const { deleteApp, initializeApp, getApps } = require('firebase-admin/app');
   const { getFirestore } = require('firebase-admin/firestore');
   const app = getApps()[0] || initializeApp({ projectId: process.env.GCLOUD_PROJECT });
@@ -371,16 +531,22 @@ module.exports = {
   aggregateMetrics,
   captureBrowserMetrics,
   countRouteResources,
+  createPageAssetTracker,
   drainPageConnections,
   installBootstrap,
   installDeterministicFontRoutes,
+  isExpectedFirestoreLifecycleCancellation,
+  isKnownDemoFirestoreStartupWarning,
+  isRouteReadyInPage,
   locateDmDashboardPlayerCard,
   navigateToCleanup,
+  readKonvaTokenPositions,
   restoreScenarioState,
   runInteraction,
   scenarioRestorePatch,
   storageStateForRole,
   waitForBridge,
+  waitForKonvaTokenMove,
   waitForReadiness,
   writeScenarioRaw,
   writeScenarioResult,

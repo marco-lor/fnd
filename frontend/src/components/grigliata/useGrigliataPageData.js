@@ -129,6 +129,7 @@ export default function useGrigliataPageData({
   const [galleryBackgrounds, setGalleryBackgrounds] = useState([]);
   const [criticalBackgroundsById, setCriticalBackgroundsById] = useState({});
   const [boardState, setBoardState] = useState({});
+  const [boardStateReadySubscriptionKey, setBoardStateReadySubscriptionKey] = useState('');
   const [foeLibrary, setFoeLibrary] = useState([]);
   const [tokenProfiles, setTokenProfiles] = useState([]);
   const [activePlacements, setActivePlacements] = useState([]);
@@ -144,12 +145,16 @@ export default function useGrigliataPageData({
   const [selectedBackgroundId, setSelectedBackgroundId] = useState('');
   const [liveInteractionClock, setLiveInteractionClock] = useState(() => Date.now());
   const [pagePresenceClock, setPagePresenceClock] = useState(() => Date.now());
+  const boardStateSubscriptionKey = `${currentUserId}:${isManager ? 'manager' : 'player'}`;
+  const isBoardStateReady = Boolean(currentUserId)
+    && boardStateReadySubscriptionKey === boardStateSubscriptionKey;
 
   useEffect(() => {
     if (!currentUserId) {
       setGalleryBackgrounds([]);
       setCriticalBackgroundsById({});
       setBoardState({});
+      setBoardStateReadySubscriptionKey('');
       setFoeLibrary([]);
       setTokenProfiles([]);
       setPagePresenceSnapshots([]);
@@ -162,8 +167,10 @@ export default function useGrigliataPageData({
       doc(db, 'grigliata_state', 'current'),
       (snapshot) => {
         setBoardState(snapshot.exists() ? snapshot.data() : {});
+        setBoardStateReadySubscriptionKey(boardStateSubscriptionKey);
       },
       (error) => {
+        setBoardStateReadySubscriptionKey('');
         console.error('Failed to load Grigliata state:', error);
       }
     );
@@ -247,7 +254,7 @@ export default function useGrigliataPageData({
       unsubscribeTokenProfiles();
       unsubscribePagePresence();
     };
-  }, [currentUserId, isManager]);
+  }, [boardStateSubscriptionKey, currentUserId, isManager]);
 
   const activeBackgroundId = typeof boardState?.activeBackgroundId === 'string'
     ? boardState.activeBackgroundId
@@ -1129,6 +1136,7 @@ export default function useGrigliataPageData({
     galleryFolders,
     grid,
     isActivePlacementsReady,
+    isBoardStateReady,
     isCurrentUserTokenHiddenOnActiveMap,
     isGridVisible,
     isTurnOrderEnabled,

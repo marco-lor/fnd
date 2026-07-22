@@ -61,19 +61,45 @@ const readResponseDetail = async (response) => {
   }
 };
 
-const fetchWithTimeout = async (fetchImpl, url, init, timeoutMs, label) => {
+const fetchWithTimeout = async (
+  fetchImpl,
+  url,
+  init,
+  timeoutMs,
+  label,
+  consumeResponse = (response) => response
+) => {
   if (typeof fetchImpl !== 'function') throw new TypeError('fetchImpl must be a function.');
+  if (typeof consumeResponse !== 'function') {
+    throw new TypeError('consumeResponse must be a function.');
+  }
   assertPositiveNumber(timeoutMs, 'request timeout');
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  timer.unref?.();
+  let responseReceived = false;
+  let timedOut = false;
+  let timer;
+  const requestPromise = Promise.resolve().then(async () => {
+    const response = await fetchImpl(url, { ...init, signal: controller.signal });
+    responseReceived = true;
+    return consumeResponse(response);
+  });
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      reject(new Error(`timed out after ${timeoutMs} ms`));
+    }, timeoutMs);
+  });
   try {
-    return await fetchImpl(url, { ...init, signal: controller.signal });
+    return await Promise.race([requestPromise, timeoutPromise]);
   } catch (error) {
-    const reason = controller.signal.aborted
+    const reason = timedOut
       ? `timed out after ${timeoutMs} ms`
       : normalizeError(error).message;
-    throw new Error(`${label} failed: ${reason}.`, { cause: normalizeError(error) });
+    if (timedOut || !responseReceived) {
+      throw new Error(`${label} failed: ${reason}.`, { cause: normalizeError(error) });
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -96,22 +122,26 @@ const setBackgroundTriggersEnabled = async (enabled, {
   if (typeof enabled !== 'boolean') throw new TypeError('enabled must be a boolean.');
   const baseUrl = normalizeLoopbackBaseUrl(hubBaseUrl, 'Firebase Emulator Hub URL');
   const action = enabled ? 'enableBackgroundTriggers' : 'disableBackgroundTriggers';
-  const response = await fetchWithTimeout(
+  const payload = await fetchWithTimeout(
     fetchImpl,
     `${baseUrl}/functions/${action}`,
     { method: 'PUT' },
     timeoutMs,
-    `Firebase background-trigger ${enabled ? 'enable' : 'disable'} request`
+    `Firebase background-trigger ${enabled ? 'enable' : 'disable'} request`,
+    async (response) => {
+      await requireOkResponse(
+        response,
+        `Firebase background-trigger ${enabled ? 'enable' : 'disable'} request`
+      );
+      try {
+        return await response.json();
+      } catch (error) {
+        throw new Error('Firebase Emulator Hub returned an invalid background-trigger response.', {
+          cause: normalizeError(error),
+        });
+      }
+    }
   );
-  await requireOkResponse(response, `Firebase background-trigger ${enabled ? 'enable' : 'disable'} request`);
-  let payload;
-  try {
-    payload = await response.json();
-  } catch (error) {
-    throw new Error('Firebase Emulator Hub returned an invalid background-trigger response.', {
-      cause: normalizeError(error),
-    });
-  }
   if (payload?.enabled !== enabled) {
     throw new Error(
       `Firebase Emulator Hub did not confirm background triggers were ${enabled ? 'enabled' : 'disabled'}.`
@@ -119,11 +149,29 @@ const setBackgroundTriggersEnabled = async (enabled, {
   }
 };
 
+const disableBackgroundTriggersWithRecovery = async (options = {}) => {
+  assertDemoProject(options.projectId ?? defaultProjectId);
+  try {
+    await setBackgroundTriggersEnabled(false, options);
+  } catch (error) {
+    const disableError = normalizeError(error);
+    try {
+      await setBackgroundTriggersEnabled(true, options);
+    } catch (recoveryError) {
+      throw new global.AggregateError(
+        [disableError, normalizeError(recoveryError)],
+        'Background triggers could not be confirmed disabled, and recovery enable also failed.'
+      );
+    }
+    throw disableError;
+  }
+};
+
 const withBackgroundTriggersDisabled = async (operation, options = {}) => {
   assertDemoProject(options.projectId ?? defaultProjectId);
   if (typeof operation !== 'function') throw new TypeError('operation must be a function.');
 
-  await setBackgroundTriggersEnabled(false, options);
+  await disableBackgroundTriggersWithRecovery(options);
   let result;
   let operationError;
   try {
@@ -173,15 +221,17 @@ const readFixtureManifest = async (db, requestTimeoutMs) => {
 };
 
 const probeHttpEndpoint = async ({ fetchImpl, url, requestTimeoutMs, label }) => {
-  const response = await fetchWithTimeout(
+  return fetchWithTimeout(
     fetchImpl,
     url,
     { method: 'GET' },
     requestTimeoutMs,
-    label
+    label,
+    async (response) => {
+      await requireOkResponse(response, label);
+      return { status: response.status };
+    }
   );
-  await requireOkResponse(response, label);
-  return { status: response.status };
 };
 
 const collectHealthSample = async ({
@@ -195,21 +245,33 @@ const collectHealthSample = async ({
   functionsRegion,
   requiredEmulators,
   requestTimeoutMs,
+  deadlineMs,
+  nowImpl,
 }) => {
-  const hubResponse = await fetchWithTimeout(
+  const nextRequestTimeoutMs = () => {
+    const remainingMs = deadlineMs - nowImpl();
+    if (remainingMs <= 0) {
+      throw new Error('Firebase emulator health deadline expired during a sample.');
+    }
+    return Math.min(requestTimeoutMs, remainingMs);
+  };
+  const registrations = await fetchWithTimeout(
     fetchImpl,
     `${hubBaseUrl}/emulators`,
     { method: 'GET' },
-    requestTimeoutMs,
-    'Firebase Emulator Hub probe'
+    nextRequestTimeoutMs(),
+    'Firebase Emulator Hub probe',
+    async (response) => {
+      await requireOkResponse(response, 'Firebase Emulator Hub probe');
+      try {
+        return await response.json();
+      } catch (error) {
+        throw new Error('Firebase Emulator Hub returned invalid JSON.', {
+          cause: normalizeError(error),
+        });
+      }
+    }
   );
-  await requireOkResponse(hubResponse, 'Firebase Emulator Hub probe');
-  let registrations;
-  try {
-    registrations = await hubResponse.json();
-  } catch (error) {
-    throw new Error('Firebase Emulator Hub returned invalid JSON.', { cause: normalizeError(error) });
-  }
   const missing = requiredEmulators.filter((name) => !registrations?.[name]);
   if (missing.length) {
     throw new Error(`Firebase Emulator Hub is missing registrations: ${missing.join(', ')}.`);
@@ -218,16 +280,16 @@ const collectHealthSample = async ({
   const hosting = await probeHttpEndpoint({
     fetchImpl,
     url: `${hostingBaseUrl}/`,
-    requestTimeoutMs,
+    requestTimeoutMs: nextRequestTimeoutMs(),
     label: 'Firebase Hosting emulator probe',
   });
   const functions = await probeHttpEndpoint({
     fetchImpl,
     url: `${functionsBaseUrl}/${encodeURIComponent(projectId)}/${encodeURIComponent(functionsRegion)}/clientFirebaseConfig`,
-    requestTimeoutMs,
+    requestTimeoutMs: nextRequestTimeoutMs(),
     label: 'clientFirebaseConfig function probe',
   });
-  const manifest = await readFixtureManifest(db, requestTimeoutMs);
+  const manifest = await readFixtureManifest(db, nextRequestTimeoutMs());
   if (manifest?.version !== expectedManifest.version || manifest?.hash !== expectedManifest.hash) {
     throw new Error(
       `Firestore fixture manifest mismatch: expected ${expectedManifest.version}/${expectedManifest.hash}, `
@@ -297,7 +359,12 @@ const waitForEmulatorHealth = async ({
         functionsRegion,
         requiredEmulators,
         requestTimeoutMs,
+        deadlineMs,
+        nowImpl,
       });
+      if (nowImpl() > deadlineMs) {
+        throw new Error('Firebase emulator health sample completed after the health deadline.');
+      }
       consecutiveHealthy += 1;
       samples.push({ sampledAtMs, healthy: true, checks });
       if (consecutiveHealthy >= consecutiveSamples) {
@@ -334,21 +401,45 @@ const waitForEmulatorHealth = async ({
 
 const assertLogWithinBudget = ({
   logPath,
+  logPaths,
   maxBytes = DEFAULT_LOG_BUDGET_BYTES,
   fsImpl = fs,
   projectId = defaultProjectId,
 } = {}) => {
   assertDemoProject(projectId);
-  if (!logPath) throw new TypeError('logPath is required.');
+  const candidates = Array.isArray(logPaths) ? [...new Set(logPaths.filter(Boolean))] : [logPath].filter(Boolean);
+  if (!candidates.length) throw new TypeError('logPath or logPaths is required.');
   assertPositiveNumber(maxBytes, 'log budget');
-  const sizeBytes = fsImpl.existsSync(logPath) ? fsImpl.statSync(logPath).size : 0;
+  const files = candidates
+    .filter((candidate) => fsImpl.existsSync(candidate))
+    .map((candidate) => ({ logPath: candidate, sizeBytes: fsImpl.statSync(candidate).size }));
+  const sizeBytes = files.reduce((total, file) => total + file.sizeBytes, 0);
+  const evidence = Array.isArray(logPaths)
+    ? {
+      logPath: files.length === 1 ? files[0].logPath : null,
+      logPaths: candidates,
+      files,
+      sizeBytes,
+      maxBytes,
+    }
+    : { logPath, sizeBytes, maxBytes };
+  if (!files.length) {
+    evidence.missing = true;
+    const error = new Error(
+      `Current-run Firebase emulator debug log is missing; checked ${candidates.join(', ')}.`
+    );
+    error.logBudget = evidence;
+    throw error;
+  }
   if (sizeBytes > maxBytes) {
-    throw new Error(
+    const error = new Error(
       `Emulator log exceeded its ${maxBytes}-byte budget (${sizeBytes} bytes); `
       + 'this indicates a possible background-trigger storm.'
     );
+    error.logBudget = evidence;
+    throw error;
   }
-  return { logPath, sizeBytes, maxBytes };
+  return evidence;
 };
 
 module.exports = {
@@ -359,6 +450,7 @@ module.exports = {
   DEFAULT_TRIGGER_CONTROL_TIMEOUT_MS,
   REQUIRED_EMULATORS,
   assertLogWithinBudget,
+  disableBackgroundTriggersWithRecovery,
   setBackgroundTriggersEnabled,
   waitForEmulatorHealth,
   withBackgroundTriggersDisabled,

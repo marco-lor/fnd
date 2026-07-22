@@ -106,6 +106,8 @@ describe("Firebase async bootstrap", () => {
     expect(require("firebase/app").initializeApp).toHaveBeenCalledTimes(1);
     expect(require("firebase/app-check").initializeAppCheck).toHaveBeenCalledTimes(1);
     expect(require("firebase/app-check").ReCaptchaV3Provider).toHaveBeenCalledTimes(1);
+    expect(require("../performance/firestore").getFirestore).toHaveBeenCalledTimes(1);
+    expect(require("../performance/firestore").initializeFirestore).not.toHaveBeenCalled();
   });
 
   test("uses the static demo config and connects emulators in an ordinary performance build", async () => {
@@ -123,11 +125,8 @@ describe("Firebase async bootstrap", () => {
       expect(fetchImpl).not.toHaveBeenCalled();
       expect(require("firebase/auth").connectAuthEmulator).toHaveBeenCalledTimes(1);
       expect(require("../performance/firestore").connectFirestoreEmulator).toHaveBeenCalledTimes(1);
-      expect(require("../performance/firestore").initializeFirestore).toHaveBeenCalledWith(
-        expect.anything(),
-        { experimentalAutoDetectLongPolling: false }
-      );
-      expect(require("../performance/firestore").getFirestore).not.toHaveBeenCalled();
+      expect(require("../performance/firestore").getFirestore).toHaveBeenCalledTimes(1);
+      expect(require("../performance/firestore").initializeFirestore).not.toHaveBeenCalled();
     } finally {
       if (previousPerformanceMode === undefined) delete process.env.REACT_APP_FND_PERF;
       else process.env.REACT_APP_FND_PERF = previousPerformanceMode;

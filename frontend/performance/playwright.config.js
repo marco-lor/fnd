@@ -3,7 +3,6 @@ const { defineConfig } = require('@playwright/test');
 const manifest = require('./scenarios.json');
 const { ensureDirectory, frontendRoot, resolvePortableJavaHome } = require('../scripts/performance/common');
 
-const isCI = Boolean(process.env.CI);
 const portableJavaHome = resolvePortableJavaHome();
 const emulatorConfigRoot = path.join(frontendRoot, '.perf-emulator-data', 'config');
 ensureDirectory(emulatorConfigRoot);
@@ -59,7 +58,7 @@ module.exports = defineConfig({
     cwd: path.join(__dirname, '..'),
     env: emulatorEnvironment,
     url: 'http://127.0.0.1:5000',
-    reuseExistingServer: !isCI,
+    reuseExistingServer: false,
     timeout: 240_000,
     stdout: 'ignore',
     stderr: 'pipe',

@@ -3,7 +3,9 @@ const assert = require('node:assert/strict');
 const {
   buildDocuments,
   buildManifest,
+  clearEmulators,
   FIXTURE_VERSION,
+  PERFORMANCE_STORAGE_BUCKET,
   runSeedFixture,
 } = require('./fixtures');
 
@@ -23,6 +25,39 @@ test('fixture generation is stable and contains the required scale', () => {
   assert.equal(first.counts.grigliata_token_placements, 200);
   assert.equal(first.counts.grigliata_fog_memory_tiles, 1024);
   assert.equal(new Set(firstDocuments.map((entry) => entry.path)).size, firstDocuments.length);
+});
+
+test('emulator cleanup clears exact loopback services then the whole demo Storage bucket', async () => {
+  const calls = [];
+  const storageBucket = {
+    name: PERFORMANCE_STORAGE_BUCKET,
+    deleteFiles: async (...args) => calls.push({ args, operation: 'storage:deleteFiles' }),
+  };
+
+  await clearEmulators({
+    initializeAdminImpl: () => calls.push({ operation: 'admin:initialize' }),
+    getBucketImpl: () => storageBucket,
+    fetchImpl: async (url, options) => {
+      calls.push({ operation: 'fetch', options, url });
+      return { ok: true, status: 200 };
+    },
+  });
+
+  assert.equal(PERFORMANCE_STORAGE_BUCKET, 'demo-fnd-perf.appspot.com');
+  assert.deepEqual(calls, [
+    { operation: 'admin:initialize' },
+    {
+      operation: 'fetch',
+      options: { method: 'DELETE' },
+      url: 'http://127.0.0.1:9099/emulator/v1/projects/demo-fnd-perf/accounts',
+    },
+    {
+      operation: 'fetch',
+      options: { method: 'DELETE' },
+      url: 'http://127.0.0.1:8080/emulator/v1/projects/demo-fnd-perf/databases/(default)/documents',
+    },
+    { args: [], operation: 'storage:deleteFiles' },
+  ]);
 });
 
 test('fixture seeding suppresses bulk triggers and flushes sentinel work before verification', async () => {

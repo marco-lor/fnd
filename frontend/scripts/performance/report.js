@@ -14,10 +14,13 @@ const {
   repoRoot,
 } = require('./common');
 
-const resolveGitCommit = () => {
-  if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA;
+const resolveGitCommit = ({
+  environment = process.env,
+  execFileSync = childProcess.execFileSync,
+} = {}) => {
+  let head;
   try {
-    return childProcess.execFileSync(
+    head = execFileSync(
       'git',
       ['-c', `safe.directory=${repoRoot.replace(/\\/g, '/')}`, 'rev-parse', 'HEAD'],
       { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
@@ -25,6 +28,11 @@ const resolveGitCommit = () => {
   } catch (_error) {
     return 'unknown';
   }
+  const suppliedCommit = String(environment.GITHUB_SHA || '').trim();
+  if (suppliedCommit && suppliedCommit !== head) {
+    throw new Error(`GITHUB_SHA ${suppliedCommit} does not match the checked-out HEAD ${head}.`);
+  }
+  return head;
 };
 
 const readOptionalJson = (filePath) => (
@@ -36,6 +44,18 @@ const sumBuildAssets = (buildReport, predicate, property) => (
     .filter(predicate)
     .reduce((total, asset) => total + (Number(asset[property]) || 0), 0)
 );
+
+const WORST_CASE_METRICS = new Set([
+  'runtime.consoleErrors',
+  'runtime.explainedFirestoreEmulatorStartupWarnings',
+  'runtime.unhandledErrors',
+  'runtime.failedRequests',
+  'runtime.synchronousNetworkCalls',
+  'firestore.activeListenersAfterCleanup',
+  'runtime.activeResourcesAfterCleanup',
+  'runtime.activeTimeoutsAfterCleanup',
+  'runtime.activeMediaAfterCleanup',
+]);
 
 const buildMetricMap = ({ buildReport, browserReport }) => {
   const metrics = {};
@@ -58,7 +78,12 @@ const buildMetricMap = ({ buildReport, browserReport }) => {
     }
   }
   for (const [key, values] of scenarioMetrics) {
-    metrics[key] = key.includes(':web-vital.') ? percentile(values, 0.75) : median(values);
+    const metricName = key.slice(key.indexOf(':') + 1);
+    metrics[key] = key.includes(':web-vital.')
+      ? percentile(values, 0.75)
+      : WORST_CASE_METRICS.has(metricName)
+        ? Math.max(...values)
+        : median(values);
     if (values.length > 1) metrics[`${key}.p95`] = percentile(values, 0.95);
   }
   return metrics;

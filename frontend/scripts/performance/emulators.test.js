@@ -3,17 +3,73 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { EventEmitter } = require('events');
 const {
   EMULATOR_PORT_RELEASE_TIMEOUT_MS,
   archiveAndDeletePreviousLogs,
   assertEmulatorPortsFree,
   previousLogPaths,
   readBoundedTail,
+  requestOwnedPosixProcessGroupTermination,
+  requestOwnedWindowsProcessTreeTermination,
   waitForEmulatorPortsFree,
+  waitForOwnedChildExit,
+  withEmulatorPortCleanup,
 } = require('./emulators');
 
 test('authoritative cleanup wait allows the observed Windows socket-release window', () => {
   assert.equal(EMULATOR_PORT_RELEASE_TIMEOUT_MS, 60_000);
+});
+
+test('Windows emulator cleanup targets only the captured child tree and preserves taskkill status', () => {
+  let invocation;
+  const result = requestOwnedWindowsProcessTreeTermination({ pid: 4321 }, {
+    spawnSyncImpl: (command, args, options) => {
+      invocation = { command, args, options };
+      return { status: 128, stdout: '', stderr: 'process already exited' };
+    },
+  });
+  assert.deepEqual(invocation, {
+    command: 'taskkill.exe',
+    args: ['/PID', '4321', '/T', '/F'],
+    options: { encoding: 'utf8', windowsHide: true },
+  });
+  assert.deepEqual(result, { status: 128, stdout: '', stderr: 'process already exited' });
+  assert.throws(
+    () => requestOwnedWindowsProcessTreeTermination({ pid: 0 }),
+    /child PID is unavailable/
+  );
+});
+
+test('POSIX emulator cleanup signals only the captured detached process group and can escalate', () => {
+  const calls = [];
+  const child = { pid: 4321 };
+  assert.deepEqual(requestOwnedPosixProcessGroupTermination(child, 'SIGTERM', {
+    killImpl: (...args) => calls.push(args),
+  }), { processGroupId: 4321, signal: 'SIGTERM' });
+  assert.deepEqual(requestOwnedPosixProcessGroupTermination(child, 'SIGKILL', {
+    killImpl: (...args) => calls.push(args),
+  }), { processGroupId: 4321, signal: 'SIGKILL' });
+  assert.deepEqual(calls, [
+    [-4321, 'SIGTERM'],
+    [-4321, 'SIGKILL'],
+  ]);
+  assert.throws(
+    () => requestOwnedPosixProcessGroupTermination({ pid: 0 }),
+    /child PID is unavailable/
+  );
+});
+
+test('owned emulator cleanup waits for the captured child exit event', async () => {
+  const child = new EventEmitter();
+  child.exitCode = null;
+  child.signalCode = null;
+  const exited = waitForOwnedChildExit(child, 100);
+  setImmediate(() => {
+    child.exitCode = 0;
+    child.emit('exit', 0, null);
+  });
+  await exited;
 });
 
 test('emulator port preflight reports occupied ports without terminating anything', async () => {
@@ -81,6 +137,39 @@ test('authoritative cleanup wait times out without terminating occupied port own
 
   assert.equal(probeCalls, 8);
   assert.deepEqual(delays, [100, 100, 50]);
+});
+
+test('emulator lifecycle reports primary and port-cleanup failures together', async () => {
+  const operationError = new Error('Playwright disconnected');
+  const cleanupError = new Error('ports 8080 and 9150 remain occupied');
+  await assert.rejects(
+    withEmulatorPortCleanup(
+      async () => { throw operationError; },
+      {
+        waitForPorts: async () => { throw cleanupError; },
+        label: 'Authoritative run test-a',
+      }
+    ),
+    (error) => {
+      assert.ok(error instanceof global.AggregateError);
+      assert.match(error.message, /Authoritative run test-a failed/);
+      assert.deepEqual(error.errors, [operationError, cleanupError]);
+      return true;
+    }
+  );
+});
+
+test('emulator lifecycle preserves a lone primary failure after successful cleanup', async () => {
+  const operationError = new Error('Playwright failed');
+  let cleanupCalls = 0;
+  await assert.rejects(
+    withEmulatorPortCleanup(
+      async () => { throw operationError; },
+      { waitForPorts: async () => { cleanupCalls += 1; } }
+    ),
+    (error) => error === operationError
+  );
+  assert.equal(cleanupCalls, 1);
 });
 
 test('previous emulator logs are archived with bounded tails and only exact files are deleted', () => {

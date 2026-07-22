@@ -1,5 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { collection, doc, onSnapshot } from '../../performance/firestore';
+import {
+  collection,
+  doc,
+  labelFirestoreTarget,
+  onSnapshot,
+} from '../../performance/firestore';
+import { withAsyncResourceOwner } from '../../performance/runtime';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
 import {
@@ -143,28 +149,40 @@ const seekAudio = async (audio, targetSeconds) => {
   });
 };
 
-export const subscribeToGrigliataMusicPlayback = (onPlaybackState, onError) => onSnapshot(
-  doc(db, GRIGLIATA_MUSIC_PLAYBACK_COLLECTION, GRIGLIATA_MUSIC_PLAYBACK_DOC_ID),
-  (snapshot) => {
-    onPlaybackState(
-      snapshot.exists()
-        ? normalizeGrigliataMusicPlaybackState(snapshot.data({ serverTimestamps: 'estimate' }))
-        : EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE
-    );
-  },
-  onError
+export const subscribeToGrigliataMusicPlayback = (onPlaybackState, onError) => (
+  withAsyncResourceOwner('shell', () => onSnapshot(
+    labelFirestoreTarget(
+      doc(db, GRIGLIATA_MUSIC_PLAYBACK_COLLECTION, GRIGLIATA_MUSIC_PLAYBACK_DOC_ID),
+      'grigliata_music_playback/:id',
+      'shell'
+    ),
+    (snapshot) => {
+      onPlaybackState(
+        snapshot.exists()
+          ? normalizeGrigliataMusicPlaybackState(snapshot.data({ serverTimestamps: 'estimate' }))
+          : EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE
+      );
+    },
+    onError
+  ))
 );
 
-export const subscribeToGrigliataMusicPlaybackSessions = (onPlaybackSessions, onError) => onSnapshot(
-  collection(db, GRIGLIATA_MUSIC_PLAYBACK_SESSION_COLLECTION),
-  (snapshot) => {
-    const nextSessions = snapshot.docs.map((docSnap) => ({
-      id: docSnap.id,
-      ...docSnap.data({ serverTimestamps: 'estimate' }),
-    }));
-    onPlaybackSessions(sortGrigliataMusicPlaybackSessions(nextSessions));
-  },
-  onError
+export const subscribeToGrigliataMusicPlaybackSessions = (onPlaybackSessions, onError) => (
+  withAsyncResourceOwner('shell', () => onSnapshot(
+    labelFirestoreTarget(
+      collection(db, GRIGLIATA_MUSIC_PLAYBACK_SESSION_COLLECTION),
+      'grigliata_music_playback_sessions',
+      'shell'
+    ),
+    (snapshot) => {
+      const nextSessions = snapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...docSnap.data({ serverTimestamps: 'estimate' }),
+      }));
+      onPlaybackSessions(sortGrigliataMusicPlaybackSessions(nextSessions));
+    },
+    onError
+  ))
 );
 
 export default function GlobalGrigliataMusicPlayer({

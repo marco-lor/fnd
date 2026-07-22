@@ -1,7 +1,12 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import GlobalGrigliataMusicPlayer from './GlobalGrigliataMusicPlayer';
+import GlobalGrigliataMusicPlayer, {
+  subscribeToGrigliataMusicPlayback,
+  subscribeToGrigliataMusicPlaybackSessions,
+} from './GlobalGrigliataMusicPlayer';
 import { useAuth } from '../../AuthContext';
+import * as firestoreRuntime from '../../performance/firestore';
+import * as performanceRuntime from '../../performance/runtime';
 
 const mockDocs = {};
 const mockListeners = [];
@@ -132,6 +137,40 @@ describe('GlobalGrigliataMusicPlayer', () => {
     pauseSpy.mockRestore();
     loadSpy.mockRestore();
     dateNowSpy.mockRestore();
+  });
+
+  test('owns its global Firestore subscriptions as shell resources', () => {
+    const playbackTarget = { path: 'grigliata_music_playback/current' };
+    const sessionsTarget = { path: 'grigliata_music_playback_sessions' };
+    firestoreRuntime.doc.mockReturnValueOnce(playbackTarget);
+    firestoreRuntime.collection.mockReturnValueOnce(sessionsTarget);
+    const snapshotSpy = jest.spyOn(firestoreRuntime, 'onSnapshot').mockReturnValue(jest.fn());
+    const ownerSpy = jest.spyOn(performanceRuntime, 'withAsyncResourceOwner');
+    const labelSpy = jest.spyOn(firestoreRuntime, 'labelFirestoreTarget');
+
+    try {
+      subscribeToGrigliataMusicPlayback(jest.fn(), jest.fn());
+      subscribeToGrigliataMusicPlaybackSessions(jest.fn(), jest.fn());
+
+      expect(ownerSpy).toHaveBeenCalledTimes(2);
+      expect(ownerSpy.mock.calls.every(([owner]) => owner === 'shell')).toBe(true);
+      expect(labelSpy).toHaveBeenNthCalledWith(
+        1,
+        playbackTarget,
+        'grigliata_music_playback/:id',
+        'shell'
+      );
+      expect(labelSpy).toHaveBeenNthCalledWith(
+        2,
+        sessionsTarget,
+        'grigliata_music_playback_sessions',
+        'shell'
+      );
+    } finally {
+      ownerSpy.mockRestore();
+      labelSpy.mockRestore();
+      snapshotSpy.mockRestore();
+    }
   });
 
   test('reacts to playing, paused, and stopped playback states', async () => {

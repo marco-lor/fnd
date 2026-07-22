@@ -1,12 +1,80 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  createPageAssetTracker,
   drainPageConnections,
   installDeterministicFontRoutes,
+  isExpectedFirestoreLifecycleCancellation,
+  isKnownDemoFirestoreStartupWarning,
+  isRouteReadyInPage,
   locateDmDashboardPlayerCard,
   navigateToCleanup,
+  readKonvaTokenPositions,
   scenarioRestorePatch,
+  waitForReadiness,
+  waitForKonvaTokenMove,
 } = require('./helpers');
+
+const firestoreStartupWarning = [
+  '@firebase/firestore: Firestore (12.12.1): Could not reach Cloud Firestore backend. Backend didn\'t respond within 10 seconds.',
+  'This typically indicates that your device does not have a healthy Internet connection at the moment. The client will operate in offline mode until it is able to successfully connect to the backend.',
+].join('\n');
+
+test('only the exact loopback demo Firestore startup warning is classified as explained', () => {
+  assert.equal(isKnownDemoFirestoreStartupWarning(firestoreStartupWarning, {
+    baseURL: 'http://127.0.0.1:5000',
+    beforeReadiness: true,
+    firebaseProjectId: 'demo-fnd-perf',
+  }), true);
+  assert.equal(isKnownDemoFirestoreStartupWarning(
+    `[2026-07-22T03:00:00.000Z] ${firestoreStartupWarning}`,
+    { baseURL: 'http://localhost:5000', beforeReadiness: true, firebaseProjectId: 'demo-fnd-perf' }
+  ), true);
+  for (const options of [
+    { baseURL: 'https://fnd.example', beforeReadiness: true, firebaseProjectId: 'demo-fnd-perf' },
+    { baseURL: 'http://127.0.0.1:5000', beforeReadiness: true, firebaseProjectId: 'demo-other' },
+    { baseURL: 'http://127.0.0.1:5000', beforeReadiness: false, firebaseProjectId: 'demo-fnd-perf' },
+  ]) {
+    assert.equal(isKnownDemoFirestoreStartupWarning(firestoreStartupWarning, options), false);
+  }
+  assert.equal(isKnownDemoFirestoreStartupWarning(
+    firestoreStartupWarning.replace('10 seconds', '11 seconds'),
+    { baseURL: 'http://127.0.0.1:5000', beforeReadiness: true, firebaseProjectId: 'demo-fnd-perf' }
+  ), false);
+  assert.equal(isKnownDemoFirestoreStartupWarning(
+    `${firestoreStartupWarning} Unexpected suffix`,
+    { baseURL: 'http://127.0.0.1:5000', beforeReadiness: true, firebaseProjectId: 'demo-fnd-perf' }
+  ), false);
+  assert.equal(isKnownDemoFirestoreStartupWarning(
+    firestoreStartupWarning.replace("Backend didn't respond within 10 seconds.", 'Connection failed once.'),
+    { baseURL: 'http://127.0.0.1:5000', beforeReadiness: true, firebaseProjectId: 'demo-fnd-perf' }
+  ), false);
+});
+
+test('only intentional lifecycle aborts from the exact demo Firestore transport are explained', () => {
+  const exact = {
+    lifecyclePhase: 'route-cleanup',
+    resourceType: 'fetch',
+    failure: 'net::ERR_ABORTED',
+    url: 'http://127.0.0.1:8080/google.firestore.v1.Firestore/Listen/channel?database=projects%2Fdemo-fnd-perf%2Fdatabases%2F(default)&RID=rpc',
+  };
+  assert.equal(isExpectedFirestoreLifecycleCancellation(exact), true);
+  assert.equal(isExpectedFirestoreLifecycleCancellation({
+    ...exact,
+    url: exact.url.replace('/Listen/', '/Write/'),
+  }), true);
+  assert.equal(isExpectedFirestoreLifecycleCancellation({
+    ...exact,
+    lifecyclePhase: 'auth-transition',
+    url: exact.url.replace('/Listen/', '/Write/'),
+  }), false);
+  assert.equal(isExpectedFirestoreLifecycleCancellation({ ...exact, lifecyclePhase: null }), false);
+  assert.equal(isExpectedFirestoreLifecycleCancellation({ ...exact, failure: 'net::ERR_FAILED' }), false);
+  assert.equal(isExpectedFirestoreLifecycleCancellation({ ...exact, url: exact.url.replace('127.0.0.1:8080', 'firestore.googleapis.com') }), false);
+  assert.equal(isExpectedFirestoreLifecycleCancellation({ ...exact, url: exact.url.replace('demo-fnd-perf', 'demo-other') }), false);
+  assert.equal(isExpectedFirestoreLifecycleCancellation({ ...exact, url: exact.url.replace('/Listen/channel', '/Other/channel') }), false);
+  assert.equal(isExpectedFirestoreLifecycleCancellation({ ...exact, firebaseProjectId: 'live-fnd' }), false);
+});
 
 test('font routing keeps optional Google font requests deterministic and local', async () => {
   let matcher;
@@ -40,7 +108,7 @@ test('page draining navigates only an owned open page to about:blank', async () 
 
   assert.deepEqual(calls, [[
     'about:blank',
-    { waitUntil: 'commit', timeout: 5_000 },
+    { waitUntil: 'load', timeout: 5_000 },
   ]]);
 });
 
@@ -60,6 +128,139 @@ test('cleanup navigation foregrounds a peer and does not depend on animation-fra
     ['bringToFront'],
     ['evaluate', 'function'],
     ['waitForFunction', 'function', null, { polling: 100 }],
+  ]);
+});
+
+test('readiness foregrounds a peer and does not depend on animation-frame polling', async () => {
+  const calls = [];
+  await waitForReadiness({
+    bringToFront: async () => calls.push(['bringToFront']),
+    url: () => 'http://127.0.0.1:5000/',
+    waitForFunction: async (callback, argument, options) => {
+      calls.push(['waitForFunction', typeof callback, argument, options]);
+    },
+  });
+
+  assert.deepEqual(calls, [
+    ['bringToFront'],
+    ['waitForFunction', 'function', null, { polling: 100 }],
+    ['waitForFunction', 'function', '/', { polling: 100 }],
+  ]);
+});
+
+test('readiness supports an explicit harness deadline without changing the default', async () => {
+  const calls = [];
+  await waitForReadiness({
+    bringToFront: async () => calls.push(['bringToFront']),
+    url: () => 'http://127.0.0.1:5000/',
+    waitForFunction: async (callback, argument, options) => {
+      calls.push(['waitForFunction', typeof callback, argument, options]);
+    },
+  }, { timeoutMs: 30_000 });
+
+  assert.deepEqual(calls, [
+    ['bringToFront'],
+    ['waitForFunction', 'function', null, { polling: 100 }],
+    ['waitForFunction', 'function', '/', { polling: 100, timeout: 30_000 }],
+  ]);
+});
+
+test('route readiness rejects transient nested lazy-route fallbacks', () => {
+  const previousWindow = global.window;
+  const previousDocument = global.document;
+  global.window = {
+    __FND_PERF__: {
+      snapshot: () => ({
+        routeState: {
+          routeId: '/home',
+          shellVisible: true,
+          dataReady: true,
+          interactive: true,
+        },
+      }),
+    },
+  };
+  try {
+    global.window.location = { pathname: '/home' };
+    global.document = { querySelector: () => ({ role: 'status' }) };
+    assert.equal(isRouteReadyInPage('/home'), false);
+    global.document = { querySelector: () => null };
+    assert.equal(isRouteReadyInPage('/home'), true);
+    global.window.__FND_PERF__.snapshot = () => ({
+      routeState: {
+        routeId: '/',
+        shellVisible: true,
+        dataReady: true,
+        interactive: true,
+      },
+    });
+    assert.equal(isRouteReadyInPage('/home'), false);
+    global.window.location.pathname = '/later';
+    assert.equal(isRouteReadyInPage('/home'), false);
+  } finally {
+    global.window = previousWindow;
+    global.document = previousDocument;
+  }
+});
+
+test('page asset tracking requires a stable quiet window and ignores streaming media', () => {
+  let now = 0;
+  const tracker = createPageAssetTracker({ now: () => now, quietWindowMs: 500 });
+  const script = { resourceType: () => 'script' };
+  const media = { resourceType: () => 'media' };
+
+  assert.equal(tracker.isQuiet(), false);
+  now = 450;
+  tracker.begin(script);
+  tracker.begin(media);
+  assert.equal(tracker.pendingCount(), 1);
+  now = 460;
+  tracker.complete(script);
+  assert.equal(tracker.isQuiet(), false);
+  now = 959;
+  assert.equal(tracker.isQuiet(), false);
+  now = 960;
+  assert.equal(tracker.isQuiet(), true);
+});
+
+test('Konva placement probes identify one exact token and poll moves without animation frames', async () => {
+  const previousWindow = global.window;
+  const tokenNode = {
+    getAttr: (name) => (name === 'data-testid' ? 'token-node-perf-token-0000' : undefined),
+    x: () => 25,
+    y: () => 75,
+  };
+  global.window = {
+    Konva: {
+      stages: [{ find: (predicate) => [tokenNode].filter(predicate) }],
+    },
+  };
+  try {
+    const page = {
+      evaluate: async (callback, argument) => callback(argument),
+    };
+    assert.deepEqual(
+      await readKonvaTokenPositions(page, 'perf-token-0000'),
+      [{ x: 25, y: 75 }]
+    );
+  } finally {
+    global.window = previousWindow;
+  }
+
+  const calls = [];
+  await waitForKonvaTokenMove({
+    evaluate: async (_callback, tokenId) => {
+      calls.push(['evaluate', tokenId]);
+      return [{ x: 75, y: 75 }];
+    },
+  }, {
+    tokenId: 'perf-token-0000',
+    from: { x: 25, y: 75 },
+    deltaX: 50,
+    deltaY: 0,
+  });
+  assert.deepEqual(calls, [
+    ['evaluate', 'perf-token-0000'],
   ]);
 });
 

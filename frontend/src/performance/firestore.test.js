@@ -15,6 +15,7 @@ const mockRuntime = {
   isPerformanceEnabled: jest.fn(() => true),
   recordPerfEvent: jest.fn(),
   registerActiveListener: jest.fn(() => jest.fn()),
+  withAsyncResourceOwner: jest.fn((_owner, callback) => callback()),
 };
 
 jest.mock('firebase/firestore', () => mockUnderlying);
@@ -27,6 +28,7 @@ beforeEach(() => {
   mockRuntime.beginRouteAsyncWork.mockImplementation(() => jest.fn());
   mockRuntime.isPerformanceEnabled.mockReturnValue(true);
   mockRuntime.registerActiveListener.mockImplementation(() => jest.fn());
+  mockRuntime.withAsyncResourceOwner.mockImplementation((_owner, callback) => callback());
 });
 
 test('listener snapshot delivery and repeated unsubscribe are accounted once', () => {
@@ -46,6 +48,10 @@ test('listener snapshot delivery and repeated unsubscribe are accounted once', (
   expect(mockRuntime.registerActiveListener.mock.results[0].value).toHaveBeenCalledTimes(1);
   expect(mockRuntime.recordPerfEvent).toHaveBeenCalledWith(expect.objectContaining({ metric: 'initial-documents-delivered', value: 2 }));
   expect(mockRuntime.recordPerfEvent).toHaveBeenCalledWith(expect.objectContaining({ metric: 'changed-documents-delivered', value: 1 }));
+  expect(mockRuntime.withAsyncResourceOwner).toHaveBeenCalledWith(
+    'firestore-transport',
+    expect.any(Function)
+  );
 });
 
 test('payload estimator handles serializable and circular values safely', () => {
@@ -77,6 +83,10 @@ test('direct writes report attempts, successes, and permission failures without 
   }));
   expect(JSON.stringify(mockRuntime.recordPerfEvent.mock.calls)).not.toContain('private@example.test');
   expect(JSON.stringify(mockRuntime.recordPerfEvent.mock.calls)).not.toContain('secret-token-value');
+  expect(mockRuntime.withAsyncResourceOwner.mock.calls).toHaveLength(2);
+  expect(mockRuntime.withAsyncResourceOwner.mock.calls.every(([owner]) => (
+    owner === 'firestore-transport'
+  ))).toBe(true);
 });
 
 test('batches account for operation count and payload bytes at commit', async () => {
