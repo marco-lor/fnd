@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../../firebaseConfig';
-import { doc, updateDoc } from '../../../performance/firestore';
 import { FaPlus, FaSpinner, FaCheckCircle, FaTimesCircle, FaExclamationTriangle } from 'react-icons/fa';
 import PropTypes from 'prop-types';
+import { patchCodex } from '../../../data/codexRepository';
 
 /*
   Bottone per aggiungere una nuova CATEGORIA al documento Codex.
@@ -93,9 +92,8 @@ function AggiungiCategoriaButton({ existingCategories, onCategoryCreated }) {
     setFeedback({ message: '', type: '' });
 
     try {
-      const codexDocRef = doc(db, 'utils', 'codex');
       // Inizializza come oggetto vuoto; si potranno aggiungere elementi successivamente.
-      await updateDoc(codexDocRef, { [normalizedKey]: {} });
+      await patchCodex({ [normalizedKey]: {} });
       setFeedback({ message: `Categoria "${trimmed}" creata con successo!`, type: 'success' });
       // Chiudi overlay dopo breve delay e notifica il parent
       setTimeout(() => {

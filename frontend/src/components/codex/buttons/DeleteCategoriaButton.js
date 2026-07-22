@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
-import { db } from '../../firebaseConfig';
-import { doc, updateDoc, deleteField } from '../../../performance/firestore';
+import { deleteField } from '../../../performance/firestore';
 import { FaTrashAlt, FaSpinner, FaTimesCircle, FaExclamationTriangle, FaCheckCircle } from 'react-icons/fa';
+import { patchCodex } from '../../../data/codexRepository';
 
 /*
   DeleteCategoriaButton
@@ -40,8 +40,7 @@ function DeleteCategoriaButton({ categoryKey, itemCount, onDeleted }) {
     setIsDeleting(true);
     setFeedback({ message: '', type: '' });
     try {
-      const codexDocRef = doc(db, 'utils', 'codex');
-      await updateDoc(codexDocRef, { [categoryKey]: deleteField() });
+      await patchCodex({ [categoryKey]: deleteField() });
       setFeedback({ message: `Categoria "${categoryKey}" eliminata con successo!`, type: 'success' });
       // Breve delay per mostrare feedback
       setTimeout(() => {

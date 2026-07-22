@@ -9,7 +9,6 @@ import {
   collection,
   deleteDoc,
   doc,
-  getDoc,
   onSnapshot,
   serverTimestamp,
   updateDoc,
@@ -21,6 +20,7 @@ import { computeParamTotals, deepClone, Pill, SectionTitle } from './elements/ut
 import RadarChart from './elements/RadarChart';
 import { FoeFormModal } from './elements/lazyFoeEditors';
 import { uploadCacheableImage } from '../common/imageStorage';
+import { getSchema } from '../../data/configRepository';
 
 // Allow only persisted HTTP(S) image URLs when reading/saving.
 // This prevents storing temporary blob:/data: URLs in Firestore.
@@ -216,9 +216,8 @@ const FoesHub = () => {
   useEffect(() => {
     (async () => {
       try {
-        const sref = doc(db, 'utils', 'schema_pg');
-        const snap = await getDoc(sref);
-        if (snap.exists()) setSchema(snap.data());
+        const schemaData = await getSchema('schema_pg');
+        if (schemaData) setSchema(schemaData);
         else setSchema({});
       } catch (e) {
         console.warn('Unable to load schema_pg', e);

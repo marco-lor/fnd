@@ -132,16 +132,31 @@ describe('performance runtime', () => {
       minifiedWebChannelWatchdog,
       45_000
     );
+    const webChannelForwardRequestTimeout = window.setTimeout(
+      minifiedWebChannelWatchdog,
+      310_875
+    );
+    const webChannelForwardRequestLowerBound = window.setTimeout(
+      minifiedWebChannelWatchdog,
+      300_000
+    );
+    const webChannelForwardRequestUpperBound = window.setTimeout(
+      minifiedWebChannelWatchdog,
+      600_000
+    );
     const routeTimeout = window.setTimeout(() => {}, 45_000);
 
     const snapshot = window.__FND_PERF__.snapshot();
     expect(snapshot.activeResources).toEqual({
-      'firestore-transport::timeout': 3,
+      'firestore-transport::timeout': 6,
       '/grigliata::timeout': 1,
     });
     expect(snapshot.activeResourceDiagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ ownerRoute: 'firestore-transport', type: 'timeout', delayMs: 60_000 }),
       expect.objectContaining({ ownerRoute: 'firestore-transport', type: 'timeout', delayMs: 45_000, callback: 'function(){e()}' }),
+      expect.objectContaining({ ownerRoute: 'firestore-transport', type: 'timeout', delayMs: 310_875, callback: 'function(){e()}' }),
+      expect.objectContaining({ ownerRoute: 'firestore-transport', type: 'timeout', delayMs: 300_000, callback: 'function(){e()}' }),
+      expect.objectContaining({ ownerRoute: 'firestore-transport', type: 'timeout', delayMs: 600_000, callback: 'function(){e()}' }),
       expect.objectContaining({ ownerRoute: '/grigliata', type: 'timeout', delayMs: 45_000, callback: '() => {}' }),
     ]));
     expect(snapshot.activeResourceDiagnostics.every(({ callback = '' }) => callback.length <= 240)).toBe(true);
@@ -149,6 +164,9 @@ describe('performance runtime', () => {
     window.clearTimeout(transportTimeout);
     window.clearTimeout(delayedOperationTimeout);
     window.clearTimeout(webChannelWatchdogTimeout);
+    window.clearTimeout(webChannelForwardRequestTimeout);
+    window.clearTimeout(webChannelForwardRequestLowerBound);
+    window.clearTimeout(webChannelForwardRequestUpperBound);
     window.clearTimeout(routeTimeout);
     expect(window.__FND_PERF__.snapshot().activeResources).toEqual({});
     runtime.teardownPerformanceRuntimeForTests();
@@ -164,6 +182,7 @@ describe('performance runtime', () => {
       'return function(){e()}'
     )(() => {});
     const watchdogCollision = window.setTimeout(minifiedApplicationCallback, 45_000);
+    const forwardRequestCollision = window.setTimeout(minifiedApplicationCallback, 310_875);
     const applicationDelayedOperation = { handleDelayElapsed: jest.fn() };
     const delayedOperationCollision = window.setTimeout(
       () => {
@@ -173,10 +192,11 @@ describe('performance runtime', () => {
     );
 
     expect(window.__FND_PERF__.snapshot().activeResources).toEqual({
-      '/grigliata::timeout': 2,
+      '/grigliata::timeout': 3,
     });
 
     window.clearTimeout(watchdogCollision);
+    window.clearTimeout(forwardRequestCollision);
     window.clearTimeout(delayedOperationCollision);
     runtime.teardownPerformanceRuntimeForTests();
   });

@@ -11,6 +11,7 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { onSnapshot, doc, labelFirestoreTarget } from "./performance/firestore";
 import { beginAsyncResourceOwner, withAsyncResourceOwner } from "./performance/runtime";
 import { auth, db } from "./components/firebaseConfig";
+import { setRepositoryActor } from "./data/repositoryRuntime";
 
 export const AuthContext = createContext(undefined);
 const AuthSessionContext = createContext(undefined);
@@ -177,6 +178,15 @@ export const AuthProvider = ({ children }) => {
   const currentUserRef = useRef(null);
   const shellProfileRef = useRef(null);
   const userDataRef = useRef(null);
+  const repositoryAccessScopeRef = useRef(null);
+
+  const setRepositoryAccessScope = useCallback((uidOrNull, accessScope) => {
+    const normalizedUid = uidOrNull || null;
+    const nextScope = `${normalizedUid || 'anonymous'}:${accessScope}`;
+    if (repositoryAccessScopeRef.current === nextScope) return;
+    repositoryAccessScopeRef.current = nextScope;
+    setRepositoryActor(normalizedUid);
+  }, []);
 
   useEffect(() => {
     userDataRef.current = userData;
@@ -220,7 +230,7 @@ export const AuthProvider = ({ children }) => {
 
     const userRef = labelFirestoreTarget(
       doc(db, "users", currentUser.uid),
-      "authenticated-user-profile",
+      "users.profile.subscribe.v1",
       "shell"
     );
 
@@ -230,6 +240,7 @@ export const AuthProvider = ({ children }) => {
         if (currentUserRef.current?.uid !== currentUser.uid) return;
 
         if (!snapshot.exists()) {
+          setRepositoryAccessScope(currentUser.uid, "profile-missing");
           setUserData(null);
           setShellProfile(null, "none");
           setProfileStatus("missing");
@@ -239,6 +250,10 @@ export const AuthProvider = ({ children }) => {
         }
 
         const nextUserData = normalizeUserData(snapshot.data());
+        setRepositoryAccessScope(
+          currentUser.uid,
+          `profile-role-${nextUserData?.role || 'unknown'}`
+        );
         const nextShellProfile = projectShellProfile(currentUser.uid, nextUserData);
         const shellChanged = !sameShellProfile(shellProfileRef.current, nextShellProfile);
 
@@ -250,6 +265,7 @@ export const AuthProvider = ({ children }) => {
       },
       (error) => {
         if (currentUserRef.current?.uid !== currentUser.uid) return;
+        setRepositoryAccessScope(currentUser.uid, "profile-error");
         console.error("Error fetching user data:", error);
         setUserData(null);
         setProfileStatus("error");
@@ -257,7 +273,7 @@ export const AuthProvider = ({ children }) => {
         if (shellProfileRef.current) setShellProfile(shellProfileRef.current, "cached");
       }
     );
-  }, [clearProfileListener, setShellProfile]);
+  }, [clearProfileListener, setRepositoryAccessScope, setShellProfile]);
 
   useEffect(() => {
     const storageApi = getLocalStorage();
@@ -283,6 +299,7 @@ export const AuthProvider = ({ children }) => {
         auth,
         (currentUser) => withAsyncResourceOwner("shell", () => {
           clearProfileListener();
+          setRepositoryAccessScope(currentUser?.uid || null, "auth-transition");
           currentUserRef.current = currentUser;
           setUser(currentUser);
           setAuthError(null);
@@ -303,6 +320,7 @@ export const AuthProvider = ({ children }) => {
         }),
         (error) => withAsyncResourceOwner("shell", () => {
           clearProfileListener();
+          setRepositoryAccessScope(null, "auth-error");
           currentUserRef.current = null;
           setUser(null);
           setAuthStatus("error");
@@ -323,8 +341,15 @@ export const AuthProvider = ({ children }) => {
       releaseInitialAuthOwnership();
       unsubscribeAuth?.();
       clearProfileListener();
+      setRepositoryAccessScope(null, "unmounted");
     };
-  }, [authAttempt, clearProfileListener, setShellProfile, subscribeToProfile]);
+  }, [
+    authAttempt,
+    clearProfileListener,
+    setRepositoryAccessScope,
+    setShellProfile,
+    subscribeToProfile,
+  ]);
 
   const retryAuth = useCallback(() => setAuthAttempt((attempt) => attempt + 1), []);
 

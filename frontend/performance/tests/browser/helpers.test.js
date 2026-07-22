@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,
+  countChangedDocumentsForTarget,
   createPageAssetTracker,
   drainPageConnections,
   installDeterministicFontRoutes,
@@ -14,6 +16,30 @@ const {
   waitForReadiness,
   waitForKonvaTokenMove,
 } = require('./helpers');
+
+test('counts Grigliata placement deliveries under the deterministic legacy telemetry key', () => {
+  const snapshot = {
+    events: [
+      {
+        category: 'firestore',
+        metric: 'changed-documents-delivered',
+        value: 1,
+        tags: { target: GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY },
+      },
+      {
+        category: 'firestore',
+        metric: 'changed-documents-delivered',
+        value: 9,
+        tags: { target: 'grigliata_token_placements' },
+      },
+    ],
+  };
+
+  assert.equal(
+    countChangedDocumentsForTarget(snapshot, GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY),
+    1
+  );
+});
 
 const firestoreStartupWarning = [
   '@firebase/firestore: Firestore (12.12.1): Could not reach Cloud Firestore backend. Backend didn\'t respond within 10 seconds.',

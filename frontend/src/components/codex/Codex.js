@@ -2,8 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import CodexBackground from '../backgrounds/CodexBackground';
 import { useAuth } from '../../AuthContext';
-import { db } from '../firebaseConfig';
-import { doc, onSnapshot } from '../../performance/firestore';
+import { subscribeCodex } from '../../data/codexRepository';
 
 // Import the button components
 import AggiungiButton from './buttons/AggiungiButton';
@@ -68,14 +67,10 @@ function Codex() {
       isInitialLoad.current = true;
       setError(null);
 
-      const docRef = doc(db, 'utils', 'codex');
-
-      unsubscribeCodex = onSnapshot(
-        docRef,
-        (docSnap) => {
+      unsubscribeCodex = subscribeCodex({
+        next: (data) => {
           console.log('Received Codex update from Firestore');
-          if (docSnap.exists()) {
-            const data = docSnap.data();
+          if (data) {
             const validData = data || {};
             setCodexData(validData);
             const sections = Object.keys(validData);
@@ -102,13 +97,13 @@ function Codex() {
             isInitialLoad.current = false;
           }
         },
-        (err) => {
+        error: (err) => {
           console.error('Error listening to codex data:', err);
           setError('Failed to listen for codex updates. Data might be stale.');
           setIsLoading(false);
           isInitialLoad.current = false;
-        }
-      );
+        },
+      });
     } else if (!user && !authLoading) {
       setCodexData({});
       setActiveSection(null);
@@ -120,7 +115,7 @@ function Codex() {
       console.log('Unsubscribing from Codex listener');
       unsubscribeCodex();
     };
-  }, [user, authLoading]);
+  }, [user, authLoading, userData?.role]);
 
   // --- Loading and Auth States ---
   if (authLoading) {

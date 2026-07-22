@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react'; // added useCallback
-import { doc, onSnapshot, getDoc } from '../../../performance/firestore';
+import { doc, onSnapshot } from '../../../performance/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from "../../firebaseConfig";
 import { useAuth } from '../../../AuthContext';
+import { getVarie } from '../../../data/configRepository';
 
 const functions = getFunctions();
 const spendCharacterPoint = httpsCallable(functions, 'spendCharacterPoint');
@@ -26,8 +27,7 @@ export default function PointsDistribution() {
   // Load combat cost table
   useEffect(() => {
     (async () => {
-      const snap = await getDoc(doc(db, 'utils', 'varie'));
-      const data = snap.exists() ? snap.data() : {};
+      const data = await getVarie() || {};
       setCombatStatCosts(data.cost_params_combat || {});
     })();
   }, []);

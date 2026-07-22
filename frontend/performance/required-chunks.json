@@ -38,7 +38,7 @@
     "feature-combat-encounter-details",
     "feature-combat-add-foes",
     "feature-home-item-details",
-    "feature-home-consumable-dialog"
+    "feature-home-consumable-dialog",
+    "perf-firestore-persistence-experiment"
   ]
 }
-

@@ -502,6 +502,18 @@ const scenarioRestorePatch = (scenarioId, currentData = {}) => {
   return null;
 };
 
+const GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY = 'legacy.grigliata-token-placements.subscribe.v1';
+
+const countChangedDocumentsForTarget = (snapshot, targetMetricKey) => (
+  (snapshot?.events || [])
+    .filter((event) => (
+      event.category === 'firestore'
+      && event.metric === 'changed-documents-delivered'
+      && event.tags?.target === targetMetricKey
+    ))
+    .reduce((sum, event) => sum + Number(event.value || 0), 0)
+);
+
 const restoreScenarioState = async (scenarioId) => {
   if (!['home', 'grigliata-manager', 'grigliata-five-peer'].includes(scenarioId)) return;
   configureOwnedPerformanceEnvironment();
@@ -528,8 +540,10 @@ const restoreScenarioState = async (scenarioId) => {
 
 module.exports = {
   ACCOUNT,
+  GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,
   aggregateMetrics,
   captureBrowserMetrics,
+  countChangedDocumentsForTarget,
   countRouteResources,
   createPageAssetTracker,
   drainPageConnections,

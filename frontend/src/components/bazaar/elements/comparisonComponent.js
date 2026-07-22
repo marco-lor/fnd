@@ -15,14 +15,7 @@ import {
 } from '../lazyBazaarEditors';
 import { FaTrash, FaEdit } from 'react-icons/fa';
 import { GiSpellBook } from "react-icons/gi";
-
-// Cache for dadi anima data to prevent repeated fetches
-const dadiAnimaCache = {
-  data: null,
-  lastFetchTimestamp: 0,
-  // Cache expiration time in milliseconds (30 minutes)
-  expirationTime: 30 * 60 * 1000
-};
+import { getSchema, getVarie } from '../../../data/configRepository';
 
 const SpellCard = ({ spellName, spell, userData }) => {
   const [isHovered, setIsHovered] = useState(false);
@@ -36,27 +29,12 @@ const SpellCard = ({ spellName, spell, userData }) => {
   const dismissTimeoutRef = useRef(null);
   const hasImage = spell.image_url && spell.image_url.trim() !== "";
 
-  // Fetch dadiAnimaByLevel data when component mounts - enhanced with caching
+  // Fetch shared dadiAnimaByLevel data when the component mounts.
   useEffect(() => {
     const fetchDadiAnima = async () => {
       try {
-        const now = Date.now();
-        // Use cached data if available and not expired
-        if (dadiAnimaCache.data && now - dadiAnimaCache.lastFetchTimestamp < dadiAnimaCache.expirationTime) {
-          setDadiAnima(dadiAnimaCache.data);
-          return;
-        }
-
-        // Fetch from database if cache is invalid
-        const dadiRef = doc(db, "utils", "varie");
-        const dadiDoc = await getDoc(dadiRef);
-        if (dadiDoc.exists()) {
-          const dadiData = dadiDoc.data().dadiAnimaByLevel || [];
-          // Update cache
-          dadiAnimaCache.data = dadiData;
-          dadiAnimaCache.lastFetchTimestamp = now;
-          setDadiAnima(dadiData);
-        }
+        const varie = await getVarie();
+        if (varie) setDadiAnima(varie.dadiAnimaByLevel || []);
       } catch (error) {
         console.error("Error fetching dadi anima data:", error);
       }
@@ -461,10 +439,9 @@ export default function ComparisonPanel({ item, showMessage }) {
 
       setIsSchemaLoading(true);
       try {
-        const schemaDocRef = doc(db, "utils", `schema_${item.item_type}`);
-        const docSnap = await getDoc(schemaDocRef);
-        if (docSnap.exists()) {
-          setSchema(docSnap.data());
+        const schemaData = await getSchema(`schema_${item.item_type}`);
+        if (schemaData) {
+          setSchema(schemaData);
         } else {
           console.warn(`Schema for item type "${item.item_type}" not found.`);
           setSchema(null);

@@ -8,6 +8,8 @@ const { FieldValue, getFirestore } = require('firebase-admin/firestore');
 const { test, expect } = require('@playwright/test');
 const manifest = require('../../scenarios.json');
 const {
+  GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,
+  countChangedDocumentsForTarget,
   createPageAssetTracker,
   installBootstrap,
   installDeterministicFontRoutes,
@@ -38,13 +40,9 @@ const LEGACY_MIGRATION_MARKER_FIELDS = [
 ];
 const LEGACY_MIGRATION_MARKER_VALUE = '2026-01-01T00:00:00.000Z';
 
-const countChangedPlacementDocuments = (snapshot) => snapshot.events
-  .filter((event) => (
-    event.category === 'firestore'
-    && event.metric === 'changed-documents-delivered'
-    && event.tags?.target === 'grigliata_token_placements'
-  ))
-  .reduce((sum, event) => sum + Number(event.value || 0), 0);
+const countChangedPlacementDocuments = (snapshot) => (
+  countChangedDocumentsForTarget(snapshot, GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY)
+);
 
 const enterMeasuredGrigliataRoute = async (page) => {
   await page.goto(CLIENT_READINESS_ROUTE, { waitUntil: 'domcontentloaded' });

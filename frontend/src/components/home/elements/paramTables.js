@@ -1,12 +1,13 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import React, { useState, useEffect, useRef } from "react";
-import { doc, updateDoc, onSnapshot, getDoc } from "../../../performance/firestore";
+import { doc, updateDoc, onSnapshot } from "../../../performance/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../../firebaseConfig";
 import { useAuth } from "../../../AuthContext";
 import { FaDiceD20 } from 'react-icons/fa';
 import DiceRoller from '../../common/DiceRoller';
 import { getParamDisplayName, SPECIAL_PARAM_SCHEMA_IDS } from '../../common/paramMetadata';
+import { getSchema, getVarie } from '../../../data/configRepository';
 
 const functions = getFunctions();
 const spendCharacterPoint = httpsCallable(functions, "spendCharacterPoint");
@@ -164,8 +165,8 @@ export function MergedStatsTable() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDoc(doc(db, 'utils', 'varie'));
-        if (snap.exists()) setDadiAnimaByLevel(snap.data().dadiAnimaByLevel || []);
+        const varie = await getVarie();
+        if (varie) setDadiAnimaByLevel(varie.dadiAnimaByLevel || []);
       } catch {}
     })();
   }, []);
@@ -174,12 +175,10 @@ export function MergedStatsTable() {
   useEffect(() => {
     (async () => {
       try {
-        const docs = await Promise.all(SPECIAL_PARAM_SCHEMA_IDS.map(id => getDoc(doc(db, 'utils', id))));
+        const schemas = await Promise.all(SPECIAL_PARAM_SCHEMA_IDS.map(id => getSchema(id)));
         const allKeys = new Set();
-        docs.forEach(snap => {
-          if (!snap.exists()) return;
-          const data = snap.data();
-          const keys = Object.keys(data?.Parametri?.Special || {});
+        schemas.forEach(schema => {
+          const keys = Object.keys(schema?.Parametri?.Special || {});
           keys.forEach(k => allKeys.add(k));
         });
         setSpecialSchemaKeys(Array.from(allKeys).sort());
@@ -193,8 +192,8 @@ export function MergedStatsTable() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDoc(doc(db, "utils", "varie"));
-        setCombatCosts(snap.exists() ? snap.data().cost_params_combat : {});
+        const varie = await getVarie();
+        setCombatCosts(varie ? varie.cost_params_combat : {});
       } catch {
         setCombatCosts({});
       }

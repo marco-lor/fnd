@@ -92,16 +92,20 @@ const isFirestoreTransportDelayedOperation = (callback, delay) => {
     // transport, not the route that happened to initiate the stream.
     if (source === '()=>this.handleDelayElapsed()') return true;
 
-    // The pinned WebChannel transport also owns a 45-second request watchdog.
-    // CRA's production minifier reduces its Closure-bound callback to this
-    // exact signature, removing every useful method name. Keep the match exact
-    // so unrelated application timers, including other 45-second timers, stay
-    // attributed to their route and continue to fail cleanup checks.
+    // The pinned WebChannel transport owns both a 45-second request watchdog
+    // and a randomized 300-600 second forward-channel request timeout. CRA's
+    // production minifier reduces both Closure-bound callbacks to this exact
+    // signature, removing every useful method name. Require recent Firestore
+    // provenance and one of those bounded delay shapes so application timers
+    // stay attributed to their route and continue to fail cleanup checks.
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const hasRecentTransportProvenance = Number.isFinite(lastFirestoreTransportOwnershipAt)
       && now - lastFirestoreTransportOwnershipAt >= 0
       && now - lastFirestoreTransportOwnershipAt <= FIRESTORE_TRANSPORT_PROVENANCE_WINDOW_MS;
-    return Number(delay) === 45_000
+    const normalizedDelay = Number(delay);
+    const isWebChannelDelay = normalizedDelay === 45_000
+      || (normalizedDelay >= 300_000 && normalizedDelay <= 600_000);
+    return isWebChannelDelay
       && source === 'function(){e()}'
       && hasRecentTransportProvenance;
   } catch (_error) {

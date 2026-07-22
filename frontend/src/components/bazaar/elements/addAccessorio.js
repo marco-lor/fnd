@@ -1,6 +1,11 @@
 // addAccessorio.js
 import React, { useState, useEffect, useCallback, useRef, useContext } from 'react';
 import VisibilitySelector from '../../common/VisibilitySelector';
+import {
+    getCommonSpells,
+    getCommonTechniques,
+    getSchema,
+} from '../../../data/configRepository';
 import { collection, doc, updateDoc, getDocs, onSnapshot, getDoc, setDoc } from "../../../performance/firestore";
 import { ref, getDownloadURL, uploadBytes, deleteObject } from "firebase/storage";
 import { uploadCacheableImage } from "../../common/imageStorage";
@@ -214,10 +219,9 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
         setIsSchemaLoading(true);
         const fetchAccessorioSchema = async () => {
             try {
-                const schemaDocRef = doc(db, "utils", "schema_accessorio");
-                const docSnap = await getDoc(schemaDocRef);
-                if (docSnap.exists()) {
-                    setSchema(docSnap.data());
+                const schemaData = await getSchema('schema_accessorio');
+                if (schemaData) {
+                    setSchema(schemaData);
                 } else {
                     console.error("Accessorio schema (schema_accessorio) not found!");
                     if (showMessage) showMessage("Errore: Schema accessorio non trovato.", "error");
@@ -264,14 +268,11 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                     setUserName(uData.characterId || uData.email || "Unknown User");
                 }
 
-                const spellSchemaRef = doc(db, "utils", "schema_spell");
-                const spellSchemaSnap = await getDoc(spellSchemaRef);
-                if (spellSchemaSnap.exists()) setSpellSchema(spellSchemaSnap.data());
+                const spellSchemaData = await getSchema('schema_spell');
+                if (spellSchemaData) setSpellSchema(spellSchemaData);
                 else console.error("Spell schema not found!");
 
-                const commonSpellsRef = doc(db, 'utils', 'spells_common');
-                const commonSpellsSnap = await getDoc(commonSpellsRef);
-                const commonSpells = commonSpellsSnap.exists() ? commonSpellsSnap.data() : {};
+                const commonSpells = await getCommonSpells() || {};
                 const userSpells = userSnap.exists() ? userSnap.data().spells || {} : {};
 
                 const initialSpellNamesFromData = initialData?.General?.spells ? Object.keys(initialData.General.spells) : [];
@@ -280,15 +281,7 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
 
                 let commonTecniche = {};
                 try {
-                    const utilsDocRef = doc(db, 'utils', 'utils');
-                    const utilsDocSnap = await getDoc(utilsDocRef);
-                    if (utilsDocSnap.exists() && utilsDocSnap.data().tecniche_common) {
-                        commonTecniche = utilsDocSnap.data().tecniche_common;
-                    } else {
-                        const commonTecnicheRef = doc(db, 'utils', 'tecniche_common');
-                        const commonTecnicheSnap = await getDoc(commonTecnicheRef);
-                        commonTecniche = commonTecnicheSnap.exists() ? commonTecnicheSnap.data() : {};
-                    }
+                    commonTecniche = await getCommonTechniques({ legacyFirst: true }) || {};
                 } catch (error) {
                     console.error("Error fetching tecniche:", error);
                 }

@@ -153,7 +153,7 @@ export const subscribeToGrigliataMusicPlayback = (onPlaybackState, onError) => (
   withAsyncResourceOwner('shell', () => onSnapshot(
     labelFirestoreTarget(
       doc(db, GRIGLIATA_MUSIC_PLAYBACK_COLLECTION, GRIGLIATA_MUSIC_PLAYBACK_DOC_ID),
-      'grigliata_music_playback/:id',
+      'grigliata.music-playback.subscribe.v1',
       'shell'
     ),
     (snapshot) => {
@@ -171,7 +171,7 @@ export const subscribeToGrigliataMusicPlaybackSessions = (onPlaybackSessions, on
   withAsyncResourceOwner('shell', () => onSnapshot(
     labelFirestoreTarget(
       collection(db, GRIGLIATA_MUSIC_PLAYBACK_SESSION_COLLECTION),
-      'grigliata_music_playback_sessions',
+      'grigliata.music-sessions.subscribe.v1',
       'shell'
     ),
     (snapshot) => {

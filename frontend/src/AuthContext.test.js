@@ -21,6 +21,7 @@ let mockProfileNext;
 let mockProfileError;
 let mockAuthUnsubscribe;
 let mockProfileSubscriptions;
+const mockSetRepositoryActor = jest.fn();
 
 jest.mock("./components/firebaseConfig", () => ({ auth: {}, db: {} }));
 
@@ -33,6 +34,10 @@ jest.mock("./performance/firestore", () => ({
   doc: jest.fn((_db, ...segments) => ({ path: segments.join("/") })),
   labelFirestoreTarget: jest.fn((target) => target),
   onSnapshot: jest.fn(),
+}));
+
+jest.mock("./data/repositoryRuntime", () => ({
+  setRepositoryActor: (...args) => mockSetRepositoryActor(...args),
 }));
 
 const user = { uid: "user-1", email: "hero@example.com" };
@@ -132,6 +137,7 @@ describe("AuthProvider", () => {
       exists: () => true,
       data: () => ({ role: "dm", stats: { level: 8, hpCurrent: 10 } }),
     }));
+    expect(mockSetRepositoryActor).toHaveBeenCalledTimes(2);
     const beforeStatUpdate = shellRenderCount;
 
     act(() => mockProfileNext({
@@ -139,12 +145,15 @@ describe("AuthProvider", () => {
       data: () => ({ role: "dm", stats: { level: 8, hpCurrent: 9 } }),
     }));
     expect(shellRenderCount).toBe(beforeStatUpdate);
+    expect(mockSetRepositoryActor).toHaveBeenCalledTimes(2);
 
     act(() => mockProfileNext({
       exists: () => true,
       data: () => ({ role: "webmaster", stats: { level: 8, hpCurrent: 9 } }),
     }));
     expect(shellRenderCount).toBeGreaterThan(beforeStatUpdate);
+    expect(mockSetRepositoryActor).toHaveBeenCalledTimes(3);
+    expect(mockSetRepositoryActor).toHaveBeenLastCalledWith(user.uid);
   });
 
   test("clears cached authorization when the live profile is missing", () => {
@@ -156,6 +165,7 @@ describe("AuthProvider", () => {
     expect(screen.getByTestId("profile-status")).toHaveTextContent("missing");
     expect(screen.getByTestId("shell-role")).toHaveTextContent("none");
     expect(readShellCache(user.uid)).toBeNull();
+    expect(mockSetRepositoryActor).toHaveBeenLastCalledWith(user.uid);
   });
 
   test("keeps the cached shell on a profile error and replaces the listener on retry", () => {
@@ -203,6 +213,8 @@ describe("AuthProvider", () => {
     act(() => mockAuthNext(secondUser));
 
     expect(mockProfileSubscriptions[0].unsubscribe).toHaveBeenCalledTimes(1);
+    expect(mockSetRepositoryActor).toHaveBeenNthCalledWith(1, "user-1");
+    expect(mockSetRepositoryActor).toHaveBeenNthCalledWith(2, "user-2");
     expect(onSnapshot).toHaveBeenCalledTimes(2);
     expect(doc).toHaveBeenLastCalledWith(expect.anything(), "users", "user-2");
     expect(screen.getByTestId("shell-role")).toHaveTextContent("player");
@@ -215,6 +227,7 @@ describe("AuthProvider", () => {
 
     expect(mockAuthUnsubscribe).toHaveBeenCalledTimes(1);
     expect(mockProfileSubscriptions[0].unsubscribe).toHaveBeenCalledTimes(1);
+    expect(mockSetRepositoryActor).toHaveBeenLastCalledWith(null);
   });
 });
 

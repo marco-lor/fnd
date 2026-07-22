@@ -1,11 +1,10 @@
 // file: ./frontend/src/components/codex/buttons/DeleteItemButton.js
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
-import { db } from '../../firebaseConfig';
-import { doc, updateDoc } from '../../../performance/firestore';
 import { FaTrashAlt, FaSpinner, FaTimesCircle, FaExclamationTriangle } from 'react-icons/fa';
 
 import { deleteField } from '../../../performance/firestore'; // Correct import for v9+
+import { patchCodex } from '../../../data/codexRepository';
 
 function DeleteItemButton({ categoryKey, itemKey }) {
   const [isOverlayVisible, setIsOverlayVisible] = useState(false);
@@ -37,13 +36,12 @@ function DeleteItemButton({ categoryKey, itemKey }) {
     setIsDeleting(true);
     setFeedback({ message: '', type: '' });
 
-    const codexDocRef = doc(db, 'utils', 'codex');
     // Use FieldValue.delete() to remove the specific key from the map
     const fieldPath = `${categoryKey}.${itemKey}`;
     const updateData = { [fieldPath]: deleteField() }; // Use deleteField()
 
     try {
-      await updateDoc(codexDocRef, updateData);
+      await patchCodex(updateData);
       // No need for success feedback state as the component might unmount immediately
       // upon successful deletion when the parent re-renders.
       // Closing the overlay might be sufficient, or show feedback briefly before close.

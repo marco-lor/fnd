@@ -22,6 +22,9 @@ const run = (command, args, environment = {}) => {
 const main = async () => {
   assertPerformanceProject(projectId);
   run(process.execPath, [path.join(__dirname, 'preflight.js')]);
+  run(process.execPath, [path.join(__dirname, 'migrate-firestore-imports.js'), '--check']);
+  run(process.execPath, [path.join(__dirname, 'check-shared-config-boundaries.js')]);
+  run(process.execPath, [path.join(__dirname, 'check-query-contracts.js')]);
   run(process.execPath, ['--test',
     path.join(frontendRoot, 'scripts', 'verify-start.test.js'),
     path.join(__dirname, 'common.test.js'),
@@ -32,6 +35,11 @@ const main = async () => {
     path.join(__dirname, 'report.test.js'),
     path.join(__dirname, 'repeatability.test.js'),
     path.join(__dirname, 'authoritative.test.js'),
+    path.join(__dirname, 'check-query-contracts.test.js'),
+    path.join(__dirname, 'check-shared-config-boundaries.test.js'),
+    path.join(__dirname, 'firestore-persistence-experiment.test.js'),
+    path.join(__dirname, 'verify-disabled-build.test.js'),
+    path.join(frontendRoot, 'scripts', 'backfill-user-directory.test.js'),
     path.join(frontendRoot, 'performance', 'global-setup.test.js'),
     path.join(frontendRoot, 'performance', 'tests', 'browser', 'helpers.test.js'),
   ]);

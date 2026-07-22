@@ -8,6 +8,7 @@ import { doc, getDoc, updateDoc, setDoc } from "../../performance/firestore";
 import { useAuth } from "../../AuthContext";
 import GlobalAuroraBackground from "../backgrounds/GlobalAuroraBackground";
 import { uploadCacheableImage } from "../common/imageStorage";
+import { getSchema, getVarie } from '../../data/configRepository';
 // Import the components for each step
 import RaceSelection from "./elements/RaceSelection";
 import AnimaShardSelection from "./elements/AnimaShardSelection";
@@ -147,18 +148,16 @@ function CharacterCreation() {
         const userDocRef = doc(db, "users", user.uid);
         await updateDoc(userDocRef, { race: selectedRace.id });
         // Reset parameters using schema from utils/schema_pg
-        const schemaRef = doc(db, 'utils', 'schema_pg');
-        const schemaSnap = await getDoc(schemaRef);
-        const schemaParams = schemaSnap.exists() ? schemaSnap.data().Parametri : { Base: {}, Combattimento: {} };
+        const schemaData = await getSchema('schema_pg');
+        const schemaParams = schemaData ? schemaData.Parametri : { Base: {}, Combattimento: {} };
         await updateDoc(userDocRef, {
           'Parametri.Base': schemaParams.Base,
           'Parametri.Combattimento': schemaParams.Combattimento
         });
         // Fetch starting values and apply race bonuses for initial points
-        const varieDocRef = doc(db, 'utils', 'varie');
-        const varieSnap = await getDoc(varieDocRef);
-        if (!varieSnap.exists()) throw new Error('Configuration for starting values not found');
-        const { starting_values: startingValues = {}, races_extra: racesExtra = {} } = varieSnap.data();
+        const varie = await getVarie();
+        if (!varie) throw new Error('Configuration for starting values not found');
+        const { starting_values: startingValues = {}, races_extra: racesExtra = {} } = varie;
         const abilityStart = startingValues.abilityPoints || 0;
         const tokenStart = startingValues.tokenPoints || 0;
         const raceExtra = racesExtra[selectedRace.id] || {};
@@ -269,12 +268,11 @@ function CharacterCreation() {
       // Check if user document exists to decide between set (create) or update
       if (!userDocSnap.exists()) {
         console.log("User document doesn't exist, creating new one.");
-        const schemaDocRef = doc(db, "utils", "schema_pg");
-        const schemaDocSnap = await getDoc(schemaDocRef);
+        const schemaData = await getSchema('schema_pg');
         let characterInitialData = {};
 
-        if (schemaDocSnap.exists()) {
-            characterInitialData = JSON.parse(JSON.stringify(schemaDocSnap.data()));
+        if (schemaData) {
+            characterInitialData = JSON.parse(JSON.stringify(schemaData));
             console.log("Using schema_pg for initial data.");
         } else {
             console.warn("schema_pg not found, creating user with minimal data.");

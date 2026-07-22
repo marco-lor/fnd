@@ -1,19 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useAuth } from "../../AuthContext";
-import { doc, onSnapshot, getDoc } from "../../performance/firestore";
+import { doc, onSnapshot } from "../../performance/firestore";
 import { db } from "../firebaseConfig";
 import TecnicheSide from "./elements/tecniche_side";
 import SpellSide from "./elements/spell_side";
 import PersonalMediaEditor from "./elements/personalMediaEditor";
 import FilterPanel from './FilterPanel';
-
-// Cache for storing fetched data
-const dataCache = {
-  commonTecniche: null,
-  lastFetchTimestamp: 0,
-  // Cache expiration time in milliseconds (60 minutes)
-  expirationTime: 60 * 60 * 1000
-};
+import { getCommonTechniques } from '../../data/configRepository';
 
 function TecnicheSpell() {
   const { user, userData: authUserData } = useAuth();
@@ -29,28 +22,12 @@ function TecnicheSpell() {
   // Unified filtering predicate (function(item) => boolean)
   const [predicate, setPredicate] = useState(() => () => true);
 
-  // Fetch and cache common tecniche data
+  // Fetch common tecniche data through the shared repository.
   const fetchCommonTecniche = async () => {
     try {
-      const now = Date.now();
-      // Check if we have valid cached data
-      if (
-        dataCache.commonTecniche && 
-        now - dataCache.lastFetchTimestamp < dataCache.expirationTime
-      ) {
-        setCommonTecniche(dataCache.commonTecniche);
-        return;
-      }
+      const data = await getCommonTechniques();
 
-      // Fetch from database if cache is invalid
-      const commonTecnicheRef = doc(db, "utils", "tecniche_common");
-      const commonTecnicheSnap = await getDoc(commonTecnicheRef);
-
-      if (commonTecnicheSnap.exists()) {
-        const data = commonTecnicheSnap.data() || {};
-        // Update cache
-        dataCache.commonTecniche = data;
-        dataCache.lastFetchTimestamp = now;
+      if (data) {
         setCommonTecniche(data);
       } else {
         console.log("No common tecniche document found");

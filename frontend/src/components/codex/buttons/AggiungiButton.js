@@ -1,9 +1,8 @@
 // file: ./frontend/src/components/codex/buttons/AggiungiButton.js
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { db } from '../../firebaseConfig';
-import { doc, updateDoc } from '../../../performance/firestore';
 import { FaCheckCircle, FaTimesCircle, FaSpinner, FaExclamationTriangle } from 'react-icons/fa';
+import { patchCodex } from '../../../data/codexRepository';
 
 // Helper to determine 'Nuovo' or 'Nuova' based on category name ending
 const getNewAdjective = (name) => {
@@ -91,13 +90,12 @@ function AggiungiButton({ categoryKey, categoryData, categoryDisplayNameSingular
     setFeedback({ message: '', type: '' });
     setExistenceWarning(''); // Clear warning before update
 
-    const codexDocRef = doc(db, 'utils', 'codex');
     // Dynamically create the field path using the categoryKey prop
     const fieldPath = `${categoryKey}.${trimmedName}`;
     const updateData = { [fieldPath]: trimmedDesc };
 
     try {
-      await updateDoc(codexDocRef, updateData);
+      await patchCodex(updateData);
       setFeedback({ message: `${categoryDisplayNameSingular} "${trimmedName}" aggiunt${displayNameLower.endsWith('a') ? 'a' : 'o'} con successo!`, type: 'success' });
       setIsOverlayVisible(false); // Close on success
       // Reset fields (already handled by handleCloseOverlay/handleButtonClick)

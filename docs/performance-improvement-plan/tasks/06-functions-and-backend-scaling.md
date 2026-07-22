@@ -9,6 +9,9 @@ Reduce user-trigger amplification, standardize callable locality/ownership, make
 ## Evidence
 
 - Five triggers target every `users/{userId}` update.
+- Task 04 deliberately adds the `europe-west8` `syncUserDirectory` projection
+  trigger. It performs no write when projected fields are unchanged, but its
+  extra invocation remains consolidation debt for this task.
 - `updateTotParameters.ts:99-103` rewrites the full parameter map; HP and mana each read `utils/varie`.
 - Callables span `us-central1`, `europe-west1`, and `europe-west8`, with region clients scattered through pages.
 - `levelUpAll.ts:40-91` uses one batch with two writes per user and ignores its idempotency key.

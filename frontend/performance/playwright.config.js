@@ -25,7 +25,7 @@ const emulatorEnvironment = {
 
 module.exports = defineConfig({
   testDir: path.join(__dirname, 'tests', 'browser'),
-  testMatch: /.*\.(performance|smoke|setup)\.js/,
+  testMatch: /.*\.(performance|smoke|setup|experiment)\.js/,
   outputDir: path.join(__dirname, '..', 'test-results', 'performance'),
   globalSetup: require.resolve('./global-setup'),
   globalTeardown: require.resolve('./global-teardown'),
@@ -68,8 +68,13 @@ module.exports = defineConfig({
     {
       name: 'chromium',
       dependencies: ['auth-setup'],
-      testIgnore: /auth\.setup\.js/,
+      testIgnore: /auth\.setup\.js|firestore-persistence\.experiment\.js/,
       use: { browserName: 'chromium', launchOptions: { args: ['--js-flags=--expose-gc'] } },
+    },
+    {
+      name: 'firestore-persistence-experiment',
+      testMatch: /firestore-persistence\.experiment\.js/,
+      use: { browserName: 'chromium' },
     },
     {
       name: 'firefox-smoke',

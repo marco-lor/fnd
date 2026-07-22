@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { doc, getDoc } from "../../../performance/firestore";
-import { db } from "../../../components/firebaseConfig"; // Update path if needed
+import { getVarie } from '../../../data/configRepository';
 
 function AnimaShardSelection({ user, onAnimaSelect, selectedAnima }) {
   // Local state for anima shards
@@ -14,12 +13,9 @@ function AnimaShardSelection({ user, onAnimaSelect, selectedAnima }) {
     const fetchAnimaData = async () => {
       setLoadingAnima(true);
       setError("");
-      const varieDocRef = doc(db, "utils", "varie");
-
       try {
-        const docSnap = await getDoc(varieDocRef);
-        if (docSnap.exists()) {
-          const varieData = docSnap.data();
+        const varieData = await getVarie();
+        if (varieData) {
           
           // Get initial anima bonuses
           if (varieData && varieData.modAnima) {

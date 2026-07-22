@@ -48,6 +48,7 @@ test('listener snapshot delivery and repeated unsubscribe are accounted once', (
   expect(mockRuntime.registerActiveListener.mock.results[0].value).toHaveBeenCalledTimes(1);
   expect(mockRuntime.recordPerfEvent).toHaveBeenCalledWith(expect.objectContaining({ metric: 'initial-documents-delivered', value: 2 }));
   expect(mockRuntime.recordPerfEvent).toHaveBeenCalledWith(expect.objectContaining({ metric: 'changed-documents-delivered', value: 1 }));
+  expect(mockRuntime.registerActiveListener).toHaveBeenCalledWith('legacy.items.subscribe.v1', 'route');
   expect(mockRuntime.withAsyncResourceOwner).toHaveBeenCalledWith(
     'firestore-transport',
     expect.any(Function)
@@ -75,7 +76,7 @@ test('direct writes report attempts, successes, and permission failures without 
 
   expect(mockRuntime.recordPerfEvent).toHaveBeenCalledWith(expect.objectContaining({
     metric: 'write-success',
-    tags: expect.objectContaining({ operation: 'set', target: 'users/:id' }),
+    tags: expect.objectContaining({ operation: 'set', target: 'legacy.users.document.set.v1' }),
   }));
   expect(mockRuntime.recordPerfEvent).toHaveBeenCalledWith(expect.objectContaining({
     metric: 'write-failure',
@@ -87,6 +88,70 @@ test('direct writes report attempts, successes, and permission failures without 
   expect(mockRuntime.withAsyncResourceOwner.mock.calls.every(([owner]) => (
     owner === 'firestore-transport'
   ))).toBe(true);
+});
+
+test('explicit labels apply to one-shot reads and reject unsafe dynamic-looking keys', async () => {
+  const snapshot = {
+    exists: () => true,
+    data: () => ({ dice: ['d6'] }),
+  };
+  mockUnderlying.getDoc.mockResolvedValue(snapshot);
+  const target = facade.labelFirestoreTarget(
+    { path: 'utils/varie' },
+    'config.varie.get.v1'
+  );
+
+  await expect(facade.getDoc(target)).resolves.toBe(snapshot);
+  expect(mockRuntime.recordPerfEvent).toHaveBeenCalledWith(expect.objectContaining({
+    metric: 'one-shot-documents-delivered',
+    tags: expect.objectContaining({ target: 'config.varie.get.v1' }),
+  }));
+  expect(() => facade.labelFirestoreTarget(target, 'user@example.test'))
+    .toThrow(/metric keys/i);
+});
+
+test('getDocs and listeners use operation-specific stable labels', async () => {
+  const querySnapshot = {
+    size: 1,
+    docs: [{ data: () => ({ label: 'Hero' }) }],
+    docChanges: () => [],
+  };
+  mockUnderlying.getDocs.mockResolvedValue(querySnapshot);
+  mockUnderlying.onSnapshot.mockImplementation((_target, next) => {
+    next(querySnapshot);
+    return jest.fn();
+  });
+
+  const listTarget = facade.labelFirestoreTarget(
+    { path: 'user_directory' },
+    'directory.users.list.v1'
+  );
+  await facade.getDocs(listTarget);
+  expect(mockRuntime.recordPerfEvent).toHaveBeenCalledWith(expect.objectContaining({
+    metric: 'one-shot-documents-delivered',
+    tags: expect.objectContaining({ target: 'directory.users.list.v1' }),
+  }));
+
+  const listenerTarget = facade.labelFirestoreTarget(
+    { path: 'user_directory' },
+    'directory.users.subscribe.v1'
+  );
+  facade.onSnapshot(listenerTarget, jest.fn());
+  expect(mockRuntime.registerActiveListener)
+    .toHaveBeenCalledWith('directory.users.subscribe.v1', 'route');
+});
+
+test('legacy read keys canonicalize document IDs instead of logging them', async () => {
+  mockUnderlying.getDoc.mockResolvedValue({
+    exists: () => true,
+    data: () => ({ characterId: 'Private Hero' }),
+  });
+
+  await facade.getDoc({ path: 'users/private-account-123' });
+  const serializedEvents = JSON.stringify(mockRuntime.recordPerfEvent.mock.calls);
+  expect(serializedEvents).toContain('legacy.users.document.get.v1');
+  expect(serializedEvents).not.toContain('private-account-123');
+  expect(serializedEvents).not.toContain('Private Hero');
 });
 
 test('batches account for operation count and payload bytes at commit', async () => {

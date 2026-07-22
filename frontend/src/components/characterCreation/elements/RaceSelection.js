@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { doc, getDoc } from "../../../performance/firestore";
-import { db } from "../../../components/firebaseConfig"; // Update path if needed
+import { getCodex } from '../../../data/codexRepository';
 
 // Always-available placeholder race with no creation bonuses.
 const PLACEHOLDER_RACE = {
@@ -20,12 +19,9 @@ function RaceSelection({ user, onRaceSelect, selectedRace }) {
     const fetchRaces = async () => {
       setLoadingRaces(true);
       setError("");
-      const codexDocRef = doc(db, "utils", "codex");
-
       try {
-        const docSnap = await getDoc(codexDocRef);
-        if (docSnap.exists()) {
-          const codexData = docSnap.data();
+        const codexData = await getCodex();
+        if (codexData) {
           // Check if the 'Razze' field exists and is an object (map)
           if (codexData && typeof codexData.Razze === 'object' && codexData.Razze !== null) {
             // Convert the Razze map (key: raceName, value: descriptionString) into an array of objects

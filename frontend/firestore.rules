@@ -1226,6 +1226,14 @@ service cloud.firestore {
       }
     }
 
+    // Server-owned, privacy-minimized user lookup records. Authorization is
+    // derived from the caller's canonical users/{uid} role, never from the
+    // projected document itself.
+    match /user_directory/{userId} {
+      allow get, list: if isDM() || isWebmaster();
+      allow create, update, delete: if false;
+    }
+
     // Items
     match /items/{docId} {
       allow read: if true;

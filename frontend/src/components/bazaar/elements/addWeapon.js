@@ -12,6 +12,11 @@ import { SpellOverlay } from '../../common/SpellOverlay';
 import { WeaponOverlay } from '../../common/WeaponOverlay';
 import { FaTrash, FaEdit } from "react-icons/fa";
 import VisibilitySelector from '../../common/VisibilitySelector';
+import {
+    getCommonSpells,
+    getCommonTechniques,
+    getSchema,
+} from '../../../data/configRepository';
 
 export function AddWeaponOverlay({ onClose, showMessage, initialData = null, editMode = false, inventoryEditMode = false, inventoryUserId = null, inventoryItemId = null, inventoryItemIndex = null }) {
     const [schema, setSchema] = useState(null);
@@ -201,10 +206,9 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
         setIsSchemaLoading(true);
         const fetchWeaponSchema = async () => {
             try {
-                const schemaDocRef = doc(db, "utils", "schema_weapon");
-                const docSnap = await getDoc(schemaDocRef);
-                if (docSnap.exists()) {
-                    setSchema(docSnap.data());
+                const schemaData = await getSchema('schema_weapon');
+                if (schemaData) {
+                    setSchema(schemaData);
                 } else {
                     console.error("Weapon schema (schema_weapon) not found!");
                     if (showMessage) showMessage("Errore: Schema arma non trovato.", "error");
@@ -263,30 +267,18 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                     setUserName(uData.characterId || uData.email || "Unknown User");
                 }
 
-                const spellSchemaRef = doc(db, "utils", "schema_spell");
-                const spellSchemaSnap = await getDoc(spellSchemaRef);
-                if (spellSchemaSnap.exists()) setSpellSchema(spellSchemaSnap.data());
+                const spellSchemaData = await getSchema('schema_spell');
+                if (spellSchemaData) setSpellSchema(spellSchemaData);
                 else console.error("Spell schema not found!");
 
-                const commonSpellsRef = doc(db, 'utils', 'spells_common');
-                const commonSpellsSnap = await getDoc(commonSpellsRef);
-                const commonSpells = commonSpellsSnap.exists() ? commonSpellsSnap.data() : {};
+                const commonSpells = await getCommonSpells() || {};
                 const userSpells = userSnap.exists() ? userSnap.data().spells || {} : {};
 
                 const initialSpellNamesFromData = initialData?.General?.spells ? Object.keys(initialData.General.spells) : [];
                 const currentCustomSpellNames = customSpells.map(cs => cs.spellData.Nome.trim());
                 setSpellsList([...new Set([...Object.keys(commonSpells), ...Object.keys(userSpells), ...initialSpellNamesFromData, ...currentCustomSpellNames])].sort());
 
-                let commonTecniche = {};
-                const utilsDocRef = doc(db, 'utils', 'utils');
-                const utilsDocSnap = await getDoc(utilsDocRef);
-                if (utilsDocSnap.exists() && utilsDocSnap.data().tecniche_common) {
-                    commonTecniche = utilsDocSnap.data().tecniche_common;
-                } else {
-                    const commonTecnicheRef = doc(db, 'utils', 'tecniche_common');
-                    const commonTecnicheSnap = await getDoc(commonTecnicheRef);
-                    commonTecniche = commonTecnicheSnap.exists() ? commonTecnicheSnap.data() : {};
-                }
+                const commonTecniche = await getCommonTechniques({ legacyFirst: true }) || {};
                 const userTecniche = userSnap.exists() ? userSnap.data().tecniche || {} : {};
                 const initialTecNamesFromData = initialData?.General?.ridCostoTecSingola ? Object.keys(initialData.General.ridCostoTecSingola) : [];
                 setTecnicheList([...new Set([...Object.keys(commonTecniche), ...Object.keys(userTecniche), ...initialTecNamesFromData])].sort());

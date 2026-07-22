@@ -25,6 +25,14 @@ Create one observable, testable data-access layer for shared documents, bounded 
 8. Evaluate Firestore persistent cache only through a separate experiment covering account switch, multi-tab, stale data, quota, and eviction. Enable it only if those gates pass.
 9. Expose Task 01 counters by repository/query key so read and listener budgets are enforceable.
 
+## Task 06 consolidation debt
+
+The server-owned `user_directory/{uid}` projection introduced by this task adds
+one `europe-west8` Firestore trigger evaluation for each `users/{uid}` write.
+Task 06 must review consolidating that projection with the existing user-derived
+field triggers so the privacy boundary remains intact without retaining an
+avoidable extra invocation per user mutation.
+
 ## Boundaries and non-goals
 
 - Do not migrate inventory, Codex, or encounter schemas in this task.

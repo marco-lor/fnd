@@ -12,6 +12,11 @@ import { SpellOverlay } from '../../common/SpellOverlay';
 import { WeaponOverlay } from '../../common/WeaponOverlay';
 import { FaTrash, FaEdit } from "react-icons/fa";
 import VisibilitySelector from '../../common/VisibilitySelector';
+import {
+    getCommonSpells,
+    getCommonTechniques,
+    getSchema,
+} from '../../../data/configRepository';
 
 export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, editMode = false, inventoryEditMode = false, inventoryUserId = null, inventoryItemId = null, inventoryItemIndex = null }) {
     const [schema, setSchema] = useState(null);
@@ -194,10 +199,9 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
         setIsSchemaLoading(true);
         const fetchArmaturaSchema = async () => {
             try {
-                const schemaDocRef = doc(db, "utils", "schema_armatura");
-                const docSnap = await getDoc(schemaDocRef);
-                if (docSnap.exists()) {
-                    setSchema(docSnap.data());
+                const schemaData = await getSchema('schema_armatura');
+                if (schemaData) {
+                    setSchema(schemaData);
                 } else {
                     console.error("Armor schema (schema_armatura) not found!");
                     if (showMessage) showMessage("Errore: Schema armatura non trovato.", "error");
@@ -255,14 +259,11 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                     setUserName(uData.characterId || uData.email || "Unknown User");
                 }
 
-                const spellSchemaRef = doc(db, "utils", "schema_spell");
-                const spellSchemaSnap = await getDoc(spellSchemaRef);
-                if (spellSchemaSnap.exists()) setSpellSchema(spellSchemaSnap.data());
+                const spellSchemaData = await getSchema('schema_spell');
+                if (spellSchemaData) setSpellSchema(spellSchemaData);
                 else console.error("Spell schema not found!");
 
-                const commonSpellsRef = doc(db, 'utils', 'spells_common');
-                const commonSpellsSnap = await getDoc(commonSpellsRef);
-                const commonSpells = commonSpellsSnap.exists() ? commonSpellsSnap.data() : {};
+                const commonSpells = await getCommonSpells() || {};
                 const userSpells = userSnap.exists() ? userSnap.data().spells || {} : {};
 
                 const initialSpellNamesFromData = initialData?.General?.spells ? Object.keys(initialData.General.spells) : [];
@@ -271,15 +272,7 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
 
                 let commonTecniche = {};
                 try {
-                    const utilsDocRef = doc(db, 'utils', 'utils');
-                    const utilsDocSnap = await getDoc(utilsDocRef);
-                    if (utilsDocSnap.exists() && utilsDocSnap.data().tecniche_common) {
-                        commonTecniche = utilsDocSnap.data().tecniche_common;
-                    } else {
-                        const commonTecnicheRef = doc(db, 'utils', 'tecniche_common');
-                        const commonTecnicheSnap = await getDoc(commonTecnicheRef);
-                        commonTecniche = commonTecnicheSnap.exists() ? commonTecnicheSnap.data() : {};
-                    }
+                    commonTecniche = await getCommonTechniques({ legacyFirst: true }) || {};
                 } catch (error) {
                     console.error("Error fetching common tecniche:", error);
                 }

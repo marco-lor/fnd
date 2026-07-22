@@ -6,6 +6,7 @@ import {
   registerActiveListener,
   withAsyncResourceOwner,
 } from './runtime';
+import { assertFirestoreMetricKey } from '../data/telemetryKeys';
 
 const performanceTargetMetadata = new WeakMap();
 const runFirestoreTransport = (operation) => (
@@ -13,8 +14,9 @@ const runFirestoreTransport = (operation) => (
 );
 
 export const labelFirestoreTarget = (target, label, ownership = 'route') => {
+  const metricKey = assertFirestoreMetricKey(label);
   if (target && typeof target === 'object') {
-    performanceTargetMetadata.set(target, { label, ownership });
+    performanceTargetMetadata.set(target, { label: metricKey, ownership });
   }
   return target;
 };
@@ -33,6 +35,7 @@ export const {
   and,
   arrayRemove,
   arrayUnion,
+  clearIndexedDbPersistence,
   collection,
   collectionGroup,
   connectFirestoreEmulator,
@@ -76,6 +79,23 @@ const describeTarget = (target) => {
     || 'query';
   return canonicalizePath(internalPath);
 };
+
+const legacyMetricKey = (target, operation) => {
+  const canonicalPath = describeTarget(target)
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => (
+      segment === ':id'
+        ? 'document'
+        : segment.toLowerCase().replace(/[^a-z0-9-]+/g, '-') || 'unknown'
+    ))
+    .join('.');
+  return `legacy.${canonicalPath || 'unknown'}.${operation}.v1`;
+};
+
+const resolveMetricKey = (target, operation) => (
+  performanceTargetMetadata.get(target)?.label || legacyMetricKey(target, operation)
+);
 
 export const estimatePayloadBytes = (payload) => {
   try {
@@ -151,7 +171,7 @@ const wrapSnapshotNext = (next, metricKey, completeInitial) => {
 export const onSnapshot = (target, ...args) => {
   if (!isPerformanceEnabled()) return firestore.onSnapshot(target, ...args);
   const targetMetadata = performanceTargetMetadata.get(target);
-  const metricKey = targetMetadata?.label || describeTarget(target);
+  const metricKey = resolveMetricKey(target, 'subscribe');
   const closeListener = registerActiveListener(metricKey, targetMetadata?.ownership || 'route');
   const completeInitial = beginRouteAsyncWork(`firestore-listener:${metricKey}`);
   const wrappedArgs = [...args];
@@ -200,9 +220,9 @@ export const onSnapshot = (target, ...args) => {
   };
 };
 
-const trackedRead = async (operation, target, args) => {
+const trackedRead = async (operationName, operation, target, args) => {
   if (!isPerformanceEnabled()) return operation(target, ...args);
-  const metricKey = describeTarget(target);
+  const metricKey = resolveMetricKey(target, operationName);
   const complete = beginRouteAsyncWork(`firestore-read:${metricKey}`);
   const start = performance.now();
   try {
@@ -226,13 +246,13 @@ const trackedRead = async (operation, target, args) => {
   }
 };
 
-export const getDoc = (target, ...args) => trackedRead(firestore.getDoc, target, args);
-export const getDocs = (target, ...args) => trackedRead(firestore.getDocs, target, args);
-export const getCountFromServer = (target, ...args) => trackedRead(firestore.getCountFromServer, target, args);
+export const getDoc = (target, ...args) => trackedRead('get', firestore.getDoc, target, args);
+export const getDocs = (target, ...args) => trackedRead('list', firestore.getDocs, target, args);
+export const getCountFromServer = (target, ...args) => trackedRead('count', firestore.getCountFromServer, target, args);
 
 const trackedWrite = async (operationName, operation, target, args, payloadIndex = 0) => {
   if (!isPerformanceEnabled()) return operation(target, ...args);
-  const metricKey = describeTarget(target);
+  const metricKey = resolveMetricKey(target, operationName);
   const payloadBytes = estimatePayloadBytes(args[payloadIndex]);
   recordPerfEvent({ category: 'firestore', metric: 'write-attempt', value: payloadBytes, unit: 'bytes', tags: { target: metricKey, operation: operationName } });
   try {

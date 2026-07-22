@@ -4,8 +4,7 @@ import { GiDrinkMe } from 'react-icons/gi';
 
 // Confirmation dialog for using a consumable. If both HP & Mana regeneration are available, user chooses.
 // mode selection passed to parent on confirm.
-import { doc, getDoc } from '../../../performance/firestore';
-import { db } from '../../firebaseConfig';
+import { getVarie } from '../../../data/configRepository';
 
 const LEVEL_THRESHOLDS = [1,4,7,10];
 const resolveLevelKey = (userLevel) => {
@@ -56,9 +55,9 @@ const ConfirmUseConsumableModal = ({ item, userData, onCancel, onConfirm }) => {
     let mounted = true;
     (async () => {
       try {
-        const snap = await getDoc(doc(db, 'utils', 'varie'));
-        if (snap.exists()) {
-          const arr = snap.data()?.dadiAnimaByLevel || [];
+        const varie = await getVarie();
+        if (varie) {
+          const arr = varie.dadiAnimaByLevel || [];
           const level = Number(userData?.stats?.level || 1);
             const diceTypeStr = arr[level] || arr[arr.length - 1];
             if (diceTypeStr && /^d\d+$/i.test(diceTypeStr)) {

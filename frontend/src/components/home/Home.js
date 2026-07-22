@@ -5,10 +5,11 @@ import StatsBars from "./elements/StatsBars";
 import EquippedInventory from "./elements/EquippedInventory";
 import Inventory from "./elements/Inventory";
 import { MergedStatsTable } from "./elements/paramTables";
-import { doc, getDoc, updateDoc } from "../../performance/firestore";
+import { doc, updateDoc } from "../../performance/firestore";
 import { db } from "../firebaseConfig";
 import { FaDiceD20 } from "react-icons/fa";
 import DiceRoller from "../common/DiceRoller";
+import { getVarie } from '../../data/configRepository';
 import Extra from './elements/Extra';
 
 function Home() {
@@ -37,9 +38,9 @@ function Home() {
   useEffect(() => {
     const fetchDadiAnima = async () => {
       try {
-        const snap = await getDoc(doc(db, "utils", "varie"));
-        if (snap.exists()) {
-          setDadiAnimaByLevel(snap.data().dadiAnimaByLevel || []);
+        const varie = await getVarie();
+        if (varie) {
+          setDadiAnimaByLevel(varie.dadiAnimaByLevel || []);
         }
       } catch (e) {
         console.error("Error fetching dadiAnimaByLevel:", e);

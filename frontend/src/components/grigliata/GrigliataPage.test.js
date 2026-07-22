@@ -9,6 +9,7 @@ import {
 } from './liveInteractions';
 import { preloadImageAssets, scheduleImageAssetPreload } from '../common/imageAssets/imageAssetRegistry';
 import { readAudioFileMetadata } from './music';
+import { __resetRepositoryRuntimeForTests } from '../../data/repositoryRuntime';
 import {
   buildFogRasterTilePayload,
   FOG_RASTER_MASK_ENCODING,
@@ -917,6 +918,7 @@ describe('GrigliataPage', () => {
   let firestore;
 
   beforeEach(() => {
+    __resetRepositoryRuntimeForTests();
     jest.useFakeTimers();
     Object.defineProperty(window, 'scrollTo', {
       writable: true,

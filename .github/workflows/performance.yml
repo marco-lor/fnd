@@ -22,6 +22,8 @@ jobs:
       - run: npm ci
       - run: npm run perf:test
       - run: npm run perf:check-firestore-imports
+      - run: npm run perf:check-shared-config-boundaries
+      - run: npm run perf:check-query-contracts
       - run: npm test -- --watch=false --runInBand --watchman=false
         env: { CI: 'true' }
 
@@ -37,6 +39,7 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npx tsc --noEmit
+      - run: npm test
 
   emulator-rules:
     runs-on: ubuntu-latest
@@ -47,7 +50,9 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 21 }
       - run: npm ci
-      - run: npx firebase emulators:exec --project demo-fnd-perf --only auth,firestore,storage "node scripts/performance/rules-exec.js"
+      - run: npm --prefix functions ci
+      - run: npm --prefix functions run build
+      - run: npx firebase emulators:exec --project demo-fnd-perf --only auth,firestore,functions,storage "node scripts/performance/rules-exec.js"
 
   hardened-build:
     runs-on: ubuntu-latest

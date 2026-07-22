@@ -7,6 +7,7 @@ import { db } from '../../firebaseConfig';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import DiceRoller from '../../common/DiceRoller';
+import { getVarie } from '../../../data/configRepository';
 
 const LEVEL_THRESHOLDS = [1,4,7,10];
 
@@ -149,9 +150,9 @@ export default async function useConsumable({ user, userData, item, slotKey, mod
   // Fetch 'utils/varie' document and read dadiAnimaByLevel[level]. Fallback to last element or d10.
   let animaDieFaces = 10; // fallback
   try {
-    const varieSnap = await getDoc(doc(db, 'utils', 'varie'));
-    if (varieSnap.exists()) {
-      const arr = varieSnap.data()?.dadiAnimaByLevel || [];
+    const varie = await getVarie();
+    if (varie) {
+      const arr = varie.dadiAnimaByLevel || [];
       const diceTypeStr = arr[level] || arr[arr.length - 1];
       if (diceTypeStr && /^d\d+$/i.test(diceTypeStr)) {
         const parsed = parseInt(diceTypeStr.replace(/^d/i, ''), 10);

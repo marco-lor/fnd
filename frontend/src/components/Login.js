@@ -3,7 +3,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, fetchSignInMethodsForEmail } from "firebase/auth";
 import { auth, db } from "./firebaseConfig";
 import { useNavigate } from "react-router-dom";
-import { setDoc, doc, getDoc } from "../performance/firestore";
+import { setDoc, doc } from "../performance/firestore";
+import { getSchema } from '../data/configRepository';
 import { useAuthSession, useProfileState } from "../AuthContext";
 import AuroraBackground from "./backgrounds/AuroraBackground";
 import "./LoginAnimations.css"; // Added import
@@ -119,11 +120,9 @@ function Login() {
       const user = userCredential.user;
 
       // Fetch initial schema for character defaults
-      const schemaDocRef = doc(db, "utils", "schema_pg");
-      const schemaSnap = await getDoc(schemaDocRef);
+      const schemaData = await getSchema('schema_pg');
       let initialSchemaData = {};
-      if (schemaSnap.exists()) {
-        const schemaData = schemaSnap.data();
+      if (schemaData) {
         const fieldsToPick = [
           "AltriParametri",
           "Parametri",

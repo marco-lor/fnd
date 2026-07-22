@@ -1,4 +1,79 @@
 {
-  "indexes": [],
+  "indexes": [
+    {
+      "collectionGroup": "items",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "visibility",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "allowed_users",
+          "arrayConfig": "CONTAINS"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "grigliata_fog_memory_tiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "backgroundId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "ownerUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "rasterProfileId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "grigliata_token_placements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "backgroundId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isVisibleToPlayers",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "grigliata_aoe_figures",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "backgroundId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isVisibleToPlayers",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "user_directory",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "role",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "normalizedLabel",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
   "fieldOverrides": []
 }

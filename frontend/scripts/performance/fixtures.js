@@ -10,6 +10,7 @@ const {
   sha256,
   writeJson,
 } = require('./common');
+const { buildUserDirectoryProjection } = require('../backfill-user-directory');
 
 configureOwnedPerformanceEnvironment();
 assertPerformanceProject(projectId);
@@ -140,8 +141,12 @@ const buildDocuments = () => {
   const primaryAccounts = new Map(accountDefinitions.map((account, index) => [account.uid, buildUser(account, index)]));
   for (let index = 0; index < 200; index += 1) {
     const uid = index < accountDefinitions.length ? accountDefinitions[index].uid : `perf-user-${pad(index)}`;
-    const existing = primaryAccounts.get(uid);
-    add(`users/${uid}`, existing || buildUser({ uid }, index));
+    const userData = primaryAccounts.get(uid) || buildUser({ uid }, index);
+    add(`users/${uid}`, userData);
+    // Bulk fixture writes intentionally suppress Functions triggers. Seed the
+    // deterministic projection explicitly, then exercise the real trigger via
+    // the readiness sentinel below.
+    add(`user_directory/${uid}`, buildUserDirectoryProjection(userData));
   }
 
   add('utils/schema_pg', buildUser({ uid: 'schema', characterCreationDone: false }, 0));
@@ -474,21 +479,44 @@ const buildManifest = (documents) => {
 const waitForFunctionsReady = async () => {
   initializeAdmin();
   const readiness = db.doc('users/perf-function-readiness');
-  await readiness.set({
+  const directory = db.doc('user_directory/perf-function-readiness');
+  const readinessData = {
+    characterId: '  Émulator Sentinel  ',
     role: 'player',
     Parametri: { Base: { Signal: { Base: 1, Anima: 0, Equip: 0, Mod: 0 } } },
     stats: { level: 1 },
-  });
+  };
+  const expectedDirectory = buildUserDirectoryProjection(readinessData);
+  await readiness.set(readinessData);
   const deadline = Date.now() + 120_000;
   try {
     while (Date.now() < deadline) {
-      const snapshot = await readiness.get();
-      if (snapshot.data()?.Parametri?.Base?.Signal?.Tot === 1) return;
+      const [snapshot, directorySnapshot] = await Promise.all([
+        readiness.get(),
+        directory.get(),
+      ]);
+      const projectedData = directorySnapshot.data();
+      if (
+        snapshot.data()?.Parametri?.Base?.Signal?.Tot === 1
+        && directorySnapshot.exists
+        && JSON.stringify(normalizeCanonical(projectedData))
+          === JSON.stringify(normalizeCanonical(expectedDirectory))
+      ) return;
       await delay(500);
     }
-    throw new Error('Functions emulator did not process the readiness sentinel within 120 seconds.');
+    throw new Error(
+      'Functions emulator did not process derived fields and the user directory readiness sentinel within 120 seconds.'
+    );
   } finally {
     await readiness.delete().catch(() => {});
+    const deletionDeadline = Date.now() + 120_000;
+    while (Date.now() < deletionDeadline) {
+      if (!(await directory.get()).exists) break;
+      await delay(500);
+    }
+    if ((await directory.get()).exists) {
+      throw new Error('User directory readiness projection was not deleted within 120 seconds.');
+    }
   }
 };
 
@@ -541,7 +569,7 @@ const verifyFixture = async () => {
   const metadata = await db.doc('perf_meta/fixture').get();
   if (!metadata.exists) throw new Error('Fixture metadata is missing. Run npm run perf:seed.');
   const manifest = metadata.data();
-  const checks = ['users', 'items', 'foes', 'echi_npcs', 'map_markers', 'encounters', 'grigliata_token_placements', 'grigliata_fog_memory_tiles'];
+  const checks = ['users', 'user_directory', 'items', 'foes', 'echi_npcs', 'map_markers', 'encounters', 'grigliata_token_placements', 'grigliata_fog_memory_tiles'];
   for (const collectionName of checks) {
     const snapshot = await db.collection(collectionName).count().get();
     const actual = snapshot.data().count;

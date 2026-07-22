@@ -16,6 +16,16 @@ import "./App.css";
 
 const performanceMode = process.env.REACT_APP_FND_PERF === "1";
 
+const firestorePersistenceExperimentDescriptor = process.env.REACT_APP_FND_PERF === "1"
+  ? createModuleLoader({
+    chunkName: 'perf-firestore-persistence-experiment',
+    importer: () => import(
+      /* webpackChunkName: "perf-firestore-persistence-experiment" */
+      './performance/FirestorePersistenceExperiment'
+    ),
+  })
+  : null;
+
 const authenticatedLayoutDescriptor = createModuleLoader({
   chunkName: 'feature-authenticated-layout',
   importer: () => import(/* webpackChunkName: "feature-authenticated-layout" */ './components/common/Layout'),
@@ -165,6 +175,12 @@ export function AppRoutes() {
       <Route path="/" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.login} label="Login" />} />
       <Route path="/character-creation" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.characterCreation} label="Character Creation" />} />
       <Route path="/__fnd_perf_cleanup__" element={<PerformanceCleanupRoute />} />
+      {process.env.REACT_APP_FND_PERF === "1" ? (
+        <Route
+          path="/__fnd_perf_firestore_persistence__"
+          element={<RoutePage descriptor={firestorePersistenceExperimentDescriptor} label="Firestore persistence experiment" />}
+        />
+      ) : null}
 
       <Route element={<AuthenticatedRoute />}>
         <Route path="/home" element={<RoutePage descriptor={ROUTE_DESCRIPTORS.home} label="Home" />} />

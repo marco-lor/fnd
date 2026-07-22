@@ -16,6 +16,7 @@ import {
 import DiceRoller from "../../common/DiceRoller";
 import { Button } from "./ui";
 import { advanceTurn as advanceTurnUtil } from "./buttons/advanceTurn";
+import { getVarie } from '../../../data/configRepository';
 
 const EncounterDetails = ({ encounter, isDM }) => {
     const { user, userData } = useAuth();
@@ -42,10 +43,8 @@ const EncounterDetails = ({ encounter, isDM }) => {
     useEffect(() => {
         (async () => {
             try {
-                const snap = await import("../../../performance/firestore").then(({ doc, getDoc }) =>
-                    getDoc(doc(db, "utils", "varie"))
-                );
-                if (snap.exists()) setDadiAnimaByLevel(snap.data().dadiAnimaByLevel || []);
+                const varie = await getVarie();
+                if (varie) setDadiAnimaByLevel(varie.dadiAnimaByLevel || []);
             } catch {}
         })();
     }, []);

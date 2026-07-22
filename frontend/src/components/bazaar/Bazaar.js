@@ -1,7 +1,7 @@
 // file: ./frontend/src/components/bazaar/Bazaar.js
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { collection, onSnapshot, query, where, or, and, doc, getDoc } from "../../performance/firestore";
+import { collection, onSnapshot, query, where, or, and } from "../../performance/firestore";
 import { db } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
 import ComparisonPanel from './elements/comparisonComponent';
@@ -12,6 +12,7 @@ import { SPECIAL_PARAM_SCHEMA_IDS } from '../common/paramMetadata';
 import { useShellLayout } from '../common/shellLayout';
 import { FiShoppingBag } from 'react-icons/fi';
 import { canPrefetchModules } from '../common/lazyLoading';
+import { getSchema } from '../../data/configRepository';
 import {
   AddAccessorioOverlay,
   AddArmaturaOverlay,
@@ -348,18 +349,14 @@ export default function Bazaar() {
 
     (async () => {
       try {
-        const docs = await Promise.all(SPECIAL_PARAM_SCHEMA_IDS.map((id) => getDoc(doc(db, 'utils', id))));
+        const schemas = await Promise.all(SPECIAL_PARAM_SCHEMA_IDS.map((id) => getSchema(id)));
         if (!isMounted) {
           return;
         }
 
         const keys = new Set();
-        docs.forEach((snapshot) => {
-          if (!snapshot.exists()) {
-            return;
-          }
-
-          Object.keys(snapshot.data()?.Parametri?.Special || {}).forEach((key) => keys.add(key));
+        schemas.forEach((schema) => {
+          Object.keys(schema?.Parametri?.Special || {}).forEach((key) => keys.add(key));
         });
 
         setSpecialSchemaKeys(Array.from(keys).sort());

@@ -213,6 +213,7 @@ import {
   filterFogVisibleTurnOrderEntries,
 } from './fogVisibilityFiltering';
 import { useShellLayout } from '../common/shellLayout';
+import { getVarie } from '../../data/configRepository';
 import {
   canPrefetchModules,
   createModuleLoader,
@@ -694,9 +695,9 @@ export default function GrigliataPage() {
 
   const loadDiceMetadata = useCallback(() => {
     if (!diceMetadataRequestRef.current) {
-      diceMetadataRequestRef.current = getDoc(doc(db, 'utils', 'varie'))
-        .then((snapshot) => (
-          snapshot.exists() ? snapshot.data().dadiAnimaByLevel || [] : []
+      diceMetadataRequestRef.current = getVarie()
+        .then((varie) => (
+          varie?.dadiAnimaByLevel || []
         ))
         .catch((error) => {
           diceMetadataRequestRef.current = null;

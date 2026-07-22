@@ -6,6 +6,7 @@ import { saveSpellForUser } from "../../../common/userOwnedMedia";
 import {
   doc, getDoc,
 } from "../../../../performance/firestore";
+import { getSchema } from '../../../../data/configRepository';
 
 /**
  * EditSpellOverlay – API unchanged for callers.
@@ -25,8 +26,8 @@ export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
   useEffect(() => {
     (async () => {
       try {
-        const schemaSnap = await getDoc(doc(db, "utils", "schema_spell"));
-        if (schemaSnap.exists()) setSchema(schemaSnap.data());
+        const schemaData = await getSchema('schema_spell');
+        if (schemaData) setSchema(schemaData);
         const userSnap   = await getDoc(doc(db, "users", userId));
         if (userSnap.exists())
           setUserName(userSnap.data().characterId || userSnap.data().email || "Unknown User");

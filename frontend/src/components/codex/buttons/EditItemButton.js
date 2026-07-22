@@ -1,9 +1,8 @@
 // file: ./frontend/src/components/codex/buttons/EditItemButton.js
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { db } from '../../firebaseConfig';
-import { doc, updateDoc } from '../../../performance/firestore';
 import { FaEdit, FaSpinner, FaCheckCircle, FaTimesCircle } from 'react-icons/fa';
+import { patchCodex } from '../../../data/codexRepository';
 
 function EditItemButton({ categoryKey, itemKey, currentValue }) {
   const [isOverlayVisible, setIsOverlayVisible] = useState(false);
@@ -58,12 +57,11 @@ function EditItemButton({ categoryKey, itemKey, currentValue }) {
     setIsUpdating(true);
     setFeedback({ message: '', type: '' });
 
-    const codexDocRef = doc(db, 'utils', 'codex');
     const fieldPath = `${categoryKey}.${itemKey}`; // e.g., lingue.Elfico Antico
     const updateData = { [fieldPath]: trimmedDesc };
 
     try {
-      await updateDoc(codexDocRef, updateData);
+      await patchCodex(updateData);
       setFeedback({ message: `Descrizione di "${itemKey}" aggiornata con successo!`, type: 'success' });
       // Optional: Close overlay automatically after a short delay
       setTimeout(() => {

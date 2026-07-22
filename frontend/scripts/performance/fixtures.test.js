@@ -17,6 +17,7 @@ test('fixture generation is stable and contains the required scale', () => {
   assert.deepEqual(first, second);
   assert.equal(first.version, FIXTURE_VERSION);
   assert.equal(first.counts.users, 200);
+  assert.equal(first.counts.user_directory, 200);
   assert.equal(first.counts.items, 1000);
   assert.equal(first.counts.foes, 500);
   assert.equal(first.counts.echi_npcs, 500);

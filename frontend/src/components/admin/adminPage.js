@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../AuthContext'; // Assuming this provides logged-in user info
 import { db, app } from '../firebaseConfig';
-import { collection, doc, getDocs, getDoc } from '../../performance/firestore';
+import { collection, getDocs } from '../../performance/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getPossibleLists } from '../../data/configRepository';
 
 const DEFAULT_ROLES = ['player', 'dm', 'webmaster'];
 const PLAYER_ROLE_ALIASES = new Set(['player', 'players']);
@@ -48,11 +49,9 @@ const AdminPage = () => {
       setError(null);
       try {
         const usersCollectionRef = collection(db, 'users');
-        const rolesDocRef = doc(db, 'utils', 'possible_lists');
-
-        const [usersSnapshot, rolesSnapshot] = await Promise.all([
+        const [usersSnapshot, rolesData] = await Promise.all([
           getDocs(usersCollectionRef),
-          getDoc(rolesDocRef)
+          getPossibleLists()
         ]);
 
         if (!usersSnapshot.empty) {
@@ -71,8 +70,7 @@ const AdminPage = () => {
           setUsers({});
         }
 
-        if (rolesSnapshot.exists()) {
-          const rolesData = rolesSnapshot.data();
+        if (rolesData) {
           if (rolesData && rolesData.ruoli && Array.isArray(rolesData.ruoli)) {
             const normalizedRoles = normalizeRoleList(rolesData.ruoli);
             setRoles(normalizedRoles.length > 0 ? normalizedRoles : DEFAULT_ROLES);

@@ -157,13 +157,13 @@ describe('GlobalGrigliataMusicPlayer', () => {
       expect(labelSpy).toHaveBeenNthCalledWith(
         1,
         playbackTarget,
-        'grigliata_music_playback/:id',
+        'grigliata.music-playback.subscribe.v1',
         'shell'
       );
       expect(labelSpy).toHaveBeenNthCalledWith(
         2,
         sessionsTarget,
-        'grigliata_music_playback_sessions',
+        'grigliata.music-sessions.subscribe.v1',
         'shell'
       );
     } finally {

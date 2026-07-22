@@ -31,6 +31,7 @@ const READINESS_BACKGROUND_TRIGGERS = new Set([
   'europe-west8-updateTotParameters',
   'europe-west8-updateAnimaModifier',
   'europe-west8-expireBarriera',
+  'europe-west8-syncUserDirectory',
 ]);
 
 const summarizeTriggerActivityText = (contents = '') => {
@@ -320,6 +321,16 @@ module.exports = async () => {
       throw new Error(`Security Rules integration tests failed.\n${rules.stdout || ''}\n${rules.stderr || ''}`);
     }
     process.stdout.write(rules.stdout || '');
+
+    const directoryQueryBuilder = childProcess.spawnSync(
+      process.execPath,
+      ['--test', path.join(frontendRoot, 'performance', 'tests', 'user-directory-query-builder.test.js')],
+      { cwd: frontendRoot, env: process.env, encoding: 'utf8' }
+    );
+    if (directoryQueryBuilder.status !== 0) {
+      throw new Error(`User-directory query-builder integration tests failed.\n${directoryQueryBuilder.stdout || ''}\n${directoryQueryBuilder.stderr || ''}`);
+    }
+    process.stdout.write(directoryQueryBuilder.stdout || '');
 
     stage = 'measurement-health';
     report.measurementWindow.health = await collectEmulatorHealth('measurement-ready');

@@ -11,6 +11,7 @@ import {
   ref, uploadBytes, getDownloadURL,
 } from "firebase/storage";
 import { uploadCacheableImage } from "../../../common/imageStorage";
+import { getSchema } from '../../../../data/configRepository';
 
 /* ------------------------------------------------------------------ */
 /*  A. Pure button – API unchanged                                    */
@@ -43,8 +44,8 @@ export function AddSpellOverlay({ userId, onClose, savePath = null }) {
   useEffect(() => {
     (async () => {
       try {
-        const schemaSnap = await getDoc(doc(db, "utils", "schema_spell"));
-        if (schemaSnap.exists()) setSchema(schemaSnap.data());
+        const schemaData = await getSchema('schema_spell');
+        if (schemaData) setSchema(schemaData);
         const userSnap   = await getDoc(doc(db, "users", userId));
         if (userSnap.exists())
           setUserName(userSnap.data().characterId || userSnap.data().email || "Unknown User");

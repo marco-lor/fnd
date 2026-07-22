@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { db } from '../../../firebaseConfig';
 import { doc, getDoc } from "../../../../performance/firestore";
+import { getSchema } from '../../../../data/configRepository';
 import { saveTecnicaForUser } from '../../../common/userOwnedMedia';
 
 // --- Style definition moved here ---
@@ -40,11 +41,9 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
     const fetchData = async () => {
       try {
         // Fetch schema
-        const schemaDocRef = doc(db, "utils", "schema_tecnica");
-        const schemaDocSnap = await getDoc(schemaDocRef);
+        const schemaData = await getSchema('schema_tecnica');
 
-        if (schemaDocSnap.exists()) {
-          const schemaData = schemaDocSnap.data();
+        if (schemaData) {
           setSchema(schemaData);
 
           // Initialize form with empty values
