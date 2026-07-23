@@ -2364,6 +2364,7 @@ export default function GrigliataBoard({
   onDeactivateActiveBackground,
   isDeactivateActiveBackgroundDisabled,
   isTurnOrderEnabled = true,
+  isTurnOrderDataReady = true,
   turnOrderEntries = [],
   isTurnOrderStarted = false,
   activeTurnTokenId = '',
@@ -6281,7 +6282,7 @@ export default function GrigliataBoard({
     [turnOrderEntries]
   );
   const isNarrationPresentationActive = isNarrationOverlayActive || isNarrationVisualActive;
-  const areTurnOrderControlsDisabled = isNarrationPresentationActive;
+  const areTurnOrderControlsDisabled = isNarrationPresentationActive || !isTurnOrderDataReady;
   const visibleRenderedAoEFigures = isNarrationPresentationActive ? [] : renderedAoEFigures;
   const visibleRenderedTokens = isNarrationPresentationActive ? [] : fogVisibleRenderedTokens;
   const visibleTokenRenderLayers = useMemo(
@@ -6712,7 +6713,7 @@ export default function GrigliataBoard({
                   activeTurnTokenId={activeTurnTokenId}
                   onSaveTurnOrderInitiative={onSaveTurnOrderInitiative}
                   savingTurnOrderInitiativeTokenId={savingTurnOrderInitiativeTokenId}
-                  isReadOnly={isNarrationPresentationActive}
+                  isReadOnly={areTurnOrderControlsDisabled}
                 />
               </motion.div>
             )}

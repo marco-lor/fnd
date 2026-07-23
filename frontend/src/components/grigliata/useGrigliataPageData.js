@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   collection,
   doc,
@@ -131,10 +131,19 @@ export default function useGrigliataPageData({
   const [boardState, setBoardState] = useState({});
   const [foeLibrary, setFoeLibrary] = useState([]);
   const [tokenProfiles, setTokenProfiles] = useState([]);
-  const [activePlacements, setActivePlacements] = useState([]);
-  const [isActivePlacementsReady, setIsActivePlacementsReady] = useState(false);
-  const [aoeFigureSnapshots, setAoEFigureSnapshots] = useState([]);
-  const [liveInteractionSnapshots, setLiveInteractionSnapshots] = useState([]);
+  const [activePlacementState, setActivePlacementState] = useState({
+    backgroundId: '',
+    status: 'idle',
+    items: [],
+  });
+  const [aoeFigureState, setAoeFigureState] = useState({
+    backgroundId: '',
+    items: [],
+  });
+  const [liveInteractionState, setLiveInteractionState] = useState({
+    backgroundId: '',
+    items: [],
+  });
   const [pagePresenceSnapshots, setPagePresenceSnapshots] = useState([]);
   const [musicTracks, setMusicTracks] = useState([]);
   const [musicPlaybackState, setMusicPlaybackState] = useState(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
@@ -144,6 +153,9 @@ export default function useGrigliataPageData({
   const [selectedBackgroundId, setSelectedBackgroundId] = useState('');
   const [liveInteractionClock, setLiveInteractionClock] = useState(() => Date.now());
   const [pagePresenceClock, setPagePresenceClock] = useState(() => Date.now());
+  const activePlacementSubscriptionGenerationRef = useRef(0);
+  const aoeFigureSubscriptionGenerationRef = useRef(0);
+  const liveInteractionSubscriptionGenerationRef = useRef(0);
 
   useEffect(() => {
     if (!currentUserId) {
@@ -252,6 +264,31 @@ export default function useGrigliataPageData({
   const activeBackgroundId = typeof boardState?.activeBackgroundId === 'string'
     ? boardState.activeBackgroundId
     : '';
+  const hasCurrentActivePlacementState = activePlacementState.backgroundId === activeBackgroundId;
+  const activePlacements = useMemo(
+    () => (hasCurrentActivePlacementState
+      ? activePlacementState.items.filter((placement) => placement?.backgroundId === activeBackgroundId)
+      : []),
+    [activeBackgroundId, activePlacementState.items, hasCurrentActivePlacementState]
+  );
+  const isActivePlacementsReady = !!activeBackgroundId
+    && hasCurrentActivePlacementState
+    && activePlacementState.status === 'ready';
+  const activePlacementsStatus = hasCurrentActivePlacementState
+    ? activePlacementState.status
+    : (activeBackgroundId ? 'loading' : 'idle');
+  const aoeFigureSnapshots = useMemo(
+    () => (aoeFigureState.backgroundId === activeBackgroundId
+      ? aoeFigureState.items.filter((figure) => figure?.backgroundId === activeBackgroundId)
+      : []),
+    [activeBackgroundId, aoeFigureState.backgroundId, aoeFigureState.items]
+  );
+  const liveInteractionSnapshots = useMemo(
+    () => (liveInteractionState.backgroundId === activeBackgroundId
+      ? liveInteractionState.items.filter((interaction) => interaction?.backgroundId === activeBackgroundId)
+      : []),
+    [activeBackgroundId, liveInteractionState.backgroundId, liveInteractionState.items]
+  );
   const legacyPresentationBackgroundId = typeof boardState?.presentationBackgroundId === 'string'
     ? boardState.presentationBackgroundId
     : '';
@@ -381,13 +418,24 @@ export default function useGrigliataPageData({
   }, [criticalBackgroundsById, galleryBackgrounds]);
 
   useEffect(() => {
+    const subscriptionGeneration = activePlacementSubscriptionGenerationRef.current + 1;
+    activePlacementSubscriptionGenerationRef.current = subscriptionGeneration;
+
     if (!currentUserId || !activeBackgroundId) {
-      setActivePlacements([]);
-      setIsActivePlacementsReady(false);
+      setActivePlacementState({
+        backgroundId: '',
+        status: 'idle',
+        items: [],
+      });
       return undefined;
     }
 
-    setIsActivePlacementsReady(false);
+    const subscribedBackgroundId = activeBackgroundId;
+    setActivePlacementState({
+      backgroundId: subscribedBackgroundId,
+      status: 'loading',
+      items: [],
+    });
 
     const placementsQuery = isManager
       ? query(
@@ -403,39 +451,77 @@ export default function useGrigliataPageData({
     const unsubscribePlacements = onSnapshot(
       placementsQuery,
       (snapshot) => {
+        if (activePlacementSubscriptionGenerationRef.current !== subscriptionGeneration) {
+          return;
+        }
+
         const nextPlacements = snapshot.docs.map((docSnap) => ({
           id: docSnap.id,
           ...docSnap.data(),
-        }));
-        setActivePlacements(nextPlacements);
-        setIsActivePlacementsReady(true);
+        })).filter((placement) => placement?.backgroundId === subscribedBackgroundId);
+        setActivePlacementState({
+          backgroundId: subscribedBackgroundId,
+          status: 'ready',
+          items: nextPlacements,
+        });
       },
       (error) => {
+        if (activePlacementSubscriptionGenerationRef.current !== subscriptionGeneration) {
+          return;
+        }
+
         console.error('Failed to load Grigliata token placements:', error);
-        setActivePlacements([]);
-        setIsActivePlacementsReady(true);
+        setActivePlacementState({
+          backgroundId: subscribedBackgroundId,
+          status: 'error',
+          items: [],
+        });
       }
     );
 
-    return () => unsubscribePlacements();
+    return () => {
+      if (activePlacementSubscriptionGenerationRef.current === subscriptionGeneration) {
+        activePlacementSubscriptionGenerationRef.current += 1;
+      }
+      unsubscribePlacements();
+    };
   }, [activeBackgroundId, currentUserId, isManager]);
 
   useEffect(() => {
+    const subscriptionGeneration = aoeFigureSubscriptionGenerationRef.current + 1;
+    aoeFigureSubscriptionGenerationRef.current = subscriptionGeneration;
+
     if (!currentUserId || !activeBackgroundId) {
-      setAoEFigureSnapshots([]);
+      setAoeFigureState({
+        backgroundId: '',
+        items: [],
+      });
       return undefined;
     }
 
+    const subscribedBackgroundId = activeBackgroundId;
+    setAoeFigureState({
+      backgroundId: subscribedBackgroundId,
+      items: [],
+    });
+
     const mergeFigureCollections = (visibleFigures, ownFigures) => {
+      if (aoeFigureSubscriptionGenerationRef.current !== subscriptionGeneration) {
+        return;
+      }
+
       const nextMap = new Map();
 
       [...visibleFigures, ...ownFigures].forEach((figure) => {
-        if (figure?.id) {
+        if (figure?.id && figure?.backgroundId === subscribedBackgroundId) {
           nextMap.set(figure.id, figure);
         }
       });
 
-      setAoEFigureSnapshots([...nextMap.values()]);
+      setAoeFigureState({
+        backgroundId: subscribedBackgroundId,
+        items: [...nextMap.values()],
+      });
     };
 
     if (isManager) {
@@ -447,19 +533,38 @@ export default function useGrigliataPageData({
       const unsubscribeFigures = onSnapshot(
         figuresQuery,
         (snapshot) => {
+          if (aoeFigureSubscriptionGenerationRef.current !== subscriptionGeneration) {
+            return;
+          }
+
           const nextFigures = snapshot.docs.map((docSnap) => ({
             id: docSnap.id,
             ...docSnap.data(),
-          }));
-          setAoEFigureSnapshots(nextFigures);
+          })).filter((figure) => figure?.backgroundId === subscribedBackgroundId);
+          setAoeFigureState({
+            backgroundId: subscribedBackgroundId,
+            items: nextFigures,
+          });
         },
         (error) => {
+          if (aoeFigureSubscriptionGenerationRef.current !== subscriptionGeneration) {
+            return;
+          }
+
           console.error('Failed to load Grigliata AoE figures:', error);
-          setAoEFigureSnapshots([]);
+          setAoeFigureState({
+            backgroundId: subscribedBackgroundId,
+            items: [],
+          });
         }
       );
 
-      return () => unsubscribeFigures();
+      return () => {
+        if (aoeFigureSubscriptionGenerationRef.current === subscriptionGeneration) {
+          aoeFigureSubscriptionGenerationRef.current += 1;
+        }
+        unsubscribeFigures();
+      };
     }
 
     let visibleFigures = [];
@@ -500,6 +605,10 @@ export default function useGrigliataPageData({
       onSnapshot(
         doc(db, GRIGLIATA_AOE_FIGURE_COLLECTION, figureId),
         (snapshot) => {
+          if (aoeFigureSubscriptionGenerationRef.current !== subscriptionGeneration) {
+            return;
+          }
+
           if (snapshot.exists()) {
             ownFiguresById.set(figureId, {
               id: snapshot.id,
@@ -511,6 +620,10 @@ export default function useGrigliataPageData({
           publishMergedFigures();
         },
         (error) => {
+          if (aoeFigureSubscriptionGenerationRef.current !== subscriptionGeneration) {
+            return;
+          }
+
           console.error(`Failed to load owned Grigliata AoE figure ${figureId}:`, error);
           ownFiguresById.delete(figureId);
           publishMergedFigures();
@@ -519,16 +632,31 @@ export default function useGrigliataPageData({
     ));
 
     return () => {
+      if (aoeFigureSubscriptionGenerationRef.current === subscriptionGeneration) {
+        aoeFigureSubscriptionGenerationRef.current += 1;
+      }
       unsubscribeVisibleFigures();
       unsubscribeOwnFigures.forEach((unsubscribe) => unsubscribe());
     };
   }, [activeBackgroundId, currentUserId, isManager]);
 
   useEffect(() => {
+    const subscriptionGeneration = liveInteractionSubscriptionGenerationRef.current + 1;
+    liveInteractionSubscriptionGenerationRef.current = subscriptionGeneration;
+
     if (!currentUserId || !activeBackgroundId) {
-      setLiveInteractionSnapshots([]);
+      setLiveInteractionState({
+        backgroundId: '',
+        items: [],
+      });
       return undefined;
     }
+
+    const subscribedBackgroundId = activeBackgroundId;
+    setLiveInteractionState({
+      backgroundId: subscribedBackgroundId,
+      items: [],
+    });
 
     const interactionsQuery = query(
       collection(db, GRIGLIATA_LIVE_INTERACTION_COLLECTION),
@@ -538,19 +666,38 @@ export default function useGrigliataPageData({
     const unsubscribeInteractions = onSnapshot(
       interactionsQuery,
       (snapshot) => {
+        if (liveInteractionSubscriptionGenerationRef.current !== subscriptionGeneration) {
+          return;
+        }
+
         const nextInteractions = snapshot.docs.map((docSnap) => ({
           id: docSnap.id,
           ...docSnap.data(),
-        }));
-        setLiveInteractionSnapshots(nextInteractions);
+        })).filter((interaction) => interaction?.backgroundId === subscribedBackgroundId);
+        setLiveInteractionState({
+          backgroundId: subscribedBackgroundId,
+          items: nextInteractions,
+        });
       },
       (error) => {
+        if (liveInteractionSubscriptionGenerationRef.current !== subscriptionGeneration) {
+          return;
+        }
+
         console.error('Failed to load Grigliata live interactions:', error);
-        setLiveInteractionSnapshots([]);
+        setLiveInteractionState({
+          backgroundId: subscribedBackgroundId,
+          items: [],
+        });
       }
     );
 
-    return () => unsubscribeInteractions();
+    return () => {
+      if (liveInteractionSubscriptionGenerationRef.current === subscriptionGeneration) {
+        liveInteractionSubscriptionGenerationRef.current += 1;
+      }
+      unsubscribeInteractions();
+    };
   }, [activeBackgroundId, currentUserId]);
 
   useEffect(() => {
@@ -1117,6 +1264,7 @@ export default function useGrigliataPageData({
     activeBackgroundId,
     activePageViewers,
     activePlacementsById,
+    activePlacementsStatus,
     aoeFigureSnapshots,
     backgrounds,
     boardState,

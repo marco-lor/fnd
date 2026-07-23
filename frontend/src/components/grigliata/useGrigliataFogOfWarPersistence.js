@@ -383,8 +383,19 @@ export default function useGrigliataFogOfWarPersistence({
     : EMPTY_CURRENT_VISIBILITY.skippedTokens;
   const storedMemoryTiles = useMemo(
     () => (Array.isArray(fogOfWar?.memoryTiles) ? fogOfWar.memoryTiles : [])
-      .filter((tile) => tileMatchesGrid(tile, normalizedGrid)),
-    [fogOfWar?.memoryTiles, normalizedGrid]
+      .filter((tile) => (
+        tile?.backgroundId === backgroundId
+        && tile?.ownerUid === currentUserId
+        && tileMatchesGrid(tile, normalizedGrid)
+      )),
+    [backgroundId, currentUserId, fogOfWar?.memoryTiles, normalizedGrid]
+  );
+  const currentBackgroundPendingMemoryTiles = useMemo(
+    () => pendingMemoryTiles.filter((tile) => (
+      tile?.backgroundId === backgroundId
+      && tile?.ownerUid === currentUserId
+    )),
+    [backgroundId, currentUserId, pendingMemoryTiles]
   );
 
   const refreshPendingMemoryTiles = useCallback(() => {
@@ -650,7 +661,7 @@ export default function useGrigliataFogOfWarPersistence({
         ? fogOfWar?.exploredPolygons?.length || 0
         : 0,
       storedRasterTileCount: storedMemoryTiles.length,
-      pendingRasterTileCount: pendingMemoryTiles.length,
+      pendingRasterTileCount: currentBackgroundPendingMemoryTiles.length,
       visualCellFallbackEnabled: false,
     });
   }, [
@@ -666,7 +677,7 @@ export default function useGrigliataFogOfWarPersistence({
     isManager,
     lightingRenderInput,
     normalizedGrid.cellSizePx,
-    pendingMemoryTiles.length,
+    currentBackgroundPendingMemoryTiles.length,
     skippedTokens,
     storedMemoryTiles.length,
     tokens,
@@ -840,6 +851,6 @@ export default function useGrigliataFogOfWarPersistence({
     currentVisibleCells,
     currentVisiblePolygons,
     currentTokenVisionPolygons,
-    pendingMemoryTiles,
+    pendingMemoryTiles: currentBackgroundPendingMemoryTiles,
   };
 }

@@ -256,6 +256,7 @@ const buildProps = (overrides = {}) => ({
   onDeactivateActiveBackground: null,
   isDeactivateActiveBackgroundDisabled: false,
   isTurnOrderEnabled: true,
+  isTurnOrderDataReady: true,
   turnOrderEntries: [],
   isTurnOrderStarted: false,
   activeTurnTokenId: '',
@@ -5128,6 +5129,45 @@ describe('GrigliataBoard', () => {
     expect(screen.getByTestId('turn-order-entry-current-user')).toBeInTheDocument();
     expect(screen.queryByTestId('turn-order-initiative-input-current-user')).not.toBeInTheDocument();
     expect(screen.getByTestId('turn-order-initiative-value-current-user')).toHaveTextContent('12');
+  });
+
+  test('freezes turn-order controls while the active map roster is loading', () => {
+    const onStartTurnOrder = jest.fn();
+    const onResetTurnOrder = jest.fn();
+    const onSaveTurnOrderInitiative = jest.fn();
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          isManager: true,
+          isTurnOrderDataReady: false,
+          turnOrderEntries: [{
+            tokenId: 'current-user',
+            ownerUid: 'current-user',
+            label: 'Ilya',
+            imageUrl: '',
+            tokenType: 'character',
+            initiative: 12,
+            joinedAt: null,
+            joinedAtMs: 10,
+          }],
+          onStartTurnOrder,
+          onResetTurnOrder,
+          onSaveTurnOrderInitiative,
+        })}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /reset turn order/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /start turn order/i })).toBeDisabled();
+    expect(screen.queryByTestId('turn-order-initiative-input-current-user')).not.toBeInTheDocument();
+    expect(screen.getByTestId('turn-order-initiative-value-current-user')).toHaveTextContent('12');
+
+    fireEvent.click(screen.getByRole('button', { name: /reset turn order/i }));
+    fireEvent.click(screen.getByRole('button', { name: /start turn order/i }));
+    expect(onResetTurnOrder).not.toHaveBeenCalled();
+    expect(onStartTurnOrder).not.toHaveBeenCalled();
+    expect(onSaveTurnOrderInitiative).not.toHaveBeenCalled();
   });
 
   test('shows the shared turn order panel by default and updates entries as data changes', () => {

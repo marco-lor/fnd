@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   collection,
   doc,
@@ -38,18 +38,34 @@ export function useGrigliataFogRasterMemory({
   ownerUid = '',
   enabled = true,
 }) {
+  const rasterScopeKey = enabled && backgroundId && ownerUid
+    ? `${backgroundId}::${ownerUid}`
+    : '';
   const [rasterTileState, setRasterTileState] = useState({
+    scopeKey: '',
     memoryTiles: [],
     isReady: false,
   });
+  const rasterSubscriptionGenerationRef = useRef(0);
+  const isCurrentRasterScope = rasterTileState.scopeKey === rasterScopeKey;
+  const currentMemoryTiles = isCurrentRasterScope ? rasterTileState.memoryTiles : [];
+  const isRasterFogReady = isCurrentRasterScope && rasterTileState.isReady;
 
   useEffect(() => {
+    const subscriptionGeneration = rasterSubscriptionGenerationRef.current + 1;
+    rasterSubscriptionGenerationRef.current = subscriptionGeneration;
+
     if (!enabled || !backgroundId || !ownerUid) {
-      setRasterTileState({ memoryTiles: [], isReady: false });
+      setRasterTileState({ scopeKey: '', memoryTiles: [], isReady: false });
       return undefined;
     }
 
-    setRasterTileState({ memoryTiles: [], isReady: false });
+    const subscriptionScopeKey = `${backgroundId}::${ownerUid}`;
+    setRasterTileState({
+      scopeKey: subscriptionScopeKey,
+      memoryTiles: [],
+      isReady: false,
+    });
 
     const unsubscribeRasterTiles = onSnapshot(
       query(
@@ -59,34 +75,53 @@ export function useGrigliataFogRasterMemory({
         where('rasterProfileId', '==', FOG_RASTER_PROFILE_ID)
       ),
       (snapshot) => {
+        if (rasterSubscriptionGenerationRef.current !== subscriptionGeneration) {
+          return;
+        }
+
         const memoryTiles = (snapshot.docs || [])
           .map((docSnapshot) => normalizeFogRasterMemoryTileDoc({
             id: docSnapshot.id,
             ...docSnapshot.data(),
           }))
-          .filter(Boolean)
+          .filter((tile) => (
+            tile?.backgroundId === backgroundId
+            && tile?.ownerUid === ownerUid
+          ))
           .sort(sortMemoryTiles);
 
         setRasterTileState({
+          scopeKey: subscriptionScopeKey,
           memoryTiles,
           isReady: true,
         });
       },
       (error) => {
+        if (rasterSubscriptionGenerationRef.current !== subscriptionGeneration) {
+          return;
+        }
+
         console.error('Failed to load Grigliata raster fog memory:', error);
-        setRasterTileState({ memoryTiles: [], isReady: true });
+        setRasterTileState({
+          scopeKey: subscriptionScopeKey,
+          memoryTiles: [],
+          isReady: true,
+        });
       }
     );
 
     return () => {
+      if (rasterSubscriptionGenerationRef.current === subscriptionGeneration) {
+        rasterSubscriptionGenerationRef.current += 1;
+      }
       unsubscribeRasterTiles();
     };
   }, [backgroundId, enabled, ownerUid]);
 
   return {
-    memoryTiles: rasterTileState.memoryTiles,
-    memoryTilesById: buildTileMap(rasterTileState.memoryTiles),
-    isRasterFogReady: rasterTileState.isReady,
+    memoryTiles: currentMemoryTiles,
+    memoryTilesById: buildTileMap(currentMemoryTiles),
+    isRasterFogReady,
   };
 }
 
@@ -95,11 +130,17 @@ export default function useGrigliataFogOfWar({
   currentUserId = '',
   isManager = false,
 }) {
+  const fogDocId = buildGrigliataFogOfWarDocId(backgroundId, currentUserId);
+  const legacyScopeKey = fogDocId && !isManager ? fogDocId : '';
   const [legacyFogState, setLegacyFogState] = useState({
+    scopeKey: '',
     fogOfWar: null,
     isReady: false,
   });
-  const fogDocId = buildGrigliataFogOfWarDocId(backgroundId, currentUserId);
+  const legacySubscriptionGenerationRef = useRef(0);
+  const isCurrentLegacyScope = legacyFogState.scopeKey === legacyScopeKey;
+  const currentLegacyFogOfWar = isCurrentLegacyScope ? legacyFogState.fogOfWar : null;
+  const isLegacyFogReady = isCurrentLegacyScope && legacyFogState.isReady;
   const {
     memoryTiles,
     memoryTilesById,
@@ -111,17 +152,25 @@ export default function useGrigliataFogOfWar({
   });
 
   useEffect(() => {
+    const subscriptionGeneration = legacySubscriptionGenerationRef.current + 1;
+    legacySubscriptionGenerationRef.current = subscriptionGeneration;
+
     if (!fogDocId || isManager) {
-      setLegacyFogState({ fogOfWar: null, isReady: false });
+      setLegacyFogState({ scopeKey: '', fogOfWar: null, isReady: false });
       return undefined;
     }
 
-    setLegacyFogState({ fogOfWar: null, isReady: false });
+    setLegacyFogState({ scopeKey: fogDocId, fogOfWar: null, isReady: false });
 
     const unsubscribeLegacyFog = onSnapshot(
       doc(db, GRIGLIATA_FOG_OF_WAR_COLLECTION, fogDocId),
       (snapshot) => {
+        if (legacySubscriptionGenerationRef.current !== subscriptionGeneration) {
+          return;
+        }
+
         setLegacyFogState({
+          scopeKey: fogDocId,
           fogOfWar: snapshot.exists()
             ? normalizeGrigliataFogOfWarDoc({
             id: snapshot.id,
@@ -132,22 +181,29 @@ export default function useGrigliataFogOfWar({
         });
       },
       (error) => {
+        if (legacySubscriptionGenerationRef.current !== subscriptionGeneration) {
+          return;
+        }
+
         console.error('Failed to load Grigliata fog of war:', error);
-        setLegacyFogState({ fogOfWar: null, isReady: true });
+        setLegacyFogState({ scopeKey: fogDocId, fogOfWar: null, isReady: true });
       }
     );
 
     return () => {
+      if (legacySubscriptionGenerationRef.current === subscriptionGeneration) {
+        legacySubscriptionGenerationRef.current += 1;
+      }
       unsubscribeLegacyFog();
     };
   }, [backgroundId, currentUserId, fogDocId, isManager]);
 
-  const isFogOfWarReady = legacyFogState.isReady && isRasterFogReady;
+  const isFogOfWarReady = isLegacyFogReady && isRasterFogReady;
   const fogOfWar = isFogOfWarReady && (
-    legacyFogState.fogOfWar || memoryTiles.length > 0
+    currentLegacyFogOfWar || memoryTiles.length > 0
   )
     ? {
-      ...(legacyFogState.fogOfWar || {
+      ...(currentLegacyFogOfWar || {
         id: buildGrigliataFogOfWarDocId(backgroundId, currentUserId),
         backgroundId,
         ownerUid: currentUserId,

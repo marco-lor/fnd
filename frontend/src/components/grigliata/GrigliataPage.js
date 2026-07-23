@@ -601,7 +601,8 @@ export default function GrigliataPage() {
   const autoClearingMusicSessionIdsRef = useRef(new Set());
   const activeLiveInteractionDocIdRef = useRef('');
   const liveInteractionMutationQueueRef = useRef(Promise.resolve());
-  const turnOrderRepairPendingRef = useRef(false);
+  const turnOrderRepairPendingBackgroundIdsRef = useRef(new Set());
+  const backgroundActivationPendingRef = useRef('');
   const narrationActionPendingRef = useRef(false);
   const fogBrushQueueRef = useRef([]);
   const fogBrushFlushPromiseRef = useRef(null);
@@ -947,7 +948,23 @@ export default function GrigliataPage() {
     [presentationBackgroundsById, presentationPlacements]
   );
   const canEditSceneLighting = !!editableSceneLighting && !isNarrationOverlayActive;
-  const isCombatMapChangeLocked = isNarrationOverlayActive || isTurnOrderStarted;
+  const isTurnOrderMutationPending = (
+    isTurnOrderProgressPending
+    || isTurnOrderResetPending
+    || !!turnOrderActionTokenId
+    || !!savingTurnOrderInitiativeTokenId
+  );
+  const isCombatMapActivationLocked = (
+    isNarrationOverlayActive
+    || !!activatingBackgroundId
+    || isTurnOrderMutationPending
+  );
+  const isActiveCombatMapDestructiveLocked = (
+    isNarrationOverlayActive
+    || isTurnOrderStarted
+    || isTurnOrderMutationPending
+  );
+  const canUseTurnOrderControls = !isNarrationOverlayActive && isActivePlacementsReady;
   const isNarrationActionPending = !!narrationActionBackgroundId;
   const destructiveGalleryLockBackgroundIds = useMemo(() => backgrounds.reduce((lockedBackgroundIds, background) => {
     if (!background?.id) {
@@ -958,13 +975,16 @@ export default function GrigliataPage() {
       background.turnOrderActive
       && typeof background.turnOrderActive === 'object'
     );
-    const isLockedActiveCombatMap = background.id === activeBackgroundId && isCombatMapChangeLocked;
+    const isLockedActiveCombatMap = (
+      background.id === activeBackgroundId
+      && isActiveCombatMapDestructiveLocked
+    );
     if (isLockedActiveCombatMap || hasActiveTurnOrderCursor) {
       lockedBackgroundIds.push(background.id);
     }
 
     return lockedBackgroundIds;
-  }, []), [activeBackgroundId, backgrounds, isCombatMapChangeLocked]);
+  }, []), [activeBackgroundId, backgrounds, isActiveCombatMapDestructiveLocked]);
 
   useEffect(() => {
     if (!isManager || !user?.uid || backgrounds.length < 1) {
@@ -3677,17 +3697,24 @@ export default function GrigliataPage() {
   };
 
   const handleUseBackground = async (background) => {
-    if (!isManager || !user?.uid || !background?.id) return;
-    if (isCombatMapChangeLocked) {
-      setBoardError(
-        isNarrationOverlayActive
-          ? 'Close narration before changing the combat map.'
-          : 'Use narration instead of switching the combat map during an active turn order.'
-      );
+    if (
+      !isManager
+      || !user?.uid
+      || !background?.id
+      || background.id === activeBackgroundId
+      || backgroundActivationPendingRef.current
+    ) return;
+    if (isNarrationOverlayActive) {
+      setBoardError('Close narration before changing the combat map.');
+      return;
+    }
+    if (isTurnOrderMutationPending) {
+      setBoardError('Wait for the current turn-order action to finish before changing maps.');
       return;
     }
 
     setBoardError('');
+    backgroundActivationPendingRef.current = background.id;
     setActivatingBackgroundId(background.id);
     try {
       await setDoc(doc(db, 'grigliata_state', 'current'), {
@@ -3699,7 +3726,10 @@ export default function GrigliataPage() {
       console.error('Failed to activate background:', error);
       setBoardError('Unable to activate that background.');
     } finally {
-      setActivatingBackgroundId('');
+      if (backgroundActivationPendingRef.current === background.id) {
+        backgroundActivationPendingRef.current = '';
+        setActivatingBackgroundId('');
+      }
     }
   };
 
@@ -3860,11 +3890,13 @@ export default function GrigliataPage() {
 
   const handleDeactivateActiveBackground = async () => {
     if (!isManager || !user?.uid || !activeBackgroundId) return;
-    if (isCombatMapChangeLocked) {
+    if (isActiveCombatMapDestructiveLocked) {
       setBoardError(
         isNarrationOverlayActive
           ? 'Close narration before deactivating the combat map.'
-          : 'Use narration instead of deactivating the combat map during an active turn order.'
+          : isTurnOrderStarted
+            ? 'Use narration instead of deactivating the combat map during an active turn order.'
+            : 'Wait for the current turn-order action to finish before deactivating the combat map.'
       );
       return;
     }
@@ -3962,6 +3994,7 @@ export default function GrigliataPage() {
     boardTokensById,
     buildCharacterShieldTurnEffect,
     getCharacterTurnEffectSource,
+    getActiveMapPlacementContexts,
   ]);
 
   const clearTurnOrderActiveState = useCallback(async (backgroundIdOverride = '') => {
@@ -3977,18 +4010,27 @@ export default function GrigliataPage() {
     });
   }, [activeBackgroundId, isManager, user?.uid]);
 
-  const writeTurnOrderActiveEntry = useCallback(async (entry, { preserveStartedAt = false } = {}) => {
-    if (!isManager || !user?.uid || !activeBackgroundId || !entry?.tokenId) {
+  const writeTurnOrderActiveEntry = useCallback(async (
+    entry,
+    {
+      preserveStartedAt = false,
+      backgroundId: backgroundIdOverride = '',
+      cursor: cursorOverride = null,
+    } = {}
+  ) => {
+    const targetBackgroundId = backgroundIdOverride || activeBackgroundId;
+    if (!isManager || !user?.uid || !targetBackgroundId || !entry?.tokenId) {
       return;
     }
 
     const progressState = await resolveTurnOrderProgressState(entry);
-    if (!progressState) {
+    if (!progressState || progressState.placementContext.backgroundId !== targetBackgroundId) {
       return;
     }
 
-    const nextStartedAt = preserveStartedAt && activeTurnCursor?.startedAt
-      ? activeTurnCursor.startedAt
+    const targetCursor = cursorOverride || activeTurnCursor;
+    const nextStartedAt = preserveStartedAt && targetCursor?.startedAt
+      ? targetCursor.startedAt
       : serverTimestamp();
     const {
       boardToken,
@@ -4000,7 +4042,7 @@ export default function GrigliataPage() {
     } = progressState;
     const batch = writeBatch(db);
 
-    batch.set(doc(db, 'grigliata_backgrounds', activeBackgroundId), {
+    batch.set(doc(db, 'grigliata_backgrounds', targetBackgroundId), {
       turnOrderActive: buildTurnOrderActiveState(entry, nextStartedAt),
       updatedAt: serverTimestamp(),
       updatedBy: user.uid,
@@ -4009,7 +4051,7 @@ export default function GrigliataPage() {
       doc(db, 'grigliata_token_placements', placementContext.placementId),
       {
         ...buildPlacementWritePayload({
-          backgroundId: activeBackgroundId,
+          backgroundId: targetBackgroundId,
           tokenId: entry.tokenId,
           ownerUid: placementContext.ownerUid,
           col: placementContext.col,
@@ -4065,7 +4107,7 @@ export default function GrigliataPage() {
     await batch.commit();
   }, [
     activeBackgroundId,
-    activeTurnCursor?.startedAt,
+    activeTurnCursor,
     buildPlacementWritePayload,
     currentUserId,
     isManager,
@@ -4074,10 +4116,11 @@ export default function GrigliataPage() {
   ]);
 
   const handleStartTurnOrder = async () => {
-    if (!isManager || !user?.uid || !activeBackgroundId) {
+    if (!isManager || !user?.uid || !activeBackgroundId || !isActivePlacementsReady) {
       return;
     }
 
+    const targetBackgroundId = activeBackgroundId;
     const firstEntry = getFirstTurnOrderEntry(turnOrderEntries);
     if (!firstEntry) {
       return;
@@ -4086,7 +4129,9 @@ export default function GrigliataPage() {
     setBoardError('');
     setIsTurnOrderProgressPending(true);
     try {
-      await writeTurnOrderActiveEntry(firstEntry);
+      await writeTurnOrderActiveEntry(firstEntry, {
+        backgroundId: targetBackgroundId,
+      });
     } catch (error) {
       console.error('Failed to start turn order:', error);
       setBoardError('Unable to start the turn order right now.');
@@ -4096,18 +4141,30 @@ export default function GrigliataPage() {
   };
 
   const handleAdvanceTurnOrder = async () => {
-    if (!isManager || !user?.uid || !activeBackgroundId || !isTurnOrderStarted) {
+    if (
+      !isManager
+      || !user?.uid
+      || !activeBackgroundId
+      || !isActivePlacementsReady
+      || !isTurnOrderStarted
+    ) {
       return;
     }
 
+    const targetBackgroundId = activeBackgroundId;
+    const targetTurnCursor = activeTurnCursor;
     setBoardError('');
     setIsTurnOrderProgressPending(true);
     try {
       const nextEntry = getNextTurnOrderEntry(turnOrderEntries, activeTurnCursor);
       if (!nextEntry) {
-        await clearTurnOrderActiveState();
+        await clearTurnOrderActiveState(targetBackgroundId);
       } else {
-        await writeTurnOrderActiveEntry(nextEntry, { preserveStartedAt: true });
+        await writeTurnOrderActiveEntry(nextEntry, {
+          preserveStartedAt: true,
+          backgroundId: targetBackgroundId,
+          cursor: targetTurnCursor,
+        });
       }
     } catch (error) {
       console.error('Failed to advance turn order:', error);
@@ -4118,12 +4175,13 @@ export default function GrigliataPage() {
   };
 
   const handleResetTurnOrder = async () => {
-    if (!isManager || !user?.uid || !activeBackgroundId) return;
+    if (!isManager || !user?.uid || !activeBackgroundId || !isActivePlacementsReady) return;
 
+    const targetBackgroundId = activeBackgroundId;
     const targetPlacements = [...activePlacementsById.values()]
       .map((placement) => {
         const resolvedTokenId = placement?.tokenId || placement?.ownerUid || '';
-        if (!resolvedTokenId || placement?.backgroundId !== activeBackgroundId) {
+        if (!resolvedTokenId || placement?.backgroundId !== targetBackgroundId) {
           return null;
         }
 
@@ -4147,7 +4205,7 @@ export default function GrigliataPage() {
           tokenType,
           hasShieldTurnEffect,
           ownerUid: placement.ownerUid,
-          placementId: placement.id || buildPlacementDocId(activeBackgroundId, resolvedTokenId),
+          placementId: placement.id || buildPlacementDocId(targetBackgroundId, resolvedTokenId),
           col: Number.isFinite(placement?.col) ? placement.col : 0,
           row: Number.isFinite(placement?.row) ? placement.row : 0,
           isVisibleToPlayers: placement?.isVisibleToPlayers !== false,
@@ -4185,7 +4243,7 @@ export default function GrigliataPage() {
           batch.set(
             doc(db, 'grigliata_token_placements', placement.placementId),
             buildTurnOrderRemovalPlacementWrite({
-              backgroundId: activeBackgroundId,
+              backgroundId: targetBackgroundId,
               tokenId: placement.tokenId,
               ownerUid: placement.ownerUid,
               col: placement.col,
@@ -4247,7 +4305,7 @@ export default function GrigliataPage() {
         await batch.commit();
       }
 
-      await clearTurnOrderActiveState();
+      await clearTurnOrderActiveState(targetBackgroundId);
     } catch (error) {
       console.error('Failed to reset turn order:', error);
       setBoardError('Unable to reset the turn order right now.');
@@ -4257,10 +4315,11 @@ export default function GrigliataPage() {
   };
 
   const handleJoinTurnOrder = async (tokenId, nextInitiative = 0) => {
-    if (!currentUserId || !activeBackgroundId || !tokenId) {
+    if (!currentUserId || !activeBackgroundId || !isActivePlacementsReady || !tokenId) {
       return false;
     }
 
+    const targetBackgroundId = activeBackgroundId;
     const normalizedInitiative = Number(nextInitiative);
     if (!Number.isInteger(normalizedInitiative)) {
       setBoardError('Initiative must be a whole number.');
@@ -4270,6 +4329,7 @@ export default function GrigliataPage() {
     const targetPlacement = getActiveMapPlacementContexts([tokenId])[0];
     if (
       !targetPlacement
+      || targetPlacement.backgroundId !== targetBackgroundId
       || !canCurrentUserManageTurnOrderPlacement(targetPlacement)
       || (!isManager && targetPlacement.isVisibleToPlayers === false)
       || targetPlacement.isInTurnOrder
@@ -4283,7 +4343,7 @@ export default function GrigliataPage() {
       await setDoc(
         doc(db, 'grigliata_token_placements', targetPlacement.placementId),
         buildPlacementWritePayload({
-          backgroundId: activeBackgroundId,
+          backgroundId: targetBackgroundId,
           tokenId,
           ownerUid: targetPlacement.ownerUid,
           col: targetPlacement.col,
@@ -4309,6 +4369,8 @@ export default function GrigliataPage() {
   };
 
   const handleResolveTurnOrderInitiativeRoll = useCallback(async (tokenId) => {
+    if (!isActivePlacementsReady) return null;
+
     const targetToken = boardTokens.find((token) => token?.tokenId === tokenId);
     if (!targetToken) return null;
 
@@ -4353,16 +4415,18 @@ export default function GrigliataPage() {
       Parametri: characterData?.Parametri,
       dieLabel,
     });
-  }, [boardTokens, currentUserId, isManager, loadDiceMetadata, userData]);
+  }, [boardTokens, currentUserId, isActivePlacementsReady, isManager, loadDiceMetadata, userData]);
 
   const handleLeaveTurnOrder = async (tokenId) => {
-    if (!currentUserId || !activeBackgroundId || !tokenId) {
+    if (!currentUserId || !activeBackgroundId || !isActivePlacementsReady || !tokenId) {
       return;
     }
 
+    const targetBackgroundId = activeBackgroundId;
     const targetPlacement = getActiveMapPlacementContexts([tokenId])[0];
     if (
       !targetPlacement
+      || targetPlacement.backgroundId !== targetBackgroundId
       || !canCurrentUserManageTurnOrderPlacement(targetPlacement)
       || (!isManager && targetPlacement.isVisibleToPlayers === false)
       || !targetPlacement.isInTurnOrder
@@ -4376,7 +4440,7 @@ export default function GrigliataPage() {
       await setDoc(
         doc(db, 'grigliata_token_placements', targetPlacement.placementId),
         buildTurnOrderRemovalPlacementWrite({
-          backgroundId: activeBackgroundId,
+          backgroundId: targetBackgroundId,
           tokenId,
           ownerUid: targetPlacement.ownerUid,
           col: targetPlacement.col,
@@ -4400,10 +4464,11 @@ export default function GrigliataPage() {
   };
 
   const handleSaveTurnOrderInitiative = async (tokenId, nextInitiative) => {
-    if (!currentUserId || !activeBackgroundId || !tokenId) {
+    if (!currentUserId || !activeBackgroundId || !isActivePlacementsReady || !tokenId) {
       return false;
     }
 
+    const targetBackgroundId = activeBackgroundId;
     const normalizedInitiative = Number(nextInitiative);
     if (!Number.isInteger(normalizedInitiative)) {
       setBoardError('Initiative must be a whole number.');
@@ -4413,6 +4478,7 @@ export default function GrigliataPage() {
     const targetPlacement = getActiveMapPlacementContexts([tokenId])[0];
     if (
       !targetPlacement
+      || targetPlacement.backgroundId !== targetBackgroundId
       || !targetPlacement.isInTurnOrder
       || !canCurrentUserManageTurnOrderPlacement(targetPlacement)
       || (!isManager && targetPlacement.isVisibleToPlayers === false)
@@ -4426,7 +4492,7 @@ export default function GrigliataPage() {
       await setDoc(
         doc(db, 'grigliata_token_placements', targetPlacement.placementId),
         buildPlacementWritePayload({
-          backgroundId: activeBackgroundId,
+          backgroundId: targetBackgroundId,
           tokenId,
           ownerUid: targetPlacement.ownerUid,
           col: targetPlacement.col,
@@ -4459,37 +4525,43 @@ export default function GrigliataPage() {
       || !isActivePlacementsReady
       || !isTurnOrderStarted
       || !!activeTurnEntry
-      || turnOrderRepairPendingRef.current
+      || turnOrderRepairPendingBackgroundIdsRef.current.has(activeBackgroundId)
       || isTurnOrderResetPending
     ) {
       return undefined;
     }
 
     let isActive = true;
+    const repairBackgroundId = activeBackgroundId;
+    const repairTurnCursor = activeTurnCursor;
 
     const repairTurnOrderState = async () => {
       setBoardError('');
-      turnOrderRepairPendingRef.current = true;
+      turnOrderRepairPendingBackgroundIdsRef.current.add(repairBackgroundId);
       try {
         if (turnOrderEntries.length < 1) {
-          await clearTurnOrderActiveState();
+          await clearTurnOrderActiveState(repairBackgroundId);
           return;
         }
 
-        const nextEntry = getNextTurnOrderEntry(turnOrderEntries, activeTurnCursor);
+        const nextEntry = getNextTurnOrderEntry(turnOrderEntries, repairTurnCursor);
         if (!nextEntry) {
-          await clearTurnOrderActiveState();
+          await clearTurnOrderActiveState(repairBackgroundId);
           return;
         }
 
-        await writeTurnOrderActiveEntry(nextEntry, { preserveStartedAt: true });
+        await writeTurnOrderActiveEntry(nextEntry, {
+          preserveStartedAt: true,
+          backgroundId: repairBackgroundId,
+          cursor: repairTurnCursor,
+        });
       } catch (error) {
         console.error('Failed to repair turn order state:', error);
         if (isActive) {
           setBoardError('Unable to repair the active turn order right now.');
         }
       } finally {
-        turnOrderRepairPendingRef.current = false;
+        turnOrderRepairPendingBackgroundIdsRef.current.delete(repairBackgroundId);
       }
     };
 
@@ -4667,7 +4739,10 @@ export default function GrigliataPage() {
       background.turnOrderActive
       && typeof background.turnOrderActive === 'object'
     );
-    if ((background.id === activeBackgroundId && isCombatMapChangeLocked) || hasActiveTurnOrderCursor) {
+    if (
+      (background.id === activeBackgroundId && isActiveCombatMapDestructiveLocked)
+      || hasActiveTurnOrderCursor
+    ) {
       setBoardError(
         background.id === activeBackgroundId
           ? (isNarrationOverlayActive
@@ -4710,7 +4785,10 @@ export default function GrigliataPage() {
       background.turnOrderActive
       && typeof background.turnOrderActive === 'object'
     );
-    if ((background.id === activeBackgroundId && isCombatMapChangeLocked) || hasActiveTurnOrderCursor) {
+    if (
+      (background.id === activeBackgroundId && isActiveCombatMapDestructiveLocked)
+      || hasActiveTurnOrderCursor
+    ) {
       setBoardError(
         background.id === activeBackgroundId
           ? (isNarrationOverlayActive
@@ -6323,21 +6401,22 @@ export default function GrigliataPage() {
                 onToggleGridVisibility={isManager && !isNarrationOverlayActive ? handleToggleGridVisibility : null}
                 isGridVisibilityToggleDisabled={!activeBackgroundId || gridVisibilityUpdateBackgroundId === activeBackgroundId || isNarrationOverlayActive}
                 onDeactivateActiveBackground={isManager ? handleDeactivateActiveBackground : null}
-                isDeactivateActiveBackgroundDisabled={!activeBackgroundId || isActiveBackgroundDeactivationPending || isCombatMapChangeLocked}
+                isDeactivateActiveBackgroundDisabled={!activeBackgroundId || isActiveBackgroundDeactivationPending || isActiveCombatMapDestructiveLocked}
                 isTurnOrderEnabled={isTurnOrderEnabled}
+                isTurnOrderDataReady={isActivePlacementsReady}
                 turnOrderEntries={boardRenderTurnOrderEntries}
                 isTurnOrderStarted={isTurnOrderStarted}
                 activeTurnTokenId={boardRenderActiveTurnTokenId}
-                onStartTurnOrder={isManager && !isNarrationOverlayActive ? handleStartTurnOrder : null}
-                onAdvanceTurnOrder={isManager && !isNarrationOverlayActive ? handleAdvanceTurnOrder : null}
+                onStartTurnOrder={isManager && canUseTurnOrderControls ? handleStartTurnOrder : null}
+                onAdvanceTurnOrder={isManager && canUseTurnOrderControls ? handleAdvanceTurnOrder : null}
                 isTurnOrderProgressPending={isTurnOrderProgressPending}
-                onResetTurnOrder={isManager && !isNarrationOverlayActive ? handleResetTurnOrder : null}
+                onResetTurnOrder={isManager && canUseTurnOrderControls ? handleResetTurnOrder : null}
                 isTurnOrderResetPending={isTurnOrderResetPending}
-                onJoinTurnOrder={isNarrationOverlayActive ? null : handleJoinTurnOrder}
-                onResolveTurnOrderInitiativeRoll={isNarrationOverlayActive ? null : handleResolveTurnOrderInitiativeRoll}
-                onLeaveTurnOrder={isNarrationOverlayActive ? null : handleLeaveTurnOrder}
+                onJoinTurnOrder={canUseTurnOrderControls ? handleJoinTurnOrder : null}
+                onResolveTurnOrderInitiativeRoll={canUseTurnOrderControls ? handleResolveTurnOrderInitiativeRoll : null}
+                onLeaveTurnOrder={canUseTurnOrderControls ? handleLeaveTurnOrder : null}
                 turnOrderActionTokenId={turnOrderActionTokenId}
-                onSaveTurnOrderInitiative={isNarrationOverlayActive ? null : handleSaveTurnOrderInitiative}
+                onSaveTurnOrderInitiative={canUseTurnOrderControls ? handleSaveTurnOrderInitiative : null}
                 savingTurnOrderInitiativeTokenId={savingTurnOrderInitiativeTokenId}
                 onAdjustGridSize={isManager && !isNarrationOverlayActive ? handleAdjustActiveGridSize : null}
                 isGridSizeAdjustmentDisabled={!activeBackgroundId || isNarrationOverlayActive}
@@ -6562,7 +6641,7 @@ export default function GrigliataPage() {
                     clearingTokensBackgroundId={clearingTokensBackgroundId}
                     folderMutationId={folderMutationId}
                     movingBackgroundFolderId={movingBackgroundFolderId}
-                    isUseBackgroundDisabled={isCombatMapChangeLocked}
+                    isUseBackgroundDisabled={isCombatMapActivationLocked}
                     destructiveActionLockedBackgroundIds={destructiveGalleryLockBackgroundIds}
                     onSelectedFolderIdChange={setSelectedGalleryFolderId}
                     onUploadBackgroundFiles={handleUploadBackgroundFiles}
