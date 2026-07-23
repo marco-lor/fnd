@@ -15,14 +15,16 @@ test('seed trigger summary allows only bounded readiness activity', () => {
     invocation('europe-west8-updateTotParameters'),
     invocation('europe-west8-updateTotParameters'),
     invocation('europe-west8-syncUserDirectory'),
+    invocation('europe-west8-syncUserDerivedState'),
     invocation('europe-west1-clientFirebaseConfig'),
   ].join('\n'));
 
-  assert.equal(summary.backgroundInvocations, 3);
+  assert.equal(summary.backgroundInvocations, 4);
   assert.equal(summary.cleanupInvocations, 0);
   assert.deepEqual(summary.counts, {
     'europe-west8-updateTotParameters': 2,
     'europe-west8-syncUserDirectory': 1,
+    'europe-west8-syncUserDerivedState': 1,
     'europe-west1-clientFirebaseConfig': 1,
   });
 });

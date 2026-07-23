@@ -311,6 +311,7 @@ const run = async () => {
     'FATINS_FIREBASE_MESSAGING_SENDER_ID=000000000000',
     'FATINS_FIREBASE_APP_ID=1:000000000000:web:performance',
     'FATINS_FIREBASE_MEASUREMENT_ID=',
+    'FND_TASK06_CONSOLIDATED_OWNER=1',
     '',
   ].join('\n'), 'utf8');
 
@@ -349,6 +350,7 @@ const run = async () => {
         FATINS_FIREBASE_MESSAGING_SENDER_ID: '000000000000',
         FATINS_FIREBASE_APP_ID: '1:000000000000:web:performance',
         FATINS_FIREBASE_MEASUREMENT_ID: '',
+        FND_TASK06_CONSOLIDATED_OWNER: '1',
       },
       stdio: ['ignore', emulatorLog, emulatorLog],
       shell: false,

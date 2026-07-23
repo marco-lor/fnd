@@ -20,6 +20,16 @@ import {
 } from '../../performance/firestore';
 import { ref as storageRef, deleteObject } from 'firebase/storage';
 import { uploadCacheableImage } from '../common/imageStorage';
+import { getCallable } from '../../data/functions/callableRegistry';
+import {
+  callBackendOperationAndWait,
+  TASK06_LOCAL_CANDIDATE,
+} from '../../data/functions/backendOperationClient';
+import {
+  runWithDurableOperationIntent,
+} from '../../data/functions/backendOperationIntentStore';
+
+const deleteNpcV2 = getCallable('deleteNpcV2');
 
 const MAX_NPC_IMAGE_BYTES = 5 * 1024 * 1024;
 const HOVER_CARD_WIDTH = 344;
@@ -975,47 +985,63 @@ export default function NpcSidebar({
     closeNpcHover();
 
     const path = getNpcStoragePath(npc);
-    if (!path) {
+    if (!TASK06_LOCAL_CANDIDATE && !path) {
       setNpcError('Cannot delete NPC image: missing storage path.');
       return;
     }
 
     setDeletingNpcId(npc.id);
     try {
-      await deleteObject(storageRef(storage, path));
-    } catch (error) {
-      console.error('Delete NPC image failed:', error);
-      setNpcError('Image deletion failed. NPC document was not deleted.');
-      setDeletingNpcId('');
-      return;
-    }
-
-    try {
-      const linkedMarkersQuery = query(
-        collection(db, 'map_markers'),
-        where('npcId', '==', npc.id)
-      );
-      const linkedMarkersSnapshot = await getDocs(linkedMarkersQuery);
-
-      if (!linkedMarkersSnapshot.empty) {
-        const batch = writeBatch(db);
-        linkedMarkersSnapshot.forEach((markerDoc) => {
-          batch.delete(markerDoc.ref);
+      if (TASK06_LOCAL_CANDIDATE) {
+        await runWithDurableOperationIntent({
+          actorUid: user?.uid,
+          kind: 'delete-npc',
+          intent: { npcId: npc.id },
+          invoke: (operationId) => callBackendOperationAndWait(
+            deleteNpcV2,
+            { npcId: npc.id },
+            { operationId }
+          ),
         });
-        await batch.commit();
+      } else {
+        try {
+          await deleteObject(storageRef(storage, path));
+        } catch (error) {
+          console.error('Delete NPC image failed:', error);
+          setNpcError('Image deletion failed. NPC document was not deleted.');
+          return;
+        }
+
+        try {
+          const linkedMarkersQuery = query(
+            collection(db, 'map_markers'),
+            where('npcId', '==', npc.id)
+          );
+          const linkedMarkersSnapshot = await getDocs(linkedMarkersQuery);
+
+          if (!linkedMarkersSnapshot.empty) {
+            const batch = writeBatch(db);
+            linkedMarkersSnapshot.forEach((markerDoc) => {
+              batch.delete(markerDoc.ref);
+            });
+            await batch.commit();
+          }
+        } catch (error) {
+          console.error('Delete linked NPC markers failed after image deletion:', error);
+          setNpcError('NPC image deleted, but linked map marker cleanup failed. NPC document was not deleted.');
+          return;
+        }
+
+        try {
+          await deleteDoc(doc(db, 'echi_npcs', npc.id));
+        } catch (error) {
+          console.error('Delete NPC document failed after image deletion:', error);
+          setNpcError('Image and linked map markers deleted, but NPC document deletion failed.');
+        }
       }
     } catch (error) {
-      console.error('Delete linked NPC markers failed after image deletion:', error);
-      setNpcError('NPC image deleted, but linked map marker cleanup failed. NPC document was not deleted.');
-      setDeletingNpcId('');
-      return;
-    }
-
-    try {
-      await deleteDoc(doc(db, 'echi_npcs', npc.id));
-    } catch (error) {
-      console.error('Delete NPC document failed after image deletion:', error);
-      setNpcError('Image and linked map markers deleted, but NPC document deletion failed.');
+      console.error('Delete NPC operation failed:', error);
+      setNpcError('NPC deletion could not be completed. You can retry safely.');
     } finally {
       setDeletingNpcId('');
     }

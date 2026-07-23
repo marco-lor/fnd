@@ -1,5 +1,6 @@
 import {onCall, HttpsError} from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
+import {FieldValue} from "firebase-admin/firestore";
 
 type SpawnGrigliataCustomTokenInstancePayload = {
   templateTokenId: string;
@@ -70,71 +71,96 @@ export const spawnGrigliataCustomTokenInstance = onCall<SpawnGrigliataCustomToke
     }
 
     const db = admin.firestore();
-    const requesterSnap = await db.doc(`users/${requesterUid}`).get();
-    const isManager = isManagerRole(requesterSnap.data()?.role);
-
+    const requesterRef = db.doc(`users/${requesterUid}`);
     const templateRef = db.doc(`grigliata_tokens/${templateTokenId}`);
-    const templateSnap = await templateRef.get();
-    if (!templateSnap.exists) {
-      throw new HttpsError("not-found", "Custom token template not found.");
-    }
-
-    const templateData = templateSnap.data() || {};
-    const ownerUid = asNonEmptyString(templateData.ownerUid);
-    const tokenType = asNonEmptyString(templateData.tokenType);
-    const customTokenRole = asNonEmptyString(templateData.customTokenRole);
-    if (!ownerUid || tokenType !== "custom" || customTokenRole === "instance") {
-      throw new HttpsError("failed-precondition", "Only custom token templates can be spawned.");
-    }
-
-    if (requesterUid !== ownerUid && !isManager) {
-      throw new HttpsError("permission-denied", "You can only spawn your own custom token templates.");
-    }
-
     const tokenRef = db.collection("grigliata_tokens").doc();
     const placementId = `${backgroundId}__${tokenRef.id}`;
     const placementRef = db.doc(`grigliata_token_placements/${placementId}`);
-    const now = admin.firestore.FieldValue.serverTimestamp();
-    const label = asNonEmptyString(templateData.label) || "Custom Token";
-    const imageUrl = asNonEmptyString(templateData.imageUrl);
-
-    const tokenPayload = {
-      ownerUid,
-      characterId: asNonEmptyString(templateData.characterId),
-      label,
-      imageUrl,
-      imagePath: asNonEmptyString(templateData.imagePath),
-      tokenType: "custom",
-      customTokenRole: "instance",
-      customTemplateId: templateTokenId,
-      imageSource: "uploaded",
-      notes: asNonEmptyString(templateData.notes),
-      stats: normalizeCustomStats(templateData.stats),
-      createdAt: now,
-      createdBy: requesterUid,
-      updatedAt: now,
-      updatedBy: requesterUid,
-    };
-
-    const placementPayload = {
-      backgroundId,
-      tokenId: tokenRef.id,
-      ownerUid,
-      label,
-      imageUrl,
-      col,
-      row,
-      isVisibleToPlayers: true,
-      isDead: false,
-      statuses: [],
-      updatedAt: now,
-      updatedBy: requesterUid,
-    };
-
-    const batch = db.batch();
-    batch.set(tokenRef, tokenPayload);
-    batch.set(placementRef, placementPayload);
-    await batch.commit();
+    await db.runTransaction(async (transaction) => {
+      const [requester, template] = await transaction.getAll(
+        requesterRef,
+        templateRef
+      );
+      if (
+        !requester.exists ||
+        requester.get("deletionState") === "pending"
+      ) {
+        throw new HttpsError(
+          "permission-denied",
+          "An active user profile is required."
+        );
+      }
+      if (!template.exists) {
+        throw new HttpsError(
+          "not-found",
+          "Custom token template not found."
+        );
+      }
+      if (template.get("task06Deletion.status") === "pending") {
+        throw new HttpsError(
+          "failed-precondition",
+          "This custom token template is pending deletion."
+        );
+      }
+      const templateData = template.data() || {};
+      const ownerUid = asNonEmptyString(templateData.ownerUid);
+      const tokenType = asNonEmptyString(templateData.tokenType);
+      const customTokenRole = asNonEmptyString(
+        templateData.customTokenRole
+      );
+      if (
+        !ownerUid ||
+        tokenType !== "custom" ||
+        customTokenRole === "instance"
+      ) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Only custom token templates can be spawned."
+        );
+      }
+      const isManager = isManagerRole(requester.get("role"));
+      if (requesterUid !== ownerUid && !isManager) {
+        throw new HttpsError(
+          "permission-denied",
+          "You can only spawn your own custom token templates."
+        );
+      }
+      const now = FieldValue.serverTimestamp();
+      const label = asNonEmptyString(templateData.label) ||
+        "Custom Token";
+      const imageUrl = asNonEmptyString(templateData.imageUrl);
+      transaction.create(tokenRef, {
+        ownerUid,
+        characterId: asNonEmptyString(templateData.characterId),
+        label,
+        imageUrl,
+        imagePath: asNonEmptyString(templateData.imagePath),
+        tokenType: "custom",
+        customTokenRole: "instance",
+        customTemplateId: templateTokenId,
+        imageSource: "uploaded",
+        notes: asNonEmptyString(templateData.notes),
+        stats: normalizeCustomStats(templateData.stats),
+        createdAt: now,
+        createdBy: requesterUid,
+        updatedAt: now,
+        updatedBy: requesterUid,
+      });
+      transaction.create(placementRef, {
+        backgroundId,
+        tokenId: tokenRef.id,
+        ownerUid,
+        label,
+        imageUrl,
+        col,
+        row,
+        isVisibleToPlayers: true,
+        isDead: false,
+        statuses: [],
+        updatedAt: now,
+        updatedBy: requesterUid,
+      });
+    });
 
     return {
       success: true,

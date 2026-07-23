@@ -1,9 +1,8 @@
 // DM Foes Hub: create, list, expand, edit, delete foes in Firestore "foes" collection
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { db } from '../firebaseConfig';
+import { auth, db } from '../firebaseConfig';
 import { storage } from '../firebaseStorage';
-import { functions } from '../firebaseFunctions';
 import {
   addDoc,
   collection,
@@ -14,13 +13,25 @@ import {
   updateDoc,
 } from '../../performance/firestore';
 import { ref as storageRef, deleteObject } from 'firebase/storage';
-import { httpsCallable } from 'firebase/functions';
 import { FiPlus, FiChevronDown, FiChevronRight, FiEdit2, FiTrash2, FiX, FiCopy } from 'react-icons/fi';
 import { computeParamTotals, deepClone, Pill, SectionTitle } from './elements/utils';
 import RadarChart from './elements/RadarChart';
 import { FoeFormModal } from './elements/lazyFoeEditors';
 import { uploadCacheableImage } from '../common/imageStorage';
 import { getSchema } from '../../data/configRepository';
+import { getCallable } from '../../data/functions/callableRegistry';
+import {
+  TASK06_LOCAL_CANDIDATE,
+} from '../../data/functions/backendOperationClient';
+import {
+  runWithDurableOperationIntent,
+} from '../../data/functions/backendOperationIntentStore';
+
+const duplicateFoeWithAssets = getCallable(
+  TASK06_LOCAL_CANDIDATE
+    ? 'duplicateFoeWithAssetsV2'
+    : 'duplicateFoeWithAssets'
+);
 
 // Allow only persisted HTTP(S) image URLs when reading/saving.
 // This prevents storing temporary blob:/data: URLs in Firestore.
@@ -263,6 +274,14 @@ const FoesHub = () => {
     setDupOpen(true);
   };
 
+  const closeDuplicateModal = () => {
+    if (dupBusy) return;
+    setDupOpen(false);
+    setDupTarget(null);
+    setDupName('');
+    setDupError('');
+  };
+
   const handleDelete = async (foe) => {
     if (!foe?.id) return;
     const ok = window.confirm(`Eliminare definitivamente "${foe.name || foe.id}"?`);
@@ -430,8 +449,23 @@ const FoesHub = () => {
     try {
       setDupBusy(true);
       setDupError('');
-      const callable = httpsCallable(functions, 'duplicateFoeWithAssets');
-  await callable({ sourceFoeId: dupTarget.id, newFoeName: dupName.trim() });
+      const duplicateRequest = {
+        sourceFoeId: dupTarget.id,
+        newFoeName: dupName.trim(),
+      };
+      if (TASK06_LOCAL_CANDIDATE) {
+        await runWithDurableOperationIntent({
+          actorUid: auth.currentUser?.uid,
+          kind: 'duplicate-foe',
+          intent: duplicateRequest,
+          invoke: (operationId) => duplicateFoeWithAssets({
+            ...duplicateRequest,
+            operationId,
+          }),
+        });
+      } else {
+        await duplicateFoeWithAssets(duplicateRequest);
+      }
       // Optional: we could resolve URLs for previews here using getDownloadURL on returned paths
       // but no need to mutate state; the Firestore onSnapshot will include the new doc
       setDupOpen(false);
@@ -495,7 +529,7 @@ const FoesHub = () => {
           <div className="w-full max-w-md rounded-xl border border-slate-700/60 bg-slate-900/95 p-4">
             <div className="flex items-start justify-between mb-2">
               <div className="text-white font-semibold">Duplicate foe</div>
-              <button className="text-slate-300 hover:text-white" onClick={() => setDupOpen(false)} aria-label="close"><FiX /></button>
+              <button className="text-slate-300 hover:text-white" onClick={closeDuplicateModal} aria-label="close"><FiX /></button>
             </div>
             {dupError && <div className="mb-2 text-sm text-red-300">{dupError}</div>}
             <label className="block mb-3">
@@ -503,7 +537,7 @@ const FoesHub = () => {
               <input disabled={dupBusy} className="w-full rounded-lg bg-slate-900/60 px-3 py-2 text-white border border-slate-700/60 focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={dupName} onChange={(e) => setDupName(e.target.value)} />
             </label>
             <div className="flex items-center justify-end gap-2">
-              <button disabled={dupBusy} onClick={() => setDupOpen(false)} className="px-3 py-1 rounded-md border border-slate-400/40 text-slate-200 hover:bg-slate-500/10 text-[12px]">Cancel</button>
+              <button disabled={dupBusy} onClick={closeDuplicateModal} className="px-3 py-1 rounded-md border border-slate-400/40 text-slate-200 hover:bg-slate-500/10 text-[12px]">Cancel</button>
               <button disabled={dupBusy || !dupName.trim()} onClick={handleDuplicateConfirm} className="inline-flex items-center gap-2 rounded-lg bg-amber-600/80 hover:bg-amber-600 text-white px-3 py-1 border border-amber-400/40 text-[12px]">
                 <FiCopy /> {dupBusy ? 'Duplicating…' : 'Duplicate'}
               </button>

@@ -27,13 +27,18 @@ import {
   where,
   writeBatch,
 } from '../../performance/firestore';
-import { httpsCallable } from 'firebase/functions';
 import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
 import { useAuth } from '../../AuthContext';
 import { auth, db } from '../firebaseConfig';
 import { storage } from '../firebaseStorage';
-import { functions } from '../firebaseFunctions';
 import { uploadCacheableImage } from '../common/imageStorage';
+import { getCallable } from '../../data/functions/callableRegistry';
+import {
+  TASK06_LOCAL_CANDIDATE,
+} from '../../data/functions/backendOperationClient';
+import {
+  runWithDurableOperationIntent,
+} from '../../data/functions/backendOperationIntentStore';
 import {
   buildGrigliataLightingSummary,
   GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION,
@@ -374,10 +379,6 @@ const LEGACY_PLACEMENT_VISIBILITY_CLEANUP_FIELD = 'legacyPlacementVisibilityClea
 const GRIGLIATA_HIDDEN_BACKGROUND_IDS_FIELD = 'grigliata_hidden_background_ids';
 const GRIGLIATA_HIDDEN_TOKEN_IDS_BY_BACKGROUND_FIELD = 'grigliata_hidden_token_ids_by_background';
 const GRIGLIATA_SHARE_INTERACTIONS_FIELD = 'grigliata_share_interactions';
-const GRIGLIATA_CUSTOM_TOKEN_DELETE_FUNCTION = 'deleteGrigliataCustomToken';
-const GRIGLIATA_CUSTOM_TOKEN_SPAWN_FUNCTION = 'spawnGrigliataCustomTokenInstance';
-const GRIGLIATA_CUSTOM_TOKEN_UPDATE_FUNCTION = 'updateGrigliataCustomTokenTemplate';
-const GRIGLIATA_SPAWN_FOE_TOKEN_FUNCTION = 'spawnGrigliataFoeToken';
 
 const clampNumber = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -390,10 +391,10 @@ const normalizeSceneLightingSettings = (scene = {}) => {
   };
 };
 
-const deleteGrigliataCustomTokenCallable = httpsCallable(functions, GRIGLIATA_CUSTOM_TOKEN_DELETE_FUNCTION);
-const spawnGrigliataCustomTokenInstanceCallable = httpsCallable(functions, GRIGLIATA_CUSTOM_TOKEN_SPAWN_FUNCTION);
-const spawnGrigliataFoeTokenCallable = httpsCallable(functions, GRIGLIATA_SPAWN_FOE_TOKEN_FUNCTION);
-const updateGrigliataCustomTokenTemplateCallable = httpsCallable(functions, GRIGLIATA_CUSTOM_TOKEN_UPDATE_FUNCTION);
+const deleteGrigliataCustomTokenCallable = getCallable('deleteGrigliataCustomToken');
+const spawnGrigliataCustomTokenInstanceCallable = getCallable('spawnGrigliataCustomTokenInstance');
+const spawnGrigliataFoeTokenCallable = getCallable('spawnGrigliataFoeToken');
+const updateGrigliataCustomTokenTemplateCallable = getCallable('updateGrigliataCustomTokenTemplate');
 
 const buildFogBrushQueueKey = ({
   backgroundId,
@@ -923,6 +924,20 @@ export default function GrigliataPage() {
       .filter((token) => token?.tokenId && token?.ownerUid === currentUserId)
       .map((token) => [token.tokenId, token])
   ), [currentUserId, currentUserToken, customUserTokens]);
+  const deleteCustomTokenWithCandidateReceipt = useCallback(async ({ tokenId }) => {
+    if (!TASK06_LOCAL_CANDIDATE) {
+      return deleteGrigliataCustomTokenCallable({ tokenId });
+    }
+    return runWithDurableOperationIntent({
+      actorUid: currentUserId,
+      kind: 'delete-custom-token',
+      intent: { tokenId },
+      invoke: (operationId) => deleteGrigliataCustomTokenCallable({
+        tokenId,
+        operationId,
+      }),
+    });
+  }, [currentUserId]);
   const {
     buildPlacementWritePayload,
     buildTurnOrderRemovalPlacementWrite,
@@ -945,7 +960,7 @@ export default function GrigliataPage() {
     buildHiddenPlacementSettingsPayload,
     isLegacyHiddenPlacementToken,
     isCustomTokenInstance,
-    deleteCustomToken: deleteGrigliataCustomTokenCallable,
+    deleteCustomToken: deleteCustomTokenWithCandidateReceipt,
     placementRuleSafeBatchSize: PLACEMENT_RULE_SAFE_BATCH_SIZE,
     placementAndUserSettingsBatchSize: PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE,
     placementDeleteBatchSize: PLACEMENT_DELETE_BATCH_SIZE,
@@ -3286,7 +3301,7 @@ export default function GrigliataPage() {
     setBoardError('');
     setDeletingCustomTokenId(tokenId);
     try {
-      await deleteGrigliataCustomTokenCallable({ tokenId });
+      await deleteCustomTokenWithCandidateReceipt({ tokenId });
       return true;
     } catch (error) {
       console.error('Failed to delete custom Grigliata token:', error);

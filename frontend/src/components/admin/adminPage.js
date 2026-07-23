@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../AuthContext'; // Assuming this provides logged-in user info
-import { db, app } from '../firebaseConfig';
+import { db } from '../firebaseConfig';
 import { collection, getDocs } from '../../performance/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getPossibleLists } from '../../data/configRepository';
+import { getCallable } from '../../data/functions/callableRegistry';
 
 const DEFAULT_ROLES = ['player', 'dm', 'webmaster'];
 const PLAYER_ROLE_ALIASES = new Set(['player', 'players']);
+const deleteUserFunction = getCallable('deleteUser');
+const updateUserRoleFunction = getCallable('updateUserRole');
 
 const normalizeStoredRole = (role) => {
   const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
@@ -37,11 +39,6 @@ const AdminPage = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const { userData } = useAuth(); // Get current user data to check if they're a webmaster
   
-  // Initialize Firebase Functions
-  const functions = getFunctions(app, "europe-west8");
-  const deleteUserFunction = httpsCallable(functions, 'deleteUser');
-  const updateUserRoleFunction = httpsCallable(functions, 'updateUserRole');
-
   // Fetch users and possible roles from Firestore on component mount
   useEffect(() => {
     const fetchData = async () => {

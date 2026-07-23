@@ -8,10 +8,10 @@ const source = (name) => fs.readFileSync(
   'utf8'
 );
 
-const LEGACY_CALLABLE_WRITERS = Object.freeze([
+const STAGED_CALLABLE_WRITERS = Object.freeze([
   'spendCharacterPoint.ts',
   'levelUpUser.ts',
-  'levelUpAll.ts',
+  'backendOperations.ts',
 ]);
 
 const DERIVED_ROOT_TRIGGERS = Object.freeze([
@@ -22,12 +22,18 @@ const DERIVED_ROOT_TRIGGERS = Object.freeze([
   'expireBarriera.ts',
 ]);
 
-test('every exported legacy callable writer uses the shared rollout gate', () => {
-  for (const file of LEGACY_CALLABLE_WRITERS) {
+test('Task 06 progression writers honor drain and V2 projection stages', () => {
+  for (const file of STAGED_CALLABLE_WRITERS) {
     const contents = source(file);
-    assert.match(contents, /assertLegacyRootMutationAllowed\(/, file);
+    assert.match(contents, /isUserDataLegacyDrainFrozen\(/, file);
+    assert.match(contents, /resolveUserDataRolloutStage\(/, file);
+    assert.match(contents, /writesLegacyUserProjection\(/, file);
     assert.match(contents, /app_config\/user_data_v2/, file);
   }
+  assert.match(
+    source('levelUpAll.ts'),
+    /asTrimmedString\(request\.data\?\.operationId\)[\s\S]*?levelUpAllTask06Handler\(request\)[\s\S]*?levelUpAllLegacyHandler\(request\)/
+  );
 });
 
 test('every derived root trigger delegates its write to the transactional gate', () => {
@@ -52,14 +58,16 @@ test('Anima builds leaf updates from the current transactional source', () => {
   assert.doesNotMatch(contents, /update:\s*\{Parametri:/);
 });
 
-test('Grigliata token deletion fences legacy settings before destructive work', () => {
+test('Grigliata token deletion fences staged settings before destructive work', () => {
   const contents = source('deleteGrigliataCustomToken.ts');
   const gate = contents.indexOf(
-    'assertLegacyRootMutationAllowed(rollout.data(), ownerUid)'
+    'isUserDataLegacyDrainFrozen(rollout.data(), claim.ownerUid)'
   );
   const destructiveCommit = contents.indexOf('await batch.commit()');
-  const tokenDelete = contents.indexOf('await tokenRef.delete()');
+  const tokenDelete = contents.indexOf('transaction.delete(tokenRef)');
   assert.ok(gate >= 0);
+  assert.match(contents, /writesLegacyUserProjection\(/);
+  assert.match(contents, /\.where\("tokenId", "in", ids\)/);
   assert.ok(destructiveCommit > gate);
   assert.ok(tokenDelete > gate);
 });
@@ -89,10 +97,14 @@ test('user deletion publishes a drain-visible job before external cleanup', () =
 
 test('level-up authorizes the requester inside the mutation transaction', () => {
   const contents = source('levelUpUser.ts');
-  const transaction = contents.indexOf('db.runTransaction(async (tx)');
-  const callerRead = contents.indexOf('const [caller, rollout, target] = await tx.getAll(');
+  const transaction = contents.indexOf(
+    'db.runTransaction(async (transaction)'
+  );
+  const callerRead = contents.indexOf(
+    'const [\n        receipt,\n        caller,\n        rollout,\n        target,'
+  );
   const roleCheck = contents.indexOf('caller.get("role") !== "dm"');
-  const update = contents.indexOf('tx.update(userRef');
+  const update = contents.indexOf('transaction.update(userRef');
   assert.ok(transaction >= 0);
   assert.ok(callerRead > transaction);
   assert.ok(roleCheck > callerRead);

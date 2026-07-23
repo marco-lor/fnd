@@ -23,6 +23,10 @@ const mockSpawnGrigliataCustomTokenInstanceCallable = jest.fn(() => Promise.reso
 const mockSpawnGrigliataFoeTokenCallable = jest.fn(() => Promise.resolve({ data: { success: true, tokenId: 'foe-token-1' } }));
 const mockUpdateGrigliataCustomTokenTemplateCallable = jest.fn(() => Promise.resolve({ data: { success: true } }));
 const mockLogGrigliataFogDebug = jest.fn();
+const mockRunWithDurableOperationIntent = jest.fn(({
+  kind,
+  invoke,
+}) => invoke(`${kind}-operation-test-0001`));
 
 const createDeferred = () => {
   let resolve;
@@ -49,6 +53,22 @@ function mockInvokeSpawnGrigliataFoeTokenCallable(...args) {
 
 function mockInvokeUpdateGrigliataCustomTokenTemplateCallable(...args) {
   return mockUpdateGrigliataCustomTokenTemplateCallable(...args);
+}
+
+function mockResolveGrigliataCallable(functionName) {
+  if (functionName === 'deleteGrigliataCustomToken') {
+    return mockInvokeDeleteGrigliataCustomTokenCallable;
+  }
+  if (functionName === 'spawnGrigliataCustomTokenInstance') {
+    return mockInvokeSpawnGrigliataCustomTokenInstanceCallable;
+  }
+  if (functionName === 'spawnGrigliataFoeToken') {
+    return mockInvokeSpawnGrigliataFoeTokenCallable;
+  }
+  if (functionName === 'updateGrigliataCustomTokenTemplate') {
+    return mockInvokeUpdateGrigliataCustomTokenTemplateCallable;
+  }
+  return jest.fn();
 }
 
 const mockFirestoreState = {
@@ -222,6 +242,12 @@ jest.mock('../../AuthContext', () => ({
   useAuth: jest.fn(),
 }));
 
+jest.mock('../../data/functions/backendOperationIntentStore', () => ({
+  runWithDurableOperationIntent: (options) => (
+    mockRunWithDurableOperationIntent(options)
+  ),
+}));
+
 jest.mock('../common/shellLayout', () => ({
   useShellLayout: jest.fn(),
 }));
@@ -251,6 +277,7 @@ jest.mock('../common/lazyLoading', () => {
 });
 
 jest.mock('../firebaseConfig', () => ({
+  app: { name: 'test-app' },
   auth: {
     currentUser: { uid: 'user-1' },
   },
@@ -260,25 +287,11 @@ jest.mock('../firebaseFunctions', () => ({ functions: {} }));
 jest.mock('../firebaseStorage', () => ({ storage: {} }));
 
 jest.mock('firebase/functions', () => ({
-  httpsCallable: jest.fn((functions, functionName) => {
-    if (functionName === 'deleteGrigliataCustomToken') {
-      return mockInvokeDeleteGrigliataCustomTokenCallable;
-    }
-
-    if (functionName === 'spawnGrigliataCustomTokenInstance') {
-      return mockInvokeSpawnGrigliataCustomTokenInstanceCallable;
-    }
-
-    if (functionName === 'spawnGrigliataFoeToken') {
-      return mockInvokeSpawnGrigliataFoeTokenCallable;
-    }
-
-    if (functionName === 'updateGrigliataCustomTokenTemplate') {
-      return mockInvokeUpdateGrigliataCustomTokenTemplateCallable;
-    }
-
-    return jest.fn();
-  }),
+  connectFunctionsEmulator: jest.fn(),
+  getFunctions: jest.fn(() => ({})),
+  httpsCallable: jest.fn((functions, functionName) => (
+    mockResolveGrigliataCallable(functionName)
+  )),
 }));
 
 jest.mock('firebase/storage', () => ({
@@ -1043,6 +1056,13 @@ describe('GrigliataPage', () => {
     const firebaseConfig = require('../firebaseConfig');
     firebaseConfig.auth.currentUser = { uid: 'user-1' };
 
+    const functionsApi = require('firebase/functions');
+    functionsApi.connectFunctionsEmulator.mockClear();
+    functionsApi.getFunctions.mockClear().mockImplementation(() => ({}));
+    functionsApi.httpsCallable.mockClear().mockImplementation((functions, functionName) => (
+      mockResolveGrigliataCallable(functionName)
+    ));
+
     const storageApi = require('firebase/storage');
     storageApi.deleteObject.mockClear().mockResolvedValue(undefined);
     storageApi.getDownloadURL.mockClear().mockResolvedValue('https://example.com/uploaded-map.png');
@@ -1054,6 +1074,11 @@ describe('GrigliataPage', () => {
 
     readAudioFileMetadata.mockClear().mockResolvedValue({ durationMs: 12_345 });
     mockLogGrigliataFogDebug.mockClear();
+    mockRunWithDurableOperationIntent
+      .mockReset()
+      .mockImplementation(({ kind, invoke }) => (
+        invoke(`${kind}-operation-test-0001`)
+      ));
     mockDeleteGrigliataCustomTokenCallable.mockClear().mockResolvedValue({ data: { success: true } });
     mockSpawnGrigliataCustomTokenInstanceCallable.mockClear().mockResolvedValue({ data: { success: true, tokenId: 'custom-instance-1' } });
     mockSpawnGrigliataFoeTokenCallable.mockClear().mockResolvedValue({ data: { success: true, tokenId: 'foe-token-1' } });
@@ -6337,7 +6362,12 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      expect(mockDeleteGrigliataCustomTokenCallable).toHaveBeenCalledWith({ tokenId: 'custom-instance-1' });
+      expect(mockDeleteGrigliataCustomTokenCallable).toHaveBeenCalledWith({
+        tokenId: 'custom-instance-1',
+        ...(process.env.REACT_APP_FND_PERF === '1'
+          ? { operationId: expect.stringMatching(/^delete-custom-token-/) }
+          : {}),
+      });
     });
 
     const issuedClientDelete = mockBatchInstances.some((batch) => (

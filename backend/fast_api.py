@@ -1,19 +1,9 @@
 # file ./backend/fast_api.py
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+"""Backward-compatible import for the dependency-light health application."""
 
-app = FastAPI()
+try:
+    from .health_app import app, read_healthz, read_root
+except ImportError:
+    from health_app import app, read_healthz, read_root
 
-origins = [
-    "https://fatins.web.app",  # The Firebase Hosting URL of your frontend
-    "https://fatins.firebaseapp.com/", # The Firebase Hosting URL of your frontend #2
-    "http://localhost:3000",   # For local development
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+__all__ = ["app", "read_healthz", "read_root"]

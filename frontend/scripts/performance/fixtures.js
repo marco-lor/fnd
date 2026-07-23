@@ -41,6 +41,19 @@ const FIXTURE_VERSION = 'fnd-performance-v1';
 const FIXED_TIME = '2026-01-01T00:00:00.000Z';
 const PASSWORD = 'PerfTest!123';
 const BATCH_SIZE = 350;
+const TASK06_OPERATION_KINDS = Object.freeze([
+  'level-up-all',
+  'set-parameter-locks',
+  'delete-npc',
+  'delete-encounter',
+  'delete-grigliata-custom-token',
+  'duplicate-foe',
+]);
+const TASK06_BACKEND_CONFIG = Object.freeze({
+  schemaVersion: 1,
+  derivedOwnerMode: 'authoritative',
+  enabledOperationKinds: TASK06_OPERATION_KINDS,
+});
 
 const pad = (value, width = 4) => String(value).padStart(width, '0');
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -137,6 +150,8 @@ const buildCodex = () => Object.fromEntries(
 const buildDocuments = () => {
   const documents = [];
   const add = (documentPath, data) => documents.push({ path: documentPath, data });
+
+  add('app_config/task06_backend', TASK06_BACKEND_CONFIG);
 
   const primaryAccounts = new Map(accountDefinitions.map((account, index) => [account.uid, buildUser(account, index)]));
   for (let index = 0; index < 200; index += 1) {
@@ -478,6 +493,9 @@ const buildManifest = (documents) => {
 
 const waitForFunctionsReady = async () => {
   initializeAdmin();
+  // The demo Functions environment exports only the consolidated owner. Seed
+  // its fail-closed control document before creating the readiness sentinel.
+  await db.doc('app_config/task06_backend').set(TASK06_BACKEND_CONFIG);
   const readiness = db.doc('users/perf-function-readiness');
   const directory = db.doc('user_directory/perf-function-readiness');
   const readinessData = {
@@ -670,4 +688,5 @@ module.exports = {
   FIXTURE_VERSION,
   PERFORMANCE_STORAGE_BUCKET,
   runSeedFixture,
+  TASK06_BACKEND_CONFIG,
 };

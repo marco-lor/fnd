@@ -32,6 +32,7 @@ const READINESS_BACKGROUND_TRIGGERS = new Set([
   'europe-west8-updateAnimaModifier',
   'europe-west8-expireBarriera',
   'europe-west8-syncUserDirectory',
+  'europe-west8-syncUserDerivedState',
 ]);
 
 const summarizeTriggerActivityText = (contents = '') => {

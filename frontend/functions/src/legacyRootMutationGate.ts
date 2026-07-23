@@ -5,6 +5,10 @@ import {
   resolveUserDataRolloutStage,
 } from "./userDataV2";
 import {isUserDataLegacyDrainFrozen} from "./userDataBridge";
+import {
+  TASK06_BACKEND_CONFIG_PATH,
+  resolveTask06DerivedOwnerMode,
+} from "./userDerivedState";
 
 const MODE_DOCUMENT = "app_config/user_data_v2";
 
@@ -75,12 +79,26 @@ export const applyLegacyRootTriggerUpdate = async (
 ): Promise<LegacyRootTriggerUpdateResult> => {
   const db = admin.firestore();
   const configRef = db.doc(MODE_DOCUMENT);
+  const task06ConfigRef = db.doc(TASK06_BACKEND_CONFIG_PATH);
   const userRef = db.doc(`users/${input.uid}`);
   return db.runTransaction(async (transaction) => {
-    const [config, user] = await transaction.getAll(configRef, userRef);
+    const [config, task06Config, user] = await transaction.getAll(
+      configRef,
+      task06ConfigRef,
+      userRef
+    );
+    if (
+      resolveTask06DerivedOwnerMode(task06Config.data()) ===
+      "authoritative"
+    ) {
+      console.log(`${input.label}: skipped by Task 06 derived owner`, {
+        userKey: hashValue(input.uid).slice(0, 12),
+      });
+      return "blocked";
+    }
     if (legacyRootMutationBlockReason(config.data(), input.uid)) {
       console.log(`${input.label}: skipped by Task 05 legacy-root fence`, {
-        uid: input.uid,
+        userKey: hashValue(input.uid).slice(0, 12),
       });
       return "blocked";
     }

@@ -2,11 +2,11 @@ import {
   __resetUserDataCommandsForTests,
   createUserOperationId,
   purchaseItem,
-  task05Functions,
   updateResource,
 } from './userDataCommands';
 import {
   connectFunctionsEmulator,
+  getFunctions,
   httpsCallable,
 } from 'firebase/functions';
 
@@ -25,6 +25,7 @@ jest.mock('firebase/functions', () => ({
 describe('Task 05 user commands', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    getFunctions.mockImplementation((_app, region) => ({ region }));
     httpsCallable.mockImplementation(() => mockCallable);
     mockCallable.mockImplementation((payload) => Promise.resolve({
       data: { success: true, replayed: false, payload },
@@ -32,8 +33,12 @@ describe('Task 05 user commands', () => {
     __resetUserDataCommandsForTests();
   });
 
-  test('initializes the Task 05 client in europe-west8', () => {
-    expect(task05Functions).toEqual({ region: 'europe-west8' });
+  test('acquires the europe-west8 client only when a command is invoked', async () => {
+    expect(getFunctions).not.toHaveBeenCalled();
+
+    await purchaseItem({ itemId: 'sword-1', operationId: 'purchase-fixed' });
+
+    expect(getFunctions).toHaveBeenCalledWith({}, 'europe-west8');
     expect(connectFunctionsEmulator).not.toHaveBeenCalled();
   });
 

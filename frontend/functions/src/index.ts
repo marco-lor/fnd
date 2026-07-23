@@ -9,25 +9,46 @@
  */
 
 import * as admin from "firebase-admin";
-import {updateHpTotal} from "./updateHpTotal";
-import {updateManaTotal} from "./updateManaTotal";
-import {updateTotParameters} from "./updateTotParameters";
-import {spendCharacterPoint} from "./spendCharacterPoint";
+import {updateHpTotal as legacyUpdateHpTotal} from "./updateHpTotal";
+import {updateManaTotal as legacyUpdateManaTotal} from "./updateManaTotal";
+import {
+  updateTotParameters as legacyUpdateTotParameters,
+} from "./updateTotParameters";
+import {
+  spendCharacterPoint,
+  spendCharacterPointV2,
+} from "./spendCharacterPoint";
 // Import the delete user function
 import {deleteUser} from "./deleteUser";
-import {updateAnimaModifier} from "./updateAnimaModifier";
+import {
+  updateAnimaModifier as legacyUpdateAnimaModifier,
+} from "./updateAnimaModifier";
 import {levelUpAll} from "./levelUpAll";
 import {levelUpUser} from "./levelUpUser";
 import {updateUserRole} from "./updateUserRole";
-import {duplicateFoeWithAssets} from "./duplicateFoeWithAssets";
-import {expireBarriera} from "./expireBarriera";
+import {
+  duplicateFoeWithAssets,
+  duplicateFoeWithAssetsV2,
+} from "./duplicateFoeWithAssets";
+import {expireBarriera as legacyExpireBarriera} from "./expireBarriera";
 import {cleanupGrigliataMusicTrack} from "./cleanupGrigliataMusicTrack";
 import {deleteGrigliataCustomToken} from "./deleteGrigliataCustomToken";
 import {spawnGrigliataCustomTokenInstance} from "./spawnGrigliataCustomTokenInstance";
 import {spawnGrigliataFoeToken} from "./spawnGrigliataFoeToken";
 import {updateGrigliataCustomTokenTemplate} from "./updateGrigliataCustomTokenTemplate";
 import {clientFirebaseConfig} from "./clientFirebaseConfig";
-import {syncUserDirectory} from "./syncUserDirectory";
+import {
+  syncUserDirectory as legacySyncUserDirectory,
+} from "./syncUserDirectory";
+import {syncUserDerivedState} from "./syncUserDerivedState";
+import {
+  deleteEncounterV2,
+  deleteNpcV2,
+  getBackendOperationStatus,
+  resumeBackendOperation,
+  runBackendOperationWorker,
+  setAllParameterLocks,
+} from "./backendOperations";
 import {
   task05AdjustGold,
   task05CommitConsumable,
@@ -48,8 +69,26 @@ import {
   cleanupDeletedGrigliataTokenImage,
   cleanupReplacedGrigliataTokenImage,
 } from "./cleanupGrigliataTokenImage";
+import {usesDemoConsolidatedOwner} from "./demoConsolidatedOwner";
 
 admin.initializeApp();
+
+// The demo-only consolidated candidate exports one authoritative user-derived
+// trigger. Normal builds keep every legacy export so an online rollout cannot
+// change trigger availability until a separately reviewed deployment.
+const usesConsolidatedDerivedOwner = usesDemoConsolidatedOwner();
+const updateHpTotal = usesConsolidatedDerivedOwner ?
+  undefined : legacyUpdateHpTotal;
+const updateManaTotal = usesConsolidatedDerivedOwner ?
+  undefined : legacyUpdateManaTotal;
+const updateTotParameters = usesConsolidatedDerivedOwner ?
+  undefined : legacyUpdateTotParameters;
+const updateAnimaModifier = usesConsolidatedDerivedOwner ?
+  undefined : legacyUpdateAnimaModifier;
+const expireBarriera = usesConsolidatedDerivedOwner ?
+  undefined : legacyExpireBarriera;
+const syncUserDirectory = usesConsolidatedDerivedOwner ?
+  undefined : legacySyncUserDirectory;
 
 // Ri-esporta le funzioni affinché Firebase le distribuisca tutte.
 export {
@@ -57,12 +96,14 @@ export {
   updateManaTotal,
   updateTotParameters,
   spendCharacterPoint,
+  spendCharacterPointV2,
   deleteUser,
   updateAnimaModifier,
   levelUpAll,
   levelUpUser,
   updateUserRole,
   duplicateFoeWithAssets,
+  duplicateFoeWithAssetsV2,
   expireBarriera,
   cleanupGrigliataMusicTrack,
   deleteGrigliataCustomToken,
@@ -71,6 +112,13 @@ export {
   updateGrigliataCustomTokenTemplate,
   clientFirebaseConfig,
   syncUserDirectory,
+  syncUserDerivedState,
+  setAllParameterLocks,
+  deleteNpcV2,
+  deleteEncounterV2,
+  getBackendOperationStatus,
+  resumeBackendOperation,
+  runBackendOperationWorker,
   task05AdjustGold,
   task05CommitConsumable,
   task05UpdateGrigliataCharacterResources,

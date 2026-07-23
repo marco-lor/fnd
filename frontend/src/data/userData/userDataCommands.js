@@ -1,14 +1,21 @@
-import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
-import { app } from '../../components/firebaseConfig';
+import {
+  __resetCallableRegistryForTests,
+  getCallable,
+} from '../functions/callableRegistry';
 
-const performanceMode = process.env.REACT_APP_FND_PERF === '1';
-export const task05Functions = getFunctions(app, 'europe-west8');
-
-if (performanceMode) {
-  connectFunctionsEmulator(task05Functions, '127.0.0.1', 5001);
-}
-
-const callableCache = new Map();
+const USER_DATA_CALLABLES = Object.freeze({
+  task05PurchaseItem: getCallable('task05PurchaseItem'),
+  task05AdjustGold: getCallable('task05AdjustGold'),
+  task05UpdateResource: getCallable('task05UpdateResource'),
+  task05UpdateProgression: getCallable('task05UpdateProgression'),
+  task05MutateInventory: getCallable('task05MutateInventory'),
+  task05SetEquipment: getCallable('task05SetEquipment'),
+  task05MutatePersonalContent: getCallable('task05MutatePersonalContent'),
+  task05UpdateSettings: getCallable('task05UpdateSettings'),
+  task05UpdateProfileContent: getCallable('task05UpdateProfileContent'),
+  task05PrepareConsumable: getCallable('task05PrepareConsumable'),
+  task05CommitConsumable: getCallable('task05CommitConsumable'),
+});
 // Retry IDs are retained only when the caller supplies a key for one logical
 // action. Deriving this key from a payload would merge distinct, intentional
 // operations (for example, two identical long-press resource ticks).
@@ -26,11 +33,6 @@ const DEFINITIVE_CALLABLE_CODES = new Set([
   'unimplemented',
 ]);
 
-const getCallable = (name) => {
-  if (!callableCache.has(name)) callableCache.set(name, httpsCallable(task05Functions, name));
-  return callableCache.get(name);
-};
-
 export const createUserOperationId = (prefix = 'user-op') => {
   const randomId = (typeof window !== 'undefined' ? window.crypto?.randomUUID?.() : null)
     || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
@@ -45,7 +47,9 @@ const requireOperationId = (operationId) => {
 };
 
 const call = async (name, payload) => {
-  const response = await getCallable(name)(payload);
+  const callable = USER_DATA_CALLABLES[name];
+  if (!callable) throw new TypeError(`Unknown Task 05 callable: ${String(name)}`);
+  const response = await callable(payload);
   return response?.data ?? response;
 };
 
@@ -177,7 +181,7 @@ export const commitConsumable = ({ operationId, retryKey, ...payload }) => callW
 
 export const __resetUserDataCommandsForTests = () => {
   if (process.env.NODE_ENV === 'test') {
-    callableCache.clear();
     retainedOperationIds.clear();
+    __resetCallableRegistryForTests();
   }
 };

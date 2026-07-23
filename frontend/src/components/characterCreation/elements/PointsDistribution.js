@@ -1,12 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react'; // added useCallback
 import { doc, onSnapshot } from '../../../performance/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from "../../firebaseConfig";
 import { useAuth } from '../../../AuthContext';
 import { getVarie } from '../../../data/configRepository';
+import { getCallable } from '../../../data/functions/callableRegistry';
+import {
+  TASK06_LOCAL_CANDIDATE,
+} from '../../../data/functions/backendOperationClient';
+import {
+  runWithDurableOperationIntent,
+} from '../../../data/functions/backendOperationIntentStore';
 
-const functions = getFunctions();
-const spendCharacterPoint = httpsCallable(functions, 'spendCharacterPoint');
+const spendCharacterPoint = getCallable(
+  TASK06_LOCAL_CANDIDATE ? 'spendCharacterPointV2' : 'spendCharacterPoint'
+);
 
 export default function PointsDistribution() {
   const { user, userData } = useAuth();
@@ -64,13 +71,39 @@ export default function PointsDistribution() {
   // Base handlers with stable references
   const handleBaseChange = useCallback(async (stat, delta) => {
     if (!user || !baseStats) return;
-    await spendCharacterPoint({ statName: stat, statType: 'Base', change: delta });
+    const payload = { statName: stat, statType: 'Base', change: delta };
+    if (TASK06_LOCAL_CANDIDATE) {
+      await runWithDurableOperationIntent({
+        actorUid: user.uid,
+        kind: 'spend-character-point',
+        intent: payload,
+        invoke: (operationId) => spendCharacterPoint({
+          ...payload,
+          operationId,
+        }),
+      });
+    } else {
+      await spendCharacterPoint(payload);
+    }
   }, [user, baseStats]);
 
   // Combat handlers with stable references
   const handleCombChange = useCallback(async (stat, delta) => {
     if (!user || !combStats) return;
-    await spendCharacterPoint({ statName: stat, statType: 'Combat', change: delta });
+    const payload = { statName: stat, statType: 'Combat', change: delta };
+    if (TASK06_LOCAL_CANDIDATE) {
+      await runWithDurableOperationIntent({
+        actorUid: user.uid,
+        kind: 'spend-character-point',
+        intent: payload,
+        invoke: (operationId) => spendCharacterPoint({
+          ...payload,
+          operationId,
+        }),
+      });
+    } else {
+      await spendCharacterPoint(payload);
+    }
   }, [user, combStats]);
 
   // Helper free credits

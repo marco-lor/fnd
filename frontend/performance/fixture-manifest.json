@@ -2,10 +2,11 @@
   "schemaVersion": 1,
   "version": "fnd-performance-v1",
   "projectId": "demo-fnd-perf",
-  "documentCount": 7878,
+  "documentCount": 7879,
   "storageObjectCount": 128,
-  "canonicalHash": "8681af754324d67b3dbf86bce629f268852e3b08333737a6cbb2c19701a09ac7",
+  "canonicalHash": "a2abfe524d38fd0f1f8540c44353cafe942d7c7fc71f31cedeacabe52621d9c9",
   "counts": {
+    "app_config": 1,
     "users": 200,
     "user_directory": 200,
     "items": 1000,

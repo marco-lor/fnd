@@ -105,7 +105,35 @@
       "indexes": []
     },
     {
+      "collectionGroup": "map_markers_private",
+      "fieldPath": "npcId",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
       "collectionGroup": "user_operations",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "backend_operations",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "backend_operation_work",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "subjects",
       "fieldPath": "expiresAt",
       "ttl": true,
       "indexes": []

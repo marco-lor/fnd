@@ -1,8 +1,7 @@
 // file: ./frontend/src/components/dmDashboard/DMDashboard.js
 import React, { useState, useEffect } from "react";
-import { db, app } from "../firebaseConfig";
+import { db } from "../firebaseConfig";
 import { collection, doc, updateDoc, increment, onSnapshot } from "../../performance/firestore";
-import { getFunctions, httpsCallable } from "firebase/functions";
 import { useAuth } from "../../AuthContext";
 import { useNavigate } from "react-router-dom";
 import { library } from "@fortawesome/fontawesome-svg-core";
@@ -10,19 +9,27 @@ import { faLock, faLockOpen } from "@fortawesome/free-solid-svg-icons";
 import PlayerInfo from "./elements/playerInfo";
 import LockSettingsTable from "./elements/LockSettingsTable";
 import { useShellLayout } from "../common/shellLayout";
+import { getCallable } from "../../data/functions/callableRegistry";
+import {
+  callBackendOperationAndWait,
+  TASK06_LOCAL_CANDIDATE,
+} from "../../data/functions/backendOperationClient";
+import {
+  runWithDurableOperationIntent,
+} from "../../data/functions/backendOperationIntentStore";
 
 // Add icons to library
 library.add(faLock, faLockOpen);
+
+const levelUpAll = getCallable("levelUpAll");
+const levelUpUser = getCallable("levelUpUser");
 
 const DMDashboard = () => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const { userData } = useAuth();
+  const { user, userData } = useAuth();
   const navigate = useNavigate();
-  const functions = getFunctions(app, "europe-west8");
-  const levelUpAll = httpsCallable(functions, "levelUpAll");
-  const levelUpUser = httpsCallable(functions, "levelUpUser");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
   const [selectedUserIds, setSelectedUserIds] = useState([]);
@@ -109,9 +116,27 @@ const DMDashboard = () => {
     try {
       setBusy(true);
       setToast(null);
-      const res = await levelUpAll({ idempotencyKey: `${Date.now()}` });
-      const payload = res?.data;
-      const updatedCount = Array.isArray(payload?.updated) ? payload.updated.filter((r)=>r.toLevel).length : 0;
+      setError(null);
+      let updatedCount = 0;
+      if (TASK06_LOCAL_CANDIDATE) {
+        const operation = await runWithDurableOperationIntent({
+          actorUid: user?.uid,
+          kind: "level-up-all",
+          intent: { scope: "all-users" },
+          invoke: (operationId) => callBackendOperationAndWait(
+            levelUpAll,
+            {},
+            { operationId }
+          ),
+        });
+        updatedCount = Number(operation?.progress?.succeeded) || 0;
+      } else {
+        const response = await levelUpAll({ idempotencyKey: `${Date.now()}` });
+        const updated = response?.data?.updated;
+        updatedCount = Array.isArray(updated)
+          ? updated.filter((result) => result?.toLevel).length
+          : 0;
+      }
       setToast(`Level up done. Updated ${updatedCount} players.`);
   // Realtime listener will update UI automatically
     } catch (e) {

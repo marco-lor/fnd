@@ -17,6 +17,16 @@ import DiceRoller from "../../common/DiceRoller";
 import { Button } from "./ui";
 import { advanceTurn as advanceTurnUtil } from "./buttons/advanceTurn";
 import { getVarie } from '../../../data/configRepository';
+import { getCallable } from '../../../data/functions/callableRegistry';
+import {
+    callBackendOperationAndWait,
+    TASK06_LOCAL_CANDIDATE,
+} from '../../../data/functions/backendOperationClient';
+import {
+    runWithDurableOperationIntent,
+} from '../../../data/functions/backendOperationIntentStore';
+
+const deleteEncounterV2 = getCallable('deleteEncounterV2');
 
 const EncounterDetails = ({ encounter, isDM }) => {
     const { user, userData } = useAuth();
@@ -32,6 +42,7 @@ const EncounterDetails = ({ encounter, isDM }) => {
     const [liveUsersMap, setLiveUsersMap] = useState({});
     // Live foes map (foeId -> foe doc) when encounter includes foes and is linked
     const [liveFoesMap, setLiveFoesMap] = useState({});
+    const [deletingEncounter, setDeletingEncounter] = useState(false);
 
     const isParticipant = useMemo(() => {
         if (!user) return false;
@@ -590,6 +601,67 @@ const EncounterDetails = ({ encounter, isDM }) => {
         }
     };
 
+    const handleDeleteEncounter = async () => {
+        const ok = window.confirm(
+            `Sei sicuro di voler eliminare l'incontro${encounter.name ? ` "${encounter.name}"` : ""}?\nQuesta azione eliminerà definitivamente il documento, i partecipanti e i log.`
+        );
+        if (!ok) return;
+
+        try {
+            setDeletingEncounter(true);
+            if (TASK06_LOCAL_CANDIDATE) {
+                await runWithDurableOperationIntent({
+                    actorUid: user?.uid,
+                    kind: 'delete-encounter',
+                    intent: { encounterId: encounter.id },
+                    invoke: (operationId) => callBackendOperationAndWait(
+                        deleteEncounterV2,
+                        { encounterId: encounter.id },
+                        { operationId }
+                    ),
+                });
+            } else {
+                const encRef = doc(db, "encounters", encounter.id);
+                const participantsRef = collection(
+                    db,
+                    "encounters",
+                    encounter.id,
+                    "participants"
+                );
+                const logsRef = collection(
+                    db,
+                    "encounters",
+                    encounter.id,
+                    "logs"
+                );
+                const toDelete = [];
+                const partSnap = await getDocs(participantsRef);
+                partSnap.forEach((document) => toDelete.push(document.ref));
+                const logsSnap = await getDocs(logsRef);
+                logsSnap.forEach((document) => toDelete.push(document.ref));
+
+                const chunkSize = 450;
+                for (let index = 0; index < toDelete.length; index += chunkSize) {
+                    const batch = writeBatch(db);
+                    toDelete
+                        .slice(index, index + chunkSize)
+                        .forEach((documentRef) => batch.delete(documentRef));
+                    await batch.commit();
+                }
+                const finalBatch = writeBatch(db);
+                finalBatch.delete(encRef);
+                await finalBatch.commit();
+            }
+        } catch (e) {
+            console.error(e);
+            alert(TASK06_LOCAL_CANDIDATE
+                ? "Failed to delete encounter. You can retry safely."
+                : "Failed to delete encounter.");
+        } finally {
+            setDeletingEncounter(false);
+        }
+    };
+
     return (
         <div className="mt-2 rounded-xl border border-slate-700/50 bg-slate-900/50 p-3">
             <div className="flex items-center justify-between mb-2 gap-2">
@@ -640,42 +712,10 @@ const EncounterDetails = ({ encounter, isDM }) => {
                         </Button>
                         <Button
                             kind="danger"
-                            onClick={async () => {
-                                const ok = window.confirm(
-                                    `Sei sicuro di voler eliminare l'incontro${encounter.name ? ` "${encounter.name}"` : ""}?\nQuesta azione eliminerà definitivamente il documento, i partecipanti e i log.`
-                                );
-                                if (!ok) return;
-                                try {
-                                    const encRef = doc(db, "encounters", encounter.id);
-                                    const participantsRef = collection(db, "encounters", encounter.id, "participants");
-                                    const logsRef = collection(db, "encounters", encounter.id, "logs");
-
-                                    // Collect all docs to delete (participants + logs), then delete in chunks to stay under batch limit
-                                    const toDelete = [];
-                                    const partSnap = await getDocs(participantsRef);
-                                    partSnap.forEach((d) => toDelete.push(d.ref));
-                                    const logsSnap = await getDocs(logsRef);
-                                    logsSnap.forEach((d) => toDelete.push(d.ref));
-
-                                    const CHUNK = 450; // safety margin under 500 operations per batch
-                                    for (let i = 0; i < toDelete.length; i += CHUNK) {
-                                        const batch = writeBatch(db);
-                                        const slice = toDelete.slice(i, i + CHUNK);
-                                        slice.forEach((ref) => batch.delete(ref));
-                                        await batch.commit();
-                                    }
-
-                                    // Finally delete the encounter document itself
-                                    const finalBatch = writeBatch(db);
-                                    finalBatch.delete(encRef);
-                                    await finalBatch.commit();
-                                } catch (e) {
-                                    console.error(e);
-                                    alert("Failed to delete encounter.");
-                                }
-                            }}
+                            onClick={handleDeleteEncounter}
+                            disabled={deletingEncounter}
                         >
-                            Delete
+                            {deletingEncounter ? "Deleting…" : "Delete"}
                         </Button>
                         </>
                     )}

@@ -261,9 +261,11 @@ test('Task 05 new-only blocks legacy aggregates while preserving shell updates',
     await updateDoc(doc(adminFirestore, 'users/perf-player'), {modelVersion: 2});
     await setDoc(doc(adminFirestore, 'app_config/user_data_v2'), {
       schemaVersion: 2,
-      mode: 'dual-write',
-      stage: 'new-only',
-      userOverrides: {'perf-player': 'new-only'},
+      mode: 'new-only',
+      userOverrides: {
+        'perf-player': 'new-only',
+        'perf-peer-2': 'dual-write',
+      },
     });
   });
 
@@ -330,7 +332,7 @@ test('Task 05 legacy drain freezes only its explicit per-user mutation scope', a
       'stats.hpCurrent': 42,
     }));
     await assertFails(updateDoc(doc(owner, 'users/perf-player'), {
-      'flags.characterCreationDone': true,
+      'flags.characterCreationDone': false,
     }));
     await assertFails(updateDoc(doc(owner, 'users/perf-player'), {
       beltCapacity: 4,

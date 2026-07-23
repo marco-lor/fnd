@@ -78,43 +78,31 @@ service cloud.firestore {
       ];
     }
 
-    function hasValidUserDataOverride(config, userId) {
-      let overrides = mapOrEmpty(config, "userOverrides");
-      return overrides.keys().hasAny([userId])
-        && isValidUserDataRolloutStage(overrides.get(userId, ""));
-    }
-
-    function userDataRolloutStage(userId) {
+    function isUserDataAggregateFrozen(userId) {
       let configPath = /databases/$(database)/documents/app_config/user_data_v2;
       let config = exists(configPath) ? get(configPath).data : {};
       let overrides = mapOrEmpty(config, "userOverrides");
       let globalStage = config.get("mode", config.get("stage", "legacy-read"));
       let configured = overrides.get(userId, globalStage);
-      return isValidUserDataRolloutStage(configured)
+      let stage = isValidUserDataRolloutStage(configured)
         ? configured
         : (isValidUserDataRolloutStage(globalStage) ? globalStage : "legacy-read");
-    }
-
-    function hasUserDataLegacyDrain(userId) {
-      let configPath = /databases/$(database)/documents/app_config/user_data_v2;
-      let config = exists(configPath) ? get(configPath).data : {};
       let drain = mapOrEmpty(config, "legacyDrain");
       let users = mapOrEmpty(drain, "users");
       let drainFieldMalformed = config.keys().hasAny(["legacyDrain"])
         && !(config.legacyDrain is map);
       let usersFieldMalformed = drain.keys().hasAny(["users"])
         && !(drain.users is map);
-      return drainFieldMalformed
+      return stage == "new-only"
+        || drainFieldMalformed
         || (
-          hasValidUserDataOverride(config, userId)
+          (
+            overrides.keys().hasAny([userId])
+            && isValidUserDataRolloutStage(overrides.get(userId, ""))
+          )
             ? usersFieldMalformed || users.keys().hasAny([userId])
             : drain.keys().hasAny(["global"])
         );
-    }
-
-    function isUserDataAggregateFrozen(userId) {
-      return userDataRolloutStage(userId) == "new-only"
-        || hasUserDataLegacyDrain(userId);
     }
 
     function changesLegacyUserAggregate(nextData, existingData) {
@@ -253,6 +241,13 @@ service cloud.firestore {
 
     function isValidGrigliataCustomTokenRole(customTokenRole) {
       return customTokenRole in ["template", "instance"];
+    }
+
+    function isGrigliataTokenPendingDeletion(data) {
+      return data is map
+        && data.keys().hasAny(["task06Deletion"])
+        && data.task06Deletion is map
+        && data.task06Deletion.get("status", "") == "pending";
     }
 
     function resolveGrigliataCustomTokenRole(data) {
@@ -1305,9 +1300,69 @@ service cloud.firestore {
         && request.resource.data.imagePath == resource.data.imagePath;
     }
 
+    function grigliataCustomTemplateAcceptsInstance(data, tokenId) {
+      let role = resolveGrigliataCustomTokenRole(data);
+      let templateId = resolveGrigliataCustomTemplateId(data, tokenId);
+      return role != "instance"
+        || (
+          existsAfter(grigliataTokenDocPath(templateId))
+          && !isGrigliataTokenPendingDeletion(
+            getAfter(grigliataTokenDocPath(templateId)).data
+          )
+        );
+    }
+
+    function grigliataCustomInstanceParentAcceptsMutation(data, tokenId) {
+      let role = resolveGrigliataCustomTokenRole(data);
+      let templateId = resolveGrigliataCustomTemplateId(data, tokenId);
+      return role != "instance"
+        || !existsAfter(grigliataTokenDocPath(templateId))
+        || !isGrigliataTokenPendingDeletion(
+          getAfter(grigliataTokenDocPath(templateId)).data
+        );
+    }
+
+    function grigliataPlacementTokenAcceptsMutation(data) {
+      let tokenId = resolveGrigliataPlacementTokenId(data);
+      return tokenId == data.ownerUid
+        || (
+          existsAfter(grigliataTokenDocPath(tokenId))
+          && !isGrigliataTokenPendingDeletion(
+            getAfter(grigliataTokenDocPath(tokenId)).data
+          )
+        );
+    }
+
+    function npcPath(npcId) {
+      return /databases/$(database)/documents/echi_npcs/$(npcId);
+    }
+
+    function referencesPendingNpc(data) {
+      let npcId = data is map ? data.get("npcId", "") : "";
+      return npcId is string
+        && npcId.size() > 0
+        && exists(npcPath(npcId))
+        && get(npcPath(npcId)).data.get("deletionState", null) == "pending";
+    }
+
     // Encounter helpers
     function encounterPath(encounterId) {
       return /databases/$(database)/documents/encounters/$(encounterId);
+    }
+
+    function isEncounterDeletionPending(data) {
+      return data is map
+        && (
+          data.get("deletionState", null) == "pending"
+          || data.get("status", null) == "deleted"
+        );
+    }
+
+    function encounterAcceptsClientMutation(encounterId) {
+      return existsAfter(encounterPath(encounterId))
+        && !isEncounterDeletionPending(
+          getAfter(encounterPath(encounterId)).data
+        );
     }
 
     // Can the authed user read this encounter document (by uid or characterId), excluding deleted ones?
@@ -1356,7 +1411,16 @@ service cloud.firestore {
       // Private map markers per user
       match /map_markers_private/{markerId} {
         allow read: if isSignedIn() && request.auth.uid == userId;
-        allow write: if isActiveSignedIn() && request.auth.uid == userId;
+        allow create: if isActiveSignedIn()
+          && request.auth.uid == userId
+          && !referencesPendingNpc(request.resource.data);
+        allow update: if isActiveSignedIn()
+          && request.auth.uid == userId
+          && !referencesPendingNpc(resource.data)
+          && !referencesPendingNpc(request.resource.data);
+        allow delete: if isActiveSignedIn()
+          && request.auth.uid == userId
+          && !referencesPendingNpc(resource.data);
       }
 
       // Task 05 user-data domains. Clients retain the same private audience as
@@ -1401,7 +1465,30 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /app_config/task06_backend {
+      // This document controls trigger ownership and enabled destructive or
+      // bulk operation kinds. It is observable only to operators and remains
+      // server-owned.
+      allow read: if isDM() || isWebmaster();
+      allow write: if false;
+    }
+
     match /user_operations/{receiptId} {
+      allow read, write: if false;
+    }
+
+    match /backend_operations/{operationId} {
+      // Clients receive a privacy-minimized view through authenticated
+      // callables; actor IDs, cursors, inputs, and per-subject receipts stay
+      // server-only.
+      allow read, write: if false;
+
+      match /subjects/{subjectId} {
+        allow read, write: if false;
+      }
+    }
+
+    match /backend_operation_work/{workId} {
       allow read, write: if false;
     }
 
@@ -1459,11 +1546,21 @@ service cloud.firestore {
 
     // Encounters
     match /encounters/{encounterId} {
-  // Read: DM, Webmaster, or Player (full read like webmaster), or participant (by uid or characterId), not deleted
-  allow read: if isDM() || isWebmaster() || isPlayer() || canReadEncounterDoc();
+      // Preserve the existing query-compatible privileged audience. A
+      // participant-only read still excludes the server's deleted marker.
+      allow read: if isDM()
+        || isWebmaster()
+        || isPlayer()
+        || canReadEncounterDoc();
 
-      // Create/Update/Delete: DM only (global DM rule already allows this)
-      allow write: if isDM();
+      // Only the server may publish or advance a deletion fence.
+      allow create: if isDM()
+        && !isEncounterDeletionPending(request.resource.data);
+      allow update: if isDM()
+        && !isEncounterDeletionPending(resource.data)
+        && !isEncounterDeletionPending(request.resource.data);
+      allow delete: if isDM()
+        && !isEncounterDeletionPending(resource.data);
 
       // Per-encounter participants
       match /participants/{pid} {
@@ -1472,23 +1569,30 @@ service cloud.firestore {
 
         // Create/Update: DM, or the signed-in user updating their own participant doc
         // The participant doc id may be either the user's uid or their characterId; allow both for the owner.
-        allow create, update: if isDM()
+        allow create, update: if encounterAcceptsClientMutation(encounterId)
+          && (
+            isDM()
           || (
                isActiveSignedIn()
                && canReadEncounterById(encounterId)
                && (pid == request.auth.uid || pid == authedCharacterId())
-             );
+             )
+          );
 
         // Delete: DM only
-        allow delete: if isDM();
+        allow delete: if isDM()
+          && encounterAcceptsClientMutation(encounterId);
       }
 
       // Shared logs — OPEN TO ALL SIGNED-IN USERS (any role)
       match /logs/{logId} {
         // Read & Write for any authenticated user; DM still has global allow.
         allow read: if isDM() || isWebmaster() || canReadEncounterById(encounterId);
-        allow write: if isDM()
-          || (isActiveSignedIn() && canReadEncounterById(encounterId));
+        allow write: if encounterAcceptsClientMutation(encounterId)
+          && (
+            isDM()
+            || (isActiveSignedIn() && canReadEncounterById(encounterId))
+          );
       }
     }
 
@@ -1500,7 +1604,25 @@ service cloud.firestore {
     // Map Markers
     match /map_markers/{markerId} {
       allow read: if isSignedIn();
-      allow write: if isDM() || isWebmaster() || isPlayer();
+      allow create: if (
+          isDM()
+          || isWebmaster()
+          || isPlayer()
+        )
+        && !referencesPendingNpc(request.resource.data);
+      allow update: if (
+          isDM()
+          || isWebmaster()
+          || isPlayer()
+        )
+        && !referencesPendingNpc(resource.data)
+        && !referencesPendingNpc(request.resource.data);
+      allow delete: if (
+          isDM()
+          || isWebmaster()
+          || isPlayer()
+        )
+        && !referencesPendingNpc(resource.data);
     }
 
     match /grigliata_state/{stateId} {
@@ -1674,6 +1796,10 @@ service cloud.firestore {
 
       allow create: if isActiveSignedIn()
         && isValidGrigliataTokenProfile(request.resource.data, tokenId)
+        && grigliataCustomTemplateAcceptsInstance(
+          request.resource.data,
+          tokenId
+        )
         && (
           isGrigliataManager()
           || (
@@ -1684,6 +1810,8 @@ service cloud.firestore {
         );
 
       allow update: if isActiveSignedIn()
+        && !isGrigliataTokenPendingDeletion(resource.data)
+        && grigliataCustomInstanceParentAcceptsMutation(resource.data, tokenId)
         && request.resource.data.ownerUid == resource.data.ownerUid
         && (
           (
@@ -1703,7 +1831,9 @@ service cloud.firestore {
           )
         );
 
-      allow delete: if isGrigliataManager();
+      allow delete: if isGrigliataManager()
+        && !isGrigliataTokenPendingDeletion(resource.data)
+        && grigliataCustomInstanceParentAcceptsMutation(resource.data, tokenId);
     }
 
     match /grigliata_token_placements/{placementId} {
@@ -1713,6 +1843,9 @@ service cloud.firestore {
       allow create: if isActiveSignedIn()
         && request.resource.data.keys().hasAll(["tokenId"])
         && isValidGrigliataPlacement(request.resource.data, placementId)
+        && grigliataPlacementTokenAcceptsMutation(
+          request.resource.data
+        )
         && (
           isGrigliataManager()
           || (
@@ -1732,6 +1865,9 @@ service cloud.firestore {
       allow update: if isActiveSignedIn()
         && request.resource.data.keys().hasAll(["tokenId"])
         && isValidGrigliataPlacement(request.resource.data, placementId)
+        && grigliataPlacementTokenAcceptsMutation(
+          request.resource.data
+        )
         && request.resource.data.backgroundId == resource.data.backgroundId
         && request.resource.data.tokenId == resolveGrigliataPlacementTokenId(resource.data)
         && request.resource.data.ownerUid == resource.data.ownerUid
@@ -1922,7 +2058,8 @@ service cloud.firestore {
           "updatedAt"
         ]);
 
-      allow delete: if isDM() || isWebmaster();
+      allow delete: if (isDM() || isWebmaster())
+        && resource.data.get("deletionState", null) != "pending";
     }
   }
 }

@@ -40,9 +40,13 @@ export const updateTotParameters = onDocumentWritten(
     );
     const updatedParams: Parametri = {
       ...parametri,
-      Base: cloneSection(parametri.Base),
-      Combattimento: cloneSection(parametri.Combattimento),
-      Special: cloneSection(parametri.Special),
+      ...(parametri.Base ? {Base: cloneSection(parametri.Base)} : {}),
+      ...(parametri.Combattimento ? {
+        Combattimento: cloneSection(parametri.Combattimento),
+      } : {}),
+      ...(parametri.Special ? {
+        Special: cloneSection(parametri.Special),
+      } : {}),
     };
 
     let changes = false; // Flag per tracciare le modifiche ai valori Tot.

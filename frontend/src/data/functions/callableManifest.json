@@ -1,0 +1,190 @@
+{
+  "schemaVersion": 1,
+  "supportedRegions": [
+    "europe-west8",
+    "europe-west1",
+    "us-central1"
+  ],
+  "callables": {
+    "deleteUser": {
+      "functionId": "deleteUser",
+      "region": "europe-west8",
+      "owner": "admin",
+      "compatibilityAliasOf": null
+    },
+    "updateUserRole": {
+      "functionId": "updateUserRole",
+      "region": "europe-west8",
+      "owner": "admin",
+      "compatibilityAliasOf": null
+    },
+    "levelUpAll": {
+      "functionId": "levelUpAll",
+      "region": "europe-west8",
+      "owner": "progression",
+      "compatibilityAliasOf": null
+    },
+    "levelUpUser": {
+      "functionId": "levelUpUser",
+      "region": "europe-west8",
+      "owner": "progression",
+      "compatibilityAliasOf": null
+    },
+    "task05PurchaseItem": {
+      "functionId": "task05PurchaseItem",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task05AdjustGold": {
+      "functionId": "task05AdjustGold",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task05UpdateResource": {
+      "functionId": "task05UpdateResource",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task05UpdateGrigliataCharacterResources": {
+      "functionId": "task05UpdateGrigliataCharacterResources",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task05SetEquipment": {
+      "functionId": "task05SetEquipment",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task05MutateInventory": {
+      "functionId": "task05MutateInventory",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task05MutatePersonalContent": {
+      "functionId": "task05MutatePersonalContent",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task05UpdateProfile": {
+      "functionId": "task05UpdateProfile",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task05UpdateSettings": {
+      "functionId": "task05UpdateSettings",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task05UpdateProfileContent": {
+      "functionId": "task05UpdateProfileContent",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task05UpdateProgression": {
+      "functionId": "task05UpdateProgression",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task05PrepareConsumable": {
+      "functionId": "task05PrepareConsumable",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task05CommitConsumable": {
+      "functionId": "task05CommitConsumable",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "setAllParameterLocks": {
+      "functionId": "setAllParameterLocks",
+      "region": "europe-west8",
+      "owner": "backend-operations",
+      "compatibilityAliasOf": null
+    },
+    "deleteNpcV2": {
+      "functionId": "deleteNpcV2",
+      "region": "europe-west8",
+      "owner": "backend-operations",
+      "compatibilityAliasOf": null
+    },
+    "deleteEncounterV2": {
+      "functionId": "deleteEncounterV2",
+      "region": "europe-west8",
+      "owner": "backend-operations",
+      "compatibilityAliasOf": null
+    },
+    "getBackendOperationStatus": {
+      "functionId": "getBackendOperationStatus",
+      "region": "europe-west8",
+      "owner": "backend-operations",
+      "compatibilityAliasOf": null
+    },
+    "resumeBackendOperation": {
+      "functionId": "resumeBackendOperation",
+      "region": "europe-west8",
+      "owner": "backend-operations",
+      "compatibilityAliasOf": null
+    },
+    "duplicateFoeWithAssets": {
+      "functionId": "duplicateFoeWithAssets",
+      "region": "europe-west1",
+      "owner": "foes",
+      "compatibilityAliasOf": "duplicateFoeWithAssetsV2"
+    },
+    "duplicateFoeWithAssetsV2": {
+      "functionId": "duplicateFoeWithAssetsV2",
+      "region": "europe-west8",
+      "owner": "foes",
+      "compatibilityAliasOf": null
+    },
+    "deleteGrigliataCustomToken": {
+      "functionId": "deleteGrigliataCustomToken",
+      "region": "europe-west1",
+      "owner": "grigliata",
+      "compatibilityAliasOf": null
+    },
+    "spawnGrigliataCustomTokenInstance": {
+      "functionId": "spawnGrigliataCustomTokenInstance",
+      "region": "europe-west1",
+      "owner": "grigliata",
+      "compatibilityAliasOf": null
+    },
+    "spawnGrigliataFoeToken": {
+      "functionId": "spawnGrigliataFoeToken",
+      "region": "europe-west1",
+      "owner": "grigliata",
+      "compatibilityAliasOf": null
+    },
+    "updateGrigliataCustomTokenTemplate": {
+      "functionId": "updateGrigliataCustomTokenTemplate",
+      "region": "europe-west1",
+      "owner": "grigliata",
+      "compatibilityAliasOf": null
+    },
+    "spendCharacterPoint": {
+      "functionId": "spendCharacterPoint",
+      "region": "us-central1",
+      "owner": "progression-legacy",
+      "compatibilityAliasOf": "spendCharacterPointV2"
+    },
+    "spendCharacterPointV2": {
+      "functionId": "spendCharacterPointV2",
+      "region": "europe-west8",
+      "owner": "progression",
+      "compatibilityAliasOf": null
+    }
+  }
+}

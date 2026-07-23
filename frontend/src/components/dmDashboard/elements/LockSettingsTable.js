@@ -1,9 +1,19 @@
 // frontend/src/components/dmDashboard/elements/LockSettingsTable.js
 import React, { useEffect, useState } from 'react';
-import { db } from '../../firebaseConfig';
+import { auth, db } from '../../firebaseConfig';
 import { doc, updateDoc, writeBatch } from '../../../performance/firestore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faLock, faLockOpen } from '@fortawesome/free-solid-svg-icons';
+import { getCallable } from '../../../data/functions/callableRegistry';
+import {
+  callBackendOperationAndWait,
+  TASK06_LOCAL_CANDIDATE,
+} from '../../../data/functions/backendOperationClient';
+import {
+  runWithDurableOperationIntent,
+} from '../../../data/functions/backendOperationIntentStore';
+
+const setAllParameterLocks = getCallable('setAllParameterLocks');
 
 // Displays and manages per-user and bulk lock toggles for base and combat parameters.
 // Only this table re-renders when toggling, keeping the rest of the dashboard stable.
@@ -60,18 +70,32 @@ const LockSettingsTable = React.memo(function LockSettingsTable({ users, canEdit
     if (!canEdit || !users.length) return;
     const allLocked = users.every((u) => !!lockMap?.[u.id]?.[fieldKey]);
     const target = !allLocked;
+    const field = fieldKey === 'base' ? 'lock_param_base' : 'lock_param_combat';
     try {
       setBusyAll(true);
-      const batch = writeBatch(db);
-      users.forEach((u) => {
-        const cur = !!lockMap?.[u.id]?.[fieldKey];
-        if (cur !== target) {
-          const ref = doc(db, 'users', u.id);
-          const field = fieldKey === 'base' ? 'lock_param_base' : 'lock_param_combat';
-          batch.update(ref, { [`settings.${field}`]: target });
-        }
-      });
-      await batch.commit();
+      if (TASK06_LOCAL_CANDIDATE) {
+        await runWithDurableOperationIntent({
+          actorUid: auth.currentUser?.uid,
+          kind: 'set-parameter-locks',
+          intent: { field, value: target },
+          invoke: (operationId) => callBackendOperationAndWait(
+            setAllParameterLocks,
+            { field, value: target },
+            { operationId }
+          ),
+        });
+      } else {
+        const batch = writeBatch(db);
+        users.forEach((u) => {
+          const cur = !!lockMap?.[u.id]?.[fieldKey];
+          if (cur !== target) {
+            const ref = doc(db, 'users', u.id);
+            const field = fieldKey === 'base' ? 'lock_param_base' : 'lock_param_combat';
+            batch.update(ref, { [`settings.${field}`]: target });
+          }
+        });
+        await batch.commit();
+      }
       setLockMap((m) => {
         const next = { ...m };
         users.forEach((u) => {

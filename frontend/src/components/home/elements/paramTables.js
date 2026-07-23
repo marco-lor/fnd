@@ -1,16 +1,23 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import React, { useState, useEffect, useRef } from "react";
 import { doc, updateDoc, onSnapshot } from "../../../performance/firestore";
-import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../../firebaseConfig";
 import { useAuth } from "../../../AuthContext";
 import { FaDiceD20 } from 'react-icons/fa';
 import DiceRoller from '../../common/DiceRoller';
 import { getParamDisplayName, SPECIAL_PARAM_SCHEMA_IDS } from '../../common/paramMetadata';
 import { getSchema, getVarie } from '../../../data/configRepository';
+import { getCallable } from '../../../data/functions/callableRegistry';
+import {
+  TASK06_LOCAL_CANDIDATE,
+} from '../../../data/functions/backendOperationClient';
+import {
+  runWithDurableOperationIntent,
+} from '../../../data/functions/backendOperationIntentStore';
 
-const functions = getFunctions();
-const spendCharacterPoint = httpsCallable(functions, "spendCharacterPoint");
+const spendCharacterPoint = getCallable(
+  TASK06_LOCAL_CANDIDATE ? "spendCharacterPointV2" : "spendCharacterPoint"
+);
 const displayName = (k) => getParamDisplayName(k);
 
 const StatButton = ({ onClick, disabled, children, className = "" }) => (
@@ -225,8 +232,21 @@ export function MergedStatsTable() {
   const handlePointChange = async (stat, type, change) => {
     if (cooldown || (type === 'Base' && lockBase) || (type === 'Combat' && lockCombat)) return;
     triggerCooldown();
+    const payload = { statName: stat, statType: type, change };
     try {
-      await spendCharacterPoint({ statName: stat, statType: type, change });
+      if (TASK06_LOCAL_CANDIDATE) {
+        await runWithDurableOperationIntent({
+          actorUid: user?.uid,
+          kind: 'spend-character-point',
+          intent: payload,
+          invoke: (operationId) => spendCharacterPoint({
+            ...payload,
+            operationId,
+          }),
+        });
+      } else {
+        await spendCharacterPoint(payload);
+      }
     } catch (err) {
       console.error(err);
       const msg = err.message?.includes('Not enough ability points')

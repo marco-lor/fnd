@@ -2,6 +2,18 @@
 
 Depends on Tasks 04 and 05.
 
+## Local candidate status
+
+The implementation is present in the working tree as a local/demo-emulator
+candidate. See:
+
+- `../task-06/architecture-decision.md`
+- `../task-06/function-region-inventory.md`
+- `../task-06/operations-runbook.md`
+- `../task-06/implementation-evidence.md`
+
+This status does not authorize deployment or any online rollout/config change.
+
 ## Outcome
 
 Reduce user-trigger amplification, standardize callable locality/ownership, make bulk work idempotent and bounded, and decide whether the Python service should be slimmed or retired.

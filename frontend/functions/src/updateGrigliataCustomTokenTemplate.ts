@@ -1,5 +1,6 @@
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
+import {FieldValue} from "firebase-admin/firestore";
 
 type UpdateGrigliataCustomTokenTemplatePayload = {
   tokenId: string;
@@ -10,6 +11,7 @@ type UpdateGrigliataCustomTokenTemplatePayload = {
 
 const REGION = "europe-west1";
 const FIRESTORE_BATCH_SIZE = 450;
+const IN_QUERY_SIZE = 30;
 
 const asNonEmptyString = (value: unknown) => (
   typeof value === "string" && value.trim() ? value.trim() : ""
@@ -17,18 +19,43 @@ const asNonEmptyString = (value: unknown) => (
 
 const isManagerRole = (role: unknown) => asNonEmptyString(role).toLowerCase() === "dm";
 
-const commitDeleteFreeChunks = async (
+const commitGuardedChunks = async (
+  guardRef: admin.firestore.DocumentReference,
   refs: admin.firestore.DocumentReference[],
   applyRef: (
-    batch: admin.firestore.WriteBatch,
+    transaction: admin.firestore.Transaction,
     ref: admin.firestore.DocumentReference
   ) => void
 ) => {
   for (let index = 0; index < refs.length; index += FIRESTORE_BATCH_SIZE) {
-    const batch = admin.firestore().batch();
-    refs.slice(index, index + FIRESTORE_BATCH_SIZE).forEach((ref) => applyRef(batch, ref));
-    await batch.commit();
+    await admin.firestore().runTransaction(async (transaction) => {
+      const guard = await transaction.get(guardRef);
+      if (!guard.exists) {
+        throw new HttpsError(
+          "not-found",
+          "Custom token template not found."
+        );
+      }
+      if (guard.get("task06Deletion.status") === "pending") {
+        throw new HttpsError(
+          "failed-precondition",
+          "This custom token template is pending deletion."
+        );
+      }
+      refs.slice(
+        index,
+        index + FIRESTORE_BATCH_SIZE
+      ).forEach((ref) => applyRef(transaction, ref));
+    });
   }
+};
+
+const chunkValues = <Value>(values: Value[], size: number): Value[][] => {
+  const output: Value[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    output.push(values.slice(index, index + size));
+  }
+  return output;
 };
 
 export const updateGrigliataCustomTokenTemplate = onCall<UpdateGrigliataCustomTokenTemplatePayload>(
@@ -46,26 +73,57 @@ export const updateGrigliataCustomTokenTemplate = onCall<UpdateGrigliataCustomTo
     }
 
     const db = admin.firestore();
-    const requesterSnap = await db.doc(`users/${requesterUid}`).get();
-    const isManager = isManagerRole(requesterSnap.data()?.role);
-
+    const requesterRef = db.doc(`users/${requesterUid}`);
     const templateRef = db.doc(`grigliata_tokens/${tokenId}`);
-    const templateSnap = await templateRef.get();
-    if (!templateSnap.exists) {
-      throw new HttpsError("not-found", "Custom token template not found.");
-    }
-
-    const templateData = templateSnap.data() || {};
-    const ownerUid = asNonEmptyString(templateData.ownerUid);
-    const tokenType = asNonEmptyString(templateData.tokenType);
-    const customTokenRole = asNonEmptyString(templateData.customTokenRole);
-    if (!ownerUid || tokenType !== "custom" || customTokenRole === "instance") {
-      throw new HttpsError("failed-precondition", "Only custom token templates can be updated.");
-    }
-
-    if (requesterUid !== ownerUid && !isManager) {
-      throw new HttpsError("permission-denied", "You can only update your own custom token templates.");
-    }
+    const templateData = await db.runTransaction(async (transaction) => {
+      const [requester, template] = await transaction.getAll(
+        requesterRef,
+        templateRef
+      );
+      if (
+        !requester.exists ||
+        requester.get("deletionState") === "pending"
+      ) {
+        throw new HttpsError(
+          "permission-denied",
+          "An active user profile is required."
+        );
+      }
+      if (!template.exists) {
+        throw new HttpsError(
+          "not-found",
+          "Custom token template not found."
+        );
+      }
+      if (template.get("task06Deletion.status") === "pending") {
+        throw new HttpsError(
+          "failed-precondition",
+          "This custom token template is pending deletion."
+        );
+      }
+      const data = template.data() || {};
+      const ownerUid = asNonEmptyString(data.ownerUid);
+      const tokenType = asNonEmptyString(data.tokenType);
+      const customTokenRole = asNonEmptyString(data.customTokenRole);
+      if (
+        !ownerUid ||
+        tokenType !== "custom" ||
+        customTokenRole === "instance"
+      ) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Only custom token templates can be updated."
+        );
+      }
+      const isManager = isManagerRole(requester.get("role"));
+      if (requesterUid !== ownerUid && !isManager) {
+        throw new HttpsError(
+          "permission-denied",
+          "You can only update your own custom token templates."
+        );
+      }
+      return data;
+    });
 
     const imageUrl = typeof request.data?.imageUrl === "string"
       ? request.data.imageUrl.trim()
@@ -73,7 +131,7 @@ export const updateGrigliataCustomTokenTemplate = onCall<UpdateGrigliataCustomTo
     const imagePath = typeof request.data?.imagePath === "string"
       ? request.data.imagePath.trim()
       : asNonEmptyString(templateData.imagePath);
-    const now = admin.firestore.FieldValue.serverTimestamp();
+    const now = FieldValue.serverTimestamp();
 
     const instanceSnapshots = await db.collection("grigliata_tokens")
       .where("customTemplateId", "==", tokenId)
@@ -83,19 +141,21 @@ export const updateGrigliataCustomTokenTemplate = onCall<UpdateGrigliataCustomTo
       .map((docSnap) => docSnap.ref);
     const placementRefs: admin.firestore.DocumentReference[] = [];
 
-    for (const targetTokenId of [tokenId, ...instanceRefs.map((ref) => ref.id)]) {
+    const targetTokenIds = [tokenId, ...instanceRefs.map((ref) => ref.id)];
+    for (const tokenIds of chunkValues(targetTokenIds, IN_QUERY_SIZE)) {
       const placementSnap = await db.collection("grigliata_token_placements")
-        .where("tokenId", "==", targetTokenId)
+        .where("tokenId", "in", tokenIds)
         .get();
       placementSnap.docs.forEach((docSnap) => {
         placementRefs.push(docSnap.ref);
       });
     }
 
-    await commitDeleteFreeChunks(
+    await commitGuardedChunks(
+      templateRef,
       [templateRef, ...instanceRefs],
-      (batch, ref) => {
-        batch.set(ref, {
+      (transaction, ref) => {
+        transaction.set(ref, {
           label,
           imageUrl,
           imagePath,
@@ -109,10 +169,11 @@ export const updateGrigliataCustomTokenTemplate = onCall<UpdateGrigliataCustomTo
       }
     );
 
-    await commitDeleteFreeChunks(
+    await commitGuardedChunks(
+      templateRef,
       placementRefs,
-      (batch, ref) => {
-        batch.set(ref, {
+      (transaction, ref) => {
+        transaction.set(ref, {
           label,
           imageUrl,
           updatedAt: now,

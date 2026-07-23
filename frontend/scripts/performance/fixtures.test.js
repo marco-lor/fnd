@@ -7,7 +7,9 @@ const {
   FIXTURE_VERSION,
   PERFORMANCE_STORAGE_BUCKET,
   runSeedFixture,
+  TASK06_BACKEND_CONFIG,
 } = require('./fixtures');
+const fixtureManifest = require('../../performance/fixture-manifest.json');
 
 test('fixture generation is stable and contains the required scale', () => {
   const firstDocuments = buildDocuments();
@@ -25,7 +27,21 @@ test('fixture generation is stable and contains the required scale', () => {
   assert.equal(first.counts.encounters, 100);
   assert.equal(first.counts.grigliata_token_placements, 200);
   assert.equal(first.counts.grigliata_fog_memory_tiles, 1024);
+  assert.equal(first.counts.app_config, 1);
+  assert.deepEqual(
+    firstDocuments.find(({path: documentPath}) => (
+      documentPath === 'app_config/task06_backend'
+    ))?.data,
+    TASK06_BACKEND_CONFIG
+  );
   assert.equal(new Set(firstDocuments.map((entry) => entry.path)).size, firstDocuments.length);
+  assert.equal(fixtureManifest.documentCount, first.documentCount);
+  assert.equal(fixtureManifest.canonicalHash, first.hash);
+  assert.deepEqual(fixtureManifest.counts, Object.fromEntries(
+    Object.entries(first.counts).filter(([collectionName]) => (
+      fixtureManifest.counts[collectionName] !== undefined
+    ))
+  ));
 });
 
 test('emulator cleanup clears exact loopback services then the whole demo Storage bucket', async () => {
