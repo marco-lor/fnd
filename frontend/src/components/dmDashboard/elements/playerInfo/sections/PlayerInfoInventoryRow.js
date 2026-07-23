@@ -239,7 +239,7 @@ const PlayerInfoInventoryRow = ({
           userId={deleteVarieTarget.userId}
           varieItemId={deleteVarieTarget.varieItemId}
           displayName={deleteVarieTarget.displayName}
-          quantity={deleteVarieTarget.qty}
+          totalQty={deleteVarieTarget.qty}
           onClose={() => setDeleteVarieTarget(null)}
           onSuccess={() => setDeleteVarieTarget(null)}
         />

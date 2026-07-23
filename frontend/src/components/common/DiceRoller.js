@@ -1,18 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { FaDiceD20, FaTimes } from 'react-icons/fa';
 import PropTypes from 'prop-types';
-import { useAuth } from '../../AuthContext';
+import { useOptionalAuth } from '../../AuthContext';
 import logDiceRoll from './diceLogger';
 
 // Dice roller overlay. Can be rendered inside or outside AuthContext provider.
 // If rendered outside, it will gracefully skip user-based logging.
-export default function DiceRoller({ faces, count, modifier, description, onComplete, user: forcedUser }) {
+export default function DiceRoller({
+  faces,
+  count = 1,
+  modifier = 0,
+  description = 'Rolling Dice',
+  onComplete,
+  user: forcedUser,
+  finalRolls,
+}) {
   const [currentTotal, setCurrentTotal] = useState(0);
   const [currentRolls, setCurrentRolls] = useState([]);
   const [finished, setFinished] = useState(false);
   // Safely access auth context (it may be undefined if mounted outside provider)
   // Unconditional hook call to satisfy react-hooks rules; if provider missing, authCtx may be undefined.
-  const authCtx = useAuth();
+  const authCtx = useOptionalAuth();
   const user = forcedUser || (authCtx && authCtx.user);
 
   useEffect(() => {
@@ -20,7 +28,12 @@ export default function DiceRoller({ faces, count, modifier, description, onComp
     const totalIterations = 20;
     const interval = setInterval(() => {
       // simulate rolling each die and calculate sum
-      const rolls = Array.from({ length: count }, () => Math.floor(Math.random() * faces) + 1);
+      const useAuthoritativeRolls = iterations === totalIterations - 1
+        && Array.isArray(finalRolls)
+        && finalRolls.length === count;
+      const rolls = useAuthoritativeRolls
+        ? finalRolls
+        : Array.from({ length: count }, () => Math.floor(Math.random() * faces) + 1);
       const sum = rolls.reduce((a, b) => a + b, 0) + modifier;
       setCurrentRolls(rolls);
       setCurrentTotal(sum);
@@ -32,7 +45,7 @@ export default function DiceRoller({ faces, count, modifier, description, onComp
       }
     }, 100);
     return () => clearInterval(interval);
-  }, [faces, count, modifier]);
+  }, [faces, count, modifier, finalRolls]);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50 p-4">
@@ -85,11 +98,5 @@ DiceRoller.propTypes = {
   description: PropTypes.string,
   onComplete: PropTypes.func.isRequired,
   user: PropTypes.object, // optional user override
-};
-
-DiceRoller.defaultProps = {
-  count: 1,
-  modifier: 0,
-  description: 'Rolling Dice',
-  user: undefined,
+  finalRolls: PropTypes.arrayOf(PropTypes.number),
 };

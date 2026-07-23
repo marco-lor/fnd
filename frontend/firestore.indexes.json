@@ -73,7 +73,42 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "inventory",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "kind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "normalizedName",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "acquiredAt",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "inventory",
+      "fieldPath": "acquisitionSnapshot",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "inventory",
+      "fieldPath": "currentSnapshot",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "user_operations",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    }
+  ]
 }

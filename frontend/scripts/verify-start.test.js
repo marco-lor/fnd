@@ -333,6 +333,28 @@ test("Windows cleanup invokes taskkill for only the captured PID tree", async ()
   assert.equal(invocation.options.windowsHide, true);
 });
 
+test("Windows cleanup tolerates a wrapper that exits after taskkill reports a stale PID", async () => {
+  const child = createFakeChild(9877);
+
+  await terminateProcessTree(child, {
+    platform: "win32",
+    cleanupTimeoutMs: 100,
+    spawnSyncImpl: () => {
+      setImmediate(() => {
+        child.exitCode = 0;
+        child.emit("exit", 0, null);
+      });
+      return {
+        status: 128,
+        stdout: "",
+        stderr: "ERROR: There is no running instance of the task.",
+      };
+    },
+  });
+
+  assert.equal(child.exitCode, 0);
+});
+
 test("bounded output retains only the configured tail", () => {
   const output = new BoundedOutput(8);
   output.append("12345");

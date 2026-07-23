@@ -1,5 +1,6 @@
 import {onCall, HttpsError, CallableRequest} from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
+import {assertLegacyRootMutationAllowed} from "./legacyRootMutationGate";
 
 /* -------------------------------------------------------------------------- */
 /*  Types                                                                     */
@@ -45,6 +46,7 @@ export const spendCharacterPoint = onCall(
     const db = admin.firestore();
     const userRef = db.doc(`users/${uid}`);
     const utilsRef = db.doc("utils/varie");
+    const rolloutRef = db.doc("app_config/user_data_v2");
 
     // Pre-load combat-cost table only if needed
     let combatCosts: CombatStatCosts = {};
@@ -61,7 +63,8 @@ export const spendCharacterPoint = onCall(
     /*  2.  Transaction                                                       */
     /* ---------------------------------------------------------------------- */
     await db.runTransaction(async (tx) => {
-      const snap = await tx.get(userRef);
+      const [rollout, snap] = await tx.getAll(rolloutRef, userRef);
+      assertLegacyRootMutationAllowed(rollout.data(), uid);
       if (!snap.exists) {
         throw new HttpsError("not-found", "User document is missing.");
       }

@@ -1,5 +1,6 @@
 import {onDocumentUpdated} from "firebase-functions/v2/firestore";
 import * as admin from "firebase-admin";
+import {applyLegacyRootTriggerUpdate} from "./legacyRootMutationGate";
 
 // eslint-disable-next-line max-len
 // Do NOT initialize Firebase Admin here because it's already initialized in index.ts.
@@ -65,9 +66,15 @@ export const updateManaTotal = onDocumentUpdated(
       // Calculate manaTotal using the correct multiplier
       const manaTotal = manaMultiplier * currentDisciplinaTot + 5;
 
-      // Update the user's document with the new manaTotal
-      return admin.firestore().doc(`users/${userId}`).update({
-        "stats.manaTotal": manaTotal,
+      // The source/config fence prevents delayed Admin SDK writes after drain.
+      return applyLegacyRootTriggerUpdate({
+        uid: userId,
+        label: "updateManaTotal",
+        expectedFields: {
+          "Parametri.Combattimento.Disciplina.Tot": newDisciplinaTot,
+          "stats.level": newLevel,
+        },
+        update: {"stats.manaTotal": manaTotal},
       });
     } catch (error) {
       console.error("Error updating manaTotal:", error);

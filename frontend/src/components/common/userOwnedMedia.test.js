@@ -32,6 +32,7 @@ jest.mock("firebase/storage", () => ({
   uploadBytes: (...args) => mockUploadBytes(...args),
 }));
 
+import { normalizeV2PersonalContentDocument } from "../../data/userData/normalizers";
 import { saveTecnicaForUser } from "./userOwnedMedia";
 
 const { auth: mockAuth } = jest.requireMock("../firebaseConfig");
@@ -94,5 +95,71 @@ describe("saveTecnicaForUser", () => {
         }),
       })
     );
+  });
+
+  it("strips V2 transport metadata before persisting an edited legacy entry", async () => {
+    const v2Entry = normalizeV2PersonalContentDocument({
+      id: "technique-doc-1",
+      data: () => ({
+        id: "transport-id",
+        displayName: "Fire Ball",
+        normalizedName: "fire ball",
+        migration: { source: "legacy" },
+        legacyManaged: true,
+        schemaVersion: 2,
+        revision: 4,
+        updatedBy: "migration",
+        Nome: "Fire Ball",
+        Costo: 2,
+        Effetto: "Deals damage",
+      }),
+    });
+
+    await saveTecnicaForUser({
+      userId: "target-user",
+      originalName: "Fire Ball",
+      entryData: v2Entry,
+    });
+
+    const saved = mockUpdateDoc.mock.calls[0][1].tecniche["Fire Ball"];
+    expect(saved).toEqual(expect.objectContaining({
+      id: "technique-doc-1",
+      Nome: "Fire Ball",
+      Costo: 2,
+      Effetto: "Deals damage",
+    }));
+    [
+      'name',
+      'displayName',
+      'normalizedName',
+      'migration',
+      'legacyManaged',
+      '_task05ContentId',
+      'schemaVersion',
+      'revision',
+      'updatedBy',
+    ].forEach((field) => expect(saved).not.toHaveProperty(field));
+  });
+
+  it("preserves ordinary legacy fields when no V2 normalization marker is present", async () => {
+    await saveTecnicaForUser({
+      userId: "target-user",
+      originalName: "Legacy Technique",
+      entryData: {
+        Nome: "Legacy Technique",
+        name: "legacy-alias",
+        createdAt: "custom-created-value",
+        updatedAt: "custom-updated-value",
+        migration: { custom: true },
+      },
+    });
+
+    expect(mockUpdateDoc.mock.calls[0][1].tecniche["Legacy Technique"]).toEqual({
+      Nome: "Legacy Technique",
+      name: "legacy-alias",
+      createdAt: "custom-created-value",
+      updatedAt: "custom-updated-value",
+      migration: { custom: true },
+    });
   });
 });

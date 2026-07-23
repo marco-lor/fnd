@@ -2,34 +2,37 @@
 // Handles: determining dice count based on player level thresholds (1,4,7,10), rolling dice via overlay,
 // applying Bonus Creazione multiplier, updating HP or Mana, decrementing inventory quantity, and clearing slot if empty.
 
-import { doc, getDoc, updateDoc } from '../../../performance/firestore';
-import { db } from '../../firebaseConfig';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import DiceRoller from '../../common/DiceRoller';
 import { getVarie } from '../../../data/configRepository';
+import {
+  commitConsumable,
+  isDefinitiveUserDataCommandError,
+  prepareConsumable,
+} from '../../../data/userData/userDataCommands';
+import { runVersionedUserDataCommand } from '../../../data/userData/userDataCommandRouting';
+import { legacyConsumeConsumable } from '../../../data/userData/legacyUserDataCommands';
 
-const LEVEL_THRESHOLDS = [1,4,7,10];
+const LEVEL_THRESHOLDS = [1, 4, 7, 10];
+const pendingConsumptions = new Map();
 
-// Resolve level key for item param tables.
+export const __resetConsumableOperationsForTests = () => {
+  if (process.env.NODE_ENV === 'test') pendingConsumptions.clear();
+};
+
 const resolveLevelKey = (userLevel) => {
-  for (let i = LEVEL_THRESHOLDS.length - 1; i >= 0; i--) {
-    if (userLevel >= LEVEL_THRESHOLDS[i]) return String(LEVEL_THRESHOLDS[i]);
+  for (let index = LEVEL_THRESHOLDS.length - 1; index >= 0; index -= 1) {
+    if (userLevel >= LEVEL_THRESHOLDS[index]) return String(LEVEL_THRESHOLDS[index]);
   }
   return '1';
 };
 
-// Extract numeric dice count from Parametri.Special field for given key and level.
 const getDiceCount = (item, fieldKey, levelKey) => {
-  try {
-    const special = item?.Parametri?.Special || {};
-    const obj = special[fieldKey];
-    if (!obj || typeof obj !== 'object') return 0;
-    const raw = obj[levelKey];
-    if (raw == null || String(raw).trim() === '') return 0;
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : 0;
-  } catch { return 0; }
+  const raw = item?.Parametri?.Special?.[fieldKey]?.[levelKey];
+  if (raw == null || String(raw).trim() === '') return 0;
+  const count = Number(raw);
+  return Number.isFinite(count) ? count : 0;
 };
 
 // Get Bonus Creazione from Specific['Bonus Creazione'] (string/number). Non-numeric becomes 0.
@@ -62,7 +65,7 @@ export const applyCapToStat = (current, gain, total) => {
 
 // Mount a DiceRoller overlay, returning a promise resolved with { total, meta }.
 // Pass forced user so DiceRoller internal logger can still function even though this root is outside provider.
-const rollDiceOverlay = ({ faces, count, modifier, description, user }) => {
+const rollDiceOverlay = ({ faces, count, modifier, description, user, finalRolls }) => {
   return new Promise((resolve) => {
     const host = document.createElement('div');
     document.body.appendChild(host);
@@ -83,142 +86,113 @@ const rollDiceOverlay = ({ faces, count, modifier, description, user }) => {
         description={description}
         onComplete={handleComplete}
         user={user}
+        finalRolls={finalRolls}
       />
     );
   });
 };
 
-// Core logic
-// params: { user, userData, item, slotKey, mode }
-// mode: 'hp' or 'mana'
-export default async function useConsumable({ user, userData, item, slotKey, mode }) {
+const consumeAuthoritatively = async ({ user, item, mode }) => {
+  if (!user?.uid || !item) return;
+  const isHP = mode === 'hp';
+  const isMana = mode === 'mana';
+  const inventoryId = item?._task05?.inventoryId || item?._instance?.instanceId;
+  if (!inventoryId) throw new Error('Consumable is missing its stable inventory ID.');
+  const resource = isHP ? 'hp' : isMana ? 'mana' : null;
+  const consumptionKey = `${user.uid}:${inventoryId}:${resource || 'none'}`;
+  let pending = pendingConsumptions.get(consumptionKey);
+  try {
+    if (!pending) {
+      const preparation = await prepareConsumable({
+        inventoryId,
+        resource,
+        retryKey: `${consumptionKey}:prepare`,
+      });
+      pending = { preparation, rollShown: false };
+      pendingConsumptions.set(consumptionKey, pending);
+    }
+    const { preparation } = pending;
+    const rolls = Array.isArray(preparation?.rolls) ? preparation.rolls : [];
+    if (rolls.length > 0 && !pending.rollShown) {
+      const faces = Number(preparation.faces) || Math.max(10, ...rolls);
+      const modifier = Number(preparation.modifier) || 0;
+      const description = `Lancio ${rolls.length}d${faces}${modifier ? `+${modifier}` : ''} Anima per ${isHP ? 'HP' : 'Mana'}`;
+      await rollDiceOverlay({
+        faces,
+        count: rolls.length,
+        modifier,
+        description,
+        user,
+        finalRolls: rolls,
+      });
+      pending.rollShown = true;
+    }
+    await commitConsumable({
+      preparationId: preparation.preparationId,
+      retryKey: `${consumptionKey}:commit`,
+    });
+    pendingConsumptions.delete(consumptionKey);
+  } catch (error) {
+    if (isDefinitiveUserDataCommandError(error)) {
+      pendingConsumptions.delete(consumptionKey);
+    }
+    throw error;
+  }
+};
+
+const consumeLegacy = async ({ user, userData, item, slotKey, mode }) => {
   if (!user?.uid || !item) return;
   const level = Number(userData?.stats?.level || 1);
   const levelKey = resolveLevelKey(level);
   const isHP = mode === 'hp';
   const isMana = mode === 'mana';
+  const consumeOnly = !isHP && !isMana;
+  const fieldKey = isHP
+    ? 'Rigenera Dado Anima HP'
+    : isMana ? 'Rigenera Dado Anima Mana' : null;
+  const diceCount = fieldKey ? getDiceCount(item, fieldKey, levelKey) : 0;
 
-  // Fetch latest user doc early for inventory operations (shared in both branches)
-  const ref = doc(db, 'users', user.uid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) return;
-  const data = snap.data() || {};
-
-  const consumeOnly = !isHP && !isMana; // user confirmed with no regeneration available
-  const fieldKey = isHP ? 'Rigenera Dado Anima HP' : (isMana ? 'Rigenera Dado Anima Mana' : null);
-  const diceCount = (fieldKey ? getDiceCount(item, fieldKey, levelKey) : 0);
-
-  if (consumeOnly || diceCount <= 0) {
-    // Perform inventory decrement / slot clearing without stat changes or dice roll.
-    const inv = Array.isArray(data.inventory) ? [...data.inventory] : [];
-    const matchId = item.id || item.name || item?.General?.Nome;
-    let updatedInventory = inv;
-    let removedCompletely = false;
-    for (let i = 0; i < updatedInventory.length; i++) {
-      const entry = updatedInventory[i];
-      if (!entry || typeof entry !== 'object') continue;
-      const entryId = entry.id || entry.name || entry?.General?.Nome;
-      if (entryId === matchId) {
-        const qty = Number(entry.qty || 1);
-        if (qty > 1) {
-          updatedInventory[i] = { ...entry, qty: qty - 1 };
-        } else {
-          updatedInventory.splice(i, 1);
-          removedCompletely = true;
-        }
-        break;
-      }
-    }
-    const equippedUpdates = {};
-    if (removedCompletely && slotKey) {
-      equippedUpdates[`equipped.${slotKey}`] = null;
-    } else if (slotKey && data.equipped && data.equipped[slotKey]) {
-      const eqEntry = data.equipped[slotKey];
-      if (eqEntry && typeof eqEntry === 'object' && eqEntry.qty != null) {
-        const newEqQty = Math.max(0, Number(eqEntry.qty) - 1);
-        equippedUpdates[`equipped.${slotKey}.qty`] = newEqQty;
-        if (newEqQty === 0) equippedUpdates[`equipped.${slotKey}`] = null;
-      }
-    }
-    await updateDoc(ref, { inventory: updatedInventory, ...equippedUpdates });
-    return; // done
-  }
-
-  const bonusCreazione = getBonusCreazione(item);
-
-  // Determine correct Anima die faces using the same method as the home page (paramTables.js):
-  // Fetch 'utils/varie' document and read dadiAnimaByLevel[level]. Fallback to last element or d10.
-  let animaDieFaces = 10; // fallback
-  try {
-    const varie = await getVarie();
-    if (varie) {
-      const arr = varie.dadiAnimaByLevel || [];
-      const diceTypeStr = arr[level] || arr[arr.length - 1];
-      if (diceTypeStr && /^d\d+$/i.test(diceTypeStr)) {
-        const parsed = parseInt(diceTypeStr.replace(/^d/i, ''), 10);
+  let finalGain = null;
+  if (!consumeOnly && diceCount > 0) {
+    let animaDieFaces = 10;
+    try {
+      const varie = await getVarie();
+      const diceByLevel = varie?.dadiAnimaByLevel || [];
+      const diceType = diceByLevel[level] || diceByLevel[diceByLevel.length - 1];
+      if (diceType && /^d\d+$/i.test(diceType)) {
+        const parsed = parseInt(diceType.replace(/^d/i, ''), 10);
         if (!Number.isNaN(parsed)) animaDieFaces = parsed;
       }
+    } catch (_error) {
+      // Preserve the legacy d10 fallback when configuration is unavailable.
     }
-  } catch (e) {
-    // silent fallback to default animaDieFaces
-  }
-  const potentialBonusAdd = bonusCreazione * diceCount;
-  // Use DiceRoller modifier so the returned total already includes bonus; display full formula.
-  const modifierValue = potentialBonusAdd; // bonusCreazione * diceCount
-  const description = `Lancio ${diceCount}d${animaDieFaces}${modifierValue ? `+${modifierValue}` : ''} Anima per ${isHP ? 'HP' : 'Mana'}`;
-  const { total: rawTotal } = await rollDiceOverlay({ faces: animaDieFaces, count: diceCount, modifier: modifierValue, description, user });
-
-  // rawTotal already includes bonus via modifier.
-  const finalGain = rawTotal; // already includes bonus modifier
-
-  // data already fetched above
-
-  // Update stat field.
-  const stats = data.stats || {};
-  const currentField = isHP ? 'hpCurrent' : 'manaCurrent';
-  const totalField = isHP ? 'hpTotal' : 'manaTotal';
-  const currentVal = Number(stats[currentField] || 0);
-  const totalVal = Number(stats[totalField] || 0);
-  const newValue = applyCapToStat(currentVal, finalGain, totalVal);
-
-  // Adjust inventory: find matching item instance; if qty >1 decrement, else remove. Equipped slot may need clearing.
-  const inv = Array.isArray(data.inventory) ? [...data.inventory] : [];
-  const matchId = item.id || item.name || item?.General?.Nome;
-  let updatedInventory = inv;
-  let removedCompletely = false;
-  for (let i = 0; i < updatedInventory.length; i++) {
-    const entry = updatedInventory[i];
-    if (!entry || typeof entry !== 'object') continue;
-    const entryId = entry.id || entry.name || entry?.General?.Nome;
-    if (entryId === matchId) {
-      const qty = Number(entry.qty || 1);
-      if (qty > 1) {
-        updatedInventory[i] = { ...entry, qty: qty - 1 };
-      } else {
-        updatedInventory.splice(i, 1);
-        removedCompletely = true;
-      }
-      break;
-    }
+    const modifier = getBonusCreazione(item) * diceCount;
+    const description = `Lancio ${diceCount}d${animaDieFaces}${modifier ? `+${modifier}` : ''} Anima per ${isHP ? 'HP' : 'Mana'}`;
+    const { total } = await rollDiceOverlay({
+      faces: animaDieFaces,
+      count: diceCount,
+      modifier,
+      description,
+      user,
+    });
+    finalGain = total;
   }
 
-  // If removed completely, clear equipped slot.
-  const equippedUpdates = {};
-  if (removedCompletely && slotKey) {
-    equippedUpdates[`equipped.${slotKey}`] = null;
-  } else if (slotKey && data.equipped && data.equipped[slotKey]) {
-    // Update the equipped entry qty if still present
-    const eqEntry = data.equipped[slotKey];
-    if (eqEntry && typeof eqEntry === 'object' && eqEntry.qty != null) {
-      const newEqQty = Math.max(0, Number(eqEntry.qty) - 1);
-      equippedUpdates[`equipped.${slotKey}.qty`] = newEqQty;
-      if (newEqQty === 0) equippedUpdates[`equipped.${slotKey}`] = null;
-    }
-  }
+  await legacyConsumeConsumable({
+    uid: user.uid,
+    item,
+    slotKey,
+    mode,
+    gain: finalGain,
+  });
+};
 
-  await updateDoc(ref, {
-    [`stats.${currentField}`]: newValue,
-    inventory: updatedInventory,
-    ...equippedUpdates,
+// Core logic. Legacy-read and shadow-verify preserve the established aggregate
+// mutation; activated rollout stages use only the authoritative command pair.
+export default function useConsumable({ user, userData, item, slotKey, mode, stage }) {
+  return runVersionedUserDataCommand({
+    stage,
+    legacy: () => consumeLegacy({ user, userData, item, slotKey, mode }),
+    authoritative: () => consumeAuthoritatively({ user, item, mode }),
   });
 }

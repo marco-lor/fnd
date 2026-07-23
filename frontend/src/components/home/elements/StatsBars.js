@@ -1,21 +1,42 @@
 // file: ./frontend/src/components/home/elements/StatsBars.js
-import React, { useEffect, useState, useRef, useContext } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { doc, onSnapshot, updateDoc } from '../../../performance/firestore';
-import { db } from '../../firebaseConfig';
-import { AuthContext } from '../../../AuthContext';
+import { useAuthSession } from '../../../AuthContext';
+import { useResources } from '../../../data/userData/userDataHooks';
+import { updateResource } from '../../../data/userData/userDataCommands';
+import { legacyUpdateResource } from '../../../data/userData/legacyUserDataCommands';
+import {
+  isUserDataCommandStageResolved,
+  runVersionedUserDataCommand,
+} from '../../../data/userData/userDataCommandRouting';
 import { FaAngleRight, FaAngleLeft, FaAnglesRight, FaAnglesLeft, FaDroplet } from 'react-icons/fa6';
 import { FaRedo, FaBan } from 'react-icons/fa';
 import { GiHearts, GiMagicSwirl, GiShield } from 'react-icons/gi';
 
 const StatsBars = () => {
-  const { user } = useContext(AuthContext);
-  const [userData, setUserData] = useState(null);
+  const { user, repositoryAccessGeneration = 0 } = useAuthSession();
+  const actionScopeKey = `${user?.uid || 'anonymous'}:${repositoryAccessGeneration}`;
+  const actionScopeRef = useRef(actionScopeKey);
+  actionScopeRef.current = actionScopeKey;
+  const {
+    data: userData,
+    stage: resourcesStage,
+    status: resourcesStatus,
+  } = useResources(user?.uid);
+  const mutationsReady = resourcesStatus === 'fresh'
+    && userData !== null
+    && isUserDataCommandStageResolved(resourcesStage);
+  const executeResourceMutation = (payload) => runVersionedUserDataCommand({
+    stage: mutationsReady ? resourcesStage : null,
+    legacy: () => legacyUpdateResource({ uid: user.uid, ...payload }),
+    authoritative: () => updateResource(payload),
+  });
   // State for custom input modal
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [customInputValue, setCustomInputValue] = useState('');
   const [customAction, setCustomAction] = useState(null);
   const [customFeedbackMessage, setCustomFeedbackMessage] = useState('');
+  const [customActionScopeKey, setCustomActionScopeKey] = useState(null);
 
   // Refs for long-press intervals.
   const hpIntervalRef = useRef(null);
@@ -27,63 +48,35 @@ const StatsBars = () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       intervalRef.current = null;
     });
-  }, []);
+  }, [mutationsReady, user?.uid]);
   // Activation overlay state for Barriera
   const [showBarrieraActivate, setShowBarrieraActivate] = useState(false);
+  const [barrieraActionScopeKey, setBarrieraActionScopeKey] = useState(null);
   const [barrieraActivateValue, setBarrieraActivateValue] = useState('');
   // Turns for barriera duration
   const [barrieraActivateTurns, setBarrieraActivateTurns] = useState('');
 
   useEffect(() => {
-    let unsubscribeSnapshot = null;
-    if (user) {
-      const userRef = doc(db, "users", user.uid);
-      unsubscribeSnapshot = onSnapshot(
-        userRef,
-        (docSnap) => {
-          if (docSnap.exists()) {
-            setUserData(docSnap.data());
-          }
-        },
-        (error) => {
-          console.error("Error in snapshot listener:", error);
-        }
-      );
-    }
-    return () => {
-      if (unsubscribeSnapshot) {
-        unsubscribeSnapshot();
-      }
-    };
-  }, [user]);
-
-  // Migration: if legacy stats.barriera exists but new fields do not, create barrieraCurrent/Total
-  useEffect(() => {
-    const migrateLegacyBarriera = async () => {
-      if (!user) return;
-      const s = userData?.stats;
-      if (!s) return;
-      if (s.barriera !== undefined && s.barrieraCurrent === undefined && s.barrieraTotal === undefined) {
-        try {
-          const userRef = doc(db, 'users', user.uid);
-            await updateDoc(userRef, {
-              'stats.barrieraCurrent': s.barriera || 0,
-              'stats.barrieraTotal': s.barriera || 0,
-            });
-        } catch (e) {
-          console.error('Failed migrating legacy barriera field', e);
-        }
-      }
-    };
-    migrateLegacyBarriera();
-  }, [user, userData?.stats, userData?.stats?.barriera, userData?.stats?.barrieraCurrent, userData?.stats?.barrieraTotal]);
+    setShowCustomInput(false);
+    setCustomActionScopeKey(null);
+    setCustomAction(null);
+    setCustomInputValue('');
+    setCustomFeedbackMessage('');
+    setShowBarrieraActivate(false);
+    setBarrieraActionScopeKey(null);
+    setBarrieraActivateValue('');
+    setBarrieraActivateTurns('');
+    [hpIntervalRef, manaIntervalRef, essenzaIntervalRef, barrieraIntervalRef].forEach((intervalRef) => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    });
+  }, [actionScopeKey]);
 
   // --- HP adjustment functions ---
   const handleResetHP = async () => {
     if (user && userData?.stats) {
       try {
-        const userRef = doc(db, "users", user.uid);
-        await updateDoc(userRef, { "stats.hpCurrent": userData.stats.hpTotal });
+        await executeResourceMutation({ resource: 'hp', mode: 'set', value: userData.stats.hpTotal });
       } catch (error) {
         console.error("Error resetting HP:", error);
       }
@@ -92,10 +85,8 @@ const StatsBars = () => {
 
   const handleDecrementHP = async () => {
     if (user && userData?.stats) {
-      const newHP = (userData.stats.hpCurrent || 0) - 1;
       try {
-        const userRef = doc(db, "users", user.uid);
-        await updateDoc(userRef, { "stats.hpCurrent": newHP });
+        await executeResourceMutation({ resource: 'hp', mode: 'delta', value: -1 });
       } catch (error) {
         console.error("Error decrementing HP:", error);
       }
@@ -104,10 +95,8 @@ const StatsBars = () => {
 
   const handleIncrementHP = async () => {
     if (user && userData?.stats) {
-      const newHP = (userData.stats.hpCurrent || 0) + 1;
       try {
-        const userRef = doc(db, "users", user.uid);
-        await updateDoc(userRef, { "stats.hpCurrent": newHP });
+        await executeResourceMutation({ resource: 'hp', mode: 'delta', value: 1 });
       } catch (error) {
         console.error("Error incrementing HP:", error);
       }
@@ -139,15 +128,20 @@ const StatsBars = () => {
   };
 
   const openCustomInput = (action) => {
+    if (!mutationsReady) return;
     setCustomAction(action);
     setCustomInputValue('');
     setCustomFeedbackMessage('');
+    setCustomActionScopeKey(actionScopeKey);
     setShowCustomInput(true);
   };
 
   const closeCustomInput = () => {
     setShowCustomInput(false);
+    setCustomActionScopeKey(null);
     setCustomAction(null);
+    setCustomInputValue('');
+    setCustomFeedbackMessage('');
   };
 
   // Determine Italian prompt message for custom input
@@ -161,12 +155,13 @@ const StatsBars = () => {
   );
 
   const handleCustomSubmit = async () => {
+    const submissionScopeKey = actionScopeKey;
+    if (!mutationsReady || customActionScopeKey !== submissionScopeKey) return;
     const delta = parseInt(customInputValue, 10);
     if (!isNaN(delta) && user && userData?.stats) {
-      const userRef = doc(db, "users", user.uid);
-      let field, newValue, actualDelta = delta;
+      let resource, newValue, actualDelta = delta;
       if (customAction === 'hp-decrement') {
-        field = 'stats.hpCurrent';
+        resource = 'hp';
         const current = userData.stats.hpCurrent || 0;
         if (delta > current) {
           actualDelta = current;
@@ -175,10 +170,10 @@ const StatsBars = () => {
           newValue = current - delta;
         }
       } else if (customAction === 'hp-increment') {
-        field = 'stats.hpCurrent';
+        resource = 'hp';
         newValue = (userData.stats.hpCurrent || 0) + delta;
       } else if (customAction === 'mana-decrement') {
-        field = 'stats.manaCurrent';
+        resource = 'mana';
         const current = userData.stats.manaCurrent || 0;
         if (delta > current) {
           actualDelta = current;
@@ -187,10 +182,10 @@ const StatsBars = () => {
           newValue = current - delta;
         }
       } else if (customAction === 'mana-increment') {
-        field = 'stats.manaCurrent';
+        resource = 'mana';
         newValue = (userData.stats.manaCurrent || 0) + delta;
       } else if (customAction === 'essenza-decrement') {
-        field = 'stats.essenzaCurrent';
+        resource = 'essenza';
         const current = userData.stats.essenzaCurrent || 0;
         if (delta > current) {
           actualDelta = current;
@@ -199,10 +194,10 @@ const StatsBars = () => {
           newValue = current - delta;
         }
       } else if (customAction === 'essenza-increment') {
-        field = 'stats.essenzaCurrent';
+        resource = 'essenza';
         newValue = (userData.stats.essenzaCurrent || 0) + delta;
       } else if (customAction === 'barriera-decrement') {
-        field = 'stats.barrieraCurrent';
+        resource = 'barriera';
         const current = userData.stats.barrieraCurrent || 0;
         if (delta > current) {
           actualDelta = current;
@@ -211,7 +206,7 @@ const StatsBars = () => {
           newValue = current - delta;
         }
       } else if (customAction === 'barriera-increment') {
-        field = 'stats.barrieraCurrent';
+        resource = 'barriera';
         const current = userData.stats.barrieraCurrent || 0;
         const total = userData.stats.barrieraTotal || 0;
         if (total <= 0) return; // cannot increment if not active
@@ -219,7 +214,8 @@ const StatsBars = () => {
         if (newValue > total) newValue = total;
       }
       try {
-        await updateDoc(userRef, { [field]: newValue });
+        await executeResourceMutation({ resource, mode: 'set', value: newValue });
+        if (actionScopeRef.current !== submissionScopeKey) return;
         if (isDecrementAction(customAction) && actualDelta !== delta) {
           const msg = `Solo ${actualDelta} punti sono stati sottratti; ${delta} superavano il valore attuale. Valore portato a 0.`;
           setCustomFeedbackMessage(msg);
@@ -236,8 +232,7 @@ const StatsBars = () => {
   const handleResetMana = async () => {
     if (user && userData?.stats) {
       try {
-        const userRef = doc(db, "users", user.uid);
-        await updateDoc(userRef, { "stats.manaCurrent": userData.stats.manaTotal });
+        await executeResourceMutation({ resource: 'mana', mode: 'set', value: userData.stats.manaTotal });
       } catch (error) {
         console.error("Error resetting Mana:", error);
       }
@@ -246,10 +241,8 @@ const StatsBars = () => {
 
   const handleDecrementMana = async () => {
     if (user && userData?.stats) {
-      const newMana = (userData.stats.manaCurrent || 0) - 1;
       try {
-        const userRef = doc(db, "users", user.uid);
-        await updateDoc(userRef, { "stats.manaCurrent": newMana });
+        await executeResourceMutation({ resource: 'mana', mode: 'delta', value: -1 });
       } catch (error) {
         console.error("Error decrementing Mana:", error);
       }
@@ -258,10 +251,8 @@ const StatsBars = () => {
 
   const handleIncrementMana = async () => {
     if (user && userData?.stats) {
-      const newMana = (userData.stats.manaCurrent || 0) + 1;
       try {
-        const userRef = doc(db, "users", user.uid);
-        await updateDoc(userRef, { "stats.manaCurrent": newMana });
+        await executeResourceMutation({ resource: 'mana', mode: 'delta', value: 1 });
       } catch (error) {
         console.error("Error incrementing Mana:", error);
       }
@@ -296,8 +287,7 @@ const StatsBars = () => {
   const handleResetEssenza = async () => {
     if (user && userData?.stats) {
       try {
-        const userRef = doc(db, "users", user.uid);
-        await updateDoc(userRef, { "stats.essenzaCurrent": userData.stats.essenzaTotal || 0 });
+        await executeResourceMutation({ resource: 'essenza', mode: 'set', value: userData.stats.essenzaTotal || 0 });
       } catch (error) {
         console.error("Error resetting Essenza:", error);
       }
@@ -306,10 +296,8 @@ const StatsBars = () => {
 
   const handleDecrementEssenza = async () => {
     if (user && userData?.stats) {
-      const newEssenza = (userData.stats.essenzaCurrent || 0) - 1;
       try {
-        const userRef = doc(db, "users", user.uid);
-        await updateDoc(userRef, { "stats.essenzaCurrent": newEssenza });
+        await executeResourceMutation({ resource: 'essenza', mode: 'delta', value: -1 });
       } catch (error) {
         console.error("Error decrementing Essenza:", error);
       }
@@ -318,10 +306,8 @@ const StatsBars = () => {
 
   const handleIncrementEssenza = async () => {
     if (user && userData?.stats) {
-      const newEssenza = (userData.stats.essenzaCurrent || 0) + 1;
       try {
-        const userRef = doc(db, "users", user.uid);
-        await updateDoc(userRef, { "stats.essenzaCurrent": newEssenza });
+        await executeResourceMutation({ resource: 'essenza', mode: 'delta', value: 1 });
       } catch (error) {
         console.error("Error incrementing Essenza:", error);
       }
@@ -478,12 +464,13 @@ const StatsBars = () => {
   const handleResetBarriera = async () => {
     if (!user) return;
     try {
-      const userRef = doc(db, 'users', user.uid);
-      await updateDoc(userRef, { 
-        'stats.barrieraCurrent': 0, 
-        'stats.barrieraTotal': 0,
-        'active_turn_effect.barriera.remainingTurns': 0,
-        'active_turn_effect.barriera.totalTurns': 0,
+      await executeResourceMutation({
+        resource: 'barriera',
+        mode: 'set',
+        value: 0,
+        totalValue: 0,
+        remainingTurns: 0,
+        totalTurns: 0,
       });
     } catch (e) {
       console.error('Error resetting Barriera:', e);
@@ -495,8 +482,7 @@ const StatsBars = () => {
       let newVal = (userData.stats.barrieraCurrent || 0) - 1;
       if (newVal < 0) newVal = 0;
       try {
-        const userRef = doc(db, 'users', user.uid);
-        await updateDoc(userRef, { 'stats.barrieraCurrent': newVal });
+        await executeResourceMutation({ resource: 'barriera', mode: 'set', value: newVal });
       } catch (e) {
         console.error('Error decrementing Barriera:', e);
       }
@@ -510,8 +496,7 @@ const StatsBars = () => {
       if (total <= 0 || current >= total) return; // cannot grow past total
       const newVal = Math.min(total, current + 1);
       try {
-        const userRef = doc(db, 'users', user.uid);
-        await updateDoc(userRef, { 'stats.barrieraCurrent': newVal });
+        await executeResourceMutation({ resource: 'barriera', mode: 'set', value: newVal });
       } catch (e) {
         console.error('Error incrementing Barriera:', e);
       }
@@ -541,27 +526,39 @@ const StatsBars = () => {
 
   // Activate Barriera (sets both current and total)
   const handleActivateBarriera = async () => {
+    const submissionScopeKey = actionScopeKey;
     const val = parseInt(barrieraActivateValue, 10);
     const turns = parseInt(barrieraActivateTurns, 10);
-    if (isNaN(val) || val <= 0 || isNaN(turns) || turns <= 0 || !user) return;
+    if (
+      isNaN(val)
+      || val <= 0
+      || isNaN(turns)
+      || turns <= 0
+      || !user
+      || !mutationsReady
+      || barrieraActionScopeKey !== submissionScopeKey
+    ) return;
     try {
-      const userRef = doc(db, 'users', user.uid);
-      await updateDoc(userRef, {
-        'stats.barrieraCurrent': val,
-        'stats.barrieraTotal': val,
-        'active_turn_effect.barriera.totalTurns': turns,
-        'active_turn_effect.barriera.remainingTurns': turns,
+      await executeResourceMutation({
+        resource: 'barriera',
+        mode: 'set',
+        value: val,
+        totalValue: val,
+        totalTurns: turns,
+        remainingTurns: turns,
       });
+      if (actionScopeRef.current !== submissionScopeKey) return;
       setBarrieraActivateValue('');
       setBarrieraActivateTurns('');
       setShowBarrieraActivate(false);
+      setBarrieraActionScopeKey(null);
     } catch (e) {
       console.error('Error activating barriera', e);
     }
   };
 
   const barrierCurrent = userData?.stats?.barrieraCurrent ?? userData?.stats?.barriera ?? 0;
-  const barrierTotal = userData?.stats?.barrieraTotal ?? 0;
+  const barrierTotal = userData?.stats?.barrieraTotal ?? userData?.stats?.barriera ?? 0;
   // Turn effect data for barriera
   const barrierTurnsTotal = userData?.active_turn_effect?.barriera?.totalTurns || 0;
   const barrierTurnsRemaining = userData?.active_turn_effect?.barriera?.remainingTurns || 0;
@@ -578,7 +575,7 @@ const StatsBars = () => {
       <div className="absolute -right-10 -bottom-24 w-64 h-64 bg-fuchsia-500/10 rounded-full blur-3xl" />
 
       {/* Custom Input Modal (full-screen overlay retained via portal to avoid clipping) */}
-      {showCustomInput && createPortal(
+      {showCustomInput && customActionScopeKey === actionScopeKey && createPortal(
         (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
             <div className="w-full max-w-md bg-slate-900/90 border border-slate-700/70 rounded-2xl shadow-xl overflow-hidden">
@@ -592,13 +589,13 @@ const StatsBars = () => {
                       type="number"
                       value={customInputValue}
                       onChange={(e) => setCustomInputValue(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') handleCustomSubmit(); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && mutationsReady) handleCustomSubmit(); }}
                       className="w-full p-2 rounded-lg bg-slate-800/80 text-slate-100 mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-500 border border-slate-600/60"
                       placeholder="0"
                     />
                     <div className="flex justify-end gap-2">
                       <button onClick={closeCustomInput} className="px-4 py-2 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70">Annulla</button>
-                      <button onClick={handleCustomSubmit} className="px-4 py-2 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow hover:opacity-95">OK</button>
+                  <button onClick={handleCustomSubmit} disabled={!mutationsReady} className="px-4 py-2 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed">OK</button>
                     </div>
                   </>
                 ) : (
@@ -617,7 +614,7 @@ const StatsBars = () => {
       )}
 
       {/* Barriera Activation Overlay */}
-      {showBarrieraActivate && createPortal(
+      {showBarrieraActivate && barrieraActionScopeKey === actionScopeKey && createPortal(
         (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
             <div className="relative w-full max-w-md rounded-2xl border border-amber-500/30 bg-slate-900/95 shadow-2xl overflow-hidden">
@@ -638,7 +635,7 @@ const StatsBars = () => {
                       min="1"
                       value={barrieraActivateValue}
                       onChange={(e) => setBarrieraActivateValue(e.target.value)}
-                      onKeyDown={(e)=>{ if(e.key==='Enter') handleActivateBarriera(); }}
+                      onKeyDown={(e)=>{ if(e.key === 'Enter' && mutationsReady) handleActivateBarriera(); }}
                       className="w-full p-2 rounded-lg bg-slate-800/80 text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500 border border-slate-600/60"
                       placeholder="0"
                     />
@@ -655,7 +652,7 @@ const StatsBars = () => {
                       min="1"
                       value={barrieraActivateTurns}
                       onChange={(e) => setBarrieraActivateTurns(e.target.value)}
-                      onKeyDown={(e)=>{ if(e.key==='Enter') handleActivateBarriera(); }}
+                      onKeyDown={(e)=>{ if(e.key === 'Enter' && mutationsReady) handleActivateBarriera(); }}
                       className="w-full p-2 rounded-lg bg-slate-800/80 text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500 border border-slate-600/60"
                       placeholder="0"
                     />
@@ -667,8 +664,8 @@ const StatsBars = () => {
                   </div>
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
-                  <button onClick={()=>{ setShowBarrieraActivate(false); setBarrieraActivateValue(''); setBarrieraActivateTurns(''); }} className="px-4 py-2 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70">Annulla</button>
-                  <button onClick={handleActivateBarriera} disabled={!barrieraActivateValue || !barrieraActivateTurns} className="px-4 py-2 rounded-xl bg-gradient-to-br from-amber-500 to-yellow-500 text-slate-900 font-medium shadow disabled:opacity-40 disabled:cursor-not-allowed">Attiva</button>
+                  <button onClick={()=>{ setShowBarrieraActivate(false); setBarrieraActionScopeKey(null); setBarrieraActivateValue(''); setBarrieraActivateTurns(''); }} className="px-4 py-2 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70">Annulla</button>
+                  <button onClick={handleActivateBarriera} disabled={!mutationsReady || !barrieraActivateValue || !barrieraActivateTurns} className="px-4 py-2 rounded-xl bg-gradient-to-br from-amber-500 to-yellow-500 text-slate-900 font-medium shadow disabled:opacity-40 disabled:cursor-not-allowed">Attiva</button>
                 </div>
               </div>
             </div>
@@ -693,6 +690,9 @@ const StatsBars = () => {
             onIncEnd={handleIncrementHPEnd}
             onOpenDec={() => openCustomInput('hp-decrement')}
             onOpenInc={() => openCustomInput('hp-increment')}
+            resetDisabled={!mutationsReady}
+            decDisabled={!mutationsReady}
+            incDisabled={!mutationsReady}
           />
 
           <StatRow
@@ -709,6 +709,9 @@ const StatsBars = () => {
             onIncEnd={handleIncrementManaEnd}
             onOpenDec={() => openCustomInput('mana-decrement')}
             onOpenInc={() => openCustomInput('mana-increment')}
+            resetDisabled={!mutationsReady}
+            decDisabled={!mutationsReady}
+            incDisabled={!mutationsReady}
           />
 
           <StatRow
@@ -725,6 +728,9 @@ const StatsBars = () => {
             onIncEnd={handleIncrementEssenzaEnd}
             onOpenDec={() => openCustomInput('essenza-decrement')}
             onOpenInc={() => openCustomInput('essenza-increment')}
+            resetDisabled={!mutationsReady}
+            decDisabled={!mutationsReady}
+            incDisabled={!mutationsReady}
           />
 
           <StatRow
@@ -742,14 +748,14 @@ const StatsBars = () => {
             onIncEnd={handleIncrementBarrieraEnd}
             onOpenDec={() => openCustomInput('barriera-decrement')}
             onOpenInc={() => openCustomInput('barriera-increment')}
-            onIconClick={() => setShowBarrieraActivate(true)}
+            onIconClick={mutationsReady ? () => { setBarrieraActionScopeKey(actionScopeKey); setShowBarrieraActivate(true); } : undefined}
             iconActive={barrierActive}
             resetTitle={barrierActive ? (barrierDepleted ? 'Rimuovi Barriera esaurita' : 'Termina Barriera') : 'Nessuna Barriera attiva'}
             resetIcon={FaBan}
             resetClassName={barrierActive ? 'bg-gradient-to-br from-rose-600 to-red-600 hover:scale-105 active:scale-95 focus:ring-red-400/40' : 'bg-slate-700/60'}
-            resetDisabled={!barrierActive}
-            decDisabled={barrierDepleted || !barrierActive}
-            incDisabled={barrierDepleted || !barrierActive || barrierFull}
+            resetDisabled={!mutationsReady || !barrierActive}
+            decDisabled={!mutationsReady || barrierDepleted || !barrierActive}
+            incDisabled={!mutationsReady || barrierDepleted || !barrierActive || barrierFull}
             incDisabledTitle={barrierIncDisabledTitle}
             decDisabledTitle={barrierDecDisabledTitle}
           />

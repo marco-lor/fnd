@@ -13,6 +13,24 @@ service cloud.firestore {
       return /databases/$(database)/documents/users/$(uid);
     }
 
+    function userDeletionJobPath(uid) {
+      return /databases/$(database)/documents/user_deletion_jobs/$(uid);
+    }
+
+    function hasUserDeletionTombstone(uid) {
+      return exists(userDeletionJobPath(uid));
+    }
+
+    function isActiveUser(uid) {
+      return exists(userDocPath(uid))
+        && get(userDocPath(uid)).data.get("deletionState", null) != "pending"
+        && !hasUserDeletionTombstone(uid);
+    }
+
+    function isActiveSignedIn() {
+      return isSignedIn() && isActiveUser(request.auth.uid);
+    }
+
     function authedCharacterId() {
       return isSignedIn() && exists(userDocPath(request.auth.uid))
         ? get(userDocPath(request.auth.uid)).data.characterId
@@ -20,20 +38,17 @@ service cloud.firestore {
     }
 
     function isDM() {
-      return isSignedIn()
-        && exists(userDocPath(request.auth.uid))
+      return isActiveSignedIn()
         && get(userDocPath(request.auth.uid)).data.role == "dm";
     }
 
     function isWebmaster() {
-      return isSignedIn()
-        && exists(userDocPath(request.auth.uid))
+      return isActiveSignedIn()
         && get(userDocPath(request.auth.uid)).data.role == "webmaster";
     }
 
     function isPlayer() {
-      return isSignedIn()
-        && exists(userDocPath(request.auth.uid))
+      return isActiveSignedIn()
         && (get(userDocPath(request.auth.uid)).data.role == "player"
             || get(userDocPath(request.auth.uid)).data.role == "players");
     }
@@ -42,10 +57,100 @@ service cloud.firestore {
       return isDM();
     }
 
+    function canReadPrivateUserDomain(userId) {
+      return isSignedIn()
+        && (request.auth.uid == userId || isDM() || isWebmaster());
+    }
+
     function mapOrEmpty(data, fieldName) {
       return data.keys().hasAny([fieldName]) && data[fieldName] is map
         ? data[fieldName]
         : {};
+    }
+
+    function isValidUserDataRolloutStage(stage) {
+      return stage in [
+        "legacy-read",
+        "shadow-verify",
+        "dual-write",
+        "new-read-dual-write",
+        "new-only"
+      ];
+    }
+
+    function hasValidUserDataOverride(config, userId) {
+      let overrides = mapOrEmpty(config, "userOverrides");
+      return overrides.keys().hasAny([userId])
+        && isValidUserDataRolloutStage(overrides.get(userId, ""));
+    }
+
+    function userDataRolloutStage(userId) {
+      let configPath = /databases/$(database)/documents/app_config/user_data_v2;
+      let config = exists(configPath) ? get(configPath).data : {};
+      let overrides = mapOrEmpty(config, "userOverrides");
+      let globalStage = config.get("mode", config.get("stage", "legacy-read"));
+      let configured = overrides.get(userId, globalStage);
+      return isValidUserDataRolloutStage(configured)
+        ? configured
+        : (isValidUserDataRolloutStage(globalStage) ? globalStage : "legacy-read");
+    }
+
+    function hasUserDataLegacyDrain(userId) {
+      let configPath = /databases/$(database)/documents/app_config/user_data_v2;
+      let config = exists(configPath) ? get(configPath).data : {};
+      let drain = mapOrEmpty(config, "legacyDrain");
+      let users = mapOrEmpty(drain, "users");
+      let drainFieldMalformed = config.keys().hasAny(["legacyDrain"])
+        && !(config.legacyDrain is map);
+      let usersFieldMalformed = drain.keys().hasAny(["users"])
+        && !(drain.users is map);
+      return drainFieldMalformed
+        || (
+          hasValidUserDataOverride(config, userId)
+            ? usersFieldMalformed || users.keys().hasAny([userId])
+            : drain.keys().hasAny(["global"])
+        );
+    }
+
+    function isUserDataAggregateFrozen(userId) {
+      return userDataRolloutStage(userId) == "new-only"
+        || hasUserDataLegacyDrain(userId);
+    }
+
+    function changesLegacyUserAggregate(nextData, existingData) {
+      return nextData.diff(existingData).affectedKeys().hasAny([
+        "stats",
+        "Parametri",
+        "AltriParametri",
+        "flags",
+        "inventory",
+        "equipped",
+        "beltCapacity",
+        "slotCintura",
+        "spells",
+        "tecniche",
+        "lingue",
+        "conoscenze",
+        "professioni",
+        "active_turn_effect",
+        "settings",
+        "parameterLocks",
+        "paramLocks",
+        "drawColorKey",
+        "shareLiveInteractions",
+        "grigliataMuted",
+        "hiddenGrigliataBackgrounds",
+        "hiddenGrigliataTokens"
+      ]);
+    }
+
+    function isAllowedUserDataRootMutation(userId, nextData, existingData) {
+      return !isUserDataAggregateFrozen(userId)
+        || (
+          existingData.get("modelVersion", 0) == 2
+          && nextData.get("modelVersion", 0) == 2
+          && !changesLegacyUserAggregate(nextData, existingData)
+        );
     }
 
     function stableMapField(nextMap, prevMap, fieldName) {
@@ -77,19 +182,41 @@ service cloud.firestore {
         && nextData.get("createdAt", null) == existingData.get("createdAt", null)
         && !nextData.diff(existingData).affectedKeys().hasAny([
           "roleUpdatedAt",
-          "roleUpdatedBy"
+          "roleUpdatedBy",
+          "modelVersion",
+          "summary",
+          "deletionState",
+          "deletionRequestedAt",
+          "deletionRequestedBy"
         ]);
     }
 
     function isSafeOwnerUserCreate(userId) {
       return request.auth.uid == userId
+        && !hasUserDeletionTombstone(userId)
+        && !request.resource.data.keys().hasAny([
+          "deletionState",
+          "deletionRequestedAt",
+          "deletionRequestedBy"
+        ])
         && request.resource.data.get("role", null) == "player"
         && request.resource.data.get("email", "") is string
-        && !request.resource.data.keys().hasAny(["roleUpdatedAt", "roleUpdatedBy"]);
+        && !request.resource.data.keys().hasAny(["roleUpdatedAt", "roleUpdatedBy"])
+        // A frozen/new-only scope requires server-owned V2-first account
+        // initialization. Direct client shell creation would leave the fixed
+        // domain documents absent and cannot participate in the frozen sweep.
+        && !isUserDataAggregateFrozen(userId);
     }
 
     function isSafeOwnerUserUpdate(userId) {
-      return request.auth.uid == userId
+      return isActiveSignedIn()
+        && request.auth.uid == userId
+        && resource.data.get("deletionState", null) != "pending"
+        && isAllowedUserDataRootMutation(
+          userId,
+          request.resource.data,
+          resource.data
+        )
         && hasStableUserIdentityAndRole(request.resource.data, resource.data)
         && (
           isCharacterCreationOpen(resource.data)
@@ -97,8 +224,14 @@ service cloud.firestore {
         );
     }
 
-    function isSafePrivilegedUserUpdate() {
+    function isSafePrivilegedUserUpdate(userId) {
       return (isDM() || isWebmaster())
+        && resource.data.get("deletionState", null) != "pending"
+        && isAllowedUserDataRootMutation(
+          userId,
+          request.resource.data,
+          resource.data
+        )
         && hasStableUserIdentityAndRole(request.resource.data, resource.data);
     }
 
@@ -1209,7 +1342,7 @@ service cloud.firestore {
       allow update: if isSignedIn()
         && (
           isSafeOwnerUserUpdate(userId)
-          || isSafePrivilegedUserUpdate()
+          || isSafePrivilegedUserUpdate(userId)
         );
       allow delete: if false;
 
@@ -1217,13 +1350,71 @@ service cloud.firestore {
       match /diceRolls/{rollId} {
         // Explicit DM read access keeps dashboard listeners query-friendly; writes stay owner-only.
         allow read: if isSignedIn() && (request.auth.uid == userId || isDM());
-        allow write: if isSignedIn() && request.auth.uid == userId;
+        allow write: if isActiveSignedIn() && request.auth.uid == userId;
       }
 
       // Private map markers per user
       match /map_markers_private/{markerId} {
-        allow read, write: if isSignedIn() && request.auth.uid == userId;
+        allow read: if isSignedIn() && request.auth.uid == userId;
+        allow write: if isActiveSignedIn() && request.auth.uid == userId;
       }
+
+      // Task 05 user-data domains. Clients retain the same private audience as
+      // the legacy aggregate, while every mutation remains server-owned.
+      match /state/{domainId} {
+        allow get, list: if canReadPrivateUserDomain(userId)
+          && domainId in [
+            "progression",
+            "resources",
+            "settings",
+            "equipment",
+            "profileContent"
+          ];
+        allow create, update, delete: if false;
+      }
+
+      match /inventory/{inventoryId} {
+        allow get, list: if canReadPrivateUserDomain(userId);
+        allow create, update, delete: if false;
+      }
+
+      match /spells/{contentId} {
+        allow get, list: if canReadPrivateUserDomain(userId);
+        allow create, update, delete: if false;
+      }
+
+      match /tecniche/{contentId} {
+        allow get, list: if canReadPrivateUserDomain(userId);
+        allow create, update, delete: if false;
+      }
+
+      match /content_names/{nameHash} {
+        allow read, write: if false;
+      }
+    }
+
+    match /app_config/user_data_v2 {
+      // The operator document contains per-user canary and drain identifiers.
+      // Players must use a future privacy-preserving effective-stage resolver;
+      // exposing this whole document would reveal every scoped UID.
+      allow read: if isDM() || isWebmaster();
+      allow write: if false;
+    }
+
+    match /user_operations/{receiptId} {
+      allow read, write: if false;
+    }
+
+    match /user_media_cleanup/{cleanupId} {
+      allow read, write: if false;
+    }
+
+    match /migration_state/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /user_deletion_jobs/{jobId} {
+      allow read, write: if false;
     }
 
     // Server-owned, privacy-minimized user lookup records. Authorization is
@@ -1283,7 +1474,7 @@ service cloud.firestore {
         // The participant doc id may be either the user's uid or their characterId; allow both for the owner.
         allow create, update: if isDM()
           || (
-               isSignedIn()
+               isActiveSignedIn()
                && canReadEncounterById(encounterId)
                && (pid == request.auth.uid || pid == authedCharacterId())
              );
@@ -1296,7 +1487,8 @@ service cloud.firestore {
       match /logs/{logId} {
         // Read & Write for any authenticated user; DM still has global allow.
         allow read: if isDM() || isWebmaster() || canReadEncounterById(encounterId);
-        allow write: if isDM() || canReadEncounterById(encounterId);
+        allow write: if isDM()
+          || (isActiveSignedIn() && canReadEncounterById(encounterId));
       }
     }
 
@@ -1361,7 +1553,7 @@ service cloud.firestore {
 
       allow list: if isGrigliataManager();
 
-      allow create: if isSignedIn()
+      allow create: if isActiveSignedIn()
         && isValidGrigliataFogOfWar(request.resource.data, fogId)
         && (
           isGrigliataManager()
@@ -1374,7 +1566,7 @@ service cloud.firestore {
           )
         );
 
-      allow update: if isSignedIn()
+      allow update: if isActiveSignedIn()
         && isValidGrigliataFogOfWar(request.resource.data, fogId)
         && request.resource.data.backgroundId == resource.data.backgroundId
         && request.resource.data.ownerUid == resource.data.ownerUid
@@ -1412,7 +1604,7 @@ service cloud.firestore {
           || request.auth.uid == resource.data.ownerUid
         );
 
-      allow create: if isSignedIn()
+      allow create: if isActiveSignedIn()
         && isValidGrigliataFogMemoryTile(request.resource.data, tileId)
         && (
           isGrigliataManager()
@@ -1425,7 +1617,7 @@ service cloud.firestore {
           )
         );
 
-      allow update: if isSignedIn()
+      allow update: if isActiveSignedIn()
         && isValidGrigliataFogMemoryTile(request.resource.data, tileId)
         && request.resource.data.backgroundId == resource.data.backgroundId
         && request.resource.data.ownerUid == resource.data.ownerUid
@@ -1480,7 +1672,7 @@ service cloud.firestore {
           || isGrigliataManager()
         );
 
-      allow create: if isSignedIn()
+      allow create: if isActiveSignedIn()
         && isValidGrigliataTokenProfile(request.resource.data, tokenId)
         && (
           isGrigliataManager()
@@ -1491,7 +1683,7 @@ service cloud.firestore {
           )
         );
 
-      allow update: if isSignedIn()
+      allow update: if isActiveSignedIn()
         && request.resource.data.ownerUid == resource.data.ownerUid
         && (
           (
@@ -1518,7 +1710,7 @@ service cloud.firestore {
       allow read: if isSignedIn()
         && (isGrigliataManager() || isGrigliataPlacementVisibleToPlayers(resource.data));
 
-      allow create: if isSignedIn()
+      allow create: if isActiveSignedIn()
         && request.resource.data.keys().hasAll(["tokenId"])
         && isValidGrigliataPlacement(request.resource.data, placementId)
         && (
@@ -1537,7 +1729,7 @@ service cloud.firestore {
           )
         );
 
-      allow update: if isSignedIn()
+      allow update: if isActiveSignedIn()
         && request.resource.data.keys().hasAll(["tokenId"])
         && isValidGrigliataPlacement(request.resource.data, placementId)
         && request.resource.data.backgroundId == resource.data.backgroundId
@@ -1560,7 +1752,7 @@ service cloud.firestore {
           )
         );
 
-      allow delete: if isSignedIn()
+      allow delete: if isActiveSignedIn()
         && isValidGrigliataPlacement(resource.data, placementId)
         && (
           isGrigliataManager()
@@ -1574,7 +1766,7 @@ service cloud.firestore {
     match /grigliata_live_interactions/{interactionId} {
       allow read: if isSignedIn();
 
-      allow create: if isSignedIn()
+      allow create: if isActiveSignedIn()
         && isValidGrigliataLiveInteraction(request.resource.data, interactionId)
         && (
           isGrigliataManager()
@@ -1587,7 +1779,7 @@ service cloud.firestore {
           )
         );
 
-      allow update: if isSignedIn()
+      allow update: if isActiveSignedIn()
         && isValidGrigliataLiveInteraction(request.resource.data, interactionId)
         && request.resource.data.backgroundId == resource.data.backgroundId
         && request.resource.data.ownerUid == resource.data.ownerUid
@@ -1602,7 +1794,7 @@ service cloud.firestore {
           )
         );
 
-      allow delete: if isSignedIn()
+      allow delete: if isActiveSignedIn()
         && isValidGrigliataLiveInteraction(resource.data, interactionId)
         && (
           isGrigliataManager()
@@ -1613,7 +1805,7 @@ service cloud.firestore {
     match /grigliata_page_presence/{presenceId} {
       allow read: if isSignedIn();
 
-      allow create, update: if isSignedIn()
+      allow create, update: if isActiveSignedIn()
         && !isGrigliataManager()
         && isValidGrigliataPagePresence(request.resource.data, presenceId)
         && request.auth.uid == request.resource.data.ownerUid
@@ -1622,7 +1814,7 @@ service cloud.firestore {
           || request.resource.data.updatedBy == request.auth.uid
         );
 
-      allow delete: if isSignedIn()
+      allow delete: if isActiveSignedIn()
         && !isGrigliataManager()
         && isValidGrigliataPagePresence(resource.data, presenceId)
         && request.auth.uid == resource.data.ownerUid;
@@ -1645,14 +1837,14 @@ service cloud.firestore {
           )
         );
 
-      allow create: if isSignedIn()
+      allow create: if isActiveSignedIn()
         && isValidGrigliataAoEFigure(request.resource.data, figureId)
         && (
           isGrigliataManager()
           || request.auth.uid == request.resource.data.ownerUid
         );
 
-      allow update: if isSignedIn()
+      allow update: if isActiveSignedIn()
         && isValidGrigliataAoEFigure(request.resource.data, figureId)
         && request.resource.data.backgroundId == resource.data.backgroundId
         && request.resource.data.ownerUid == resource.data.ownerUid
@@ -1663,7 +1855,7 @@ service cloud.firestore {
           || request.auth.uid == resource.data.ownerUid
         );
 
-      allow delete: if isSignedIn()
+      allow delete: if isActiveSignedIn()
         && isValidGrigliataAoEFigure(resource.data, figureId)
         && (
           isGrigliataManager()
@@ -1700,7 +1892,7 @@ service cloud.firestore {
         ]);
 
       // Text-only updates: immutable image + creator metadata
-      allow update: if isSignedIn()
+      allow update: if isActiveSignedIn()
         && request.resource.data.keys().hasAll([
           "nome",
           "imageUrl",

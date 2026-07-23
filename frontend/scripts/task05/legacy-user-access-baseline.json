@@ -1,0 +1,264 @@
+{
+  "schemaVersion": 2,
+  "purpose": "Temporary Task 05 legacy aggregate accesses. Reference, operation, and mutation payload context are locked; new or changed accesses fail CI.",
+  "entries": [
+    {
+      "path": "components/admin/adminPage.js",
+      "count": 1,
+      "operationCount": 1,
+      "contextFingerprint": "a492312c775e93154ea320798d79e1591ff599f3fd1d2a214f9eadd269a5b0b3"
+    },
+    {
+      "path": "components/bazaar/elements/addAccessorio.js",
+      "count": 3,
+      "operationCount": 4,
+      "contextFingerprint": "7a67b2a95f3c1c3463b928027b8a387569789ed7992acbed3e30e0f233fc909e"
+    },
+    {
+      "path": "components/bazaar/elements/addArmatura.js",
+      "count": 3,
+      "operationCount": 4,
+      "contextFingerprint": "7a67b2a95f3c1c3463b928027b8a387569789ed7992acbed3e30e0f233fc909e"
+    },
+    {
+      "path": "components/bazaar/elements/addConsumabile.js",
+      "count": 3,
+      "operationCount": 4,
+      "contextFingerprint": "7a67b2a95f3c1c3463b928027b8a387569789ed7992acbed3e30e0f233fc909e"
+    },
+    {
+      "path": "components/bazaar/elements/addWeapon.js",
+      "count": 3,
+      "operationCount": 4,
+      "contextFingerprint": "7a67b2a95f3c1c3463b928027b8a387569789ed7992acbed3e30e0f233fc909e"
+    },
+    {
+      "path": "components/bazaar/elements/comparisonComponent.js",
+      "count": 2,
+      "operationCount": 3,
+      "contextFingerprint": "18a3983055a23747c5a0a181f5dfcce8bbcdeea5eec6f94fdf528ab9dc33c8a3"
+    },
+    {
+      "path": "components/characterCreation/CharacterCreation.js",
+      "count": 4,
+      "operationCount": 40,
+      "contextFingerprint": "b608130ce6a83e3e05a44d551e967ca2e6a41362f23407180c44722cc4026d72"
+    },
+    {
+      "path": "components/characterCreation/elements/PointsDistribution.js",
+      "count": 1,
+      "operationCount": 1,
+      "contextFingerprint": "6add1c9f2e90186098ad72b7f3fe1718fa637a7048612be3321f631e4ac1e7ee"
+    },
+    {
+      "path": "components/combatTool/elements/buttons/advanceTurn.js",
+      "count": 1,
+      "operationCount": 2,
+      "contextFingerprint": "fcdc26acea96c4c4f2b5c4b16987432db8c848414309030440af3f681c9075a6"
+    },
+    {
+      "path": "components/combatTool/elements/EncounterCreator.js",
+      "count": 1,
+      "operationCount": 2,
+      "contextFingerprint": "313048f70e9992fe08a2bf073c7f06f3abe7a9d5ef0a7cda2e8147b922b98472"
+    },
+    {
+      "path": "components/combatTool/elements/EncounterDetails.js",
+      "count": 1,
+      "operationCount": 1,
+      "contextFingerprint": "52e2d4065529fc9b3a275beb075709d4d354399f9113a0e36c822974bb1c3d35"
+    },
+    {
+      "path": "components/common/navbar.js",
+      "count": 1,
+      "operationCount": 1,
+      "contextFingerprint": "bb0bf399d19e75223c3b30a0f763b3ff569a60c2e0a939b240573539031abbc2"
+    },
+    {
+      "path": "components/common/userOwnedMedia.js",
+      "count": 1,
+      "operationCount": 3,
+      "contextFingerprint": "371efa8dbb100e9c41d3d2b23aaa233ab9ff8a6df77cb29327ca99b7ab782dd2"
+    },
+    {
+      "path": "components/dmDashboard/DMDashboard.js",
+      "count": 2,
+      "operationCount": 2,
+      "contextFingerprint": "f8d70a2d4b5fd73ce46737742619e163336d9f83eef370b9cbc5bcf7e447e264"
+    },
+    {
+      "path": "components/dmDashboard/elements/buttons/addConoscenzaPersonale.js",
+      "count": 2,
+      "operationCount": 3,
+      "contextFingerprint": "a83c6f86b72b1dcd045351e3fe9db0397b7dfd9070b47c6e81417937feaf05e7"
+    },
+    {
+      "path": "components/dmDashboard/elements/buttons/addLinguaPersonale.js",
+      "count": 2,
+      "operationCount": 3,
+      "contextFingerprint": "8e8b6377593c47ba7d4695ef88937099c37f2cb73fac216ad4d9a81ab677c792"
+    },
+    {
+      "path": "components/dmDashboard/elements/buttons/addProfessionePersonale.js",
+      "count": 2,
+      "operationCount": 3,
+      "contextFingerprint": "fe0550e6b590142c77ccc8e9f7f6c03d72f531899a2d99b7289592adf0118aa0"
+    },
+    {
+      "path": "components/dmDashboard/elements/buttons/addSpell.js",
+      "count": 1,
+      "operationCount": 1,
+      "contextFingerprint": "b7cff7da6bbe666854a72c12a5dc37143a6b9c369cfe0c32e131364a466e5d32"
+    },
+    {
+      "path": "components/dmDashboard/elements/buttons/addTecnicaPersonale.js",
+      "count": 1,
+      "operationCount": 1,
+      "contextFingerprint": "e6ccdd17b481d6eb8be1164686e28caa209e4d8152d6c62b0f08a64528b71b22"
+    },
+    {
+      "path": "components/dmDashboard/elements/buttons/delConoscenzaPersonale.js",
+      "count": 2,
+      "operationCount": 3,
+      "contextFingerprint": "dbf45d99af2e0bbf00e5cfadcbd10ba2512d24d307d77c9549f88418c55cb4fd"
+    },
+    {
+      "path": "components/dmDashboard/elements/buttons/delInventoryItem.js",
+      "count": 2,
+      "operationCount": 3,
+      "contextFingerprint": "eb2641fff20fac6b934993645cb5b60e150c077f9a25796c6ccda15547df4899"
+    },
+    {
+      "path": "components/dmDashboard/elements/buttons/delLinguaPersonale.js",
+      "count": 2,
+      "operationCount": 3,
+      "contextFingerprint": "211c09087ef35c6d56c0acf44560979258d3436a9e298d2301a36a492ba6fccf"
+    },
+    {
+      "path": "components/dmDashboard/elements/buttons/delProfessionePersonale.js",
+      "count": 2,
+      "operationCount": 3,
+      "contextFingerprint": "402d899ea3ff668912616c28984549778a777af20ae7ad6b904fff6459c668b9"
+    },
+    {
+      "path": "components/dmDashboard/elements/buttons/delSpell.js",
+      "count": 1,
+      "operationCount": 1,
+      "contextFingerprint": "b7cff7da6bbe666854a72c12a5dc37143a6b9c369cfe0c32e131364a466e5d32"
+    },
+    {
+      "path": "components/dmDashboard/elements/buttons/delTecnicaPersonale.js",
+      "count": 1,
+      "operationCount": 1,
+      "contextFingerprint": "b7cff7da6bbe666854a72c12a5dc37143a6b9c369cfe0c32e131364a466e5d32"
+    },
+    {
+      "path": "components/dmDashboard/elements/buttons/delVarieItemUnits.js",
+      "count": 2,
+      "operationCount": 3,
+      "contextFingerprint": "eb2641fff20fac6b934993645cb5b60e150c077f9a25796c6ccda15547df4899"
+    },
+    {
+      "path": "components/dmDashboard/elements/buttons/editConoscenzaPersonale.js",
+      "count": 2,
+      "operationCount": 6,
+      "contextFingerprint": "5a9668406deb45dc3b3024548e902b56365df2e1f146bca0c6fbdf430570f7c1"
+    },
+    {
+      "path": "components/dmDashboard/elements/buttons/editProfessionePersonale.js",
+      "count": 2,
+      "operationCount": 6,
+      "contextFingerprint": "6b96b90ff496562c560caa2beeef76958bfa2ec257a766cf19cba5749ec813f5"
+    },
+    {
+      "path": "components/dmDashboard/elements/buttons/editSpell.js",
+      "count": 1,
+      "operationCount": 1,
+      "contextFingerprint": "b7cff7da6bbe666854a72c12a5dc37143a6b9c369cfe0c32e131364a466e5d32"
+    },
+    {
+      "path": "components/dmDashboard/elements/buttons/editTecnicaPersonale.js",
+      "count": 1,
+      "operationCount": 1,
+      "contextFingerprint": "e6ccdd17b481d6eb8be1164686e28caa209e4d8152d6c62b0f08a64528b71b22"
+    },
+    {
+      "path": "components/dmDashboard/elements/LockSettingsTable.js",
+      "count": 2,
+      "operationCount": 4,
+      "contextFingerprint": "50b2d111d477d2fa972a65daf11343a9c43b00a340f7fcaff557d2cb0d88d394"
+    },
+    {
+      "path": "components/dmDashboard/elements/playerInfo.js",
+      "count": 6,
+      "operationCount": 7,
+      "contextFingerprint": "c1fea37ce7a27fccaef3872a8ce62ea96c6febe29694418d94c8dc341328b493"
+    },
+    {
+      "path": "components/dmDashboard/elements/playerInfo/overlays/AddBazaarItemOverlay.js",
+      "count": 1,
+      "operationCount": 2,
+      "contextFingerprint": "6438378b6d68d09cfebe73d05dc050d1bceffd8641bd423439697ee2b1028315"
+    },
+    {
+      "path": "components/dmDashboard/elements/playerInfo/overlays/AddVarieItemOverlay.js",
+      "count": 1,
+      "operationCount": 2,
+      "contextFingerprint": "5d89e253f2dd28557029ec7bdc0fa05f15f2fd7fe8fddea498662fbc8f43c508"
+    },
+    {
+      "path": "components/dmDashboard/elements/playerInfo/overlays/EditVarieItemOverlay.js",
+      "count": 1,
+      "operationCount": 2,
+      "contextFingerprint": "5d89e253f2dd28557029ec7bdc0fa05f15f2fd7fe8fddea498662fbc8f43c508"
+    },
+    {
+      "path": "components/grigliata/GrigliataDicePanel.js",
+      "count": 1,
+      "operationCount": 1,
+      "contextFingerprint": "bb0ff1d6973b7ff961fe0031b2dbfa4a4dd1ff2ef0c31c07989d2813adb319dd"
+    },
+    {
+      "path": "components/grigliata/GrigliataPage.js",
+      "count": 11,
+      "operationCount": 11,
+      "contextFingerprint": "2883b507da017870191e87b0d3e40f37b3504183a18961c329df24d70b435208"
+    },
+    {
+      "path": "components/grigliata/useGrigliataPlacementActions.js",
+      "count": 4,
+      "operationCount": 4,
+      "contextFingerprint": "a261270dc1a7c5ca85c223e0e07599950352fb3f79512e638580e8bd3795dfb7"
+    },
+    {
+      "path": "components/home/elements/ItemDetailsModal.js",
+      "count": 1,
+      "operationCount": 2,
+      "contextFingerprint": "adaea174db6733bf89ab744bed89bf46c843e5ce1702d865dbec411e6790b179"
+    },
+    {
+      "path": "components/home/elements/paramTables.js",
+      "count": 2,
+      "operationCount": 2,
+      "contextFingerprint": "338bee3890fe71d10e624df234a07a5ce8a3a0835a5c37e84b26f56b930a4378"
+    },
+    {
+      "path": "components/Login.js",
+      "count": 2,
+      "operationCount": 2,
+      "contextFingerprint": "b771a6f9c923a7633f8781d1fc8e1ddf88299977e76083aa54706f93d165dc3c"
+    },
+    {
+      "path": "components/tecnicheSpell/elements/spell_side.js",
+      "count": 1,
+      "operationCount": 1,
+      "contextFingerprint": "55d8ef5a49983cf1779cf777259bfc52b1da673524856520cafb22eefc21d121"
+    },
+    {
+      "path": "components/tecnicheSpell/elements/tecniche_side.js",
+      "count": 1,
+      "operationCount": 1,
+      "contextFingerprint": "55d8ef5a49983cf1779cf777259bfc52b1da673524856520cafb22eefc21d121"
+    }
+  ]
+}

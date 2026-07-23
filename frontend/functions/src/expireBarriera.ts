@@ -1,5 +1,5 @@
 import {onDocumentUpdated} from "firebase-functions/v2/firestore";
-import * as admin from "firebase-admin";
+import {applyLegacyRootTriggerUpdate} from "./legacyRootMutationGate";
 
 // Cloud Function: expireBarriera
 // Purpose: Mirror the frontend check in StatsBars.js that automatically
@@ -62,13 +62,25 @@ export const expireBarriera = onDocumentUpdated(
     }
 
     try {
-      await admin.firestore().doc(`users/${userId}`).update({
-        "stats.barrieraCurrent": 0,
-        "stats.barrieraTotal": 0,
-        "active_turn_effect.barriera.remainingTurns": 0,
-        "active_turn_effect.barriera.totalTurns": 0,
+      const result = await applyLegacyRootTriggerUpdate({
+        uid: userId,
+        label: "expireBarriera",
+        expectedFields: {
+          "stats.barrieraCurrent": barrieraCurrent,
+          "stats.barrieraTotal": barrieraTotal,
+          "active_turn_effect.barriera.remainingTurns": afterRemaining,
+          "active_turn_effect.barriera.totalTurns": afterTotalTurns,
+        },
+        update: {
+          "stats.barrieraCurrent": 0,
+          "stats.barrieraTotal": 0,
+          "active_turn_effect.barriera.remainingTurns": 0,
+          "active_turn_effect.barriera.totalTurns": 0,
+        },
       });
-      console.log(`expireBarriera: Barrier expired for user ${userId}`);
+      if (result === "applied") {
+        console.log(`expireBarriera: Barrier expired for user ${userId}`);
+      }
     } catch (e) {
       console.error("expireBarriera: Failed to expire barrier", e);
     }

@@ -1,19 +1,38 @@
 // file: ./frontend/src/components/home/Home.js
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../../AuthContext";
 import StatsBars from "./elements/StatsBars";
 import EquippedInventory from "./elements/EquippedInventory";
 import Inventory from "./elements/Inventory";
 import { MergedStatsTable } from "./elements/paramTables";
-import { doc, updateDoc } from "../../performance/firestore";
-import { db } from "../firebaseConfig";
 import { FaDiceD20 } from "react-icons/fa";
 import DiceRoller from "../common/DiceRoller";
 import { getVarie } from '../../data/configRepository';
 import Extra from './elements/Extra';
+import { updateProgression } from '../../data/userData/userDataCommands';
+import { useProfileContent, useProgression } from '../../data/userData/userDataHooks';
+import { legacyUpdateProgression } from '../../data/userData/legacyUserDataCommands';
+import {
+  isUserDataCommandStageResolved,
+  runVersionedUserDataCommand,
+} from '../../data/userData/userDataCommandRouting';
 
 function Home() {
-  const { user, userData } = useAuth();
+  const { user } = useAuth();
+  const {
+    data: progression,
+    stage: progressionStage,
+    status: progressionStatus,
+  } = useProgression(user?.uid);
+  const { data: profileContent } = useProfileContent(user?.uid);
+  const userData = useMemo(() => ({
+    ...(progression || {}),
+    ...(profileContent || {}),
+    stats: { ...(progression?.stats || {}) },
+  }), [profileContent, progression]);
+  const progressionCommandsReady = progressionStatus === 'fresh'
+    && progression !== null
+    && isUserDataCommandStageResolved(progressionStage);
   // helper to show anima field value or empty
   const getAnimaField = (key) => {
     const val = userData?.AltriParametri?.[key];
@@ -200,16 +219,19 @@ function Home() {
           }}
         />
       )}
-      {animaPickerOpen && animaPickerLevel && (
+      {animaPickerOpen && animaPickerLevel && progressionCommandsReady && (
         <AnimaPickerOverlay
           level={animaPickerLevel}
           onClose={() => setAnimaPickerOpen(false)}
           onSelect={async (choice) => {
             try {
-              if (!user) return;
+              if (!user || !progressionCommandsReady) return;
               const key = animaPickerLevel === 7 ? 'Anima_7' : 'Anima_4';
-              await updateDoc(doc(db, 'users', user.uid), {
-                [`AltriParametri.${key}`]: choice,
+              const patch = { AltriParametri: { [key]: choice } };
+              await runVersionedUserDataCommand({
+                stage: progressionStage,
+                legacy: () => legacyUpdateProgression({ uid: user.uid, patch }),
+                authoritative: () => updateProgression({ patch }),
               });
             } catch (e) {
               console.error('Failed to save anima choice', e);

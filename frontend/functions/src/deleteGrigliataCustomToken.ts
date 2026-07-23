@@ -1,5 +1,6 @@
 import {onCall, HttpsError, CallableRequest} from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
+import {assertLegacyRootMutationAllowed} from "./legacyRootMutationGate";
 
 type DeleteGrigliataCustomTokenPayload = {
   tokenId: string;
@@ -95,6 +96,40 @@ export const deleteGrigliataCustomToken = onCall<DeleteGrigliataCustomTokenPaylo
       placementDocs.push(...placementsSnap.docs);
     }
 
+    // This legacy settings cleanup has no V2 command yet. Fence it before any
+    // token deletion so drain/new-only rejection cannot leave partial work.
+    const ownerRef = db.doc(`users/${ownerUid}`);
+    const rolloutRef = db.doc("app_config/user_data_v2");
+    await db.runTransaction(async (transaction) => {
+      const [rollout, owner] = await transaction.getAll(
+        rolloutRef,
+        ownerRef
+      );
+      assertLegacyRootMutationAllowed(rollout.data(), ownerUid);
+      if (!owner.exists) return;
+      const currentSettings = owner.get("settings") || {};
+      const nextHiddenTokenIdsByBackground =
+        normalizeHiddenTokenIdsByBackground(
+          currentSettings[HIDDEN_TOKEN_FIELD]
+        );
+
+      Object.keys(nextHiddenTokenIdsByBackground).forEach((backgroundId) => {
+        const filteredTokenIds = nextHiddenTokenIdsByBackground[backgroundId]
+          .filter((hiddenTokenId) => !deletedTokenIds.has(hiddenTokenId));
+        if (filteredTokenIds.length) {
+          nextHiddenTokenIdsByBackground[backgroundId] = filteredTokenIds;
+        } else {
+          delete nextHiddenTokenIdsByBackground[backgroundId];
+        }
+      });
+
+      transaction.set(ownerRef, {
+        settings: {
+          [HIDDEN_TOKEN_FIELD]: nextHiddenTokenIdsByBackground,
+        },
+      }, {merge: true});
+    });
+
     for (let index = 0; index < placementDocs.length; index += FIRESTORE_BATCH_SIZE) {
       const batch = db.batch();
       placementDocs.slice(index, index + FIRESTORE_BATCH_SIZE).forEach((placementDoc) => {
@@ -111,30 +146,6 @@ export const deleteGrigliataCustomToken = onCall<DeleteGrigliataCustomTokenPaylo
         });
         await batch.commit();
       }
-    }
-
-    const ownerRef = db.doc(`users/${ownerUid}`);
-    const ownerSnap = await ownerRef.get();
-    if (ownerSnap.exists) {
-      const ownerData = ownerSnap.data() || {};
-      const currentSettings = ownerData.settings || {};
-      const nextHiddenTokenIdsByBackground = normalizeHiddenTokenIdsByBackground(currentSettings[HIDDEN_TOKEN_FIELD]);
-
-      Object.keys(nextHiddenTokenIdsByBackground).forEach((backgroundId) => {
-        const filteredTokenIds = nextHiddenTokenIdsByBackground[backgroundId]
-          .filter((hiddenTokenId) => !deletedTokenIds.has(hiddenTokenId));
-        if (filteredTokenIds.length) {
-          nextHiddenTokenIdsByBackground[backgroundId] = filteredTokenIds;
-        } else {
-          delete nextHiddenTokenIdsByBackground[backgroundId];
-        }
-      });
-
-      await ownerRef.set({
-        settings: {
-          [HIDDEN_TOKEN_FIELD]: nextHiddenTokenIdsByBackground,
-        },
-      }, {merge: true});
     }
 
     await tokenRef.delete();

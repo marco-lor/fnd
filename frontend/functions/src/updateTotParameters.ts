@@ -1,5 +1,5 @@
 import {onDocumentWritten} from "firebase-functions/v2/firestore";
-import * as admin from "firebase-admin";
+import {applyLegacyRootTriggerUpdate} from "./legacyRootMutationGate";
 
 // Non inizializzare Firebase Admin qui perché è già inizializzato in index.ts.
 
@@ -32,8 +32,18 @@ export const updateTotParameters = onDocumentWritten(
     }
 
     const parametri: Parametri = afterData.Parametri;
-    // Clona l'oggetto per evitare di modificare i dati originali.
-    const updatedParams: Parametri = {...parametri};
+    // Clone nested entries so the event snapshot remains a stable source fence.
+    const cloneSection = (section?: Record<string, SingleParam>) => (
+      section ? Object.fromEntries(Object.entries(section).map(
+        ([key, value]) => [key, {...value}]
+      )) : undefined
+    );
+    const updatedParams: Parametri = {
+      ...parametri,
+      Base: cloneSection(parametri.Base),
+      Combattimento: cloneSection(parametri.Combattimento),
+      Special: cloneSection(parametri.Special),
+    };
 
     let changes = false; // Flag per tracciare le modifiche ai valori Tot.
 
@@ -98,9 +108,15 @@ export const updateTotParameters = onDocumentWritten(
 
     try {
       if (userId) {
-        await admin.firestore().collection("users").doc(userId)
-          .update({Parametri: updatedParams});
-        console.log(`Updated Tot values for user ${userId}`);
+        const result = await applyLegacyRootTriggerUpdate({
+          uid: userId,
+          label: "updateTotParameters",
+          expectedFields: {Parametri: afterData.Parametri},
+          update: {Parametri: updatedParams},
+        });
+        if (result === "applied") {
+          console.log(`Updated Tot values for user ${userId}`);
+        }
       }
     } catch (error) {
       console.error("Error updating Tot values:", error);

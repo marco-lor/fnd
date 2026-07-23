@@ -2,6 +2,17 @@
 # C:\ProgramData\miniconda3\envs\fatins\Scripts\uvicorn.exe main:app --reload --host 127.0.0.1 --port 8000
 from firebase_conn import db
 from fast_api import app
+from firestore_backup import (
+    FirestoreAdminAdapter,
+    apply_restore_plan,
+    assert_approved_restore_report,
+    assert_safe_firestore_target,
+    build_restore_plan,
+    build_restore_report,
+    export_recursive_firestore,
+    read_backup,
+    write_json_atomic,
+)
 import argparse
 import uvicorn
 import json
@@ -50,6 +61,12 @@ def run_call(user_id: str = None, path: str = None, dry_run: bool = True):
     Retrieve, modify and update a document at the specified Firestore path.
     Used by local CLI maintenance commands; mutating operations default to dry-run.
     """
+    if not dry_run:
+        raise RuntimeError(
+            "Legacy root-stat normalization writes are retired by Task 05. "
+            "Use the fenced user-data V2 migration workflow instead."
+        )
+
     try:
         if user_id:
             doc_path = f'users/{user_id}'
@@ -80,11 +97,7 @@ def run_call(user_id: str = None, path: str = None, dry_run: bool = True):
                 "combatTokensSpent":     0,
             }
             doc_data["stats"] = new_stats
-            if dry_run:
-                print(f"[DRY RUN] Would update Firestore document: {doc_path}")
-            else:
-                doc_ref.set(doc_data)
-                print(f"Document updated in Firestore: {doc_path}")
+            print(f"[DRY RUN] Would update Firestore document: {doc_path}")
 
         print(f"\nStructure of document at {doc_path}:")
         print("-----------------------------------")
@@ -101,6 +114,12 @@ def run_call_on_everyone(dry_run: bool = True):
     """
     Normalize all users in the 'users' collection. Defaults to dry-run.
     """
+    if not dry_run:
+        raise RuntimeError(
+            "Legacy root-stat normalization writes are retired by Task 05. "
+            "Use the fenced user-data V2 migration workflow instead."
+        )
+
     try:
         users_ref = db.collection('users').stream()
         results, user_count = {}, 0
@@ -172,47 +191,96 @@ def normalize_user_roles(dry_run: bool = True):
         return {"error": str(e)}
 
 
-def everything_to_json(output_dir: str | None = None):
-    """
-    Dump Firestore to JSON and optionally save a timestamped local backup.
-    """
-    try:
-        result = {}
-        collections = db.collections()
-        print("\nRetrieving all Firestore data:")
-        print("-----------------------------------")
+def _assert_adapter_project(project_id: str, adapter: FirestoreAdminAdapter) -> None:
+    client_project = str(getattr(adapter.client, "project", "") or "")
+    if client_project and client_project != project_id:
+        raise ValueError(
+            "Initialized Firestore client project does not match the explicit project ID."
+        )
 
-        for collection in collections:
-            col_name = collection.id
-            result[col_name] = {}
-            if col_name == "users":
-                specific_doc_id = "TQAmmVfIpOeNiRflXKSeL1NX2ak2"
-                doc = collection.document(specific_doc_id).get()
-                if doc.exists:
-                    result[col_name][specific_doc_id] = doc.to_dict()
-            else:
-                for doc in collection.stream():
-                    result[col_name][doc.id] = doc.to_dict()
 
-        formatted_json = json.dumps(result, indent=2, cls=FirestoreEncoder)
-        print(formatted_json)
-        print("-----------------------------------")
+def everything_to_json(
+    output_dir: str | None = None,
+    *,
+    project_id: str,
+    adapter: FirestoreAdminAdapter | None = None,
+):
+    """Create a versioned recursive backup without printing private documents."""
+    backup_adapter = adapter or FirestoreAdminAdapter(db)
+    _assert_adapter_project(project_id, backup_adapter)
+    backup = export_recursive_firestore(backup_adapter, project_id=project_id)
+    filepath = None
+    if output_dir:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filepath = os.path.join(output_dir, f"firestore_backup_v2_{timestamp}.json")
+        write_json_atomic(filepath, backup)
 
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"firestore_backup_{timestamp}.json"
-            filepath = os.path.join(output_dir, filename)
-            with open(filepath, "w", encoding="utf-8") as fp:
-                fp.write(formatted_json)
-            print(f"Data saved to file: {filepath}")
-        else:
-            print("No output file written. Pass --output-dir when using the local CLI export command.")
-        print("-----------------------------------")
-        return result
-    except Exception as e:
-        print(f"Error retrieving Firestore data: {str(e)}")
-        return {"error": str(e)}
+    print(json.dumps({
+        "status": "complete",
+        "operation": "recursive-export",
+        "projectId": project_id,
+        "canonicalHash": backup["canonicalHash"],
+        "counts": backup["counts"],
+        "outputPath": filepath,
+    }, indent=2))
+    return backup
+
+
+def restore_from_json(
+    backup_path: str,
+    *,
+    project_id: str,
+    report_path: str,
+    execute: bool = False,
+    live_target: bool = True,
+    approved_fingerprint: str = "",
+    adapter: FirestoreAdminAdapter | None = None,
+):
+    """Plan or apply a non-destructive recursive restore; dry-run is the default."""
+    if execute and live_target:
+        raise ValueError(
+            "Live restore execution is blocked until a compatible mutation pause fence exists."
+        )
+    restore_adapter = adapter or FirestoreAdminAdapter(db)
+    _assert_adapter_project(project_id, restore_adapter)
+    backup = read_backup(backup_path, expected_project_id=project_id)
+    plan = build_restore_plan(restore_adapter, backup, project_id=project_id)
+
+    if not execute:
+        report = build_restore_report(plan)
+        write_json_atomic(report_path, report)
+        print(json.dumps({
+            "status": "complete",
+            "operation": "restore-dry-run",
+            "projectId": project_id,
+            "backupHash": plan["backupHash"],
+            "planFingerprint": plan["planFingerprint"],
+            "counts": plan["counts"],
+            "reportPath": report_path,
+        }, indent=2))
+        return report
+
+    with open(report_path, "r", encoding="utf-8") as report_file:
+        report = json.load(report_file)
+    assert_approved_restore_report(
+        report,
+        plan,
+        approved_fingerprint=approved_fingerprint,
+    )
+    result = apply_restore_plan(
+        restore_adapter,
+        plan,
+        **restore_adapter.restore_factories(),
+    )
+    print(json.dumps({
+        "status": "complete",
+        "operation": "restore-execute",
+        "projectId": project_id,
+        "backupHash": plan["backupHash"],
+        "planFingerprint": plan["planFingerprint"],
+        **result,
+    }, indent=2))
+    return result
 
 # ---------------------------------------------------------------------------
 #  schema_armatura copy logic
@@ -533,12 +601,22 @@ def run_admin_cli():
         description="Local-only Firestore maintenance tools. No admin operation is exposed as a production HTTP route."
     )
     parser.add_argument("--serve-local", action="store_true", help="Run the healthcheck-only FastAPI app on 127.0.0.1:8000.")
-    parser.add_argument("--update-all-users", action="store_true", help="Normalize user stats. Dry-run unless --execute is set.")
+    parser.add_argument(
+        "--update-all-users",
+        action="store_true",
+        help="Inspect legacy user-stat normalization as a read-only dry run; write mode is retired by Task 05.",
+    )
     parser.add_argument("--normalize-user-roles", action="store_true", help="Normalize stored user roles. Dry-run unless --execute is set.")
-    parser.add_argument("--export-data", action="store_true", help="Export Firestore data to a local ignored backup file.")
+    parser.add_argument("--export-data", action="store_true", help="Recursively export Firestore to a versioned ignored backup file.")
+    parser.add_argument("--restore-data", metavar="BACKUP", help="Plan a non-destructive recursive restore. Dry-run unless --execute is set.")
     parser.add_argument("--seed-schema", choices=sorted(SCHEMA_COPY_COMMANDS), help="Seed one schema document. Dry-run unless --execute is set.")
     parser.add_argument("--execute", action="store_true", help="Actually perform the selected mutating operation.")
-    parser.add_argument("--output-dir", default=os.path.dirname(__file__), help="Output directory for --export-data backups.")
+    parser.add_argument("--project", help="Exact Firebase project ID required by export and restore operations.")
+    parser.add_argument("--allow-live-project", action="store_true", help="Acknowledge that the selected maintenance operation may read a live project.")
+    parser.add_argument("--confirm-project", default="", help="Repeat the exact project ID before any live Firestore access.")
+    parser.add_argument("--approve-fingerprint", default="", help="Exact restore dry-run fingerprint required with --execute.")
+    parser.add_argument("--output-dir", default=os.path.join(os.path.dirname(__file__), "backups"), help="Ignored output directory for backups/reports.")
+    parser.add_argument("--restore-report", help="Restore dry-run report path; defaults inside --output-dir.")
     args = parser.parse_args()
 
     if args.serve_local:
@@ -547,6 +625,11 @@ def run_admin_cli():
         return
 
     if args.update_all_users:
+        if args.execute:
+            parser.error(
+                "--update-all-users --execute is retired by Task 05; "
+                "use the fenced user-data V2 migration workflow instead."
+            )
         result = run_call_on_everyone(dry_run=not args.execute)
         user_count = len(result) if isinstance(result, dict) and "error" not in result else 0
         mode = "Updated" if args.execute else "Dry-run checked"
@@ -558,7 +641,38 @@ def run_admin_cli():
         return
 
     if args.export_data:
-        everything_to_json(output_dir=args.output_dir)
+        if not args.project:
+            parser.error("--export-data requires an explicit --project.")
+        assert_safe_firestore_target(
+            project_id=args.project,
+            allow_live_project=args.allow_live_project,
+            confirm_project=args.confirm_project,
+        )
+        everything_to_json(output_dir=args.output_dir, project_id=args.project)
+        return
+
+    if args.restore_data:
+        if not args.project:
+            parser.error("--restore-data requires an explicit --project.")
+        target_safety = assert_safe_firestore_target(
+            project_id=args.project,
+            allow_live_project=args.allow_live_project,
+            confirm_project=args.confirm_project,
+            operation="restore",
+            execute=args.execute,
+        )
+        report_path = args.restore_report or os.path.join(
+            args.output_dir,
+            "firestore_restore_v2_dry_run.json",
+        )
+        restore_from_json(
+            args.restore_data,
+            project_id=args.project,
+            report_path=report_path,
+            execute=args.execute,
+            live_target=target_safety["live"],
+            approved_fingerprint=args.approve_fingerprint,
+        )
         return
 
     if args.seed_schema:

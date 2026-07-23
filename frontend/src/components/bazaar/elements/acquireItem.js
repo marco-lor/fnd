@@ -1,11 +1,12 @@
 // file: ./frontend/src/components/bazaar/elements/acquireItem.js
-// Helper to acquire an item: checks user gold against item price and, if sufficient,
-// atomically subtracts gold and appends a full snapshot of the item to the user's inventory
-// (1:1 copy per purchase, not just an id pointer). Uses a Firestore transaction
-// to avoid race conditions on concurrent purchases.
-
-import { doc, runTransaction } from '../../../performance/firestore';
-import { db } from '../../firebaseConfig';
+// The catalog ID is the only client-provided purchase fact. Price, visibility,
+// inventory snapshot, and gold are validated atomically by the Task 05 command.
+import {
+  isDefinitiveUserDataCommandError,
+  purchaseItem,
+} from '../../../data/userData/userDataCommands';
+import { legacyPurchaseItem } from '../../../data/userData/legacyUserDataCommands';
+import { runVersionedUserDataCommand } from '../../../data/userData/userDataCommandRouting';
 
 /**
  * Attempts to purchase an item for a user.
@@ -21,7 +22,7 @@ import { db } from '../../firebaseConfig';
  * @param {object} item Item object (must contain id and General.prezzo)
  * @returns {Promise<{success?:boolean, alreadyOwned?:boolean, insufficient?:boolean, newGold?:number, price:number, gold:number, error?:string}>}
  */
-export async function acquireItem(userId, item) {
+export async function acquireItem(userId, item, operationId, stage, retryKey) {
   if (!userId) return { error: 'Utente non valido.', price: 0, gold: 0 };
   if (!item || !item.id) return { error: 'Oggetto non valido.', price: 0, gold: 0 };
 
@@ -29,50 +30,23 @@ export async function acquireItem(userId, item) {
   const price = typeof rawPrice === 'number' ? rawPrice : parseInt(rawPrice, 10) || 0;
   if (price < 0) return { error: 'Prezzo non valido.', price: 0, gold: 0 };
 
-  const userRef = doc(db, 'users', userId);
-
   try {
-    const result = await runTransaction(db, async (transaction) => {
-      const snap = await transaction.get(userRef);
-      if (!snap.exists()) return { error: 'Utente non trovato.', price, gold: 0 };
-      const data = snap.data();
-      const gold = data?.stats?.gold ?? 0;
-      const inventory = Array.isArray(data?.inventory) ? [...data.inventory] : [];
-
-      if (price > gold) {
-        return { insufficient: true, price, gold };
-      }
-
-      // Count how many of this item (by id) the user owns before purchase
-      let qtyBefore = 0;
-      for (let i = 0; i < inventory.length; i++) {
-        const entry = inventory[i];
-        const entryId = typeof entry === 'string' ? entry : (entry && typeof entry === 'object' ? entry.id : undefined);
-        if (entryId && entryId === item.id) qtyBefore += (typeof entry === 'object' && entry.qty ? entry.qty : 1);
-      }
-
-      // Deep copy item snapshot and add minimal metadata for the instance
-      const instanceId = `inv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const snapshot = JSON.parse(JSON.stringify(item));
-      // Ensure base id is preserved so UI can aggregate, plus store instance metadata
-      snapshot.id = item.id;
-      snapshot._instance = { instanceId, acquiredAt: new Date(), pricePaid: price, source: 'bazaar' };
-
-      // Push a new entry (no stacking)
-      inventory.push(snapshot);
-
-      const newGold = gold - price;
-      transaction.update(userRef, {
-        'stats.gold': newGold,
-        inventory
-      });
-
-      const newQty = qtyBefore + 1;
-      return { success: true, newGold, price, gold, newQty };
+    return await runVersionedUserDataCommand({
+      stage,
+      legacy: () => legacyPurchaseItem({ uid: userId, item }),
+      authoritative: () => purchaseItem({
+        itemId: item.id,
+        ...(operationId ? { operationId } : {}),
+        ...(retryKey ? { retryKey } : {}),
+      }),
     });
-    return result;
   } catch (e) {
-    console.error('Errore transazione acquisto:', e);
-    return { error: e.message || 'Errore sconosciuto.', price: 0, gold: 0 };
+    console.error('Errore comando acquisto:', e);
+    return {
+      error: e.message || 'Errore sconosciuto.',
+      price,
+      gold: 0,
+      retryable: !isDefinitiveUserDataCommandError(e),
+    };
   }
 }

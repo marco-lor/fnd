@@ -1,5 +1,6 @@
 import {onDocumentUpdated} from "firebase-functions/v2/firestore";
 import * as admin from "firebase-admin";
+import {applyLegacyRootTriggerUpdate} from "./legacyRootMutationGate";
 
 // eslint-disable-next-line max-len
 // Do NOT initialize Firebase Admin here because it's already initialized in index.ts.
@@ -63,9 +64,15 @@ export const updateHpTotal = onDocumentUpdated(
       // Calculate hpTotal using the correct multiplier
       const hpTotal = hpMultiplier * currentSaluteTot + 8;
 
-      // Update the user's document with the new hpTotal
-      return admin.firestore().doc(`users/${userId}`).update({
-        "stats.hpTotal": hpTotal,
+      // The source/config fence prevents delayed Admin SDK writes after drain.
+      return applyLegacyRootTriggerUpdate({
+        uid: userId,
+        label: "updateHpTotal",
+        expectedFields: {
+          "Parametri.Combattimento.Salute.Tot": newSaluteTot,
+          "stats.level": newLevel,
+        },
+        update: {"stats.hpTotal": hpTotal},
       });
     } catch (error) {
       console.error("Error updating hpTotal:", error);

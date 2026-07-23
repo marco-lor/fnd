@@ -1,9 +1,9 @@
 // file: ./frontend/src/components/bazaar/Bazaar.js
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { collection, onSnapshot, query, where, or, and } from "../../performance/firestore";
 import { db } from '../firebaseConfig';
-import { useAuth } from '../../AuthContext';
+import { useAuth, useAuthSession } from '../../AuthContext';
 import ComparisonPanel from './elements/comparisonComponent';
 import { acquireItem } from './elements/acquireItem';
 import PurchaseConfirmModal from './elements/PurchaseConfirmModal';
@@ -20,8 +20,11 @@ import {
   AddWeaponOverlay,
   BAZAAR_EDITOR_DESCRIPTORS,
 } from './lazyBazaarEditors';
+import { useResources } from '../../data/userData/userDataHooks';
+import { createUserOperationId } from '../../data/userData/userDataCommands';
+import { isUserDataCommandStageResolved } from '../../data/userData/userDataCommandRouting';
 
-function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purchasing, userGold }) {
+function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purchasing, purchaseDisabled, userGold }) {
   const [imageError, setImageError] = useState(false);
   const title = item.General?.Nome || 'Oggetto Sconosciuto';
   const imageUrl = item.General?.image_url;
@@ -104,17 +107,17 @@ function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purch
           <button
             onClick={(e) => {
               e.stopPropagation();
-              if (!purchasing && affordable) onPurchase(item);
+              if (!purchasing && !purchaseDisabled && affordable) onPurchase(item);
             }}
-            disabled={purchasing || (!affordable && price > 0)}
+            disabled={purchasing || purchaseDisabled || (!affordable && price > 0)}
             className={`w-full rounded-xl px-3 py-2 text-sm font-medium transition-colors
-              ${purchasing ? 'bg-gray-500 cursor-not-allowed opacity-60 text-white'
+              ${purchasing || purchaseDisabled ? 'bg-gray-500 cursor-not-allowed opacity-60 text-white'
                 : !affordable && price > 0 ? 'bg-gray-700/60 text-gray-300 cursor-not-allowed border border-gray-600'
                 : 'bg-[rgba(25,50,128,0.7)] text-white hover:bg-[rgba(35,60,148,0.85)]'}
             `}
-            title={purchasing ? 'Acquisto in corso...' : (!affordable && price > 0 ? 'Oro insufficiente' : 'Acquista')}
+            title={purchasing ? 'Acquisto in corso...' : (purchaseDisabled ? 'Dati utente in caricamento' : (!affordable && price > 0 ? 'Oro insufficiente' : 'Acquista'))}
           >
-            {purchasing ? '...' : (!affordable && price > 0 ? 'No Gold' : 'Acquire')}
+            {purchasing ? '...' : (purchaseDisabled ? 'Unavailable' : (!affordable && price > 0 ? 'No Gold' : 'Acquire'))}
           </button>
         </div>
       </div>
@@ -144,6 +147,7 @@ function BazaarDetailPlaceholder() {
 }
 
 const BAZAAR_FILTERS_STORAGE_KEY = 'bazaar.filters';
+const EMPTY_BAZAAR_ITEMS = Object.freeze([]);
 
 const normalizeFilterArray = (value) => {
   if (!Array.isArray(value)) {
@@ -232,7 +236,16 @@ const loadBazaarFilters = () => {
 
 export default function Bazaar() {
   const { topInset } = useShellLayout();
-  const [items, setItems] = useState([]);
+  const { user, userData } = useAuth();
+  const { repositoryAccessGeneration = 0 } = useAuthSession();
+  const normalizedRole = userData?.role || 'unknown';
+  const catalogScopeKey = `${user?.uid || 'anonymous'}:${repositoryAccessGeneration}:${normalizedRole}`;
+  const catalogScopeRef = useRef(catalogScopeKey);
+  catalogScopeRef.current = catalogScopeKey;
+  const [catalogState, setCatalogState] = useState({ scopeKey: null, items: [] });
+  const items = catalogState.scopeKey === catalogScopeKey
+    ? catalogState.items
+    : EMPTY_BAZAAR_ITEMS;
   const [savedFilters] = useState(() => loadBazaarFilters());
   const [searchTerm, setSearchTerm] = useState(savedFilters.searchTerm);
   const [selectedSlot, setSelectedSlot] = useState(savedFilters.selectedSlot);
@@ -253,9 +266,19 @@ export default function Bazaar() {
   const [showConsumabileOverlay, setShowConsumabileOverlay] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [confirmationMessage, setConfirmationMessage] = useState("");
-  const { user, userData } = useAuth();
+  const {
+    data: resources,
+    stage: resourcesStage,
+    status: resourcesStatus,
+  } = useResources(user?.uid);
+  const resourcesReady = resourcesStatus === 'fresh'
+    && resources !== null
+    && isUserDataCommandStageResolved(resourcesStage);
+  const userGold = resourcesReady ? (resources?.stats?.gold ?? 0) : 0;
   const [purchasingItemId, setPurchasingItemId] = useState(null);
   const [pendingPurchaseItem, setPendingPurchaseItem] = useState(null);
+  const [pendingPurchaseRetryKey, setPendingPurchaseRetryKey] = useState(null);
+  const [pendingPurchaseScopeKey, setPendingPurchaseScopeKey] = useState(null);
   const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
   const isDM = userData?.role === 'dm'; // DMs can see all items regardless of custom visibility
   const prefetchEditor = (kind) => {
@@ -263,9 +286,31 @@ export default function Bazaar() {
     BAZAAR_EDITOR_DESCRIPTORS[kind]?.preload().catch(() => {});
   };
 
+  // Catalog data and every action derived from it belong to one exact auth and
+  // access scope. Mask the previous scope during the render that observes a
+  // UID/role generation change, then clear its transient UI state.
+  useEffect(() => {
+    setCatalogState({ scopeKey: catalogScopeKey, items: [] });
+    setHoveredItem(null);
+    setLockedItem(null);
+    setPendingPurchaseItem(null);
+    setPendingPurchaseRetryKey(null);
+    setPendingPurchaseScopeKey(null);
+    setPurchasingItemId(null);
+    setShowOverlay(false);
+    setShowArmaturaOverlay(false);
+    setShowAccessorioOverlay(false);
+    setShowConsumabileOverlay(false);
+  }, [catalogScopeKey]);
+
   // Listen to items respecting visibility
   useEffect(() => {
     if (!user) return;
+    const subscriptionScopeKey = catalogScopeKey;
+    const publishItems = (nextItems) => {
+      if (catalogScopeRef.current !== subscriptionScopeKey) return;
+      setCatalogState({ scopeKey: subscriptionScopeKey, items: nextItems });
+    };
 
     const itemsRef = collection(db, 'items');
 
@@ -283,10 +328,11 @@ export default function Bazaar() {
                 allItems.push({ id: doc.id, ...data });
               }
             });
-            setItems(allItems);
+            publishItems(allItems);
           },
           (error) => {
             console.error('Error listening to items collection (DM view):', error);
+            publishItems([]);
           }
         );
       } else {
@@ -310,10 +356,11 @@ export default function Bazaar() {
                 filteredItems.push({ id: doc.id, ...data });
               }
             });
-            setItems(filteredItems);
+            publishItems(filteredItems);
           },
           (error) => {
             console.error('Error listening to items collection:', error);
+            publishItems([]);
           }
         );
       }
@@ -325,7 +372,22 @@ export default function Bazaar() {
         unsubscribe();
       }
     };
-  }, [user, isDM]);
+  }, [catalogScopeKey, isDM, user]);
+
+  // A pending confirmation is valid only while its exact catalog record stays
+  // in the current authorized query. Refresh the payload when the catalog
+  // changes and close it immediately if visibility or existence is lost.
+  useEffect(() => {
+    if (!pendingPurchaseItem || pendingPurchaseScopeKey !== catalogScopeKey) return;
+    const currentItem = items.find((item) => item.id === pendingPurchaseItem.id);
+    if (!currentItem) {
+      setPendingPurchaseItem(null);
+      setPendingPurchaseRetryKey(null);
+      setPendingPurchaseScopeKey(null);
+      return;
+    }
+    if (currentItem !== pendingPurchaseItem) setPendingPurchaseItem(currentItem);
+  }, [catalogScopeKey, items, pendingPurchaseItem, pendingPurchaseScopeKey]);
 
   useEffect(() => {
     const currentLockedItemId = lockedItem?.id;
@@ -492,7 +554,6 @@ export default function Bazaar() {
     const matchesTipo = selectedTipo.includes('All') || selectedTipo.includes(item.Specific?.Tipo);
     const matchesItemType = selectedItemType.includes('All') || selectedItemType.includes(item.item_type);
     const matchesSpecialParams = selectedSpecialParams.includes('All') || selectedSpecialParams.some((param) => isMeaningfulSpecialValue(item.Parametri?.Special?.[param]));
-    const userGold = userData?.stats?.gold ?? 0;
     const rawPrice = item?.General?.prezzo ?? 0;
     const price = typeof rawPrice === 'number' ? rawPrice : parseInt(rawPrice, 10) || 0;
     const matchesAffordable = !onlyAffordable || price <= userGold;
@@ -586,12 +647,12 @@ export default function Bazaar() {
   }, []);
 
   const startPurchaseFlow = (item) => {
-    if (!user) {
+    if (!user || !resourcesReady) {
       displayConfirmation('Devi essere loggato per acquistare.', 'error');
       return;
     }
   // Stacking allowed: no early return if already owned
-    const gold = userData?.stats?.gold ?? 0;
+    const gold = userGold;
     const rawPrice = item?.General?.prezzo;
     const price = typeof rawPrice === 'number' ? rawPrice : parseInt(rawPrice, 10) || 0;
     if (price > gold) {
@@ -599,27 +660,46 @@ export default function Bazaar() {
       return;
     }
     setPendingPurchaseItem(item);
+    setPendingPurchaseRetryKey(`${user.uid}:${createUserOperationId('purchase-flow')}`);
+    setPendingPurchaseScopeKey(catalogScopeKey);
   };
 
   const confirmPurchase = async () => {
-    const item = pendingPurchaseItem;
-    if (!item || !user) { setPendingPurchaseItem(null); return; }
-    if (!user) {
-      displayConfirmation('Devi essere loggato per acquistare.', 'error');
+    const item = items.find((candidate) => candidate.id === pendingPurchaseItem?.id);
+    const actionScopeKey = catalogScopeKey;
+    if (
+      !item
+      || !user
+      || !resourcesReady
+      || pendingPurchaseScopeKey !== catalogScopeKey
+      || !pendingPurchaseRetryKey?.startsWith(`${user.uid}:`)
+    ) {
+      setPendingPurchaseItem(null);
+      setPendingPurchaseRetryKey(null);
+      setPendingPurchaseScopeKey(null);
       return;
     }
     const price = typeof item?.General?.prezzo === 'number' ? item.General.prezzo : parseInt(item?.General?.prezzo, 10) || 0;
     const name = item.General?.Nome || 'Oggetto';
   // Stacking allowed: skip already-owned guard
-    const gold = userData?.stats?.gold ?? 0;
+    const gold = userGold;
     if (price > gold) {
       displayConfirmation(`Oro insufficiente: ${gold} / ${price}`, 'error');
       return;
     }
+    let preservePendingPurchase = false;
     try {
       setPurchasingItemId(item.id);
-      const res = await acquireItem(user.uid, item);
+      const res = await acquireItem(
+        user.uid,
+        item,
+        undefined,
+        resourcesStage,
+        pendingPurchaseRetryKey
+      );
+      if (catalogScopeRef.current !== actionScopeKey) return;
       if (res?.error) {
+        preservePendingPurchase = res.retryable === true;
         displayConfirmation(`Errore: ${res.error}`, 'error');
       } else if (res?.insufficient) {
         displayConfirmation(`Oro insufficiente: ${res.gold} / ${res.price}`, 'error');
@@ -633,10 +713,17 @@ export default function Bazaar() {
         displayConfirmation('Risposta inattesa dalla transazione.', 'error');
       }
     } catch (e) {
-      displayConfirmation(`Errore durante l'acquisto: ${e.message}`, 'error');
+      if (catalogScopeRef.current === actionScopeKey) {
+        displayConfirmation(`Errore durante l'acquisto: ${e.message}`, 'error');
+      }
     } finally {
+      if (catalogScopeRef.current !== actionScopeKey) return;
       setPurchasingItemId(null);
-    setPendingPurchaseItem(null);
+      if (!preservePendingPurchase) {
+        setPendingPurchaseItem(null);
+        setPendingPurchaseRetryKey(null);
+        setPendingPurchaseScopeKey(null);
+      }
     }
   };
   const handleAddWeaponClick = () => {
@@ -747,7 +834,8 @@ export default function Bazaar() {
                   onLockToggle={() => handleLockToggle(item)}
                   isLocked={lockedItem && lockedItem.id === item.id}
                   purchasing={purchasingItemId === item.id}
-                  userGold={userData?.stats?.gold ?? 0}
+                  purchaseDisabled={!resourcesReady}
+                  userGold={userGold}
                 />
               ))
             ) : (
@@ -838,12 +926,22 @@ export default function Bazaar() {
         )}
       </AnimatePresence>
       {/* Purchase Confirmation Modal */}
-      {pendingPurchaseItem && (
+      {pendingPurchaseItem
+        && pendingPurchaseScopeKey === catalogScopeKey
+        && items.some((item) => item.id === pendingPurchaseItem.id)
+        && resourcesReady
+        && pendingPurchaseRetryKey?.startsWith(`${user?.uid}:`) && (
         <PurchaseConfirmModal
           item={pendingPurchaseItem}
-            userGold={userData?.stats?.gold ?? 0}
+            userGold={userGold}
           onConfirm={confirmPurchase}
-          onClose={() => !purchasingItemId && setPendingPurchaseItem(null)}
+          onClose={() => {
+            if (!purchasingItemId) {
+              setPendingPurchaseItem(null);
+              setPendingPurchaseRetryKey(null);
+              setPendingPurchaseScopeKey(null);
+            }
+          }}
           isProcessing={!!purchasingItemId}
         />
       )}

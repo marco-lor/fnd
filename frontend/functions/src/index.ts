@@ -29,6 +29,22 @@ import {updateGrigliataCustomTokenTemplate} from "./updateGrigliataCustomTokenTe
 import {clientFirebaseConfig} from "./clientFirebaseConfig";
 import {syncUserDirectory} from "./syncUserDirectory";
 import {
+  task05AdjustGold,
+  task05CommitConsumable,
+  task05UpdateGrigliataCharacterResources,
+  task05MutateInventory,
+  task05MutatePersonalContent,
+  task05PrepareConsumable,
+  task05PurchaseItem,
+  task05SetEquipment,
+  task05UpdateProfileContent,
+  task05UpdateProfile,
+  task05UpdateProgression,
+  task05UpdateResource,
+  task05UpdateSettings,
+} from "./userDataCommands";
+import {cleanupUserOwnedMedia} from "./userOwnedMediaCleanup";
+import {
   cleanupDeletedGrigliataTokenImage,
   cleanupReplacedGrigliataTokenImage,
 } from "./cleanupGrigliataTokenImage";
@@ -55,6 +71,20 @@ export {
   updateGrigliataCustomTokenTemplate,
   clientFirebaseConfig,
   syncUserDirectory,
+  task05AdjustGold,
+  task05CommitConsumable,
+  task05UpdateGrigliataCharacterResources,
+  task05MutateInventory,
+  task05MutatePersonalContent,
+  task05PrepareConsumable,
+  task05PurchaseItem,
+  task05SetEquipment,
+  task05UpdateProfileContent,
+  task05UpdateProfile,
+  task05UpdateProgression,
+  task05UpdateResource,
+  task05UpdateSettings,
   cleanupDeletedGrigliataTokenImage,
   cleanupReplacedGrigliataTokenImage,
+  cleanupUserOwnedMedia,
 };

@@ -356,9 +356,19 @@ async function terminateProcessTree(child, {
       throw result.error;
     }
     if (result.status !== 0 && !childHasExited(child)) {
-      throw new Error(
-        `taskkill failed for owned npm start process ${child.pid}: ${String(result.stderr || "unknown error").trim()}`
-      );
+      // The cmd.exe wrapper can finish naturally after taskkill has resolved
+      // the PID but before Node delivers the ChildProcess exit event. Give
+      // that event a short bounded chance to arrive before treating taskkill's
+      // "no running instance" result as a cleanup failure. The independent
+      // port-release check below still proves that the dev server is gone.
+      try {
+        await waitForChildExit(child, Math.min(1_000, cleanupTimeoutMs));
+      } catch (_exitError) {
+        throw new Error(
+          `taskkill failed for owned npm start process ${child.pid}: ${String(result.stderr || "unknown error").trim()}`
+        );
+      }
+      return;
     }
     await waitForChildExit(child, cleanupTimeoutMs);
     return;

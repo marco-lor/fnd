@@ -1,97 +1,86 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
-import { useAuth } from "../../AuthContext";
-import { doc, onSnapshot } from "../../performance/firestore";
-import { db } from "../firebaseConfig";
+import React, { useState, useEffect, useMemo } from "react";
+import { useAuth, useAuthSession } from "../../AuthContext";
 import TecnicheSide from "./elements/tecniche_side";
 import SpellSide from "./elements/spell_side";
 import PersonalMediaEditor from "./elements/personalMediaEditor";
 import FilterPanel from './FilterPanel';
 import { getCommonTechniques } from '../../data/configRepository';
+import {
+  usePersonalSpells,
+  usePersonalTechniques,
+  useProgression,
+  useResources,
+} from '../../data/userData/userDataHooks';
+
+const EMPTY_COMMON_TECNICHE = Object.freeze({});
 
 function TecnicheSpell() {
   const { user, userData: authUserData } = useAuth();
-  const [userData, setUserData] = useState(null);
-  const [personalTecniche, setPersonalTecniche] = useState({});
-  const [commonTecniche, setCommonTecniche] = useState({});
-  const [personalSpells, setPersonalSpells] = useState({});
+  const { repositoryAccessGeneration = 0 } = useAuthSession();
+  const contentScopeKey = `${user?.uid || 'anonymous'}:${repositoryAccessGeneration}`;
+  const { data: progression, status: progressionStatus } = useProgression(user?.uid);
+  const { data: resources, status: resourcesStatus } = useResources(user?.uid);
+  const { data: personalTecnicheData, status: techniquesStatus } = usePersonalTechniques(user?.uid);
+  const { data: personalSpellsData, status: spellsStatus } = usePersonalSpells(user?.uid);
+  const progressionReady = progressionStatus === 'fresh' && progression !== null;
+  const resourcesReady = resourcesStatus === 'fresh' && resources !== null;
+  const actionDataReady = progressionReady && resourcesReady;
+  const userData = useMemo(() => ({
+    ...(progression || {}),
+    ...(resources || {}),
+    uid: actionDataReady ? user?.uid : null,
+    characterId: authUserData?.characterId,
+    email: user?.email,
+    stats: { ...(progression?.stats || {}), ...(resources?.stats || {}) },
+  }), [actionDataReady, authUserData?.characterId, progression, resources, user?.email, user?.uid]);
+  const personalTecniche = useMemo(
+    () => personalTecnicheData || {},
+    [personalTecnicheData]
+  );
+  const [commonTecnicheState, setCommonTecnicheState] = useState({
+    scopeKey: null,
+    data: EMPTY_COMMON_TECNICHE,
+  });
+  const commonTecniche = commonTecnicheState.scopeKey === contentScopeKey
+    ? commonTecnicheState.data
+    : EMPTY_COMMON_TECNICHE;
+  const personalSpells = useMemo(
+    () => personalSpellsData || {},
+    [personalSpellsData]
+  );
   const [selectedTecnica, setSelectedTecnica] = useState(null);
   const [selectedSpell, setSelectedSpell] = useState(null);
-  const [isReady, setIsReady] = useState(false);
-  const unsubscribeRef = useRef(null);
 
   // Unified filtering predicate (function(item) => boolean)
   const [predicate, setPredicate] = useState(() => () => true);
 
-  // Fetch common tecniche data through the shared repository.
-  const fetchCommonTecniche = async () => {
-    try {
-      const data = await getCommonTechniques();
-
-      if (data) {
-        setCommonTecniche(data);
-      } else {
-        console.log("No common tecniche document found");
-        setCommonTecniche({});
-      }
-    } catch (error) {
-      console.error("Error fetching common tecniche:", error);
-    }
-  };
-
   useEffect(() => {
-    async function fetchData() {
-      if (user) {
-        // Initialize with data from AuthContext if available
-        if (authUserData) {
-          setUserData({ ...authUserData, uid: user.uid });
-          setPersonalTecniche(authUserData.tecniche || {});
-          setPersonalSpells(authUserData.spells || {});
-          
-          // Start fetching common tecniche in parallel
-          fetchCommonTecniche();
-          
-          // Set ready state even before completing all fetches to prevent flashing
-          setIsReady(true);
-        }
-        
-        // Set up the listener for real-time updates to specific data
-        const userRef = doc(db, "users", user.uid);
-        unsubscribeRef.current = onSnapshot(
-          userRef,
-          (docSnap) => {
-            if (docSnap.exists()) {
-              const data = docSnap.data();
-              setUserData({ ...data, uid: user.uid });
-              setPersonalTecniche(data.tecniche || {});
-              setPersonalSpells(data.spells || {});
-              
-              // Ensure ready state is set once we have basic user data
-              if (!isReady) setIsReady(true);
-            }
-          },
-          (error) => {
-            console.error("Error fetching user data:", error);
-            // Still set ready to avoid indefinite loading state
-            if (!isReady) setIsReady(true);
-          }
-        );
+    setSelectedTecnica(null);
+    setSelectedSpell(null);
+    setPredicate(() => () => true);
+    setCommonTecnicheState({ scopeKey: contentScopeKey, data: {} });
+  }, [contentScopeKey]);
 
-        // If we didn't have authUserData, we need to fetch common tecniche here
-        if (!authUserData) {
-          await fetchCommonTecniche();
-          setIsReady(true);
-        }
-      }
-    }
-
-    fetchData();
-
-    return () => {
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
+  // Common config is actor-scoped by the repository runtime. Ignore any
+  // in-flight result from the previous UID/access generation.
+  useEffect(() => {
+    if (!user) return undefined;
+    let active = true;
+    const fetchCommonTecniche = async () => {
+      try {
+        const data = await getCommonTechniques();
+        if (!active) return;
+        if (!data) console.log("No common tecniche document found");
+        setCommonTecnicheState({ scopeKey: contentScopeKey, data: data || {} });
+      } catch (error) {
+        if (!active) return;
+        console.error("Error fetching common tecniche:", error);
+        setCommonTecnicheState({ scopeKey: contentScopeKey, data: {} });
       }
     };
-  }, [user, authUserData, isReady]);
+    fetchCommonTecniche();
+    return () => { active = false; };
+  }, [contentScopeKey, user]);
 
   // Apply unified predicate to datasets
   const filteredPersonalTecniche = useMemo(() => {
@@ -110,10 +99,14 @@ function TecnicheSpell() {
     }, {});
   }, [personalSpells, predicate]);
 
-  // Render the component only when isReady, prevents flickering
   return (
   <div className="w-full min-h-full relative">
       <div className="relative z-10 w-full min-h-full">
+        {[progressionStatus, resourcesStatus, techniquesStatus, spellsStatus].some((status) => status === 'missing' || status === 'error') && (
+          <p role="status" className="px-5 pt-4 text-sm text-amber-300">
+            Alcuni dati personali non sono disponibili. Le azioni collegate restano disabilitate.
+          </p>
+        )}
         {/* Unified Filter Panel */}
         <FilterPanel
           personalTecniche={personalTecniche}
@@ -130,7 +123,7 @@ function TecnicheSpell() {
               commonTecniche={filteredCommonTecniche}
               userData={userData}
               onEditPersonalTecnica={(tecnicaName, tecnicaData) =>
-                setSelectedTecnica({ name: tecnicaName, data: tecnicaData })
+                setSelectedTecnica({ name: tecnicaName, data: tecnicaData, scopeKey: contentScopeKey })
               }
             />
 
@@ -138,7 +131,7 @@ function TecnicheSpell() {
               personalSpells={filteredPersonalSpells}
               userData={userData}
               onEditPersonalSpell={(spellName, spellData) =>
-                setSelectedSpell({ name: spellName, data: spellData })
+                setSelectedSpell({ name: spellName, data: spellData, scopeKey: contentScopeKey })
               }
             />
           </div>
@@ -146,7 +139,7 @@ function TecnicheSpell() {
           <div className="w-full h-20 mt-6"></div>
         </main>
 
-        {selectedTecnica && userData?.uid && (
+        {selectedTecnica?.scopeKey === contentScopeKey && userData?.uid && (
           <PersonalMediaEditor
             userId={userData.uid}
             userLabel={userData?.characterId || userData?.email || user?.email}
@@ -157,7 +150,7 @@ function TecnicheSpell() {
           />
         )}
 
-        {selectedSpell && userData?.uid && (
+        {selectedSpell?.scopeKey === contentScopeKey && userData?.uid && (
           <PersonalMediaEditor
             userId={userData.uid}
             userLabel={userData?.characterId || userData?.email || user?.email}

@@ -8,10 +8,10 @@ import React, {
   useState,
 } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { onSnapshot, doc, labelFirestoreTarget } from "./performance/firestore";
 import { beginAsyncResourceOwner, withAsyncResourceOwner } from "./performance/runtime";
-import { auth, db } from "./components/firebaseConfig";
+import { auth } from "./components/firebaseConfig";
 import { setRepositoryActor } from "./data/repositoryRuntime";
+import { subscribeAuthProfileAggregate } from "./data/userData/userDataRepository";
 
 export const AuthContext = createContext(undefined);
 const AuthSessionContext = createContext(undefined);
@@ -76,7 +76,7 @@ export const projectShellProfile = (uid, userData) => ({
   role: normalizeStoredRole(userData?.role) || null,
   characterId: normalizeShellString(userData?.characterId),
   race: normalizeShellString(userData?.race),
-  level: normalizeShellLevel(userData?.stats?.level),
+  level: normalizeShellLevel(userData?.summary?.level ?? userData?.stats?.level),
   avatarUrl: normalizeShellString(userData?.imageUrl),
 });
 
@@ -174,18 +174,21 @@ export const AuthProvider = ({ children }) => {
   const [profileError, setProfileError] = useState(null);
   const [shellState, setShellState] = useState({ profile: null, source: "none" });
   const [authAttempt, setAuthAttempt] = useState(0);
+  const [repositoryAccessGeneration, setRepositoryAccessGeneration] = useState(0);
   const userSnapshotUnsubscribe = useRef(null);
   const currentUserRef = useRef(null);
   const shellProfileRef = useRef(null);
   const userDataRef = useRef(null);
   const repositoryAccessScopeRef = useRef(null);
 
-  const setRepositoryAccessScope = useCallback((uidOrNull, accessScope) => {
+  const setRepositoryAccessScope = useCallback((uidOrNull, accessScope, { publish = true } = {}) => {
     const normalizedUid = uidOrNull || null;
     const nextScope = `${normalizedUid || 'anonymous'}:${accessScope}`;
     if (repositoryAccessScopeRef.current === nextScope) return;
     repositoryAccessScopeRef.current = nextScope;
-    setRepositoryActor(normalizedUid);
+    const generation = setRepositoryActor(normalizedUid);
+    if (publish) setRepositoryAccessGeneration(generation);
+    return generation;
   }, []);
 
   useEffect(() => {
@@ -228,49 +231,45 @@ export const AuthProvider = ({ children }) => {
       setProfileStatus("loading");
     }
 
-    const userRef = labelFirestoreTarget(
-      doc(db, "users", currentUser.uid),
-      "users.profile.subscribe.v1",
-      "shell"
-    );
+    userSnapshotUnsubscribe.current = subscribeAuthProfileAggregate(
+      currentUser.uid,
+      {
+        next: (profileData) => {
+          if (currentUserRef.current?.uid !== currentUser.uid) return;
 
-    userSnapshotUnsubscribe.current = onSnapshot(
-      userRef,
-      (snapshot) => {
-        if (currentUserRef.current?.uid !== currentUser.uid) return;
+          if (!profileData) {
+            setRepositoryAccessScope(currentUser.uid, "profile-missing");
+            setUserData(null);
+            setShellProfile(null, "none");
+            setProfileStatus("missing");
+            setProfileError(null);
+            removeShellCache(currentUser.uid);
+            return;
+          }
 
-        if (!snapshot.exists()) {
-          setRepositoryAccessScope(currentUser.uid, "profile-missing");
-          setUserData(null);
-          setShellProfile(null, "none");
-          setProfileStatus("missing");
+          const nextUserData = normalizeUserData(profileData);
+          setRepositoryAccessScope(
+            currentUser.uid,
+            `profile-role-${nextUserData?.role || 'unknown'}`
+          );
+          const nextShellProfile = projectShellProfile(currentUser.uid, nextUserData);
+          const shellChanged = !sameShellProfile(shellProfileRef.current, nextShellProfile);
+
+          setUserData(nextUserData);
+          setShellProfile(nextShellProfile, "fresh");
+          setProfileStatus("fresh");
           setProfileError(null);
-          removeShellCache(currentUser.uid);
-          return;
-        }
-
-        const nextUserData = normalizeUserData(snapshot.data());
-        setRepositoryAccessScope(
-          currentUser.uid,
-          `profile-role-${nextUserData?.role || 'unknown'}`
-        );
-        const nextShellProfile = projectShellProfile(currentUser.uid, nextUserData);
-        const shellChanged = !sameShellProfile(shellProfileRef.current, nextShellProfile);
-
-        setUserData(nextUserData);
-        setShellProfile(nextShellProfile, "fresh");
-        setProfileStatus("fresh");
-        setProfileError(null);
-        if (shellChanged && BOOTSTRAP_V2_ENABLED) writeShellCache(nextShellProfile);
-      },
-      (error) => {
-        if (currentUserRef.current?.uid !== currentUser.uid) return;
-        setRepositoryAccessScope(currentUser.uid, "profile-error");
-        console.error("Error fetching user data:", error);
-        setUserData(null);
-        setProfileStatus("error");
-        setProfileError(error || new Error("Unable to load the authenticated profile."));
-        if (shellProfileRef.current) setShellProfile(shellProfileRef.current, "cached");
+          if (shellChanged && BOOTSTRAP_V2_ENABLED) writeShellCache(nextShellProfile);
+        },
+        error: (error) => {
+          if (currentUserRef.current?.uid !== currentUser.uid) return;
+          setRepositoryAccessScope(currentUser.uid, "profile-error");
+          console.error("Error fetching user data:", error);
+          setUserData(null);
+          setProfileStatus("error");
+          setProfileError(error || new Error("Unable to load the authenticated profile."));
+          if (shellProfileRef.current) setShellProfile(shellProfileRef.current, "cached");
+        },
       }
     );
   }, [clearProfileListener, setRepositoryAccessScope, setShellProfile]);
@@ -341,7 +340,7 @@ export const AuthProvider = ({ children }) => {
       releaseInitialAuthOwnership();
       unsubscribeAuth?.();
       clearProfileListener();
-      setRepositoryAccessScope(null, "unmounted");
+      setRepositoryAccessScope(null, "unmounted", { publish: false });
     };
   }, [
     authAttempt,
@@ -383,7 +382,17 @@ export const AuthProvider = ({ children }) => {
     logout,
     retryAuth,
     getCurrentProfile,
-  }), [user, authStatus, authReady, authError, logout, retryAuth, getCurrentProfile]);
+    repositoryAccessGeneration,
+  }), [
+    user,
+    authStatus,
+    authReady,
+    authError,
+    logout,
+    retryAuth,
+    getCurrentProfile,
+    repositoryAccessGeneration,
+  ]);
 
   const profileValue = useMemo(() => ({
     userData,
@@ -433,6 +442,7 @@ export const AuthProvider = ({ children }) => {
 };
 
 export const useAuth = () => useRequiredContext(AuthContext, "useAuth");
+export const useOptionalAuth = () => useContext(AuthContext);
 export const useAuthSession = () => useRequiredContext(AuthSessionContext, "useAuthSession");
 export const useProfileState = () => useRequiredContext(ProfileStateContext, "useProfileState");
 export const useShellProfile = () => useRequiredContext(ShellProfileContext, "useShellProfile");

@@ -21,6 +21,42 @@ const COLLECTION_CONFIG = {
 };
 
 const AUTH_WAIT_TIMEOUT_MS = 5000;
+const USER_DATA_TRANSPORT_FIELDS = new Set([
+  '_task05',
+  '_task05ContentId',
+  'createdAt',
+  'displayName',
+  'id',
+  'legacyManaged',
+  'legacySourceHash',
+  'legacySourceUpdateTime',
+  'migration',
+  'modelVersion',
+  'name',
+  'normalizedName',
+  'revision',
+  'schemaVersion',
+  'updatedAt',
+  'updatedBy',
+]);
+
+const normalizeContentId = (value) => {
+  const candidate = typeof value === 'string' ? value.trim() : '';
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(candidate) ? candidate : null;
+};
+
+export const stripUserDataTransportFields = (value) => {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const stableContentId = normalizeContentId(source._task05ContentId);
+  // Generic names and timestamps can be legitimate legacy content. Only a
+  // normalized V2 entry carries this dedicated marker, so legacy editor saves
+  // retain their historical payload byte-for-byte.
+  if (!stableContentId) return { ...source };
+  const result = Object.fromEntries(
+    Object.entries(source).filter(([key]) => !USER_DATA_TRANSPORT_FIELDS.has(key))
+  );
+  return { ...result, id: stableContentId };
+};
 
 function sanitizeStorageName(value) {
   const sanitized = String(value || "")
@@ -175,7 +211,8 @@ async function persistOwnedEntry({
   removeImage = false,
   removeVideo = false,
 }) {
-  const trimmedName = entryData?.Nome?.trim();
+  const cleanEntryData = stripUserDataTransportFields(entryData);
+  const trimmedName = cleanEntryData?.Nome?.trim();
 
   if (!trimmedName) {
     throw new Error("Nome is required");
@@ -185,7 +222,7 @@ async function persistOwnedEntry({
   const { userRef, collection } = await loadUserCollection(userId, collectionKey);
   const previousEntry = collection[originalName] || {};
   const nextEntry = {
-    ...entryData,
+    ...cleanEntryData,
     Nome: trimmedName,
   };
 

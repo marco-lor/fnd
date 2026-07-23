@@ -10,8 +10,20 @@ service firebase.storage {
       return /databases/(default)/documents/users/$(uid);
     }
 
+    function isActiveUser(uid) {
+      // Storage rules permit only two cross-service Firestore document reads;
+      // the root pending marker blocks an in-flight deletion, and a missing
+      // root fails closed after deletion. Firestore rules separately prevent
+      // recreation whenever the durable deletion-job tombstone exists.
+      return firestore.get(userDocPath(uid)).data.get("deletionState", null) != "pending";
+    }
+
+    function isActiveSignedIn() {
+      return isSignedIn() && isActiveUser(request.auth.uid);
+    }
+
     function userRole() {
-      return isSignedIn() && firestore.exists(userDocPath(request.auth.uid))
+      return isActiveSignedIn()
         ? firestore.get(userDocPath(request.auth.uid)).data.role
         : null;
     }
@@ -29,11 +41,13 @@ service firebase.storage {
     }
 
     function filenameBelongsToCaller(fileName) {
-      return isSignedIn() && fileName.matches('^.*' + request.auth.uid + '.*$');
+      return isActiveSignedIn()
+        && fileName.matches('^.*' + request.auth.uid + '.*$');
     }
 
     function isCallerOwnedVarieFile(fileName) {
-      return isSignedIn() && fileName.matches('^varie_' + request.auth.uid + '_.*$');
+      return isActiveSignedIn()
+        && fileName.matches('^varie_' + request.auth.uid + '_.*$');
     }
 
     function isImage(maxBytes) {
@@ -130,6 +144,53 @@ service firebase.storage {
       allow delete: if isCatalogManager();
     }
 
+    // Canonical Task 05 user-owned media. Metadata changes are committed by
+    // callable functions before an old object is removed; these paths never
+    // overlap shared catalog assets.
+    match /users/{userId}/profile/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isActiveSignedIn()
+        && request.auth.uid == userId
+        && isImage(8 * 1024 * 1024);
+      allow delete: if false;
+    }
+
+    match /users/{userId}/inventory/{inventoryId}/{fileName} {
+      allow read: if isSignedIn()
+        && (request.auth.uid == userId || isCatalogManager());
+      allow create, update: if isActiveSignedIn()
+        && isActiveUser(userId)
+        && (request.auth.uid == userId || isCatalogManager())
+        && isImage(8 * 1024 * 1024);
+      allow delete: if false;
+    }
+
+    match /users/{userId}/spells/{contentId}/{fileName} {
+      allow read: if isSignedIn()
+        && (request.auth.uid == userId || isCatalogManager());
+      allow create, update: if isActiveSignedIn()
+        && isActiveUser(userId)
+        && (request.auth.uid == userId || isCatalogManager())
+        && (
+          isImage(8 * 1024 * 1024)
+          || isVideo(25 * 1024 * 1024)
+        );
+      allow delete: if false;
+    }
+
+    match /users/{userId}/tecniche/{contentId}/{fileName} {
+      allow read: if isSignedIn()
+        && (request.auth.uid == userId || isCatalogManager());
+      allow create, update: if isActiveSignedIn()
+        && isActiveUser(userId)
+        && (request.auth.uid == userId || isCatalogManager())
+        && (
+          isImage(8 * 1024 * 1024)
+          || isVideo(25 * 1024 * 1024)
+        );
+      allow delete: if false;
+    }
+
     match /grigliata/backgrounds/{userId}/{fileName} {
       allow read: if isSignedIn();
       allow create, update: if isDM()
@@ -151,10 +212,10 @@ service firebase.storage {
 
     match /grigliata/tokens/{userId}/{fileName} {
       allow read: if isSignedIn() && (request.auth.uid == userId || isDM());
-      allow create, update: if isSignedIn()
+      allow create, update: if isActiveSignedIn()
         && request.auth.uid == userId
         && isImage(8 * 1024 * 1024);
-      allow delete: if (isSignedIn() && request.auth.uid == userId) || isDM();
+      allow delete: if (isActiveSignedIn() && request.auth.uid == userId) || isDM();
     }
   }
 }

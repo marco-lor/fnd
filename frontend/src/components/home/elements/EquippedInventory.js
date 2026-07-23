@@ -1,7 +1,5 @@
-import React, { useEffect, useState, useContext } from 'react';
-import { AuthContext } from '../../../AuthContext';
-import { doc, onSnapshot, updateDoc, increment } from '../../../performance/firestore';
-import { db } from '../../firebaseConfig';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useAuthSession } from '../../../AuthContext';
 import { FaTimes } from 'react-icons/fa';
 import { GiChestArmor, GiBroadsword, GiShield, GiRing, GiCrackedHelm, GiBlackBelt, GiSteeltoeBoots, GiScabbard, GiPotionBall, GiDrinkMe } from 'react-icons/gi';
 import {
@@ -10,7 +8,22 @@ import {
 } from './lazyHomeFeatures';
 // Utility (not a React hook) renamed locally to avoid hook lint rule triggering.
 import consumeConsumable from './useConsumable';
+import {
+  useEquipment,
+  useInventory,
+  useProgression,
+  useResources,
+} from '../../../data/userData/userDataHooks';
+import { setEquipment } from '../../../data/userData/userDataCommands';
+import { legacySetEquipment } from '../../../data/userData/legacyUserDataCommands';
+import {
+  isUserDataCommandStageResolved,
+  runVersionedUserDataCommand,
+} from '../../../data/userData/userDataCommandRouting';
+import { increment } from '../../../performance/firestore';
 import { computeValue } from '../../common/computeFormula';
+import { stableUserDataJson } from '../../../data/userData/legacyInventoryProjection';
+import { buildAvailableEquipmentInventory } from './equipmentInventoryProjection';
 
 // Slot metadata (icon + label) retained; layout will be Diablo-like around a silhouette
 const SLOT_DEFS = [
@@ -61,9 +74,89 @@ const Modal = ({ title, onClose, children }) => (
 );
 
 const EquippedInventory = () => {
-  const { user, userData } = useContext(AuthContext);
-  const [equipped, setEquipped] = useState({});
-  const [inventory, setInventory] = useState([]); // simple array of item objects or strings
+  const { user } = useAuthSession();
+  const {
+    data: equipment,
+    stage: equipmentStage,
+    status: equipmentStatus,
+    uid: equipmentUid,
+  } = useEquipment(user?.uid);
+  const {
+    data: inventoryData,
+    status: inventoryStatus,
+    uid: inventoryUid,
+  } = useInventory(user?.uid);
+  const {
+    data: progression,
+    status: progressionStatus,
+    uid: progressionUid,
+  } = useProgression(user?.uid);
+  const {
+    data: resources,
+    status: resourcesStatus,
+    uid: resourcesUid,
+  } = useResources(user?.uid);
+  const equipmentReady = equipmentStatus === 'fresh'
+    && equipment !== null
+    && equipmentUid === user?.uid
+    && isUserDataCommandStageResolved(equipmentStage);
+  const inventoryReady = inventoryStatus === 'fresh'
+    && inventoryData !== null
+    && inventoryUid === user?.uid;
+  const progressionReady = progressionStatus === 'fresh'
+    && progression !== null
+    && progressionUid === user?.uid;
+  const resourcesReady = resourcesStatus === 'fresh'
+    && resources !== null
+    && resourcesUid === user?.uid;
+  const equipmentMutationsReady = equipmentReady && inventoryReady && progressionReady && resourcesReady;
+  const inventory = useMemo(() => inventoryData || [], [inventoryData]);
+  const inventoryById = useMemo(() => Object.fromEntries(inventory.map((entry) => [
+    entry?._task05?.inventoryId || entry?._instance?.instanceId,
+    entry,
+  ]).filter(([id]) => id)), [inventory]);
+  const equipped = useMemo(() => {
+    const candidates = [...inventory];
+    const usedIds = new Set();
+    const comparableSnapshot = (entry) => {
+      if (!entry || typeof entry !== 'object') return entry;
+      const snapshot = { ...entry };
+      delete snapshot._instance;
+      delete snapshot._task05;
+      delete snapshot.qty;
+      delete snapshot.quantity;
+      return snapshot;
+    };
+    const resolveEntry = (value) => {
+      if (typeof value === 'string') return inventoryById[value] || value;
+      if (!value || typeof value !== 'object') return value;
+      const requestedId = value?._instance?.instanceId;
+      if (requestedId && inventoryById[requestedId]) return inventoryById[requestedId];
+      const serialized = stableUserDataJson(comparableSnapshot(value));
+      let candidate = candidates.find((entry) => {
+        const id = entry?._task05?.inventoryId || entry?._instance?.instanceId;
+        return !usedIds.has(id) && stableUserDataJson(comparableSnapshot(entry)) === serialized;
+      });
+      if (!candidate) {
+        const catalogId = value.id || value.itemId;
+        candidate = candidates.find((entry) => {
+          const id = entry?._task05?.inventoryId || entry?._instance?.instanceId;
+          return !usedIds.has(id) && (entry.id === catalogId || entry.itemId === catalogId);
+        });
+      }
+      const resolvedId = candidate?._task05?.inventoryId || candidate?._instance?.instanceId;
+      if (resolvedId) usedIds.add(resolvedId);
+      return candidate || value;
+    };
+    return Object.fromEntries(Object.entries(
+      equipment?.slots || equipment?.equipped || {}
+    ).map(([slot, value]) => [slot, resolveEntry(value)]));
+  }, [equipment, inventory, inventoryById]);
+  const userData = useMemo(() => ({
+    ...(progression || {}),
+    ...(resources || {}),
+    stats: { ...(progression?.stats || {}), ...(resources?.stats || {}) },
+  }), [progression, resources]);
   const [activeSlot, setActiveSlot] = useState(null);
   const [loading, setLoading] = useState(false);
   // Full item specifics now come from user's inventory/equipped entries directly
@@ -73,41 +166,63 @@ const EquippedInventory = () => {
   const [equipError, setEquipError] = useState('');
 
   useEffect(() => {
-    if (!user) return;
-    const unsub = onSnapshot(doc(db, 'users', user.uid), snap => {
-      if (!snap.exists()) return;
-      const data = snap.data();
-      setEquipped(data.equipped || {});
-      setInventory(data.inventory || []);
-    });
-    return () => unsub();
-  }, [user]);
+    setActiveSlot(null);
+    setConfirmUse(null);
+    setPreviewItem(null);
+  }, [user?.uid]);
 
-  // No subscription to global items; specifics are already in user's data
-
-  // ------------------------------
-  // Parametri helpers (same logic as details overlay)
-  // ------------------------------
+  // Keep the legacy aggregate's equipment-derived Parametri behavior intact
+  // until the authoritative equipment command is enabled for this user.
   const getDefaultLevelKey = () => {
     const thresholds = [1, 4, 7, 10];
     const userLevel = Number(userData?.stats?.level || 1);
-    for (let i = thresholds.length - 1; i >= 0; i--) {
+    for (let i = thresholds.length - 1; i >= 0; i -= 1) {
       if (userLevel >= thresholds[i]) return String(thresholds[i]);
     }
     return '1';
   };
-  const isDice = (s) => typeof s === 'string' && /\b\d+d\d+\b/i.test(s);
-  const looksLikeFormula = (s) => {
-    if (typeof s !== 'string') return false;
-    if (isDice(s)) return false;
-    return /[+\-*/()]|\bMAX\b|\bMIN\b|[A-Za-z]/i.test(s);
+  const isDice = (value) => typeof value === 'string' && /\b\d+d\d+\b/i.test(value);
+  const looksLikeFormula = (value) => {
+    if (typeof value !== 'string' || isDice(value)) return false;
+    return /[+\-*/()]|\bMAX\b|\bMIN\b|[A-Za-z]/i.test(value);
   };
-  const asNumber = (val) => {
-    if (val == null) return 0;
-    if (typeof val === 'number') return val;
-    const n = Number(val);
-    return Number.isFinite(n) ? n : 0;
+  const asNumber = (value) => {
+    if (value == null) return 0;
+    if (typeof value === 'number') return value;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
   };
+  const buildEquipDeltaFromItem = (item, sign = 1) => {
+    const updates = {};
+    if (!item || typeof item !== 'object') return updates;
+    const params = item.Parametri || {};
+    const levelKey = getDefaultLevelKey();
+    const userParams = userData?.Parametri;
+    ['Base', 'Combattimento', 'Special'].forEach((groupName) => {
+      const group = params[groupName];
+      if (!group || typeof group !== 'object') return;
+      Object.entries(group).forEach(([stat, levels]) => {
+        const raw = levels?.[levelKey];
+        if (raw == null || String(raw).trim() === '') return;
+        let value = 0;
+        if (looksLikeFormula(raw) && userParams) {
+          const computed = computeValue(String(raw), userParams);
+          value = Number.isFinite(computed) ? computed : 0;
+        } else if (!isDice(raw)) {
+          value = asNumber(raw);
+        }
+        if (value) updates[`Parametri.${groupName}.${stat}.Equip`] = increment(sign * value);
+      });
+    });
+    return updates;
+  };
+  const executeEquipmentMutation = useCallback(({ slot, item, inventoryId, parameterUpdates }) => (
+    runVersionedUserDataCommand({
+      stage: equipmentMutationsReady ? equipmentStage : null,
+      legacy: () => legacySetEquipment({ uid: user.uid, slot, item, parameterUpdates }),
+      authoritative: () => setEquipment({ slot, inventoryId }),
+    })
+  ), [equipmentMutationsReady, equipmentStage, user]);
 
   // --- Belt (Cintura) helpers: dynamic consumable slots --------------------
   // Capacity comes from equipped belt item Specific.slotCintura
@@ -127,7 +242,7 @@ const EquippedInventory = () => {
 
   // When capacity decreases, automatically clear extra equipped consumables beyond capacity
   useEffect(() => {
-    if (!user) return;
+    if (!user || !equipmentMutationsReady) return;
     const cap = beltCapacity;
     if (!equipped) return;
     if (beltUnlimited) return; // sentinel 99: keep whatever is stored; UI just hides
@@ -146,51 +261,29 @@ const EquippedInventory = () => {
       }
     });
     if (needs) {
-      updateDoc(doc(db, 'users', user.uid), updates).catch(console.error);
+      Promise.all(Object.keys(updates).map((path) => executeEquipmentMutation({
+        slot: path.replace(/^equipped\./, ''),
+        item: null,
+        inventoryId: null,
+      }))).catch(console.error);
     }
-  }, [beltCapacity, beltUnlimited, user, equipped]);
-
-  // Build an object of FieldValue.increment updates for this item's Parametri
-  const buildEquipDeltaFromItem = (item, sign = +1) => {
-    const updates = {};
-    if (!item || typeof item !== 'object') return updates;
-    const params = item.Parametri || {};
-    const levelKey = getDefaultLevelKey();
-    const userParams = userData?.Parametri;
-
-    const applyGroup = (groupName) => {
-      const group = params[groupName];
-      if (!group || typeof group !== 'object') return;
-      for (const [stat, levels] of Object.entries(group)) {
-        const raw = levels?.[levelKey];
-        if (raw == null || String(raw).toString().trim() === '') continue;
-        let value = 0;
-        if (looksLikeFormula(raw) && userParams) {
-          const computed = computeValue(String(raw), userParams);
-          value = Number.isFinite(computed) ? computed : 0;
-        } else if (!isDice(raw)) {
-          value = asNumber(raw);
-        }
-        if (!value) continue;
-        const path = `Parametri.${groupName}.${stat}.Equip`;
-        updates[path] = increment(sign * value);
-      }
-    };
-
-  // Apply Base, Combattimento, and Special to user Parametri
-  applyGroup('Base');
-  applyGroup('Combattimento');
-  applyGroup('Special');
-    return updates;
-  };
+  }, [beltCapacity, beltUnlimited, user, equipped, executeEquipmentMutation, equipmentMutationsReady]);
 
   const handleUnequip = async (slotKey) => {
-    if (!user) return;
+    if (!user || !equipmentMutationsReady) return;
     setLoading(true);
     try {
-      const prevItem = equipped?.[slotKey];
-      const deltas = buildEquipDeltaFromItem(resolveItemDoc(prevItem) || prevItem, -1);
-      await updateDoc(doc(db, 'users', user.uid), { [`equipped.${slotKey}`]: null, ...deltas });
+      const previousItem = equipped?.[slotKey];
+      const parameterUpdates = buildEquipDeltaFromItem(
+        resolveItemDoc(previousItem) || previousItem,
+        -1
+      );
+      await executeEquipmentMutation({
+        slot: slotKey,
+        item: null,
+        inventoryId: null,
+        parameterUpdates,
+      });
     } catch (e) { console.error(e); }
     setLoading(false);
   };
@@ -201,7 +294,7 @@ const EquippedInventory = () => {
   };
 
   const handleEquip = async (item) => {
-    if (!user || !activeSlot) return;
+    if (!user || !activeSlot || !equipmentMutationsReady) return;
     setLoading(true);
     try {
       // Validate item-slot compatibility before saving
@@ -217,85 +310,28 @@ const EquippedInventory = () => {
   setLoading(false);
   return;
       }
-      // Build increments: subtract previous item in slot (if any), add new item
-      const prevItem = equipped?.[activeSlot];
-      const subtractPrev = buildEquipDeltaFromItem(resolveItemDoc(prevItem) || prevItem, -1);
-      const addNew = buildEquipDeltaFromItem(toCheck, +1);
-      await updateDoc(doc(db, 'users', user.uid), { [`equipped.${activeSlot}`]: item, ...subtractPrev, ...addNew });
+      const inventoryId = item?._task05?.inventoryId || item?._instance?.instanceId;
+      if (!inventoryId) throw new Error('Inventory item is missing its stable instance ID.');
+      const previousItem = equipped?.[activeSlot];
+      const subtractPrevious = buildEquipDeltaFromItem(
+        resolveItemDoc(previousItem) || previousItem,
+        -1
+      );
+      const addNext = buildEquipDeltaFromItem(toCheck, 1);
+      await executeEquipmentMutation({
+        slot: activeSlot,
+        item,
+        inventoryId,
+        parameterUpdates: { ...subtractPrevious, ...addNext },
+      });
     } catch (e) { console.error(e); }
     setLoading(false);
     setActiveSlot(null);
   };
 
-  // Items not already equipped (simple identity by name or id)
-  // Collect equipped counts per item id (allow duplicates across different slots)
-  const equippedCounts = {};
-  Object.values(equipped || {}).forEach(val => {
-    if (!val) return;
-    const id = typeof val === 'string' ? val : val.id || val.name || val?.General?.Nome;
-    if (!id) return;
-    equippedCounts[id] = (equippedCounts[id] || 0) + 1;
-  });
-
-  // Build available list: keep non-Varie unstacked per instance, stack only Varie
-  const expandedAvailable = (() => {
-    const nonVarieInstances = [];
-    const varieTotals = {};
-    // Track stable ordinals per duplicate id so numbering does not shift when one is equipped.
-    // This ensures that if you have two "Pozione del Mana" and you equip one, the remaining
-    // instance still shows "Pozione del Mana (2)" instead of losing the suffix.
-    const ordinalByIdCounter = {};
-    // Walk raw inventory to preserve per-entry specifics and images
-    for (let i = 0; i < inventory.length; i++) {
-      const entry = inventory[i];
-      if (!entry) continue;
-      if (typeof entry === 'string') {
-        // Unknown type without global catalog here; treat as non-varie by default
-        const idStr = entry;
-        const ord = (ordinalByIdCounter[idStr] = (ordinalByIdCounter[idStr] || 0) + 1);
-        nonVarieInstances.push({ id: idStr, name: idStr, qty: 1, type: 'oggetto', isVarie: false, invIndex: i, dupOrdinal: ord });
-        continue;
-      }
-      const id = entry.id || entry.name || entry?.General?.Nome;
-      const name = entry?.General?.Nome || entry.name || id;
-      const t = (entry.type || entry.item_type || '').toLowerCase();
-      const qty = typeof entry.qty === 'number' ? Math.max(1, entry.qty) : 1;
-      if (t === 'varie') {
-        if (!varieTotals[id]) varieTotals[id] = { id, name, qty: 0, type: 'varie', isVarie: true };
-        varieTotals[id].qty += qty;
-      } else {
-        for (let q = 0; q < qty; q++) {
-          const ord = (ordinalByIdCounter[id] = (ordinalByIdCounter[id] || 0) + 1);
-          nonVarieInstances.push({ ...entry, id, name, qty: 1, type: t || 'oggetto', isVarie: false, invIndex: i, dupOrdinal: ord });
-        }
-      }
-    }
-
-    // Remove already-equipped instances by id (first N instances per id)
-    const usedById = {};
-    const availableNonVarie = nonVarieInstances.filter(inst => {
-      const id = inst.id;
-      const used = usedById[id] || 0;
-      const eq = equippedCounts[id] || 0;
-      if (used < eq) { usedById[id] = used + 1; return false; }
-      return true;
-    });
-
-    // Compute remaining for Varie after subtracting equipped
-    const availableVarie = Object.values(varieTotals)
-      .map(v => ({ ...v, qty: Math.max(0, v.qty - (equippedCounts[v.id] || 0)) }))
-      .filter(v => v.qty > 0)
-      .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
-
-    // Use stable original ordinal (dupOrdinal) so numbering does not renumber after equipping
-    const numberedNonVarie = availableNonVarie.map(it => {
-      const baseName = it.name || it.id;
-      const ord = it.dupOrdinal;
-      return { ...it, displayName: ord > 1 ? `${baseName} (${ord})` : baseName };
-    });
-
-    return [...numberedNonVarie, ...availableVarie];
-  })();
+  // Build available inventory by exact instance identity. Catalog IDs remain a
+  // compatibility fallback only for unresolved legacy equipment values.
+  const expandedAvailable = buildAvailableEquipmentInventory({ inventory, equipped });
 
   // Inventory consumables (for unlimited belt case: slotCintura === 99)
   const inventoryConsumables = React.useMemo(() => {
@@ -434,7 +470,7 @@ const EquippedInventory = () => {
   const item = equipped?.[slotKey];
     const itemDoc = resolveItemDoc(item);
     const imgUrl = itemDoc?.General?.image_url || item?.General?.image_url;
-    const blocked = isDisabledByTwoH(slotKey) && !item; // disable empty opposite slot if 2H is equipped
+    const blocked = (isDisabledByTwoH(slotKey) && !item) || !equipmentMutationsReady;
     return (
       <div key={slotKey} className="group relative">
         <div
@@ -482,7 +518,7 @@ const EquippedInventory = () => {
           {item && itemDoc && /^beltC\d+$/.test(slotKey) && (itemDoc.type === 'consumabile' || (itemDoc.item_type || '').toLowerCase() === 'consumabile') && (
             <button
               onClick={(e) => { e.stopPropagation(); setConfirmUse({ slotKey, itemDoc }); }}
-              disabled={usingConsumable}
+              disabled={usingConsumable || !equipmentMutationsReady}
               className={`absolute bottom-1 right-1 text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1 border transition
                 ${usingConsumable ? 'border-emerald-800/40 bg-emerald-900/40 text-emerald-700 cursor-not-allowed' : 'border-emerald-400/50 bg-emerald-600/20 text-emerald-200 hover:border-emerald-300/70 hover:bg-emerald-600/30'}
               `}
@@ -586,8 +622,11 @@ const EquippedInventory = () => {
                   </div>
                   <div className="flex items-center gap-2 w-full justify-center">
                     <button
-                      onClick={(e) => { e.stopPropagation(); setConfirmUse({ slotKey: null, itemDoc: c }); }}
-                      disabled={usingConsumable}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (equipmentMutationsReady) setConfirmUse({ slotKey: null, itemDoc: c });
+                      }}
+                      disabled={usingConsumable || !equipmentMutationsReady}
                       className={`text-[10px] px-2 py-0.5 rounded flex items-center gap-1 border transition
                         ${usingConsumable ? 'border-emerald-800/40 bg-emerald-900/40 text-emerald-700 cursor-not-allowed' : 'border-emerald-400/50 bg-emerald-600/20 text-emerald-200 hover:border-emerald-300/70 hover:bg-emerald-600/30'}`}
                       title={usingConsumable ? 'In uso…' : 'Usa consumabile'}
@@ -635,6 +674,7 @@ const EquippedInventory = () => {
                       )}
                       <button
                         onClick={() => handleEquip(it)}
+                        disabled={!equipmentMutationsReady}
                         className="flex-1 text-left hover:bg-slate-700/60 rounded-md px-2 py-1 transition"
                       >
                         <span className="text-sm text-slate-200 truncate">{name}{(it.isVarie && qty > 1) && <span className="ml-2 text-[10px] text-amber-300">x{qty}</span>}{(it.isVarie && remaining !== qty) && <span className="ml-2 text-[10px] text-emerald-300">(resta {remaining})</span>}</span>
@@ -664,14 +704,14 @@ const EquippedInventory = () => {
       {previewItem && (
         <ItemDetailsModal item={previewItem} onClose={() => setPreviewItem(null)} />
       )}
-      {confirmUse && confirmUse.itemDoc && (
+      {confirmUse && confirmUse.itemDoc && equipmentMutationsReady && (
         <ConfirmUseConsumableModal
           item={confirmUse.itemDoc}
           userData={userData}
           onCancel={() => setConfirmUse(null)}
           onConfirm={async (mode) => {
             // mode can be 'hp' or 'mana'
-            if (!user) return;
+            if (!user || !equipmentMutationsReady) return;
             setUsingConsumable(true);
             try {
               await consumeConsumable({
@@ -680,6 +720,7 @@ const EquippedInventory = () => {
                 item: confirmUse.itemDoc,
                 slotKey: confirmUse.slotKey,
                 mode, // regen target
+                stage: equipmentStage,
               });
             } catch (e) {
               console.error('Errore uso consumabile', e);

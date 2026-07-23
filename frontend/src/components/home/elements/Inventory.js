@@ -1,194 +1,258 @@
-import React, { useContext, useEffect, useState } from 'react';
-import { AuthContext } from '../../../AuthContext';
-import { db } from '../../firebaseConfig';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useAuthSession } from '../../../AuthContext';
 import { storage } from '../../firebaseStorage';
-import { doc, onSnapshot, getDoc, updateDoc } from '../../../performance/firestore';
-import { ref as storageRef, deleteObject } from 'firebase/storage';
+import { deleteObject, ref as storageRef } from 'firebase/storage';
 import { FiPackage, FiSearch, FiTrash2, FiPlus, FiMinus } from 'react-icons/fi';
 import { FaCoins } from 'react-icons/fa';
 import { LazyItemDetailsModal as ItemDetailsModal } from './lazyHomeFeatures';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
 import { uploadCacheableImage } from '../../common/imageStorage';
+import {
+	useEquipment,
+	useInventory,
+	useResources,
+} from '../../../data/userData/userDataHooks';
+import {
+	adjustGold,
+	createUserOperationId,
+	isDefinitiveUserDataCommandError,
+	mutateInventory,
+} from '../../../data/userData/userDataCommands';
+import {
+	legacyAdjustGold,
+	legacyMutateInventory,
+} from '../../../data/userData/legacyUserDataCommands';
+import {
+ isUserDataCommandStageResolved,
+ runVersionedUserDataCommand,
+} from '../../../data/userData/userDataCommandRouting';
+import { resolveEquippedInventoryIds } from './equipmentInventoryProjection';
+
+const inventoryDocumentId = (entry, index) => (
+	entry?._task05?.inventoryId
+	|| entry?._instance?.instanceId
+	|| (typeof entry === 'string' ? entry : entry?.id)
+	|| `item-${index}`
+);
+
+export const buildInventoryView = (inventory, equipment) => {
+	const inv = Array.isArray(inventory) ? inventory : [];
+	const equippedValues = Object.values(equipment?.slots || equipment?.equipped || {}).filter(Boolean);
+	const equippedInventoryIds = resolveEquippedInventoryIds({
+		inventory: inv,
+		equipped: Object.fromEntries(equippedValues.map((value, index) => [index, value])),
+	});
+
+	const nonVarieInstances = [];
+	const varieMap = {};
+	inv.forEach((entry, index) => {
+		if (!entry) return;
+		const baseId = typeof entry === 'string'
+			? entry
+			: entry.id || entry.name || entry?.General?.Nome || `item-${index}`;
+		const baseName = typeof entry === 'string'
+			? entry
+			: entry?.General?.Nome || entry.name || baseId;
+		const type = typeof entry === 'string' ? '' : (entry.type || entry.item_type || '').toLowerCase();
+		const rarity = typeof entry === 'object' ? entry.rarity : undefined;
+		const quantity = typeof entry === 'object' && typeof entry.qty === 'number'
+			? Math.max(1, entry.qty)
+			: 1;
+		const stableInventoryId = inventoryDocumentId(entry, index);
+		const docObj = typeof entry === 'object' ? { ...entry, id: baseId } : null;
+		const equipped = equippedInventoryIds.has(stableInventoryId);
+		if (type === 'varie') {
+			if (!varieMap[baseId]) {
+				varieMap[baseId] = {
+					id: baseId,
+					name: baseName,
+					qty: 0,
+					rarity,
+					type: 'varie',
+					doc: docObj,
+					instances: [],
+					isEquipped: false,
+				};
+			}
+				varieMap[baseId].qty += quantity;
+			varieMap[baseId].instances.push({
+				inventoryId: stableInventoryId,
+				legacyIndex: entry?._task05?.legacyIndex,
+				quantity,
+				doc: docObj,
+			});
+			varieMap[baseId].isEquipped = varieMap[baseId].isEquipped || equipped;
+			return;
+		}
+		for (let ordinal = 0; ordinal < quantity; ordinal += 1) {
+			nonVarieInstances.push({
+				id: baseId,
+				name: baseName,
+				rarity,
+				type: type || 'oggetto',
+				doc: docObj,
+				invIndex: index,
+				inventoryId: stableInventoryId,
+				legacyIndex: entry?._task05?.legacyIndex,
+				isEquipped: equipped,
+			});
+		}
+	});
+	const seenCounts = {};
+	const numberedNonVarie = nonVarieInstances.map((item) => {
+		const count = (seenCounts[item.id] = (seenCounts[item.id] || 0) + 1);
+		return { ...item, displayName: count > 1 ? `${item.name} (${count})` : item.name };
+	});
+	return {
+		items: [...numberedNonVarie, ...Object.values(varieMap)],
+	};
+};
 
 // Simple inventory browser to occupy the right column
 // Shows a searchable, grouped list of items in user's inventory
 const Inventory = () => {
-	const { user } = useContext(AuthContext);
-	const [items, setItems] = useState([]);
+	const { user, repositoryAccessGeneration = 0 } = useAuthSession();
+	const actionScopeKey = `${user?.uid || 'anonymous'}:${repositoryAccessGeneration}`;
+	const actionScopeRef = useRef(actionScopeKey);
+	actionScopeRef.current = actionScopeKey;
+	const {
+		data: inventory,
+		stage: inventoryStage,
+		status: inventoryStatus,
+	} = useInventory(user?.uid);
+	const { data: equipment } = useEquipment(user?.uid);
+	const {
+		data: resources,
+		stage: resourcesStage,
+		status: resourcesStatus,
+	} = useResources(user?.uid);
+	const resourcesCommandsReady = resourcesStatus === 'fresh'
+		&& resources !== null
+		&& isUserDataCommandStageResolved(resourcesStage);
+	const inventoryCommandsReady = inventoryStatus === 'fresh'
+		&& inventory !== null
+		&& isUserDataCommandStageResolved(inventoryStage);
+	const executeInventoryMutation = (payload, legacyOptions = {}, retryKey = null) => runVersionedUserDataCommand({
+		stage: inventoryCommandsReady ? inventoryStage : null,
+		legacy: () => legacyMutateInventory({ uid: user.uid, ...payload, ...legacyOptions }),
+		authoritative: () => mutateInventory({
+			userId: user.uid,
+			...payload,
+			...(retryKey ? { retryKey } : {}),
+		}),
+	});
+	const executeGoldAdjustment = (delta, retryKey = null) => runVersionedUserDataCommand({
+		stage: resourcesCommandsReady ? resourcesStage : null,
+		legacy: () => legacyAdjustGold({ uid: user.uid, delta }),
+		authoritative: () => adjustGold({
+			userId: user.uid,
+			delta,
+			...(retryKey ? { retryKey } : {}),
+		}),
+	});
+	const { items } = useMemo(
+		() => buildInventoryView(inventory, equipment),
+		[inventory, equipment]
+	);
 	const [q, setQ] = useState('');
 	const [previewItem, setPreviewItem] = useState(null);
-	const [gold, setGold] = useState(0);
+	const [previewScopeKey, setPreviewScopeKey] = useState(null);
+	const gold = typeof resources?.stats?.gold === 'number'
+		? resources.stats.gold
+		: parseInt(resources?.stats?.gold, 10) || 0;
 	const [busyId, setBusyId] = useState(null);
 	const [confirmTarget, setConfirmTarget] = useState(null); // { id, name }
-	const [equippedCounts, setEquippedCounts] = useState({}); // id -> count equipped
 	// gold adjustment overlay state
 	const [showGoldOverlay, setShowGoldOverlay] = useState(false);
+	const [goldActionScopeKey, setGoldActionScopeKey] = useState(null);
+	const [goldRetryKey, setGoldRetryKey] = useState(null);
 	const [goldDir, setGoldDir] = useState(1); // 1 for add, -1 for subtract
 	const [goldDelta, setGoldDelta] = useState('');
 	const [goldBusy, setGoldBusy] = useState(false);
 
 	// "Varie" custom item overlay state
 	const [showVarieOverlay, setShowVarieOverlay] = useState(false);
+	const [varieActionScopeKey, setVarieActionScopeKey] = useState(null);
+	const [varieRetryKey, setVarieRetryKey] = useState(null);
 	const [vName, setVName] = useState('');
 	const [vDesc, setVDesc] = useState('');
 	const [vQty, setVQty] = useState('1');
 	const [vBusy, setVBusy] = useState(false);
 	const [vImageFile, setVImageFile] = useState(null);
 	const [vImagePreviewUrl, setVImagePreviewUrl] = useState(null);
+	const [vUploadedImage, setVUploadedImage] = useState(null);
 
 	useEffect(() => {
-		if (!user) return;
-		const unsub = onSnapshot(doc(db, 'users', user.uid), snap => {
-			const data = snap.data();
-			const inv = Array.isArray(data?.inventory) ? data.inventory : [];
-			setGold(typeof data?.stats?.gold === 'number' ? data.stats.gold : parseInt(data?.stats?.gold, 10) || 0);
-			// Compute equipped counts by id
-			const equipped = data?.equipped || {};
-			const eqCounts = {};
-			Object.values(equipped).forEach((val, idx) => {
-				if (!val) return;
-				let id;
-				if (typeof val === 'string') id = val;
-				else id = val.id || val.name || val?.General?.Nome || `eq-${idx}`;
-				if (!id) return;
-				eqCounts[id] = (eqCounts[id] || 0) + 1;
-			});
-			setEquippedCounts(eqCounts);
-			// Build list where Varie items are stacked but normal items are not
-			const nonVarieInstances = [];
-			const varieMap = {};
-			for (let i = 0; i < inv.length; i++) {
-				const e = inv[i];
-				if (!e) continue;
-				// derive basics
-				let baseId, baseName, type, rarity;
-				if (typeof e === 'string') {
-					baseId = e;
-					baseName = e;
-					type = undefined;
-					rarity = undefined;
-				} else {
-					baseId = e.id || e.name || e?.General?.Nome || `item-${i}`;
-					baseName = e?.General?.Nome || e.name || baseId;
-					type = (e.type || e.item_type || '').toLowerCase();
-					rarity = e.rarity;
-				}
-				const qty = (typeof e === 'object' && typeof e.qty === 'number') ? Math.max(1, e.qty) : 1;
-				const docObj = typeof e === 'object' ? { ...e, id: baseId } : null;
-				const isVarie = (type === 'varie');
-				if (isVarie) {
-					if (!varieMap[baseId]) {
-						varieMap[baseId] = { id: baseId, name: baseName, qty: 0, rarity, type: 'varie', doc: docObj };
-					}
-					varieMap[baseId].qty += qty;
-				} else {
-					// expand into individual instances (unstacked)
-					for (let u = 0; u < qty; u++) {
-						nonVarieInstances.push({
-							id: baseId,
-							name: baseName,
-							rarity,
-							type: (type || 'oggetto'),
-							doc: docObj,
-							invIndex: i
-						});
-					}
-				}
-			}
-			// number duplicates for non-varie for display
-			const seenCounts = {};
-			const numberedNonVarie = nonVarieInstances.map((it) => {
-				const count = (seenCounts[it.id] = (seenCounts[it.id] || 0) + 1);
-				const displayName = count > 1 ? `${it.name} (${count})` : it.name;
-				return { ...it, displayName };
-			});
-			// final items array: keep non-varie instances (qty implicitly 1) and stacked varie
-			const combined = [
-				...numberedNonVarie,
-				...Object.values(varieMap)
-			];
-			setItems(combined);
+		setPreviewItem(null);
+		setPreviewScopeKey(null);
+		setConfirmTarget(null);
+		setBusyId(null);
+		setShowGoldOverlay(false);
+		setGoldActionScopeKey(null);
+		setGoldRetryKey(null);
+		setGoldDelta('');
+		setGoldBusy(false);
+		setShowVarieOverlay(false);
+		setVarieActionScopeKey(null);
+		setVarieRetryKey(null);
+		setVName('');
+		setVDesc('');
+		setVQty('1');
+		setVBusy(false);
+		setVImageFile(null);
+		setVUploadedImage(null);
+		setVImagePreviewUrl((currentUrl) => {
+			if (currentUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(currentUrl);
+			return null;
 		});
-		return () => unsub();
-	}, [user]);
+	}, [actionScopeKey]);
 
-	// No longer loading the global items catalog; full item specifics are in user's inventory
-
-	// Helper to derive an id from an inventory entry (string or object)
-	const deriveId = (e, i) => {
-		if (!e) return `item-${i}`;
-		if (typeof e === 'string') return e;
-		return e.id || e.name || e?.General?.Nome || `item-${i}`;
+	const closeGoldOverlay = () => {
+		if (goldBusy) return;
+		setShowGoldOverlay(false);
+		setGoldActionScopeKey(null);
+		setGoldRetryKey(null);
+		setGoldDelta('');
 	};
+
+	const resetVarieDraft = () => {
+		setShowVarieOverlay(false);
+		setVarieActionScopeKey(null);
+		setVarieRetryKey(null);
+		setVName('');
+		setVDesc('');
+		setVQty('1');
+		setVImageFile(null);
+		setVUploadedImage(null);
+		setVImagePreviewUrl((currentUrl) => {
+			if (currentUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(currentUrl);
+			return null;
+		});
+	};
+
 
 	// Remove a single unit of an item; if matchIndex is provided, remove at that inventory index
 	const removeOne = async (targetId, matchIndex) => {
 		if (!user || !targetId) return;
 		try {
 			setBusyId(targetId);
-			const ref = doc(db, 'users', user.uid);
-			const snap = await getDoc(ref);
-			if (!snap.exists()) return;
-			const data = snap.data() || {};
-			const inv = Array.isArray(data.inventory) ? [...data.inventory] : [];
-
-			let removed = false;
-			let deletedImageUrl = null;
-			const next = [];
-
-			for (let i = 0; i < inv.length; i++) {
-				const entry = inv[i];
-				if (removed) { next.push(entry); continue; }
-
-				// If a specific inventory index is requested, match by index first
-				if (typeof matchIndex === 'number') {
-					if (i !== matchIndex) { next.push(entry); continue; }
-				} else {
-					const id = deriveId(entry, i);
-					if (id !== targetId) { next.push(entry); continue; }
-				}
-
-				// match
-				if (typeof entry === 'object' && entry && typeof entry.qty === 'number') {
-					const newQty = Math.max(0, (entry.qty || 0) - 1);
-					if (newQty > 0) {
-						next.push({ ...entry, qty: newQty });
-					} else {
-						// fully removed; if it was a Varie with its own image, mark for deletion
-						if ((entry.type || '').toLowerCase() === 'varie' && entry.image_url) {
-							deletedImageUrl = entry.image_url;
-						}
-						// if this standard item had a user-specific custom image, delete it as well
-						if ((entry.type || '').toLowerCase() !== 'varie' && entry.user_image_custom && entry.user_image_url) {
-							deletedImageUrl = deletedImageUrl || entry.user_image_url;
-						}
-						// fully removed; do not push
-					}
-				} else {
-					// string or object without qty: remove this single occurrence by skipping push
-					if (typeof entry === 'object') {
-						if ((entry.type || '').toLowerCase() === 'varie' && entry.image_url) {
-							deletedImageUrl = entry.image_url;
-						}
-						if ((entry.type || '').toLowerCase() !== 'varie' && entry.user_image_custom && entry.user_image_url) {
-							deletedImageUrl = deletedImageUrl || entry.user_image_url;
-						}
-					}
-				}
-				removed = true;
-			}
-
-			if (!removed) return; // nothing to do
-			await updateDoc(ref, { inventory: next });
-
-			// After Firestore update, delete storage file if this was a Varie or a user-custom image and it was fully removed
-			if (deletedImageUrl) {
-				try {
-					const path = decodeURIComponent(deletedImageUrl.split('/o/')[1].split('?')[0]);
-					await deleteObject(storageRef(storage, path));
-				} catch (e) {
-					console.warn('Failed to delete inventory image from storage', e);
-				}
+			const target = typeof matchIndex === 'number'
+				? items.find((item) => item.id === targetId && item.invIndex === matchIndex)
+				: items.find((item) => item.id === targetId);
+			if (!target) return;
+			const instance = target.type === 'varie' ? target.instances?.[0] : target;
+			if (!instance?.inventoryId) throw new Error('Inventory item is missing its stable instance ID.');
+			if (target.type === 'varie' && instance.quantity > 1) {
+				await executeInventoryMutation({
+					action: 'setQuantity',
+					inventoryId: instance.inventoryId,
+					quantity: instance.quantity - 1,
+				}, { legacyIndex: instance.legacyIndex });
+			} else {
+				await executeInventoryMutation(
+					{ action: 'remove', inventoryId: instance.inventoryId },
+					{ legacyIndex: instance.legacyIndex }
+				);
 			}
 		} catch (err) {
 			console.error('Error removing item from inventory', err);
@@ -202,38 +266,21 @@ const Inventory = () => {
 		if (!user || !targetId) return;
 		try {
 			setBusyId(targetId);
-			const ref = doc(db, 'users', user.uid);
-			const snap = await getDoc(ref);
-			if (!snap.exists()) return;
-			const data = snap.data() || {};
-			const inv = Array.isArray(data.inventory) ? [...data.inventory] : [];
-			let deletedImageUrl = null;
-			const next = [];
-			for (let i = 0; i < inv.length; i++) {
-				const entry = inv[i];
-				const id = deriveId(entry, i);
-				if (id === targetId) {
-					if (typeof entry === 'object') {
-						if ((entry.type || '').toLowerCase() === 'varie' && entry.image_url) {
-							deletedImageUrl = entry.image_url;
-						}
-						if ((entry.type || '').toLowerCase() !== 'varie' && entry.user_image_custom && entry.user_image_url) {
-							deletedImageUrl = deletedImageUrl || entry.user_image_url;
-						}
-					}
-					// skip to remove
-					continue;
-				}
-				next.push(entry);
+			const ids = new Set();
+			const matchingItems = items.filter((item) => item.id === targetId);
+			if (matchingItems.some((item) => item.isEquipped)) {
+				throw new Error("Prima rimuovi tutti gli oggetti equipaggiati.");
 			}
-			await updateDoc(ref, { inventory: next });
-			if (deletedImageUrl) {
-				try {
-					const path = decodeURIComponent(deletedImageUrl.split('/o/')[1].split('?')[0]);
-					await deleteObject(storageRef(storage, path));
-				} catch (e) {
-					console.warn('Failed to delete inventory image from storage', e);
-				}
+			matchingItems.forEach((item) => {
+				if (item.type === 'varie') item.instances?.forEach(({ inventoryId }) => ids.add(inventoryId));
+				else if (item.inventoryId) ids.add(item.inventoryId);
+			});
+			const inventoryIds = [...ids];
+			for (let index = 0; index < inventoryIds.length; index += 50) {
+				await executeInventoryMutation({
+					action: 'removeMany',
+					inventoryIds: inventoryIds.slice(index, index + 50),
+				});
 			}
 		} catch (err) {
 			console.error('Error removing all units from inventory', err);
@@ -244,54 +291,95 @@ const Inventory = () => {
 
 	// Add a custom "Varie" item to inventory
 	const addVarieItem = async () => {
-		if (!user) return;
+		const submissionScopeKey = actionScopeKey;
+		const submissionRetryKey = varieRetryKey;
+		if (
+			!user
+			|| !inventoryCommandsReady
+			|| varieActionScopeKey !== submissionScopeKey
+			|| !submissionRetryKey
+		) return;
 		const name = (vName || '').trim();
 		const qtyNum = Math.max(1, Math.abs(parseInt(vQty, 10) || 1));
 		if (!name) return; // require a name
+		let uploadedImage = vUploadedImage;
 		try {
 			setVBusy(true);
-			const ref = doc(db, 'users', user.uid);
-			const snap = await getDoc(ref);
-			if (!snap.exists()) return;
-			const data = snap.data() || {};
-			const inv = Array.isArray(data.inventory) ? [...data.inventory] : [];
-
-			const id = `varie_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
-			let image_url = null;
-			if (vImageFile) {
+			if (vImageFile && !uploadedImage) {
 				try {
 					const safe = name.replace(/[^a-zA-Z0-9]/g, '_');
 					const fileName = `varie_${user.uid}_${safe}_${Date.now()}_${vImageFile.name}`;
 					const imgRef = storageRef(storage, 'items/' + fileName);
-					({ downloadUrl: image_url } = await uploadCacheableImage(imgRef, vImageFile));
+					const { downloadUrl } = await uploadCacheableImage(imgRef, vImageFile);
+					uploadedImage = { downloadUrl, objectRef: imgRef };
+					if (actionScopeRef.current !== submissionScopeKey) {
+						await deleteObject(imgRef).catch((cleanupError) => {
+							console.error('Failed to clean up abandoned varie image', cleanupError);
+						});
+						return;
+					}
+					setVUploadedImage(uploadedImage);
 				} catch (e) {
 					console.error('Failed to upload varie image', e);
 				}
 			}
+			if (actionScopeRef.current !== submissionScopeKey) return;
 
-			inv.push({ id, name, description: (vDesc||'').trim(), type: 'varie', qty: qtyNum, ...(image_url ? { image_url } : {}) });
-			await updateDoc(ref, { inventory: inv });
+			await executeInventoryMutation({
+				action: 'createVarie',
+				quantity: qtyNum,
+				snapshot: {
+					name,
+					description: (vDesc || '').trim(),
+					type: 'varie',
+					...(uploadedImage?.downloadUrl ? { image_url: uploadedImage.downloadUrl } : {}),
+				},
+			}, {}, submissionRetryKey);
+			if (actionScopeRef.current !== submissionScopeKey) return;
 
-			// reset and close
-			setShowVarieOverlay(false);
-			setVName(''); setVDesc(''); setVQty('1'); setVImageFile(null); setVImagePreviewUrl(null);
+			resetVarieDraft();
 		} catch (err) {
 			console.error('Error adding custom varie item', err);
+			if (isDefinitiveUserDataCommandError(err)) {
+				if (uploadedImage?.objectRef) {
+					await deleteObject(uploadedImage.objectRef).catch((cleanupError) => {
+						console.error('Failed to clean up unused varie image', cleanupError);
+					});
+				}
+				if (actionScopeRef.current === submissionScopeKey) resetVarieDraft();
+			}
 		} finally {
-			setVBusy(false);
+			if (actionScopeRef.current === submissionScopeKey) setVBusy(false);
 		}
+	};
+
+	const openVarieOverlay = () => {
+		if (!user || !inventoryCommandsReady) return;
+		setVarieActionScopeKey(actionScopeKey);
+		setVarieRetryKey(`${actionScopeKey}:${createUserOperationId('varie-flow')}`);
+		setShowVarieOverlay(true);
 	};
 
 	// Open overlay to adjust gold
 	const openGoldOverlay = (dir) => {
+		if (!user || !resourcesCommandsReady) return;
 		setGoldDir(dir);
 		setGoldDelta('');
+		setGoldActionScopeKey(actionScopeKey);
+		setGoldRetryKey(`${actionScopeKey}:${createUserOperationId('gold-flow')}`);
 		setShowGoldOverlay(true);
 	};
 
 	// Apply gold delta to Firestore, clamped to >= 0
 	const applyGoldDelta = async () => {
-		if (!user) return;
+		const submissionScopeKey = actionScopeKey;
+		const submissionRetryKey = goldRetryKey;
+		if (
+			!user
+			|| !resourcesCommandsReady
+			|| goldActionScopeKey !== submissionScopeKey
+			|| !submissionRetryKey
+		) return;
 		const amount = Math.abs(parseInt(goldDelta, 10));
 		if (!amount || Number.isNaN(amount)) {
 			// no valid amount entered
@@ -299,20 +387,20 @@ const Inventory = () => {
 		}
 		try {
 			setGoldBusy(true);
-			const ref = doc(db, 'users', user.uid);
-			const snap = await getDoc(ref);
-			if (!snap.exists()) return;
-			const data = snap.data() || {};
-			const curr = typeof data?.stats?.gold === 'number' ? data.stats.gold : parseInt(data?.stats?.gold, 10) || 0;
-			const next = Math.max(0, curr + (goldDir >= 0 ? amount : -amount));
-			await updateDoc(ref, {
-				stats: { ...(data.stats || {}), gold: next }
-			});
+			await executeGoldAdjustment(goldDir >= 0 ? amount : -amount, submissionRetryKey);
+			if (actionScopeRef.current !== submissionScopeKey) return;
 			setShowGoldOverlay(false);
+			setGoldActionScopeKey(null);
+			setGoldRetryKey(null);
+			setGoldDelta('');
 		} catch (err) {
 			console.error('Error updating gold', err);
+			if (
+				actionScopeRef.current === submissionScopeKey
+				&& isDefinitiveUserDataCommandError(err)
+			) closeGoldOverlay();
 		} finally {
-			setGoldBusy(false);
+			if (actionScopeRef.current === submissionScopeKey) setGoldBusy(false);
 		}
 	};
 
@@ -336,6 +424,7 @@ const Inventory = () => {
 						className="inline-flex h-5 w-5 items-center justify-center rounded-md border border-emerald-400/40 text-emerald-300 hover:bg-emerald-500/10"
 						title="Aggiungi oro"
 						onClick={() => openGoldOverlay(1)}
+						disabled={!resourcesCommandsReady}
 					>
 						<FiPlus className="h-3 w-3" />
 					</button>
@@ -343,6 +432,7 @@ const Inventory = () => {
 						className="inline-flex h-5 w-5 items-center justify-center rounded-md border border-rose-400/40 text-rose-300 hover:bg-rose-500/10"
 						title="Rimuovi oro"
 						onClick={() => openGoldOverlay(-1)}
+						disabled={!resourcesCommandsReady}
 					>
 						<FiMinus className="h-3 w-3" />
 					</button>
@@ -389,6 +479,7 @@ const Inventory = () => {
 							    <button onClick={() => {
 							    const modalItem = docObj ? { ...docObj, __invIndex: it.invIndex } : { id: it.id, name: it.name, type: it.type, __invIndex: it.invIndex };
 							    setPreviewItem(modalItem);
+							    setPreviewScopeKey(actionScopeKey);
 							    }} className="min-w-0 text-left flex-1 hover:bg-slate-700/40 rounded-md px-2 py-1">
 												<div className="text-sm text-slate-200 truncate">{display}</div>
 										<div className="text-[11px] text-slate-400 truncate">{it.type || 'oggetto'}</div>
@@ -398,10 +489,10 @@ const Inventory = () => {
 											<span className="text-[10px] uppercase tracking-wide text-fuchsia-300">{it.rarity}</span>
 										)}
 												{/* Non-varie are unstacked; no qty badge */}
-										{(() => { const isEquipped = (equippedCounts[it.id] || 0) > 0; return (
+										{(() => { const isEquipped = it.isEquipped; return (
 											<button
 														className={`ml-1 inline-flex items-center justify-center rounded-md border p-1.5 transition ${(busyId===it.id || isEquipped) ? 'opacity-60 cursor-not-allowed' : 'hover:bg-red-500/10'} border-red-400/40 text-red-300`}
-														onClick={() => !isEquipped && setConfirmTarget({ id: it.id, name: display, invIndex: it.invIndex })}
+												onClick={() => !isEquipped && setConfirmTarget({ id: it.id, name: display, invIndex: it.invIndex, scopeKey: actionScopeKey })}
 														disabled={busyId===it.id || isEquipped}
 												title={isEquipped ? "Prima rimuovi l'oggetto" : "Rimuovi 1"}
 											>
@@ -421,8 +512,9 @@ const Inventory = () => {
 								<h3 className="text-xs font-semibold tracking-wide text-slate-300">Varie</h3>
 								<button
 									className="inline-flex items-center gap-1 rounded-md border border-slate-600/60 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-700/40"
-									onClick={() => setShowVarieOverlay(true)}
-									title="Aggiungi oggetto Varie"
+								onClick={openVarieOverlay}
+								disabled={!inventoryCommandsReady}
+								title="Aggiungi oggetto Varie"
 								>
 									<FiPlus className="h-3 w-3" /> Aggiungi
 								</button>
@@ -439,7 +531,7 @@ const Inventory = () => {
 														<img src={imgUrl} alt={it.name} className="h-full w-full object-contain" />
 													</div>
 												)}
-												<button onClick={() => setPreviewItem(docObj)} className="min-w-0 text-left flex-1 hover:bg-slate-700/40 rounded-md px-2 py-1">
+												<button onClick={() => { setPreviewItem(docObj); setPreviewScopeKey(actionScopeKey); }} className="min-w-0 text-left flex-1 hover:bg-slate-700/40 rounded-md px-2 py-1">
 													<div className="text-sm text-slate-200 truncate">{it.name}</div>
 													<div className="text-[11px] text-slate-400 truncate">Varie</div>
 												</button>
@@ -447,7 +539,7 @@ const Inventory = () => {
 													<span className="text-xs text-amber-300">x{it.qty}</span>
 													<button
 														className={`ml-1 inline-flex items-center justify-center rounded-md border p-1.5 transition ${busyId===it.id ? 'opacity-60 cursor-not-allowed' : 'hover:bg-red-500/10'} border-red-400/40 text-red-300`}
-														onClick={() => setConfirmTarget({ id: it.id, name: it.name })}
+													onClick={() => setConfirmTarget({ id: it.id, name: it.name, scopeKey: actionScopeKey })}
 														disabled={busyId===it.id}
 														title="Rimuovi 1"
 													>
@@ -468,31 +560,35 @@ const Inventory = () => {
 				)}
 			</div>
 
-			{previewItem && (
-				<ItemDetailsModal item={previewItem} onClose={() => setPreviewItem(null)} />
+			{previewItem && previewScopeKey === actionScopeKey && (
+				<ItemDetailsModal item={previewItem} onClose={() => { setPreviewItem(null); setPreviewScopeKey(null); }} />
 			)}
 
-			{confirmTarget && (
+			{confirmTarget && confirmTarget.scopeKey === actionScopeKey && (
 				<ConfirmDeleteModal
 					itemName={confirmTarget.name}
 					onCancel={() => setConfirmTarget(null)}
 					onConfirm={async () => {
+						if (actionScopeRef.current !== confirmTarget.scopeKey) return;
 						await removeOne(confirmTarget.id, confirmTarget.invIndex);
-						setConfirmTarget(null);
+						if (actionScopeRef.current === confirmTarget.scopeKey) setConfirmTarget(null);
 					}}
 					enableDeleteAll={true}
 					onConfirmAll={async () => {
 						// For non-varie, delete-all will still remove all by id
+						if (actionScopeRef.current !== confirmTarget.scopeKey) return;
 						await removeAllUnits(confirmTarget.id);
-						setConfirmTarget(null);
+						if (actionScopeRef.current === confirmTarget.scopeKey) setConfirmTarget(null);
 					}}
 				/>
 			)}
 
 			{/* Overlay to input gold delta */}
-			{showGoldOverlay && (
+			{showGoldOverlay
+				&& goldActionScopeKey === actionScopeKey
+				&& resourcesCommandsReady && (
 				<div className="absolute inset-0 z-20 flex items-center justify-center">
-					<div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => !goldBusy && setShowGoldOverlay(false)} />
+					<div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={closeGoldOverlay} />
 					<div className="relative z-10 w-72 rounded-xl border border-slate-700/60 bg-slate-800/90 p-4 shadow-xl">
 						<h3 className="text-sm font-semibold text-slate-200">
 							{goldDir >= 0 ? 'Aggiungi oro' : 'Rimuovi oro'}
@@ -512,15 +608,15 @@ const Inventory = () => {
 						<div className="mt-4 flex justify-end gap-2">
 							<button
 								className="inline-flex items-center justify-center rounded-md border border-slate-600/60 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700/40"
-								onClick={() => !goldBusy && setShowGoldOverlay(false)}
-								disabled={goldBusy}
+								onClick={closeGoldOverlay}
+								disabled={goldBusy || !resourcesCommandsReady}
 							>
 								Annulla
 							</button>
 							<button
 								className={`inline-flex items-center justify-center rounded-md px-3 py-1.5 text-xs ${goldDir>=0 ? 'bg-emerald-600/80 hover:bg-emerald-600 text-white' : 'bg-rose-600/80 hover:bg-rose-600 text-white'} disabled:opacity-60`}
 								onClick={applyGoldDelta}
-								disabled={goldBusy}
+								disabled={goldBusy || !resourcesCommandsReady}
 							>
 								Conferma
 							</button>
@@ -530,14 +626,15 @@ const Inventory = () => {
 			)}
 
 			{/* Overlay to add custom Varie item */}
-			{showVarieOverlay && (
+			{showVarieOverlay
+				&& varieActionScopeKey === actionScopeKey
+				&& inventoryCommandsReady && (
 				<div className="absolute inset-0 z-20 flex items-center justify-center">
 					<div
 						className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
 						onClick={() => {
 							if (!vBusy) {
-								setShowVarieOverlay(false);
-								setVName(''); setVDesc(''); setVQty('1'); setVImageFile(null); setVImagePreviewUrl(null);
+								resetVarieDraft();
 							}
 						}}
 					/>
@@ -559,10 +656,14 @@ const Inventory = () => {
 										type="file"
 										accept="image/*"
 										onChange={(e) => {
-											const f = e.target.files && e.target.files[0] ? e.target.files[0] : null;
-											setVImageFile(f);
-											setVImagePreviewUrl(f ? URL.createObjectURL(f) : null);
-										}}
+										const f = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+										setVImageFile(f);
+										setVImagePreviewUrl((currentUrl) => {
+											if (currentUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(currentUrl);
+											return f ? URL.createObjectURL(f) : null;
+										});
+									}}
+									disabled={vBusy || !!vUploadedImage}
 										className="text-xs text-slate-300"
 									/>
 									{vImagePreviewUrl && (
@@ -570,7 +671,13 @@ const Inventory = () => {
 											<div className="h-10 w-10 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/50">
 												<img src={vImagePreviewUrl} alt="Preview" className="h-full w-full object-cover" />
 											</div>
-											<button type="button" onClick={() => { setVImageFile(null); setVImagePreviewUrl(null); }} className="text-[11px] text-slate-300 border border-slate-600/60 rounded px-2 py-1 hover:bg-slate-700/40">Rimuovi</button>
+											<button type="button" disabled={vBusy || !!vUploadedImage} onClick={() => {
+												setVImageFile(null);
+												setVImagePreviewUrl((currentUrl) => {
+													if (currentUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(currentUrl);
+													return null;
+												});
+											}} className="text-[11px] text-slate-300 border border-slate-600/60 rounded px-2 py-1 hover:bg-slate-700/40 disabled:opacity-50">Rimuovi</button>
 										</div>
 									)}
 								</div>
@@ -583,15 +690,15 @@ const Inventory = () => {
 						<div className="mt-4 flex justify-end gap-2">
 							<button
 								className="inline-flex items-center justify-center rounded-md border border-slate-600/60 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700/40"
-								onClick={() => { if (!vBusy) { setShowVarieOverlay(false); setVName(''); setVDesc(''); setVQty('1'); setVImageFile(null); setVImagePreviewUrl(null); } }}
-								disabled={vBusy}
+								onClick={() => { if (!vBusy) resetVarieDraft(); }}
+								disabled={vBusy || !inventoryCommandsReady}
 							>
 								Annulla
 							</button>
 							<button
 								className={`inline-flex items-center justify-center rounded-md px-3 py-1.5 text-xs bg-indigo-600/80 hover:bg-indigo-600 text-white disabled:opacity-60`}
 								onClick={addVarieItem}
-								disabled={vBusy || !vName.trim()}
+								disabled={vBusy || !inventoryCommandsReady || !vName.trim()}
 							>
 								Aggiungi
 							</button>

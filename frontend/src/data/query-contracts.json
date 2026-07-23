@@ -5,14 +5,14 @@
     {
       "id": "shell-user-profile-document",
       "kind": "document",
-      "queryKey": "users.profile.subscribe.v1",
-      "ownerTask": "Task 04 auth integration",
-      "currentScope": "Authenticated user's source profile document",
+      "queryKey": "users.aggregate.subscribe.v1",
+      "ownerTask": "Task 05",
+      "currentScope": "Dedicated Auth profile plus the actor-scoped shared legacy aggregate, compact shell, rollout resolution, and fixed V2 state documents",
       "targetOrdering": [],
       "cursor": { "version": 1, "status": "none", "fields": [] },
-      "realtimePolicy": "One authoritative shell listener",
+      "realtimePolicy": "At most two root listeners per Auth UID: one dedicated session-resilient profile listener and one ref-counted actor-scoped aggregate listener; actor-scoped domains reattach on access-generation changes",
       "activation": "active",
-      "sources": [{ "file": "AuthContext.js", "occurrence": 1 }]
+      "sources": [{ "file": "data/userData/userDataRepository.js", "occurrence": 1 }]
     },
     {
       "id": "bazaar-items-manager-current",
@@ -616,26 +616,23 @@
       "currentScope": "Current user's full profile in four independently mounted home sections",
       "targetOrdering": [],
       "cursor": { "version": 1, "status": "none", "fields": [] },
-      "realtimePolicy": "Mounted home sections; deduplication owned by later page task",
+      "realtimePolicy": "Legacy parameter-table listener only; resources, equipment, and inventory use Task 05 repositories",
       "activation": "deferred",
       "sources": [
-        { "file": "components/home/elements/EquippedInventory.js", "occurrence": 1 },
-        { "file": "components/home/elements/Inventory.js", "occurrence": 1 },
-        { "file": "components/home/elements/paramTables.js", "occurrence": 1 },
-        { "file": "components/home/elements/StatsBars.js", "occurrence": 1 }
+        { "file": "components/home/elements/paramTables.js", "occurrence": 1 }
       ]
     },
     {
-      "id": "techniques-user-document",
-      "kind": "document",
-      "queryKey": "techniques.user.subscribe.v1",
-      "ownerTask": "Task 10",
-      "currentScope": "Current user's technique/spell profile",
-      "targetOrdering": [],
-      "cursor": { "version": 1, "status": "none", "fields": [] },
-      "realtimePolicy": "Mounted techniques route only",
+      "id": "task05-user-domain-collections",
+      "kind": "collection",
+      "queryKey": "users.content.subscribe.v2",
+      "ownerTask": "Task 05",
+      "currentScope": "Complete inventory plus complete normalized personal spell or technique collection for the active user",
+      "targetOrdering": [{ "field": "normalizedName", "direction": "ASCENDING" }, { "field": "__name__", "direction": "ASCENDING" }],
+      "cursor": { "version": 1, "status": "compatibility-full", "fields": ["normalizedName", "__name__"] },
+      "realtimePolicy": "One ref-counted listener per collection; personal content remains complete until the UI exposes load-more",
       "activation": "active",
-      "sources": [{ "file": "components/tecnicheSpell/TecnicheSpell.js", "occurrence": 1 }]
+      "sources": [{ "file": "data/userData/userDataRepository.js", "occurrence": 2 }]
     },
     {
       "id": "codex-document-repository",
@@ -666,7 +663,13 @@
     { "id": "config-document-reads", "ownerTask": "Task 04", "activation": "active", "indexMode": "automatic" },
     { "id": "codex-document-read-listener", "ownerTask": "Task 04", "activation": "active", "indexMode": "automatic" },
     { "id": "user-directory-all-page", "ownerTask": "Task 04", "activation": "active", "indexMode": "automatic" },
-    { "id": "user-directory-role-page", "ownerTask": "Task 04", "activation": "active", "requiredIndexId": "user-directory-role-normalized-label" }
+    { "id": "user-directory-role-page", "ownerTask": "Task 04", "activation": "active", "requiredIndexId": "user-directory-role-normalized-label" },
+    { "id": "task05-user-domain-documents", "ownerTask": "Task 05", "activation": "active", "indexMode": "automatic" },
+    { "id": "task05-inventory-complete-listener", "ownerTask": "Task 05", "activation": "active", "indexMode": "automatic" },
+    { "id": "task05-personal-content-normalized-listener", "ownerTask": "Task 05", "activation": "active", "indexMode": "automatic" },
+    { "id": "task05-inventory-kind-page", "ownerTask": "Task 05", "activation": "deferred", "requiredIndexId": "task05-inventory-kind-normalized-acquired" },
+    { "id": "task05-spells-updated-page", "ownerTask": "Task 05", "activation": "deferred", "requiredIndexId": "task05-spells-normalized-updated" },
+    { "id": "task05-techniques-updated-page", "ownerTask": "Task 05", "activation": "deferred", "requiredIndexId": "task05-techniques-normalized-updated" }
   ],
   "activatedIndexSignatures": [
     {
@@ -713,6 +716,16 @@
       "fields": [
         { "fieldPath": "role", "order": "ASCENDING" },
         { "fieldPath": "normalizedLabel", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "id": "task05-inventory-kind-normalized-acquired",
+      "collectionGroup": "inventory",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "kind", "order": "ASCENDING" },
+        { "fieldPath": "normalizedName", "order": "ASCENDING" },
+        { "fieldPath": "acquiredAt", "order": "DESCENDING" }
       ]
     }
   ]

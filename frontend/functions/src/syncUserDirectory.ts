@@ -5,6 +5,7 @@ import {
   planUserDirectoryMutation,
   userDirectoryProjectionDataMatches,
 } from "./userDirectoryProjection";
+import {reconcileLegacyUserDomains} from "./userDataBridge";
 
 const REGION = "europe-west8";
 const USER_DIRECTORY_COLLECTION = "user_directory";
@@ -23,18 +24,18 @@ export const syncUserDirectory = onDocumentWritten(
     const afterData = event.data.after.exists
       ? event.data.after.data()
       : null;
-    const mutation = planUserDirectoryMutation(beforeData, afterData);
-    if (mutation.type === "none") return;
-
     const db = admin.firestore();
     const sourceRef = db.collection("users").doc(event.params.uid);
     const targetRef = db.collection(USER_DIRECTORY_COLLECTION)
       .doc(event.params.uid);
+    const mutation = planUserDirectoryMutation(beforeData, afterData);
 
     // Events can be retried or delivered out of order. Resolve the current
     // source and target together so every relevant event converges to the
     // latest source state and retries do not create redundant writes.
-    await db.runTransaction(async (transaction) => {
+    const syncDirectory = mutation.type === "none"
+      ? Promise.resolve()
+      : db.runTransaction(async (transaction) => {
       const [sourceSnapshot, targetSnapshot] = await Promise.all([
         transaction.get(sourceRef),
         transaction.get(targetRef),
@@ -55,5 +56,15 @@ export const syncUserDirectory = onDocumentWritten(
       // fields cannot survive a projection refresh.
       transaction.set(targetRef, projection);
     });
+
+    await Promise.all([
+      syncDirectory,
+      reconcileLegacyUserDomains(
+        event.params.uid,
+        beforeData,
+        afterData,
+        event.data.after.updateTime
+      ),
+    ]);
   }
 );

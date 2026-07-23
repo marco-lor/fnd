@@ -23,6 +23,7 @@ jobs:
       - run: npm run perf:test
       - run: npm run perf:check-firestore-imports
       - run: npm run perf:check-shared-config-boundaries
+      - run: npm run perf:check-user-data-boundaries
       - run: npm run perf:check-query-contracts
       - run: npm test -- --watch=false --runInBand --watchman=false
         env: { CI: 'true' }

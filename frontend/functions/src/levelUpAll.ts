@@ -1,5 +1,6 @@
 import {onCall, HttpsError, CallableRequest} from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
+import {assertLegacyRootMutationAllowed} from "./legacyRootMutationGate";
 
 type LevelUpAllRequest = {
   idempotencyKey?: string;
@@ -24,71 +25,85 @@ const getTokenGrantForLevel = (level: number): number => {
 };
 
 
-export const levelUpAll = onCall({ region: REGION }, async (req: CallableRequest<LevelUpAllRequest>) => {
-  if (!req.auth) {
-    throw new HttpsError("unauthenticated", "You must be authenticated.");
-  }
-
-  const db = admin.firestore();
-  const callerUid = req.auth.uid;
-  const callerSnap = await db.doc(`users/${callerUid}`).get();
-  const callerRole = callerSnap.get("role");
-  if (callerRole !== "dm") {
-    throw new HttpsError("permission-denied", "Only DMs can level up players.");
-  }
-
-  const usersSnap = await db.collection("users").get();
-  const results: LevelUpResult[] = [];
-
-  const batch = db.batch();
-
-  for (const docSnap of usersSnap.docs) {
-    const uid = docSnap.id;
-    const data = docSnap.data() || {};
-    const role = data.role || "player";
-    if (role === "dm") {
-      results.push({ userId: uid, characterId: data.characterId, fromLevel: data?.stats?.level || 1, skipped: "DM account" });
-      continue;
+export const levelUpAll = onCall(
+  {region: REGION},
+  async (req: CallableRequest<LevelUpAllRequest>) => {
+    if (!req.auth) {
+      throw new HttpsError("unauthenticated", "You must be authenticated.");
     }
 
-  const stats = data.stats || {};
-    const fromLevel = Number(stats.level) || 1;
-    if (fromLevel >= 10) {
-      results.push({ userId: uid, characterId: data.characterId, fromLevel, skipped: "Already at max level" });
-      continue;
-    }
+    const db = admin.firestore();
+    const callerUid = req.auth.uid;
+    const rolloutRef = db.doc("app_config/user_data_v2");
+    const results = await db.runTransaction(async (transaction) => {
+      const rollout = await transaction.get(rolloutRef);
+      const users = await transaction.get(db.collection("users"));
+      const caller = users.docs.find((snapshot) => snapshot.id === callerUid);
+      if (!caller || caller.get("role") !== "dm") {
+        throw new HttpsError(
+          "permission-denied",
+          "Only DMs can level up players."
+        );
+      }
 
-    const toLevel = fromLevel + 1;
-  const tokensGranted = getTokenGrantForLevel(toLevel);
+      const nextResults: LevelUpResult[] = [];
+      let plannedWrites = 0;
+      for (const user of users.docs) {
+        const uid = user.id;
+        const data = user.data() || {};
+        const role = data.role || "player";
+        const fromLevel = Number(data?.stats?.level) || 1;
+        if (role === "dm") {
+          nextResults.push({
+            userId: uid,
+            characterId: data.characterId,
+            fromLevel,
+            skipped: "DM account",
+          });
+          continue;
+        }
+        if (fromLevel >= 10) {
+          nextResults.push({
+            userId: uid,
+            characterId: data.characterId,
+            fromLevel,
+            skipped: "Already at max level",
+          });
+          continue;
+        }
 
-    // Build user update
-    const userRef = db.doc(`users/${uid}`);
-    const update: Record<string, any> = {
-      "stats.level": toLevel,
-      "stats.combatTokensAvailable": admin.firestore.FieldValue.increment(tokensGranted),
-    };
-
-    batch.update(userRef, update);
-
-    // Prepare audit doc write separately (can't add to batch subcollection with auto-id reliably? Actually we can)
-    const auditRef = userRef.collection("level_events").doc();
-  batch.set(auditRef, {
-      from_level: fromLevel,
-      to_level: toLevel,
-      tokens_granted: tokensGranted,
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        assertLegacyRootMutationAllowed(rollout.data(), uid);
+        plannedWrites += 2;
+        if (plannedWrites > 500) {
+          throw new HttpsError(
+            "resource-exhausted",
+            "Too many users to level up in one atomic operation."
+          );
+        }
+        const toLevel = fromLevel + 1;
+        const tokensGranted = getTokenGrantForLevel(toLevel);
+        transaction.update(user.ref, {
+          "stats.level": toLevel,
+          "stats.combatTokensAvailable":
+            admin.firestore.FieldValue.increment(tokensGranted),
+        });
+        transaction.set(user.ref.collection("level_events").doc(), {
+          from_level: fromLevel,
+          to_level: toLevel,
+          tokens_granted: tokensGranted,
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        nextResults.push({
+          userId: uid,
+          characterId: data.characterId,
+          fromLevel,
+          toLevel,
+          tokensGranted,
+        });
+      }
+      return nextResults;
     });
 
-    results.push({
-      userId: uid,
-      characterId: data.characterId,
-      fromLevel,
-      toLevel,
-  tokensGranted,
-    });
+    return {ok: true, updated: results};
   }
-
-  await batch.commit();
-
-  return { ok: true, updated: results };
-});
+);

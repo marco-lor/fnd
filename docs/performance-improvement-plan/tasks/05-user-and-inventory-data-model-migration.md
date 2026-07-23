@@ -1,60 +1,81 @@
 # Task 05 - User and inventory data-model migration
 
-Depends on Task 04.
+Depends on Task 04. The implementation contract is now frozen in the
+[Task 05 architecture decision](../task-05/architecture-decision.md). The
+[access and mutation matrix](../task-05/access-and-mutation-matrix.md) is the
+ownership inventory, and [implementation evidence](../task-05/implementation-evidence.md)
+records the current validation state and remaining rollout gates.
 
 ## Outcome
 
-Separate high-frequency stats/profile state from growing inventory/content so a small mutation no longer transfers, serializes, rerenders, and triggers the entire character aggregate.
+Separate the compact user shell, high-frequency character state, growing
+inventory, equipment references, and personal content. A resource mutation must
+not transfer or rewrite inventory, while acquired-item history and all legacy
+gameplay behavior remain recoverable.
 
-## Evidence
+## Implemented foundation
 
-- Home opens five listeners to `users/{uid}`.
-- Purchase deep-copies a Bazaar item into the embedded inventory and rewrites the array (`acquireItem.js:35-68`).
-- Inventory/equipment/spells/techniques/settings/stats share the auth profile document.
-- Server functions and rules use broad user-document triggers and field comparisons.
+- Version-aware repositories and hooks expose profile, progression, resources,
+  settings, equipment, inventory, profile content, spells, and techniques.
+- Server-owned command boundaries and idempotency receipts cover purchase,
+  resource/progression changes, inventory/equipment, personal content,
+  settings/profile content, and consumable prepare/commit flows.
+- `scripts/task05/user-data-migration.js` provides deterministic, default-dry-run
+  backfill, verification, immutable archive, and reverse-materialization plans.
+- Migration execution requires the exact completed dry-run fingerprint, writes
+  resumable checkpoints, and fails closed against implicit live-project access.
+- An exact `shadow-verify` pre-drain `stabilize` pass persists canonical legacy
+  personal-content IDs before additive backfill; source, scope, and frozen-input
+  changes invalidate the approved plan.
+- Frozen sweeps explicitly name a global or exact-user drain scope and drain ID;
+  live backfill execution is refused without that fence or an exact
+  `shadow-verify` pre-drain fence. UID-redacted evidence binds scope membership,
+  cutoff, frozen legacy inputs, and active deletion-job state, and every write
+  transaction rechecks those conditions.
+- Cutover completion retains the sealed drain while installing a durable
+  completion lock, runs fresh authoritative verification, and removes both only
+  when the fresh fingerprints match the approved sealed evidence.
+- The backend exports every Firestore document and descendant subcollection in a
+  typed, hash-verified V2 format and restores non-destructively only after an
+  exact redacted dry-run report is approved.
+- CI tracks recognized residual direct `users/{uid}` aggregate expressions and
+  binds them to Firestore operation, target, and mutation payload context. This
+  lexical guard does not alone prove transaction or authorization semantics, so
+  review and behavior tests remain required.
 
-## Target contract
+## Hard boundaries
 
-Finalize the model in an architecture decision before coding. A likely boundary is:
+- Runtime defaults to `legacy-read`; the remote rollout document is opt-in.
+- Raw rollout configuration is readable only by DM/webmaster identities and is
+  never client-writable. Player activation is hard-blocked until a
+  privacy-preserving server-owned effective-stage resolver is implemented.
+- No deployment, production backfill, archive, reverse materialization, root
+  compaction, or rollout-stage change is part of implementation validation.
+- Live archive/reverse execute modes remain blocked until an exact compatible
+  pause fence is implemented and reviewed.
+- No migration deletes legacy fields. Root compaction is a separately approved
+  `new-only` action after archives and reverse materialization verify.
+- Live Grigliata is not mounted or mutated. Its user-data behavior is validated
+  only through source/unit/emulator evidence after the current battle.
+- Codex migration, inventory UI pagination, Task 06 trigger consolidation, and
+  Grigliata board-schema work remain in their dedicated tasks.
 
-- Compact identity/role/profile shell.
-- High-frequency resources/stats with a narrow authoritative write API.
-- Inventory instance/stack subcollection with item version/reference and required acquisition snapshot.
-- Separate equipment projection or deterministic derivation.
-- Personal spells/techniques as paged subcollections where scale requires it.
-- Minimal summary fields only where a page needs an efficient list.
+## Completion gates
 
-## Implementation elements
-
-1. Inventory every reader, writer, rule, trigger, callable, script, and backup path for affected fields.
-2. Define document ownership, transaction boundaries, version fields, size budgets, and historical item semantics.
-3. Implement versioned repository adapters supporting legacy read, new read, dual write, verification, and new-only modes.
-4. Add resumable, idempotent backfill with dry-run counts, checkpoints, per-user verification hashes/counts, and rollback markers.
-5. Update Firestore/Storage rules and indexes before enabling writes.
-6. Make purchase authority read current catalog price/visibility server-side. Never trust the client-supplied item snapshot.
-7. Update purchase, remove, equip/unequip, quantity, consume, DM edit, deletion, and character-deletion flows atomically.
-8. Keep old clients safe during the compatibility window; stop legacy writes only after adoption and mismatch metrics pass.
-9. Remove large fields from auth cache/context and from summary queries after cutover.
-
-## Boundaries and non-goals
-
-- Preserve acquired-item history, instance identity, stack behavior, price rules, equipment effects, and permissions.
-- Do not delete legacy data during backfill or initial cutover.
-- Do not duplicate mutable source-of-truth fields without a reconciliation owner.
-- Do not combine Codex migration; it has its own task.
-
-## Tests
-
-- Migration dry run, rerun, interruption/resume, partial legacy data, and rollback.
-- Concurrent purchase/use/remove/equip from two clients.
-- Price/visibility tampering and unauthorized directory access.
-- Old/new client interoperability through each rollout mode.
-- 500-item user fixture: profile document size remains stable and a stat update transfers no inventory payload.
-- Trigger/callable and backup/restore compatibility.
-
-## Acceptance gates
-
-- Purchase/removal changes O(1) inventory documents, not the whole user aggregate.
-- Home uses one subscription per actual data domain with measured payload/read budgets.
-- Verification reports zero unresolved count/value mismatches before new-only reads.
-- Rollback can restore legacy-read mode without data loss.
+- The legacy-access baseline reaches zero outside the repository adapter before
+  `new-only`; compatibility residuals are not accepted as final cleanup.
+- The intentional Auth-UID root-listener ceiling remains two (dedicated Auth
+  profile plus shared actor-scoped aggregate), and role changes prove ordinary
+  domains close/reattach through a new access generation without canceling Auth.
+- Two complete verification passes at least 24 hours apart report zero errors,
+  semantic mismatches, orphaned equipment, or unsupported oversized documents.
+- Purchase/removal touches O(1) inventory documents and a resource mutation
+  transfers zero inventory documents in an authoritative 500-item fixture.
+- Rules, indexes, Functions, frontend regression, recursive backup/restore,
+  reverse materialization, normal production build, and alternate-port
+  `npm start` smoke all pass from the same candidate revision.
+- The rules/index/callable emulator matrix passes under Java 21. This workstation
+  currently has Java 8, so Java 21 emulator evidence is still an activation gate.
+- A privacy-preserving player effective-stage resolver is implemented and
+  validated before any player canary or remote rollout activation.
+- Any production action requires a separate approval after the ongoing battle.
