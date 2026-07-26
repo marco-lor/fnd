@@ -18,6 +18,10 @@ const requiredChunks = JSON.parse(fs.readFileSync(
   path.join(frontendRoot, 'performance', 'required-chunks.json'),
   'utf8'
 ));
+const PINNED_WEBCHANNEL_CALLBACK_SOURCE = 'function(){e()}';
+const PINNED_WEBCHANNEL_EXECUTABLE_CALLSITE = 'setTimeout((function(){e()}),';
+const countOccurrences = (source, needle) => source.split(needle).length - 1;
+
 
 const walk = (directoryPath) => {
   if (!fs.existsSync(directoryPath)) return [];
@@ -144,6 +148,31 @@ const assets = walk(buildDir)
     };
   })
   .sort((left, right) => right.rawBytes - left.rawBytes);
+const javascriptBuildSources = walk(buildDir)
+  .filter((filePath) => filePath.endsWith('.js'))
+  .map((filePath) => fs.readFileSync(filePath, 'utf8'));
+const pinnedWebChannelCallbackCount = javascriptBuildSources.reduce(
+  (total, source) => total + countOccurrences(source, PINNED_WEBCHANNEL_CALLBACK_SOURCE),
+  0
+);
+const pinnedWebChannelExecutableCallsiteCount = javascriptBuildSources.reduce(
+  (total, source) => total + countOccurrences(source, PINNED_WEBCHANNEL_EXECUTABLE_CALLSITE),
+  0
+);
+if (pinnedWebChannelCallbackCount !== 2 || pinnedWebChannelExecutableCallsiteCount !== 1) {
+  throw new Error(
+    'Pinned Firestore WebChannel timer shape changed: expected exactly one executable '
+    + `${PINNED_WEBCHANNEL_EXECUTABLE_CALLSITE} callsite and two total `
+    + `${PINNED_WEBCHANNEL_CALLBACK_SOURCE} occurrences, observed `
+    + `${pinnedWebChannelExecutableCallsiteCount} and ${pinnedWebChannelCallbackCount}. `
+    + 'Re-audit transport timer attribution before accepting performance cleanup results.'
+  );
+}
+const pinnedWebChannelTransport = {
+  callbackOccurrences: pinnedWebChannelCallbackCount,
+  executableCallsites: pinnedWebChannelExecutableCallsiteCount,
+};
+
 
 const totals = assets.reduce((result, asset) => {
   const key = asset.category;
@@ -164,6 +193,7 @@ const report = {
   instrumentationMarkerPresent: walk(buildDir)
     .filter((filePath) => filePath.endsWith('.js'))
     .some((filePath) => fs.readFileSync(filePath, 'utf8').includes('__FND_PERF__')),
+  pinnedWebChannelTransport,
   totals,
   assets,
   chunkInventory: assets

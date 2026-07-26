@@ -1,7 +1,6 @@
 const PERFORMANCE_ENABLED = process.env.REACT_APP_FND_PERF === '1';
 const EVENT_SCHEMA_VERSION = 1;
 const MAX_EVENTS = 50000;
-const FIRESTORE_TRANSPORT_PROVENANCE_WINDOW_MS = 5_000;
 const SAFE_METADATA_KEYS = new Set([
   'runId',
   'routeId',
@@ -27,7 +26,6 @@ let observerPatches = [];
 const observerResourceKeys = new WeakMap();
 let asyncResourceOwnerOverride = null;
 let asyncResourceOwnerLeases = [];
-let lastFirestoreTransportOwnershipAt = null;
 
 const redactString = (value) => {
   const text = String(value ?? '').slice(0, 160);
@@ -95,19 +93,15 @@ const isFirestoreTransportDelayedOperation = (callback, delay) => {
     // The pinned WebChannel transport owns both a 45-second request watchdog
     // and a randomized 300-600 second forward-channel request timeout. CRA's
     // production minifier reduces both Closure-bound callbacks to this exact
-    // signature, removing every useful method name. Require recent Firestore
-    // provenance and one of those bounded delay shapes so application timers
-    // stay attributed to their route and continue to fail cleanup checks.
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    const hasRecentTransportProvenance = Number.isFinite(lastFirestoreTransportOwnershipAt)
-      && now - lastFirestoreTransportOwnershipAt >= 0
-      && now - lastFirestoreTransportOwnershipAt <= FIRESTORE_TRANSPORT_PROVENANCE_WINDOW_MS;
+    // signature. Successor watchdogs can be scheduled long after the transport
+    // operation that opened the stream, so attribution uses the pinned callback
+    // and delay shapes rather than a short provenance window.
+    // The performance build fails unless this callback remains unique to one
+    // executable WebChannel callsite in the pinned production bundle.
     const normalizedDelay = Number(delay);
     const isWebChannelDelay = normalizedDelay === 45_000
       || (normalizedDelay >= 300_000 && normalizedDelay <= 600_000);
-    return isWebChannelDelay
-      && source === 'function(){e()}'
-      && hasRecentTransportProvenance;
+    return source === 'function(){e()}' && isWebChannelDelay;
   } catch (_error) {
     return false;
   }
@@ -119,11 +113,6 @@ export const withAsyncResourceOwner = (owner, callback) => {
   if (!PERFORMANCE_ENABLED) return callback();
   const previousOwner = asyncResourceOwnerOverride;
   asyncResourceOwnerOverride = redactString(owner || 'shell');
-  if (asyncResourceOwnerOverride === 'firestore-transport') {
-    lastFirestoreTransportOwnershipAt = typeof performance !== 'undefined'
-      ? performance.now()
-      : Date.now();
-  }
   try {
     return callback();
   } finally {
@@ -510,7 +499,6 @@ export const teardownPerformanceRuntimeForTests = () => {
   activeAsyncResources = new Map();
   asyncResourceOwnerOverride = null;
   asyncResourceOwnerLeases = [];
-  lastFirestoreTransportOwnershipAt = null;
   asyncResourceSequence = 0;
   routeState = null;
   if (originalXhrOpen && typeof XMLHttpRequest !== 'undefined') {

@@ -34,6 +34,18 @@ test('fixture generation is stable and contains the required scale', () => {
     ))?.data,
     TASK06_BACKEND_CONFIG
   );
+
+  const boardState = firstDocuments.find(({ path: documentPath }) => (
+    documentPath === 'grigliata_state/current'
+  ))?.data;
+  for (const field of [
+    'legacyTokenPlacementCleanupCompletedAt',
+    'legacyPlacementDeadStateCleanupCompletedAt',
+    'legacyPlacementVisibilityCleanupCompletedAt',
+  ]) {
+    assert.equal(boardState?.[field], '2026-01-01T00:00:00.000Z');
+  }
+
   assert.equal(new Set(firstDocuments.map((entry) => entry.path)).size, firstDocuments.length);
   assert.equal(fixtureManifest.documentCount, first.documentCount);
   assert.equal(fixtureManifest.canonicalHash, first.hash);

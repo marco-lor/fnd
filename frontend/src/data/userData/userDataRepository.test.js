@@ -3,6 +3,7 @@ import {
   setRepositoryActor,
 } from '../repositoryRuntime';
 import {
+  subscribeAuthProfileAggregate,
   subscribeUserDomain,
   resolveUserDataRolloutDocumentStage,
   userDataRolloutInstanceKey,
@@ -107,6 +108,18 @@ describe('user-data repository compatibility', () => {
 
     unsubscribeProgression();
     unsubscribeResources();
+  });
+
+  test('labels the application-lifetime auth profile listener as shell-owned', () => {
+    const unsubscribe = subscribeAuthProfileAggregate('user-1', jest.fn());
+
+    expect(labelFirestoreTarget).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'users/user-1' }),
+      'users.aggregate.subscribe.v1',
+      'shell'
+    );
+
+    unsubscribe();
   });
 
   test('selects V2 reads only after the new-read cutover stage', () => {

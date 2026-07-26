@@ -64,12 +64,13 @@ const listenToDocument = ({
   normalize,
   observer,
   actorScoped = true,
+  ownership = 'route',
 }) => subscribeShared({
   metricKey,
   instanceKey,
   actorScoped,
   listen: ({ next, error }) => onSnapshot(
-    labelFirestoreTarget(target, metricKey),
+    labelFirestoreTarget(target, metricKey, ownership),
     {
       next: (snapshot) => next(normalize(snapshot)),
       error,
@@ -102,6 +103,7 @@ export const subscribeAuthProfileAggregate = (uid, observer) => {
     normalize: (snapshot) => normalizeLegacyUserAggregate(normalizeDocumentSnapshot(snapshot)),
     observer,
     actorScoped: false,
+    ownership: 'shell',
   });
 };
 

@@ -101,7 +101,7 @@ describe('performance runtime', () => {
     runtime.teardownPerformanceRuntimeForTests();
   });
 
-  test('propagates Firestore transport ownership through timer callbacks without hiding route timeouts', async () => {
+  test('propagates Firestore transport ownership and recognizes pinned delayed WebChannel timers', async () => {
     const runtime = loadRuntime(true);
     window.__FND_PERF_BOOTSTRAP__ = { runId: 'transport-timer-test', actorRole: 'dm' };
     runtime.installPerformanceRuntime();
@@ -127,7 +127,6 @@ describe('performance runtime', () => {
       'e',
       'return function(){e()}'
     )(() => {});
-    runtime.withAsyncResourceOwner('firestore-transport', () => {});
     const webChannelWatchdogTimeout = window.setTimeout(
       minifiedWebChannelWatchdog,
       45_000
@@ -172,7 +171,7 @@ describe('performance runtime', () => {
     runtime.teardownPerformanceRuntimeForTests();
   });
 
-  test('keeps callback-text collisions route-owned without Firestore transport provenance', () => {
+  test('classifies pinned WebChannel delays without hiding near-boundary route timers', () => {
     const runtime = loadRuntime(true);
     window.__FND_PERF_BOOTSTRAP__ = { runId: 'transport-collision-test', actorRole: 'dm' };
     runtime.installPerformanceRuntime();
@@ -181,23 +180,34 @@ describe('performance runtime', () => {
       'e',
       'return function(){e()}'
     )(() => {});
-    const watchdogCollision = window.setTimeout(minifiedApplicationCallback, 45_000);
-    const forwardRequestCollision = window.setTimeout(minifiedApplicationCallback, 310_875);
-    const applicationDelayedOperation = { handleDelayElapsed: jest.fn() };
-    const delayedOperationCollision = window.setTimeout(
-      () => {
-        applicationDelayedOperation.handleDelayElapsed();
-      },
-      60_000
-    );
+    const exactWatchdog = window.setTimeout(minifiedApplicationCallback, 45_000);
+    const exactForwardRequest = window.setTimeout(minifiedApplicationCallback, 310_875);
+    const belowWatchdog = window.setTimeout(minifiedApplicationCallback, 44_999);
+    const belowForwardRequest = window.setTimeout(minifiedApplicationCallback, 299_999);
+    const aboveForwardRequest = window.setTimeout(minifiedApplicationCallback, 600_001);
+    const routeTimeout = window.setTimeout(() => {}, 45_000);
 
-    expect(window.__FND_PERF__.snapshot().activeResources).toEqual({
-      '/grigliata::timeout': 3,
+    const snapshot = window.__FND_PERF__.snapshot();
+    expect(snapshot.activeResources).toEqual({
+      'firestore-transport::timeout': 2,
+      '/grigliata::timeout': 4,
     });
+    expect(snapshot.activeResourceDiagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ownerRoute: 'firestore-transport', delayMs: 45_000, callback: 'function(){e()}' }),
+      expect.objectContaining({ ownerRoute: 'firestore-transport', delayMs: 310_875, callback: 'function(){e()}' }),
+      expect.objectContaining({ ownerRoute: '/grigliata', delayMs: 44_999, callback: 'function(){e()}' }),
+      expect.objectContaining({ ownerRoute: '/grigliata', delayMs: 299_999, callback: 'function(){e()}' }),
+      expect.objectContaining({ ownerRoute: '/grigliata', delayMs: 600_001, callback: 'function(){e()}' }),
+      expect.objectContaining({ ownerRoute: '/grigliata', delayMs: 45_000, callback: '() => {}' }),
+    ]));
 
-    window.clearTimeout(watchdogCollision);
-    window.clearTimeout(forwardRequestCollision);
-    window.clearTimeout(delayedOperationCollision);
+    window.clearTimeout(exactWatchdog);
+    window.clearTimeout(exactForwardRequest);
+    window.clearTimeout(belowWatchdog);
+    window.clearTimeout(belowForwardRequest);
+    window.clearTimeout(aboveForwardRequest);
+    window.clearTimeout(routeTimeout);
+    expect(window.__FND_PERF__.snapshot().activeResources).toEqual({});
     runtime.teardownPerformanceRuntimeForTests();
   });
 

@@ -6,7 +6,7 @@ const path = require('node:path');
 const source = (name) => fs.readFileSync(
   path.join(__dirname, '..', 'src', name),
   'utf8'
-);
+).replace(/\r\n?/g, '\n');
 
 const STAGED_CALLABLE_WRITERS = Object.freeze([
   'spendCharacterPoint.ts',
@@ -21,6 +21,12 @@ const DERIVED_ROOT_TRIGGERS = Object.freeze([
   'updateAnimaModifier.ts',
   'expireBarriera.ts',
 ]);
+
+test('user-data commands use emulator-stable modular Firestore sentinels', () => {
+  const contents = source('userDataCommands.ts');
+  assert.match(contents, /import \{FieldValue, Timestamp\} from "firebase-admin\/firestore";/);
+  assert.doesNotMatch(contents, /admin\.firestore\.(FieldValue|Timestamp)/);
+});
 
 test('Task 06 progression writers honor drain and V2 projection stages', () => {
   for (const file of STAGED_CALLABLE_WRITERS) {

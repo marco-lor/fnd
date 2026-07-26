@@ -274,6 +274,9 @@ const buildDocuments = () => {
     presentationBackgroundId: '',
     presentationPlacements: [],
     gridVisible: true,
+    legacyTokenPlacementCleanupCompletedAt: FIXED_TIME,
+    legacyPlacementDeadStateCleanupCompletedAt: FIXED_TIME,
+    legacyPlacementVisibilityCleanupCompletedAt: FIXED_TIME,
     updatedAt: FIXED_TIME,
   });
   add('grigliata_backgrounds/perf-map', {

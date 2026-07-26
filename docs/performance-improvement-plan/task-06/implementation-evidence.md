@@ -1,6 +1,6 @@
 # Task 06 implementation evidence
 
-Date: 2026-07-23. Candidate scope: repository plus local
+Date: 2026-07-26. Candidate scope: repository plus local
 `demo-fnd-perf` emulators. No Firebase deployment, production configuration,
 online data/rules/index change, or live Grigliata navigation is evidence here.
 
@@ -26,7 +26,7 @@ online data/rules/index change, or live Grigliata navigation is evidence here.
   - document count: `7,879`
   - `app_config` count: `1`
   - canonical hash:
-    `a2abfe524d38fd0f1f8540c44353cafe942d7c7fc71f31cedeacabe52621d9c9`
+    `135be517702ba0edb56ea4e7821944f6d2994c3032b35cf6d34c26699434e8f0`
 
 ## Validation record
 
@@ -35,28 +35,40 @@ These results are from local commands against the exact demo project
 
 | Gate | Command | Status |
 | --- | --- | --- |
-| Functions compile | `cd frontend/functions && npm run build` | Passed locally on 2026-07-23. |
-| Functions lint | `cd frontend/functions && npm run lint` | Passed locally on 2026-07-23. |
-| Demo export boundary | `cd frontend/functions && node --test test/demoConsolidatedExports.test.js` | 3/3 passed on 2026-07-23. |
-| Task 06 rules | integrated demo Firestore/Storage emulator suite | 6/6 passed on 2026-07-23. |
-| Harness/static tests | `cd frontend && npm run perf:test` | 169/169 passed on 2026-07-23. |
-| Callable registry | `cd frontend && npm run perf:check-callable-registry` | Passed on 2026-07-23: 30 callables across 3 regions. |
-| Task 06 Functions acceptance | `cd frontend && npm run perf:functions-integration` | 7/7 passed on 2026-07-23: one derived-root write/no loop; 526 planned/processed, 524 succeeded, 2 skipped, 0 failed; pause/resume/replay; paged lock, token, NPC, encounter, and Storage cleanup; and all 30 callable routes verified. |
-| Full Functions suite | `cd frontend/functions && npm test -- --runInBand` | 76/76 passed on 2026-07-23. |
-| Full frontend suite | CI-mode React/Jest run | 90/90 suites and 846/846 tests passed on 2026-07-23. |
-| Python backend suite | repository backend test command | 21/21 passed on 2026-07-23. |
-| Production build | `cd frontend && npm run build:production` | Compiled successfully on 2026-07-23. |
-| Production-build verification | `cd frontend && npm run verify:production-build` | Passed on 2026-07-23. |
-| `npm start` smoke | `cd frontend && npm run verify:start` | Compiled and `/home` returned HTTP 200 on owned port 3001 on 2026-07-23; the existing port-3000 process was untouched. |
-| Broad performance CI | `cd frontend && npm run perf:ci` | Static checks, deterministic fixtures, production builds, emulator health, and 14/14 seeded Firestore rules passed. The non-authoritative browser phase remained blocked at 6/19 passed by the existing cleanup-accounting gate: a shared 45-second Firestore WebChannel watchdog was attributed to `/grigliata`, and protected-route cleanup retained one route-counted listener. The comparison/baseline stage did not run. |
+| Functions compile | `cd frontend/functions && npm run build` | Passed locally on 2026-07-26. |
+| Functions lint | `cd frontend/functions && npm run lint` | Passed locally on 2026-07-26. |
+| Modular Firestore sentinel regression | `cd frontend/functions && node --test test/legacyRootMutationGate.test.js` | 7/7 passed on 2026-07-26, including CRLF-safe source guards. |
+| Demo rules and callable matrix | exact `demo-fnd-perf` Auth/Firestore/Functions/Storage emulator wrapper | 14/14, 3/3, and 11/11 groups passed on 2026-07-26. |
+| Harness/static tests | `cd frontend && npm run perf:test` | 169/169 passed on 2026-07-26. |
+| Callable registry | `cd frontend && npm run perf:check-callable-registry` | Passed on 2026-07-26: 30 callables across 3 regions. |
+| Deterministic fixture | `cd frontend && npm run perf:fixture-determinism` | 7,879 documents and hash `135be517702ba0edb56ea4e7821944f6d2994c3032b35cf6d34c26699434e8f0`. |
+| Task 06 Functions acceptance | `cd frontend && npm run perf:functions-integration` | Unfiltered 7/7 passed on 2026-07-26, including pause/resume/replay, bounded cleanup, and every declared callable region. |
+| Full Functions suite | `cd frontend/functions && npm test` | 77/77 passed on 2026-07-26. |
+| Full frontend suite | CI-mode serial React/Jest run | 90/90 suites and 847/847 tests passed on 2026-07-26. |
+| Python backend suite | `python -m unittest -v backend.test_backend_health_and_maintenance backend.test_firestore_backup` | 21/21 passed on 2026-07-26. |
+| Production build | `cd frontend && npm run build:production` | Compiled successfully on 2026-07-26. |
+| Production-build verification | `cd frontend && npm run verify:production-build` | Passed on 2026-07-26. |
+| `npm start` smoke | `cd frontend && npm run verify:start` | `/home` returned HTTP 200 on owned port 3001; the existing port-3000 process was untouched. |
+| Instrumented-build safeguard | `cd frontend && npm run perf:build` | Passed with exactly 2 pinned callback occurrences and 1 executable WebChannel callsite. |
+| Broad performance CI | `cd frontend && npm run perf:ci` | 157/157 harness checks, 14/14 plus 3/3 emulator rules groups, and 19/19 browser tests passed; every blocking comparison gate passed. |
+| Authoritative repeatability | `cd frontend && npm run perf:authoritative` | Pending the required clean local validation commit. |
 
-The broad rules run initially exposed Firestore's expression ceiling in the
-Task 05 aggregate-freeze helper. Consolidating rollout/drain evaluation to one
-config read removed that evaluator failure. It also exposed two ineffective
-fixtures: one expected `stage` to override canonical `mode`, and one wrote an
-already-stored boolean. The fixtures now use canonical `new-only` plus an
-explicit peer override and perform a real boolean transition; all 14 seeded
-rules cases pass.
+The current pass closed the two prior browser cleanup blockers. The deterministic
+fixture now records all three completed legacy-placement migrations, so the
+manager does not perform obsolete serial cleanup during measured startup. The
+auth aggregate listener is shell-owned, and the pinned WebChannel watchdog is
+transport-owned without a five-second timing assumption. The performance build
+now refuses to proceed unless the minified callback remains unique to exactly
+one executable WebChannel callsite.
+
+The emulator rules wrapper also exposed legacy namespace access to
+`admin.firestore.Timestamp` and `admin.firestore.FieldValue` in
+`userDataCommands.ts`. Using the repository's modular `firebase-admin/firestore`
+sentinels restored all Task 05 callable acceptance cases under the emulator.
+
+The broad comparison passed every blocking gate. Five advisory targets
+(`initial collection view`, LCP, INP, CLS, and Grigliata long task) remain above target.
+They are recorded as non-blocking and no baseline was rewritten or accepted.
 
 Passing local evidence does not authorize `firebase deploy`, a Task 06 config
 write online, a TTL/index deployment, or acceptance of a new performance
@@ -66,5 +78,9 @@ All validation was repository-local or used exact project `demo-fnd-perf`.
 Playwright exercised only the isolated demo-emulator `/grigliata`; no browser
 navigated to the live board, its presence was not read or changed, and no
 Firebase deployment, online config/data/rules/index mutation, baseline
-acceptance, commit, or production rollout was performed. The declared index
+acceptance, push, or production rollout was performed. The declared index
 and TTL policies remain undeployed.
+
+The authoritative runner requires a clean commit. A scoped commit on the
+isolated validation branch is used only to generate repeatability evidence;
+it is not pushed and does not authorize deployment or baseline acceptance.

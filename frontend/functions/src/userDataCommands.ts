@@ -1,5 +1,6 @@
 import {randomBytes} from "crypto";
 import * as admin from "firebase-admin";
+import {FieldValue, Timestamp} from "firebase-admin/firestore";
 import {
   CallableRequest,
   FunctionsErrorCode,
@@ -148,8 +149,8 @@ const assertPayloadSize = (value: unknown): void => {
   }
 };
 
-const operationExpiry = (): admin.firestore.Timestamp => (
-  admin.firestore.Timestamp.fromMillis(
+const operationExpiry = (): Timestamp => (
+  Timestamp.fromMillis(
     Date.now() + USER_DATA_OPERATION_TTL_DAYS * 24 * 60 * 60 * 1000
   )
 );
@@ -185,7 +186,7 @@ const runIdempotent = async (
 
   return db.runTransaction(async (transaction) => {
     const receipt = await transaction.get(receiptRef);
-    const nowMillis = admin.firestore.Timestamp.now().toMillis();
+    const nowMillis = Timestamp.now().toMillis();
     const receiptExpired = receipt.exists && isOperationExpired(
       receipt.get("expiresAt"),
       nowMillis
@@ -243,7 +244,7 @@ const runIdempotent = async (
       requestHash,
       status: "completed",
       result,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
       expiresAt: operationExpiry(),
     });
     return {...result, replayed: false};
@@ -293,8 +294,8 @@ const commandAccess = async (
 
 const stateMetadata = (actorUid: string): UnknownRecord => ({
   schemaVersion: USER_DATA_SCHEMA_VERSION,
-  revision: admin.firestore.FieldValue.increment(1),
-  updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  revision: FieldValue.increment(1),
+  updatedAt: FieldValue.serverTimestamp(),
   updatedBy: actorUid,
 });
 
@@ -337,13 +338,13 @@ const inventoryDocument = (
     currentRevision: 1,
     displayName: name,
     normalizedName: normalizeDisplayName(name),
-    acquiredAt: admin.firestore.FieldValue.serverTimestamp(),
+    acquiredAt: FieldValue.serverTimestamp(),
     pricePaid: options.pricePaid,
     source: options.source,
     migration: null,
     legacyManaged: false,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
   };
   assertDocumentBudget(document, USER_ITEM_MAX_BYTES, "Inventory item");
   return document;
@@ -360,7 +361,7 @@ const legacyInventoryEntry = (
   ...(quantity > 1 ? {qty: quantity} : {}),
   _instance: {
     instanceId: inventoryId,
-    acquiredAt: admin.firestore.Timestamp.now(),
+    acquiredAt: Timestamp.now(),
     pricePaid,
     source,
   },
@@ -683,7 +684,7 @@ export const task05UpdateGrigliataCharacterResources = onCall(
           ownerUid: access.targetUid,
           tokenType: "character",
           imageSource: "profile",
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
           updatedBy: context.actorUid,
         }, {merge: true});
         if (context.writeLegacy) {
@@ -1117,8 +1118,8 @@ export const task05MutateInventory = onCall(
           : rootInventory;
         context.transaction.update(inventoryRef, {
           quantity,
-          revision: admin.firestore.FieldValue.increment(1),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          revision: FieldValue.increment(1),
+          updatedAt: FieldValue.serverTimestamp(),
           updatedBy: context.actorUid,
         });
         if (context.writeLegacy) {
@@ -1158,11 +1159,11 @@ export const task05MutateInventory = onCall(
       const inventoryUpdate = {
         currentSnapshot,
         currentHash: hashValue(currentSnapshot),
-        currentRevision: admin.firestore.FieldValue.increment(1),
+        currentRevision: FieldValue.increment(1),
         displayName: inventoryName(currentSnapshot),
         normalizedName: normalizeDisplayName(inventoryName(currentSnapshot)),
-        revision: admin.firestore.FieldValue.increment(1),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        revision: FieldValue.increment(1),
+        updatedAt: FieldValue.serverTimestamp(),
         updatedBy: context.actorUid,
       };
       assertDocumentBudget({
@@ -1304,12 +1305,12 @@ export const task05MutatePersonalContent = onCall(
         id: contentId,
         schemaVersion: USER_DATA_SCHEMA_VERSION,
         revision: existing.exists
-          ? admin.firestore.FieldValue.increment(1)
+          ? FieldValue.increment(1)
           : 1,
         displayName: name,
         normalizedName: normalizeDisplayName(name),
         legacyManaged: false,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
         updatedBy: context.actorUid,
       };
       assertDocumentBudget(
@@ -1340,7 +1341,7 @@ export const task05MutatePersonalContent = onCall(
         exactName: name,
         contentId,
         legacyManaged: false,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       if (oldReservation) context.transaction.delete(oldReservation);
       if (oldName && oldName !== name) delete rootContent[oldName];
@@ -1806,7 +1807,7 @@ export const task05CommitConsumable = onCall(
       }
       if (isOperationExpired(
         preparation.get("expiresAt"),
-        admin.firestore.Timestamp.now().toMillis()
+        Timestamp.now().toMillis()
       )) {
         fail("failed-precondition", "Consumable preparation expired.");
       }
@@ -1938,8 +1939,8 @@ export const task05CommitConsumable = onCall(
       if (nextQuantity > 0) {
         context.transaction.update(inventoryRef, {
           quantity: nextQuantity,
-          revision: admin.firestore.FieldValue.increment(1),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          revision: FieldValue.increment(1),
+          updatedAt: FieldValue.serverTimestamp(),
           updatedBy: context.actorUid,
         });
       } else {
@@ -2020,7 +2021,7 @@ export const task05CommitConsumable = onCall(
         );
       }
       context.transaction.update(preparationRef, {
-        committedAt: admin.firestore.FieldValue.serverTimestamp(),
+        committedAt: FieldValue.serverTimestamp(),
         committedByReceipt: context.receiptId,
       });
       return {
