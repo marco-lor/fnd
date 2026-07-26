@@ -5,6 +5,7 @@ const path = require('path');
 const {
   assertSchemaVersion,
   baselinePath,
+  PERFORMANCE_MEASUREMENT_CONTRACT_VERSION,
   readJson,
   resultsDir,
   scorecardPath,
@@ -26,12 +27,20 @@ if (!fs.existsSync(repeatabilityPath) || !fs.existsSync(aggregatePath)) {
 }
 const repeatability = assertSchemaVersion(readJson(repeatabilityPath), 'repeatability report');
 const aggregateBytes = fs.readFileSync(aggregatePath);
-if (repeatability.status !== 'pass' || repeatability.aggregateSha256 !== sha256(aggregateBytes)) {
+if (
+  repeatability.measurementContractVersion !== PERFORMANCE_MEASUREMENT_CONTRACT_VERSION
+  || repeatability.status !== 'pass'
+  || repeatability.aggregateSha256 !== sha256(aggregateBytes)
+) {
   console.error('The authoritative aggregate is stale or its repeatability gate did not pass.');
   process.exit(1);
 }
 const report = JSON.parse(aggregateBytes.toString('utf8'));
 assertSchemaVersion(report, 'authoritative aggregate');
+if (report.measurementContractVersion !== PERFORMANCE_MEASUREMENT_CONTRACT_VERSION) {
+  console.error('The authoritative aggregate uses a stale measurement contract.');
+  process.exit(1);
+}
 if (!report.build || !report.fixture || !report.browser) {
   console.error('A complete build, fixture, and browser report is required before accepting a baseline.');
   process.exit(1);

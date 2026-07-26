@@ -4,6 +4,7 @@ const {
   aggregateMetrics,
   captureBrowserMetrics,
   countRouteResources,
+  createPageAssetTracker,
   drainPageConnections,
   installBootstrap,
   installDeterministicFontRoutes,
@@ -19,6 +20,29 @@ const {
 const scenarios = manifest.scenarios.filter((scenario) => scenario.role !== 'five-peer');
 const iterations = process.env.FND_PERF_ITERATIONS ? Number(process.env.FND_PERF_ITERATIONS) : 1;
 const includeWarmup = process.env.FND_PERF_AUTHORITATIVE === '1';
+
+const waitForFinitePageAssets = async (pageAssets, scenarioId, phase) => {
+  await expect.poll(
+    () => pageAssets.isQuiet(),
+    {
+      timeout: 10_000,
+      message: `Finite page assets did not settle ${phase} for ${scenarioId}.`,
+    }
+  ).toBe(true);
+};
+
+const flushBrowserObservers = async (page) => {
+  await page.evaluate(() => new Promise((resolve) => {
+    const afterIdle = () => {
+      window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(afterIdle, { timeout: 250 });
+      return;
+    }
+    window.setTimeout(afterIdle, 0);
+  }));
+};
 
 const assertChunkIsolation = (scenario, diagnostics) => {
   const scriptPaths = diagnostics.networkRecords
@@ -56,26 +80,32 @@ for (const scenario of scenarios) {
         await installDeterministicFontRoutes(context);
         await installBootstrap(context, scenario, iteration);
         page = await context.newPage();
-      page.on('console', (message) => {
-        if (message.type() === 'error') diagnostics.consoleErrors.push(message.text().slice(0, 300));
-      });
-      page.on('pageerror', (error) => diagnostics.unhandledErrors.push(error.message.slice(0, 300)));
-      page.on('requestfailed', (request) => diagnostics.failedRequests.push({
-        resourceType: request.resourceType(),
-        failure: request.failure()?.errorText || 'unknown',
-        path: new URL(request.url()).pathname,
-      }));
-      page.on('response', async (response) => {
-        const request = response.request();
-        const headers = await response.allHeaders().catch(() => ({}));
-        diagnostics.networkRecords.push({
-          path: new URL(response.url()).pathname,
-          resourceType: request.resourceType(),
-          method: request.method(),
-          status: response.status(),
-          contentLength: Number(headers['content-length']) || 0,
+        const pageAssets = createPageAssetTracker();
+        page.on('request', (request) => pageAssets.begin(request));
+        page.on('requestfinished', (request) => pageAssets.complete(request));
+        page.on('console', (message) => {
+          if (message.type() === 'error') diagnostics.consoleErrors.push(message.text().slice(0, 300));
         });
-      });
+        page.on('pageerror', (error) => diagnostics.unhandledErrors.push(error.message.slice(0, 300)));
+        page.on('requestfailed', (request) => {
+          pageAssets.complete(request);
+          diagnostics.failedRequests.push({
+            resourceType: request.resourceType(),
+            failure: request.failure()?.errorText || 'unknown',
+            path: new URL(request.url()).pathname,
+          });
+        });
+        page.on('response', async (response) => {
+          const request = response.request();
+          const headers = await response.allHeaders().catch(() => ({}));
+          diagnostics.networkRecords.push({
+            path: new URL(response.url()).pathname,
+            resourceType: request.resourceType(),
+            method: request.method(),
+            status: response.status(),
+            contentLength: Number(headers['content-length']) || 0,
+          });
+        });
 
       await page.goto(scenario.route, { waitUntil: 'domcontentloaded' });
       await waitForReadiness(page);
@@ -84,10 +114,18 @@ for (const scenario of scenarios) {
         await page.reload({ waitUntil: 'domcontentloaded' });
         await waitForReadiness(page);
       }
+      await waitForFinitePageAssets(pageAssets, scenario.id, 'before interaction');
       await runInteraction(page, scenario);
       assertChunkIsolation(scenario, diagnostics);
       await page.waitForFunction(() => window.__FND_PERF__.snapshot().routeState?.interactive);
+      pageAssets.beginQuietWindow();
+      await flushBrowserObservers(page);
+      await waitForFinitePageAssets(pageAssets, scenario.id, 'after interaction and observer flush');
       const capture = await captureBrowserMetrics(page, diagnostics);
+      expect(
+        capture.resourceTimingBufferOverflow,
+        `Resource Timing buffer overflowed for ${scenario.id}.`
+      ).toBe(false);
       if (iteration > 0) writeScenarioRaw(scenario, iteration, capture);
 
       const phases = new Set(capture.snapshot.events

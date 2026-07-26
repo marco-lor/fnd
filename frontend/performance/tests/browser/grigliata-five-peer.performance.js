@@ -1,4 +1,4 @@
-const { configureOwnedPerformanceEnvironment } = require('../../../scripts/performance/common');
+const { configureOwnedPerformanceEnvironment, median } = require('../../../scripts/performance/common');
 const { isDeepStrictEqual } = require('node:util');
 
 configureOwnedPerformanceEnvironment();
@@ -32,7 +32,7 @@ const PROBE_PLACEMENT_PATH = 'grigliata_token_placements/perf-map__perf-token-00
 const PROBE_GRID_DELTA_X = 50;
 const CLIENT_READINESS_ROUTE = '/__fnd_perf_cleanup__';
 const FIVE_PEER_ROUTE_READINESS_TIMEOUT_MS = 30_000;
-const FIVE_PEER_TEST_TIMEOUT_MS = 180_000;
+const FIVE_PEER_TEST_TIMEOUT_MS = 210_000;
 const LEGACY_MIGRATION_MARKER_FIELDS = [
   'legacyTokenPlacementCleanupCompletedAt',
   'legacyPlacementDeadStateCleanupCompletedAt',
@@ -240,6 +240,11 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
         expect(delivered, `${label}/${pages[index].role}: expected one probe placement delivery`).toBe(1);
       });
       return {
+        col,
+        updatedAt,
+        fromPositions,
+        deltaX,
+        label,
         deliveriesByPeer,
         durationMs,
         nextPositions: fromPositions.map(({ x, y }) => ({ x: x + deltaX, y })),
@@ -261,18 +266,41 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
       deltaX: -PROBE_GRID_DELTA_X,
       label: 'warmup-reverse',
     });
-    const measuredTransition = await runProbeTransition({
-      col: 1,
-      updatedAt: '2026-01-01T00:00:01.000Z',
-      fromPositions: warmupReverse.nextPositions,
-      deltaX: PROBE_GRID_DELTA_X,
-      label: 'measured',
+    const measuredTransitions = [];
+    let measuredPositions = warmupReverse.nextPositions;
+    for (const probe of [
+      {
+        col: 1,
+        updatedAt: '2026-01-01T00:00:01.000Z',
+        deltaX: PROBE_GRID_DELTA_X,
+        label: 'measured-1',
+      },
+      {
+        col: 0,
+        updatedAt: '2026-01-01T00:00:02.000Z',
+        deltaX: -PROBE_GRID_DELTA_X,
+        label: 'measured-2',
+      },
+      {
+        col: 1,
+        updatedAt: '2026-01-01T00:00:03.000Z',
+        deltaX: PROBE_GRID_DELTA_X,
+        label: 'measured-3',
+      },
+    ]) {
+      const transition = await runProbeTransition({
+        ...probe,
+        fromPositions: measuredPositions,
+      });
+      measuredTransitions.push(transition);
+      measuredPositions = transition.nextPositions;
+    }
+    const observedPlacementChangeEvents = measuredTransitions.map(({ deliveriesByPeer }) => (
+      deliveriesByPeer.reduce((total, value) => total + value, 0)
+    ));
+    observedPlacementChangeEvents.forEach((observed, index) => {
+      expect(observed, `measured-${index + 1}: placement deliveries`).toBe(pages.length);
     });
-    const convergenceMs = measuredTransition.durationMs;
-    const snapshots = measuredTransition.snapshots;
-    const placementDeliveriesByPeer = measuredTransition.deliveriesByPeer;
-    const observedPlacementChangeEvents = placementDeliveriesByPeer.reduce((total, value) => total + value, 0);
-    expect(observedPlacementChangeEvents).toBe(pages.length);
     for (const { role, diagnostics } of pages) {
       expect(diagnostics.consoleErrors, `${role}: ${diagnostics.consoleErrors.join('\n')}`).toHaveLength(0);
       expect(diagnostics.unhandledErrors, `${role}: ${diagnostics.unhandledErrors.join('\n')}`).toHaveLength(0);
@@ -322,6 +350,8 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
         `${role}: ${JSON.stringify(diagnostics.explainedCleanupTransportCancellations)}`
       ).toBeLessThanOrEqual(2);
     }
+    const convergenceMs = median(measuredTransitions.map(({ durationMs }) => durationMs));
+    const finalMeasuredTransition = measuredTransitions[measuredTransitions.length - 1];
     writeScenarioResult(scenario, 1, {
       environment: {
         projectName: testInfo.project.name,
@@ -344,9 +374,10 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
         'runtime.activeResourcesAfterCleanup': leakedRouteResources,
         'runtime.activeTimeoutsAfterCleanup': pendingRouteTimeouts,
         'runtime.activeMediaAfterCleanup': activeMediaAfterCleanup,
-        'firestore.changedDocumentsDelivered': observedPlacementChangeEvents,
+        'firestore.changedDocumentsDelivered': pages.length,
       },
-      eventCount: snapshots.reduce((total, snapshot) => total + snapshot.events.length, 0),
+      eventCount: finalMeasuredTransition.snapshots
+        .reduce((total, snapshot) => total + snapshot.events.length, 0),
       readiness: { 'shell-visible': true, 'data-ready': true, interactive: true },
       peerCount: pages.length,
       diagnostics: {
@@ -355,25 +386,34 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
         warmup: {
           forwardDurationMs: warmupForward.durationMs,
           reverseDurationMs: warmupReverse.durationMs,
-          forwardDeliveriesByPeer: Object.fromEntries(pages.map(({ role }, index) => [
+          forwardDeliveriesByPeer: Object.fromEntries(pages.map(({ role }, peerIndex) => [
             role,
-            warmupForward.deliveriesByPeer[index],
+            warmupForward.deliveriesByPeer[peerIndex],
           ])),
-          reverseDeliveriesByPeer: Object.fromEntries(pages.map(({ role }, index) => [
+          reverseDeliveriesByPeer: Object.fromEntries(pages.map(({ role }, peerIndex) => [
             role,
-            warmupReverse.deliveriesByPeer[index],
+            warmupReverse.deliveriesByPeer[peerIndex],
           ])),
         },
-        observedPlacementChangeEvents,
-        placementDeliveriesByPeer: Object.fromEntries(pages.map(({ role }, index) => [
-          role,
-          placementDeliveriesByPeer[index],
-        ])),
+        convergenceMedianMs: convergenceMs,
+        measuredTransitions: measuredTransitions.map((transition, index) => ({
+          iteration: index + 1,
+          label: transition.label,
+          col: transition.col,
+          updatedAt: transition.updatedAt,
+          fromPositions: transition.fromPositions,
+          deltaX: transition.deltaX,
+          durationMs: transition.durationMs,
+          observedPlacementChangeEvents: observedPlacementChangeEvents[index],
+          placementDeliveriesByPeer: Object.fromEntries(pages.map(({ role }, peerIndex) => [
+            role,
+            transition.deliveriesByPeer[peerIndex],
+          ])),
+        })),
         placementProbe: {
           path: PROBE_PLACEMENT_PATH,
           tokenId: PROBE_TOKEN_ID,
           startingPositions,
-          deltaX: PROBE_GRID_DELTA_X,
           deltaY: 0,
         },
       },

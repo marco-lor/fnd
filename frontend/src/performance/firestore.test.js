@@ -48,11 +48,40 @@ test('listener snapshot delivery and repeated unsubscribe are accounted once', (
   expect(mockRuntime.registerActiveListener.mock.results[0].value).toHaveBeenCalledTimes(1);
   expect(mockRuntime.recordPerfEvent).toHaveBeenCalledWith(expect.objectContaining({ metric: 'initial-documents-delivered', value: 2 }));
   expect(mockRuntime.recordPerfEvent).toHaveBeenCalledWith(expect.objectContaining({ metric: 'changed-documents-delivered', value: 1 }));
+  expect(mockRuntime.recordPerfEvent).toHaveBeenCalledWith(expect.objectContaining({
+    metric: 'initial-documents-delivered',
+    tags: expect.objectContaining({ ownership: 'route' }),
+  }));
   expect(mockRuntime.registerActiveListener).toHaveBeenCalledWith('legacy.items.subscribe.v1', 'route');
   expect(mockRuntime.withAsyncResourceOwner).toHaveBeenCalledWith(
     'firestore-transport',
     expect.any(Function)
   );
+});
+
+test('shell listener deliveries retain shell ownership for route-level accounting', () => {
+  mockUnderlying.onSnapshot.mockImplementation((_target, callback) => {
+    callback({ size: 1, docChanges: () => [] });
+    return jest.fn();
+  });
+  const target = facade.labelFirestoreTarget(
+    { path: 'grigliata_music_playback/current' },
+    'grigliata.music-playback.subscribe.v1',
+    'shell'
+  );
+
+  facade.onSnapshot(target, jest.fn());
+
+  expect(mockRuntime.registerActiveListener)
+    .toHaveBeenCalledWith('grigliata.music-playback.subscribe.v1', 'shell');
+  expect(mockRuntime.recordPerfEvent).toHaveBeenCalledWith(expect.objectContaining({
+    metric: 'initial-documents-delivered',
+    value: 1,
+    tags: expect.objectContaining({
+      target: 'grigliata.music-playback.subscribe.v1',
+      ownership: 'shell',
+    }),
+  }));
 });
 
 test('payload estimator handles serializable and circular values safely', () => {

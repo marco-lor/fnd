@@ -130,8 +130,9 @@ const estimateSnapshotPayloadBytes = (snapshot, initial) => {
   return 0;
 };
 
-const wrapSnapshotNext = (next, metricKey, completeInitial) => {
+const wrapSnapshotNext = (next, metricKey, completeInitial, ownership = 'route') => {
   let initial = true;
+  const normalizedOwnership = ownership === 'shell' ? 'shell' : 'route';
   return (snapshot) => {
     const normalizationStart = performance.now();
     const count = initial
@@ -143,14 +144,18 @@ const wrapSnapshotNext = (next, metricKey, completeInitial) => {
       category: 'firestore',
       metric: initial ? 'initial-documents-delivered' : 'changed-documents-delivered',
       value: count,
-      tags: { target: metricKey },
+      tags: { target: metricKey, ownership: normalizedOwnership },
     });
     recordPerfEvent({
       category: 'firestore',
       metric: 'documents-delivery-estimated-bytes',
       value: estimateSnapshotPayloadBytes(snapshot, initial),
       unit: 'bytes',
-      tags: { target: metricKey, delivery: initial ? 'initial' : 'changed' },
+      tags: {
+        target: metricKey,
+        delivery: initial ? 'initial' : 'changed',
+        ownership: normalizedOwnership,
+      },
     });
     if (initial) {
       initial = false;
@@ -181,7 +186,12 @@ export const onSnapshot = (target, ...args) => {
     const observer = wrappedArgs[observerIndex];
     wrappedArgs[observerIndex] = {
       ...observer,
-      next: wrapSnapshotNext(observer.next?.bind(observer), metricKey, completeInitial),
+      next: wrapSnapshotNext(
+        observer.next?.bind(observer),
+        metricKey,
+        completeInitial,
+        targetMetadata?.ownership
+      ),
       error: (error) => {
         completeInitial();
         observer.error?.(error);
@@ -190,7 +200,12 @@ export const onSnapshot = (target, ...args) => {
   } else {
     const nextIndex = wrappedArgs.findIndex((value) => typeof value === 'function');
     if (nextIndex >= 0) {
-      wrappedArgs[nextIndex] = wrapSnapshotNext(wrappedArgs[nextIndex], metricKey, completeInitial);
+      wrappedArgs[nextIndex] = wrapSnapshotNext(
+        wrappedArgs[nextIndex],
+        metricKey,
+        completeInitial,
+        targetMetadata?.ownership
+      );
       const errorIndex = wrappedArgs.findIndex((value, index) => index > nextIndex && typeof value === 'function');
       if (errorIndex >= 0) {
         const originalError = wrappedArgs[errorIndex];

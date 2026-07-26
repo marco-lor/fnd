@@ -5,6 +5,7 @@ const childProcess = require('child_process');
 const {
   budgetsPath,
   fixtureManifestPath,
+  PERFORMANCE_MEASUREMENT_CONTRACT_VERSION,
   projectId,
   median,
   percentile,
@@ -96,6 +97,7 @@ const collectCurrentReport = () => {
   const normalBuildVerification = readOptionalJson(path.join(resultsDir, 'normal-build-verification.json'));
   const report = {
     schemaVersion: 1,
+    measurementContractVersion: PERFORMANCE_MEASUREMENT_CONTRACT_VERSION,
     generatedAt: new Date().toISOString(),
     projectId,
     commit: resolveGitCommit(),

@@ -1,7 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { sha256 } = require('../../../scripts/performance/common');
 const {
   GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,
+  RESOURCE_TIMING_BUFFER_SIZE,
+  aggregateMetrics,
   countChangedDocumentsForTarget,
   createPageAssetTracker,
   drainPageConnections,
@@ -13,9 +16,47 @@ const {
   navigateToCleanup,
   readKonvaTokenPositions,
   scenarioRestorePatch,
+  summarizeResourceEntries,
   waitForReadiness,
   waitForKonvaTokenMove,
 } = require('./helpers');
+
+test('document accounting preserves totals and exposes route-scoped deliveries', () => {
+  const capture = {
+    snapshot: {
+      routeState: { routeId: '/home' },
+      events: [
+        {
+          category: 'firestore',
+          metric: 'initial-documents-delivered',
+          value: 5,
+          tags: { target: 'home.items.subscribe.v1', ownership: 'route' },
+        },
+        {
+          category: 'firestore',
+          metric: 'initial-documents-delivered',
+          value: 1,
+          tags: { target: 'grigliata.music-playback.subscribe.v1', ownership: 'shell' },
+        },
+        {
+          category: 'firestore',
+          metric: 'one-shot-documents-delivered',
+          value: 2,
+          tags: { target: 'config.schema.get.v1' },
+        },
+      ],
+    },
+    diagnostics: { consoleErrors: [], unhandledErrors: [], failedRequests: [] },
+    resources: {},
+    cdp: null,
+  };
+  const cleanup = { activeListeners: {}, activeResources: {}, media: { activeSources: 0 } };
+
+  const metrics = aggregateMetrics(capture, cleanup);
+  assert.equal(metrics['firestore.documentsDelivered'], 8);
+  assert.equal(metrics['firestore.routeDocumentsDelivered'], 7);
+  assert.equal(metrics['runtime.resourceTimingBufferOverflows'], 0);
+});
 
 test('counts Grigliata placement deliveries under the deterministic legacy telemetry key', () => {
   const snapshot = {
@@ -229,24 +270,93 @@ test('route readiness rejects transient nested lazy-route fallbacks', () => {
   }
 });
 
-test('page asset tracking requires a stable quiet window and ignores streaming media', () => {
+test('page asset tracking waits for finite fetches and ignores known streams and media', () => {
   let now = 0;
   const tracker = createPageAssetTracker({ now: () => now, quietWindowMs: 500 });
   const script = { resourceType: () => 'script' };
   const media = { resourceType: () => 'media' };
+  const finiteFetch = {
+    resourceType: () => 'fetch',
+    url: () => 'http://127.0.0.1:5000/api/config',
+  };
+  const firestoreStream = {
+    resourceType: () => 'fetch',
+    url: () => 'http://127.0.0.1:8080/google.firestore.v1.Firestore/Listen/channel?database=projects%2Fdemo-fnd-perf%2Fdatabases%2F(default)&RID=rpc',
+  };
 
   assert.equal(tracker.isQuiet(), false);
   now = 450;
   tracker.begin(script);
   tracker.begin(media);
-  assert.equal(tracker.pendingCount(), 1);
+  tracker.begin(finiteFetch);
+  tracker.begin(firestoreStream);
+  assert.equal(tracker.pendingCount(), 2);
   now = 460;
   tracker.complete(script);
+  assert.equal(tracker.pendingCount(), 1);
+  tracker.complete(finiteFetch);
   assert.equal(tracker.isQuiet(), false);
   now = 959;
   assert.equal(tracker.isQuiet(), false);
   now = 960;
   assert.equal(tracker.isQuiet(), true);
+  tracker.beginQuietWindow();
+  assert.equal(tracker.isQuiet(), false);
+  now = 1460;
+  assert.equal(tracker.isQuiet(), true);
+});
+
+test('resource summaries preserve requests and separate canonical inventory from streams', () => {
+  const summary = summarizeResourceEntries([
+    {
+      name: 'http://127.0.0.1:5000/static/image.svg?token=one',
+      transferSize: 10,
+      encodedBodySize: 8,
+    },
+    {
+      name: 'http://127.0.0.1:5000/static/image.svg?token=two',
+      transferSize: 12,
+      encodedBodySize: 9,
+    },
+    {
+      name: 'http://127.0.0.1:5000/static/other.svg',
+      transferSize: 14,
+      encodedBodySize: 11,
+    },
+    {
+      name: 'http://127.0.0.1:8080/google.firestore.v1.Firestore/Listen/channel?database=projects%2Fdemo-fnd-perf%2Fdatabases%2F(default)&RID=one',
+      transferSize: 3,
+      encodedBodySize: 2,
+    },
+    {
+      name: 'http://127.0.0.1:8080/google.firestore.v1.Firestore/Listen/channel?database=projects%2Fdemo-fnd-perf%2Fdatabases%2F(default)&RID=two',
+      transferSize: 4,
+      encodedBodySize: 3,
+    },
+  ]);
+
+  assert.equal(RESOURCE_TIMING_BUFFER_SIZE, 5_000);
+  assert.deepEqual(summary.image, {
+    count: 3,
+    uniqueCount: 2,
+    uniqueFingerprint: sha256([
+      'http://127.0.0.1:5000/static/image.svg',
+      'http://127.0.0.1:5000/static/other.svg',
+    ].sort().join('\n')),
+    transferBytes: 36,
+    encodedBytes: 28,
+    uniqueEncodedBytes: 20,
+  });
+  assert.deepEqual(summary.stream, {
+    count: 2,
+    uniqueCount: 1,
+    uniqueFingerprint: sha256(
+      'http://127.0.0.1:8080/google.firestore.v1.Firestore/Listen/channel'
+    ),
+    transferBytes: 7,
+    encodedBytes: 5,
+    uniqueEncodedBytes: 3,
+  });
 });
 
 test('Konva placement probes identify one exact token and poll moves without animation frames', async () => {

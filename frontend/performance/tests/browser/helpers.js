@@ -5,6 +5,7 @@ const {
   configureOwnedPerformanceEnvironment,
   projectId,
   resultsDir,
+  sha256,
   writeJson,
 } = require('../../../scripts/performance/common');
 const fixtureManifest = require('../../fixture-manifest.json');
@@ -14,6 +15,24 @@ const FIRESTORE_EMULATOR_STARTUP_WARNING = /^(?:\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:
 const FIRESTORE_STREAM_PATH = /^\/google\.firestore\.v1\.Firestore\/(Listen|Write)\/channel$/;
 const FIRESTORE_EMULATOR_ORIGIN = 'http://127.0.0.1:8080';
 const FIRESTORE_EMULATOR_DATABASE = 'projects/demo-fnd-perf/databases/(default)';
+const RESOURCE_TIMING_BUFFER_SIZE = 5_000;
+
+const demoFirestoreStreamOperation = (url) => {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (_error) {
+    return null;
+  }
+  if (
+    parsed.origin !== FIRESTORE_EMULATOR_ORIGIN
+    || parsed.searchParams.get('database') !== FIRESTORE_EMULATOR_DATABASE
+  ) {
+    return null;
+  }
+  return parsed.pathname.match(FIRESTORE_STREAM_PATH)?.[1] || null;
+};
+
 const LIFECYCLE_STREAM_OPERATIONS = {
   'auth-transition': new Set(['Listen']),
   'connection-drain': new Set(['Listen', 'Write']),
@@ -72,21 +91,8 @@ const isExpectedFirestoreLifecycleCancellation = ({
     return false;
   }
 
-  let parsed;
-  try {
-    parsed = new URL(url);
-  } catch (_error) {
-    return false;
-  }
-  if (
-    parsed.origin !== FIRESTORE_EMULATOR_ORIGIN
-    || parsed.searchParams.get('database') !== FIRESTORE_EMULATOR_DATABASE
-  ) {
-    return false;
-  }
-
-  const match = parsed.pathname.match(FIRESTORE_STREAM_PATH);
-  return Boolean(match && allowedOperations.has(match[1]));
+  const operation = demoFirestoreStreamOperation(url);
+  return Boolean(operation && allowedOperations.has(operation));
 };
 
 const installDeterministicFontRoutes = async (context) => {
@@ -106,6 +112,13 @@ const createPageAssetTracker = ({
   quietWindowMs = 500,
 } = {}) => {
   const trackedResourceTypes = new Set(['document', 'script', 'stylesheet', 'image', 'font']);
+  const shouldTrack = (request) => {
+    const resourceType = request.resourceType();
+    if (trackedResourceTypes.has(resourceType)) return true;
+    if (!['fetch', 'xhr'].includes(resourceType)) return false;
+    const requestUrl = typeof request.url === 'function' ? request.url() : '';
+    return !demoFirestoreStreamOperation(requestUrl);
+  };
   const pending = new Set();
   let lastActivityAt = now();
   const touch = () => {
@@ -113,12 +126,15 @@ const createPageAssetTracker = ({
   };
   return {
     begin(request) {
-      if (!trackedResourceTypes.has(request.resourceType())) return;
+      if (!shouldTrack(request)) return;
       pending.add(request);
       touch();
     },
     complete(request) {
       if (!pending.delete(request)) return;
+      touch();
+    },
+    beginQuietWindow() {
       touch();
     },
     isQuiet() {
@@ -131,7 +147,23 @@ const createPageAssetTracker = ({
 };
 
 const installBootstrap = async (context, scenario, iteration) => {
-  await context.addInitScript(({ scenarioId, role, runIteration, benchmarkRunId, fixtureVersion }) => {
+  await context.addInitScript(({
+    scenarioId,
+    role,
+    runIteration,
+    benchmarkRunId,
+    fixtureVersion,
+    resourceTimingBufferSize,
+  }) => {
+    window.__FND_PERF_RESOURCE_TIMING_BUFFER_OVERFLOW__ = false;
+    if (typeof performance.setResourceTimingBufferSize === 'function') {
+      performance.setResourceTimingBufferSize(resourceTimingBufferSize);
+    }
+    if (typeof performance.addEventListener === 'function') {
+      performance.addEventListener('resourcetimingbufferfull', () => {
+        window.__FND_PERF_RESOURCE_TIMING_BUFFER_OVERFLOW__ = true;
+      });
+    }
     window.__FND_PERF_BOOTSTRAP__ = {
       runId: `${benchmarkRunId}:${scenarioId}-${runIteration}`,
       scenarioId,
@@ -148,6 +180,7 @@ const installBootstrap = async (context, scenario, iteration) => {
     runIteration: iteration,
     benchmarkRunId: process.env.FND_PERF_RUN_ID || 'local',
     fixtureVersion: fixtureManifest.version,
+    resourceTimingBufferSize: RESOURCE_TIMING_BUFFER_SIZE,
   });
 };
 
@@ -249,6 +282,58 @@ const countRouteResources = (resources, route, { includeTimeouts = false } = {})
     .filter(([key]) => includeTimeouts || !key.startsWith(`${route}::timeout`))
     .reduce((total, [, value]) => total + Number(value || 0), 0)
 );
+
+const summarizeResourceEntries = (entries = []) => {
+  const byClass = entries.reduce((totals, entry) => {
+    let parsedUrl = null;
+    try { parsedUrl = new URL(entry.name); } catch (_error) { /* Keep malformed entries observable. */ }
+    const pathname = parsedUrl?.pathname || '';
+    const normalizedPathname = pathname.toLowerCase();
+    const category = demoFirestoreStreamOperation(entry.name)
+      ? 'stream'
+      : normalizedPathname.endsWith('.js') ? 'javascript'
+        : normalizedPathname.endsWith('.css') ? 'css'
+          : /\.(png|jpe?g|gif|svg|webp|avif)$/.test(normalizedPathname) ? 'image'
+            : /\.(woff2?|ttf|otf)$/.test(normalizedPathname) ? 'font'
+              : /\.(mp3|wav|ogg|mp4|webm)$/.test(normalizedPathname) ? 'media'
+                : 'other';
+    totals[category] ||= {
+      canonicalNames: new Set(),
+      encodedBytesByCanonicalName: new Map(),
+      count: 0,
+      transferBytes: 0,
+      encodedBytes: 0,
+    };
+    const canonicalName = parsedUrl ? `${parsedUrl.origin}${parsedUrl.pathname}` : String(entry.name || '');
+    if (canonicalName) {
+      totals[category].canonicalNames.add(canonicalName);
+      totals[category].encodedBytesByCanonicalName.set(
+        canonicalName,
+        Math.max(
+          totals[category].encodedBytesByCanonicalName.get(canonicalName) || 0,
+          Number(entry.encodedBodySize) || 0
+        )
+      );
+    }
+    totals[category].count += 1;
+    totals[category].transferBytes += Number(entry.transferSize) || 0;
+    totals[category].encodedBytes += Number(entry.encodedBodySize) || 0;
+    return totals;
+  }, {});
+
+  return Object.fromEntries(Object.entries(byClass).map(([category, values]) => [
+    category,
+    {
+      count: values.count,
+      uniqueCount: values.canonicalNames.size,
+      uniqueFingerprint: sha256([...values.canonicalNames].sort().join('\n')),
+      transferBytes: values.transferBytes,
+      encodedBytes: values.encodedBytes,
+      uniqueEncodedBytes: [...values.encodedBytesByCanonicalName.values()]
+        .reduce((total, value) => total + value, 0),
+    },
+  ]));
+};
 
 const visibleFirst = async (locators) => {
   for (const locator of locators) {
@@ -381,25 +466,18 @@ const runInteraction = async (page, scenario) => {
 
 const captureBrowserMetrics = async (page, diagnostics) => {
   const browserCapture = await page.evaluate((capturedDiagnostics) => {
-  const snapshot = window.__FND_PERF__.snapshot();
-  const resources = performance.getEntriesByType('resource');
-  const byClass = resources.reduce((totals, entry) => {
-    const pathname = (() => {
-      try { return new URL(entry.name).pathname.toLowerCase(); } catch { return ''; }
-    })();
-    const category = pathname.endsWith('.js') ? 'javascript'
-      : pathname.endsWith('.css') ? 'css'
-        : /\.(png|jpe?g|gif|svg|webp|avif)$/.test(pathname) ? 'image'
-          : /\.(woff2?|ttf|otf)$/.test(pathname) ? 'font'
-            : /\.(mp3|wav|ogg|mp4|webm)$/.test(pathname) ? 'media'
-              : 'other';
-    totals[category] ||= { count: 0, transferBytes: 0, encodedBytes: 0 };
-    totals[category].count += 1;
-    totals[category].transferBytes += Number(entry.transferSize) || 0;
-    totals[category].encodedBytes += Number(entry.encodedBodySize) || 0;
-    return totals;
-  }, {});
-    return { snapshot, resources: byClass, diagnostics: capturedDiagnostics };
+    const snapshot = window.__FND_PERF__.snapshot();
+    const resourceEntries = performance.getEntriesByType('resource').map((entry) => ({
+      name: entry.name,
+      transferSize: entry.transferSize,
+      encodedBodySize: entry.encodedBodySize,
+    }));
+    return {
+      snapshot,
+      resourceEntries,
+      resourceTimingBufferOverflow: Boolean(window.__FND_PERF_RESOURCE_TIMING_BUFFER_OVERFLOW__),
+      diagnostics: capturedDiagnostics,
+    };
   }, diagnostics);
   let cdp = null;
   try {
@@ -411,7 +489,12 @@ const captureBrowserMetrics = async (page, diagnostics) => {
   } catch (_error) {
     // Firefox/WebKit smoke coverage does not expose CDP and does not use timing budgets.
   }
-  return { ...browserCapture, cdp };
+  const { resourceEntries, ...captureWithoutResourceEntries } = browserCapture;
+  return {
+    ...captureWithoutResourceEntries,
+    resources: summarizeResourceEntries(resourceEntries),
+    cdp,
+  };
 };
 
 const aggregateMetrics = (capture, cleanup) => {
@@ -431,8 +514,13 @@ const aggregateMetrics = (capture, cleanup) => {
   metrics['runtime.failedRequests'] = capture.diagnostics.failedRequests.length;
   metrics['runtime.synchronousNetworkCalls'] = events
     .filter((event) => event.category === 'runtime' && event.metric === 'synchronous-network-call').length;
-  metrics['firestore.documentsDelivered'] = events
-    .filter((event) => event.category === 'firestore' && /documents-delivered$/.test(event.metric))
+  metrics['runtime.resourceTimingBufferOverflows'] = capture.resourceTimingBufferOverflow ? 1 : 0;
+  const documentDeliveryEvents = events
+    .filter((event) => event.category === 'firestore' && /documents-delivered$/.test(event.metric));
+  metrics['firestore.documentsDelivered'] = documentDeliveryEvents
+    .reduce((total, event) => total + (Number(event.value) || 0), 0);
+  metrics['firestore.routeDocumentsDelivered'] = documentDeliveryEvents
+    .filter((event) => event.tags?.ownership !== 'shell')
     .reduce((total, event) => total + (Number(event.value) || 0), 0);
   metrics['firestore.activeListenersAfterCleanup'] = Object.entries(cleanup.activeListeners || {})
     .filter(([key]) => key.startsWith(`${capture.snapshot.routeState?.routeId || 'unknown'}::`))
@@ -455,6 +543,9 @@ const aggregateMetrics = (capture, cleanup) => {
     metrics[`resource.${category}.transferBytes`] = values.transferBytes;
     metrics[`resource.${category}.gzipBytes`] = values.encodedBytes;
     metrics[`resource.${category}.count`] = values.count;
+    metrics[`resource.${category}.uniqueCount`] = values.uniqueCount;
+    metrics[`resource.${category}.uniqueFingerprint`] = values.uniqueFingerprint;
+    metrics[`resource.${category}.uniqueGzipBytes`] = values.uniqueEncodedBytes;
   }
   return metrics;
 };
@@ -541,6 +632,7 @@ const restoreScenarioState = async (scenarioId) => {
 module.exports = {
   ACCOUNT,
   GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,
+  RESOURCE_TIMING_BUFFER_SIZE,
   aggregateMetrics,
   captureBrowserMetrics,
   countChangedDocumentsForTarget,
@@ -558,6 +650,7 @@ module.exports = {
   restoreScenarioState,
   runInteraction,
   scenarioRestorePatch,
+  summarizeResourceEntries,
   storageStateForRole,
   waitForBridge,
   waitForKonvaTokenMove,
