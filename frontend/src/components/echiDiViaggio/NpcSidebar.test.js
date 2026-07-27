@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import NpcSidebar from './NpcSidebar';
-import { onSnapshot } from '../../performance/firestore';
+import { deleteDoc, doc, getDocs, onSnapshot } from '../../performance/firestore';
+import { deleteObject } from 'firebase/storage';
 
 jest.mock('../firebaseConfig', () => ({
   db: {},
@@ -75,6 +76,11 @@ function HoverStateHarness() {
 
 describe('NpcSidebar', () => {
   beforeEach(() => {
+    jest.clearAllMocks();
+    doc.mockImplementation((db, ...segments) => ({
+      path: segments.join('/'),
+    }));
+    getDocs.mockResolvedValue({ empty: true, forEach: jest.fn() });
     onSnapshot.mockImplementation((target, onNext) => {
       onNext({ docs: [] });
       return () => {};
@@ -99,5 +105,44 @@ describe('NpcSidebar', () => {
     expect(hasCrossComponentWarning).toBe(false);
 
     consoleErrorSpy.mockRestore();
+  });
+
+  test('deletes a canonical NPC document without directly deleting private Storage', async () => {
+    const canonicalNpc = {
+      id: 'npc-canonical',
+      data: () => ({
+        nome: 'Canonical NPC',
+        description: 'Lifecycle-owned portrait',
+        media: {
+          assetId: `m_${'a'.repeat(40)}`,
+        },
+      }),
+    };
+    onSnapshot.mockImplementation((target, onNext) => {
+      onNext({ docs: [canonicalNpc] });
+      return () => {};
+    });
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(
+      <NpcSidebar
+        user={{ uid: 'dm-1' }}
+        userData={{ role: 'dm' }}
+        stickyOffset={104}
+        canDragToMap={false}
+      />
+    );
+
+    const npcName = await screen.findByText('Canonical NPC');
+    fireEvent.mouseEnter(npcName.closest('button'));
+    const deleteButton = await screen.findByRole('button', { name: 'Delete' });
+    fireEvent.click(deleteButton);
+
+    await waitFor(() => expect(deleteDoc).toHaveBeenCalledWith({
+      path: 'echi_npcs/npc-canonical',
+    }));
+    expect(deleteObject).not.toHaveBeenCalled();
+
+    confirmSpy.mockRestore();
   });
 });

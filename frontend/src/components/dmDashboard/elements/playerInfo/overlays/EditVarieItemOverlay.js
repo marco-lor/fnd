@@ -5,6 +5,7 @@ import { ref as storageRef, deleteObject } from "firebase/storage";
 import { db } from "../../../../firebaseConfig";
 import { storage } from "../../../../firebaseStorage";
 import { uploadCacheableImage } from "../../../../common/imageStorage";
+import useObjectUrl from "../../../../common/useObjectUrl";
 
 const EditVarieItemOverlay = ({ userId, initialData, inventoryItemId, onClose }) => {
   const [name, setName] = useState(initialData?.name || initialData?.General?.Nome || "");
@@ -14,7 +15,7 @@ const EditVarieItemOverlay = ({ userId, initialData, inventoryItemId, onClose })
   );
   const [busy, setBusy] = useState(false);
   const [imageFile, setImageFile] = useState(null);
-  const [previewUrl, setPreviewUrl] = useState(null);
+  const previewUrl = useObjectUrl(imageFile);
   const [currentImageUrl, setCurrentImageUrl] = useState(initialData?.image_url || null);
   const originalUrlRef = useRef(initialData?.image_url || null);
   const [removeExisting, setRemoveExisting] = useState(false);
@@ -101,7 +102,6 @@ const EditVarieItemOverlay = ({ userId, initialData, inventoryItemId, onClose })
     setRemoveExisting(true);
     setCurrentImageUrl(null);
     setImageFile(null);
-    setPreviewUrl(null);
   };
 
   return (
@@ -137,7 +137,6 @@ const EditVarieItemOverlay = ({ userId, initialData, inventoryItemId, onClose })
                 onChange={(event) => {
                   const file = event.target.files && event.target.files[0] ? event.target.files[0] : null;
                   setImageFile(file);
-                  setPreviewUrl(file ? URL.createObjectURL(file) : null);
                 }}
               />
               {(previewUrl || currentImageUrl) && (

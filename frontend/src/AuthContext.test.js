@@ -239,6 +239,7 @@ describe("shell cache validation", () => {
 
     expect(Object.keys(projected).sort()).toEqual([
       "avatarUrl",
+      "avatarMedia",
       "characterId",
       "level",
       "race",
@@ -250,6 +251,92 @@ describe("shell cache validation", () => {
     expect(new Blob([JSON.stringify(projected)]).size).toBeLessThan(SHELL_CACHE_MAX_BYTES);
     expect(validateShellCache({ ...projected, inventory: [] }, "uid-1")).toBeNull();
     expect(validateShellCache(projected, "different-uid")).toBeNull();
+  });
+
+  test("projects only the path-based avatar descriptor and accepts old caches without it", () => {
+    const assetId = `m_${"a".repeat(40)}`;
+    const pathPrefix = `media/v1/avatar/uid-1/${assetId}`;
+    const projected = projectShellProfile("uid-1", {
+      role: "player",
+      imageUrl: "https://example.com/legacy-avatar.png",
+      media: {
+        schemaVersion: 1,
+        contractVersion: 1,
+        assetId,
+        kind: "avatar",
+        state: "ready",
+        original: {
+          path: `${pathPrefix}/original/source.png`,
+          generation: "11",
+          contentType: "image/png",
+          bytes: 1000,
+          width: 400,
+          height: 400,
+          cacheControl: "private",
+          downloadUrl: "must-not-be-cached",
+        },
+        variants: {
+          thumbnail: {
+            path: `${pathPrefix}/derivatives/v1/thumbnail.webp`,
+            generation: "12",
+            contentType: "image/webp",
+            bytes: 500,
+            width: 96,
+            height: 96,
+          },
+        },
+        processing: { authoritative: true },
+      },
+    });
+
+    expect(projected.avatarUrl).toBe("https://example.com/legacy-avatar.png");
+    expect(projected.avatarMedia).toEqual({
+      schemaVersion: 1,
+      contractVersion: 1,
+      assetId,
+      kind: "avatar",
+      state: "ready",
+      original: expect.not.objectContaining({ downloadUrl: expect.anything() }),
+      variants: {
+        thumbnail: expect.objectContaining({
+          path: `${pathPrefix}/derivatives/v1/thumbnail.webp`,
+        }),
+      },
+    });
+    const { avatarMedia: _avatarMedia, ...legacyCache } = projected;
+    expect(validateShellCache(legacyCache, "uid-1")).toEqual(legacyCache);
+  });
+
+  test("rejects noncanonical avatar object paths and derivative MIME types", () => {
+    const assetId = `m_${"b".repeat(40)}`;
+    const prefix = `media/v1/avatar/uid-1/${assetId}/`;
+    const base = {
+      schemaVersion: 1,
+      contractVersion: 1,
+      assetId,
+      kind: "avatar",
+      state: "ready",
+      original: {
+        path: `${prefix}original/source.png`,
+        generation: "1",
+        contentType: "image/png",
+        bytes: 100,
+        width: 10,
+        height: 10,
+      },
+      variants: {},
+    };
+    expect(projectShellProfile("uid-1", {
+      media: { ...base, original: { ...base.original, path: `${prefix}other.png` } },
+    }).avatarMedia).toBeNull();
+    expect(projectShellProfile("uid-1", {
+      media: {
+        ...base,
+        variants: {
+          thumbnail: { ...base.original, path: `${prefix}derivatives/v1/thumbnail.webp` },
+        },
+      },
+    }).avatarMedia).toBeNull();
   });
 
   test("rejects malformed and oversized serialized entries", () => {

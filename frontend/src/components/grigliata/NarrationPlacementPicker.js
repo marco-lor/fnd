@@ -1,5 +1,7 @@
 import React, { useMemo } from 'react';
 import { FiArrowDown, FiArrowLeft, FiArrowRight, FiArrowUp, FiMove, FiX } from 'react-icons/fi';
+import MediaImage, { resolveMediaAsset } from '../common/MediaImage';
+import { isVideoBackground } from './boardUtils';
 import {
   buildBackgroundMap,
   buildNarrationPlacementBounds,
@@ -15,6 +17,49 @@ const PREVIEW_SIZE_PX = 168;
 const PREVIEW_PADDING_PX = 14;
 const PLACEMENT_BUTTON_CLASS = 'inline-flex h-10 w-10 items-center justify-center rounded-md border border-amber-500/40 bg-slate-950/90 text-amber-200 transition-colors hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-60';
 const PLACEMENT_ICON_CLASS = 'h-4 w-4';
+
+const isRecord = (value) => (
+  value != null && typeof value === 'object' && !Array.isArray(value)
+);
+
+const getBackgroundMediaManifest = (background) => {
+  if (isRecord(background?.media)) return background.media;
+  if (isRecord(background?.General?.media)) return background.General.media;
+  return {};
+};
+
+const isVideoGalleryBackground = (background, manifest) => (
+  isVideoBackground(background)
+  || manifest.kind === 'map-video'
+  || manifest.original?.contentType === 'video/mp4'
+);
+
+const buildVideoPosterMedia = (manifest) => {
+  const poster = isRecord(manifest.variants)
+    ? manifest.variants.poster
+    : null;
+  return {
+    media: {
+      schemaVersion: manifest.schemaVersion,
+      state: manifest.state,
+      variants: poster ? { poster } : {},
+    },
+  };
+};
+
+const buildNarrationThumbnail = (background) => {
+  const manifest = getBackgroundMediaManifest(background);
+  const isVideo = isVideoGalleryBackground(background, manifest);
+  const media = isVideo ? buildVideoPosterMedia(manifest) : background;
+  const src = isVideo ? '' : (background?.imageUrl || '');
+  const variant = isVideo ? 'poster' : 'thumbnail';
+  return {
+    asset: resolveMediaAsset(media, { fallbackSrc: src, variant }),
+    media,
+    src,
+    variant,
+  };
+};
 
 const getPreviewStyle = (placement, bounds) => {
   if (!placement || !bounds?.width || !bounds?.height) {
@@ -48,6 +93,7 @@ export default function NarrationPlacementPicker({
     return null;
   }
 
+  const selectedBackgroundThumbnail = buildNarrationThumbnail(background);
   const handleSelectSide = (side) => {
     onSelectPlacement?.({
       mode: NARRATION_PLACEMENT_MODE_MAGNETIC,
@@ -112,6 +158,7 @@ export default function NarrationPlacementPicker({
             {placements.map((placement) => {
               const placementBackground = backgroundsById.get(placement.backgroundId) || null;
               const previewStyle = getPreviewStyle(placement, previewBounds);
+              const placementThumbnail = buildNarrationThumbnail(placementBackground);
 
               return (
                 <div
@@ -119,10 +166,15 @@ export default function NarrationPlacementPicker({
                   className="absolute overflow-hidden rounded border border-sky-300/50 bg-sky-500/15"
                   style={previewStyle}
                 >
-                  {placementBackground?.imageUrl && (
-                    <img
-                      src={placementBackground.imageUrl}
+                  {placementThumbnail.asset.candidates.length > 0 && (
+                    <MediaImage
+                      media={placementThumbnail.media}
+                      src={placementThumbnail.src}
+                      variant={placementThumbnail.variant}
                       alt=""
+                      width={PREVIEW_SIZE_PX}
+                      height={PREVIEW_SIZE_PX}
+                      sizes={`${PREVIEW_SIZE_PX}px`}
                       className="h-full w-full object-cover opacity-80"
                     />
                   )}
@@ -130,9 +182,18 @@ export default function NarrationPlacementPicker({
               );
             })}
             <div className="absolute bottom-2 right-2 h-10 w-10 overflow-hidden rounded-md border border-amber-300/70 bg-amber-500/20 shadow-lg shadow-black/40">
-              {background.imageUrl ? (
-                <img src={background.imageUrl} alt="" className="h-full w-full object-cover" />
-              ) : null}
+              {selectedBackgroundThumbnail.asset.candidates.length > 0 && (
+                <MediaImage
+                  media={selectedBackgroundThumbnail.media}
+                  src={selectedBackgroundThumbnail.src}
+                  variant={selectedBackgroundThumbnail.variant}
+                  alt=""
+                  width={40}
+                  height={40}
+                  sizes="40px"
+                  className="h-full w-full object-cover"
+                />
+              )}
             </div>
           </div>
 

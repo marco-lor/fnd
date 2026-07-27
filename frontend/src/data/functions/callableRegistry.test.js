@@ -93,7 +93,7 @@ describe('Firebase callable registry', () => {
       await registry.getCallable(logicalKey)({probe: true});
     }
 
-    expect(entries).toHaveLength(30);
+    expect(entries).toHaveLength(36);
     expect(getFunctions).toHaveBeenCalledTimes(
       callableManifest.supportedRegions.length
     );
@@ -118,6 +118,21 @@ describe('Firebase callable registry', () => {
       }));
     expect(callableManifest.callables.spendCharacterPointV2.region)
       .toBe('europe-west8');
+    [
+      'task07PrepareMediaUpload',
+      'task07FinalizeMediaUpload',
+      'task07ConfirmMediaReference',
+      'task07AbandonMediaAsset',
+      'task07RetireMediaAsset',
+      'task07RetryMediaCleanup',
+    ].forEach((logicalKey) => {
+      expect(callableManifest.callables[logicalKey]).toEqual({
+        functionId: logicalKey,
+        region: 'europe-west8',
+        owner: 'media-lifecycle',
+        compatibilityAliasOf: null,
+      });
+    });
   });
 
   test('connects the performance emulator once for each acquired region', async () => {

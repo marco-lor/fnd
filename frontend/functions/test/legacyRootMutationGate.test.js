@@ -106,8 +106,8 @@ test('level-up authorizes the requester inside the mutation transaction', () => 
   const transaction = contents.indexOf(
     'db.runTransaction(async (transaction)'
   );
-  const callerRead = contents.indexOf(
-    'const [\n        receipt,\n        caller,\n        rollout,\n        target,'
+  const callerRead = contents.search(
+    /const\s*\[\s*receipt,\s*caller,\s*rollout,\s*target,/
   );
   const roleCheck = contents.indexOf('caller.get("role") !== "dm"');
   const update = contents.indexOf('transaction.update(userRef');

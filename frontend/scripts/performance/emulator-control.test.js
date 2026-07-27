@@ -229,7 +229,7 @@ test('waitForEmulatorHealth resets after failure and requires three consecutive 
     auth: { port: 9099 },
     firestore: { port: 8080 },
     functions: { port: 5001 },
-    hosting: { port: 5000 },
+    hosting: { port: 5002 },
     storage: { port: 9199 },
   };
   let hubAttempt = 0;
@@ -351,7 +351,7 @@ test('waitForEmulatorHealth aborts stalled Hub JSON within its hard deadline', a
 test('waitForEmulatorHealth rejects a healthy sample that completes after its deadline', async () => {
   let now = 0;
   const registrations = {
-    auth: {}, firestore: {}, functions: {}, hosting: {}, storage: {},
+    auth: {}, firestore: {}, functions: {}, hosting: { port: 5002 }, storage: {},
   };
   const fetchImpl = async (url) => {
     now += 260;

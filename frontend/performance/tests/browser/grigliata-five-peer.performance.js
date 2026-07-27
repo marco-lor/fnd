@@ -5,7 +5,7 @@ configureOwnedPerformanceEnvironment();
 
 const { deleteApp, initializeApp, getApps } = require('firebase-admin/app');
 const { FieldValue, getFirestore } = require('firebase-admin/firestore');
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./measured-test');
 const manifest = require('../../scenarios.json');
 const {
   GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,

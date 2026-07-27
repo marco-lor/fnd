@@ -24,6 +24,7 @@ frontend/playwright/.auth/
 frontend/playwright-report/
 frontend/test-results/
 frontend/.perf-emulator-data/
+frontend/.firebase.performance.generated.json
 frontend/.perf-tools/
 frontend/firebase-debug.log
 frontend/firebase-debug.[1-9].log

@@ -15,11 +15,16 @@ service firebase.storage {
       // the root pending marker blocks an in-flight deletion, and a missing
       // root fails closed after deletion. Firestore rules separately prevent
       // recreation whenever the durable deletion-job tombstone exists.
-      return firestore.get(userDocPath(uid)).data.get("deletionState", null) != "pending";
+      let userData = firestore.get(userDocPath(uid)).data;
+      return userData == null
+        ? false
+        : userData.get("deletionState", null) != "pending";
     }
 
     function isActiveSignedIn() {
-      return isSignedIn() && isActiveUser(request.auth.uid);
+      return isSignedIn()
+        ? isActiveUser(request.auth.uid)
+        : false;
     }
 
     function userRole() {
@@ -66,6 +71,267 @@ service firebase.storage {
       return request.resource != null
         && request.resource.size <= maxBytes
         && request.resource.contentType.matches('^video/.+$');
+    }
+
+    function task07ManifestPath(assetId) {
+      return /databases/(default)/documents/media_assets/$(assetId);
+    }
+
+    function task07KindIsKnown(kind) {
+      return kind in [
+        'avatar',
+        'item',
+        'npc',
+        'foe',
+        'map',
+        'map-video'
+      ];
+    }
+
+    function task07ManifestMatches(manifest, kind, ownerUid, assetId) {
+      return manifest.schemaVersion == 1
+        && manifest.contractVersion == 1
+        && task07KindIsKnown(kind)
+        && assetId.matches('^m_[a-f0-9]{40}$')
+        && manifest.assetId == assetId
+        && manifest.kind == kind
+        && manifest.ownerUid == ownerUid
+        && manifest.contractVersion == 1
+        && manifest.plan.schemaVersion == 1
+        && manifest.plan.contractVersion == 1
+        && manifest.plan.assetId == assetId
+        && manifest.plan.kind == kind
+        && manifest.plan.actorUid == manifest.actorUid
+        && manifest.plan.ownerUid == ownerUid
+        && manifest.plan.entityId == manifest.entityId
+        && manifest.plan.get("referenceScope", null)
+          == manifest.get("referenceScope", null)
+        && (
+          kind == 'item'
+            ? manifest.get("referenceScope", null) in [
+              'global-catalog',
+              'user-inventory'
+            ]
+            : manifest.get("referenceScope", null) == null
+        );
+    }
+
+    function task07AudienceCanRead(manifest) {
+      return (
+          manifest.kind in ['avatar', 'npc', 'map', 'map-video']
+        )
+        || (
+          manifest.kind == 'foe'
+          && isDM()
+        )
+        || (
+          manifest.kind == 'item'
+          && (
+            manifest.get("referenceScope", null) == 'global-catalog'
+            || (
+              manifest.get("referenceScope", null) == 'user-inventory'
+              && (
+                request.auth.uid == manifest.ownerUid
+                || isCatalogManager()
+              )
+            )
+          )
+        );
+    }
+
+    function canReadTask07Media(kind, ownerUid, assetId) {
+      let manifest = firestore.get(task07ManifestPath(assetId)).data;
+      let sharedState = manifest.state in [
+        'ready', 'fallback', 'referenced', 'superseded'
+      ];
+      return isActiveSignedIn()
+        && task07ManifestMatches(manifest, kind, ownerUid, assetId)
+        && task07AudienceCanRead(manifest)
+        && (
+          manifest.actorUid == request.auth.uid
+          || sharedState
+        );
+    }
+
+    function canCreateTask07Media(kind, ownerUid, assetId) {
+      let manifest = firestore.get(task07ManifestPath(assetId)).data;
+      return isActiveSignedIn()
+        && task07ManifestMatches(manifest, kind, ownerUid, assetId)
+        && manifest.actorUid == request.auth.uid
+        && manifest.state in ['prepared', 'failed'];
+    }
+
+    function task07VariantRole(fileName) {
+      return fileName == 'thumbnail.webp' ? 'thumbnail'
+        : fileName == 'card.webp' ? 'card'
+        : fileName == 'board.webp' ? 'board'
+        : fileName == 'poster.webp' ? 'poster'
+        : '';
+    }
+
+    // Cloud Storage write rules expose custom metadata, size, content type,
+    // name, and bucket. Standard cacheControl/contentDisposition are stamped
+    // and verified by the server finalizer before an asset becomes shared.
+    // Exact map equality rejects missing, altered, and extra client metadata.
+    function task07UploadMetadataMatches(
+      manifest,
+      kind,
+      ownerUid,
+      assetId,
+      role
+    ) {
+      let metadata = request.resource.metadata;
+      return metadata == {
+          'task07AssetId': assetId,
+          'task07ContractVersion': '1',
+          'task07EntityId': manifest.plan.entityId,
+          'task07Kind': kind,
+          'task07OwnerUid': ownerUid,
+          'task07Role': role
+        }
+        && assetId == manifest.plan.assetId
+        && kind == manifest.plan.kind
+        && ownerUid == manifest.plan.ownerUid;
+    }
+
+    function task07SourceBytesAreBounded(kind) {
+      return request.resource.size > 0
+        && request.resource.size <= (
+          kind == 'avatar' ? 5 * 1024 * 1024
+          : kind == 'map' ? 15 * 1024 * 1024
+          : kind == 'map-video' ? 25 * 1024 * 1024
+          : 8 * 1024 * 1024
+        );
+    }
+
+    function task07SourceFileMatches(kind, fileName) {
+      return (
+          request.resource.contentType == 'image/jpeg'
+          && fileName == 'source.jpg'
+          && kind != 'map-video'
+        )
+        || (
+          request.resource.contentType == 'image/png'
+          && fileName == 'source.png'
+          && kind != 'map-video'
+        )
+        || (
+          request.resource.contentType == 'image/webp'
+          && fileName == 'source.webp'
+          && kind != 'map-video'
+        )
+        || (
+          request.resource.contentType == 'image/gif'
+          && fileName == 'source.gif'
+          && kind != 'map-video'
+        )
+        || (
+          request.resource.contentType == 'video/mp4'
+          && fileName == 'source.mp4'
+          && kind == 'map-video'
+        );
+    }
+
+    function task07VariantBytesAreBounded(kind, fileName) {
+      return request.resource.size > 0
+        && (
+          (
+            fileName == 'thumbnail.webp'
+            && request.resource.size <= (
+              kind == 'avatar' || kind == 'item' ? 128 * 1024
+              : kind == 'npc' || kind == 'foe' ? 160 * 1024
+              : 256 * 1024
+            )
+          )
+          || (
+            fileName == 'card.webp'
+            && request.resource.size <= (
+              kind == 'avatar' ? 384 * 1024
+              : kind == 'item' ? 512 * 1024
+              : kind == 'npc' || kind == 'foe' ? 640 * 1024
+              : 1024 * 1024
+            )
+          )
+          || (
+            fileName == 'board.webp'
+            && kind == 'map'
+            && request.resource.size <= 4 * 1024 * 1024
+          )
+          || (
+            fileName == 'poster.webp'
+            && kind == 'map-video'
+            && request.resource.size <= 256 * 1024
+          )
+        );
+    }
+
+    function task07VariantIsPlanned(
+      manifest,
+      kind,
+      ownerUid,
+      assetId,
+      fileName
+    ) {
+      let prefix = 'media/v1/' + kind + '/' + ownerUid + '/' + assetId
+        + '/derivatives/v1/';
+      return (
+          fileName == 'thumbnail.webp'
+          && manifest.plan.variants.thumbnail == prefix + fileName
+        )
+        || (
+          fileName == 'card.webp'
+          && manifest.plan.variants.card == prefix + fileName
+        )
+        || (
+          fileName == 'board.webp'
+          && manifest.plan.variants.board == prefix + fileName
+        )
+        || (
+          fileName == 'poster.webp'
+          && manifest.plan.variants.poster == prefix + fileName
+        );
+    }
+
+    match /media/v1/{kind}/{ownerUid}/{assetId}/original/{fileName} {
+      allow read: if canReadTask07Media(kind, ownerUid, assetId);
+      allow create: if resource == null
+        && canCreateTask07Media(kind, ownerUid, assetId)
+        && task07SourceBytesAreBounded(kind)
+        && task07SourceFileMatches(kind, fileName)
+        && task07UploadMetadataMatches(
+          firestore.get(task07ManifestPath(assetId)).data,
+          kind,
+          ownerUid,
+          assetId,
+          'original'
+        )
+        && firestore.get(task07ManifestPath(assetId)).data.plan.originalPath
+          == 'media/v1/' + kind + '/' + ownerUid + '/' + assetId
+            + '/original/' + fileName;
+      allow update, delete: if false;
+    }
+
+    match /media/v1/{kind}/{ownerUid}/{assetId}/derivatives/v1/{fileName} {
+      allow read: if canReadTask07Media(kind, ownerUid, assetId);
+      allow create: if resource == null
+        && canCreateTask07Media(kind, ownerUid, assetId)
+        && request.resource.contentType == 'image/webp'
+        && task07VariantBytesAreBounded(kind, fileName)
+        && task07VariantIsPlanned(
+          firestore.get(task07ManifestPath(assetId)).data,
+          kind,
+          ownerUid,
+          assetId,
+          fileName
+        )
+        && task07UploadMetadataMatches(
+          firestore.get(task07ManifestPath(assetId)).data,
+          kind,
+          ownerUid,
+          assetId,
+          task07VariantRole(fileName)
+        );
+      allow update, delete: if false;
     }
 
     match /characters/{fileName} {

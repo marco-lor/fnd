@@ -64,15 +64,21 @@ module.exports = defineConfig({
     stderr: 'pipe',
   },
   projects: [
-    { name: 'auth-setup', testMatch: /auth\.setup\.js/ },
+    { name: 'asset-warmup', testMatch: /asset-warmup\.setup\.js/ },
+    {
+      name: 'auth-setup',
+      dependencies: ['asset-warmup'],
+      testMatch: /auth\.setup\.js/,
+    },
     {
       name: 'chromium',
       dependencies: ['auth-setup'],
-      testIgnore: /auth\.setup\.js|firestore-persistence\.experiment\.js/,
+      testIgnore: /asset-warmup\.setup\.js|auth\.setup\.js|firestore-persistence\.experiment\.js/,
       use: { browserName: 'chromium', launchOptions: { args: ['--js-flags=--expose-gc'] } },
     },
     {
       name: 'firestore-persistence-experiment',
+      dependencies: ['asset-warmup'],
       testMatch: /firestore-persistence\.experiment\.js/,
       use: { browserName: 'chromium' },
     },

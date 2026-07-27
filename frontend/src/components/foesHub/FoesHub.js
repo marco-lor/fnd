@@ -7,9 +7,11 @@ import {
   addDoc,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   onSnapshot,
   serverTimestamp,
+  setDoc,
   updateDoc,
 } from '../../performance/firestore';
 import { ref as storageRef, deleteObject } from 'firebase/storage';
@@ -26,6 +28,13 @@ import {
 import {
   runWithDurableOperationIntent,
 } from '../../data/functions/backendOperationIntentStore';
+import { TASK07_MEDIA_PIPELINE_ENABLED } from '../../data/media/mediaFeatureFlags';
+import MediaImage, { hasMediaAsset } from '../common/MediaImage';
+import {
+  buildCanonicalFoeImageRemovalPayload,
+  collectClientDeletableFoeStoragePaths,
+  shouldClientDeleteFoeMainStorageObject,
+} from './foeMediaLifecycle';
 
 const duplicateFoeWithAssets = getCallable(
   TASK06_LOCAL_CANDIDATE
@@ -68,8 +77,17 @@ const FoeRow = ({ foe, onEdit, onDelete, onDuplicate }) => {
             {open ? <FiChevronDown /> : <FiChevronRight />}
           </button>
           <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-700/60 bg-slate-800/60 flex items-center justify-center shrink-0">
-            {isSafeImageUrl(foe?.imageUrl) ? (
-              <img src={foe.imageUrl} alt={foe?.name || 'foe'} className="w-full h-full object-cover" />
+            {hasMediaAsset(foe, { variant: 'thumbnail' }) ? (
+              <MediaImage
+                media={foe}
+                src={foe?.imageUrl || ''}
+                variant="thumbnail"
+                alt={foe?.name || 'foe'}
+                width={40}
+                height={40}
+                sizes="40px"
+                className="w-full h-full object-cover"
+              />
             ) : (
               <span className="text-slate-400 text-sm">
                 {(foe?.name || '?').toString().charAt(0).toUpperCase()}
@@ -131,8 +149,17 @@ const FoeRow = ({ foe, onEdit, onDelete, onDuplicate }) => {
                 {foe.tecniche.map((t, i) => (
                   <div key={i} className="flex items-start gap-3 rounded-lg border border-slate-700/50 bg-slate-900/40 p-3">
                     <div className="w-14 h-14 rounded-md overflow-hidden border border-slate-700/60 bg-slate-800/60 shrink-0 flex items-center justify-center">
-                      {isSafeImageUrl(t?.imageUrl) ? (
-                        <img src={t.imageUrl} alt={t?.name || `tecnica-${i}`} className="w-full h-full object-cover" />
+                      {hasMediaAsset(t, { variant: 'thumbnail' }) ? (
+                        <MediaImage
+                          media={t}
+                          src={t?.imageUrl || ''}
+                          variant="thumbnail"
+                          alt={t?.name || `tecnica-${i}`}
+                          width={56}
+                          height={56}
+                          sizes="56px"
+                          className="w-full h-full object-cover"
+                        />
                       ) : (
                         <span className="text-slate-400 text-xs">No Img</span>
                       )}
@@ -162,8 +189,17 @@ const FoeRow = ({ foe, onEdit, onDelete, onDuplicate }) => {
                 {foe.spells.map((s, i) => (
                   <div key={i} className="flex items-start gap-3 rounded-lg border border-slate-700/50 bg-slate-900/40 p-3">
                     <div className="w-14 h-14 rounded-md overflow-hidden border border-slate-700/60 bg-slate-800/60 shrink-0 flex items-center justify-center">
-                      {isSafeImageUrl(s?.imageUrl) ? (
-                        <img src={s.imageUrl} alt={s?.name || `spell-${i}`} className="w-full h-full object-cover" />
+                      {hasMediaAsset(s, { variant: 'thumbnail' }) ? (
+                        <MediaImage
+                          media={s}
+                          src={s?.imageUrl || ''}
+                          variant="thumbnail"
+                          alt={s?.name || `spell-${i}`}
+                          width={56}
+                          height={56}
+                          sizes="56px"
+                          className="w-full h-full object-cover"
+                        />
                       ) : (
                         <span className="text-slate-400 text-xs">No Img</span>
                       )}
@@ -289,35 +325,13 @@ const FoesHub = () => {
     try {
       setBusy(true);
 
-      // Collect all storage paths to delete: main image + tecniche + spells images
-      const getStoragePath = (item) => {
-        if (!item) return null;
-        return item.imagePath || (item.imageUrl ? decodeURIComponent(item.imageUrl.split('/o/')[1]?.split('?')[0]) : null);
-      };
-      const pathsSet = new Set();
-
-      // Main foe image
-      const mainPath = getStoragePath(foe);
-      if (mainPath) pathsSet.add(mainPath);
-
-      // Tecniche images
-      if (Array.isArray(foe?.tecniche)) {
-        foe.tecniche.forEach((t) => {
-          const p = getStoragePath(t);
-            if (p) pathsSet.add(p);
-        });
-      }
-      // Spells images
-      if (Array.isArray(foe?.spells)) {
-        foe.spells.forEach((s) => {
-          const p = getStoragePath(s);
-            if (p) pathsSet.add(p);
-        });
-      }
-
-      // Delete all gathered storage objects (ignore individual failures)
+      const clientDeletablePaths = collectClientDeletableFoeStoragePaths(foe);
+      // Canonical main media is retired by the Firestore deletion trigger.
+      // Only legacy main and nested legacy objects remain client-deletable.
       try {
-        await Promise.allSettled(Array.from(pathsSet).map((p) => deleteObject(storageRef(storage, p))));
+        await Promise.allSettled(
+          clientDeletablePaths.map((path) => deleteObject(storageRef(storage, path)))
+        );
       } catch (e) {
         console.warn('Some foe asset deletions failed', e);
       }
@@ -347,26 +361,6 @@ const FoesHub = () => {
         manaCurrent: manaTotal,
       };
 
-      let imageUrl = basePayload.imageUrl || null;
-      let imagePath = basePayload.imagePath || null;
-
-      // If a new file selected, upload to foes/ and get URL
-      if (imageFile) {
-        const safeName = (basePayload?.name || 'foe').toString().trim().replace(/\s+/g, '_').slice(0, 40) || 'foe';
-        const fileName = `${safeName}_${Date.now()}`;
-        const path = `foes/${fileName}`;
-        const fileRef = storageRef(storage, path);
-        ({ downloadUrl: imageUrl } = await uploadCacheableImage(fileRef, imageFile));
-        imagePath = path;
-      }
-
-      // Remove image explicit request
-      if (removeImage) {
-        imageUrl = null;
-        imagePath = null;
-      }
-
-      // Upload tecniche/spells entry images
       const uploadEntryImage = async (folder, entry) => {
         let eUrl = entry.imageUrl || '';
         let ePath = entry.imagePath || '';
@@ -388,12 +382,127 @@ const FoesHub = () => {
         return { name: entry.name || '', description: entry.description || '', danni: entry.danni || '', effetti: entry.effetti || '', imageUrl: eUrl, imagePath: ePath };
       };
 
+      if (TASK07_MEDIA_PIPELINE_ENABLED && imageFile && !removeImage) {
+        const actorUid = auth.currentUser?.uid || '';
+        const foeRef = editing?.id
+          ? doc(db, 'foes', editing.id)
+          : doc(collection(db, 'foes'));
+        const revision = Date.now();
+        const withTec = Array.isArray(basePayload.tecniche)
+          ? await Promise.all(basePayload.tecniche.map((entry) => uploadEntryImage('tecniche', entry)))
+          : [];
+        const withSp = Array.isArray(basePayload.spells)
+          ? await Promise.all(basePayload.spells.map((entry) => uploadEntryImage('spells', entry)))
+          : [];
+        basePayload.tecniche = withTec;
+        basePayload.spells = withSp;
+
+        const {
+          buildTask07MediaEntityPatch,
+          buildTask07MediaOperationId,
+          describeTask07ConsumerOutcome,
+          getTask07PreviousAssetId,
+          runTask07ConsumerUpload,
+          task07ConsumerNeedsAttention,
+        } = await import(
+          /* webpackChunkName: "feature-task07-media" */
+          '../../data/media/mediaConsumerAdapter'
+        );
+        const payload = {
+          ...basePayload,
+          imageUrl: '',
+          imagePath: '',
+          updated_at: serverTimestamp(),
+        };
+        const outcome = await runTask07ConsumerUpload({
+          file: imageFile,
+          ownerUid: actorUid,
+          entityId: foeRef.id,
+          operationId: buildTask07MediaOperationId({
+            kind: 'foe',
+            ownerUid: actorUid,
+            entityId: foeRef.id,
+            file: imageFile,
+            revision,
+          }),
+          kind: 'foe',
+          previousAssetId: getTask07PreviousAssetId(editing),
+          commitEntity: (media) => {
+            const committedPayload = {
+              ...payload,
+              ...buildTask07MediaEntityPatch(media, { includeEmptyImageUrl: true }),
+            };
+            return editing?.id
+              ? updateDoc(foeRef, committedPayload)
+              : setDoc(foeRef, {
+                ...committedPayload,
+                created_at: serverTimestamp(),
+              });
+          },
+        });
+
+        try {
+          const cleanupList = [];
+          const prevTec = Array.isArray(foeData?.tecniche) ? foeData.tecniche : [];
+          prevTec.forEach((prev, idx) => {
+            const next = withTec[idx];
+            const prevPath = prev?.imagePath || (prev?.imageUrl ? decodeURIComponent(prev.imageUrl.split('/o/')[1]?.split('?')[0]) : null);
+            const nextPath = next?.imagePath || '';
+            if (prevPath && prevPath !== nextPath && (prev?.imageFile || prev?.removeImage)) cleanupList.push(prevPath);
+          });
+          const prevSp = Array.isArray(foeData?.spells) ? foeData.spells : [];
+          prevSp.forEach((prev, idx) => {
+            const next = withSp[idx];
+            const prevPath = prev?.imagePath || (prev?.imageUrl ? decodeURIComponent(prev.imageUrl.split('/o/')[1]?.split('?')[0]) : null);
+            const nextPath = next?.imagePath || '';
+            if (prevPath && prevPath !== nextPath && (prev?.imageFile || prev?.removeImage)) cleanupList.push(prevPath);
+          });
+          await Promise.allSettled(cleanupList.map((path) => deleteObject(storageRef(storage, path))));
+        } catch (cleanupError) {
+          console.warn('cleanup old foe entry image failed', cleanupError);
+        }
+
+        setModalOpen(false);
+        setEditing(null);
+        if (task07ConsumerNeedsAttention(outcome)) {
+          setError(describeTask07ConsumerOutcome(outcome, 'Foe image'));
+        }
+        return;
+      }
+
+      let imageUrl = basePayload.imageUrl || null;
+      let imagePath = basePayload.imagePath || null;
+
+      // If a new file selected, upload to foes/ and get URL
+      if (imageFile) {
+        const safeName = (basePayload?.name || 'foe').toString().trim().replace(/\s+/g, '_').slice(0, 40) || 'foe';
+        const fileName = `${safeName}_${Date.now()}`;
+        const path = `foes/${fileName}`;
+        const fileRef = storageRef(storage, path);
+        ({ downloadUrl: imageUrl } = await uploadCacheableImage(fileRef, imageFile));
+        imagePath = path;
+      }
+
+      // Remove image explicit request
+      if (removeImage) {
+        imageUrl = null;
+        imagePath = null;
+      }
+
       const withTec = Array.isArray(basePayload.tecniche) ? await Promise.all(basePayload.tecniche.map((t) => uploadEntryImage('tecniche', t))) : [];
       const withSp = Array.isArray(basePayload.spells) ? await Promise.all(basePayload.spells.map((s) => uploadEntryImage('spells', s))) : [];
       basePayload.tecniche = withTec;
       basePayload.spells = withSp;
 
-      const payload = { ...basePayload, imageUrl: normalizeImageUrl(imageUrl) || '', imagePath: imagePath || '', updated_at: serverTimestamp() };
+      let payload = {
+        ...basePayload,
+        imageUrl: normalizeImageUrl(imageUrl) || '',
+        imagePath: imagePath || '',
+        updated_at: serverTimestamp(),
+      };
+      if (removeImage) {
+        payload = buildCanonicalFoeImageRemovalPayload(payload, editing, deleteField());
+      }
 
       let docId = editing?.id;
       if (docId) {
@@ -407,7 +516,12 @@ const FoesHub = () => {
       try {
         const oldPath = originalImagePath || (originalImageUrl ? decodeURIComponent(originalImageUrl.split('/o/')[1]?.split('?')[0]) : null);
         const newPath = imagePath;
-        if ((imageFile || removeImage) && oldPath && oldPath !== newPath) {
+        if (
+          (imageFile || removeImage)
+          && oldPath
+          && oldPath !== newPath
+          && shouldClientDeleteFoeMainStorageObject(editing)
+        ) {
           await deleteObject(storageRef(storage, oldPath));
         }
         // cleanup tecniche/spells old images when replaced or removed

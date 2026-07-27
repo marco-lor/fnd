@@ -1,4 +1,4 @@
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./measured-test');
 const { installBootstrap, waitForReadiness } = require('./helpers');
 
 test('login route exposes all readiness phases', async ({ page, context }) => {

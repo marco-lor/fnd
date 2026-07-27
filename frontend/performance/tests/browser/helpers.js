@@ -1,9 +1,11 @@
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { expect } = require('@playwright/test');
 const {
   configureOwnedPerformanceEnvironment,
   projectId,
+  readJson,
   resultsDir,
   sha256,
   writeJson,
@@ -33,10 +35,395 @@ const demoFirestoreStreamOperation = (url) => {
   return parsed.pathname.match(FIRESTORE_STREAM_PATH)?.[1] || null;
 };
 
+const STORAGE_EMULATOR_ORIGIN = 'http://127.0.0.1:9199';
+const TASK07_FIXTURE_IMAGE_PATH = /^\/v0\/b\/demo-fnd-perf\.appspot\.com\/o\/performance%2Fimage-\d{3}\.svg$/i;
+const STATIC_ASSET_WARMUP_PATH = /^static\/(js|css)\/[^/]+\.(js|css)$/;
+const BROWSER_ASSET_WARMUP_ORIGIN = 'http://127.0.0.1:5000';
+const BROWSER_ASSET_WARMUP_BATCH_SIZE = 4;
+const BROWSER_ASSET_WARM_PASS_TIMEOUT_MS = 30_000;
+const BROWSER_ASSET_VALIDATION_PASS_TIMEOUT_MS = 5_000;
+const BUILD_REPORT_PATH = path.join(resultsDir, 'build-report.json');
 const LIFECYCLE_STREAM_OPERATIONS = {
   'auth-transition': new Set(['Listen']),
   'connection-drain': new Set(['Listen', 'Write']),
   'route-cleanup': new Set(['Listen', 'Write']),
+};
+
+const createStaticAssetWarmupBatches = (buildReport, { batchSize = 6 } = {}) => {
+  if (!Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 16) {
+    throw new TypeError('Static asset warmup batchSize must be an integer from 1 through 16.');
+  }
+  if (
+    buildReport?.schemaVersion !== 1
+    || buildReport?.buildMode !== 'performance'
+    || buildReport?.projectId !== 'demo-fnd-perf'
+  ) {
+    throw new Error('Static asset warmup requires the demo-fnd-perf performance build report.');
+  }
+  if (!Array.isArray(buildReport.assets)) {
+    throw new Error('Static asset warmup requires a build-report asset inventory.');
+  }
+
+  const seenPaths = new Set();
+  const assets = buildReport.assets
+    .filter((asset) => asset?.category === 'javascript' || asset?.category === 'css')
+    .map((asset) => {
+      const assetPath = String(asset.path || '').replace(/\\/g, '/');
+      const match = assetPath.match(STATIC_ASSET_WARMUP_PATH);
+      const expectedCategory = match?.[2] === 'js' ? 'javascript' : match?.[2];
+      if (!match || match[1] !== match[2] || expectedCategory !== asset.category) {
+        throw new Error(`Static asset warmup rejected an invalid build path: ${assetPath || 'missing'}.`);
+      }
+      if (seenPaths.has(assetPath)) {
+        throw new Error(`Static asset warmup rejected duplicate build path: ${assetPath}.`);
+      }
+      const rawBytes = Number(asset.rawBytes);
+      if (!Number.isSafeInteger(rawBytes) || rawBytes <= 0) {
+        throw new Error(`Static asset warmup requires positive rawBytes for ${assetPath}.`);
+      }
+      const sha256 = String(asset.sha256 || '').toLowerCase();
+      if (!/^[a-f0-9]{64}$/.test(sha256)) {
+        throw new Error(`Static asset warmup requires a SHA-256 digest for ${assetPath}.`);
+      }
+      seenPaths.add(assetPath);
+      return {
+        category: asset.category,
+        path: `/${assetPath}`,
+        rawBytes,
+        sha256,
+      };
+    })
+    .sort((left, right) => left.path.localeCompare(right.path));
+
+  if (!assets.length) {
+    throw new Error('Static asset warmup found no JavaScript or CSS build assets.');
+  }
+
+  return Array.from(
+    { length: Math.ceil(assets.length / batchSize) },
+    (_unused, index) => assets.slice(index * batchSize, (index + 1) * batchSize)
+  );
+};
+
+const assertStaticAssetWarmupInventory = (batches, actualPaths) => {
+  if (!Array.isArray(batches) || !Array.isArray(actualPaths)) {
+    throw new TypeError('Static asset warmup inventory comparison requires arrays.');
+  }
+  const plannedPaths = batches.flat().map(({ path: assetPath }) => (
+    String(assetPath || '').replace(/^\/+/, '').replace(/\\/g, '/')
+  )).sort();
+  const normalizedActualPaths = actualPaths.map((assetPath) => (
+    String(assetPath || '').replace(/^\/+/, '').replace(/\\/g, '/')
+  )).sort();
+  const planned = new Set(plannedPaths);
+  const actual = new Set(normalizedActualPaths);
+  const missing = plannedPaths.filter((assetPath) => !actual.has(assetPath));
+  const unreported = normalizedActualPaths.filter((assetPath) => !planned.has(assetPath));
+  if (missing.length || unreported.length) {
+    throw new Error(
+      'Static asset warmup build-report inventory is stale. '
+      + `Missing: ${missing.join(', ') || 'none'}. `
+      + `Unreported: ${unreported.join(', ') || 'none'}.`
+    );
+  }
+  return { assetCount: plannedPaths.length };
+};
+
+const runStaticAssetWarmupPass = async ({
+  batches,
+  passName,
+  requestAsset,
+  timeoutMs,
+  now = Date.now,
+}) => {
+  if (!Array.isArray(batches) || !batches.length || batches.some((batch) => !Array.isArray(batch))) {
+    throw new TypeError('Static asset warmup requires non-empty request batches.');
+  }
+  if (typeof requestAsset !== 'function' || typeof now !== 'function') {
+    throw new TypeError('Static asset warmup requires request and clock functions.');
+  }
+  if (!String(passName || '').trim()) {
+    throw new TypeError('Static asset warmup requires a passName.');
+  }
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new TypeError('Static asset warmup timeoutMs must be positive.');
+  }
+
+  const results = [];
+  for (const batch of batches) {
+    const batchResults = await Promise.all(batch.map(async (asset) => {
+      const startedAt = now();
+      try {
+        const response = await requestAsset(asset, { passName, timeoutMs });
+        const status = typeof response?.status === 'function'
+          ? Number(response.status())
+          : Number(response?.status);
+        const headers = typeof response?.headers === 'function'
+          ? response.headers()
+          : (response?.headers || {});
+        const contentType = String(headers['content-type'] || headers['Content-Type'] || '');
+        const body = await response.body();
+        const bytes = Number(body?.byteLength ?? body?.length ?? 0);
+        const sha256 = bytes > 0
+          ? crypto.createHash('sha256').update(body).digest('hex')
+          : null;
+        const expectedContentType = asset.category === 'javascript'
+          ? /^(?:application|text)\/javascript\b/i
+          : /^text\/css\b/i;
+        const violations = [
+          ...(status === 200 ? [] : [`HTTP ${Number.isFinite(status) ? status : 'unknown'}`]),
+          ...(bytes > 0 ? [] : ['empty response body']),
+          ...(expectedContentType.test(contentType)
+            ? []
+            : [`unexpected content type ${contentType || 'missing'}`]),
+          ...(sha256 === asset.sha256 ? [] : ['SHA-256 mismatch']),
+        ];
+        return {
+          bytes,
+          contentType,
+          durationMs: Math.max(0, now() - startedAt),
+          error: violations.join('; ') || null,
+          ok: violations.length === 0,
+          pass: passName,
+          path: asset.path,
+          sha256,
+          status: Number.isFinite(status) ? status : null,
+        };
+      } catch (error) {
+        return {
+          bytes: 0,
+          contentType: '',
+          durationMs: Math.max(0, now() - startedAt),
+          error: error.message,
+          ok: false,
+          pass: passName,
+          path: asset.path,
+          sha256: null,
+          status: null,
+        };
+      }
+    }));
+    results.push(...batchResults);
+  }
+  return results;
+};
+
+const runBrowserStaticAssetWarmupPass = async ({
+  batches,
+  page,
+  passName,
+  timeoutMs,
+}) => {
+  if (!Array.isArray(batches) || !batches.length || batches.some((batch) => !Array.isArray(batch))) {
+    throw new TypeError('Browser static asset warmup requires non-empty request batches.');
+  }
+  if (typeof page?.evaluate !== 'function') {
+    throw new TypeError('Browser static asset warmup requires a Playwright page.');
+  }
+  if (!String(passName || '').trim() || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new TypeError('Browser static asset warmup requires a passName and positive timeoutMs.');
+  }
+
+  const results = [];
+  for (const batch of batches) {
+    const batchResults = await page.evaluate(async ({ assets, requestPass, requestTimeoutMs }) => (
+      Promise.all(assets.map(async (asset) => {
+        const controller = new AbortController();
+        const startedAt = performance.now();
+        const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+        try {
+          const response = await fetch(asset.path, {
+            cache: 'no-store',
+            signal: controller.signal,
+          });
+          const contentType = response.headers.get('content-type') || '';
+          const body = await response.arrayBuffer();
+          const digest = await crypto.subtle.digest('SHA-256', body);
+          const sha256 = Array.from(new Uint8Array(digest), (byte) => (
+            byte.toString(16).padStart(2, '0')
+          )).join('');
+          const expectedContentType = asset.category === 'javascript'
+            ? /^(?:application|text)\/javascript\b/i
+            : /^text\/css\b/i;
+          const violations = [
+            ...(response.status === 200 ? [] : [`HTTP ${response.status}`]),
+            ...(body.byteLength > 0 ? [] : ['empty response body']),
+            ...(expectedContentType.test(contentType)
+              ? []
+              : [`unexpected content type ${contentType || 'missing'}`]),
+            ...(sha256 === asset.sha256 ? [] : ['SHA-256 mismatch']),
+          ];
+          return {
+            bytes: body.byteLength,
+            contentType,
+            durationMs: Math.max(0, performance.now() - startedAt),
+            error: violations.join('; ') || null,
+            ok: violations.length === 0,
+            pass: requestPass,
+            path: asset.path,
+            sha256,
+            status: response.status,
+          };
+        } catch (error) {
+          return {
+            bytes: 0,
+            contentType: '',
+            durationMs: Math.max(0, performance.now() - startedAt),
+            error: error.message,
+            ok: false,
+            pass: requestPass,
+            path: asset.path,
+            sha256: null,
+            status: null,
+          };
+        } finally {
+          clearTimeout(timer);
+        }
+      }))
+    ), {
+      assets: batch,
+      requestPass: passName,
+      requestTimeoutMs: timeoutMs,
+    });
+    results.push(...batchResults);
+  }
+  return results;
+};
+
+const warmBrowserAssetDelivery = async ({
+  baseURL,
+  browser,
+  context: providedContext,
+  diagnosticsPath,
+  owner,
+  buildReport = null,
+  writeDiagnostics = writeJson,
+}) => {
+  const ownerLabel = String(owner || 'unspecified');
+  const derivedDiagnosticsPath = /^[a-z0-9-]+$/.test(ownerLabel)
+    ? path.join(resultsDir, `browser-asset-warmup-${ownerLabel}.json`)
+    : null;
+  const resolvedDiagnosticsPath = path.resolve(String(
+    diagnosticsPath || derivedDiagnosticsPath || ''
+  ));
+  if (
+    path.dirname(resolvedDiagnosticsPath) !== path.resolve(resultsDir)
+    || path.extname(resolvedDiagnosticsPath) !== '.json'
+  ) {
+    throw new Error('Browser asset warmup diagnostics must be a JSON file in performance-results.');
+  }
+  if (
+    typeof writeDiagnostics !== 'function'
+    || (
+      typeof providedContext?.newPage !== 'function'
+      && typeof browser?.newContext !== 'function'
+    )
+  ) {
+    throw new TypeError(
+      'Browser asset warmup requires a Playwright browser or context and diagnostics writer.'
+    );
+  }
+  const diagnostics = {
+    schemaVersion: 1,
+    generatedAt: null,
+    projectId: 'demo-fnd-perf',
+    owner: ownerLabel,
+    status: 'running',
+    assetCount: 0,
+    batchSize: BROWSER_ASSET_WARMUP_BATCH_SIZE,
+    passes: [],
+    failure: null,
+  };
+  let context = providedContext;
+  let ownsContext = false;
+  let page;
+  let warmupMatcher;
+  let warmupHandler;
+  let operationError = null;
+  try {
+    const origin = new URL(baseURL).origin;
+    if (origin !== BROWSER_ASSET_WARMUP_ORIGIN) {
+      throw new Error(`Browser asset warmup refuses non-owned origin: ${origin}.`);
+    }
+    const batches = createStaticAssetWarmupBatches(
+      buildReport || readJson(BUILD_REPORT_PATH),
+      { batchSize: BROWSER_ASSET_WARMUP_BATCH_SIZE }
+    );
+    diagnostics.assetCount = batches.flat().length;
+    const warmupUrl = `${origin}/__fnd_perf_browser_asset_warmup__`;
+    if (!context) {
+      context = await browser.newContext({ baseURL: origin });
+      ownsContext = true;
+    }
+    warmupMatcher = (url) => url.href === warmupUrl;
+    warmupHandler = (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: '<!doctype html><html><body>asset warmup</body></html>',
+    });
+    await context.route(warmupMatcher, warmupHandler);
+    page = await context.newPage();
+    await page.goto(warmupUrl, { waitUntil: 'load', timeout: 15_000 });
+
+    for (const [passName, timeoutMs] of [
+      ['warm', BROWSER_ASSET_WARM_PASS_TIMEOUT_MS],
+      ['validation', BROWSER_ASSET_VALIDATION_PASS_TIMEOUT_MS],
+    ]) {
+      const results = await runBrowserStaticAssetWarmupPass({
+        batches,
+        page,
+        passName,
+        timeoutMs,
+      });
+      diagnostics.passes.push({ name: passName, timeoutMs, results });
+    }
+    const failures = diagnostics.passes.flatMap((pass) => (
+      pass.results.filter((result) => !result.ok)
+    ));
+    if (failures.length) {
+      throw new Error(
+        `Browser static asset warmup failed ${failures.length} requests: `
+        + failures.slice(0, 10).map((failure) => (
+          `${failure.pass} ${failure.path}: ${failure.error}`
+        )).join('; ')
+      );
+    }
+    diagnostics.status = 'passed';
+  } catch (error) {
+    operationError = error;
+    diagnostics.status = 'failed';
+    diagnostics.failure = { message: error.message, stack: error.stack };
+  } finally {
+    try {
+      await page?.close?.();
+    } catch (error) {
+      operationError ||= error;
+      diagnostics.status = 'failed';
+      diagnostics.failure ||= { message: error.message, stack: error.stack };
+    }
+    if (!ownsContext && typeof context?.unroute === 'function' && warmupMatcher) {
+      try {
+        await context.unroute(warmupMatcher, warmupHandler);
+      } catch (error) {
+        operationError ||= error;
+        diagnostics.status = 'failed';
+        diagnostics.failure ||= { message: error.message, stack: error.stack };
+      }
+    }
+    if (ownsContext) {
+      try {
+        await context?.close();
+      } catch (error) {
+        operationError ||= error;
+        diagnostics.status = 'failed';
+        diagnostics.failure ||= { message: error.message, stack: error.stack };
+      }
+    }
+    diagnostics.generatedAt = new Date().toISOString();
+    writeDiagnostics(resolvedDiagnosticsPath, diagnostics);
+  }
+  if (operationError) throw operationError;
+  return diagnostics;
 };
 
 const AUTH_DIRECTORY = path.resolve(__dirname, '..', '..', '..', 'playwright', '.auth');
@@ -93,6 +480,34 @@ const isExpectedFirestoreLifecycleCancellation = ({
 
   const operation = demoFirestoreStreamOperation(url);
   return Boolean(operation && allowedOperations.has(operation));
+};
+
+const isExpectedTask07MediaDetachmentCancellation = ({
+  lifecyclePhase,
+  resourceType,
+  failure,
+  url,
+  firebaseProjectId = projectId,
+} = {}) => {
+  if (
+    firebaseProjectId !== 'demo-fnd-perf'
+    || lifecyclePhase !== 'auth-transition'
+    || resourceType !== 'image'
+    || failure !== 'net::ERR_ABORTED'
+  ) {
+    return false;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (_error) {
+    return false;
+  }
+  return (
+    parsed.origin === STORAGE_EMULATOR_ORIGIN
+    && TASK07_FIXTURE_IMAGE_PATH.test(parsed.pathname)
+  );
 };
 
 const installDeterministicFontRoutes = async (context) => {
@@ -638,20 +1053,26 @@ module.exports = {
   countChangedDocumentsForTarget,
   countRouteResources,
   createPageAssetTracker,
+  createStaticAssetWarmupBatches,
+  assertStaticAssetWarmupInventory,
   drainPageConnections,
   installBootstrap,
   installDeterministicFontRoutes,
   isExpectedFirestoreLifecycleCancellation,
+  isExpectedTask07MediaDetachmentCancellation,
   isKnownDemoFirestoreStartupWarning,
   isRouteReadyInPage,
   locateDmDashboardPlayerCard,
   navigateToCleanup,
   readKonvaTokenPositions,
   restoreScenarioState,
+  runBrowserStaticAssetWarmupPass,
+  runStaticAssetWarmupPass,
   runInteraction,
   scenarioRestorePatch,
   summarizeResourceEntries,
   storageStateForRole,
+  warmBrowserAssetDelivery,
   waitForBridge,
   waitForKonvaTokenMove,
   waitForReadiness,

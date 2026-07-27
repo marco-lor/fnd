@@ -119,9 +119,18 @@ const mockCreateQuerySnapshot = (path, items) => ({
 
 const mockApplyQueryConstraints = (items, constraints) => (
   (constraints || []).reduce((filteredItems, constraint) => {
-    if (constraint?.kind !== 'where' || constraint.op !== '==') {
+    if (constraint?.kind !== 'where') {
       return filteredItems;
     }
+    if (constraint.op === 'in') {
+      return filteredItems.filter((item) => {
+        const itemValue = constraint.field === '__name__'
+          ? item?.id
+          : item?.[constraint.field];
+        return Array.isArray(constraint.value) && constraint.value.includes(itemValue);
+      });
+    }
+    if (constraint.op !== '==') return filteredItems;
 
     return filteredItems.filter((item) => {
       const itemValue = item?.[constraint.field];
@@ -294,11 +303,25 @@ jest.mock('firebase/functions', () => ({
   )),
 }));
 
+const mockCreateResumableUploadTask = (uploadedRef) => {
+  const task = {
+    snapshot: { ref: uploadedRef },
+    cancel: jest.fn(),
+  };
+  task.on = jest.fn((event, onProgress, onError, onComplete) => {
+    onComplete();
+    return jest.fn();
+  });
+  return task;
+};
+
 jest.mock('firebase/storage', () => ({
   deleteObject: jest.fn(() => Promise.resolve()),
+  getBlob: jest.fn(() => Promise.resolve(new Blob(['data'], { type: 'image/webp' }))),
   getDownloadURL: jest.fn(() => Promise.resolve('https://example.com/uploaded-map.png')),
   ref: jest.fn((storage, path) => ({ storage, path })),
   uploadBytes: jest.fn(() => Promise.resolve()),
+  uploadBytesResumable: jest.fn((uploadedRef) => mockCreateResumableUploadTask(uploadedRef)),
 }));
 
 const mockArrayUnionSentinel = (...values) => (
@@ -398,12 +421,18 @@ jest.mock('./GrigliataBoard', () => {
       <div data-testid="board-aoe-count">{String(props.aoeFigures?.length || 0)}</div>
       <div data-testid="board-token-count">{String(props.tokens?.length || 0)}</div>
       <div data-testid="board-token-ids">{(props.tokens || []).map((token) => token.tokenId).join(',')}</div>
+      <div data-testid="board-token-media-paths">{(props.tokens || []).map((token) => (
+        token?.media?.variants?.thumbnail?.path || token?.media?.original?.path || ''
+      )).join(',')}</div>
       <div data-testid="board-aoe-ids">{(props.aoeFigures || []).map((figure) => figure.id).join(',')}</div>
       <div data-testid="board-turn-order-enabled">{String(props.isTurnOrderEnabled)}</div>
       <div data-testid="board-turn-order-started">{String(props.isTurnOrderStarted)}</div>
       <div data-testid="board-turn-order-count">{String(props.turnOrderEntries?.length || 0)}</div>
       <div data-testid="board-active-turn-token">{props.activeTurnTokenId || ''}</div>
       <div data-testid="board-turn-order-order">{(props.turnOrderEntries || []).map((entry) => entry.tokenId).join(',')}</div>
+      <div data-testid="board-turn-order-media-paths">{(props.turnOrderEntries || []).map((entry) => (
+        entry?.media?.variants?.thumbnail?.path || entry?.media?.original?.path || ''
+      )).join(',')}</div>
       <div data-testid="board-turn-order-visibility">{(props.turnOrderEntries || []).map((entry) => `${entry.tokenId}:${entry.isVisibleToPlayers === false ? 'hidden' : 'visible'}`).join(',')}</div>
       <div data-testid="board-initiative-roll-result">{initiativeRollResult}</div>
       <div data-testid="board-ruler-enabled">{String(!!props.isRulerEnabled)}</div>
@@ -937,6 +966,16 @@ describe('GrigliataPage', () => {
       writable: true,
       value: jest.fn(),
     });
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      writable: true,
+      value: jest.fn(() => 'blob:task07-media-test'),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      writable: true,
+      value: jest.fn(),
+    });
     window.localStorage.clear();
     mockFirestoreListeners.splice(0, mockFirestoreListeners.length);
     mockBatchInstances.splice(0, mockBatchInstances.length);
@@ -1065,9 +1104,13 @@ describe('GrigliataPage', () => {
 
     const storageApi = require('firebase/storage');
     storageApi.deleteObject.mockClear().mockResolvedValue(undefined);
+    storageApi.getBlob.mockClear().mockResolvedValue(new Blob(['data'], { type: 'image/webp' }));
     storageApi.getDownloadURL.mockClear().mockResolvedValue('https://example.com/uploaded-map.png');
     storageApi.ref.mockClear().mockImplementation((storage, path) => ({ storage, path }));
     storageApi.uploadBytes.mockClear().mockResolvedValue(undefined);
+    storageApi.uploadBytesResumable
+      .mockClear()
+      .mockImplementation((uploadedRef) => mockCreateResumableUploadTask(uploadedRef));
 
     preloadImageAssets.mockClear().mockResolvedValue([]);
     scheduleImageAssetPreload.mockClear().mockImplementation(() => jest.fn());
@@ -1716,8 +1759,8 @@ describe('GrigliataPage', () => {
         await BackgroundGalleryPanelMock.mock.calls.at(-1)[0].onUploadBackgroundFiles([firstFile, secondFile]);
       });
 
-      expect(storageApi.uploadBytes).toHaveBeenCalledTimes(2);
-      expect(storageApi.uploadBytes).toHaveBeenNthCalledWith(
+      expect(storageApi.uploadBytesResumable).toHaveBeenCalledTimes(2);
+      expect(storageApi.uploadBytesResumable).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({
           path: expect.stringMatching(/^grigliata\/backgrounds\/user-1\/train_yard_\d+\.png$/),
@@ -1728,7 +1771,7 @@ describe('GrigliataPage', () => {
           contentType: 'image/png',
         }
       );
-      expect(storageApi.uploadBytes).toHaveBeenNthCalledWith(
+      expect(storageApi.uploadBytesResumable).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({
           path: expect.stringMatching(/^grigliata\/backgrounds\/user-1\/signal_room_\d+\.jpg$/),
@@ -1791,6 +1834,7 @@ describe('GrigliataPage', () => {
     });
 
     expect(storageApi.uploadBytes).not.toHaveBeenCalled();
+    expect(storageApi.uploadBytesResumable).not.toHaveBeenCalled();
     expect(firestore.addDoc).not.toHaveBeenCalled();
     expect(BackgroundGalleryPanelMock.mock.calls.at(-1)[0].uploadError).toMatch(/text-notes\.txt/i);
   });
@@ -1839,7 +1883,7 @@ describe('GrigliataPage', () => {
         await BackgroundGalleryPanelMock.mock.calls.at(-1)[0].onUploadBackgroundFiles([firstFile, secondFile]);
       });
 
-      expect(storageApi.uploadBytes).toHaveBeenCalledTimes(2);
+      expect(storageApi.uploadBytesResumable).toHaveBeenCalledTimes(2);
       expect(firestore.addDoc).toHaveBeenCalledTimes(2);
       expect(storageApi.deleteObject).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -2113,6 +2157,7 @@ describe('GrigliataPage', () => {
     });
 
     expect(storageApi.uploadBytes).not.toHaveBeenCalled();
+    expect(storageApi.uploadBytesResumable).not.toHaveBeenCalled();
     expect(firestore.setDoc).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'grigliata_background_lighting/map-1' }),
       expect.objectContaining({
@@ -4813,6 +4858,288 @@ describe('GrigliataPage', () => {
           });
         });
 
+  test('projects canonical-only user media and syncs the exact profile-global manifest', async () => {
+    const assetId = `m_${'a'.repeat(40)}`;
+    const thumbnailPath = `media/v1/avatar/user/${assetId}/derivatives/v1/thumbnail.webp`;
+    const originalPath = `media/v1/avatar/user/${assetId}/original/source.png`;
+    const media = {
+      assetId,
+      kind: 'avatar',
+      schemaVersion: 1,
+      state: 'ready',
+      original: {
+        path: originalPath,
+        generation: '1',
+        bytes: 4,
+        contentType: 'image/png',
+        width: 512,
+        height: 512,
+      },
+      variants: {
+        thumbnail: {
+          path: thumbnailPath,
+          generation: '2',
+          bytes: 4,
+          contentType: 'image/webp',
+          width: 96,
+          height: 96,
+        },
+      },
+    };
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'player',
+        characterId: 'Aldor',
+        imageUrl: '',
+        imagePath: originalPath,
+        media,
+        settings: {
+          grigliata_draw_color: 'ion-cyan',
+          grigliata_share_interactions: false,
+        },
+      },
+      loading: false,
+    });
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-1',
+      backgroundId: 'map-1',
+      tokenId: 'user-1',
+      ownerUid: 'user-1',
+      label: 'Aldor',
+      imageUrl: '',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+
+    const { container } = render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-token-media-paths')).toHaveTextContent(thumbnailPath);
+      expect(container.querySelector('img[src="blob:task07-media-test"]')).not.toBeNull();
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_tokens/user-1' }),
+        expect.objectContaining({
+          imageUrl: '',
+          imagePath: originalPath,
+          media,
+          tokenType: 'character',
+        }),
+        { merge: true }
+      );
+    });
+  });
+
+  test('reads canonical media from a visible peer character profile without copying it into placement state', async () => {
+    const assetId = `m_${'d'.repeat(40)}`;
+    const thumbnailPath = `media/v1/avatar/user-2/${assetId}/derivatives/v1/thumbnail.webp`;
+    setCollectionData('grigliata_tokens', [{
+      id: 'user-2',
+      ownerUid: 'user-2',
+      characterId: 'Bran',
+      label: 'Bran',
+      imageUrl: '',
+      imagePath: `media/v1/avatar/user-2/${assetId}/original/source.png`,
+      tokenType: 'character',
+      imageSource: 'profile',
+      media: {
+        assetId,
+        kind: 'avatar',
+        schemaVersion: 1,
+        state: 'ready',
+        variants: {
+          thumbnail: {
+            path: thumbnailPath,
+            generation: '4',
+            bytes: 4,
+            contentType: 'image/webp',
+            width: 96,
+            height: 96,
+          },
+        },
+      },
+      updatedAt: { seconds: 1 },
+      updatedBy: 'user-2',
+    }]);
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__user-2',
+      backgroundId: 'map-1',
+      tokenId: 'user-2',
+      ownerUid: 'user-2',
+      label: 'Bran',
+      imageUrl: '',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(firestore.onSnapshot.mock.calls.some(([target]) => {
+        const constraints = target?.constraints || [];
+        return target?.kind === 'query'
+          && target?.base?.path === 'grigliata_tokens'
+          && constraints.some((constraint) => (
+            constraint.field === '__name__'
+            && constraint.op === 'in'
+            && constraint.value.includes('user-2')
+          ))
+          && constraints.some((constraint) => (
+            constraint.field === 'tokenType'
+            && constraint.op === '=='
+            && constraint.value === 'character'
+          ));
+      })).toBe(true);
+      expect(screen.getByTestId('board-token-media-paths')).toHaveTextContent(thumbnailPath);
+    });
+    expect(firestore.setDoc.mock.calls.some(([target, payload]) => (
+      target?.path === 'grigliata_token_placements/map-1__user-2'
+      && Object.prototype.hasOwnProperty.call(payload || {}, 'media')
+    ))).toBe(false);
+  });
+
+  test('caps visible peer character profile reads at two deterministic 30-id queries', async () => {
+    const peerIds = Array.from(
+      { length: 61 },
+      (_, index) => `user-peer-${String(index + 1).padStart(2, '0')}`
+    );
+    setCollectionData('grigliata_tokens', peerIds.map((peerId) => ({
+      id: peerId,
+      ownerUid: peerId,
+      characterId: peerId,
+      label: peerId,
+      imageUrl: '',
+      imagePath: '',
+      tokenType: 'character',
+      imageSource: 'profile',
+      updatedAt: { seconds: 1 },
+      updatedBy: peerId,
+    })));
+    setCollectionData('grigliata_token_placements', peerIds.map((peerId, index) => ({
+      id: `map-1__${peerId}`,
+      backgroundId: 'map-1',
+      tokenId: peerId,
+      ownerUid: peerId,
+      label: peerId,
+      imageUrl: '',
+      col: index % 10,
+      row: Math.floor(index / 10),
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    })));
+
+    render(<GrigliataPage />);
+
+    let sharedProfileTargets = [];
+    await waitFor(() => {
+      sharedProfileTargets = firestore.onSnapshot.mock.calls
+        .map(([target]) => target)
+        .filter((target) => (
+          target?.kind === 'query'
+          && target?.base?.path === 'grigliata_tokens'
+          && target.constraints?.some((constraint) => (
+            constraint.field === '__name__' && constraint.op === 'in'
+          ))
+        ));
+      expect(sharedProfileTargets).toHaveLength(2);
+    });
+
+    const idChunks = sharedProfileTargets.map((target) => (
+      target.constraints.find((constraint) => (
+        constraint.field === '__name__' && constraint.op === 'in'
+      )).value
+    ));
+    expect(idChunks.map((chunk) => chunk.length)).toEqual([30, 30]);
+    expect(idChunks.flat()).toEqual(peerIds.slice(0, 60));
+    expect(idChunks.flat()).not.toContain('user-peer-61');
+    sharedProfileTargets.forEach((target) => {
+      expect(target.constraints).toContainEqual(expect.objectContaining({
+        field: 'tokenType',
+        op: '==',
+        value: 'character',
+      }));
+    });
+  });
+
+  test('projects the current canonical foe source into board and turn-order views', async () => {
+    setManagerAuth();
+    const sourceAssetId = `m_${'b'.repeat(40)}`;
+    const sourceThumbnailPath = `media/v1/foe/user/${sourceAssetId}/derivatives/v1/thumbnail.webp`;
+    const sourceMedia = {
+      assetId: sourceAssetId,
+      kind: 'foe',
+      schemaVersion: 1,
+      state: 'ready',
+      variants: {
+        thumbnail: {
+          path: sourceThumbnailPath,
+          generation: '3',
+          bytes: 4,
+          contentType: 'image/webp',
+          width: 96,
+          height: 96,
+        },
+      },
+    };
+    setCollectionData('foes', [{
+      id: 'foe-1',
+      name: 'Current Foe',
+      imageUrl: '',
+      imagePath: '',
+      media: sourceMedia,
+    }]);
+    setCollectionData('grigliata_tokens', [{
+      id: 'foe-token-1',
+      ownerUid: 'user-1',
+      tokenType: 'foe',
+      foeSourceId: 'foe-1',
+      label: 'Current Foe',
+      imageUrl: 'https://example.com/superseded-foe.png',
+      imagePath: 'foes/superseded-foe.png',
+      media: {
+        kind: 'foe',
+        variants: {
+          thumbnail: {
+            path: `media/v1/foe/user/m_${'c'.repeat(40)}/derivatives/v1/thumbnail.webp`,
+          },
+        },
+      },
+    }]);
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__foe-token-1',
+      backgroundId: 'map-1',
+      tokenId: 'foe-token-1',
+      ownerUid: 'user-1',
+      label: 'Current Foe',
+      imageUrl: 'https://example.com/superseded-foe.png',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+      isInTurnOrder: true,
+      turnOrderInitiative: 14,
+    }]);
+
+    const { container } = render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('board-token-media-paths')).toHaveTextContent(sourceThumbnailPath);
+      expect(screen.getByTestId('board-turn-order-media-paths')).toHaveTextContent(sourceThumbnailPath);
+      expect(container.querySelector('img[src="blob:task07-media-test"]')).not.toBeNull();
+    });
+  });
+
   test('places the current token with an explicit dead-state flag', async () => {
     useAuth.mockReturnValue({
       user: {
@@ -5485,7 +5812,7 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      expect(storageApi.uploadBytes).toHaveBeenCalledTimes(1);
+      expect(storageApi.uploadBytesResumable).toHaveBeenCalledTimes(1);
       expect(firestore.setDoc).toHaveBeenCalledWith(
         expect.objectContaining({ path: 'grigliata_tokens/generated-doc-1' }),
         expect.objectContaining({
@@ -8846,6 +9173,42 @@ describe('GrigliataPage', () => {
         expect.objectContaining({ path: 'grigliata_backgrounds/map-2' })
       );
     });
+
+    confirmSpy.mockRestore();
+  });
+
+  test('leaves canonical map storage cleanup to the document deletion trigger', async () => {
+    setManagerAuth();
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    const storageApi = require('firebase/storage');
+    const assetId = `m_${'a'.repeat(40)}`;
+    const canonicalPath = `media/v1/map/user-1/${assetId}/original/source.png`;
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+    });
+
+    firestore.deleteDoc.mockClear();
+    storageApi.deleteObject.mockClear();
+
+    const latestBackgroundGalleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+    await act(async () => {
+      await latestBackgroundGalleryProps.onDeleteBackground({
+        id: 'map-2',
+        name: 'Iron Keep',
+        imagePath: canonicalPath,
+        media: { assetId },
+      });
+    });
+
+    await waitFor(() => {
+      expect(firestore.deleteDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_backgrounds/map-2' })
+      );
+    });
+    expect(storageApi.deleteObject).not.toHaveBeenCalled();
 
     confirmSpy.mockRestore();
   });

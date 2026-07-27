@@ -16,15 +16,27 @@ test('seed trigger summary allows only bounded readiness activity', () => {
     invocation('europe-west8-updateTotParameters'),
     invocation('europe-west8-syncUserDirectory'),
     invocation('europe-west8-syncUserDerivedState'),
+    invocation('europe-west8-cleanupTask07RemovedBackgroundMedia'),
+    invocation('europe-west8-cleanupTask07RemovedCatalogItemMedia'),
+    invocation('europe-west8-cleanupTask07RemovedFoeMedia'),
+    invocation('europe-west8-cleanupTask07RemovedInventoryMedia'),
+    invocation('europe-west8-cleanupTask07RemovedNpcMedia'),
+    invocation('europe-west8-cleanupTask07RemovedUserMedia'),
     invocation('europe-west1-clientFirebaseConfig'),
   ].join('\n'));
 
-  assert.equal(summary.backgroundInvocations, 4);
+  assert.equal(summary.backgroundInvocations, 10);
   assert.equal(summary.cleanupInvocations, 0);
   assert.deepEqual(summary.counts, {
     'europe-west8-updateTotParameters': 2,
     'europe-west8-syncUserDirectory': 1,
     'europe-west8-syncUserDerivedState': 1,
+    'europe-west8-cleanupTask07RemovedBackgroundMedia': 1,
+    'europe-west8-cleanupTask07RemovedCatalogItemMedia': 1,
+    'europe-west8-cleanupTask07RemovedFoeMedia': 1,
+    'europe-west8-cleanupTask07RemovedInventoryMedia': 1,
+    'europe-west8-cleanupTask07RemovedNpcMedia': 1,
+    'europe-west8-cleanupTask07RemovedUserMedia': 1,
     'europe-west1-clientFirebaseConfig': 1,
   });
 });
@@ -84,7 +96,7 @@ test('measurement trigger suppression rejects any background invocation growth',
 
 test('startup readiness consumes Hub and Functions bodies for the exact harness project', async () => {
   const registrations = {
-    auth: {}, firestore: {}, functions: {}, hosting: {}, storage: {},
+    auth: {}, firestore: {}, functions: {}, hosting: { port: 5002 }, storage: {},
   };
   const calls = [];
   let functionBodyReads = 0;
@@ -112,6 +124,32 @@ test('startup readiness consumes Hub and Functions bodies for the exact harness 
   ]);
   assert.equal(functionBodyReads, 1);
   assert.ok(calls.every(({ signal }) => signal instanceof AbortSignal && !signal.aborted));
+});
+
+test('startup readiness requires Firebase Hosting on the hidden upstream port', async () => {
+  let currentTime = 0;
+  await assert.rejects(
+    waitForEmulators({
+      lifecycleProjectId: 'demo-fnd-perf',
+      timeoutMs: 5,
+      requestTimeoutMs: 2,
+      intervalMs: 1,
+      nowImpl: () => currentTime,
+      sleepImpl: async (delayMs) => { currentTime += delayMs; },
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          auth: {},
+          firestore: {},
+          functions: {},
+          hosting: { port: 5000 },
+          storage: {},
+        }),
+      }),
+    }),
+    /Firebase Hosting registered on port 5000; expected 5002/
+  );
 });
 
 test('startup readiness refuses a different demo project before making requests', async () => {

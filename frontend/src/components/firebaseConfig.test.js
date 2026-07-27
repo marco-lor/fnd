@@ -125,8 +125,15 @@ describe("Firebase async bootstrap", () => {
       expect(fetchImpl).not.toHaveBeenCalled();
       expect(require("firebase/auth").connectAuthEmulator).toHaveBeenCalledTimes(1);
       expect(require("../performance/firestore").connectFirestoreEmulator).toHaveBeenCalledTimes(1);
-      expect(require("../performance/firestore").getFirestore).toHaveBeenCalledTimes(1);
-      expect(require("../performance/firestore").initializeFirestore).not.toHaveBeenCalled();
+      const firestore = require("../performance/firestore");
+      expect(firestore.getFirestore).not.toHaveBeenCalled();
+      expect(firestore.initializeFirestore).toHaveBeenCalledTimes(1);
+      const [initializedApp, settings] = firestore.initializeFirestore.mock.calls[0];
+      expect(initializedApp.config.projectId).toBe("demo-fnd-perf");
+      expect(settings).toEqual({
+        experimentalAutoDetectLongPolling: false,
+      });
+      expect(settings).not.toHaveProperty("experimentalForceLongPolling");
     } finally {
       if (previousPerformanceMode === undefined) delete process.env.REACT_APP_FND_PERF;
       else process.env.REACT_APP_FND_PERF = previousPerformanceMode;

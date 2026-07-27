@@ -1,0 +1,43 @@
+import { useEffect, useState } from 'react';
+
+const getDefaultUrlApi = () => (
+  typeof URL !== 'undefined' ? URL : null
+);
+
+export const createObjectUrlLease = (file, {
+  urlApi = getDefaultUrlApi(),
+} = {}) => {
+  if (!file) return { revoke: () => {}, url: '' };
+  if (
+    typeof urlApi?.createObjectURL !== 'function'
+    || typeof urlApi?.revokeObjectURL !== 'function'
+  ) {
+    throw new Error('Object URL previews are not supported in this environment.');
+  }
+  const url = urlApi.createObjectURL(file);
+  let active = true;
+  return {
+    url,
+    revoke: () => {
+      if (!active) return;
+      active = false;
+      urlApi.revokeObjectURL(url);
+    },
+  };
+};
+
+const useObjectUrl = (file) => {
+  const [objectUrl, setObjectUrl] = useState('');
+
+  useEffect(() => {
+    setObjectUrl('');
+    if (!file) return undefined;
+    const lease = createObjectUrlLease(file);
+    setObjectUrl(lease.url);
+    return lease.revoke;
+  }, [file]);
+
+  return objectUrl;
+};
+
+export default useObjectUrl;

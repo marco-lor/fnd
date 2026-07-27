@@ -29,6 +29,9 @@ import {
 import {
   duplicateFoeWithAssetsLegacyHandler,
 } from "./duplicateFoeWithAssetsLegacy";
+import {
+  stripTask07MediaFromDuplicatedFoe,
+} from "./duplicateFoeWithAssetsCore";
 
 type DuplicatePayload = {
   sourceFoeId?: string;
@@ -550,7 +553,7 @@ const duplicateFoeHandler = async (
   );
   const sourceStats = asRecord(source.stats);
   const payload = {
-    ...source,
+    ...stripTask07MediaFromDuplicatedFoe(source),
     name: newFoeName,
     imagePath: mainCopy.path,
     imageUrl: mainCopy.url,

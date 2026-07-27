@@ -108,6 +108,42 @@
       "owner": "user-data-v2",
       "compatibilityAliasOf": null
     },
+    "task07PrepareMediaUpload": {
+      "functionId": "task07PrepareMediaUpload",
+      "region": "europe-west8",
+      "owner": "media-lifecycle",
+      "compatibilityAliasOf": null
+    },
+    "task07FinalizeMediaUpload": {
+      "functionId": "task07FinalizeMediaUpload",
+      "region": "europe-west8",
+      "owner": "media-lifecycle",
+      "compatibilityAliasOf": null
+    },
+    "task07ConfirmMediaReference": {
+      "functionId": "task07ConfirmMediaReference",
+      "region": "europe-west8",
+      "owner": "media-lifecycle",
+      "compatibilityAliasOf": null
+    },
+    "task07AbandonMediaAsset": {
+      "functionId": "task07AbandonMediaAsset",
+      "region": "europe-west8",
+      "owner": "media-lifecycle",
+      "compatibilityAliasOf": null
+    },
+    "task07RetireMediaAsset": {
+      "functionId": "task07RetireMediaAsset",
+      "region": "europe-west8",
+      "owner": "media-lifecycle",
+      "compatibilityAliasOf": null
+    },
+    "task07RetryMediaCleanup": {
+      "functionId": "task07RetryMediaCleanup",
+      "region": "europe-west8",
+      "owner": "media-lifecycle",
+      "compatibilityAliasOf": null
+    },
     "setAllParameterLocks": {
       "functionId": "setAllParameterLocks",
       "region": "europe-west8",

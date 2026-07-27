@@ -281,7 +281,7 @@ const collectHealthSample = async ({
     fetchImpl,
     url: `${hostingBaseUrl}/`,
     requestTimeoutMs: nextRequestTimeoutMs(),
-    label: 'Firebase Hosting emulator probe',
+    label: 'Performance static server probe',
   });
   const functions = await probeHttpEndpoint({
     fetchImpl,

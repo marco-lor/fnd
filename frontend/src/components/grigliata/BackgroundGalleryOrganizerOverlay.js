@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { FiTrash2 } from 'react-icons/fi';
 import { isVideoBackground } from './boardUtils';
+import MediaImage, { resolveMediaAsset } from '../common/MediaImage';
 import MediaFolderOrganizerOverlay from './MediaFolderOrganizerOverlay';
 import {
   buildGalleryFolderOptions,
@@ -8,6 +9,50 @@ import {
   getWritableGalleryFolderId,
   UNFILED_GALLERY_FOLDER_ID,
 } from './galleryFolders';
+
+const isRecord = (value) => (
+  value != null && typeof value === 'object' && !Array.isArray(value)
+);
+
+const getBackgroundMediaManifest = (background) => {
+  if (isRecord(background?.media)) return background.media;
+  if (isRecord(background?.General?.media)) return background.General.media;
+  return {};
+};
+
+const isVideoGalleryBackground = (background, manifest) => (
+  isVideoBackground(background)
+  || manifest.kind === 'map-video'
+  || manifest.original?.contentType === 'video/mp4'
+);
+
+const buildVideoPosterMedia = (manifest) => {
+  const poster = isRecord(manifest.variants)
+    ? manifest.variants.poster
+    : null;
+  return {
+    media: {
+      schemaVersion: manifest.schemaVersion,
+      state: manifest.state,
+      variants: poster ? { poster } : {},
+    },
+  };
+};
+
+const buildOrganizerThumbnail = (background) => {
+  const manifest = getBackgroundMediaManifest(background);
+  const isVideo = isVideoGalleryBackground(background, manifest);
+  const media = isVideo ? buildVideoPosterMedia(manifest) : background;
+  const src = isVideo ? '' : (background?.imageUrl || '');
+  const variant = isVideo ? 'poster' : 'thumbnail';
+  return {
+    asset: resolveMediaAsset(media, { fallbackSrc: src, variant }),
+    isVideo,
+    media,
+    src,
+    variant,
+  };
+};
 
 export default function BackgroundGalleryOrganizerOverlay({
   isOpen = false,
@@ -51,7 +96,13 @@ export default function BackgroundGalleryOrganizerOverlay({
       getItemId={(background) => background?.id || ''}
       isItemSelectionEnabled
       renderItem={({ item: background, itemId, moving, dragProps, isSelectionEnabled, isSelected, onSelectedChange }) => {
-        const isVideo = isVideoBackground(background);
+        const {
+          asset: thumbnailAsset,
+          isVideo,
+          media: thumbnailMedia,
+          src: thumbnailSrc,
+          variant: thumbnailVariant,
+        } = buildOrganizerThumbnail(background);
         const resolvedFolderId = getResolvedGalleryFolderId(background, folders);
         const selectValue = getWritableGalleryFolderId(resolvedFolderId);
         const backgroundName = background.name || 'Untitled Map';
@@ -79,23 +130,17 @@ export default function BackgroundGalleryOrganizerOverlay({
               </label>
             )}
             <div className="h-16 overflow-hidden rounded-lg border border-slate-700 bg-slate-950">
-              {background.imageUrl && (
-                isVideo ? (
-                  <video
-                    src={background.imageUrl}
-                    aria-label={backgroundName}
-                    className="h-full w-full object-cover"
-                    muted
-                    playsInline
-                    preload="metadata"
-                  />
-                ) : (
-                  <img
-                    src={background.imageUrl}
-                    alt={backgroundName}
-                    className="h-full w-full object-cover"
-                  />
-                )
+              {thumbnailAsset.candidates.length > 0 && (
+                <MediaImage
+                  media={thumbnailMedia}
+                  src={thumbnailSrc}
+                  variant={thumbnailVariant}
+                  alt={backgroundName}
+                  width={80}
+                  height={64}
+                  sizes="80px"
+                  className="h-full w-full object-cover"
+                />
               )}
             </div>
             <div className="min-w-0">

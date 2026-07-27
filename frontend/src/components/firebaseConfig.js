@@ -5,6 +5,7 @@ import { connectAuthEmulator, getAuth } from "firebase/auth";
 import {
   connectFirestoreEmulator,
   getFirestore,
+  initializeFirestore,
 } from "../performance/firestore";
 
 export const FIREBASE_CONFIG_ENDPOINT = "/fatins-runtime/firebase-client";
@@ -139,7 +140,11 @@ const initializeFirebaseServices = (config, {
   }
 
   auth = getAuth(app);
-  db = getFirestore(app);
+  db = performanceMode
+    ? initializeFirestore(app, {
+      experimentalAutoDetectLongPolling: false,
+    })
+    : getFirestore(app);
 
   if (performanceMode && !emulatorsConnected) {
     connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });

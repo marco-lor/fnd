@@ -24,12 +24,20 @@ jest.mock("firebase/firestore", () => ({
 var mockDeleteObject = jest.fn(() => Promise.resolve());
 var mockGetDownloadURL = jest.fn(() => Promise.resolve("https://example.com/tecnica.png"));
 var mockRef = jest.fn(() => mockStorageRef);
-var mockUploadBytes = jest.fn(() => Promise.resolve());
+var mockUploadTask = {
+  snapshot: { ref: mockStorageRef },
+  cancel: jest.fn(),
+  on: jest.fn((event, onProgress, onError, onComplete) => {
+    onComplete();
+    return jest.fn();
+  }),
+};
+var mockUploadBytesResumable = jest.fn(() => mockUploadTask);
 jest.mock("firebase/storage", () => ({
   deleteObject: (...args) => mockDeleteObject(...args),
   getDownloadURL: (...args) => mockGetDownloadURL(...args),
   ref: (...args) => mockRef(...args),
-  uploadBytes: (...args) => mockUploadBytes(...args),
+  uploadBytesResumable: (...args) => mockUploadBytesResumable(...args),
 }));
 
 import { normalizeV2PersonalContentDocument } from "../../data/userData/normalizers";
@@ -42,6 +50,14 @@ describe("saveTecnicaForUser", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockRef.mockReturnValue(mockStorageRef);
+    mockUploadTask.snapshot = { ref: mockStorageRef };
+    mockUploadTask.on.mockImplementation(
+      (event, onProgress, onError, onComplete) => {
+        onComplete();
+        return jest.fn();
+      }
+    );
+    mockUploadBytesResumable.mockReturnValue(mockUploadTask);
     mockAuth.currentUser = null;
 
     mockGetDoc.mockResolvedValue({
@@ -76,8 +92,8 @@ describe("saveTecnicaForUser", () => {
       mockStorage,
       expect.stringMatching(/^tecnicas\/tecnica_target-user_Fire_Ball_\d+_image$/)
     );
-    expect(mockUploadBytes).toHaveBeenCalledTimes(1);
-    expect(mockUploadBytes).toHaveBeenCalledWith(
+    expect(mockUploadBytesResumable).toHaveBeenCalledTimes(1);
+    expect(mockUploadBytesResumable).toHaveBeenCalledWith(
       mockStorageRef,
       imageFile,
       {

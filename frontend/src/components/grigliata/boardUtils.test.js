@@ -25,6 +25,8 @@ describe('background media helpers', () => {
     expect(getBackgroundAssetType({ assetType: 'image' })).toBe('image');
     expect(getBackgroundAssetType({ assetType: 'video' })).toBe('video');
     expect(isVideoBackground({ assetType: 'video' })).toBe(true);
+    expect(getBackgroundAssetType({ media: { kind: 'map-video' } })).toBe('video');
+    expect(isVideoBackground({ media: { kind: 'map-video' } })).toBe(true);
     expect(isVideoBackground({ imageUrl: 'https://example.com/map.png' })).toBe(false);
   });
 

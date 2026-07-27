@@ -1,6 +1,26 @@
 import React from 'react';
+import MediaImage from '../../common/MediaImage';
+import useObjectUrl from '../../common/useObjectUrl';
 
 const ensureArray = (v) => Array.isArray(v) ? v : [];
+
+const EditorImagePreview = ({ item, label }) => {
+  const previewUrl = useObjectUrl(item?.imageFile || null);
+  const src = previewUrl || item?.imageUrl || '';
+  return src ? (
+    <MediaImage
+      src={src}
+      variant="thumbnail"
+      alt={label}
+      width={80}
+      height={80}
+      loading="eager"
+      className="w-full h-full object-cover"
+    />
+  ) : (
+    <span className="text-slate-400 text-xs">No Img</span>
+  );
+};
 
 const SpellsEditor = ({ value = [], onChange }) => {
   const list = ensureArray(value);
@@ -22,11 +42,7 @@ const SpellsEditor = ({ value = [], onChange }) => {
             <div key={idx} className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
               <div className="flex items-start gap-3">
                 <div className="w-20 h-20 rounded-lg overflow-hidden border border-slate-700/60 bg-slate-800/60 flex items-center justify-center shrink-0">
-                  {(it.previewUrl || it.imageUrl) ? (
-                    <img src={it.previewUrl || it.imageUrl} alt={it.name || 'spell'} className="w-full h-full object-cover" />
-                  ) : (
-                    <span className="text-slate-400 text-xs">No Img</span>
-                  )}
+                  <EditorImagePreview item={it} label={it.name || 'spell'} />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1">
                   <label className="block">
@@ -38,11 +54,10 @@ const SpellsEditor = ({ value = [], onChange }) => {
                     <div className="flex items-center gap-2">
                       <input type="file" accept="image/*" onChange={(e) => {
                         const f = e.target.files?.[0] || null;
-                        const purl = f ? URL.createObjectURL(f) : null;
-                        setItem(idx, { imageFile: f || null, previewUrl: purl, removeImage: !f && !it.imageUrl });
+                        setItem(idx, { imageFile: f || null, removeImage: !f && !it.imageUrl });
                       }} className="block text-sm text-slate-200 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-600/80 file:text-white hover:file:bg-indigo-600" />
-                      {(it.previewUrl || it.imageUrl) && (
-                        <button type="button" className="px-2 py-1 rounded-md border border-red-400/40 text-red-200 hover:bg-red-500/10 text-[12px]" onClick={() => setItem(idx, { imageFile: null, previewUrl: null, removeImage: true, imageUrl: '' })}>Remove</button>
+                      {(it.imageFile || it.imageUrl) && (
+                        <button type="button" className="px-2 py-1 rounded-md border border-red-400/40 text-red-200 hover:bg-red-500/10 text-[12px]" onClick={() => setItem(idx, { imageFile: null, removeImage: true, imageUrl: '' })}>Remove</button>
                       )}
                     </div>
                   </div>

@@ -32,6 +32,8 @@ import { useAuth } from '../../AuthContext';
 import { auth, db } from '../firebaseConfig';
 import { storage } from '../firebaseStorage';
 import { uploadCacheableImage } from '../common/imageStorage';
+import { hasMediaAsset } from '../common/MediaImage';
+import { hasCanonicalTask07MediaAssetId } from '../common/canonicalMediaAsset';
 import { getCallable } from '../../data/functions/callableRegistry';
 import {
   TASK06_LOCAL_CANDIDATE,
@@ -39,6 +41,7 @@ import {
 import {
   runWithDurableOperationIntent,
 } from '../../data/functions/backendOperationIntentStore';
+import { TASK07_MEDIA_PIPELINE_ENABLED } from '../../data/media/mediaFeatureFlags';
 import {
   buildGrigliataLightingSummary,
   GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION,
@@ -443,6 +446,34 @@ const MAX_DEFERRED_GALLERY_IMAGE_PRELOADS = 6;
 const collectUniqueImageUrls = (urls) => [...new Set(
   (urls || []).map((url) => (typeof url === 'string' ? url.trim() : '')).filter(Boolean)
 )];
+const areMediaManifestValuesEqual = (left, right) => {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => areMediaManifestValuesEqual(value, right[index]))
+    );
+  }
+  if (
+    !left
+    || !right
+    || typeof left !== 'object'
+    || typeof right !== 'object'
+  ) {
+    return false;
+  }
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return (
+    leftKeys.length === rightKeys.length
+    && leftKeys.every((key, index) => (
+      key === rightKeys[index]
+      && areMediaManifestValuesEqual(left[key], right[key])
+    ))
+  );
+};
 const getBackgroundImageUrlForPreload = (background) => (
   background && !isVideoBackground(background) ? background.imageUrl : ''
 );
@@ -583,6 +614,14 @@ export default function GrigliataPage() {
   const currentCharacterId = typeof userData?.characterId === 'string' ? userData.characterId.trim() : '';
   const currentImageUrl = typeof userData?.imageUrl === 'string' ? userData.imageUrl.trim() : '';
   const currentImagePath = typeof userData?.imagePath === 'string' ? userData.imagePath.trim() : '';
+  const currentMediaCandidate = (
+    userData?.media && typeof userData.media === 'object'
+      ? userData.media
+      : (userData?.General?.media && typeof userData.General.media === 'object' ? userData.General.media : null)
+  );
+  const currentMedia = hasMediaAsset({ media: currentMediaCandidate }, {
+    variant: 'thumbnail',
+  }) ? currentMediaCandidate : null;
   const currentTokenLabel = currentCharacterId || currentUserEmail.split('@')[0] || 'Player';
   const persistedDrawColorKey = resolveGrigliataDrawColorKey(userData?.settings?.grigliata_draw_color);
   const persistedInteractionSharingEnabled = userData?.settings?.[GRIGLIATA_SHARE_INTERACTIONS_FIELD] === true;
@@ -788,6 +827,7 @@ export default function GrigliataPage() {
   } = useGrigliataPageData({
     activeGridSizeOverride,
     currentCharacterId,
+    currentMedia,
     currentImagePath,
     currentImageUrl,
     currentTokenLabel,
@@ -1232,8 +1272,8 @@ export default function GrigliataPage() {
     const localTokenProfile = tokenProfilesByTokenId.get(selectedBoardToken.tokenId) || null;
     const tokenProfile = isOwnedByCurrentUser ? localTokenProfile : selectedExternalTokenProfile;
     const profileLabel = typeof tokenProfile?.label === 'string' ? tokenProfile.label.trim() : '';
-    const resolvedImageUrl = tokenProfile?.imageUrl || selectedBoardToken.imageUrl || '';
-    const resolvedImagePath = tokenProfile?.imagePath || '';
+    const resolvedImageUrl = selectedBoardToken.imageUrl || tokenProfile?.imageUrl || '';
+    const resolvedImagePath = selectedBoardToken.imagePath || tokenProfile?.imagePath || '';
     const resolvedNotes = normalizeTokenNotesValue(tokenProfile?.notes);
 
     if (tokenType === 'foe') {
@@ -1247,6 +1287,7 @@ export default function GrigliataPage() {
         label: profileLabel || selectedBoardToken.label || 'Foe',
         imageUrl: resolvedImageUrl,
         imagePath: resolvedImagePath,
+        media: selectedBoardToken?.media || tokenProfile?.media || null,
         category: tokenProfile?.category || '',
         rank: tokenProfile?.rank || '',
         dadoAnima: tokenProfile?.dadoAnima || '',
@@ -1263,6 +1304,14 @@ export default function GrigliataPage() {
     if (tokenType === 'character') {
       const userSource = isOwnedByCurrentUser ? userData : selectedExternalUserData;
       const resourceValues = buildCharacterResourceValues(userSource?.stats || {});
+      const userSourceMediaCandidate = (
+        userSource?.media
+        || userSource?.General?.media
+        || null
+      );
+      const userSourceMedia = hasMediaAsset({ media: userSourceMediaCandidate }, {
+        variant: 'thumbnail',
+      }) ? userSourceMediaCandidate : null;
       return {
         ...(tokenProfile || {}),
         ...selectedBoardToken,
@@ -1273,8 +1322,14 @@ export default function GrigliataPage() {
         tokenId: selectedBoardToken.tokenId,
         characterId: tokenProfile?.characterId || selectedBoardToken.characterId || userSource?.characterId || '',
         label: profileLabel || selectedBoardToken.label || userSource?.characterId || 'Character',
-        imageUrl: resolvedImageUrl,
-        imagePath: resolvedImagePath,
+        imageUrl: userSourceMedia ? (userSource?.imageUrl || '') : resolvedImageUrl,
+        imagePath: userSourceMedia ? (userSource?.imagePath || '') : resolvedImagePath,
+        media: (
+          userSourceMedia
+          || selectedBoardToken?.media
+          || tokenProfile?.media
+          || null
+        ),
         notes: resolvedNotes,
         stats: {
           hpCurrent: resourceValues.hpCurrent,
@@ -1302,6 +1357,7 @@ export default function GrigliataPage() {
       label: profileLabel || selectedBoardToken.label || 'Custom Token',
       imageUrl: resolvedImageUrl,
       imagePath: resolvedImagePath,
+      media: selectedBoardToken?.media || tokenProfile?.media || null,
       notes: resolvedNotes,
       stats: customStats,
       missingResourceTotals,
@@ -1789,6 +1845,11 @@ export default function GrigliataPage() {
     setLightingImportError('');
   }, [selectedBackgroundId]);
 
+  const currentTokenHasImage = hasMediaAsset({ media: currentMedia }, {
+    fallbackSrc: currentImageUrl,
+    variant: 'thumbnail',
+  });
+
   useEffect(() => {
     if (!currentUserId) return undefined;
 
@@ -1805,7 +1866,7 @@ export default function GrigliataPage() {
         )
       );
 
-      if (!currentImageUrl && !existingToken) {
+      if (!currentTokenHasImage && !existingToken) {
         return;
       }
 
@@ -1815,6 +1876,7 @@ export default function GrigliataPage() {
         || existingToken.label !== currentTokenLabel
         || existingToken.imageUrl !== currentImageUrl
         || existingToken.imagePath !== currentImagePath
+        || !areMediaManifestValuesEqual(existingToken.media || null, currentMedia || null)
         || hasLegacyPlacementFields;
 
       if (!needsSync || !isActive) return;
@@ -1826,6 +1888,7 @@ export default function GrigliataPage() {
           label: currentTokenLabel,
           imageUrl: currentImageUrl,
           imagePath: currentImagePath,
+          media: currentMedia || deleteField(),
           tokenType: 'character',
           imageSource: 'profile',
           updatedAt: serverTimestamp(),
@@ -1853,7 +1916,9 @@ export default function GrigliataPage() {
     currentCharacterId,
     currentImagePath,
     currentImageUrl,
+    currentMedia,
     currentTokenLabel,
+    currentTokenHasImage,
     currentUserId,
     currentUserTokenProfileDoc,
   ]);
@@ -3502,6 +3567,80 @@ export default function GrigliataPage() {
   };
 
   const uploadBackgroundFile = async (file, fileIndex) => {
+    if (TASK07_MEDIA_PIPELINE_ENABLED) {
+      const assetType = getBackgroundUploadAssetType(file);
+      const mapName = getDisplayNameFromFileName(file.name).trim();
+      const backgroundRef = doc(collection(db, 'grigliata_backgrounds'));
+      const revision = `${Date.now()}-${fileIndex}`;
+
+      try {
+        const {
+          buildTask07MediaEntityPatch,
+          buildTask07MediaOperationId,
+          describeTask07ConsumerOutcome,
+          runTask07ConsumerUpload,
+          task07ConsumerNeedsAttention,
+        } = await import(
+          /* webpackChunkName: "feature-task07-media" */
+          '../../data/media/mediaConsumerAdapter'
+        );
+        const kind = assetType === 'video' ? 'map-video' : 'map';
+        const outcome = await runTask07ConsumerUpload({
+          file,
+          ownerUid: user.uid,
+          entityId: backgroundRef.id,
+          operationId: buildTask07MediaOperationId({
+            kind,
+            ownerUid: user.uid,
+            entityId: backgroundRef.id,
+            file,
+            revision,
+          }),
+          kind,
+          previousAssetId: null,
+          commitEntity: (media) => {
+            const original = media.original;
+            const backgroundPayload = {
+              name: mapName || 'Untitled Map',
+              ...buildTask07MediaEntityPatch(media, { includeEmptyImageUrl: true }),
+              imageWidth: original.width,
+              imageHeight: original.height,
+              assetType,
+              contentType: original.contentType,
+              fileName: file.name || '',
+              sizeBytes: original.bytes,
+              grid: normalizeGridConfig(DEFAULT_GRID),
+              isGridVisible: true,
+              galleryFolderId: getWritableGalleryFolderId(selectedGalleryFolderId),
+              createdAt: serverTimestamp(),
+              createdBy: user.uid,
+              updatedAt: serverTimestamp(),
+              updatedBy: user.uid,
+            };
+
+            if (assetType === 'video') {
+              backgroundPayload.durationMs = original.durationMs || 0;
+            }
+            return setDoc(backgroundRef, backgroundPayload);
+          },
+        });
+
+        return {
+          ...outcome,
+          attentionMessage: task07ConsumerNeedsAttention(outcome)
+            ? describeTask07ConsumerOutcome(
+              outcome,
+              assetType === 'video' ? 'Map video' : 'Map image'
+            )
+            : '',
+        };
+      } catch (error) {
+        console.error('Failed to upload background:', error);
+        setUploadError(`Failed to upload "${file.name || mapName}".`);
+        throw error;
+      }
+    }
+
     const assetType = getBackgroundUploadAssetType(file);
     const mapName = getDisplayNameFromFileName(file.name).trim();
     const safeName = buildStorageSafeName(mapName, 'grigliata_map');
@@ -3587,11 +3726,15 @@ export default function GrigliataPage() {
 
     setIsUploading(true);
     try {
+      let attentionMessage = '';
       for (const [fileIndex, file] of selectedFiles.entries()) {
-        await uploadBackgroundFile(file, fileIndex);
+        const outcome = await uploadBackgroundFile(file, fileIndex);
+        if (outcome?.attentionMessage) {
+          attentionMessage = outcome.attentionMessage;
+        }
       }
 
-      setUploadError('');
+      setUploadError(attentionMessage);
     } catch {
       // uploadBackgroundFile already surfaced the file-specific error and cleanup.
     } finally {
@@ -4817,7 +4960,12 @@ export default function GrigliataPage() {
         },
       });
 
-      if (background.imagePath) {
+      // Canonical objects are retired by the server after this document
+      // reference is deleted; direct client deletion is legacy-only.
+      if (
+        background.imagePath
+        && !hasCanonicalTask07MediaAssetId(background)
+      ) {
         try {
           await deleteObject(storageRef(storage, background.imagePath));
         } catch (storageError) {
@@ -5936,7 +6084,10 @@ export default function GrigliataPage() {
       return;
     }
 
-    if (!targetToken.imageUrl) {
+    if (!hasMediaAsset(targetToken, {
+      fallbackSrc: targetToken.imageUrl || '',
+      variant: 'thumbnail',
+    })) {
       setBoardError(
         tokenId === currentUserId
           ? 'Upload a profile image before placing your token.'

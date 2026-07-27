@@ -34,6 +34,7 @@ const SHELL_CACHE_KEYS = new Set([
   "race",
   "level",
   "avatarUrl",
+  "avatarMedia",
 ]);
 
 const getLocalStorage = () => {
@@ -69,6 +70,97 @@ const normalizeShellLevel = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const normalizeShellMediaPositiveInteger = (value) => {
+  const normalized = Number(value);
+  return Number.isSafeInteger(normalized) && normalized > 0 ? normalized : null;
+};
+
+const SHELL_AVATAR_CONTENT_TYPE_EXTENSIONS = Object.freeze({
+  "image/gif": "gif",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+});
+
+const normalizeShellMediaDescriptor = (value, expectedPrefix, { variant = null } = {}) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const path = typeof value.path === "string" ? value.path.trim() : "";
+  const generation = (
+    typeof value.generation === "string"
+    || typeof value.generation === "number"
+  ) ? String(value.generation).trim() : "";
+  const contentType = typeof value.contentType === "string"
+    ? value.contentType.trim().toLowerCase()
+    : "";
+  const bytes = normalizeShellMediaPositiveInteger(value.bytes);
+  const width = normalizeShellMediaPositiveInteger(value.width);
+  const height = normalizeShellMediaPositiveInteger(value.height);
+  const originalExtension = SHELL_AVATAR_CONTENT_TYPE_EXTENSIONS[contentType];
+  const expectedPath = variant
+    ? `${expectedPrefix}derivatives/v1/${variant}.webp`
+    : originalExtension
+      ? `${expectedPrefix}original/source.${originalExtension}`
+      : "";
+  const contentTypeIsAllowed = variant
+    ? contentType === "image/webp"
+    : Boolean(originalExtension);
+  if (
+    path !== expectedPath
+    || !generation
+    || !contentTypeIsAllowed
+    || !bytes
+    || !width
+    || !height
+  ) {
+    return null;
+  }
+  return {
+    path,
+    generation,
+    contentType,
+    bytes,
+    width,
+    height,
+  };
+};
+
+const normalizeShellAvatarMedia = (uid, value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const assetId = typeof value.assetId === "string" ? value.assetId.trim() : "";
+  if (
+    value.schemaVersion !== 1
+    || value.contractVersion !== 1
+    || value.kind !== "avatar"
+    || !["ready", "fallback"].includes(value.state)
+    || !/^m_[a-f0-9]{40}$/.test(assetId)
+  ) {
+    return null;
+  }
+  const expectedPrefix = `media/v1/avatar/${uid}/${assetId}/`;
+  const original = normalizeShellMediaDescriptor(value.original, expectedPrefix);
+  if (!original) return null;
+  const variants = {};
+  for (const variant of ["thumbnail", "card"]) {
+    if (!value.variants?.[variant]) continue;
+    const descriptor = normalizeShellMediaDescriptor(
+      value.variants[variant],
+      expectedPrefix,
+      { variant }
+    );
+    if (!descriptor) return null;
+    variants[variant] = descriptor;
+  }
+  return {
+    schemaVersion: 1,
+    contractVersion: 1,
+    assetId,
+    kind: "avatar",
+    state: value.state,
+    original,
+    variants,
+  };
+};
+
 export const projectShellProfile = (uid, userData) => ({
   version: SHELL_CACHE_VERSION,
   uid,
@@ -78,6 +170,7 @@ export const projectShellProfile = (uid, userData) => ({
   race: normalizeShellString(userData?.race),
   level: normalizeShellLevel(userData?.summary?.level ?? userData?.stats?.level),
   avatarUrl: normalizeShellString(userData?.imageUrl),
+  avatarMedia: normalizeShellAvatarMedia(uid, userData?.media),
 });
 
 const sameShellProfile = (left, right) => (
@@ -89,6 +182,7 @@ const sameShellProfile = (left, right) => (
   && left.race === right.race
   && left.level === right.level
   && left.avatarUrl === right.avatarUrl
+  && (left.avatarMedia?.assetId || null) === (right.avatarMedia?.assetId || null)
 );
 
 export const validateShellCache = (value, expectedUid) => {
@@ -102,10 +196,19 @@ export const validateShellCache = (value, expectedUid) => {
     return null;
   }
   if (value.level !== null && !Number.isFinite(value.level)) return null;
+  const hasAvatarMedia = Object.prototype.hasOwnProperty.call(value, "avatarMedia");
+  const avatarMedia = normalizeShellAvatarMedia(expectedUid, value.avatarMedia);
+  if (hasAvatarMedia && value.avatarMedia !== null && !avatarMedia) return null;
+  const normalizedValue = hasAvatarMedia
+    ? {
+      ...value,
+      avatarMedia,
+    }
+    : value;
 
-  const serialized = JSON.stringify(value);
+  const serialized = JSON.stringify(normalizedValue);
   if (new Blob([serialized]).size >= SHELL_CACHE_MAX_BYTES) return null;
-  return value;
+  return normalizedValue;
 };
 
 export const readShellCache = (uid, storageApi = getLocalStorage()) => {

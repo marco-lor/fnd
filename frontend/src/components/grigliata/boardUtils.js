@@ -109,7 +109,10 @@ export const sortBackgrounds = (backgrounds) => (
 export const buildPlacementDocId = (backgroundId, tokenId) => `${backgroundId}__${tokenId}`;
 
 export const getBackgroundAssetType = (background) => (
-  background?.assetType === 'video' ? 'video' : 'image'
+  background?.assetType === 'video'
+  || background?.media?.kind === 'map-video'
+    ? 'video'
+    : 'image'
 );
 
 export const isVideoBackground = (background) => getBackgroundAssetType(background) === 'video';

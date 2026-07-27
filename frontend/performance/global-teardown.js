@@ -17,7 +17,10 @@ const {
   resultsDir,
   writeJson,
 } = require('../scripts/performance/common');
-const { firebaseDebugLogPaths } = require('../scripts/performance/emulators');
+const {
+  firebaseDebugLogPaths,
+  removePerformanceFirebaseConfig,
+} = require('../scripts/performance/emulators');
 
 const collectTeardownEvidence = ({
   healthReport,
@@ -166,6 +169,11 @@ module.exports = async () => {
       }
     }
     fs.rmSync(webServerMarker, { force: true });
+    try {
+      removePerformanceFirebaseConfig();
+    } catch (error) {
+      errors.push(error);
+    }
   }
 
   if (errors.length === 1) throw errors[0];

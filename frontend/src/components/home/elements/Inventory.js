@@ -7,6 +7,7 @@ import { FaCoins } from 'react-icons/fa';
 import { LazyItemDetailsModal as ItemDetailsModal } from './lazyHomeFeatures';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
 import { uploadCacheableImage } from '../../common/imageStorage';
+import MediaImage, { hasMediaAsset } from '../../common/MediaImage';
 import {
 	useEquipment,
 	useInventory,
@@ -471,9 +472,18 @@ const Inventory = () => {
 							    const key = `${it.id}-${it.invIndex ?? 'x'}-${idx}`;
 									return (
 											<li key={key} className="flex items-center justify-between rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2">
-									{imgUrl && (
+									{hasMediaAsset(docObj, { fallbackSrc: imgUrl, variant: 'thumbnail' }) && (
 										<div className="h-8 w-8 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/50 mr-2">
-											<img src={imgUrl} alt={it.name} className="h-full w-full object-contain" />
+											<MediaImage
+												media={docObj}
+												src={imgUrl || ''}
+												variant="thumbnail"
+												alt={it.name}
+												width={32}
+												height={32}
+												sizes="32px"
+												className="h-full w-full object-contain"
+											/>
 										</div>
 									)}
 							    <button onClick={() => {
@@ -526,9 +536,18 @@ const Inventory = () => {
 										const imgUrl = docObj?.image_url;
 										return (
 											<li key={it.id} className="flex items-center justify-between rounded-xl border border-slate-700/40 bg-slate-800/40 px-3 py-2">
-												{imgUrl && (
+												{hasMediaAsset(docObj, { fallbackSrc: imgUrl, variant: 'thumbnail' }) && (
 													<div className="h-8 w-8 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/50 mr-2">
-														<img src={imgUrl} alt={it.name} className="h-full w-full object-contain" />
+														<MediaImage
+															media={docObj}
+															src={imgUrl || ''}
+															variant="thumbnail"
+															alt={it.name}
+															width={32}
+															height={32}
+															sizes="32px"
+															className="h-full w-full object-contain"
+														/>
 													</div>
 												)}
 												<button onClick={() => { setPreviewItem(docObj); setPreviewScopeKey(actionScopeKey); }} className="min-w-0 text-left flex-1 hover:bg-slate-700/40 rounded-md px-2 py-1">

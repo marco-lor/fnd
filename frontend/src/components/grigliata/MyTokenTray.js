@@ -4,6 +4,12 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { FiCheck, FiChevronDown, FiEdit2, FiPlus, FiTrash2, FiX } from 'react-icons/fi';
 import { FOE_LIBRARY_DRAG_TYPE, TRAY_DRAG_MIME } from './constants';
 import { GRIGLIATA_ANIMA_VISUAL, GRIGLIATA_RESOURCE_VISUALS } from './resourceVisuals';
+import MediaImage, { hasMediaAsset } from '../common/MediaImage';
+
+export const hasTokenImageAsset = (token) => hasMediaAsset(token, {
+  fallbackSrc: token?.imageUrl || '',
+  variant: 'thumbnail',
+});
 
 const buildTokenDragPayload = (token) => JSON.stringify({
   type: 'grigliata-token',
@@ -54,7 +60,7 @@ const getTokenHelpText = (token, hasActiveMap) => {
   if (!hasActiveMap) {
     return 'Select a map first. Token positions are saved independently for each map.';
   }
-  if (!token?.imageUrl) {
+  if (!hasTokenImageAsset(token)) {
     return token?.tokenType === 'character'
       ? 'Upload a profile image from the navbar first. Without it, your main character token stays disabled.'
       : 'Upload an image for this custom token template before dragging it onto the map.';
@@ -557,7 +563,18 @@ function FoeLibrarySection({ currentUserId, foeLibrary = [], hasActiveMap, onDra
                     >
                       <div className="flex items-start gap-3">
                         <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-700 bg-slate-800 text-lg font-semibold text-slate-100">
-                          {foe?.imageUrl ? <img src={foe.imageUrl} alt={foe?.name || 'Foe'} className="h-full w-full object-cover" /> : <span>{(foe?.name || '?').charAt(0).toUpperCase()}</span>}
+                          {hasTokenImageAsset(foe) ? (
+                            <MediaImage
+                              media={foe}
+                              src={foe.imageUrl}
+                              variant="thumbnail"
+                              alt={foe?.name || 'Foe'}
+                              width={56}
+                              height={56}
+                              sizes="56px"
+                              className="h-full w-full object-cover"
+                            />
+                          ) : <span>{(foe?.name || '?').charAt(0).toUpperCase()}</span>}
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
@@ -780,7 +797,18 @@ function SelectedResourceTokenDetailsPanel({
     <div className="rounded-2xl border border-emerald-500/25 bg-emerald-950/10 p-4">
       <div className="flex items-start gap-3">
         <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-700 bg-slate-800 text-lg font-semibold text-slate-100">
-          {token?.imageUrl ? <img src={token.imageUrl} alt={token?.label || 'Token'} className="h-full w-full object-cover" /> : <span>{(token?.label || '?').charAt(0).toUpperCase()}</span>}
+          {hasTokenImageAsset(token) ? (
+            <MediaImage
+              media={token}
+              src={token.imageUrl}
+              variant="thumbnail"
+              alt={token?.label || 'Token'}
+              width={64}
+              height={64}
+              sizes="64px"
+              className="h-full w-full object-cover"
+            />
+          ) : <span>{(token?.label || '?').charAt(0).toUpperCase()}</span>}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
@@ -1032,7 +1060,18 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
     <div className="rounded-2xl border border-cyan-500/25 bg-cyan-950/10 p-4">
       <div className="flex items-start gap-3">
         <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-700 bg-slate-800 text-lg font-semibold text-slate-100">
-          {token?.imageUrl ? <img src={token.imageUrl} alt={token?.label || 'Foe'} className="h-full w-full object-cover" /> : <span>{(token?.label || '?').charAt(0).toUpperCase()}</span>}
+          {hasTokenImageAsset(token) ? (
+            <MediaImage
+              media={token}
+              src={token.imageUrl}
+              variant="thumbnail"
+              alt={token?.label || 'Foe'}
+              width={64}
+              height={64}
+              sizes="64px"
+              className="h-full w-full object-cover"
+            />
+          ) : <span>{(token?.label || '?').charAt(0).toUpperCase()}</span>}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
@@ -1191,7 +1230,18 @@ function SelectedFoeDetailsPanel({ token, onUpdateFoeToken, savingFoeTokenId }) 
                 <div key={`${sectionKey}-${entry?.name || index}`} className="rounded-2xl border border-slate-800 bg-slate-950/65 p-3">
                   <div className="flex items-start gap-3">
                     <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-700 bg-slate-800 text-xs text-slate-400">
-                      {entry?.imageUrl ? <img src={entry.imageUrl} alt={entry?.name || title} className="h-full w-full object-cover" /> : 'No Img'}
+                      {hasTokenImageAsset(entry) ? (
+                        <MediaImage
+                          media={entry}
+                          src={entry.imageUrl}
+                          variant="thumbnail"
+                          alt={entry?.name || title}
+                          width={48}
+                          height={48}
+                          sizes="48px"
+                          className="h-full w-full object-cover"
+                        />
+                      ) : 'No Img'}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold text-slate-100">{entry?.name || `${title} ${index + 1}`}</p>
@@ -1291,7 +1341,7 @@ export default function MyTokenTray({
   const handleTokenDragStart = (event, token) => {
     const tokenId = token?.tokenId || token?.id || '';
     const ownerUid = token?.ownerUid || '';
-    const canDrag = !!(hasActiveMap && token?.imageUrl && tokenId && ownerUid && !token?.isHiddenByManager && editingTokenId !== tokenId);
+    const canDrag = !!(hasActiveMap && hasTokenImageAsset(token) && tokenId && ownerUid && !token?.isHiddenByManager && editingTokenId !== tokenId);
     if (!canDrag) {
       event.preventDefault();
       return;
@@ -1337,7 +1387,8 @@ export default function MyTokenTray({
           const isCustomToken = token?.tokenType === 'custom';
           const isUpdating = updatingCustomTokenId === tokenId;
           const isDeleting = deletingCustomTokenId === tokenId;
-          const canDrag = !!(hasActiveMap && token?.imageUrl && tokenId && token?.ownerUid && !token?.isHiddenByManager && !isEditing && !isUpdating && !isDeleting);
+          const hasImage = hasTokenImageAsset(token);
+          const canDrag = !!(hasActiveMap && hasImage && tokenId && token?.ownerUid && !token?.isHiddenByManager && !isEditing && !isUpdating && !isDeleting);
 
           return (
             <div
@@ -1350,7 +1401,20 @@ export default function MyTokenTray({
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 flex-1 items-center gap-3">
                   <div className="h-16 w-16 shrink-0 overflow-hidden rounded-full border-2 border-slate-300/70 bg-slate-800">
-                    {token?.imageUrl ? <img src={token.imageUrl} alt={token?.label || 'Token'} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center px-2 text-center text-[11px] text-slate-400">No Img</div>}
+                    {hasImage ? (
+                      <MediaImage
+                        media={token}
+                        src={token.imageUrl}
+                        variant="thumbnail"
+                        alt={token?.label || 'Token'}
+                        width={64}
+                        height={64}
+                        sizes="64px"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center px-2 text-center text-[11px] text-slate-400">No Img</div>
+                    )}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">

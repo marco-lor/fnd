@@ -69,6 +69,22 @@ import {
   cleanupDeletedGrigliataTokenImage,
   cleanupReplacedGrigliataTokenImage,
 } from "./cleanupGrigliataTokenImage";
+import {
+  cleanupTask07MediaAsset,
+  cleanupTask07RemovedBackgroundMedia,
+  cleanupTask07RemovedCatalogItemMedia,
+  cleanupTask07RemovedFoeMedia,
+  cleanupTask07RemovedInventoryMedia,
+  cleanupTask07RemovedNpcMedia,
+  cleanupTask07RemovedUserMedia,
+  sweepTask07MediaOrphans,
+  task07AbandonMediaAsset,
+  task07ConfirmMediaReference,
+  task07FinalizeMediaUpload,
+  task07PrepareMediaUpload,
+  task07RetireMediaAsset,
+  task07RetryMediaCleanup,
+} from "./mediaAssetLifecycle";
 import {usesDemoConsolidatedOwner} from "./demoConsolidatedOwner";
 
 admin.initializeApp();
@@ -135,4 +151,18 @@ export {
   cleanupDeletedGrigliataTokenImage,
   cleanupReplacedGrigliataTokenImage,
   cleanupUserOwnedMedia,
+  cleanupTask07MediaAsset,
+  cleanupTask07RemovedBackgroundMedia,
+  cleanupTask07RemovedCatalogItemMedia,
+  cleanupTask07RemovedFoeMedia,
+  cleanupTask07RemovedInventoryMedia,
+  cleanupTask07RemovedNpcMedia,
+  cleanupTask07RemovedUserMedia,
+  sweepTask07MediaOrphans,
+  task07AbandonMediaAsset,
+  task07ConfirmMediaReference,
+  task07FinalizeMediaUpload,
+  task07PrepareMediaUpload,
+  task07RetireMediaAsset,
+  task07RetryMediaCleanup,
 };

@@ -23,11 +23,13 @@ import {
 import { useResources } from '../../data/userData/userDataHooks';
 import { createUserOperationId } from '../../data/userData/userDataCommands';
 import { isUserDataCommandStageResolved } from '../../data/userData/userDataCommandRouting';
+import MediaImage, { hasMediaAsset } from '../common/MediaImage';
 
 function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purchasing, purchaseDisabled, userGold }) {
   const [imageError, setImageError] = useState(false);
   const title = item.General?.Nome || 'Oggetto Sconosciuto';
   const imageUrl = item.General?.image_url;
+  const hasImage = hasMediaAsset(item.General, { fallbackSrc: imageUrl, variant: 'card' });
   const slot = item.General?.Slot || '-';
   const tipo = item.Specific?.Tipo || '-';
   const hands = item.Specific?.Hands != null ? item.Specific.Hands : '-';
@@ -37,10 +39,10 @@ function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purch
 
   useEffect(() => {
      setImageError(false);
-     if (!imageUrl) {
+     if (!hasImage) {
         setImageError(true);
      }
-  }, [imageUrl]);
+  }, [hasImage, imageUrl]);
 
   return (
     <motion.div
@@ -55,13 +57,18 @@ function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purch
       onClick={onLockToggle}
     >
       <div className="relative mb-3 aspect-[4/3] overflow-hidden rounded-xl border border-gray-700/70 bg-gray-900/70">
-        {imageUrl && !imageError ? (
-          <img
+        {hasImage && !imageError ? (
+          <MediaImage
+            media={item.General}
             src={imageUrl}
+            variant="card"
             alt={title}
+            width={640}
+            height={480}
+            sizes="(max-width: 640px) 100vw, 320px"
             className="h-full w-full object-cover"
             onError={() => {
-              console.warn(`Failed to load image in ItemCard: ${imageUrl}`);
+              console.warn(`Failed to load image in ItemCard: ${imageUrl || 'media manifest'}`);
               setImageError(true);
             }}
           />

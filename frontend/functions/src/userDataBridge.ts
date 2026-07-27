@@ -14,6 +14,9 @@ import {
   resolveUserDataRolloutStage,
   stabilizeLegacyInventoryProjection,
 } from "./userDataV2";
+import {
+  hardenLegacyInventoryProjectionMedia,
+} from "./task07ServerBoundary";
 
 const ACTIVE_BRIDGE_MODES = new Set([
   "shadow-verify",
@@ -348,6 +351,10 @@ export const reconcileLegacyUserDomains = async (
       id: snapshot.id,
       data: snapshot.data(),
     }));
+    const existingProjectionById = new Map(existingEntries.map((entry) => [
+      entry.id,
+      entry.data,
+    ]));
     const preferredIds = Object.values(asRecord(existingEquipment.get("slots")))
       .map(asTrimmedString)
       .filter(Boolean);
@@ -356,9 +363,30 @@ export const reconcileLegacyUserDomains = async (
       existingEntries,
       preferredIds
     );
+    // The legacy root is client-controlled. Strip Task 07 references before
+    // projecting descendants, while carrying forward only descriptors already
+    // owned by a command-written V2 inventory document.
+    const hardenedProjection = stabilizedProjection.map(({id, data}) => {
+      const hardened = hardenLegacyInventoryProjectionMedia(
+        data,
+        existingProjectionById.get(id)
+      );
+      const acquisitionSnapshot = asRecord(hardened.acquisitionSnapshot);
+      const currentSnapshot = asRecord(hardened.currentSnapshot);
+      return {
+        id,
+        data: {
+          ...hardened,
+          acquisitionSnapshot,
+          acquisitionHash: hashValue(acquisitionSnapshot),
+          currentSnapshot,
+          currentHash: hashValue(currentSnapshot),
+        },
+      };
+    });
     const plan = planLegacyManagedProjection(
       existingEntries,
-      stabilizedProjection
+      hardenedProjection
     );
     const stableSlots = buildLegacyEquipmentSlotProjection(
       currentSource.equipped,

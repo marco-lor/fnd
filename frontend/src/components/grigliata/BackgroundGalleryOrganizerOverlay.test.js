@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import BackgroundGalleryOrganizerOverlay from './BackgroundGalleryOrganizerOverlay';
 
 const folders = [
@@ -143,6 +143,81 @@ describe('BackgroundGalleryOrganizerOverlay', () => {
     expect(onDeleteBackgrounds).toHaveBeenCalledWith([
       expect.objectContaining({ id: 'map-2' }),
     ]);
+  });
+
+  test('uses fixed image thumbnails and never attaches video originals to organizer rows', async () => {
+    const imageThumbnailUrl = 'https://example.com/image-thumbnail.webp';
+    const videoPosterUrl = 'https://example.com/video-poster.webp';
+    const videoOriginalUrl = 'https://example.com/video-original.mp4';
+    const legacyImageUrl = 'https://example.com/legacy-map.png';
+    render(
+      <BackgroundGalleryOrganizerOverlay
+        {...buildProps({
+          backgrounds: [
+            {
+              id: 'descriptor-map',
+              name: 'Descriptor Map',
+              media: {
+                kind: 'map',
+                schemaVersion: 1,
+                variants: {
+                  thumbnail: {
+                    url: imageThumbnailUrl,
+                    width: 320,
+                    height: 180,
+                  },
+                },
+              },
+            },
+            {
+              id: 'video-map',
+              name: 'Video Map',
+              assetType: 'video',
+              imageUrl: videoOriginalUrl,
+              General: {
+                media: {
+                  kind: 'map-video',
+                  schemaVersion: 1,
+                  original: {
+                    url: videoOriginalUrl,
+                    contentType: 'video/mp4',
+                  },
+                  variants: {
+                    poster: {
+                      url: videoPosterUrl,
+                      width: 320,
+                      height: 180,
+                    },
+                  },
+                },
+              },
+            },
+            {
+              id: 'legacy-map',
+              name: 'Legacy Map',
+              imageUrl: legacyImageUrl,
+            },
+          ],
+          folders: [],
+        })}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('img', { name: 'Descriptor Map' }))
+        .toHaveAttribute('src', imageThumbnailUrl);
+      expect(screen.getByRole('img', { name: 'Video Map' }))
+        .toHaveAttribute('src', videoPosterUrl);
+      expect(screen.getByRole('img', { name: 'Legacy Map' }))
+        .toHaveAttribute('src', legacyImageUrl);
+    });
+
+    screen.getAllByRole('img').forEach((image) => {
+      expect(image).toHaveAttribute('width', '80');
+      expect(image).toHaveAttribute('height', '64');
+      expect(image).not.toHaveAttribute('src', videoOriginalUrl);
+    });
+    expect(document.body.querySelector('video')).toBeNull();
   });
 
   test('moves a background by dragging it onto a folder drop target', () => {

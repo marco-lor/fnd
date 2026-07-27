@@ -1,4 +1,4 @@
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./measured-test');
 
 const CONFIG_PATH = '/fatins-runtime/firebase-client';
 const CONFIG_DELAY_MS = 750;

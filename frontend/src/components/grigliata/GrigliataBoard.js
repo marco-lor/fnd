@@ -59,11 +59,17 @@ import {
 import GrigliataTokenActions, { TokenStatusSummaryCard } from './GrigliataTokenActions';
 import { GRIGLIATA_RESOURCE_VISUALS } from './resourceVisuals';
 import DiceRoller from '../common/DiceRoller';
+import MediaImage, { hasMediaAsset } from '../common/MediaImage';
 import {
   splitTokenStatusesForDisplay,
   useTokenStatusIconImages,
 } from './tokenStatuses';
 import { useImageAssetSnapshot } from '../common/imageAssets/useImageAsset';
+import {
+  PRIVATE_MEDIA_CROSSFADE_PROTECTION_MS,
+  resolveMediaSourceAsset,
+  useResolvedMediaSource,
+} from '../common/useResolvedMediaSource';
 import {
   buildAoEFigureFromGrigliataLiveInteraction,
   buildMeasurementFromGrigliataLiveInteraction,
@@ -732,22 +738,35 @@ const useVideoBackgroundAssetSnapshot = (src) => {
 
   return snapshot;
 };
-const buildBattlemapImageLayer = ({ background, image, opacity = 1 }) => {
-  if (!background?.imageUrl || !image) {
+const buildBattlemapImageLayer = ({
+  background,
+  image,
+  opacity = 1,
+  src,
+}) => {
+  if (!src || !image) {
     return null;
   }
 
   const assetType = getBackgroundAssetType(background);
 
   return {
-    key: `${background.id || background.imageUrl}::${background.imageUrl}`,
-    src: background.imageUrl,
+    key: `${background.id || src}::${src}`,
+    src,
     assetType,
     image,
     imageWidth: background.imageWidth || image.naturalWidth || image.videoWidth || image.width || 0,
     imageHeight: background.imageHeight || image.naturalHeight || image.videoHeight || image.height || 0,
     opacity,
   };
+};
+const getBackgroundMediaAssetKey = (background) => {
+  const assetType = getBackgroundAssetType(background);
+  return resolveMediaSourceAsset(background, {
+    fallbackSrc: background?.imageUrl || '',
+    kind: assetType,
+    variant: assetType === 'video' ? 'original' : 'board',
+  }).assetKey;
 };
 const NarrationPlacementImage = ({
   placement,
@@ -759,11 +778,50 @@ const NarrationPlacementImage = ({
   onMoveNarrationPlacement = null,
 }) => {
   const assetType = getBackgroundAssetType(background);
-  const imageSnapshot = useImageAssetSnapshot(assetType === 'image' ? background?.imageUrl || '' : '');
-  const videoSnapshot = useVideoBackgroundAssetSnapshot(assetType === 'video' ? background?.imageUrl || '' : '');
-  const assetSnapshot = assetType === 'video' ? videoSnapshot : imageSnapshot;
+  const mediaSource = useResolvedMediaSource(background, {
+    fallbackSrc: background?.imageUrl || '',
+    kind: assetType,
+    releaseDelayMs: PRIVATE_MEDIA_CROSSFADE_PROTECTION_MS,
+    variant: assetType === 'video' ? 'original' : 'board',
+  });
+  const advanceNarrationMediaFallback = mediaSource.advanceFallback;
+  const narrationMediaStatus = mediaSource.status;
+  const imageSnapshot = useImageAssetSnapshot(
+    assetType === 'image' ? mediaSource.url : ''
+  );
+  const videoSnapshot = useVideoBackgroundAssetSnapshot(
+    assetType === 'video' ? mediaSource.url : ''
+  );
+  const rawAssetSnapshot = assetType === 'video' ? videoSnapshot : imageSnapshot;
+  const assetSnapshot = mediaSource.status === 'error'
+    ? {
+      status: 'error',
+      image: null,
+      error: mediaSource.error,
+    }
+    : (
+      rawAssetSnapshot.status === 'error' && mediaSource.hasFallback
+        ? { status: 'loading', image: null, error: null }
+        : rawAssetSnapshot
+    );
 
-  if (!placement?.id || !background?.imageUrl || assetSnapshot.status !== 'loaded' || !assetSnapshot.image) {
+  useEffect(() => {
+    if (rawAssetSnapshot.status === 'error' && narrationMediaStatus === 'ready') {
+      advanceNarrationMediaFallback(rawAssetSnapshot.error);
+    }
+  }, [
+    advanceNarrationMediaFallback,
+    narrationMediaStatus,
+    rawAssetSnapshot.error,
+    rawAssetSnapshot.status,
+  ]);
+
+  if (
+    !placement?.id
+    || !mediaSource.url
+    || assetSnapshot.status !== 'loaded'
+    || !assetSnapshot.image
+  ) {
     return null;
   }
 
@@ -1960,6 +2018,10 @@ const TurnOrderPanel = ({
             base: Number.isInteger(entry?.initiative) ? entry.initiative : 0,
           };
           const isSaving = savingTurnOrderInitiativeTokenId === entry.tokenId;
+          const hasImage = hasMediaAsset(entry, {
+            fallbackSrc: entry.imageUrl || '',
+            variant: 'thumbnail',
+          });
 
           return (
             <motion.div
@@ -2026,13 +2088,23 @@ const TurnOrderPanel = ({
                 onFocus={(event) => showEntryTooltip(entry.tokenId, entry.label, event.currentTarget)}
                 onBlur={() => clearEntryTooltip(entry.tokenId)}
               >
-                {entry.imageUrl ? (
-                  <img
+                {hasImage ? (
+                  <MediaImage
+                    media={entry}
                     src={entry.imageUrl}
                     alt=""
+                    variant="thumbnail"
+                    width={40}
+                    height={40}
+                    sizes="40px"
                     className={`h-10 w-10 shrink-0 rounded-2xl object-cover transition-[border-color,box-shadow] duration-150 ${isActiveTurn
                       ? 'border-2 border-amber-300/90 shadow-[0_0_12px_rgba(251,191,36,0.24)]'
                       : 'border border-slate-700/80'}`}
+                    fallback={(
+                      <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-800/90 text-xs font-bold uppercase tracking-[0.18em] ${isActiveTurn ? 'border-2 border-amber-300/90 text-amber-50' : 'border border-slate-700/80 text-slate-200'}`}>
+                        {getInitials(entry.label)}
+                      </div>
+                    )}
                   />
                 ) : (
                   <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-800/90 text-xs font-bold uppercase tracking-[0.18em] transition-[border-color,box-shadow] duration-150 ${isActiveTurn
@@ -2231,15 +2303,48 @@ export default function GrigliataBoard({
   const [turnOrderInitiativeRoller, setTurnOrderInitiativeRoller] = useState(null);
   const turnOrderJoinPromptTokenId = turnOrderJoinPrompt?.tokenId || '';
   const activeBackgroundAssetType = getBackgroundAssetType(activeBackground);
+  const activeBackgroundMediaSource = useResolvedMediaSource(activeBackground, {
+    fallbackSrc: activeBackground?.imageUrl || '',
+    kind: activeBackgroundAssetType,
+    releaseDelayMs: PRIVATE_MEDIA_CROSSFADE_PROTECTION_MS,
+    variant: activeBackgroundAssetType === 'video' ? 'original' : 'board',
+  });
+  const advanceActiveBackgroundFallback = activeBackgroundMediaSource.advanceFallback;
+  const activeBackgroundMediaStatus = activeBackgroundMediaSource.status;
   const backgroundImageAssetSnapshot = useImageAssetSnapshot(
-    activeBackgroundAssetType === 'image' ? activeBackground?.imageUrl || '' : ''
+    activeBackgroundAssetType === 'image' ? activeBackgroundMediaSource.url : ''
   );
   const backgroundVideoAssetSnapshot = useVideoBackgroundAssetSnapshot(
-    activeBackgroundAssetType === 'video' ? activeBackground?.imageUrl || '' : ''
+    activeBackgroundAssetType === 'video' ? activeBackgroundMediaSource.url : ''
   );
-  const backgroundAssetSnapshot = activeBackgroundAssetType === 'video'
+  const rawBackgroundAssetSnapshot = activeBackgroundAssetType === 'video'
     ? backgroundVideoAssetSnapshot
     : backgroundImageAssetSnapshot;
+  const backgroundAssetSnapshot = activeBackgroundMediaSource.status === 'error'
+    ? {
+      status: 'error',
+      image: null,
+      error: activeBackgroundMediaSource.error,
+    }
+    : (
+      rawBackgroundAssetSnapshot.status === 'error'
+      && activeBackgroundMediaSource.hasFallback
+        ? { status: 'loading', image: null, error: null }
+        : rawBackgroundAssetSnapshot
+    );
+  useEffect(() => {
+    if (
+      rawBackgroundAssetSnapshot.status === 'error'
+      && activeBackgroundMediaStatus === 'ready'
+    ) {
+      advanceActiveBackgroundFallback(rawBackgroundAssetSnapshot.error);
+    }
+  }, [
+    activeBackgroundMediaStatus,
+    advanceActiveBackgroundFallback,
+    rawBackgroundAssetSnapshot.error,
+    rawBackgroundAssetSnapshot.status,
+  ]);
   const turnOrderContextMenuRef = useRef(null);
   const turnOrderJoinInputRef = useRef(null);
   const lastReportedSelectedTokenIdsRef = useRef([]);
@@ -2343,10 +2448,20 @@ export default function GrigliataBoard({
 
     return {
       ...activeBackground,
-      imageWidth: activeBackground.imageWidth || backgroundAssetSnapshot.image?.naturalWidth || backgroundAssetSnapshot.image?.videoWidth || backgroundAssetSnapshot.image?.width || 0,
-      imageHeight: activeBackground.imageHeight || backgroundAssetSnapshot.image?.naturalHeight || backgroundAssetSnapshot.image?.videoHeight || backgroundAssetSnapshot.image?.height || 0,
+      imageWidth: activeBackground.imageWidth
+        || activeBackgroundMediaSource.width
+        || backgroundAssetSnapshot.image?.naturalWidth
+        || backgroundAssetSnapshot.image?.videoWidth
+        || backgroundAssetSnapshot.image?.width
+        || 0,
+      imageHeight: activeBackground.imageHeight
+        || activeBackgroundMediaSource.height
+        || backgroundAssetSnapshot.image?.naturalHeight
+        || backgroundAssetSnapshot.image?.videoHeight
+        || backgroundAssetSnapshot.image?.height
+        || 0,
     };
-  }, [activeBackground, backgroundAssetSnapshot.image]);
+  }, [activeBackground, activeBackgroundMediaSource.height, activeBackgroundMediaSource.width, backgroundAssetSnapshot.image]);
 
   const resolvedNarrationPlacements = useMemo(() => {
     if (!isNarrationOverlayActive) return [];
@@ -2375,7 +2490,7 @@ export default function GrigliataBoard({
     canonicalNarrationEntries.map((entry) => ({
       id: entry.placement.id,
       backgroundId: entry.placement.backgroundId,
-      imageUrl: entry.background?.imageUrl || '',
+      mediaAssetKey: getBackgroundMediaAssetKey(entry.background),
       x: entry.placement.x,
       y: entry.placement.y,
       width: entry.placement.width,
@@ -2556,8 +2671,9 @@ export default function GrigliataBoard({
     () => buildBattlemapImageLayer({
       background: resolvedBackground,
       image: backgroundAssetSnapshot.image,
+      src: activeBackgroundMediaSource.url,
     }),
-    [backgroundAssetSnapshot.image, resolvedBackground]
+    [activeBackgroundMediaSource.url, backgroundAssetSnapshot.image, resolvedBackground]
   );
 
   const runBattlemapImageTransition = useCallback((fromLayer, toLayer) => {
@@ -2625,7 +2741,7 @@ export default function GrigliataBoard({
     previousNarrationOverlayActiveRef.current = isNarrationOverlayActive;
     const shouldSkipTransition = isNarrationOverlayActive || wasNarrationOverlayActive;
 
-    if (!activeBackground?.imageUrl) {
+    if (activeBackgroundMediaSource.candidateCount < 1) {
       if (!dominantLayer) {
         cancelBattlemapImageAnimation();
         setBattlemapImageTransition({ visibleLayer: null, fadingOutLayer: null });
@@ -2701,7 +2817,8 @@ export default function GrigliataBoard({
       runBattlemapImageTransition(dominantLayer, null);
     }
   }, [
-    activeBackground?.imageUrl,
+    activeBackgroundMediaSource.assetKey,
+    activeBackgroundMediaSource.candidateCount,
     backgroundAssetSnapshot.status,
     cancelBattlemapImageAnimation,
     isNarrationOverlayActive,

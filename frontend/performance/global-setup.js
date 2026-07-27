@@ -11,7 +11,10 @@ const {
   setBackgroundTriggersEnabled,
   waitForEmulatorHealth,
 } = require('../scripts/performance/emulator-control');
-const { firebaseDebugLogPaths } = require('../scripts/performance/emulators');
+const {
+  FIREBASE_HOSTING_UPSTREAM_PORT,
+  firebaseDebugLogPaths,
+} = require('../scripts/performance/emulators');
 const {
   PERFORMANCE_ENVIRONMENT_MODE,
   PERFORMANCE_PROJECT_ID: projectId,
@@ -33,6 +36,12 @@ const READINESS_BACKGROUND_TRIGGERS = new Set([
   'europe-west8-expireBarriera',
   'europe-west8-syncUserDirectory',
   'europe-west8-syncUserDerivedState',
+  'europe-west8-cleanupTask07RemovedBackgroundMedia',
+  'europe-west8-cleanupTask07RemovedCatalogItemMedia',
+  'europe-west8-cleanupTask07RemovedFoeMedia',
+  'europe-west8-cleanupTask07RemovedInventoryMedia',
+  'europe-west8-cleanupTask07RemovedNpcMedia',
+  'europe-west8-cleanupTask07RemovedUserMedia',
 ]);
 
 const summarizeTriggerActivityText = (contents = '') => {
@@ -180,8 +189,14 @@ const waitForEmulators = async ({
         },
       });
       const missing = required.filter((name) => !emulators?.[name]);
+      const registeredHostingPort = Number(emulators?.hosting?.port);
       if (missing.length) {
         lastError = `missing emulator registrations: ${missing.join(', ')}`;
+      } else if (registeredHostingPort !== FIREBASE_HOSTING_UPSTREAM_PORT) {
+        lastError = (
+          `Firebase Hosting registered on port ${registeredHostingPort || 'unknown'}; `
+          + `expected ${FIREBASE_HOSTING_UPSTREAM_PORT}`
+        );
       } else {
         await fetchStartupResponse({
           fetchImpl,
@@ -244,9 +259,40 @@ module.exports = async () => {
   const scenarioDirectory = path.join(resultsDirectory, 'scenarios');
   const healthReportPath = path.join(resultsDirectory, 'emulator-health.json');
   const authDiagnosticsPath = path.join(resultsDirectory, 'auth-setup-diagnostics.json');
+  const assetWarmupDiagnosticsPath = path.join(
+    resultsDirectory,
+    'asset-warmup-diagnostics.json'
+  );
+  const browserAssetWarmupDiagnosticsPath = path.join(
+    resultsDirectory,
+    'browser-asset-warmup-diagnostics.json'
+  );
+  const browserWorkerAssetWarmupDiagnosticsPaths = [
+    'chromium',
+    'firefox-smoke',
+    'webkit-smoke',
+  ].map((projectName) => path.join(
+    resultsDirectory,
+    `browser-worker-asset-warmup-${projectName}.json`
+  ));
+  const browserContextAssetWarmupDiagnosticsPaths = fs.existsSync(resultsDirectory)
+    ? fs.readdirSync(resultsDirectory)
+      .filter((fileName) => (
+        /^browser-asset-warmup-context-[a-z0-9-]+\.json$/.test(fileName)
+      ))
+      .map((fileName) => path.join(resultsDirectory, fileName))
+    : [];
   fs.rmSync(scenarioDirectory, { recursive: true, force: true });
   fs.rmSync(healthReportPath, { force: true });
   fs.rmSync(authDiagnosticsPath, { force: true });
+  fs.rmSync(assetWarmupDiagnosticsPath, { force: true });
+  fs.rmSync(browserAssetWarmupDiagnosticsPath, { force: true });
+  browserWorkerAssetWarmupDiagnosticsPaths.forEach((diagnosticsPath) => {
+    fs.rmSync(diagnosticsPath, { force: true });
+  });
+  browserContextAssetWarmupDiagnosticsPaths.forEach((diagnosticsPath) => {
+    fs.rmSync(diagnosticsPath, { force: true });
+  });
   fs.mkdirSync(scenarioDirectory, { recursive: true });
   const emulatorLogPath = path.join(frontendRoot, '.perf-emulator-data', 'emulator.log');
   const firebaseDebugCandidates = firebaseDebugLogPaths(frontendRoot);

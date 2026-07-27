@@ -3,7 +3,11 @@ import {
   collection,
   doc,
   labelFirestoreTarget,
+  limit,
   onSnapshot,
+  orderBy,
+  query,
+  where,
 } from '../../performance/firestore';
 import { withAsyncResourceOwner } from '../../performance/runtime';
 import { db } from '../firebaseConfig';
@@ -20,6 +24,14 @@ import {
   normalizeGrigliataMusicPlaybackState,
   sortGrigliataMusicPlaybackSessions,
 } from './music';
+
+export const MAX_GLOBAL_GRIGLIATA_MUSIC_SESSIONS = 4;
+export const MAX_GLOBAL_GRIGLIATA_MUSIC_AUDIO_NODES = 1;
+
+const ACTIVE_GRIGLIATA_MUSIC_STATUSES = [
+  GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING,
+  GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PAUSED,
+];
 
 const clearAudioSource = (audio) => {
   if (!audio) return;
@@ -53,6 +65,11 @@ const clearAudioSources = (audioMap) => {
 };
 
 const getPlaybackSessionId = (session) => session?.id || session?.trackId || '';
+
+export const selectBoundedGrigliataMusicPlaybackSessions = (sessions) => (
+  sortGrigliataMusicPlaybackSessions(sessions)
+    .slice(0, MAX_GLOBAL_GRIGLIATA_MUSIC_SESSIONS)
+);
 
 const ensureAudioSource = async (audio, audioUrl) => {
   if (!audio || !audioUrl) return;
@@ -167,10 +184,17 @@ export const subscribeToGrigliataMusicPlayback = (onPlaybackState, onError) => (
   ))
 );
 
-export const subscribeToGrigliataMusicPlaybackSessions = (onPlaybackSessions, onError) => (
-  withAsyncResourceOwner('shell', () => onSnapshot(
+export const subscribeToGrigliataMusicPlaybackSessions = (onPlaybackSessions, onError) => {
+  const activeSessionsQuery = query(
+    collection(db, GRIGLIATA_MUSIC_PLAYBACK_SESSION_COLLECTION),
+    where('status', 'in', ACTIVE_GRIGLIATA_MUSIC_STATUSES),
+    orderBy('updatedAt', 'desc'),
+    limit(MAX_GLOBAL_GRIGLIATA_MUSIC_SESSIONS)
+  );
+
+  return withAsyncResourceOwner('shell', () => onSnapshot(
     labelFirestoreTarget(
-      collection(db, GRIGLIATA_MUSIC_PLAYBACK_SESSION_COLLECTION),
+      activeSessionsQuery,
       'grigliata.music-sessions.subscribe.v1',
       'shell'
     ),
@@ -179,11 +203,11 @@ export const subscribeToGrigliataMusicPlaybackSessions = (onPlaybackSessions, on
         id: docSnap.id,
         ...docSnap.data({ serverTimestamps: 'estimate' }),
       }));
-      onPlaybackSessions(sortGrigliataMusicPlaybackSessions(nextSessions));
+      onPlaybackSessions(selectBoundedGrigliataMusicPlaybackSessions(nextSessions));
     },
     onError
-  ))
-);
+  ));
+};
 
 export default function GlobalGrigliataMusicPlayer({
   subscribeToPlaybackState = subscribeToGrigliataMusicPlayback,
@@ -217,7 +241,7 @@ export default function GlobalGrigliataMusicPlayer({
 
     const unsubscribePlaybackSessions = subscribeToPlaybackSessions(
       (nextPlaybackSessions) => {
-        setPlaybackSessions(sortGrigliataMusicPlaybackSessions(nextPlaybackSessions));
+        setPlaybackSessions(selectBoundedGrigliataMusicPlaybackSessions(nextPlaybackSessions));
       },
       (error) => {
         console.error('Failed to load Grigliata music playback sessions:', error);
@@ -244,7 +268,7 @@ export default function GlobalGrigliataMusicPlayer({
       return [];
     }
 
-    const activeSessions = sortGrigliataMusicPlaybackSessions(playbackSessions);
+    const activeSessions = selectBoundedGrigliataMusicPlaybackSessions(playbackSessions);
     if (activeSessions.length > 0) {
       return activeSessions;
     }
@@ -254,13 +278,19 @@ export default function GlobalGrigliataMusicPlayer({
       id: 'legacy-current',
     }];
   }, [normalizedPlaybackState, playbackSessions, user?.uid]);
+  const audiblePlaybackSessions = useMemo(
+    () => normalizedPlaybackSessions.slice(0, MAX_GLOBAL_GRIGLIATA_MUSIC_AUDIO_NODES),
+    [normalizedPlaybackSessions]
+  );
   const isUnlockPromptVisible = blockedPlaybackSessionIds.length > 0;
 
   const markPlaybackSessionBlocked = useCallback((sessionId) => {
     if (!sessionId) return;
 
     setBlockedPlaybackSessionIds((currentIds) => (
-      currentIds.includes(sessionId) ? currentIds : [...currentIds, sessionId]
+      currentIds.includes(sessionId)
+        ? currentIds
+        : [...currentIds, sessionId].slice(-MAX_GLOBAL_GRIGLIATA_MUSIC_SESSIONS)
     ));
   }, []);
 
@@ -294,7 +324,8 @@ export default function GlobalGrigliataMusicPlayer({
 
     try {
       if (
-        normalizedSession.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED
+        isMusicMuted
+        || normalizedSession.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED
         || !normalizedSession.audioUrl
       ) {
         clearBlockedPlaybackSession(sessionId);
@@ -302,14 +333,20 @@ export default function GlobalGrigliataMusicPlayer({
         return;
       }
 
-      await ensureAudioSource(audio, normalizedSession.audioUrl);
-
       if (normalizedSession.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PAUSED) {
+        if (audio.dataset.grigliataAudioUrl !== normalizedSession.audioUrl) {
+          clearBlockedPlaybackSession(sessionId);
+          clearAudioSource(audio);
+          return;
+        }
+
         await seekAudio(audio, normalizedSession.offsetMs / 1000);
         audio.pause();
         clearBlockedPlaybackSession(sessionId);
         return;
       }
+
+      await ensureAudioSource(audio, normalizedSession.audioUrl);
 
       const targetOffsetMs = computeGrigliataMusicPlaybackOffsetMs(normalizedSession);
       if (
@@ -350,7 +387,7 @@ export default function GlobalGrigliataMusicPlayer({
   }, [clearBlockedPlaybackSession, isMusicMuted, markPlaybackSessionBlocked, normalizedPlaybackState.volume]);
 
   useEffect(() => {
-    const activeSessionIds = new Set(normalizedPlaybackSessions.map(getPlaybackSessionId).filter(Boolean));
+    const activeSessionIds = new Set(audiblePlaybackSessions.map(getPlaybackSessionId).filter(Boolean));
 
     audioRefs.current.forEach((audio, sessionId) => {
       if (!activeSessionIds.has(sessionId)) {
@@ -360,14 +397,14 @@ export default function GlobalGrigliataMusicPlayer({
     });
 
     setBlockedPlaybackSessionIds((currentIds) => currentIds.filter((sessionId) => activeSessionIds.has(sessionId)));
-  }, [normalizedPlaybackSessions]);
+  }, [audiblePlaybackSessions]);
 
   useEffect(() => {
     let cancelled = false;
 
     const syncPlayback = async () => {
       if (cancelled) return;
-      await Promise.all(normalizedPlaybackSessions.map((session) => applyPlaybackSession(session)));
+      await Promise.all(audiblePlaybackSessions.map((session) => applyPlaybackSession(session)));
     };
 
     void syncPlayback();
@@ -375,19 +412,19 @@ export default function GlobalGrigliataMusicPlayer({
     return () => {
       cancelled = true;
     };
-  }, [applyPlaybackSession, normalizedPlaybackSessions]);
+  }, [applyPlaybackSession, audiblePlaybackSessions]);
 
   const handlePlaybackSessionEnded = useCallback((sessionId) => {
     clearBlockedPlaybackSession(sessionId);
   }, [clearBlockedPlaybackSession]);
 
   const handleUnlockAudio = useCallback(async () => {
-    await Promise.all(normalizedPlaybackSessions.map((session) => applyPlaybackSession(session)));
-  }, [applyPlaybackSession, normalizedPlaybackSessions]);
+    await Promise.all(audiblePlaybackSessions.map((session) => applyPlaybackSession(session)));
+  }, [applyPlaybackSession, audiblePlaybackSessions]);
 
   return (
     <>
-      {normalizedPlaybackSessions.map((session) => {
+      {audiblePlaybackSessions.map((session) => {
         const sessionId = getPlaybackSessionId(session);
         if (!sessionId) return null;
 
@@ -395,7 +432,7 @@ export default function GlobalGrigliataMusicPlayer({
           <audio
             key={sessionId}
             ref={(audio) => registerPlaybackSessionAudio(sessionId, audio)}
-            preload="auto"
+            preload="none"
             className="hidden"
             aria-hidden="true"
             onEnded={() => handlePlaybackSessionEnded(sessionId)}
@@ -404,8 +441,7 @@ export default function GlobalGrigliataMusicPlayer({
       })}
 
       {isUnlockPromptVisible
-        && !isMusicMuted
-        && normalizedPlaybackSessions.some((session) => session.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING) && (
+        && audiblePlaybackSessions.some((session) => session.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING) && (
         <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-2xl border border-amber-400/40 bg-slate-950/95 p-4 text-white shadow-2xl backdrop-blur">
           <p className="text-sm font-semibold text-amber-200">Enable audio</p>
           <p className="mt-1 text-xs text-slate-300">

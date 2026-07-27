@@ -16,6 +16,7 @@ import {
   serverTimestamp,
   where,
   writeBatch,
+  setDoc,
   updateDoc
 } from '../../performance/firestore';
 import { ref as storageRef, deleteObject } from 'firebase/storage';
@@ -28,6 +29,11 @@ import {
 import {
   runWithDurableOperationIntent,
 } from '../../data/functions/backendOperationIntentStore';
+import { TASK07_MEDIA_PIPELINE_ENABLED } from '../../data/media/mediaFeatureFlags';
+import MediaImage, { hasMediaAsset } from '../common/MediaImage';
+import {
+  hasCanonicalTask07MediaAssetId,
+} from '../common/canonicalMediaAsset';
 
 const deleteNpcV2 = getCallable('deleteNpcV2');
 
@@ -143,8 +149,17 @@ const NpcTile = ({
         }`}
       >
         <div className="w-14 h-14 rounded-lg overflow-hidden border border-amber-500/40 bg-slate-900/70 shadow-md shrink-0">
-          {npc?.imageUrl ? (
-            <img src={npc.imageUrl} alt={nome} className="w-full h-full object-cover" />
+          {hasMediaAsset(npc, { variant: 'thumbnail' }) ? (
+            <MediaImage
+              media={npc}
+              src={npc?.imageUrl || ''}
+              variant="thumbnail"
+              alt={nome}
+              width={56}
+              height={56}
+              sizes="56px"
+              className="w-full h-full object-cover"
+            />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-400">No Img</div>
           )}
@@ -195,7 +210,7 @@ const NpcHoverPortal = ({
           <div className="rounded-xl border border-amber-400/50 bg-gradient-to-b from-slate-900 to-slate-950 shadow-2xl p-4 max-h-[72vh] overflow-y-auto">
             <div className="flex items-start gap-3">
               <div className="group/portrait relative w-16 h-16 rounded-md overflow-hidden border border-slate-600/60 bg-slate-800/60 shrink-0">
-                {npc?.imageUrl ? (
+                {hasMediaAsset(npc, { variant: 'thumbnail' }) ? (
                   <>
                     <button
                       type="button"
@@ -203,7 +218,17 @@ const NpcHoverPortal = ({
                       className="w-full h-full cursor-zoom-in focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80 focus-visible:ring-offset-1 focus-visible:ring-offset-slate-900"
                       aria-label={`Zoom image for ${getNpcNome(npc)}`}
                     >
-                      <img src={npc.imageUrl} alt={`${getNpcNome(npc)} portrait`} className="w-full h-full object-cover" />
+                      <MediaImage
+                        media={npc}
+                        src={npc?.imageUrl || ''}
+                        variant="thumbnail"
+                        alt={`${getNpcNome(npc)} portrait`}
+                        width={64}
+                        height={64}
+                        sizes="64px"
+                        loading="eager"
+                        className="w-full h-full object-cover"
+                      />
                     </button>
                     <button
                       type="button"
@@ -842,6 +867,67 @@ export default function NpcSidebar({
       setCreateFormError('Image must be 5 MB or smaller.');
       return;
     }
+
+    if (TASK07_MEDIA_PIPELINE_ENABLED) {
+      setIsCreatingNpc(true);
+      try {
+        const npcRef = doc(collection(db, 'echi_npcs'));
+        const revision = Date.now();
+        const {
+          buildTask07MediaEntityPatch,
+          buildTask07MediaOperationId,
+          describeTask07ConsumerOutcome,
+          runTask07ConsumerUpload,
+          task07ConsumerNeedsAttention,
+        } = await import(
+          /* webpackChunkName: "feature-task07-media" */
+          '../../data/media/mediaConsumerAdapter'
+        );
+        const outcome = await runTask07ConsumerUpload({
+          file: createImageFile,
+          ownerUid: user.uid,
+          entityId: npcRef.id,
+          operationId: buildTask07MediaOperationId({
+            kind: 'npc',
+            ownerUid: user.uid,
+            entityId: npcRef.id,
+            file: createImageFile,
+            revision,
+          }),
+          kind: 'npc',
+          previousAssetId: null,
+          commitEntity: (media) => setDoc(npcRef, {
+            nome,
+            ...buildTask07MediaEntityPatch(media, { includeEmptyImageUrl: true }),
+            description,
+            notes,
+            createdBy: user.uid,
+            createdByRole: role || '',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          }),
+        });
+
+        setCreateImageFile(null);
+        if (createImagePreviewUrl) {
+          URL.revokeObjectURL(createImagePreviewUrl);
+          setCreateImagePreviewUrl('');
+        }
+        if (task07ConsumerNeedsAttention(outcome)) {
+          setCreateFormError(describeTask07ConsumerOutcome(outcome, 'NPC image'));
+          return;
+        }
+        setShowCreateNpcModal(false);
+        resetCreateNpcForm();
+      } catch (error) {
+        console.error('Create NPC failed:', error);
+        setCreateFormError('Failed to create NPC.');
+      } finally {
+        setIsCreatingNpc(false);
+      }
+      return;
+    }
+
     const fileExt = createImageFile.name?.includes('.') ? createImageFile.name.split('.').pop() : '';
     const safeExt = fileExt ? `.${fileExt.replace(/[^a-zA-Z0-9]/g, '')}` : '';
     const safeNome = nome.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'npc';
@@ -926,6 +1012,63 @@ export default function NpcSidebar({
     }
 
     setIsSavingEditNpc(true);
+    if (TASK07_MEDIA_PIPELINE_ENABLED && isReplacingImage) {
+      try {
+        const revision = Date.now();
+        const {
+          buildTask07MediaEntityPatch,
+          buildTask07MediaOperationId,
+          describeTask07ConsumerOutcome,
+          getTask07PreviousAssetId,
+          runTask07ConsumerUpload,
+          task07ConsumerNeedsAttention,
+        } = await import(
+          /* webpackChunkName: "feature-task07-media" */
+          '../../data/media/mediaConsumerAdapter'
+        );
+        const outcome = await runTask07ConsumerUpload({
+          file: editImageFile,
+          ownerUid: user.uid,
+          entityId: editingNpc.id,
+          operationId: buildTask07MediaOperationId({
+            kind: 'npc',
+            ownerUid: user.uid,
+            entityId: editingNpc.id,
+            file: editImageFile,
+            revision,
+          }),
+          kind: 'npc',
+          previousAssetId: getTask07PreviousAssetId(editingNpc),
+          commitEntity: (media) => updateDoc(doc(db, 'echi_npcs', editingNpc.id), {
+            nome,
+            description,
+            notes,
+            updatedAt: serverTimestamp(),
+            ...buildTask07MediaEntityPatch(media, {
+              includeImagePath: false,
+            }),
+          }),
+        });
+
+        setEditImageFile(null);
+        if (editImagePreviewUrl) {
+          URL.revokeObjectURL(editImagePreviewUrl);
+          setEditImagePreviewUrl('');
+        }
+        if (task07ConsumerNeedsAttention(outcome)) {
+          setEditFormError(describeTask07ConsumerOutcome(outcome, 'NPC image'));
+          return;
+        }
+        closeEditNpcModal();
+      } catch (error) {
+        console.error('Edit NPC failed:', error);
+        setEditFormError('Failed to save NPC changes.');
+      } finally {
+        setIsSavingEditNpc(false);
+      }
+      return;
+    }
+
     let uploadedNewPath = '';
     try {
       const payload = {
@@ -985,7 +1128,8 @@ export default function NpcSidebar({
     closeNpcHover();
 
     const path = getNpcStoragePath(npc);
-    if (!TASK06_LOCAL_CANDIDATE && !path) {
+    const hasCanonicalMedia = hasCanonicalTask07MediaAssetId(npc);
+    if (!TASK06_LOCAL_CANDIDATE && !hasCanonicalMedia && !path) {
       setNpcError('Cannot delete NPC image: missing storage path.');
       return;
     }
@@ -1004,12 +1148,14 @@ export default function NpcSidebar({
           ),
         });
       } else {
-        try {
-          await deleteObject(storageRef(storage, path));
-        } catch (error) {
-          console.error('Delete NPC image failed:', error);
-          setNpcError('Image deletion failed. NPC document was not deleted.');
-          return;
+        if (!hasCanonicalMedia) {
+          try {
+            await deleteObject(storageRef(storage, path));
+          } catch (error) {
+            console.error('Delete NPC image failed:', error);
+            setNpcError('Image deletion failed. NPC document was not deleted.');
+            return;
+          }
         }
 
         try {
@@ -1028,7 +1174,7 @@ export default function NpcSidebar({
           }
         } catch (error) {
           console.error('Delete linked NPC markers failed after image deletion:', error);
-          setNpcError('NPC image deleted, but linked map marker cleanup failed. NPC document was not deleted.');
+          setNpcError('Linked map marker cleanup failed. NPC document was not deleted.');
           return;
         }
 
@@ -1036,7 +1182,7 @@ export default function NpcSidebar({
           await deleteDoc(doc(db, 'echi_npcs', npc.id));
         } catch (error) {
           console.error('Delete NPC document failed after image deletion:', error);
-          setNpcError('Image and linked map markers deleted, but NPC document deletion failed.');
+          setNpcError('Linked map markers were cleaned up, but NPC document deletion failed.');
         }
       }
     } catch (error) {

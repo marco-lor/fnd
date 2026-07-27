@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   collection,
+  documentId,
   doc,
   onSnapshot,
   query,
@@ -65,6 +66,9 @@ import {
 } from './narrationScene';
 
 const LIVE_INTERACTION_CLOCK_INTERVAL_MS = 15 * 1000;
+export const GRIGLIATA_SHARED_CHARACTER_PROFILE_QUERY_CHUNK_SIZE = 30;
+export const GRIGLIATA_SHARED_CHARACTER_PROFILE_MAX_IDS = (
+  GRIGLIATA_SHARED_CHARACTER_PROFILE_QUERY_CHUNK_SIZE * 2);
 const PAGE_PRESENCE_CLOCK_INTERVAL_MS = 15 * 1000;
 const resolveCustomTokenRole = (token = {}, tokenType = '') => {
   if (tokenType !== 'custom') {
@@ -113,12 +117,23 @@ const normalizeResourceValue = (value, fallback = 0) => {
   return Number.isFinite(numericValue) ? Math.max(0, numericValue) : fallback;
 };
 
+const getEntityMedia = (entity) => {
+  if (entity?.media && typeof entity.media === 'object') {
+    return entity.media;
+  }
+  if (entity?.General?.media && typeof entity.General.media === 'object') {
+    return entity.General.media;
+  }
+  return null;
+};
+
 export default function useGrigliataPageData({
   currentUserId = '',
   currentCharacterId = '',
   currentTokenLabel = '',
   currentImageUrl = '',
   currentImagePath = '',
+  currentMedia = null,
   currentUserHiddenBackgroundIds = [],
   currentUserHiddenTokenIdsByBackground = {},
   isManager = false,
@@ -132,6 +147,7 @@ export default function useGrigliataPageData({
   const [boardStateReadySubscriptionKey, setBoardStateReadySubscriptionKey] = useState('');
   const [foeLibrary, setFoeLibrary] = useState([]);
   const [tokenProfiles, setTokenProfiles] = useState([]);
+  const [sharedCharacterProfilesById, setSharedCharacterProfilesById] = useState({});
   const [activePlacements, setActivePlacements] = useState([]);
   const [isActivePlacementsReady, setIsActivePlacementsReady] = useState(false);
   const [aoeFigureSnapshots, setAoEFigureSnapshots] = useState([]);
@@ -157,6 +173,7 @@ export default function useGrigliataPageData({
       setBoardStateReadySubscriptionKey('');
       setFoeLibrary([]);
       setTokenProfiles([]);
+      setSharedCharacterProfilesById({});
       setPagePresenceSnapshots([]);
       setGalleryFolders([]);
       setMusicFolders([]);
@@ -736,8 +753,106 @@ export default function useGrigliataPageData({
     [currentUserHiddenTokenIdsByBackground]
   );
 
+  const sharedCharacterProfileIdsKey = useMemo(() => JSON.stringify(
+    [...new Set(activePlacements
+      .map((placement) => {
+        const tokenId = typeof placement?.tokenId === 'string'
+          ? placement.tokenId.trim()
+          : '';
+        const ownerUid = typeof placement?.ownerUid === 'string'
+          ? placement.ownerUid.trim()
+          : '';
+        return (
+          tokenId
+          && tokenId === ownerUid
+          && tokenId !== currentUserId
+        ) ? tokenId : '';
+      })
+      .filter(Boolean))]
+      .sort()
+      // Keep listener fan-out hard-bounded. Placements beyond this cap retain
+      // their map-local legacy image/initial fallback instead of adding reads.
+      .slice(0, GRIGLIATA_SHARED_CHARACTER_PROFILE_MAX_IDS)
+  ), [activePlacements, currentUserId]);
+
+  useEffect(() => {
+    const profileIds = JSON.parse(sharedCharacterProfileIdsKey);
+    if (!currentUserId || !profileIds.length) {
+      setSharedCharacterProfilesById({});
+      return undefined;
+    }
+
+    let active = true;
+    const profileIdChunks = [];
+    for (
+      let offset = 0;
+      offset < profileIds.length;
+      offset += GRIGLIATA_SHARED_CHARACTER_PROFILE_QUERY_CHUNK_SIZE
+    ) {
+      profileIdChunks.push(
+        profileIds.slice(
+          offset,
+          offset + GRIGLIATA_SHARED_CHARACTER_PROFILE_QUERY_CHUNK_SIZE
+        )
+      );
+    }
+    const profilesByChunkIndex = new Map();
+    const publishSharedProfiles = () => {
+      if (!active) return;
+      const mergedProfiles = {};
+      [...profilesByChunkIndex.keys()]
+        .sort((left, right) => left - right)
+        .forEach((chunkIndex) => {
+          Object.assign(mergedProfiles, profilesByChunkIndex.get(chunkIndex));
+        });
+      setSharedCharacterProfilesById(mergedProfiles);
+    };
+
+    setSharedCharacterProfilesById({});
+    const unsubscribes = profileIdChunks.map((chunkProfileIds, chunkIndex) => onSnapshot(
+      query(
+        collection(db, 'grigliata_tokens'),
+        where(documentId(), 'in', chunkProfileIds),
+        where('tokenType', '==', 'character')
+      ),
+      (snapshot) => {
+        if (!active) return;
+        const nextChunkProfiles = {};
+        snapshot.docs.forEach((profileSnapshot) => {
+          const profile = {
+            id: profileSnapshot.id,
+            ...profileSnapshot.data(),
+          };
+          if (
+            profile.tokenType === 'character'
+            && profile.ownerUid === profileSnapshot.id
+            && chunkProfileIds.includes(profileSnapshot.id)
+          ) {
+            nextChunkProfiles[profileSnapshot.id] = profile;
+          }
+        });
+        profilesByChunkIndex.set(chunkIndex, nextChunkProfiles);
+        publishSharedProfiles();
+      },
+      (error) => {
+        if (!active) return;
+        console.error('Failed to load a shared Grigliata character profile:', error);
+        profilesByChunkIndex.set(chunkIndex, {});
+        publishSharedProfiles();
+      }
+    ));
+
+    return () => {
+      active = false;
+      unsubscribes.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [currentUserId, sharedCharacterProfileIdsKey]);
+
   const normalizedTokenProfiles = useMemo(
-    () => tokenProfiles
+    () => [
+      ...tokenProfiles,
+      ...Object.values(sharedCharacterProfilesById),
+    ]
       .map((token) => {
         const tokenId = typeof token?.id === 'string' ? token.id : '';
         const ownerUid = typeof token?.ownerUid === 'string' && token.ownerUid
@@ -774,7 +889,7 @@ export default function useGrigliataPageData({
         };
       })
       .filter(Boolean),
-    [tokenProfiles]
+    [sharedCharacterProfilesById, tokenProfiles]
   );
 
   const normalizedActivePlacements = useMemo(
@@ -852,6 +967,17 @@ export default function useGrigliataPageData({
     return nextMap;
   }, [normalizedTokenProfiles]);
 
+  const foeSourcesById = useMemo(() => {
+    const nextMap = new Map();
+    foeLibrary.forEach((foe) => {
+      const foeId = typeof foe?.id === 'string' ? foe.id : '';
+      if (foeId) {
+        nextMap.set(foeId, foe);
+      }
+    });
+    return nextMap;
+  }, [foeLibrary]);
+
   const boardTokens = useMemo(
     () => normalizedActivePlacements
       .map((placement) => {
@@ -865,6 +991,7 @@ export default function useGrigliataPageData({
             label: currentTokenLabel,
             imageUrl: currentImageUrl,
             imagePath: currentImagePath,
+            media: currentMedia,
             tokenType: 'character',
             imageSource: 'profile',
           } : null);
@@ -880,6 +1007,26 @@ export default function useGrigliataPageData({
             : (tokenType === 'custom' ? 'uploaded' : 'profile')
         );
         const tokenVisionSettings = normalizeTokenVisionSettings(placement);
+        const isCurrentUserCharacter = (
+          tokenType === 'character'
+          && placement.tokenId === currentUserId
+        );
+        const foeSource = tokenType === 'foe' && profile?.foeSourceId
+          ? foeSourcesById.get(profile.foeSourceId) || null
+          : null;
+        const projectedImageUrl = isCurrentUserCharacter && currentMedia
+          ? currentImageUrl
+          : (foeSource
+            ? (typeof foeSource?.imageUrl === 'string' ? foeSource.imageUrl.trim() : '')
+            : (placementImageUrl || profile?.imageUrl || ''));
+        const projectedImagePath = isCurrentUserCharacter && currentMedia
+          ? currentImagePath
+          : (foeSource
+            ? (typeof foeSource?.imagePath === 'string' ? foeSource.imagePath.trim() : '')
+            : (profile?.imagePath || ''));
+        const projectedMedia = isCurrentUserCharacter && currentMedia
+          ? currentMedia
+          : (foeSource ? getEntityMedia(foeSource) : getEntityMedia(profile));
 
         return {
           ...(profile || {}),
@@ -895,8 +1042,9 @@ export default function useGrigliataPageData({
             : '',
           imageSource,
           label: placementLabel || profile?.label || placement.ownerUid || 'Player',
-          imageUrl: placementImageUrl || profile?.imageUrl || '',
-          imagePath: profile?.imagePath || '',
+          imageUrl: projectedImageUrl,
+          imagePath: projectedImagePath,
+          media: projectedMedia,
           category: profile?.category || '',
           rank: profile?.rank || '',
           dadoAnima: profile?.dadoAnima || '',
@@ -926,10 +1074,12 @@ export default function useGrigliataPageData({
       }),
     [
       currentCharacterId,
+      currentMedia,
       currentImagePath,
       currentImageUrl,
       currentTokenLabel,
       currentUserId,
+      foeSourcesById,
       normalizedActivePlacements,
       tokenProfilesByTokenId,
     ]
@@ -943,6 +1093,7 @@ export default function useGrigliataPageData({
         ownerUid: token.ownerUid,
         label: token.label || token.characterId || token.ownerUid || 'Token',
         imageUrl: token.imageUrl || '',
+        media: getEntityMedia(token),
         tokenType: token.tokenType || 'character',
         isVisibleToPlayers: token.isVisibleToPlayers !== false,
         initiative: Number.isInteger(token.turnOrderInitiative) ? token.turnOrderInitiative : 0,
@@ -1016,8 +1167,9 @@ export default function useGrigliataPageData({
       tokenType: 'character',
       imageSource: currentUserTokenProfileDoc?.imageSource || 'profile',
       label: currentUserTokenProfileDoc?.label || currentTokenLabel,
-      imageUrl: currentUserTokenProfileDoc?.imageUrl || currentImageUrl,
-      imagePath: currentUserTokenProfileDoc?.imagePath || currentImagePath,
+      imageUrl: currentMedia ? currentImageUrl : (currentUserTokenProfileDoc?.imageUrl || currentImageUrl),
+      imagePath: currentMedia ? currentImagePath : (currentUserTokenProfileDoc?.imagePath || currentImagePath),
+      media: currentMedia || getEntityMedia(currentUserTokenProfileDoc),
       placed: !!currentUserPlacement,
       col: Number.isFinite(currentUserPlacement?.col) ? currentUserPlacement.col : 0,
       row: Number.isFinite(currentUserPlacement?.row) ? currentUserPlacement.row : 0,
@@ -1033,6 +1185,7 @@ export default function useGrigliataPageData({
     currentCharacterId,
     currentImagePath,
     currentImageUrl,
+    currentMedia,
     currentTokenLabel,
     currentUserId,
     currentUserPlacement,
@@ -1060,6 +1213,7 @@ export default function useGrigliataPageData({
         label: tokenProfile.label || 'Custom Token',
         imageUrl: tokenProfile.imageUrl || '',
         imagePath: tokenProfile.imagePath || '',
+        media: getEntityMedia(tokenProfile),
         placed: activePlacementCount > 0,
         activePlacementCount,
         col: 0,

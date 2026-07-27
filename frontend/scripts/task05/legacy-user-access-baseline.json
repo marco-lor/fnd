@@ -69,12 +69,6 @@
       "contextFingerprint": "52e2d4065529fc9b3a275beb075709d4d354399f9113a0e36c822974bb1c3d35"
     },
     {
-      "path": "components/common/navbar.js",
-      "count": 1,
-      "operationCount": 1,
-      "contextFingerprint": "bb0bf399d19e75223c3b30a0f763b3ff569a60c2e0a939b240573539031abbc2"
-    },
-    {
       "path": "components/common/userOwnedMedia.js",
       "count": 1,
       "operationCount": 3,

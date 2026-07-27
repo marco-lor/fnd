@@ -47,6 +47,12 @@ service cloud.firestore {
         && get(userDocPath(request.auth.uid)).data.role == "webmaster";
     }
 
+    function isDMOrWebmaster() {
+      return isActiveSignedIn()
+        && get(userDocPath(request.auth.uid)).data.role
+          in ["dm", "webmaster"];
+    }
+
     function isPlayer() {
       return isActiveSignedIn()
         && (get(userDocPath(request.auth.uid)).data.role == "player"
@@ -66,6 +72,152 @@ service cloud.firestore {
       return data.keys().hasAny([fieldName]) && data[fieldName] is map
         ? data[fieldName]
         : {};
+    }
+
+    function task07MediaAssetPath(assetId) {
+      return /databases/$(database)/documents/media_assets/$(assetId);
+    }
+
+    function task07MediaKindMatches(kind, expectedKind) {
+      return kind == expectedKind
+        || (
+          expectedKind == "map-or-video"
+          && kind in ["map", "map-video"]
+        );
+    }
+
+    function isValidTask07CanonicalMediaValue(
+      value,
+      expectedKind,
+      expectedOwnerUid,
+      expectedEntityId,
+      expectedReferenceScope,
+      expectedReferencePath
+    ) {
+      let assetId = value is map
+          && value.get("assetId", "") is string
+        ? value.get("assetId", "")
+        : "invalid";
+      let assetPath = task07MediaAssetPath(assetId);
+      let hasManifest = exists(assetPath);
+      let manifest = hasManifest
+        ? get(assetPath).data
+        : {};
+      let plan = manifest.get("plan", {});
+      let canonicalMedia = manifest.get("media", {});
+      let canonicalOriginal = canonicalMedia.get("original", {});
+      return (
+          value is map
+          && assetId.matches('^m_[a-f0-9]{40}$')
+          && hasManifest
+        )
+        ? (
+          manifest.get("schemaVersion", 0) == 1
+          && manifest.get("contractVersion", 0) == 1
+          && manifest.get("assetId", "") == assetId
+          && task07MediaKindMatches(
+            manifest.get("kind", ""),
+            expectedKind
+          )
+          && manifest.get("ownerUid", "") is string
+          && manifest.get("ownerUid", "").size() > 0
+          && (
+            expectedOwnerUid == null
+            || manifest.get("ownerUid", "") == expectedOwnerUid
+          )
+          && manifest.get("entityId", "") == expectedEntityId
+          && manifest.get("referenceScope", null) == expectedReferenceScope
+          && manifest.get("state", "") in ["ready", "fallback", "referenced"]
+          // media_assets is server-owned. Equality to its finalized descriptor
+          // binds every nested path/generation while avoiding duplicate field
+          // validation that can exceed Firestore's 1,000-expression limit.
+          && canonicalMedia == value
+          && plan is map
+          && plan.get("schemaVersion", 0) == 1
+          && plan.get("contractVersion", 0) == 1
+          && plan.get("assetId", "") == assetId
+          && plan.get("kind", "") == manifest.get("kind", "")
+          && plan.get("actorUid", "") == manifest.get("actorUid", "")
+          && plan.get("ownerUid", "") == manifest.get("ownerUid", "")
+          && plan.get("entityId", "") == expectedEntityId
+          && plan.get("referenceScope", null) == expectedReferenceScope
+          && plan.get("originalPath", "") == canonicalOriginal.get("path", "")
+          && (
+            manifest.get("state", "") != "referenced"
+            || manifest.get("referencePath", "") == expectedReferencePath
+          )
+          && (
+            !manifest.keys().hasAny(["referencePath"])
+            || manifest.get("referencePath", "") == expectedReferencePath
+          )
+        )
+        : false;
+    }
+
+    function hasValidOptionalTask07MediaReference(
+      data,
+      expectedKind,
+      expectedOwnerUid,
+      expectedEntityId,
+      expectedReferenceScope,
+      expectedReferencePath
+    ) {
+      let topLevel = data.get("media", null);
+      let general = mapOrEmpty(data, "General");
+      let nested = general.get("media", null);
+      let hasTopLevel = data.keys().hasAny(["media"]) && topLevel != null;
+      let hasNested = general.keys().hasAny(["media"]) && nested != null;
+      return hasTopLevel
+        ? (
+          (
+            !hasNested
+            || topLevel == nested
+          )
+          && isValidTask07CanonicalMediaValue(
+            topLevel,
+            expectedKind,
+            expectedOwnerUid,
+            expectedEntityId,
+            expectedReferenceScope,
+            expectedReferencePath
+          )
+        )
+        : (
+          hasNested
+            ? isValidTask07CanonicalMediaValue(
+              nested,
+              expectedKind,
+              expectedOwnerUid,
+              expectedEntityId,
+              expectedReferenceScope,
+              expectedReferencePath
+            )
+            : true
+        );
+    }
+
+    function task07MediaAssetId(value) {
+      return value is map
+        ? value.get("assetId", null)
+        : null;
+    }
+
+    function task07MediaAssetIdsUnchanged(data, existingData) {
+      let nextGeneral = mapOrEmpty(data, "General");
+      let existingGeneral = mapOrEmpty(existingData, "General");
+      return task07MediaAssetId(data.get("media", null))
+          == task07MediaAssetId(existingData.get("media", null))
+        && task07MediaAssetId(nextGeneral.get("media", null))
+          == task07MediaAssetId(existingGeneral.get("media", null));
+    }
+
+    function task07MediaReferencesUnchanged(data, existingData) {
+      let nextGeneral = mapOrEmpty(data, "General");
+      let existingGeneral = mapOrEmpty(existingData, "General");
+      return data.get("media", null)
+          == existingData.get("media", null)
+        && nextGeneral.get("media", null)
+          == existingGeneral.get("media", null);
     }
 
     function isValidUserDataRolloutStage(stage) {
@@ -213,7 +365,7 @@ service cloud.firestore {
     }
 
     function isSafePrivilegedUserUpdate(userId) {
-      return (isDM() || isWebmaster())
+      return isDMOrWebmaster()
         && resource.data.get("deletionState", null) != "pending"
         && isAllowedUserDataRootMutation(
           userId,
@@ -308,7 +460,45 @@ service cloud.firestore {
         );
     }
 
-    function isValidGrigliataTokenProfile(data, tokenId) {
+    function isValidOptionalGrigliataCharacterMedia(data, existingData) {
+      let hasMedia = data.keys().hasAny(["media"])
+        && data.media != null;
+      let assetIdsUnchanged = task07MediaAssetIdsUnchanged(
+        data,
+        existingData
+      );
+      return assetIdsUnchanged
+        ? task07MediaReferencesUnchanged(data, existingData)
+        : hasMedia
+        ? (
+          data.tokenType == "character"
+          && data.ownerUid is string
+          && isValidTask07CanonicalMediaValue(
+            data.media,
+            "avatar",
+            data.ownerUid,
+            data.ownerUid,
+            null,
+            "users/" + data.ownerUid
+          )
+        )
+        : true;
+    }
+
+    function hasNoGrigliataCharacterFoeDetails(data) {
+      return data.tokenType != "character"
+        || !data.keys().hasAny([
+          "foeSourceId",
+          "category",
+          "rank",
+          "dadoAnima",
+          "Parametri",
+          "spells",
+          "tecniche"
+        ]);
+    }
+
+    function isValidGrigliataTokenProfile(data, tokenId, existingData) {
       return data.keys().hasAll([
           "ownerUid",
           "label",
@@ -329,6 +519,7 @@ service cloud.firestore {
           "customTokenRole",
           "customTemplateId",
           "imageSource",
+          "media",
           "createdAt",
           "createdBy",
           "updatedAt",
@@ -352,6 +543,11 @@ service cloud.firestore {
         && data.imagePath is string
         && isValidGrigliataTokenType(data.tokenType)
         && isValidGrigliataTokenImageSource(data.imageSource)
+        && isValidOptionalGrigliataCharacterMedia(
+          data,
+          existingData
+        )
+        && hasNoGrigliataCharacterFoeDetails(data)
         && (data.tokenType == "custom" || !data.keys().hasAny(["customTokenRole", "customTemplateId"]))
         && (!data.keys().hasAny(["characterId"]) || data.characterId is string)
         && (!data.keys().hasAny(["customTokenRole"]) || data.customTokenRole is string)
@@ -1393,11 +1589,38 @@ service cloud.firestore {
     match /users/{userId} {
       // Owner read, plus webmaster read. (Note: players cannot read other users.)
       allow read: if isSignedIn() && (request.auth.uid == userId || isWebmaster() || isDM());
-      allow create: if isSignedIn() && isSafeOwnerUserCreate(userId);
+      allow create: if isSignedIn()
+        && isSafeOwnerUserCreate(userId)
+        && hasValidOptionalTask07MediaReference(
+          request.resource.data,
+          "avatar",
+          userId,
+          userId,
+          null,
+          "users/" + userId
+        );
       allow update: if isSignedIn()
         && (
           isSafeOwnerUserUpdate(userId)
           || isSafePrivilegedUserUpdate(userId)
+        )
+        && (
+          task07MediaAssetIdsUnchanged(
+            request.resource.data,
+            resource.data
+          )
+            ? task07MediaReferencesUnchanged(
+              request.resource.data,
+              resource.data
+            )
+            : hasValidOptionalTask07MediaReference(
+              request.resource.data,
+              "avatar",
+              userId,
+              userId,
+              null,
+              "users/" + userId
+            )
         );
       allow delete: if false;
 
@@ -1496,6 +1719,18 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Task 07 media manifests and cleanup leases contain actor ownership,
+    // canonical private paths, processing errors, and lifecycle timestamps.
+    // Clients receive only privacy-minimized descriptors from authenticated
+    // callables; all direct reads and writes remain server-owned.
+    match /media_assets/{assetId} {
+      allow read, write: if false;
+    }
+
+    match /media_asset_cleanup/{assetId} {
+      allow read, write: if false;
+    }
+
     match /migration_state/{document=**} {
       allow read, write: if false;
     }
@@ -1515,7 +1750,35 @@ service cloud.firestore {
     // Items
     match /items/{docId} {
       allow read: if true;
-      allow write: if isDM() || isWebmaster();
+      allow create: if isDMOrWebmaster()
+        && hasValidOptionalTask07MediaReference(
+          request.resource.data,
+          "item",
+          null,
+          docId,
+          "global-catalog",
+          "items/" + docId
+        );
+      allow update: if isDMOrWebmaster()
+        && (
+          task07MediaAssetIdsUnchanged(
+            request.resource.data,
+            resource.data
+          )
+            ? task07MediaReferencesUnchanged(
+              request.resource.data,
+              resource.data
+            )
+            : hasValidOptionalTask07MediaReference(
+              request.resource.data,
+              "item",
+              null,
+              docId,
+              "global-catalog",
+              "items/" + docId
+            )
+        );
+      allow delete: if isDM() || isWebmaster();
     }
 
     match /tecniche/{docId} {
@@ -1541,7 +1804,35 @@ service cloud.firestore {
     // Foes
     match /foes/{foeId} {
       allow get, list: if isDM();
-      allow create, update, delete: if isDM();
+      allow create: if isDM()
+        && hasValidOptionalTask07MediaReference(
+          request.resource.data,
+          "foe",
+          null,
+          foeId,
+          null,
+          "foes/" + foeId
+        );
+      allow update: if isDM()
+        && (
+          task07MediaAssetIdsUnchanged(
+            request.resource.data,
+            resource.data
+          )
+            ? task07MediaReferencesUnchanged(
+              request.resource.data,
+              resource.data
+            )
+            : hasValidOptionalTask07MediaReference(
+              request.resource.data,
+              "foe",
+              null,
+              foeId,
+              null,
+              "foes/" + foeId
+            )
+        );
+      allow delete: if isDM();
     }
 
     // Encounters
@@ -1632,7 +1923,35 @@ service cloud.firestore {
 
     match /grigliata_backgrounds/{backgroundId} {
       allow read: if isSignedIn();
-      allow write: if isGrigliataManager();
+      allow create: if isGrigliataManager()
+        && hasValidOptionalTask07MediaReference(
+          request.resource.data,
+          "map-or-video",
+          null,
+          backgroundId,
+          null,
+          "grigliata_backgrounds/" + backgroundId
+        );
+      allow update: if isGrigliataManager()
+        && (
+          task07MediaAssetIdsUnchanged(
+            request.resource.data,
+            resource.data
+          )
+            ? task07MediaReferencesUnchanged(
+              request.resource.data,
+              resource.data
+            )
+            : hasValidOptionalTask07MediaReference(
+              request.resource.data,
+              "map-or-video",
+              null,
+              backgroundId,
+              null,
+              "grigliata_backgrounds/" + backgroundId
+            )
+        );
+      allow delete: if isGrigliataManager();
     }
 
     match /grigliata_gallery_folders/{folderId} {
@@ -1789,13 +2108,17 @@ service cloud.firestore {
     match /grigliata_tokens/{tokenId} {
       allow read: if isSignedIn()
         && (
-          tokenId == resource.data.ownerUid
+          resource.data.tokenType == "character"
           || request.auth.uid == resource.data.ownerUid
           || isGrigliataManager()
         );
 
       allow create: if isActiveSignedIn()
-        && isValidGrigliataTokenProfile(request.resource.data, tokenId)
+        && isValidGrigliataTokenProfile(
+          request.resource.data,
+          tokenId,
+          {}
+        )
         && grigliataCustomTemplateAcceptsInstance(
           request.resource.data,
           tokenId
@@ -1815,7 +2138,11 @@ service cloud.firestore {
         && request.resource.data.ownerUid == resource.data.ownerUid
         && (
           (
-            isValidGrigliataTokenProfile(request.resource.data, tokenId)
+            isValidGrigliataTokenProfile(
+              request.resource.data,
+              tokenId,
+              resource.data
+            )
             && isStableGrigliataCustomTokenContract(request.resource.data, resource.data, tokenId)
             && (
               isGrigliataManager()
@@ -2003,7 +2330,7 @@ service cloud.firestore {
     match /echi_npcs/{npcId} {
       allow read: if isSignedIn();
 
-      allow create: if (isDM() || isWebmaster())
+      allow create: if isDMOrWebmaster()
         && request.resource.data.keys().hasAll([
           "nome",
           "imageUrl",
@@ -2019,17 +2346,26 @@ service cloud.firestore {
           "nome",
           "imageUrl",
           "imagePath",
+          "media",
           "description",
           "notes",
           "createdBy",
           "createdByRole",
           "createdAt",
           "updatedAt"
-        ]);
+        ])
+        && hasValidOptionalTask07MediaReference(
+          request.resource.data,
+          "npc",
+          null,
+          npcId,
+          null,
+          "echi_npcs/" + npcId
+        );
 
-      // Text-only updates: immutable image + creator metadata
-      allow update: if isActiveSignedIn()
-        && request.resource.data.keys().hasAll([
+      // Legacy image fields and creator metadata stay immutable. Task 07 media
+      // references can be added or replaced only by privileged editors.
+      allow update: if request.resource.data.keys().hasAll([
           "nome",
           "imageUrl",
           "imagePath",
@@ -2045,11 +2381,35 @@ service cloud.firestore {
         && request.resource.data.createdBy == resource.data.createdBy
         && request.resource.data.createdByRole == resource.data.createdByRole
         && request.resource.data.createdAt == resource.data.createdAt
-        && (isNpcTextOnlyUpdate() || isDM() || isWebmaster())
+        && (
+          task07MediaAssetIdsUnchanged(
+            request.resource.data,
+            resource.data
+          )
+            ? (
+              isActiveSignedIn()
+              && task07MediaReferencesUnchanged(
+                request.resource.data,
+                resource.data
+              )
+            )
+            : (
+              isDMOrWebmaster()
+              && hasValidOptionalTask07MediaReference(
+                request.resource.data,
+                "npc",
+                null,
+                npcId,
+                null,
+                "echi_npcs/" + npcId
+              )
+            )
+        )
         && request.resource.data.keys().hasOnly([
           "nome",
           "imageUrl",
           "imagePath",
+          "media",
           "description",
           "notes",
           "createdBy",

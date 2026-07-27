@@ -4,6 +4,7 @@ const childProcess = require('child_process');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
+const { createDeterministicBuildServer } = require('./deterministic-static-server');
 const {
   assertPerformanceProject,
   ensureDirectory,
@@ -13,12 +14,16 @@ const {
   resultsDir,
 } = require('./common');
 
+const PERFORMANCE_STATIC_SERVER_PORT = 5000;
+const FIREBASE_HOSTING_UPSTREAM_PORT = 5002;
+const PERFORMANCE_FIREBASE_CONFIG_FILENAME = '.firebase.performance.generated.json';
 const EMULATOR_HARNESS_PORTS = Object.freeze([
   4000,
   4400,
   4500,
-  5000,
+  PERFORMANCE_STATIC_SERVER_PORT,
   5001,
+  FIREBASE_HOSTING_UPSTREAM_PORT,
   8080,
   9099,
   9150,
@@ -31,6 +36,87 @@ const PREVIOUS_LOG_TAIL_BYTES = 64 * 1024;
 const EMULATOR_PORT_RELEASE_TIMEOUT_MS = 60 * 1000;
 const EMULATOR_PORT_RELEASE_INTERVAL_MS = 250;
 const EMULATOR_PORT_RELEASE_STABLE_SAMPLES = 2;
+const FIREBASE_CLI_OFFLINE_ENV_KEY = 'npm_config_offline';
+
+const createFirebaseCliEnvironment = (
+  inheritedEnvironment = process.env,
+  overrides = {}
+) => {
+  const environment = {};
+  for (const [key, value] of Object.entries({
+    ...inheritedEnvironment,
+    ...overrides,
+  })) {
+    if (key.toLowerCase() !== FIREBASE_CLI_OFFLINE_ENV_KEY) {
+      environment[key] = value;
+    }
+  }
+  return {
+    ...environment,
+    // The demo harness must not let firebase-tools synchronously query npm
+    // while its single CLI process is also serving the local emulators.
+    [FIREBASE_CLI_OFFLINE_ENV_KEY]: 'true',
+  };
+};
+
+const writePerformanceFirebaseConfig = ({
+  sourcePath = path.join(frontendRoot, 'firebase.json'),
+  outputPath = path.join(frontendRoot, PERFORMANCE_FIREBASE_CONFIG_FILENAME),
+  hostingPort = FIREBASE_HOSTING_UPSTREAM_PORT,
+  fsImpl = fs,
+} = {}) => {
+  if (!Number.isInteger(hostingPort) || hostingPort <= 0 || hostingPort > 65_535) {
+    throw new TypeError('Performance Firebase Hosting port must be an integer from 1 to 65535.');
+  }
+  const source = JSON.parse(fsImpl.readFileSync(sourcePath, 'utf8'));
+  if (!source?.emulators?.hosting) {
+    throw new Error('Firebase config must define emulators.hosting.');
+  }
+  const generated = JSON.parse(JSON.stringify(source));
+  generated.emulators.hosting = {
+    ...generated.emulators.hosting,
+    host: '127.0.0.1',
+    port: hostingPort,
+  };
+  fsImpl.writeFileSync(outputPath, `${JSON.stringify(generated, null, 2)}\n`, 'utf8');
+  return generated;
+};
+
+const removePerformanceFirebaseConfig = ({
+  root = frontendRoot,
+  fsImpl = fs,
+} = {}) => {
+  const resolvedRoot = path.resolve(root);
+  const configPath = path.resolve(resolvedRoot, PERFORMANCE_FIREBASE_CONFIG_FILENAME);
+  const relativePath = path.relative(resolvedRoot, configPath);
+  if (
+    !relativePath
+    || path.isAbsolute(relativePath)
+    || relativePath.startsWith(`..${path.sep}`)
+  ) {
+    throw new Error('Performance Firebase config cleanup escaped the frontend root.');
+  }
+  fsImpl.rmSync(configPath, { force: true });
+  return configPath;
+};
+
+const createFirebaseEmulatorArguments = ({
+  firebaseCli,
+  configPath,
+  lifecycleProjectId = projectId,
+} = {}) => {
+  if (!firebaseCli || !configPath) {
+    throw new TypeError('Firebase CLI and generated config paths are required.');
+  }
+  return [
+    firebaseCli,
+    'emulators:start',
+    '--project', lifecycleProjectId,
+    '--config', configPath,
+    '--only', 'auth,firestore,storage,functions,hosting',
+    '--log-verbosity', 'INFO',
+  ];
+};
 
 const firebaseDebugLogPaths = (root = frontendRoot) => [
   path.join(root, 'firebase-debug.log'),
@@ -137,10 +223,15 @@ const waitForEmulatorPortsFree = async ({
 
 const withEmulatorPortCleanup = async (operation, {
   waitForPorts = waitForEmulatorPortsFree,
+  cleanupOwnedArtifacts = async () => {},
   label = 'Performance emulator run',
 } = {}) => {
-  if (typeof operation !== 'function' || typeof waitForPorts !== 'function') {
-    throw new TypeError('Emulator operation and port cleanup must be functions.');
+  if (
+    typeof operation !== 'function'
+    || typeof waitForPorts !== 'function'
+    || typeof cleanupOwnedArtifacts !== 'function'
+  ) {
+    throw new TypeError('Emulator operation, port cleanup, and artifact cleanup must be functions.');
   }
   let result;
   let operationError;
@@ -157,14 +248,21 @@ const withEmulatorPortCleanup = async (operation, {
     cleanupError = error instanceof Error ? error : new Error(String(error));
   }
 
-  if (operationError && cleanupError) {
+  let artifactCleanupError;
+  try {
+    await cleanupOwnedArtifacts();
+  } catch (error) {
+    artifactCleanupError = error instanceof Error ? error : new Error(String(error));
+  }
+
+  const errors = [operationError, cleanupError, artifactCleanupError].filter(Boolean);
+  if (errors.length > 1) {
     throw new global.AggregateError(
-      [operationError, cleanupError],
-      `${label} failed and its owned emulator ports did not become free.`
+      errors,
+      `${label} failed or cleanup left owned resources unavailable.`
     );
   }
-  if (operationError) throw operationError;
-  if (cleanupError) throw cleanupError;
+  if (errors.length === 1) throw errors[0];
   return result;
 };
 
@@ -300,6 +398,13 @@ const run = async () => {
   await assertEmulatorPortsFree();
   archiveAndDeletePreviousLogs();
 
+  const performanceFirebaseConfigPath = path.join(
+    frontendRoot,
+    PERFORMANCE_FIREBASE_CONFIG_FILENAME
+  );
+  removePerformanceFirebaseConfig();
+  writePerformanceFirebaseConfig({ outputPath: performanceFirebaseConfigPath });
+
   const configRoot = path.join(frontendRoot, '.perf-emulator-data', 'config');
   ensureDirectory(configRoot);
   const functionsEnvironmentPath = path.join(frontendRoot, 'functions', `.env.${projectId}`);
@@ -318,6 +423,19 @@ const run = async () => {
   const firebaseCli = path.join(frontendRoot, 'node_modules', 'firebase-tools', 'lib', 'bin', 'firebase.js');
   if (!fs.existsSync(firebaseCli)) throw new Error(`Firebase CLI not found: ${firebaseCli}`);
   const portableJavaHome = resolvePortableJavaHome();
+  const deterministicStaticServer = createDeterministicBuildServer({
+    buildDirectory: path.join(frontendRoot, 'build'),
+    host: '127.0.0.1',
+    port: PERFORMANCE_STATIC_SERVER_PORT,
+    runtimeConfigUpstreamUrl:
+      `http://127.0.0.1:${FIREBASE_HOSTING_UPSTREAM_PORT}/fatins-runtime/firebase-client`,
+  });
+  try {
+    await deterministicStaticServer.start();
+  } catch (error) {
+    removePerformanceFirebaseConfig();
+    throw error;
+  }
   const emulatorLogPath = path.join(frontendRoot, '.perf-emulator-data', 'emulator.log');
   const emulatorLog = fs.openSync(emulatorLogPath, 'w');
   const playwrightMarker = path.join(frontendRoot, '.perf-emulator-data', 'playwright-webserver.active');
@@ -327,17 +445,13 @@ const run = async () => {
 
   const child = childProcess.spawn(
     process.execPath,
-    [
+    createFirebaseEmulatorArguments({
       firebaseCli,
-      'emulators:start',
-      '--project', projectId,
-      '--only', 'auth,firestore,storage,functions,hosting',
-      '--log-verbosity', 'INFO',
-    ],
+      configPath: performanceFirebaseConfigPath,
+    }),
     {
       cwd: frontendRoot,
-      env: {
-        ...process.env,
+      env: createFirebaseCliEnvironment(process.env, {
         ...(portableJavaHome ? {
           JAVA_HOME: portableJavaHome,
           PATH: `${path.join(portableJavaHome, 'bin')}${path.delimiter}${process.env.PATH || ''}`,
@@ -351,7 +465,7 @@ const run = async () => {
         FATINS_FIREBASE_APP_ID: '1:000000000000:web:performance',
         FATINS_FIREBASE_MEASUREMENT_ID: '',
         FND_TASK06_CONSOLIDATED_OWNER: '1',
-      },
+      }),
       stdio: ['ignore', emulatorLog, emulatorLog],
       shell: false,
       detached: process.platform !== 'win32',
@@ -371,6 +485,11 @@ const run = async () => {
     shuttingDown = true;
     shutdownPromise = (async () => {
       const errors = [];
+      try {
+        await deterministicStaticServer.close();
+      } catch (error) {
+        errors.push(error);
+      }
       let windowsTermination = null;
       if (process.platform === 'win32') {
         try {
@@ -418,6 +537,7 @@ const run = async () => {
       }
 
       fs.rmSync(playwrightMarker, { force: true });
+      removePerformanceFirebaseConfig();
       closeEmulatorLog();
       if (errors.length) {
         console.error(new global.AggregateError(errors, 'Owned Firebase emulator shutdown failed.'));
@@ -445,8 +565,30 @@ const run = async () => {
   process.on('disconnect', () => { void shutdown('SIGTERM'); });
   child.on('exit', (code) => {
     if (shuttingDown) return;
-    closeEmulatorLog();
-    process.exit(code || 0);
+    shuttingDown = true;
+    void (async () => {
+      const errors = [];
+      try {
+        await deterministicStaticServer.close();
+      } catch (error) {
+        errors.push(error);
+      }
+      try {
+        await waitForEmulatorPortsFree();
+      } catch (error) {
+        errors.push(error);
+      }
+      fs.rmSync(playwrightMarker, { force: true });
+      removePerformanceFirebaseConfig();
+      closeEmulatorLog();
+      if (errors.length) {
+        console.error(new global.AggregateError(
+          errors,
+          'Unexpected Firebase emulator exit left owned resources unavailable.'
+        ));
+      }
+      process.exit(errors.length ? 1 : (code || 0));
+    })();
   });
 };
 
@@ -462,17 +604,24 @@ module.exports = {
   EMULATOR_PORT_RELEASE_STABLE_SAMPLES,
   EMULATOR_PORT_RELEASE_TIMEOUT_MS,
   EMULATOR_HARNESS_PORTS,
+  FIREBASE_HOSTING_UPSTREAM_PORT,
+  PERFORMANCE_FIREBASE_CONFIG_FILENAME,
+  PERFORMANCE_STATIC_SERVER_PORT,
   PREVIOUS_LOG_TAIL_BYTES,
   archiveAndDeletePreviousLogs,
   assertEmulatorPortsFree,
   canBindPort,
+  createFirebaseEmulatorArguments,
+  createFirebaseCliEnvironment,
   firebaseDebugLogPaths,
   previousLogPaths,
   readBoundedTail,
+  removePerformanceFirebaseConfig,
   requestOwnedPosixProcessGroupTermination,
   requestOwnedWindowsProcessTreeTermination,
   run,
   waitForEmulatorPortsFree,
   waitForOwnedChildExit,
   withEmulatorPortCleanup,
+  writePerformanceFirebaseConfig,
 };

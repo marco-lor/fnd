@@ -1,4 +1,4 @@
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./measured-test');
 
 test('a failed Login route chunk can be retried without loading protected routes', async ({ browser, baseURL }) => {
   const context = await browser.newContext({ baseURL, serviceWorkers: 'block' });

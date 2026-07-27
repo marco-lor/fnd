@@ -1,22 +1,31 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const { sha256 } = require('../../../scripts/performance/common');
 const {
   GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,
   RESOURCE_TIMING_BUFFER_SIZE,
   aggregateMetrics,
+  assertStaticAssetWarmupInventory,
   countChangedDocumentsForTarget,
   createPageAssetTracker,
+  createStaticAssetWarmupBatches,
   drainPageConnections,
   installDeterministicFontRoutes,
   isExpectedFirestoreLifecycleCancellation,
+  isExpectedTask07MediaDetachmentCancellation,
   isKnownDemoFirestoreStartupWarning,
   isRouteReadyInPage,
   locateDmDashboardPlayerCard,
   navigateToCleanup,
   readKonvaTokenPositions,
+  runBrowserStaticAssetWarmupPass,
+  runStaticAssetWarmupPass,
   scenarioRestorePatch,
   summarizeResourceEntries,
+  warmBrowserAssetDelivery,
   waitForReadiness,
   waitForKonvaTokenMove,
 } = require('./helpers');
@@ -56,6 +65,358 @@ test('document accounting preserves totals and exposes route-scoped deliveries',
   assert.equal(metrics['firestore.documentsDelivered'], 8);
   assert.equal(metrics['firestore.routeDocumentsDelivered'], 7);
   assert.equal(metrics['runtime.resourceTimingBufferOverflows'], 0);
+});
+
+test('static asset warmup batches cover every demo performance JS and CSS asset exactly once', () => {
+  const sha256 = 'a'.repeat(64);
+  const batches = createStaticAssetWarmupBatches({
+    schemaVersion: 1,
+    buildMode: 'performance',
+    projectId: 'demo-fnd-perf',
+    assets: [
+      { path: 'static/js/route-home.1234.chunk.js', category: 'javascript', rawBytes: 20, sha256 },
+      { path: 'static/css/main.1234.css', category: 'css', rawBytes: 10, sha256 },
+      { path: 'favicon.ico', category: 'image', rawBytes: 5, sha256 },
+      { path: 'static/js/101.1234.chunk.js', category: 'javascript', rawBytes: 30, sha256 },
+    ],
+  }, { batchSize: 2 });
+
+  assert.deepEqual(batches, [
+    [
+      { path: '/static/css/main.1234.css', category: 'css', rawBytes: 10, sha256 },
+      { path: '/static/js/101.1234.chunk.js', category: 'javascript', rawBytes: 30, sha256 },
+    ],
+    [
+      { path: '/static/js/route-home.1234.chunk.js', category: 'javascript', rawBytes: 20, sha256 },
+    ],
+  ]);
+});
+
+test('static asset warmup rejects non-demo reports, unsafe paths, duplicates, and invalid sizes', () => {
+  const sha256 = 'a'.repeat(64);
+  const report = {
+    schemaVersion: 1,
+    buildMode: 'performance',
+    projectId: 'demo-fnd-perf',
+    assets: [
+      { path: 'static/js/main.1234.js', category: 'javascript', rawBytes: 10, sha256 },
+    ],
+  };
+  assert.throws(
+    () => createStaticAssetWarmupBatches({ ...report, projectId: 'live-fnd' }),
+    /demo-fnd-perf/
+  );
+  assert.throws(
+    () => createStaticAssetWarmupBatches({
+      ...report,
+      assets: [{ path: '../main.js', category: 'javascript', rawBytes: 10 }],
+    }),
+    /invalid build path/
+  );
+  assert.throws(
+    () => createStaticAssetWarmupBatches({
+      ...report,
+      assets: [...report.assets, ...report.assets],
+    }),
+    /duplicate build path/
+  );
+  assert.throws(
+    () => createStaticAssetWarmupBatches({
+      ...report,
+      assets: [{ ...report.assets[0], rawBytes: 0 }],
+    }),
+    /positive rawBytes/
+  );
+  assert.throws(
+    () => createStaticAssetWarmupBatches({
+      ...report,
+      assets: [{ ...report.assets[0], sha256: 'invalid' }],
+    }),
+    /SHA-256/
+  );
+  assert.throws(() => createStaticAssetWarmupBatches(report, { batchSize: 0 }), /batchSize/);
+});
+
+test('static asset warmup compares report paths relative to the build root', () => {
+  const batches = [[
+    { path: '/static/css/main.css' },
+    { path: '/static/js/main.js' },
+  ]];
+  assert.deepEqual(
+    assertStaticAssetWarmupInventory(batches, [
+      'static/js/main.js',
+      'static/css/main.css',
+    ]),
+    { assetCount: 2 }
+  );
+  assert.throws(
+    () => assertStaticAssetWarmupInventory(batches, [
+      'build/static/js/main.js',
+      'build/static/css/main.css',
+    ]),
+    /Missing: static\/css\/main\.css/
+  );
+});
+
+test('static asset warmup consumes every response body within the configured batch concurrency', async () => {
+  const body = Buffer.from('asset');
+  const sha256 = crypto.createHash('sha256').update(body).digest('hex');
+  const batches = [
+    [
+      { path: '/static/js/a.js', category: 'javascript', sha256 },
+      { path: '/static/css/a.css', category: 'css', sha256 },
+    ],
+    [
+      { path: '/static/js/b.js', category: 'javascript', sha256 },
+    ],
+  ];
+  let active = 0;
+  let maxActive = 0;
+  let bodyCalls = 0;
+  const results = await runStaticAssetWarmupPass({
+    batches,
+    passName: 'warm',
+    timeoutMs: 30_000,
+    requestAsset: async (asset, options) => {
+      assert.deepEqual(options, { passName: 'warm', timeoutMs: 30_000 });
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setImmediate(resolve));
+      active -= 1;
+      return {
+        status: () => 200,
+        headers: () => ({
+          'content-type': asset.category === 'javascript'
+            ? 'application/javascript; charset=utf-8'
+            : 'text/css; charset=utf-8',
+        }),
+        body: async () => {
+          bodyCalls += 1;
+          return body;
+        },
+      };
+    },
+  });
+
+  assert.equal(maxActive, 2);
+  assert.equal(bodyCalls, 3);
+  assert.equal(results.length, 3);
+  assert.equal(results.every((result) => result.ok), true);
+});
+
+test('static asset warmup reports transport, status, body, and MIME failures without hiding paths', async () => {
+  const body = Buffer.from('asset');
+  const sha256 = crypto.createHash('sha256').update(body).digest('hex');
+  const assets = [
+    { path: '/static/js/timeout.js', category: 'javascript', sha256 },
+    { path: '/static/js/not-found.js', category: 'javascript', sha256 },
+    { path: '/static/js/empty.js', category: 'javascript', sha256 },
+    { path: '/static/css/wrong.css', category: 'css', sha256 },
+  ];
+  const results = await runStaticAssetWarmupPass({
+    batches: [assets],
+    passName: 'validation',
+    timeoutMs: 5_000,
+    requestAsset: async (asset) => {
+      if (asset.path.includes('timeout')) throw new Error('request timed out');
+      return {
+        status: () => (asset.path.includes('not-found') ? 404 : 200),
+        headers: () => ({
+          'content-type': asset.path.includes('wrong')
+            ? 'text/html'
+            : 'application/javascript',
+        }),
+        body: async () => (
+          asset.path.includes('empty') ? Buffer.alloc(0) : body
+        ),
+      };
+    },
+  });
+
+  assert.deepEqual(results.map(({ path, ok }) => ({ path, ok })), assets.map(({ path }) => ({
+    path,
+    ok: false,
+  })));
+  assert.match(results[0].error, /timed out/);
+  assert.match(results[1].error, /HTTP 404/);
+  assert.match(results[2].error, /empty response body/);
+  assert.match(results[3].error, /unexpected content type/);
+});
+
+test('browser static asset warmup keeps batch order and explicit pass deadlines', async () => {
+  const calls = [];
+  const batches = [
+    [{ path: '/static/js/a.js', category: 'javascript', sha256: 'a'.repeat(64) }],
+    [{ path: '/static/css/a.css', category: 'css', sha256: 'b'.repeat(64) }],
+  ];
+  const results = await runBrowserStaticAssetWarmupPass({
+    batches,
+    page: {
+      evaluate: async (callback, payload) => {
+        calls.push({ callback: typeof callback, payload });
+        return payload.assets.map((asset) => ({
+          ok: true,
+          pass: payload.requestPass,
+          path: asset.path,
+        }));
+      },
+    },
+    passName: 'validation',
+    timeoutMs: 5_000,
+  });
+
+  assert.deepEqual(calls.map(({ callback, payload }) => ({
+    callback,
+    pass: payload.requestPass,
+    paths: payload.assets.map(({ path: assetPath }) => assetPath),
+    timeoutMs: payload.requestTimeoutMs,
+  })), [
+    {
+      callback: 'function',
+      pass: 'validation',
+      paths: ['/static/js/a.js'],
+      timeoutMs: 5_000,
+    },
+    {
+      callback: 'function',
+      pass: 'validation',
+      paths: ['/static/css/a.css'],
+      timeoutMs: 5_000,
+    },
+  ]);
+  assert.deepEqual(results.map(({ path }) => path), [
+    '/static/js/a.js',
+    '/static/css/a.css',
+  ]);
+});
+
+test('browser delivery warmup is disposable, exact-origin, and records both passes', async () => {
+  const sha256 = 'a'.repeat(64);
+  const writes = [];
+  const calls = [];
+  const page = {
+    goto: async (...args) => calls.push(['goto', ...args]),
+    evaluate: async (_callback, payload) => payload.assets.map((asset) => ({
+      bytes: asset.rawBytes,
+      contentType: asset.category === 'javascript'
+        ? 'application/javascript; charset=utf-8'
+        : 'text/css; charset=utf-8',
+      durationMs: 1,
+      error: null,
+      ok: true,
+      pass: payload.requestPass,
+      path: asset.path,
+      sha256: asset.sha256,
+      status: 200,
+    })),
+  };
+  const context = {
+    route: async (matcher) => calls.push(['route', typeof matcher]),
+    newPage: async () => page,
+    close: async () => calls.push(['close']),
+  };
+  const { resultsDir } = require('../../../scripts/performance/common');
+  const diagnosticsPath = path.join(
+    resultsDir,
+    'browser-worker-asset-warmup-unit.json'
+  );
+  const buildReport = {
+    schemaVersion: 1,
+    buildMode: 'performance',
+    projectId: 'demo-fnd-perf',
+    assets: [{
+      path: 'static/js/main.js',
+      category: 'javascript',
+      rawBytes: 10,
+      sha256,
+    }],
+  };
+  const diagnostics = await warmBrowserAssetDelivery({
+    baseURL: 'http://127.0.0.1:5000',
+    browser: {
+      newContext: async (options) => {
+        calls.push(['newContext', options]);
+        return context;
+      },
+    },
+    diagnosticsPath,
+    owner: 'unit',
+    buildReport,
+    writeDiagnostics: (nextPath, contents) => {
+      writes.push({ diagnosticsPath: nextPath, contents });
+    },
+  });
+
+  assert.equal(diagnostics.status, 'passed');
+  assert.equal(diagnostics.owner, 'unit');
+  assert.deepEqual(
+    diagnostics.passes.map(({ name, results }) => [name, results.length]),
+    [['warm', 1], ['validation', 1]]
+  );
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].diagnosticsPath, diagnosticsPath);
+  assert.equal(writes[0].contents, diagnostics);
+  assert.deepEqual(calls.filter(([name]) => name === 'newContext'), [
+    ['newContext', { baseURL: 'http://127.0.0.1:5000' }],
+  ]);
+  assert.deepEqual(calls.filter(([name]) => name === 'goto'), [[
+    'goto',
+    'http://127.0.0.1:5000/__fnd_perf_browser_asset_warmup__',
+    { waitUntil: 'load', timeout: 15_000 },
+  ]]);
+  assert.deepEqual(calls.filter(([name]) => name === 'close'), [['close']]);
+
+  await assert.rejects(
+    warmBrowserAssetDelivery({
+      baseURL: 'https://live.example',
+      browser: { newContext: async () => context },
+      diagnosticsPath,
+      owner: 'unit',
+      buildReport,
+      writeDiagnostics: () => {},
+    }),
+    /refuses non-owned origin/
+  );
+});
+
+test('Playwright runs asset warmup before auth and keeps setup files out of measured Chromium', () => {
+  const config = require('../../playwright.config');
+  const projects = new Map(config.projects.map((project) => [project.name, project]));
+
+  assert.deepEqual(projects.get('auth-setup').dependencies, ['asset-warmup']);
+  assert.deepEqual(projects.get('chromium').dependencies, ['auth-setup']);
+  assert.deepEqual(
+    projects.get('firestore-persistence-experiment').dependencies,
+    ['asset-warmup']
+  );
+  assert.equal(
+    projects.get('chromium').testIgnore.test('asset-warmup.setup.js'),
+    true
+  );
+  assert.equal(projects.get('chromium').testIgnore.test('auth.setup.js'), true);
+  assert.equal(projects.get('chromium').testIgnore.test('routes.performance.js'), false);
+  assert.equal(config.workers, 1);
+  assert.equal(config.retries, 0);
+});
+
+test('every measured browser test uses the automatic worker-scoped warmup fixture', () => {
+  const measuredFiles = [
+    'bootstrap.performance.js',
+    'chunk-recovery.performance.js',
+    'cross-browser.smoke.js',
+    'grigliata-five-peer.performance.js',
+    'routes.performance.js',
+  ];
+  for (const fileName of measuredFiles) {
+    const source = fs.readFileSync(path.join(__dirname, fileName), 'utf8');
+    assert.match(source, /require\(['"]\.\/measured-test['"]\)/);
+    assert.doesNotMatch(source, /require\(['"]@playwright\/test['"]\)/);
+  }
+  const fixtureSource = fs.readFileSync(path.join(__dirname, 'measured-test.js'), 'utf8');
+  assert.match(fixtureSource, /scope:\s*['"]worker['"]/);
+  assert.match(fixtureSource, /auto:\s*true/);
+  assert.match(fixtureSource, /timeout:\s*180_000/);
+  assert.match(fixtureSource, /http:\/\/127\.0\.0\.1:5000/);
 });
 
 test('counts Grigliata placement deliveries under the deterministic legacy telemetry key', () => {
@@ -128,6 +489,10 @@ test('only intentional lifecycle aborts from the exact demo Firestore transport 
   assert.equal(isExpectedFirestoreLifecycleCancellation(exact), true);
   assert.equal(isExpectedFirestoreLifecycleCancellation({
     ...exact,
+    resourceType: 'xhr',
+  }), false);
+  assert.equal(isExpectedFirestoreLifecycleCancellation({
+    ...exact,
     url: exact.url.replace('/Listen/', '/Write/'),
   }), true);
   assert.equal(isExpectedFirestoreLifecycleCancellation({
@@ -136,11 +501,28 @@ test('only intentional lifecycle aborts from the exact demo Firestore transport 
     url: exact.url.replace('/Listen/', '/Write/'),
   }), false);
   assert.equal(isExpectedFirestoreLifecycleCancellation({ ...exact, lifecyclePhase: null }), false);
+  assert.equal(isExpectedFirestoreLifecycleCancellation({ ...exact, resourceType: 'document' }), false);
   assert.equal(isExpectedFirestoreLifecycleCancellation({ ...exact, failure: 'net::ERR_FAILED' }), false);
   assert.equal(isExpectedFirestoreLifecycleCancellation({ ...exact, url: exact.url.replace('127.0.0.1:8080', 'firestore.googleapis.com') }), false);
   assert.equal(isExpectedFirestoreLifecycleCancellation({ ...exact, url: exact.url.replace('demo-fnd-perf', 'demo-other') }), false);
   assert.equal(isExpectedFirestoreLifecycleCancellation({ ...exact, url: exact.url.replace('/Listen/channel', '/Other/channel') }), false);
   assert.equal(isExpectedFirestoreLifecycleCancellation({ ...exact, firebaseProjectId: 'live-fnd' }), false);
+});
+
+test('only intentional Task 07 fixture-image detach aborts are explained', () => {
+  const exact = {
+    lifecyclePhase: 'auth-transition',
+    resourceType: 'image',
+    failure: 'net::ERR_ABORTED',
+    url: 'http://127.0.0.1:9199/v0/b/demo-fnd-perf.appspot.com/o/performance%2Fimage-013.svg?alt=media&token=performance-token',
+  };
+  assert.equal(isExpectedTask07MediaDetachmentCancellation(exact), true);
+  assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, lifecyclePhase: 'connection-drain' }), false);
+  assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, resourceType: 'fetch' }), false);
+  assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, failure: 'net::ERR_FAILED' }), false);
+  assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, url: exact.url.replace('127.0.0.1:9199', 'storage.googleapis.com') }), false);
+  assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, url: exact.url.replace('image-013.svg', 'other.svg') }), false);
+  assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, firebaseProjectId: 'live-fnd' }), false);
 });
 
 test('font routing keeps optional Google font requests deterministic and local', async () => {

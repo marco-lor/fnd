@@ -8,6 +8,7 @@ import { doc, getDoc, updateDoc, setDoc } from "../../performance/firestore";
 import { useAuth } from "../../AuthContext";
 import GlobalAuroraBackground from "../backgrounds/GlobalAuroraBackground";
 import { uploadCacheableImage } from "../common/imageStorage";
+import useObjectUrl from "../common/useObjectUrl";
 import { getSchema, getVarie } from '../../data/configRepository';
 // Import the components for each step
 import RaceSelection from "./elements/RaceSelection";
@@ -33,8 +34,8 @@ function CharacterCreation() {
   const [currentStep, setCurrentStep] = useState(1); // Track the current step
   const [characterName, setCharacterName] = useState("");
   const [imageFile, setImageFile] = useState(null);
-  const [imagePreview, setImagePreview] = useState(null);
   const [error, setError] = useState("");
+  const imagePreview = useObjectUrl(imageFile);
   const [loading, setLoading] = useState(false);
   const [initializing, setInitializing] = useState(true);
   
@@ -103,17 +104,11 @@ function CharacterCreation() {
       if (!selectedFile.type.startsWith('image/')) {
           setError("Please select a valid image file.");
           setImageFile(null); // Clear invalid file
-          setImagePreview(null); // Clear preview
           return;
       }
       setImageFile(selectedFile);
-      const previewUrl = URL.createObjectURL(selectedFile);
-      setImagePreview(previewUrl);
-      // Cleanup function for object URL
-      return () => URL.revokeObjectURL(previewUrl);
     } else {
         setImageFile(null);
-        setImagePreview(null);
     }
   };
 

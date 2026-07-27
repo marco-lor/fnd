@@ -1,0 +1,22 @@
+[
+  {
+    "origin": [
+      "https://fatins.web.app",
+      "https://fatins.firebaseapp.com"
+    ],
+    "method": [
+      "GET",
+      "HEAD"
+    ],
+    "responseHeader": [
+      "Accept-Ranges",
+      "Content-Length",
+      "Content-Range",
+      "Content-Type",
+      "ETag",
+      "x-goog-generation",
+      "x-goog-hash"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

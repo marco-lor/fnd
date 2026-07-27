@@ -3,7 +3,10 @@
 const childProcess = require('child_process');
 const path = require('path');
 const { assertPerformanceProject, frontendRoot, projectId } = require('./common');
-const { withEmulatorPortCleanup } = require('./emulators');
+const {
+  removePerformanceFirebaseConfig,
+  withEmulatorPortCleanup,
+} = require('./emulators');
 
 const run = (command, args, environment = {}) => {
   const result = childProcess.spawnSync(command, args, {
@@ -21,6 +24,7 @@ const run = (command, args, environment = {}) => {
 
 const main = async () => {
   assertPerformanceProject(projectId);
+  removePerformanceFirebaseConfig();
   run(process.execPath, [path.join(__dirname, 'preflight.js')]);
   run(process.execPath, [path.join(__dirname, 'migrate-firestore-imports.js'), '--check']);
   run(process.execPath, [path.join(__dirname, 'check-shared-config-boundaries.js')]);
@@ -31,6 +35,7 @@ const main = async () => {
     path.join(__dirname, 'common.test.js'),
     path.join(__dirname, 'emulator-control.test.js'),
     path.join(__dirname, 'emulators.test.js'),
+    path.join(__dirname, 'deterministic-static-server.test.js'),
     path.join(__dirname, 'fixtures.test.js'),
     path.join(__dirname, 'compare.test.js'),
     path.join(__dirname, 'report.test.js'),
@@ -60,7 +65,10 @@ const main = async () => {
       '--project',
       'chromium',
     ]);
-  }, { label: 'Performance CI Playwright run' });
+  }, {
+    cleanupOwnedArtifacts: removePerformanceFirebaseConfig,
+    label: 'Performance CI Playwright run',
+  });
   run(process.execPath, [path.join(__dirname, 'compare.js')]);
 };
 

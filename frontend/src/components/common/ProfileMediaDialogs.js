@@ -1,8 +1,10 @@
 import React from 'react';
+import MediaImage from './MediaImage';
 
 const ProfileMediaDialogs = ({
   mode,
   imageUrl,
+  media,
   isUploading,
   onClose,
   onFileChange,
@@ -19,9 +21,15 @@ const ProfileMediaDialogs = ({
         aria-modal="true"
         aria-label="Profile image preview"
       >
-        <img
+        <MediaImage
           src={imageUrl}
+          media={media}
+          variant="board"
           alt="Profile Preview"
+          width={1200}
+          height={1200}
+          loading="eager"
+          fetchPriority="high"
           className="max-h-full max-w-full rounded-lg"
         />
       </div>
@@ -38,7 +46,9 @@ const ProfileMediaDialogs = ({
       <div className="w-full max-w-sm rounded-lg bg-gray-800 p-6 shadow-lg">
         <h2 id="profile-upload-title" className="mb-4 text-xl text-white">Upload New Profile Image</h2>
         <div className="mb-4 rounded border border-red-700 bg-red-900 bg-opacity-25 p-4">
-          <p className="text-white">Uploading a new image will permanently delete your previous one.</p>
+          <p className="text-white">
+            Your previous image remains available until the new upload is saved successfully.
+          </p>
         </div>
         <input
           type="file"

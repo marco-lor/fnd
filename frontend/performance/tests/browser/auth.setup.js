@@ -1,23 +1,35 @@
 const fs = require('fs');
 const path = require('path');
 const { test, expect } = require('@playwright/test');
-const { resultsDir, writeJson } = require('../../../scripts/performance/common');
+const {
+  resultsDir,
+  writeJson,
+} = require('../../../scripts/performance/common');
 const {
   ACCOUNT,
   createPageAssetTracker,
   drainPageConnections,
   isExpectedFirestoreLifecycleCancellation,
+  isExpectedTask07MediaDetachmentCancellation,
   isKnownDemoFirestoreStartupWarning,
+  warmBrowserAssetDelivery,
   waitForReadiness,
 } = require('./helpers');
 
 const authDirectory = path.resolve(__dirname, '..', '..', '..', 'playwright', '.auth');
 const diagnosticsPath = path.join(resultsDir, 'auth-setup-diagnostics.json');
+const browserAssetDiagnosticsPath = path.join(
+  resultsDir,
+  'browser-asset-warmup-diagnostics.json'
+);
 
 const summarizeDiagnostics = (accounts) => ({
   consoleErrors: accounts.reduce((total, account) => total + account.consoleErrors.length, 0),
   explainedFirestoreEmulatorStartupWarnings: accounts.reduce((total, account) => (
     total + account.explainedStartupWarnings.length
+  ), 0),
+  explainedMediaDetachmentCancellations: accounts.reduce((total, account) => (
+    total + account.explainedMediaDetachmentCancellations.length
   ), 0),
   unhandledErrors: accounts.reduce((total, account) => total + account.unhandledErrors.length, 0),
   failedRequests: accounts.reduce((total, account) => total + account.failedRequests.length, 0),
@@ -25,6 +37,13 @@ const summarizeDiagnostics = (accounts) => ({
 });
 
 test('create deterministic emulator authentication states', async ({ browser, baseURL }) => {
+  test.setTimeout(240_000);
+  await warmBrowserAssetDelivery({
+    baseURL,
+    browser,
+    diagnosticsPath: browserAssetDiagnosticsPath,
+    owner: 'auth-setup',
+  });
   fs.mkdirSync(authDirectory, { recursive: true });
   const accountDiagnostics = [];
   let setupError = null;
@@ -37,6 +56,7 @@ test('create deterministic emulator authentication states', async ({ browser, ba
         consoleErrors: [],
         explainedStartupWarnings: [],
         explainedLifecycleTransportCancellations: [],
+        explainedMediaDetachmentCancellations: [],
         unhandledErrors: [],
         failedRequests: [],
         cleanupErrors: [],
@@ -48,6 +68,11 @@ test('create deterministic emulator authentication states', async ({ browser, ba
       let lifecyclePhase = null;
       const pageAssets = createPageAssetTracker();
       try {
+        await warmBrowserAssetDelivery({
+          baseURL,
+          context,
+          owner: `context-auth-${role}`,
+        });
         page = await context.newPage();
         page.on('request', (request) => {
           pageAssets.begin(request);
@@ -97,6 +122,17 @@ test('create deterministic emulator authentication states', async ({ browser, ba
             });
             return;
           }
+          if (isExpectedTask07MediaDetachmentCancellation({
+            ...failure,
+            lifecyclePhase,
+            url: request.url(),
+          })) {
+            diagnostics.explainedMediaDetachmentCancellations.push({
+              ...failure,
+              phase: lifecyclePhase,
+            });
+            return;
+          }
           diagnostics.failedRequests.push(failure);
         });
         await page.goto('/');
@@ -141,6 +177,9 @@ test('create deterministic emulator authentication states', async ({ browser, ba
         ...diagnostics.failedRequests.map((entry) => `requestfailed: ${JSON.stringify(entry)}`),
         ...(diagnostics.explainedLifecycleTransportCancellations.length > 2
           ? [`excess Firestore lifecycle cancellations: ${JSON.stringify(diagnostics.explainedLifecycleTransportCancellations)}`]
+          : []),
+        ...(diagnostics.explainedMediaDetachmentCancellations.length > 2
+          ? [`excess Task 07 media detach cancellations: ${JSON.stringify(diagnostics.explainedMediaDetachmentCancellations)}`]
           : []),
         ...diagnostics.cleanupErrors.map((message) => `cleanup: ${message}`),
       ];

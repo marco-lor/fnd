@@ -1,6 +1,6 @@
 import { act, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { FOE_LIBRARY_DRAG_TYPE, TRAY_DRAG_MIME } from './constants';
-import MyTokenTray from './MyTokenTray';
+import MyTokenTray, { hasTokenImageAsset } from './MyTokenTray';
 
 const buildTrayProps = (props = {}) => {
   const {
@@ -164,6 +164,32 @@ describe('MyTokenTray', () => {
     expect(screen.getByText('No Img')).toBeInTheDocument();
     expect(screen.getByText(/Upload a profile image from the navbar first/i)).toBeInTheDocument();
     expect(screen.getByText('Aldor').closest('[draggable]')).toHaveAttribute('draggable', 'false');
+  });
+
+  test('treats a canonical-only thumbnail as a usable token image', () => {
+    const media = {
+      kind: 'avatar',
+      schemaVersion: 1,
+      variants: {
+        thumbnail: {
+          path: `media/v1/avatar/user/m_${'a'.repeat(40)}/derivatives/v1/thumbnail.webp`,
+          generation: '1',
+          bytes: 4,
+          contentType: 'image/webp',
+          width: 96,
+          height: 96,
+        },
+      },
+    };
+
+    expect(hasTokenImageAsset({
+      imageUrl: '',
+      media,
+    })).toBe(true);
+    expect(hasTokenImageAsset({
+      imageUrl: '',
+      media: null,
+    })).toBe(false);
   });
 
   test('shows upload guidance when a custom token has no image', () => {

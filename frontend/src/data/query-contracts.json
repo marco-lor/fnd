@@ -300,12 +300,12 @@
       "id": "grigliata-shell-music-sessions-current",
       "kind": "collection",
       "queryKey": "grigliata.music-sessions.subscribe.v1",
-      "ownerTask": "Task 16/21",
-      "currentScope": "Complete music playback sessions collection in shell",
-      "targetOrdering": [],
+      "ownerTask": "Task 07/21",
+      "currentScope": "At most four playing or paused sessions ordered by most recent update",
+      "targetOrdering": [{ "field": "status", "direction": "ASCENDING" }, { "field": "updatedAt", "direction": "DESCENDING" }],
       "cursor": { "version": 1, "status": "none", "fields": [] },
-      "realtimePolicy": "One shell-owned complete session scope",
-      "activation": "exception",
+      "realtimePolicy": "One shell-owned bounded active-session listener",
+      "activation": "active",
       "sources": [{ "file": "components/grigliata/GlobalGrigliataMusicPlayer.js", "occurrence": 2 }]
     },
     {
@@ -597,6 +597,18 @@
       "sources": [{ "file": "components/grigliata/useGrigliataPageData.js", "occurrence": 16 }]
     },
     {
+      "id": "grigliata-visible-character-profiles",
+      "kind": "collection",
+      "queryKey": "grigliata.character-profiles.visible.subscribe.v1",
+      "ownerTask": "Task 07",
+      "currentScope": "At most 60 visible peer character profiles in two deterministic document-ID chunks",
+      "targetOrdering": [],
+      "cursor": { "version": 1, "status": "bounded", "fields": ["__name__"] },
+      "realtimePolicy": "Mounted battle route only; at most two listeners and no unbounded fallback",
+      "activation": "active",
+      "sources": [{ "file": "components/grigliata/useGrigliataPageData.js", "occurrence": 17 }]
+    },
+    {
       "id": "grigliata-wall-runtime-document",
       "kind": "document",
       "queryKey": "grigliata.wall-runtime.subscribe.v1",
@@ -707,6 +719,15 @@
       "fields": [
         { "fieldPath": "backgroundId", "order": "ASCENDING" },
         { "fieldPath": "isVisibleToPlayers", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "id": "grigliata-music-status-updated",
+      "collectionGroup": "grigliata_music_playback_sessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
       ]
     },
     {

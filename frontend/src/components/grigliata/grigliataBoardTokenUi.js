@@ -20,7 +20,8 @@ import {
   getTokenStatusDefinition,
   splitTokenStatusesForDisplay,
 } from './tokenStatuses';
-import useImageAsset from '../common/imageAssets/useImageAsset';
+import { useImageAssetSnapshot } from '../common/imageAssets/useImageAsset';
+import { useResolvedMediaSource } from '../common/useResolvedMediaSource';
 import { normalizeTokenVisionSettings } from './lightingVisibility';
 import { buildTokenLayerStepState } from './tokenLayering';
 
@@ -261,7 +262,28 @@ export const TokenNode = ({
   onOverflowMouseLeave,
   onOverflowToggle,
 }) => {
-  const image = useImageAsset(token?.imageUrl || '');
+  const mediaSource = useResolvedMediaSource(token, {
+    fallbackSrc: token?.imageUrl || '',
+    kind: 'image',
+    variant: 'thumbnail',
+  });
+  const advanceTokenMediaFallback = mediaSource.advanceFallback;
+  const tokenMediaStatus = mediaSource.status;
+  const imageSnapshot = useImageAssetSnapshot(mediaSource.url);
+  const image = imageSnapshot.image;
+  React.useEffect(() => {
+    if (
+      imageSnapshot.status === 'error'
+      && tokenMediaStatus === 'ready'
+    ) {
+      advanceTokenMediaFallback(imageSnapshot.error);
+    }
+  }, [
+    advanceTokenMediaFallback,
+    imageSnapshot.error,
+    imageSnapshot.status,
+    tokenMediaStatus,
+  ]);
   const size = position.size;
   const label = token?.label || token?.characterId || token?.ownerUid || 'Player';
   const initials = getInitials(label);

@@ -9,6 +9,8 @@ import {
   StatsEditor,
   TecnicheEditor,
 } from './lazyFoeEditors';
+import MediaImage from '../../common/MediaImage';
+import useObjectUrl from '../../common/useObjectUrl';
 
 const isSafeImageUrl = (url) => typeof url === 'string' && /^https?:\/\//i.test(url);
 
@@ -17,8 +19,8 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema }) => {
   const [tab, setTab] = useState('general');
   // jsonErr removed (was unused)
   const [imageFile, setImageFile] = useState(null);
-  const [previewUrl, setPreviewUrl] = useState(null);
   const [removeExisting, setRemoveExisting] = useState(false);
+  const previewUrl = useObjectUrl(imageFile);
 
   // Reset form when opening / switching initial foe
   useEffect(() => {
@@ -26,18 +28,9 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema }) => {
       setFoe(deepClone(initial));
       setTab('general');
       setImageFile(null);
-      // clear previous preview (revocation handled in separate effect)
-      setPreviewUrl(null);
       setRemoveExisting(false);
     }
   }, [open, initial]);
-
-  // Revoke object URL when previewUrl changes or component unmounts
-  useEffect(() => {
-    return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-    };
-  }, [previewUrl]);
 
   const params = useMemo(() => computeParamTotals(foe?.Parametri || {}), [foe?.Parametri]);
   const specialKeys = useMemo(() => {
@@ -132,7 +125,15 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema }) => {
                           {(() => {
                             const src = previewUrl || (isSafeImageUrl(foe?.imageUrl) ? foe.imageUrl : null);
                             return src ? (
-                              <img src={src} alt="preview" className="w-full h-full object-cover" />
+                              <MediaImage
+                                src={src}
+                                variant="card"
+                                alt="preview"
+                                width={80}
+                                height={80}
+                                loading="eager"
+                                className="w-full h-full object-cover"
+                              />
                             ) : (
                               <span>No Img</span>
                             );
@@ -145,8 +146,6 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema }) => {
                             onChange={(e) => {
                               const f = e.target.files?.[0] || null;
                               setImageFile(f);
-                              if (previewUrl) URL.revokeObjectURL(previewUrl);
-                              setPreviewUrl(f ? URL.createObjectURL(f) : null);
                               if (f) setRemoveExisting(false);
                             }}
                             className="block text-sm text-slate-200 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-600/80 file:text-white hover:file:bg-indigo-600"
@@ -156,8 +155,6 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema }) => {
                               type="button"
                               onClick={() => {
                                 setImageFile(null);
-                                if (previewUrl) URL.revokeObjectURL(previewUrl);
-                                setPreviewUrl(null);
                                 setRemoveExisting(true);
                                 setField('imageUrl', '');
                                 setField('imagePath', '');

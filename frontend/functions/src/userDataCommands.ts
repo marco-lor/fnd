@@ -57,6 +57,11 @@ import {
   planOwnedMediaCleanup,
 } from "./userOwnedMediaCleanup";
 import {isUserDataLegacyDrainFrozen} from "./userDataBridge";
+import {
+  hasUntrustedTask07InventoryMedia,
+  mergeUntrustedInventorySnapshotPatch,
+  stripUntrustedTask07InventoryMedia,
+} from "./task07ServerBoundary";
 
 const REGION = "europe-west8";
 const MAX_MUTATION_BYTES = 256 * 1024;
@@ -429,6 +434,8 @@ export const task05PurchaseItem = onCall(
         ? [...access.targetSnapshot.get("inventory")]
         : [];
       const catalogVersion = catalogSnapshot.updateTime?.toMillis() ?? null;
+      // Only this Admin-read catalog document may introduce a trusted global
+      // Task 07 media projection into a user-owned inventory document.
       const snapshot = {...catalogData, id: itemId};
       currentInventory.push(legacyInventoryEntry(
         snapshot,
@@ -956,10 +963,18 @@ export const task05MutateInventory = onCall(
           fail("invalid-argument", "Quantity must be between 1 and 9999.");
         }
         const requestedSnapshot = asRecord(request.data?.snapshot);
-        const name = inventoryName(requestedSnapshot);
+        if (hasUntrustedTask07InventoryMedia(requestedSnapshot)) {
+          fail(
+            "invalid-argument",
+            "Custom inventory snapshots cannot set Task 07 media."
+          );
+        }
+        const safeRequestedSnapshot =
+          stripUntrustedTask07InventoryMedia(requestedSnapshot);
+        const name = inventoryName(safeRequestedSnapshot);
         if (!name) fail("invalid-argument", "A Varie item name is required.");
         const snapshot = {
-          ...requestedSnapshot,
+          ...safeRequestedSnapshot,
           type: "varie",
           item_type: "varie",
         };
@@ -1009,6 +1024,8 @@ export const task05MutateInventory = onCall(
         const catalogRef = context.db.doc(`items/${itemId}`);
         const catalog = await context.transaction.get(catalogRef);
         if (!catalog.exists) fail("not-found", "Catalog item not found.");
+        // A grant may project Task 07 media only from this Admin-read global
+        // catalog document; the callable request never supplies the snapshot.
         const snapshot = {...(catalog.data() ?? {}), id: itemId};
         const kind = inventoryKind(snapshot);
         const documentCount = kind === "varie" ? 1 : quantity;
@@ -1152,10 +1169,16 @@ export const task05MutateInventory = onCall(
       if (Object.keys(patch).some((key) => forbidden.has(key))) {
         fail("invalid-argument", "The patch contains server-owned fields.");
       }
-      const currentSnapshot = {
-        ...asRecord(inventory.get("currentSnapshot")),
-        ...patch,
-      };
+      if (hasUntrustedTask07InventoryMedia(patch)) {
+        fail(
+          "invalid-argument",
+          "Inventory edits cannot set Task 07 media."
+        );
+      }
+      const currentSnapshot = mergeUntrustedInventorySnapshotPatch(
+        inventory.get("currentSnapshot"),
+        patch
+      );
       const inventoryUpdate = {
         currentSnapshot,
         currentHash: hashValue(currentSnapshot),

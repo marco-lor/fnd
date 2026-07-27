@@ -11,6 +11,8 @@ import {
   getWritableGalleryFolderId,
   UNFILED_GALLERY_FOLDER_ID,
 } from './galleryFolders';
+import MediaImage, { resolveMediaAsset } from '../common/MediaImage';
+import MediaVideo, { resolveMediaVideoAsset } from '../common/MediaVideo';
 
 const GALLERY_ACTION_BASE_CLASS_NAME = 'inline-flex h-9 w-9 items-center justify-center rounded-md border transition-colors disabled:cursor-not-allowed disabled:opacity-60';
 const GALLERY_ACTION_ICON_CLASS_NAME = 'h-4 w-4';
@@ -18,6 +20,20 @@ const GALLERY_ACTION_ICON_CLASS_NAME = 'h-4 w-4';
 const getGalleryActionClassName = (toneClassName) => (
   `${GALLERY_ACTION_BASE_CLASS_NAME} ${toneClassName}`
 );
+
+const buildVideoPosterMedia = (background) => {
+  const manifest = background?.media && typeof background.media === 'object'
+    ? background.media
+    : {};
+  const poster = manifest.variants?.poster;
+  return {
+    media: {
+      schemaVersion: manifest.schemaVersion,
+      state: manifest.state,
+      variants: poster ? { poster } : {},
+    },
+  };
+};
 
 export default function BackgroundGalleryPanel({
   backgrounds,
@@ -119,18 +135,26 @@ export default function BackgroundGalleryPanel({
         </div>
         <div className="flex min-h-0 flex-1 items-center justify-center bg-black p-3">
           {isPreviewVideo ? (
-            <video
-              src={previewBackground.imageUrl}
+            <MediaVideo
+              media={previewBackground}
+              src={previewBackground.imageUrl || ''}
               aria-label={`${previewBackgroundName} preview`}
               className="max-h-full max-w-full rounded-lg object-contain"
               controls
               muted
               playsInline
+              preload="metadata"
             />
           ) : (
-            <img
-              src={previewBackground.imageUrl}
+            <MediaImage
+              media={previewBackground}
+              src={previewBackground.imageUrl || ''}
+              variant="board"
               alt={`${previewBackgroundName} preview`}
+              width={previewBackground.imageWidth || 1920}
+              height={previewBackground.imageHeight || 1080}
+              loading="eager"
+              fetchPriority="high"
               className="max-h-full max-w-full rounded-lg object-contain"
             />
           )}
@@ -218,6 +242,16 @@ export default function BackgroundGalleryPanel({
                 const isIncludedInNarration = presentationBackgroundIdSet.has(background.id);
                 const isSelected = background.id === selectedBackgroundId;
                 const isVideo = isVideoBackground(background);
+                const thumbnailMedia = isVideo
+                  ? buildVideoPosterMedia(background)
+                  : background;
+                const thumbnailVariant = isVideo ? 'poster' : 'thumbnail';
+                const thumbnailAsset = resolveMediaAsset(thumbnailMedia, {
+                  variant: thumbnailVariant,
+                });
+                const previewAsset = isVideo
+                  ? resolveMediaVideoAsset(background, { fallbackSrc: background.imageUrl || '' })
+                  : thumbnailAsset;
                 const isUsePending = activatingBackgroundId === background.id;
                 const isNarrationPending = narrationActionBackgroundId === background.id;
                 const isDestructiveActionLocked = destructiveActionLockedBackgroundIdSet.has(background.id);
@@ -264,22 +298,20 @@ export default function BackgroundGalleryPanel({
                           onClick={() => onSelectBackground(background.id)}
                           className="block h-full w-full"
                         >
-                          {background.imageUrl ? (
-                            isVideo ? (
-                              <video
-                                src={background.imageUrl}
-                                aria-label={backgroundName}
-                                className="w-full h-full object-cover"
-                                muted
-                                playsInline
-                                preload="metadata"
-                              />
-                            ) : (
-                              <img src={background.imageUrl} alt={backgroundName} className="w-full h-full object-cover" />
-                            )
-                          ) : null}
+                          {(isVideo || thumbnailAsset.candidates.length > 0) && (
+                            <MediaImage
+                              media={thumbnailMedia}
+                              src={isVideo ? '' : background.imageUrl || ''}
+                              variant={thumbnailVariant}
+                              alt={backgroundName}
+                              width={80}
+                              height={56}
+                              sizes="80px"
+                              className="w-full h-full object-cover"
+                            />
+                          )}
                         </button>
-                        {background.imageUrl && (
+                        {previewAsset.candidates.length > 0 && (
                           <button
                             type="button"
                             aria-label={`Preview ${backgroundName}`}

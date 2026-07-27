@@ -1,6 +1,12 @@
 import React from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import {
+  fireEvent, render, screen, waitFor, within,
+} from '@testing-library/react';
 import BackgroundGalleryPanel from './BackgroundGalleryPanel';
+import {
+  __configurePrivateMediaAssetsForTests,
+  __resetPrivateMediaAssetsForTests,
+} from '../common/privateMediaAssets';
 
 const backgrounds = [{
   id: 'map-1',
@@ -74,6 +80,10 @@ const buildProps = (overrides = {}) => ({
 });
 
 describe('BackgroundGalleryPanel', () => {
+  afterEach(() => {
+    __resetPrivateMediaAssetsForTests();
+  });
+
   test('disables destructive actions only for locked backgrounds', () => {
     render(
       <BackgroundGalleryPanel
@@ -181,7 +191,7 @@ describe('BackgroundGalleryPanel', () => {
     expect(screen.getAllByLabelText('Lighting metadata imported')).toHaveLength(1);
   });
 
-  test('accepts MP4 uploads and renders video map thumbnails', () => {
+  test('accepts MP4 uploads without attaching a legacy original video in the list', () => {
     const { container } = render(
       <BackgroundGalleryPanel
         {...buildProps({
@@ -199,8 +209,129 @@ describe('BackgroundGalleryPanel', () => {
     );
 
     expect(container.querySelector('input[type="file"]')).toHaveAttribute('accept', 'image/*,video/mp4');
-    expect(container.querySelector('video')).toHaveAttribute('src', 'https://example.com/map.mp4');
+    expect(container.querySelector('video')).not.toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Dungeon Alchemist Loop' }))
+      .not.toHaveAttribute('src');
     expect(screen.getByText(/2040 x 1620 px \| Video/i)).toBeInTheDocument();
+  });
+
+  test('uses a private poster derivative without attaching original video bytes in the list', () => {
+    const originalUrl = 'https://private.example/maps/map.mp4';
+    const posterUrl = 'https://private.example/maps/map-poster.webp';
+    const { container } = render(
+      <BackgroundGalleryPanel
+        {...buildProps({
+          backgrounds: [{
+            id: 'map-video-manifest',
+            name: 'Verified Video Map',
+            imageWidth: 1920,
+            imageHeight: 1080,
+            assetType: 'video',
+            media: {
+              kind: 'map-video',
+              schemaVersion: 1,
+              original: {
+                url: originalUrl,
+                width: 1920,
+                height: 1080,
+              },
+              variants: {
+                poster: {
+                  url: posterUrl,
+                  width: 320,
+                  height: 180,
+                },
+              },
+            },
+            grid: { cellSizePx: 60, offsetXPx: 0, offsetYPx: 0 },
+          }],
+        })}
+      />
+    );
+
+    expect(container.querySelector('video')).not.toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Verified Video Map' }))
+      .toHaveAttribute('src', posterUrl);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview Verified Video Map' }));
+    const previewVideo = within(screen.getByRole('dialog', {
+      name: 'Preview Verified Video Map',
+    })).getByLabelText('Verified Video Map preview');
+    expect(previewVideo).toHaveAttribute('src', originalUrl);
+    expect(previewVideo).toHaveAttribute('preload', 'metadata');
+  });
+
+  test('loads a path-only poster in the row and authenticated MP4 only in the opened preview', async () => {
+    const storage = { name: 'authenticated-storage' };
+    const ref = jest.fn((_storage, path) => ({ path }));
+    const getBlob = jest.fn(async ({ path }) => (
+      path.endsWith('.mp4')
+        ? new Blob(['data'], { type: 'video/mp4' })
+        : new Blob(['data'], { type: 'image/webp' })
+    ));
+    const createObjectURL = jest.fn((blob) => (
+      blob.type === 'video/mp4'
+        ? 'blob:private-map-video'
+        : 'blob:private-map-poster'
+    ));
+    __configurePrivateMediaAssetsForTests({
+      loadStorageApi: jest.fn(async () => ({ storage, ref, getBlob })),
+      createObjectURL,
+      revokeObjectURL: jest.fn(),
+    });
+    const assetId = `m_${'b'.repeat(40)}`;
+    const original = {
+      path: `media/v1/map-video/dm/${assetId}/original/source.mp4`,
+      generation: '101',
+      bytes: 4,
+      contentType: 'video/mp4',
+      width: 1920,
+      height: 1080,
+    };
+    const poster = {
+      path: `media/v1/map-video/dm/${assetId}/derivatives/v1/poster.webp`,
+      generation: '102',
+      bytes: 4,
+      contentType: 'image/webp',
+      width: 320,
+      height: 180,
+    };
+    const { container } = render(
+      <BackgroundGalleryPanel
+        {...buildProps({
+          backgrounds: [{
+            id: 'map-video-private',
+            name: 'Private Video Map',
+            imageWidth: 1920,
+            imageHeight: 1080,
+            assetType: 'video',
+            media: {
+              kind: 'map-video',
+              schemaVersion: 1,
+              original,
+              variants: { poster },
+            },
+            grid: { cellSizePx: 60, offsetXPx: 0, offsetYPx: 0 },
+          }],
+        })}
+      />
+    );
+
+    const rowImage = screen.getByRole('img', { name: 'Private Video Map' });
+    await waitFor(() => {
+      expect(rowImage).toHaveAttribute('src', 'blob:private-map-poster');
+    });
+    expect(container.querySelector('video')).not.toBeInTheDocument();
+    expect(getBlob).toHaveBeenCalledWith({ path: poster.path }, poster.bytes);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview Private Video Map' }));
+    const previewVideo = within(screen.getByRole('dialog', {
+      name: 'Preview Private Video Map',
+    })).getByLabelText('Private Video Map preview');
+    await waitFor(() => {
+      expect(previewVideo).toHaveAttribute('src', 'blob:private-map-video');
+    });
+    expect(getBlob).toHaveBeenCalledWith({ path: original.path }, original.bytes);
   });
 
   test('uploads selected background files from the minimal maps toolbar', () => {

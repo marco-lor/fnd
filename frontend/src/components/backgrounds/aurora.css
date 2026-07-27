@@ -10,9 +10,9 @@
   100% { transform: translateX(15%) skewY(6deg); opacity: 0.5; }
 }
 @keyframes twinkle {
-  0% { opacity: 0.25; transform: scale(1); }
-  50% { opacity: 0.9; transform: scale(1.35); }
-  100% { opacity: 0.25; transform: scale(1); }
+  0% { opacity: 0.45; }
+  50% { opacity: 0.9; }
+  100% { opacity: 0.45; }
 }
 
 /* Scoped classes to avoid collisions */
@@ -28,8 +28,40 @@
               radial-gradient(900px 380px at 60% 80%, rgba(94,234,212,0.18), transparent 60%);
   animation: auroraSweep2 20s ease-in-out infinite;
 }
-.global-aurora__twinkle {
-  animation: twinkle 4s ease-in-out infinite;
+.global-aurora__star-field {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  border-radius: 9999px;
+  animation: twinkle 6s ease-in-out infinite;
+  will-change: opacity;
+}
+.global-aurora__star-field--secondary {
+  animation-delay: -3s;
+}
+
+.global-aurora--paused .global-aurora__layer,
+.global-aurora--paused .global-aurora__layer--b,
+.global-aurora--paused .global-aurora__star-field,
+.global-aurora--paused .shooting-star__trail {
+  animation-play-state: paused;
+}
+
+@media (max-width: 767px) {
+  .global-aurora__star-field--secondary {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .global-aurora__layer,
+  .global-aurora__layer--b,
+  .global-aurora__star-field,
+  .shooting-star__trail {
+    animation: none !important;
+  }
 }
 
 /* Shooting stars */

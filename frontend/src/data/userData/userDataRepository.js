@@ -11,6 +11,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  updateDoc,
 } from '../../performance/firestore';
 import { recordPerfEvent } from '../../performance/runtime';
 import {
@@ -52,6 +53,36 @@ const validateUid = (uid) => {
   if (typeof uid !== 'string' || !uid.trim()) throw new TypeError('A non-empty user UID is required.');
   return uid;
 };
+
+const USER_PROFILE_MEDIA_FIELDS = new Set(['imageUrl', 'imagePath', 'media']);
+
+const normalizeUserProfileMediaPatch = (patch) => {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    throw new TypeError('A profile media patch is required.');
+  }
+  const entries = Object.entries(patch);
+  if (
+    entries.length === 0
+    || entries.some(([field]) => !USER_PROFILE_MEDIA_FIELDS.has(field))
+  ) {
+    throw new TypeError('Profile media patches may update only media fields.');
+  }
+  return Object.fromEntries(entries.map(([field, value]) => {
+    if (field === 'media') {
+      if (value !== null && (!value || typeof value !== 'object' || Array.isArray(value))) {
+        throw new TypeError('Profile media metadata must be an object or null.');
+      }
+    } else if (typeof value !== 'string') {
+      throw new TypeError(`Profile ${field} must be a string.`);
+    }
+    return [field, value];
+  }));
+};
+
+export const updateUserProfileMedia = (uid, patch) => updateDoc(
+  doc(db, 'users', validateUid(uid)),
+  normalizeUserProfileMediaPatch(patch)
+);
 
 const normalizeDocumentSnapshot = (snapshot) => (
   snapshot?.exists?.() ? snapshot.data() : null

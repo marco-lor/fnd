@@ -9,6 +9,8 @@ import {
 import { collection, doc, updateDoc, getDocs, onSnapshot, getDoc, setDoc } from "../../../performance/firestore";
 import { ref, getDownloadURL, uploadBytes, deleteObject } from "firebase/storage";
 import { uploadCacheableImage } from "../../common/imageStorage";
+import { createDeferredStorageCleanup } from "../../common/deferredStorageCleanup";
+import useObjectUrl from "../../common/useObjectUrl";
 import { db } from '../../firebaseConfig';
 import { storage } from '../../firebaseStorage';
 import { AuthContext } from '../../../AuthContext';
@@ -24,7 +26,7 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
     const [isSchemaLoading, setIsSchemaLoading] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
     const [imageFile, setImageFile] = useState(null);
-    const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
+    const imagePreviewUrl = useObjectUrl(imageFile) || accessorioFormData.General?.image_url || null;
     const [ridTecnicheList, setRidTecnicheList] = useState([]);
     const [ridSpellList, setRidSpellList] = useState([]);
     const [customSpells, setCustomSpells] = useState([]);
@@ -65,11 +67,8 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
         const file = e.target.files[0];
         if (file) {
             setImageFile(file);
-            const url = URL.createObjectURL(file);
-            setImagePreviewUrl(url);
-            handleNestedChange('General.image_url', url);
         }
-    }, [handleNestedChange]);
+    }, []);
 
     // List management functions
     const addTecnica = useCallback(() => setRidTecnicheList(prev => [...prev, { selectedTec: '', ridValue: '' }]), []);
@@ -207,9 +206,6 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
             setAccessorioSpellsList(initialLinkedSpells);
             setCustomSpells(initialCustomSpellsFromData);
 
-            if (currentItemData.General?.image_url) {
-                setImagePreviewUrl(currentItemData.General.image_url);
-            }
         }
 
         setAccessorioFormData(initialFormState);
@@ -353,6 +349,14 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
             return;
         }
         const accessorioDocRef = doc(db, "items", docId);
+        const deferredStorageCleanup = createDeferredStorageCleanup(
+            (path) => deleteObject(ref(storage, path)),
+            {
+                onError: ({ path, error }) => {
+                    console.warn("Post-commit accessorio media cleanup failed:", path, error);
+                },
+            }
+        );
         
         try {
             if (!editMode) {
@@ -372,17 +376,11 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                 const accessorioImgRef = ref(storage, 'items/' + accessorioImgFileName);
                 newImageUrl = (await uploadCacheableImage(accessorioImgRef, imageFile)).downloadUrl;
                 if (!inventoryEditMode && editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
-                    try {
-                        const oldPath = decodeURIComponent(initialData.General.image_url.split('/o/')[1].split('?')[0]);
-                        await deleteObject(ref(storage, oldPath));
-                    } catch (e) { console.warn("Failed to delete old image:", e.code === 'storage/object-not-found' ? 'Old file not found.' : e.message); }
+                    deferredStorageCleanup.addUrl(initialData.General.image_url);
                 }
             } else if (!inventoryEditMode && editMode && !imagePreviewUrl && initialData?.General?.image_url) {
                 newImageUrl = null;
-                try {
-                    const oldPath = decodeURIComponent(initialData.General.image_url.split('/o/')[1].split('?')[0]);
-                    await deleteObject(ref(storage, oldPath));
-                } catch (e) { console.warn("Failed to delete removed image:", e.code === 'storage/object-not-found' ? 'File not found.' : e.message); }
+                deferredStorageCleanup.addUrl(initialData.General.image_url);
             }
             finalAccessorioData.General.image_url = newImageUrl;
 
@@ -406,14 +404,14 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                     spellVideoUrlToSave = await getDownloadURL(spellVideoSnapshot.ref);
                 }
                 
-                // Delete old files if editing
+                // Queue old files for cleanup only after the catalog document commits.
                 if (!inventoryEditMode && editMode && initialData?.General?.spells?.[spellNameKey] && typeof initialData.General.spells[spellNameKey] === 'object') {
                     const initialSpellFromData = initialData.General.spells[spellNameKey];
                     if (customSpell.imageFile && initialSpellFromData.image_url) {
-                        try { await deleteObject(ref(storage, decodeURIComponent(initialSpellFromData.image_url.split('/o/')[1].split('?')[0]))); } catch (e) { console.warn("Failed to delete old spell image for", spellNameKey, e); }
+                        deferredStorageCleanup.addUrl(initialSpellFromData.image_url);
                     }
                     if (customSpell.videoFile && initialSpellFromData.video_url) {
-                        try { await deleteObject(ref(storage, decodeURIComponent(initialSpellFromData.video_url.split('/o/')[1].split('?')[0]))); } catch (e) { console.warn("Failed to delete old spell video for", spellNameKey, e); }
+                        deferredStorageCleanup.addUrl(initialSpellFromData.video_url);
                     }
                 }
                 createdSpellData.image_url = spellImageUrlToSave;
@@ -432,8 +430,8 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                     if (!finalSpells[initialSpellName]) {
                         const initialSpellDetails = initialData.General.spells[initialSpellName];
                         if (typeof initialSpellDetails === 'object') {
-                            if (initialSpellDetails.image_url) try { await deleteObject(ref(storage, decodeURIComponent(initialSpellDetails.image_url.split('/o/')[1].split('?')[0]))); } catch (e) { console.warn("Failed to delete removed spell image for", initialSpellName, e); }
-                            if (initialSpellDetails.video_url) try { await deleteObject(ref(storage, decodeURIComponent(initialSpellDetails.video_url.split('/o/')[1].split('?')[0]))); } catch (e) { console.warn("Failed to delete removed spell video for", initialSpellName, e); }
+                            if (initialSpellDetails.image_url) deferredStorageCleanup.addUrl(initialSpellDetails.image_url);
+                            if (initialSpellDetails.video_url) deferredStorageCleanup.addUrl(initialSpellDetails.video_url);
                         }
                     }
                 }
@@ -536,6 +534,7 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                     await setDoc(accessorioDocRef, finalAccessorioData);
                     if (showMessage) showMessage(`Accessorio "${accessorioName}" creato!`, "success");
                 }
+                await deferredStorageCleanup.flush();
                 onClose(true);
             }
 
@@ -762,7 +761,6 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                         <button
                             type="button"
                             onClick={() => {
-                                setImagePreviewUrl(null);
                                 setImageFile(null);
                                 handleNestedChange('General.image_url', null);
                             }}

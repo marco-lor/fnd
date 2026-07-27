@@ -1,6 +1,11 @@
+import { XhrIo as FirestoreWebChannelXhrIo } from '@firebase/webchannel-wrapper/webchannel-blob';
+
 const PERFORMANCE_ENABLED = process.env.REACT_APP_FND_PERF === '1';
 const EVENT_SCHEMA_VERSION = 1;
 const MAX_EVENTS = 50000;
+const FIRESTORE_WEBCHANNEL_CALLBACK_SOURCE = 'function(){e()}';
+const FIRESTORE_EMULATOR_ORIGIN = 'http://127.0.0.1:8080';
+const FIRESTORE_EMULATOR_DATABASE = 'projects/demo-fnd-perf/databases/(default)';
 const SAFE_METADATA_KEYS = new Set([
   'runId',
   'routeId',
@@ -26,6 +31,11 @@ let observerPatches = [];
 const observerResourceKeys = new WeakMap();
 let asyncResourceOwnerOverride = null;
 let asyncResourceOwnerLeases = [];
+let originalFetch = null;
+let originalWebChannelInternalSend = null;
+let originalWebChannelPublicSend = null;
+let firestoreWebChannelResponseCallbacks = new Map();
+let pendingWebChannelTimerTurn = null;
 
 const redactString = (value) => {
   const text = String(value ?? '').slice(0, 160);
@@ -60,13 +70,20 @@ const registerAsyncResource = (type, ownerOverride, diagnostics = null) => {
     || asyncResourceOwnerLeases[asyncResourceOwnerLeases.length - 1]?.owner
     || (routeState ? redactString(routeState.routeId) : 'shell');
   const key = `${ownerRoute}::${type}::${++asyncResourceSequence}`;
-  activeAsyncResources.set(key, { diagnostics, type, ownerRoute });
-  let closed = false;
-  return { key, ownerRoute, close: () => {
-    if (closed) return;
-    closed = true;
-    activeAsyncResources.delete(key);
-  } };
+  const resource = {
+    key,
+    diagnostics,
+    type,
+    ownerRoute,
+    closed: false,
+    close() {
+      if (resource.closed) return;
+      resource.closed = true;
+      activeAsyncResources.delete(key);
+    },
+  };
+  activeAsyncResources.set(key, resource);
+  return resource;
 };
 
 const describeTimerCallback = (callback) => {
@@ -105,6 +122,84 @@ const isFirestoreTransportDelayedOperation = (callback, delay) => {
   } catch (_error) {
     return false;
   }
+};
+
+const isFirestoreWebChannelDelay = (delay) => {
+  const normalizedDelay = Number(delay);
+  return normalizedDelay === 45_000
+    || (normalizedDelay >= 300_000 && normalizedDelay <= 600_000);
+};
+
+const requestMethod = (input, init, fallbackMethod = 'GET') => String(
+  init?.method || input?.method || fallbackMethod
+).toUpperCase();
+
+const isDemoFirestoreWebChannelRequest = (
+  input,
+  init,
+  fallbackMethod = 'GET'
+) => {
+  const rawUrl = typeof input === 'string' ? input : input?.url;
+  if (!rawUrl) return false;
+  try {
+    const baseUrl = typeof window !== 'undefined' ? window.location.href : undefined;
+    const parsed = new URL(String(rawUrl), baseUrl);
+    const method = requestMethod(input, init, fallbackMethod);
+    return parsed.origin === FIRESTORE_EMULATOR_ORIGIN
+      && /\/google\.firestore\.v1\.Firestore\/(?:Listen|Write)\/channel\/?$/.test(parsed.pathname)
+      && parsed.searchParams.get('database') === FIRESTORE_EMULATOR_DATABASE
+      && (method === 'GET' || method === 'POST');
+  } catch (_error) {
+    return false;
+  }
+};
+
+const recordAmbiguousWebChannelTimer = (resource) => {
+  let turn = pendingWebChannelTimerTurn;
+  if (!turn) {
+    turn = { candidates: [] };
+    pendingWebChannelTimerTurn = turn;
+    const expire = () => {
+      if (pendingWebChannelTimerTurn === turn) pendingWebChannelTimerTurn = null;
+    };
+    if (typeof queueMicrotask === 'function') queueMicrotask(expire);
+    else Promise.resolve().then(expire);
+  }
+  turn.candidates.push(resource);
+};
+
+const claimNewestFirestoreWebChannelTimer = () => {
+  const turn = pendingWebChannelTimerTurn;
+  pendingWebChannelTimerTurn = null;
+  if (!turn) return false;
+  for (let index = turn.candidates.length - 1; index >= 0; index -= 1) {
+    const candidate = turn.candidates[index];
+    if (candidate.closed || candidate.ownerRoute === 'firestore-transport') continue;
+    candidate.ownerRoute = 'firestore-transport';
+    candidate.diagnostics = {
+      ...(candidate.diagnostics || {}),
+      attribution: 'firestore-webchannel-request',
+    };
+    return true;
+  }
+  return false;
+};
+
+const wrapFirestoreWebChannelResponseCallback = (xhr) => {
+  const callback = xhr?.onreadystatechange;
+  if (typeof callback !== 'function' || firestoreWebChannelResponseCallbacks.has(xhr)) return;
+  const wrapped = function firestoreOwnedReadyStateChange(...callbackArgs) {
+    try {
+      return withAsyncResourceOwner(
+        'firestore-transport',
+        () => callback.apply(this, callbackArgs)
+      );
+    } finally {
+      if (xhr.readyState === 4) firestoreWebChannelResponseCallbacks.delete(xhr);
+    }
+  };
+  firestoreWebChannelResponseCallbacks.set(xhr, { callback, wrapped });
+  xhr.onreadystatechange = wrapped;
 };
 
 export const isPerformanceEnabled = () => PERFORMANCE_ENABLED;
@@ -369,6 +464,45 @@ export const installPerformanceRuntime = () => {
     };
   }
 
+  if (typeof window.fetch === 'function' && !originalFetch) {
+    originalFetch = window.fetch;
+    window.fetch = function instrumentedFetch(input, ...args) {
+      const isFirestoreWebChannel = isDemoFirestoreWebChannelRequest(input, args[0]);
+      const result = originalFetch.call(this, input, ...args);
+      if (isFirestoreWebChannel) claimNewestFirestoreWebChannelTimer();
+      return result;
+    };
+  }
+
+  const webChannelPrototype = FirestoreWebChannelXhrIo?.prototype;
+  if (
+    webChannelPrototype?.ea
+    && webChannelPrototype.send === webChannelPrototype.ea
+    && !originalWebChannelInternalSend
+  ) {
+    originalWebChannelInternalSend = webChannelPrototype.ea;
+    originalWebChannelPublicSend = webChannelPrototype.send;
+    const instrumentedWebChannelSend = function instrumentedWebChannelSend(
+      url,
+      method,
+      ...args
+    ) {
+      const isFirestoreWebChannel = isDemoFirestoreWebChannelRequest(
+        String(url),
+        { method },
+        method
+      );
+      const result = originalWebChannelInternalSend.call(this, url, method, ...args);
+      if (isFirestoreWebChannel) {
+        wrapFirestoreWebChannelResponseCallback(this.g);
+        claimNewestFirestoreWebChannelTimer();
+      }
+      return result;
+    };
+    webChannelPrototype.ea = instrumentedWebChannelSend;
+    webChannelPrototype.send = instrumentedWebChannelSend;
+  }
+
   if (!originalTimers) {
     originalTimers = {
       setTimeout: window.setTimeout.bind(window),
@@ -392,12 +526,25 @@ export const installPerformanceRuntime = () => {
           delayMs: Number(delay) || 0,
         }
       );
-      const id = originalTimers.setTimeout((...callbackArgs) => {
+      let id;
+      try {
+        id = originalTimers.setTimeout((...callbackArgs) => {
+          resource.close();
+          timeouts.delete(id);
+          withAsyncResourceOwner(resource.ownerRoute, () => callback(...callbackArgs));
+        }, delay, ...args);
+      } catch (error) {
         resource.close();
-        timeouts.delete(id);
-        withAsyncResourceOwner(resource.ownerRoute, () => callback(...callbackArgs));
-      }, delay, ...args);
+        throw error;
+      }
       timeouts.set(id, resource);
+      if (
+        resource.ownerRoute !== 'firestore-transport'
+        && resource.diagnostics?.callback === FIRESTORE_WEBCHANNEL_CALLBACK_SOURCE
+        && isFirestoreWebChannelDelay(resource.diagnostics?.delayMs)
+      ) {
+        recordAmbiguousWebChannelTimer(resource);
+      }
       return id;
     };
     window.clearTimeout = (id) => {
@@ -499,11 +646,29 @@ export const teardownPerformanceRuntimeForTests = () => {
   activeAsyncResources = new Map();
   asyncResourceOwnerOverride = null;
   asyncResourceOwnerLeases = [];
+  pendingWebChannelTimerTurn = null;
   asyncResourceSequence = 0;
   routeState = null;
   if (originalXhrOpen && typeof XMLHttpRequest !== 'undefined') {
     XMLHttpRequest.prototype.open = originalXhrOpen;
     originalXhrOpen = null;
+  }
+  if (originalFetch && typeof window !== 'undefined') {
+    window.fetch = originalFetch;
+    originalFetch = null;
+  }
+  firestoreWebChannelResponseCallbacks.forEach(({ callback, wrapped }, xhr) => {
+    if (xhr.onreadystatechange === wrapped) xhr.onreadystatechange = callback;
+  });
+  firestoreWebChannelResponseCallbacks = new Map();
+  if (originalWebChannelInternalSend) {
+    const webChannelPrototype = FirestoreWebChannelXhrIo?.prototype;
+    if (webChannelPrototype) {
+      webChannelPrototype.ea = originalWebChannelInternalSend;
+      webChannelPrototype.send = originalWebChannelPublicSend;
+    }
+    originalWebChannelInternalSend = null;
+    originalWebChannelPublicSend = null;
   }
   if (originalTimers && typeof window !== 'undefined') {
     Object.assign(window, originalTimers);

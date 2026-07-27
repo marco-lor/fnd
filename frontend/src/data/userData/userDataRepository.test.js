@@ -4,8 +4,10 @@ import {
 } from '../repositoryRuntime';
 import {
   subscribeAuthProfileAggregate,
+  subscribeLegacyUserAggregate,
   subscribeUserDomain,
   resolveUserDataRolloutDocumentStage,
+  updateUserProfileMedia,
   userDataRolloutInstanceKey,
 } from './userDataRepository';
 import {
@@ -23,7 +25,7 @@ import {
   selectLegacyResources,
   selectLegacySettings,
 } from './normalizers';
-import { doc, labelFirestoreTarget, onSnapshot } from '../../performance/firestore';
+import { doc, labelFirestoreTarget, onSnapshot, updateDoc } from '../../performance/firestore';
 
 const mockListeners = new Map();
 
@@ -41,6 +43,7 @@ jest.mock('../../performance/firestore', () => ({
   }),
   orderBy: jest.fn((field) => ({ type: 'orderBy', field })),
   query: jest.fn((base) => base),
+  updateDoc: jest.fn(() => Promise.resolve()),
 }));
 
 const emitDocument = (path, data) => {
@@ -110,16 +113,45 @@ describe('user-data repository compatibility', () => {
     unsubscribeResources();
   });
 
-  test('labels the application-lifetime auth profile listener as shell-owned', () => {
-    const unsubscribe = subscribeAuthProfileAggregate('user-1', jest.fn());
+  test('labels only the Auth-owned profile listener as shell-owned', () => {
+    const unsubscribeAuth = subscribeAuthProfileAggregate('user-1', jest.fn());
+    const unsubscribeRoute = subscribeLegacyUserAggregate('user-1', jest.fn());
 
     expect(labelFirestoreTarget).toHaveBeenCalledWith(
       expect.objectContaining({ path: 'users/user-1' }),
       'users.aggregate.subscribe.v1',
       'shell'
     );
+    expect(labelFirestoreTarget).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'users/user-1' }),
+      'users.aggregate.subscribe.v1',
+      'route'
+    );
 
-    unsubscribe();
+    unsubscribeAuth();
+    unsubscribeRoute();
+  });
+
+  test('writes only validated profile media fields through the repository boundary', async () => {
+    const media = { assetId: `m_${'a'.repeat(40)}`, state: 'ready' };
+    await updateUserProfileMedia(
+      'user-1',
+      {
+        imageUrl: '',
+        imagePath: 'media/v1/avatar/user-1/original.png',
+        media,
+      }
+    );
+
+    expect(doc).toHaveBeenCalledWith({}, 'users', 'user-1');
+    expect(updateDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'users/user-1' }),
+      { imageUrl: '', imagePath: 'media/v1/avatar/user-1/original.png', media }
+    );
+    expect(() => updateUserProfileMedia('user-1', { role: 'dm' }))
+      .toThrow('Profile media patches may update only media fields.');
+    expect(() => updateUserProfileMedia('user-1', { media: [] }))
+      .toThrow('Profile media metadata must be an object or null.');
   });
 
   test('selects V2 reads only after the new-read cutover stage', () => {

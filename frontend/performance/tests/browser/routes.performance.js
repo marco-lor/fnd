@@ -1,4 +1,4 @@
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./measured-test');
 const manifest = require('../../scenarios.json');
 const {
   aggregateMetrics,
@@ -12,6 +12,7 @@ const {
   restoreScenarioState,
   runInteraction,
   storageStateForRole,
+  warmBrowserAssetDelivery,
   waitForReadiness,
   writeScenarioRaw,
   writeScenarioResult,
@@ -76,6 +77,11 @@ for (const scenario of scenarios) {
         context = await browser.newContext({
           baseURL,
           storageState: storageStateForRole(scenario.role),
+        });
+        await warmBrowserAssetDelivery({
+          baseURL,
+          context,
+          owner: `context-chromium-${scenario.id}-${iteration}`,
         });
         await installDeterministicFontRoutes(context);
         await installBootstrap(context, scenario, iteration);

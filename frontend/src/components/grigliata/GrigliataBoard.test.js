@@ -23,6 +23,10 @@ import {
 } from './tokenStatuses';
 import useImageAsset, { useImageAssetSnapshot } from '../common/imageAssets/useImageAsset';
 import {
+  __configurePrivateMediaAssetsForTests,
+  __resetPrivateMediaAssetsForTests,
+} from '../common/privateMediaAssets';
+import {
   FOG_RASTER_MASK_ENCODING,
   FOG_RASTER_PROFILE_ID,
   createEmptyFogRasterMaskBytes,
@@ -332,7 +336,9 @@ const getTokenOverlayMetrics = (tokenNode) => {
   const textNodes = [...tokenNode.querySelectorAll('[data-konva-type="Text"]')];
   const overflowText = textNodes.find((node) => node.textContent === '+1');
   const deadText = textNodes.find((node) => node.textContent === 'DEAD');
-  const statusIcon = tokenNode.querySelector('[data-konva-type="Image"]');
+  const statusIcon = statusBadge?.parentElement?.querySelector(
+    '[data-konva-type="Image"]'
+  );
 
   expect(statusBadge).toBeTruthy();
   expect(statusIcon).toBeTruthy();
@@ -550,6 +556,7 @@ describe('GrigliataBoard', () => {
   });
 
   afterEach(() => {
+    __resetPrivateMediaAssetsForTests();
     jest.clearAllTimers();
     jest.useRealTimers();
     resizeObserverInstance = null;
@@ -641,8 +648,69 @@ describe('GrigliataBoard', () => {
     expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
   });
 
+  test('loads the canonical full-quality board derivative through an authenticated lease', async () => {
+    useReducedMotion.mockReturnValue(true);
+    const storage = { name: 'authenticated-storage' };
+    const ref = jest.fn((_storage, path) => ({ path }));
+    const getBlob = jest.fn(async () => new Blob(['data'], { type: 'image/webp' }));
+    __configurePrivateMediaAssetsForTests({
+      loadStorageApi: jest.fn(async () => ({ storage, ref, getBlob })),
+      createObjectURL: jest.fn(() => 'blob:private-board-derivative'),
+      revokeObjectURL: jest.fn(),
+    });
+    const assetId = `m_${'d'.repeat(40)}`;
+    const board = {
+      path: `media/v1/map/dm/${assetId}/derivatives/v1/board.webp`,
+      generation: '302',
+      bytes: 4,
+      contentType: 'image/webp',
+      width: 2560,
+      height: 1440,
+    };
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          activeBackground: {
+            id: 'map-private',
+            name: 'Private Board',
+            imageWidth: 0,
+            imageHeight: 0,
+            media: {
+              kind: 'map',
+              original: {
+                path: `media/v1/map/dm/${assetId}/original/source.png`,
+                generation: '301',
+                bytes: 4,
+                contentType: 'image/png',
+                width: 3840,
+                height: 2160,
+              },
+              variants: { board },
+            },
+          },
+        })}
+      />
+    );
+
+    const activeImage = await screen.findByTestId('battlemap-image-active');
+    expect(getBlob).toHaveBeenCalledTimes(1);
+    expect(getBlob).toHaveBeenCalledWith({ path: board.path }, board.bytes);
+    expect(useImageAssetSnapshot).toHaveBeenCalledWith('blob:private-board-derivative');
+    expect(activeImage).toHaveAttribute('data-width', '2560');
+    expect(activeImage).toHaveAttribute('data-height', '1440');
+  });
+
   test('renders video battlemap backgrounds through the existing Konva image layer', async () => {
     useReducedMotion.mockReturnValue(true);
+    const storage = { name: 'authenticated-storage' };
+    const ref = jest.fn((_storage, path) => ({ path }));
+    const getBlob = jest.fn(async () => new Blob(['data'], { type: 'video/mp4' }));
+    __configurePrivateMediaAssetsForTests({
+      loadStorageApi: jest.fn(async () => ({ storage, ref, getBlob })),
+      createObjectURL: jest.fn(() => 'blob:private-battlemap-video'),
+      revokeObjectURL: jest.fn(),
+    });
     const originalCreateElement = document.createElement.bind(document);
     const listeners = {};
     const mockVideo = {
@@ -673,21 +741,36 @@ describe('GrigliataBoard', () => {
       ));
 
     try {
+      const assetId = `m_${'e'.repeat(40)}`;
+      const original = {
+        path: `media/v1/map-video/dm/${assetId}/original/source.mp4`,
+        generation: '401',
+        bytes: 4,
+        contentType: 'video/mp4',
+        width: 2040,
+        height: 1620,
+      };
       render(
         <GrigliataBoard
           {...buildProps({
             activeBackground: {
               id: 'map-video',
               name: 'Dungeon Alchemist Loop',
-              imageUrl: 'https://example.com/map.mp4',
               imageWidth: 2040,
               imageHeight: 1620,
               assetType: 'video',
+              media: {
+                kind: 'map-video',
+                original,
+              },
             },
           })}
         />
       );
 
+      await waitFor(() => {
+        expect(mockVideo.src).toBe('blob:private-battlemap-video');
+      });
       await act(async () => {
         listeners.loadeddata();
       });
@@ -699,6 +782,7 @@ describe('GrigliataBoard', () => {
       expect(mockVideo.playsInline).toBe(true);
       expect(mockVideo.autoplay).toBe(true);
       expect(mockVideo.play).toHaveBeenCalled();
+      expect(getBlob).toHaveBeenCalledWith({ path: original.path }, original.bytes);
 
       const activeVideoLayer = screen.getByTestId('battlemap-image-active');
       expect(activeVideoLayer).toHaveAttribute('data-asset-type', 'video');
@@ -707,6 +791,178 @@ describe('GrigliataBoard', () => {
     } finally {
       createElementSpy.mockRestore();
     }
+  });
+
+  test('resolves a canonical MP4 narration placement without changing narration layout', async () => {
+    useReducedMotion.mockReturnValue(true);
+    const storage = { name: 'authenticated-storage' };
+    const ref = jest.fn((_storage, path) => ({ path }));
+    const getBlob = jest.fn(async () => new Blob(['data'], { type: 'video/mp4' }));
+    __configurePrivateMediaAssetsForTests({
+      loadStorageApi: jest.fn(async () => ({ storage, ref, getBlob })),
+      createObjectURL: jest.fn(() => 'blob:private-narration-video'),
+      revokeObjectURL: jest.fn(),
+    });
+    const originalCreateElement = document.createElement.bind(document);
+    const listeners = {};
+    const mockVideo = {
+      videoWidth: 1920,
+      videoHeight: 1080,
+      muted: false,
+      defaultMuted: false,
+      loop: false,
+      playsInline: false,
+      autoplay: false,
+      preload: '',
+      src: '',
+      addEventListener: jest.fn((eventName, handler) => {
+        listeners[eventName] = handler;
+      }),
+      removeEventListener: jest.fn(),
+      play: jest.fn(() => Promise.resolve()),
+      pause: jest.fn(),
+      load: jest.fn(),
+      removeAttribute: jest.fn(),
+    };
+    const createElementSpy = jest
+      .spyOn(document, 'createElement')
+      .mockImplementation((tagName, options) => (
+        tagName === 'video'
+          ? mockVideo
+          : originalCreateElement(tagName, options)
+      ));
+
+    try {
+      const assetId = `m_${'f'.repeat(40)}`;
+      const original = {
+        path: `media/v1/map-video/dm/${assetId}/original/source.mp4`,
+        generation: '501',
+        bytes: 4,
+        contentType: 'video/mp4',
+        width: 1920,
+        height: 1080,
+      };
+      render(
+        <GrigliataBoard
+          {...buildProps({
+            activeBackground: {
+              id: 'map-1',
+              name: 'Sunken Ruins',
+              imageUrl: 'https://example.com/map-1.png',
+              imageWidth: 1280,
+              imageHeight: 720,
+            },
+            isNarrationOverlayActive: true,
+            narrationBackgrounds: [{
+              id: 'map-1',
+              name: 'Sunken Ruins',
+              imageUrl: 'https://example.com/map-1.png',
+              imageWidth: 1280,
+              imageHeight: 720,
+            }, {
+              id: 'map-video-private',
+              name: 'Private Narration Video',
+              assetType: 'video',
+              imageWidth: 1920,
+              imageHeight: 1080,
+              media: {
+                kind: 'map-video',
+                original,
+              },
+            }],
+            narrationPlacements: [{
+              id: 'background:map-1',
+              backgroundId: 'map-1',
+              x: 0,
+              y: 0,
+              width: 1280,
+              height: 720,
+              order: 0,
+              mode: 'free',
+              attachedSide: '',
+            }, {
+              id: 'background:map-video-private',
+              backgroundId: 'map-video-private',
+              x: 1280,
+              y: 0,
+              width: 1920,
+              height: 1080,
+              order: 1,
+              mode: 'magnetic',
+              attachedSide: 'right',
+            }],
+          })}
+        />
+      );
+
+      await waitFor(() => {
+        expect(mockVideo.src).toBe('blob:private-narration-video');
+      });
+      await act(async () => {
+        listeners.loadeddata();
+      });
+
+      const narrationVideo = screen.getByTestId(
+        'narration-image-placement-background:map-video-private'
+      );
+      expect(narrationVideo).toHaveAttribute('data-asset-type', 'video');
+      expect(narrationVideo).toHaveAttribute('data-x', '1280');
+      expect(narrationVideo).toHaveAttribute('data-width', '1920');
+      expect(getBlob).toHaveBeenCalledWith({ path: original.path }, original.bytes);
+    } finally {
+      createElementSpy.mockRestore();
+    }
+  });
+
+  test('resolves a canonical-only token thumbnail through an authenticated lease', async () => {
+    const storage = { name: 'authenticated-storage' };
+    const ref = jest.fn((_storage, path) => ({ path }));
+    const getBlob = jest.fn(async () => new Blob(['data'], { type: 'image/webp' }));
+    __configurePrivateMediaAssetsForTests({
+      loadStorageApi: jest.fn(async () => ({ storage, ref, getBlob })),
+      createObjectURL: jest.fn(() => 'blob:private-token-thumbnail'),
+      revokeObjectURL: jest.fn(),
+    });
+    const thumbnail = {
+      path: `media/v1/avatar/user/m_${'a'.repeat(40)}/derivatives/v1/thumbnail.webp`,
+      generation: '1',
+      bytes: 4,
+      contentType: 'image/webp',
+      width: 96,
+      height: 96,
+    };
+
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          tokens: [{
+            tokenId: 'user-1',
+            id: 'user-1',
+            ownerUid: 'user-1',
+            tokenType: 'character',
+            label: 'Aldor',
+            imageUrl: '',
+            media: {
+              kind: 'avatar',
+              schemaVersion: 1,
+              variants: { thumbnail },
+            },
+            placed: true,
+            col: 2,
+            row: 2,
+            isVisibleToPlayers: true,
+            isDead: false,
+            statuses: [],
+          }],
+        })}
+      />
+    );
+
+    await waitFor(() => {
+      expect(getBlob).toHaveBeenCalledWith({ path: thumbnail.path }, thumbnail.bytes);
+      expect(useImageAssetSnapshot).toHaveBeenCalledWith('blob:private-token-thumbnail');
+    });
+    expect(screen.getByTestId('token-node-user-1')).toBeInTheDocument();
   });
 
   test('renders the DM lighting debug overlay above the map and below tokens', async () => {
@@ -4302,7 +4558,9 @@ describe('GrigliataBoard', () => {
     );
 
     const tokenNode = screen.getByTestId('token-node-token-2');
-    const tokenFootprint = tokenNode.querySelector('[data-konva-type="Rect"][data-width="140"][data-height="140"]');
+    const tokenFootprint = tokenNode.querySelector(
+      '[data-width="140"][data-height="140"]'
+    );
 
     expect(tokenFootprint).toBeTruthy();
   });
@@ -5128,6 +5386,36 @@ describe('GrigliataBoard', () => {
     expect(screen.getByTestId('turn-order-entry-current-user')).toBeInTheDocument();
     expect(screen.queryByTestId('turn-order-initiative-input-current-user')).not.toBeInTheDocument();
     expect(screen.getByTestId('turn-order-initiative-value-current-user')).toHaveTextContent('12');
+  });
+
+  test('uses a fixed thumbnail image for a legacy turn-order portrait', async () => {
+    render(
+      <GrigliataBoard
+        {...buildProps({
+          turnOrderEntries: [{
+            tokenId: 'user-1',
+            ownerUid: 'current-user',
+            label: 'Ilya',
+            imageUrl: 'https://example.com/ilya.png',
+            tokenType: 'character',
+            initiative: 12,
+            joinedAt: null,
+            joinedAtMs: 10,
+          }],
+        })}
+      />
+    );
+
+    const chip = screen.getByTestId('turn-order-chip-user-1');
+    await waitFor(() => {
+      expect(chip.querySelector('img')).toHaveAttribute(
+        'src',
+        'https://example.com/ilya.png'
+      );
+    });
+    expect(chip.querySelector('img')).toHaveAttribute('width', '40');
+    expect(chip.querySelector('img')).toHaveAttribute('height', '40');
+    expect(chip.querySelector('video')).toBeNull();
   });
 
   test('shows the shared turn order panel by default and updates entries as data changes', () => {

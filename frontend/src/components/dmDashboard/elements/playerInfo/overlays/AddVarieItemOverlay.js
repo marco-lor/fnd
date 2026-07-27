@@ -5,6 +5,7 @@ import { ref as storageRef } from "firebase/storage";
 import { db } from "../../../../firebaseConfig";
 import { storage } from "../../../../firebaseStorage";
 import { uploadCacheableImage } from "../../../../common/imageStorage";
+import useObjectUrl from "../../../../common/useObjectUrl";
 
 // Overlay to add a new custom Varie item to a user's inventory (DM side)
 // Mirrors the fields used by player Inventory add-varie overlay for consistency.
@@ -13,7 +14,7 @@ const AddVarieItemOverlay = ({ userId, onClose }) => {
   const [description, setDescription] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [imageFile, setImageFile] = useState(null);
-  const [previewUrl, setPreviewUrl] = useState(null);
+  const previewUrl = useObjectUrl(imageFile);
   const [busy, setBusy] = useState(false);
 
   const closeAll = (ok) => {
@@ -89,7 +90,6 @@ const AddVarieItemOverlay = ({ userId, onClose }) => {
                 onChange={(e) => {
                   const f = e.target.files && e.target.files[0] ? e.target.files[0] : null;
                   setImageFile(f);
-                  setPreviewUrl(f ? URL.createObjectURL(f) : null);
                 }}
               />
               {previewUrl && (
@@ -99,7 +99,7 @@ const AddVarieItemOverlay = ({ userId, onClose }) => {
                   </div>
                   <button
                     type="button"
-                    onClick={() => { setImageFile(null); setPreviewUrl(null); }}
+                    onClick={() => setImageFile(null)}
                     className="text-[11px] text-slate-300 border border-slate-600/60 rounded px-2 py-1 hover:bg-slate-700/40"
                     disabled={busy}
                   >Rimuovi</button>
