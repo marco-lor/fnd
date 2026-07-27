@@ -3,19 +3,38 @@ import {
   acquirePrivateMediaAsset,
   normalizePrivateMediaDescriptor,
 } from './privateMediaAssets';
+import {
+  getTask07VariantCandidates,
+  selectTask07VariantName,
+} from '../../data/media/mediaPolicy';
+import useTask07MediaReadMode from '../../data/media/useTask07MediaReadMode';
 
 export const MEDIA_CONTRACT_VERSION = 1;
-export const MEDIA_VARIANTS = Object.freeze(['thumbnail', 'card', 'board', 'poster']);
+export const MEDIA_VARIANTS = Object.freeze([
+  'thumbnail',
+  'thumbnail2x',
+  'card',
+  'card2x',
+  'gallery',
+  'gallery2x',
+  'poster',
+  'poster2x',
+  // Retained only for already-written candidate manifests. Active boards use original.
+  'board',
+]);
 export const MEDIA_VARIANT_FALLBACKS = Object.freeze({
-  thumbnail: Object.freeze(['thumbnail', 'poster', 'card', 'original']),
-  card: Object.freeze(['card', 'thumbnail', 'poster', 'original']),
+  thumbnail: Object.freeze(['thumbnail', 'thumbnail2x', 'poster', 'poster2x', 'card', 'card2x']),
+  card: Object.freeze(['card', 'card2x', 'thumbnail2x', 'thumbnail', 'poster2x', 'poster']),
+  gallery: Object.freeze(['gallery', 'gallery2x', 'thumbnail2x', 'thumbnail']),
   board: Object.freeze(['board', 'original']),
-  poster: Object.freeze(['poster', 'thumbnail', 'original']),
+  poster: Object.freeze(['poster', 'poster2x', 'thumbnail2x', 'thumbnail']),
   original: Object.freeze(['original']),
 });
 
 const DEFAULT_ROOT_MARGIN = '200px';
 const URL_FIELDS = ['url', 'downloadUrl', 'imageUrl', 'image_url'];
+const LIST_MEDIA_VARIANTS = new Set(['thumbnail', 'card', 'gallery', 'poster']);
+const DERIVATIVE_READ_STATES = new Set(['derivative-read', 'v1-write']);
 
 const isRecord = (value) => (
   value != null && typeof value === 'object' && !Array.isArray(value)
@@ -64,22 +83,59 @@ const normalizeDescriptor = (value) => {
   };
 };
 
-const getFallbackOrder = (variant) => {
+const getMediaPurpose = (manifest, variants, original) => {
+  const declaredKind = typeof manifest.kind === 'string' ? manifest.kind.trim() : '';
+  if (declaredKind) return declaredKind;
+  const path = [original, ...Object.values(variants)]
+    .map((descriptor) => normalizeDescriptor(descriptor)?.path || '')
+    .find(Boolean) || '';
+  return path.match(/^media\/v1\/([^/]+)\//)?.[1] || '';
+};
+
+const getMediaManifest = (mediaOrEntity) => {
+  const entity = isRecord(mediaOrEntity) ? mediaOrEntity : {};
+  const general = isRecord(entity.General) ? entity.General : null;
+  const manifest = isRecord(entity.media)
+    ? entity.media
+    : (isRecord(general?.media) ? general.media : (general || entity));
+  return {entity, general, manifest};
+};
+
+export const getTask07MediaPurpose = (mediaOrEntity) => {
+  const {manifest} = getMediaManifest(mediaOrEntity);
+  const variants = isRecord(manifest.variants) ? manifest.variants : {};
+  const original = normalizeDescriptor(manifest.original);
+  return getMediaPurpose(manifest, variants, original);
+};
+
+const getVariantUse = (variant, purpose) => {
+  if (variant === 'gallery' || (purpose === 'map' && variant !== 'original')) {
+    return 'map-gallery';
+  }
+  return variant;
+};
+
+const getFallbackOrder = (variant, purpose) => {
   const normalized = typeof variant === 'string' && variant.trim()
     ? variant.trim()
     : 'thumbnail';
+  const policyCandidates = getTask07VariantCandidates(
+    purpose,
+    getVariantUse(normalized, purpose)
+  ).map(({ name }) => name);
+  if (policyCandidates.length) return policyCandidates;
   return MEDIA_VARIANT_FALLBACKS[normalized]
-    || [normalized, 'card', 'thumbnail', 'original'];
+    || [normalized, 'card', 'card2x', 'thumbnail', 'thumbnail2x'];
 };
 
-const buildSrcSet = (variants, original) => {
-  const descriptors = [
-    ...MEDIA_VARIANTS.map((key) => normalizeDescriptor(variants[key])),
-    original,
-  ].filter(Boolean);
+const buildSrcSet = (candidates) => {
   const byWidth = new Map();
-  descriptors.forEach((descriptor) => {
-    if (!descriptor.width || !descriptor.url) return;
+  candidates.forEach((descriptor) => {
+    if (
+      descriptor.variant === 'legacy'
+      || !descriptor.width
+      || !descriptor.url
+    ) return;
     byWidth.set(`${descriptor.width}:${descriptor.url}`, descriptor);
   });
   return Array.from(byWidth.values())
@@ -122,15 +178,12 @@ const dedupeCandidates = (candidates) => {
 export const resolveMediaAsset = (
   mediaOrEntity,
   {
+    compatibilityMode = 'legacy',
     fallbackSrc = '',
     variant = 'thumbnail',
   } = {}
 ) => {
-  const entity = isRecord(mediaOrEntity) ? mediaOrEntity : {};
-  const general = isRecord(entity.General) ? entity.General : null;
-  const manifest = isRecord(entity.media)
-    ? entity.media
-    : (isRecord(general?.media) ? general.media : (general || entity));
+  const {entity, general, manifest} = getMediaManifest(mediaOrEntity);
   const variants = isRecord(manifest.variants) ? manifest.variants : {};
   const legacyDescriptor = normalizeDescriptor({
     url: fallbackSrc
@@ -145,28 +198,54 @@ export const resolveMediaAsset = (
       ?? manifest.imageHeight ?? manifest.height,
   });
   const original = normalizeDescriptor(manifest.original);
-  const fallbackOrder = getFallbackOrder(variant);
+  const purpose = getMediaPurpose(manifest, variants, original);
+  const fallbackOrder = getFallbackOrder(variant, purpose);
+  const schemaVersion = Number(manifest.schemaVersion) || null;
+  const declaredState = typeof manifest.state === 'string'
+    ? manifest.state.trim().toLowerCase()
+    : '';
+  const state = declaredState || 'legacy';
+  const normalizedVariant = typeof variant === 'string' && variant.trim()
+    ? variant.trim()
+    : 'thumbnail';
+  const variantUse = getVariantUse(normalizedVariant, purpose);
+  const isListContract = LIST_MEDIA_VARIANTS.has(normalizedVariant)
+    || variantUse === 'map-gallery';
+  const normalizedCompatibilityMode = DERIVATIVE_READ_STATES.has(compatibilityMode)
+    ? compatibilityMode
+    : 'legacy';
+  const canonicalReady = schemaVersion === MEDIA_CONTRACT_VERSION
+    && declaredState === 'ready';
+  const readsCanonical = canonicalReady
+    && DERIVATIVE_READ_STATES.has(normalizedCompatibilityMode);
   const collectedCandidates = [];
 
-  for (const key of fallbackOrder) {
-    const descriptor = key === 'original'
-      ? original
-      : normalizeDescriptor(variants[key]);
-    appendDescriptorCandidates(collectedCandidates, key, descriptor);
-    if (key === 'original') {
-      appendDescriptorCandidates(collectedCandidates, key, legacyDescriptor);
+  if (readsCanonical) {
+    for (const key of fallbackOrder) {
+      if (key === 'original' && isListContract) continue;
+      const descriptor = key === 'original'
+        ? original
+        : normalizeDescriptor(variants[key]);
+      appendDescriptorCandidates(collectedCandidates, key, descriptor);
     }
   }
 
-  if (!fallbackOrder.includes('original')) {
+  // A versionless original URL is part of the old contract. A schema-v1
+  // original is not: legacy/shadow readers may use only the preserved legacy
+  // URL fields, while allowlisted derivative readers may use verified v1
+  // descriptors and then fall back to that old URL.
+  appendDescriptorCandidates(collectedCandidates, 'legacy', legacyDescriptor);
+  if (canonicalReady && !readsCanonical && !legacyDescriptor) {
+    // Emergency rollback for media created after v1 writes were enabled: no
+    // legacy object exists, so legacy/shadow mode may read only the verified
+    // canonical original (never a derivative). Existing entities continue to
+    // prefer their preserved legacy reference and avoid behavior drift.
     appendDescriptorCandidates(collectedCandidates, 'original', original);
-    appendDescriptorCandidates(collectedCandidates, 'original', legacyDescriptor);
+  } else if (schemaVersion !== MEDIA_CONTRACT_VERSION) {
+    appendDescriptorCandidates(collectedCandidates, 'legacy', original);
   }
 
   const candidates = dedupeCandidates(collectedCandidates);
-  const responsiveOriginal = original?.url
-    ? original
-    : legacyDescriptor;
   const selected = candidates[0] || null;
   const placeholder = normalizeDescriptor(manifest.placeholder);
   const assetKey = JSON.stringify(candidates.map((candidate) => ({
@@ -184,24 +263,71 @@ export const resolveMediaAsset = (
     height: selected?.height || original?.height || null,
     placeholderUrl: placeholder?.url || '',
     path: selected?.path || '',
-    requestedVariant: variant,
-    schemaVersion: Number(manifest.schemaVersion) || null,
+    purpose,
+    requestedVariant: normalizedVariant,
+    schemaVersion,
+    compatibilityMode: normalizedCompatibilityMode,
     selectedVariant: selected?.variant || '',
-    srcSet: buildSrcSet(variants, responsiveOriginal),
-    state: typeof manifest.state === 'string' ? manifest.state : 'legacy',
+    srcSet: buildSrcSet(candidates),
+    state,
     url: selected?.url || '',
+    variantUse,
     width: selected?.width || original?.width || null,
     assetKey,
   };
 };
 
+const orderPrivateCandidatesForRenderedSize = (asset, renderedWidth) => {
+  if (
+    !LIST_MEDIA_VARIANTS.has(asset.requestedVariant)
+    && asset.variantUse !== 'map-gallery'
+  ) return asset.candidates;
+  const privateCandidates = asset.candidates
+    .map((candidate, index) => ({ candidate, index }))
+    .filter(({ candidate }) => candidate.privateAsset && candidate.variant !== 'original');
+  if (privateCandidates.length < 2) return asset.candidates;
+
+  const devicePixelRatio = typeof window !== 'undefined'
+    ? Number(window.devicePixelRatio) || 1
+    : 1;
+  const selectedVariant = selectTask07VariantName({
+    purpose: asset.purpose,
+    use: asset.variantUse,
+    renderedWidth,
+    devicePixelRatio,
+  });
+  const targetWidth = (positiveNumber(renderedWidth) || privateCandidates[0].candidate.width || 1)
+    * Math.min(2, Math.max(1, devicePixelRatio));
+  const selected = privateCandidates.find(({ candidate }) => candidate.variant === selectedVariant)
+    || privateCandidates
+      .filter(({ candidate }) => positiveNumber(candidate.width))
+      .sort((left, right) => left.candidate.width - right.candidate.width)
+      .find(({ candidate }) => candidate.width >= targetWidth)
+    || privateCandidates[privateCandidates.length - 1];
+
+  return [
+    selected.candidate,
+    ...asset.candidates.filter((_candidate, index) => index !== selected.index),
+  ];
+};
+
 export const hasMediaAsset = (mediaOrEntity, options) => (
-  Boolean(resolveMediaAsset(mediaOrEntity, options).candidates.length)
+  Boolean(
+    resolveMediaAsset(mediaOrEntity, options).candidates.length
+    || (
+      (!options?.compatibilityMode || options.compatibilityMode === 'auto')
+      && resolveMediaAsset(mediaOrEntity, {
+        ...options,
+        compatibilityMode: 'derivative-read',
+      }).candidates.length
+    )
+  )
 );
 
 const MediaImage = ({
   alt,
   className = '',
+  compatibilityMode = 'auto',
   decoding = 'async',
   fallback = null,
   fetchPriority,
@@ -222,10 +348,16 @@ const MediaImage = ({
   const onErrorRef = useRef(onError);
   const privateLeaseRef = useRef(null);
   onErrorRef.current = onError;
+  const purpose = useMemo(() => getTask07MediaPurpose(media), [media]);
+  const readerMode = useTask07MediaReadMode({
+    override: compatibilityMode,
+    purpose,
+  });
   const asset = useMemo(() => resolveMediaAsset(media, {
+    compatibilityMode: readerMode,
     fallbackSrc: src,
     variant,
-  }), [media, src, variant]);
+  }), [media, readerMode, src, variant]);
   const eager = loading === 'eager' || fetchPriority === 'high';
   const [activatedAssetKey, setActivatedAssetKey] = useState('');
   const [resolvedSource, setResolvedSource] = useState(null);
@@ -290,13 +422,17 @@ const MediaImage = ({
 
     const resolveCandidate = async () => {
       let lastError = null;
+      const measuredWidth = positiveNumber(imageRef.current?.getBoundingClientRect?.().width)
+        || positiveNumber(width)
+        || asset.width;
+      const orderedCandidates = orderPrivateCandidatesForRenderedSize(asset, measuredWidth);
 
       for (
         let candidateIndex = fallbackStartIndex;
-        candidateIndex < asset.candidates.length;
+        candidateIndex < orderedCandidates.length;
         candidateIndex += 1
       ) {
-        const candidate = asset.candidates[candidateIndex];
+        const candidate = orderedCandidates[candidateIndex];
         if (candidate.privateAsset) {
           try {
             currentLease = acquirePrivateMediaAsset(candidate.privateAsset);
@@ -361,6 +497,7 @@ const MediaImage = ({
     asset.assetKey,
     asset.candidates,
     fallbackStartIndex,
+    width,
   ]);
 
   if (failure && fallback != null) return fallback;

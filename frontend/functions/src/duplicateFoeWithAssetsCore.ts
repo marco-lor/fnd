@@ -19,10 +19,20 @@ export const stripTask07MediaFromDuplicatedFoe = (
 ): UnknownRecord => {
   const copyable = {...source};
   delete copyable.media;
+  delete copyable.mediaUpdatedAt;
+  delete copyable.task07MediaRevision;
+  delete copyable.videoMedia;
+  delete copyable.videoMediaUpdatedAt;
+  delete copyable.task07VideoMediaRevision;
   if (!isPlainRecord(copyable.General)) return copyable;
 
   const general = {...copyable.General};
   delete general.media;
+  delete general.mediaUpdatedAt;
+  delete general.task07MediaRevision;
+  delete general.videoMedia;
+  delete general.videoMediaUpdatedAt;
+  delete general.task07VideoMediaRevision;
   return {
     ...copyable,
     General: general,

@@ -4,110 +4,125 @@ import {
   throwIfTask07Aborted,
 } from './mediaErrors';
 
-export const TASK07_MEDIA_UPLOAD_CONCURRENCY = 3;
-export const TASK07_PRIVATE_IMMUTABLE_CACHE_CONTROL = 'private, max-age=31536000, immutable';
+export const TASK07_MEDIA_UPLOAD_CONCURRENCY = 1;
+export const TASK07_STAGING_CACHE_CONTROL = 'private, no-store';
 
-const isCanonicalStoragePath = (value) => (
-  typeof value === 'string'
-  && value.startsWith('media/v')
-  && !value.startsWith('/')
-  && !value.includes('://')
-  && !value.includes('\\')
+let activeTask07Uploads = 0;
+const pendingTask07Uploads = [];
+
+const dispatchTask07UploadQueue = () => {
+  while (
+    activeTask07Uploads < TASK07_MEDIA_UPLOAD_CONCURRENCY
+    && pendingTask07Uploads.length > 0
+  ) {
+    const entry = pendingTask07Uploads.shift();
+    entry.signal?.removeEventListener('abort', entry.handleAbort);
+    if (entry.signal?.aborted) {
+      entry.reject(createTask07AbortError(entry.signal.reason));
+      continue;
+    }
+    activeTask07Uploads += 1;
+    let released = false;
+    entry.resolve(() => {
+      if (released) return;
+      released = true;
+      activeTask07Uploads = Math.max(0, activeTask07Uploads - 1);
+      dispatchTask07UploadQueue();
+    });
+  }
+};
+
+const acquireTask07UploadSlot = (signal) => new Promise((resolve, reject) => {
+  const entry = {
+    signal,
+    resolve,
+    reject,
+    handleAbort: null,
+  };
+  entry.handleAbort = () => {
+    const index = pendingTask07Uploads.indexOf(entry);
+    if (index >= 0) pendingTask07Uploads.splice(index, 1);
+    reject(createTask07AbortError(signal?.reason));
+  };
+  signal?.addEventListener('abort', entry.handleAbort, { once: true });
+  pendingTask07Uploads.push(entry);
+  dispatchTask07UploadQueue();
+});
+
+export const getTask07UploadQueueStats = () => ({
+  active: activeTask07Uploads,
+  pending: pendingTask07Uploads.length,
+  concurrency: TASK07_MEDIA_UPLOAD_CONCURRENCY,
+});
+
+const normalizeContentType = (value) => (
+  typeof value === 'string' ? value.split(';')[0].trim().toLowerCase() : ''
 );
 
-export const mapTask07WithConcurrency = async (
-  values,
-  worker,
-  concurrency = TASK07_MEDIA_UPLOAD_CONCURRENCY
-) => {
-  const items = Array.from(values || []);
-  const limit = Math.max(
-    1,
-    Math.min(TASK07_MEDIA_UPLOAD_CONCURRENCY, Math.floor(Number(concurrency) || 1))
-  );
-  const results = new Array(items.length);
-  let cursor = 0;
-  const workers = Array.from(
-    { length: Math.min(limit, items.length) },
-    async () => {
-      while (cursor < items.length) {
-        const index = cursor;
-        cursor += 1;
-        results[index] = await worker(items[index], index);
-      }
-    }
-  );
-  await Promise.all(workers);
-  return results;
-};
+export const isTask07StagingSourcePath = (value) => (
+  typeof value === 'string'
+  && /^media_uploads\/[A-Za-z0-9._~-]{1,128}\/m_[a-f0-9]{40}\/source$/.test(value)
+);
 
-export const buildTask07UploadEntries = (upload, generated) => {
-  if (!isCanonicalStoragePath(upload?.originalPath)) {
-    throw new Task07MediaPipelineError('Server original storage path is invalid.', {
-      code: 'invalid-original-path',
+const requirePlainStringMap = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Task07MediaPipelineError('Server staging metadata is invalid.', {
+      code: 'invalid-staging-metadata',
       stage: 'upload',
     });
   }
-  const declaredNames = Object.keys(upload?.variants || {}).sort();
-  const generatedNames = Object.keys(generated?.variants || {}).sort();
+  const entries = Object.entries(value);
   if (
-    declaredNames.length !== generatedNames.length
-    || declaredNames.some((name, index) => name !== generatedNames[index])
+    entries.length === 0
+    || entries.some(([key, item]) => !key || typeof item !== 'string' || !item)
   ) {
-    throw new Task07MediaPipelineError(
-      'Generated variants do not exactly match the server upload plan.',
-      {
-        code: 'variant-set-mismatch',
-        stage: 'upload',
-      }
-    );
-  }
-  if (!generated?.original?.blob) {
-    throw new Task07MediaPipelineError('Generated upload is missing its original media.', {
-      code: 'missing-original',
+    throw new Task07MediaPipelineError('Server staging metadata is invalid.', {
+      code: 'invalid-staging-metadata',
       stage: 'upload',
     });
   }
-  const entries = [{
-    role: 'original',
-    variant: null,
-    path: upload.originalPath,
-    blob: generated.original.blob,
-    contentType: generated.original.contentType || upload.sourceContentType,
-  }];
-  declaredNames.forEach((name) => {
-    const path = upload.variants[name];
-    const value = generated.variants[name];
-    if (!isCanonicalStoragePath(path) || !value?.blob) {
-      throw new Task07MediaPipelineError(`Generated ${name} upload is invalid.`, {
-        code: 'invalid-variant-upload',
-        stage: 'upload',
-      });
-    }
-    entries.push({
-      role: 'variant',
-      variant: name,
-      path,
-      blob: value.blob,
-      contentType: value.contentType,
-    });
-  });
-  return entries;
+  return Object.fromEntries(entries);
 };
 
-export const buildTask07UploadMetadata = (upload, entry) => ({
-  contentType: entry.contentType,
-  cacheControl: TASK07_PRIVATE_IMMUTABLE_CACHE_CONTROL,
-  contentDisposition: 'inline',
-  customMetadata: {
-    task07AssetId: upload.assetId,
-    task07ContractVersion: String(upload.contractVersion),
-    task07EntityId: upload.entityId,
-    task07Kind: upload.kind,
-    task07OwnerUid: upload.ownerUid,
-    task07Role: entry.variant || 'original',
-  },
-});
+export const buildTask07SourceUpload = (upload, file) => {
+  if (!isTask07StagingSourcePath(upload?.sourcePath)) {
+    throw new Task07MediaPipelineError('Server staging source path is invalid.', {
+      code: 'invalid-staging-path',
+      stage: 'upload',
+    });
+  }
+  if (
+    !file
+    || !Number.isSafeInteger(file.size)
+    || file.size <= 0
+    || file.size !== upload.sourceBytes
+    || normalizeContentType(file.type) !== normalizeContentType(upload.sourceContentType)
+  ) {
+    throw new Task07MediaPipelineError('Selected media no longer matches its upload intent.', {
+      code: 'staging-source-mismatch',
+      stage: 'upload',
+    });
+  }
+  if (
+    upload.cacheControl !== TASK07_STAGING_CACHE_CONTROL
+    || upload.contentDisposition !== 'inline'
+  ) {
+    throw new Task07MediaPipelineError('Server staging cache contract is invalid.', {
+      code: 'invalid-staging-cache-contract',
+      stage: 'upload',
+    });
+  }
+  return {
+    path: upload.sourcePath,
+    blob: file,
+    metadata: {
+      contentType: normalizeContentType(upload.sourceContentType),
+      cacheControl: TASK07_STAGING_CACHE_CONTROL,
+      contentDisposition: 'inline',
+      customMetadata: requirePlainStringMap(upload.sourceMetadata),
+    },
+  };
+};
 
 export const loadTask07FirebaseStorageUploadApi = async () => {
   const [{ storage }, storageApi] = await Promise.all([
@@ -144,7 +159,7 @@ const observeResumableUpload = (task, signal, onProgress) => new Promise((resolv
     try {
       task.cancel?.();
     } catch (_error) {
-      // Cancellation is best effort; the orchestration still abandons the asset.
+      // Cancellation is best effort; the lifecycle callable owns cleanup.
     }
     finish(reject, createTask07AbortError(signal?.reason));
   };
@@ -164,102 +179,54 @@ const observeResumableUpload = (task, signal, onProgress) => new Promise((resolv
     },
     () => finish(resolve, task.snapshot)
   );
-  if (settled) {
-    unsubscribe?.();
-  } else if (signal?.aborted) {
-    handleAbort();
-  }
+  if (settled) unsubscribe?.();
+  else if (signal?.aborted) handleAbort();
 });
 
-export const uploadTask07EntryWithFirebase = async (
-  entry,
-  {
-    upload,
-    signal,
-    onProgress,
-    loadApi = loadTask07FirebaseStorageUploadApi,
-  }
-) => {
-  throwIfTask07Aborted(signal);
-  const { storage, ref, uploadBytesResumable } = await loadApi();
-  throwIfTask07Aborted(signal);
-  const storageRef = ref(storage, entry.path);
-  const task = uploadBytesResumable(
-    storageRef,
-    entry.blob,
-    buildTask07UploadMetadata(upload, entry)
-  );
-  return observeResumableUpload(task, signal, onProgress);
-};
-
-export const uploadGeneratedTask07Media = async ({
+export const uploadTask07Source = async ({
   upload,
-  generated,
+  file,
   signal,
   onProgress,
-  concurrency = TASK07_MEDIA_UPLOAD_CONCURRENCY,
 }, {
-  uploadOne = uploadTask07EntryWithFirebase,
+  loadApi = loadTask07FirebaseStorageUploadApi,
 } = {}) => {
   throwIfTask07Aborted(signal);
-  const entries = buildTask07UploadEntries(upload, generated);
-  const controller = new AbortController();
-  const handleExternalAbort = () => controller.abort(signal?.reason);
-  signal?.addEventListener('abort', handleExternalAbort, { once: true });
-  if (signal?.aborted) controller.abort(signal.reason);
-
-  const totals = new Map(entries.map((entry) => [entry.path, {
-    transferred: 0,
-    total: Number(entry.blob?.size || 0),
-  }]));
-  const totalBytes = Array.from(totals.values())
-    .reduce((sum, value) => sum + value.total, 0);
-  const report = (entry, update = {}) => {
-    const current = totals.get(entry.path);
-    current.transferred = Math.max(
-      current.transferred,
-      Number(update.bytesTransferred || 0)
+  const source = buildTask07SourceUpload(upload, file);
+  const { storage, ref, uploadBytesResumable } = await loadApi();
+  throwIfTask07Aborted(signal);
+  const release = await acquireTask07UploadSlot(signal);
+  try {
+    throwIfTask07Aborted(signal);
+    const task = uploadBytesResumable(
+      ref(storage, source.path),
+      source.blob,
+      source.metadata
     );
-    if (Number(update.totalBytes) > 0) current.total = Number(update.totalBytes);
-    const bytesTransferred = Array.from(totals.values())
-      .reduce((sum, value) => sum + Math.min(value.transferred, value.total), 0);
+    const snapshot = await observeResumableUpload(task, signal, (progress) => {
+      const totalBytes = progress.totalBytes || source.blob.size;
+      onProgress?.({
+        stage: 'upload',
+        path: source.path,
+        role: 'source',
+        bytesTransferred: progress.bytesTransferred,
+        totalBytes,
+        fraction: totalBytes > 0 ? progress.bytesTransferred / totalBytes : 0,
+      });
+    });
     onProgress?.({
       stage: 'upload',
-      path: entry.path,
-      role: entry.role,
-      variant: entry.variant,
-      bytesTransferred,
-      totalBytes,
-      fraction: totalBytes > 0 ? bytesTransferred / totalBytes : 0,
+      path: source.path,
+      role: 'source',
+      bytesTransferred: source.blob.size,
+      totalBytes: source.blob.size,
+      fraction: 1,
     });
-  };
-
-  try {
-    const snapshots = await mapTask07WithConcurrency(
-      entries,
-      async (entry) => {
-        throwIfTask07Aborted(controller.signal);
-        const snapshot = await uploadOne(entry, {
-          upload,
-          signal: controller.signal,
-          onProgress: (update) => report(entry, update),
-        });
-        report(entry, {
-          bytesTransferred: Number(entry.blob?.size || 0),
-          totalBytes: Number(entry.blob?.size || 0),
-        });
-        return snapshot;
-      },
-      concurrency
-    );
     return {
-      entries: entries.map(({ role, variant, path }) => ({ role, variant, path })),
-      snapshots,
+      entries: [{ role: 'source', path: source.path }],
+      snapshot,
     };
-  } catch (error) {
-    controller.abort(error);
-    throw error;
   } finally {
-    signal?.removeEventListener('abort', handleExternalAbort);
+    release();
   }
 };

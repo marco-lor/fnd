@@ -1,6 +1,7 @@
 // file: ./frontend/src/components/common/SpellOverlay.js
 import React, { useEffect, useState, useCallback } from "react"; // Added useCallback
 import ReactDOM from "react-dom";
+import useObjectUrl from "./useObjectUrl";
 
 /**
  * Generic, storage-agnostic spell form.
@@ -34,6 +35,10 @@ export function SpellOverlay({
   // Track when media has been explicitly removed
   const [imageRemoved, setImageRemoved] = useState(false);
   const [videoRemoved, setVideoRemoved] = useState(false);
+  const imageObjectUrl = useObjectUrl(imageFile);
+  const videoObjectUrl = useObjectUrl(videoFile);
+  const resolvedImagePreviewUrl = imageObjectUrl || imagePreviewUrl;
+  const resolvedVideoPreviewUrl = videoObjectUrl || videoPreviewUrl;
   /* ---------------- helpers ---------------- */
   // Use useCallback to memoize buildEmptySpell if schema structure is stable
    const buildEmptySpell = useCallback((s) => ({
@@ -82,18 +87,6 @@ export function SpellOverlay({
 
   }, [schema, initialData, buildEmptySpell]); // buildEmptySpell is memoized
 
-  useEffect(() => () => {
-    if (imagePreviewUrl?.startsWith('blob:')) {
-      URL.revokeObjectURL(imagePreviewUrl);
-    }
-  }, [imagePreviewUrl]);
-
-  useEffect(() => () => {
-    if (videoPreviewUrl?.startsWith('blob:')) {
-      URL.revokeObjectURL(videoPreviewUrl);
-    }
-  }, [videoPreviewUrl]);
-
   /* generic nested-field setter */
  const handleNestedChange = useCallback((cat, sub, key, val) =>
     setSpellFormData((prev) => {
@@ -129,14 +122,13 @@ export function SpellOverlay({
        return;
      }
 
-     const newPreviewUrl = URL.createObjectURL(file);
      if (isImg) {
        setImageFile(file);
-       setImagePreviewUrl(newPreviewUrl);
+       setImagePreviewUrl(null);
        setImageRemoved(false); // Reset removal flag when new file is selected
      } else {
        setVideoFile(file);
-       setVideoPreviewUrl(newPreviewUrl);
+       setVideoPreviewUrl(null);
        setVideoRemoved(false); // Reset removal flag when new file is selected
      }
    };
@@ -349,9 +341,9 @@ export function SpellOverlay({
           <label className="block text-white text-sm mb-1">Immagine (Opzionale)</label>
           <input type="file" accept="image/*" aria-label="Spell image file" onChange={(e) => preview(e, true)}
                  className="w-full text-sm text-white file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
-          {imagePreviewUrl && (
+          {resolvedImagePreviewUrl && (
              <div className="mt-2 relative w-24 h-24">
-                <img src={imagePreviewUrl} alt="Preview" className="w-full h-full object-cover rounded border border-gray-600" />
+                <img src={resolvedImagePreviewUrl} alt="Preview" className="w-full h-full object-cover rounded border border-gray-600" />
                  {/* Add a clear button */}
                   <button type="button" onClick={() => { 
                     setImageFile(null); 
@@ -360,7 +352,7 @@ export function SpellOverlay({
                   }} className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center -mt-1 -mr-1">&times;</button>
               </div>
            )}
-           {!imagePreviewUrl && <div className="mt-2 w-24 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">No Image</div>}
+           {!resolvedImagePreviewUrl && <div className="mt-2 w-24 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">No Image</div>}
         </div>
 
          {/* Video Upload */}
@@ -368,9 +360,9 @@ export function SpellOverlay({
            <label className="block text-white text-sm mb-1">Video (Opzionale)</label>
            <input type="file" accept="video/*" aria-label="Spell video file" onChange={(e) => preview(e, false)}
                    className="w-full text-sm text-white file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
-           {videoPreviewUrl && (
+           {resolvedVideoPreviewUrl && (
              <div className="mt-2 relative max-w-xs">
-                <video src={videoPreviewUrl} controls className="w-full max-h-48 rounded border border-gray-600" />
+                <video src={resolvedVideoPreviewUrl} controls className="w-full max-h-48 rounded border border-gray-600" />
                 {/* Add a clear button */}
                 <button type="button" onClick={() => { 
                   setVideoFile(null); 
@@ -379,7 +371,7 @@ export function SpellOverlay({
                 }} className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center -mt-1 -mr-1">&times;</button>
               </div>
             )}
-            {!videoPreviewUrl && <div className="mt-2 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">No Video</div>}
+            {!resolvedVideoPreviewUrl && <div className="mt-2 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">No Video</div>}
 
            <p className="text-gray-400 text-xs mt-1">Consigliato: video breve (&lt;30s) e di dimensioni ridotte.</p>
          </div>

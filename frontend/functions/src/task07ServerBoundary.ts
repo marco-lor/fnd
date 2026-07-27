@@ -1,6 +1,14 @@
 type UnknownRecord = Record<string, unknown>;
 
 const TASK07_ASSET_ID_PATTERN = /^m_[a-f0-9]{40}$/;
+const TASK07_MEDIA_CONTROL_FIELDS = Object.freeze([
+  "media",
+  "mediaUpdatedAt",
+  "task07MediaRevision",
+  "task07VideoMediaRevision",
+  "videoMedia",
+  "videoMediaUpdatedAt",
+] as const);
 
 const isPlainRecord = (value: unknown): value is UnknownRecord => {
   if (!value ||
@@ -18,7 +26,10 @@ export const isTask07CanonicalStoragePath = (value: unknown): boolean => {
   if (typeof value !== "string") return false;
   const text = value.trim();
   if (!text) return false;
-  if (/^\/?media\/v1\//.test(text)) return true;
+  const isCanonicalObjectPath = (path: string): boolean => (
+    /^(?:media\/v1|media_assets\/v1)\//.test(path.replace(/^\/+/, ""))
+  );
+  if (isCanonicalObjectPath(text)) return true;
 
   try {
     const parsed = new URL(text);
@@ -28,18 +39,18 @@ export const isTask07CanonicalStoragePath = (value: unknown): boolean => {
       const encodedPath = parsed.pathname.slice(
         markerIndex + objectMarker.length
       );
-      return /^media\/v1\//.test(decodeURIComponent(encodedPath));
+      return isCanonicalObjectPath(decodeURIComponent(encodedPath));
     }
     if (parsed.protocol === "gs:") {
       const objectPath = decodeURIComponent(
         parsed.pathname.replace(/^\/+/, "")
       );
-      return /^media\/v1\//.test(objectPath);
+      return isCanonicalObjectPath(objectPath);
     }
     if (parsed.hostname === "storage.googleapis.com") {
       const pathParts = parsed.pathname.split("/").filter(Boolean);
       return pathParts.length > 1 &&
-        /^media\/v1\//.test(decodeURIComponent(pathParts.slice(1).join("/")));
+        isCanonicalObjectPath(decodeURIComponent(pathParts.slice(1).join("/")));
     }
   } catch {
     return false;
@@ -136,13 +147,88 @@ export const stripUntrustedTask07InventoryMedia = (
     new WeakMap<object, unknown>()
   );
   const snapshot = isPlainRecord(stripped) ? stripped : {};
-  delete snapshot.media;
+  TASK07_MEDIA_CONTROL_FIELDS.forEach((field) => {
+    delete snapshot[field];
+  });
   if (isPlainRecord(snapshot.General)) {
     const general = {...snapshot.General};
-    delete general.media;
+    TASK07_MEDIA_CONTROL_FIELDS.forEach((field) => {
+      delete general[field];
+    });
     snapshot.General = general;
   }
   return snapshot;
+};
+
+const TASK07_PERSONAL_MEDIA_FIELDS = TASK07_MEDIA_CONTROL_FIELDS;
+
+const hasReservedTask07PersonalMediaField = (
+  value: UnknownRecord
+): boolean => TASK07_PERSONAL_MEDIA_FIELDS.some((field) => hasOwn(value, field));
+
+/**
+ * Personal-content commands prepare ordinary technique/spell fields before
+ * the Task 07 attachment transaction runs. The request may never introduce
+ * canonical descriptors, canonical paths, slots, or slot revisions. Existing
+ * server-attached slots are carried forward exactly so a normal edit cannot
+ * detach media or make the attachment CAS observe revision zero.
+ */
+export const preserveTrustedTask07PersonalContent = (
+  requestedValue: unknown,
+  existingValue: unknown
+): UnknownRecord => {
+  const requested = isPlainRecord(requestedValue) ? requestedValue : {};
+  if (
+    hasReservedTask07PersonalMediaField(requested) ||
+    containsTask07Reference(requested, new WeakSet<object>())
+  ) {
+    throw new TypeError("task07-personal-media-injection");
+  }
+
+  const stripped = stripTask07References(
+    requested,
+    new WeakMap<object, unknown>()
+  );
+  const output = isPlainRecord(stripped) ? stripped : {};
+  const existing = isPlainRecord(existingValue) ? existingValue : {};
+
+  if (isTask07MediaDescriptor(existing.media)) {
+    output.media = existing.media;
+  }
+  if (isTask07MediaDescriptor(existing.videoMedia)) {
+    output.videoMedia = existing.videoMedia;
+  }
+  [
+    "task07MediaRevision",
+    "task07VideoMediaRevision",
+  ].forEach((field) => {
+    const value = existing[field];
+    if (Number.isSafeInteger(value) && Number(value) >= 0) {
+      output[field] = value;
+    }
+  });
+  [
+    "mediaUpdatedAt",
+    "videoMediaUpdatedAt",
+  ].forEach((field) => {
+    if (existing[field] !== undefined) output[field] = existing[field];
+  });
+  return output;
+};
+
+/**
+ * The compatibility root map remains legacy-only. Canonical slots and their
+ * server revisions live only on the V2 personal-content document.
+ */
+export const stripTask07PersonalContentProjection = (
+  value: unknown
+): UnknownRecord => {
+  const source = isPlainRecord(value) ? value : {};
+  const output = {...source};
+  TASK07_PERSONAL_MEDIA_FIELDS.forEach((field) => {
+    delete output[field];
+  });
+  return output;
 };
 
 /**

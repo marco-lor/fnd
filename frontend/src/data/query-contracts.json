@@ -289,11 +289,11 @@
       "kind": "document",
       "queryKey": "grigliata.music-playback.subscribe.v1",
       "ownerTask": "Task 16/21",
-      "currentScope": "Global shell playback document",
+      "currentScope": "Legacy and shadow shell compatibility playback document",
       "targetOrdering": [],
       "cursor": { "version": 1, "status": "none", "fields": [] },
-      "realtimePolicy": "One shell-owned listener",
-      "activation": "active",
+      "realtimePolicy": "Legacy/shadow only; removed after derivative-read switch",
+      "activation": "experiment",
       "sources": [{ "file": "components/grigliata/GlobalGrigliataMusicPlayer.js", "occurrence": 1 }]
     },
     {
@@ -301,12 +301,24 @@
       "kind": "collection",
       "queryKey": "grigliata.music-sessions.subscribe.v1",
       "ownerTask": "Task 07/21",
-      "currentScope": "At most four playing or paused sessions ordered by most recent update",
-      "targetOrdering": [{ "field": "status", "direction": "ASCENDING" }, { "field": "updatedAt", "direction": "DESCENDING" }],
+      "currentScope": "Legacy and shadow compatibility session collection",
+      "targetOrdering": [],
       "cursor": { "version": 1, "status": "none", "fields": [] },
-      "realtimePolicy": "One shell-owned bounded active-session listener",
-      "activation": "active",
+      "realtimePolicy": "Legacy/shadow only; client fails closed above four active sessions",
+      "activation": "experiment",
       "sources": [{ "file": "components/grigliata/GlobalGrigliataMusicPlayer.js", "occurrence": 2 }]
+    },
+    {
+      "id": "task07-shell-music-stream-current",
+      "kind": "document",
+      "queryKey": "grigliata.music-stream.subscribe.v1",
+      "ownerTask": "Task 07",
+      "currentScope": "Server-owned bounded authenticated-shell music projection",
+      "targetOrdering": [],
+      "cursor": { "version": 1, "status": "none", "fields": [] },
+      "realtimePolicy": "Exactly one shell listener in derivative-read and v1-write modes",
+      "activation": "active",
+      "sources": [{ "file": "components/grigliata/GlobalGrigliataMusicPlayer.js", "occurrence": 3 }]
     },
     {
       "id": "grigliata-dice-history-current",

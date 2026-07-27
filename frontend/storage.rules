@@ -292,46 +292,146 @@ service firebase.storage {
         );
     }
 
-    match /media/v1/{kind}/{ownerUid}/{assetId}/original/{fileName} {
-      allow read: if canReadTask07Media(kind, ownerUid, assetId);
-      allow create: if resource == null
-        && canCreateTask07Media(kind, ownerUid, assetId)
-        && task07SourceBytesAreBounded(kind)
-        && task07SourceFileMatches(kind, fileName)
-        && task07UploadMetadataMatches(
-          firestore.get(task07ManifestPath(assetId)).data,
-          kind,
-          ownerUid,
-          assetId,
-          'original'
+    function task07V2ManifestMatches(manifest, ownerUid, assetId) {
+      return manifest.schemaVersion == 1
+        && manifest.policyVersion == 1
+        && manifest.assetId == assetId
+        && manifest.ownerUid == ownerUid
+        && manifest.plan.schemaVersion == 1
+        && manifest.plan.policyVersion == 1
+        && manifest.plan.contractVersion == 1
+        && manifest.plan.assetId == assetId
+        && manifest.plan.ownerUid == ownerUid
+        && manifest.plan.sourcePath
+          == 'media_uploads/' + ownerUid + '/' + assetId + '/source'
+        && manifest.plan.sourceBytes > 0
+        && manifest.plan.sourceBytes <= (
+          manifest.plan.kind == 'avatar' ? 5 * 1024 * 1024
+          : manifest.plan.kind == 'map' ? 15 * 1024 * 1024
+          : manifest.plan.kind in [
+              'technique-video', 'spell-video', 'map-video', 'music'
+            ] ? 25 * 1024 * 1024
+          : 8 * 1024 * 1024
         )
-        && firestore.get(task07ManifestPath(assetId)).data.plan.originalPath
-          == 'media/v1/' + kind + '/' + ownerUid + '/' + assetId
-            + '/original/' + fileName;
-      allow update, delete: if false;
+        && manifest.plan.kind in [
+          'avatar', 'item', 'token', 'npc', 'foe', 'technique', 'spell',
+          'map', 'technique-video', 'spell-video', 'map-video', 'music'
+        ];
     }
 
-    match /media/v1/{kind}/{ownerUid}/{assetId}/derivatives/v1/{fileName} {
-      allow read: if canReadTask07Media(kind, ownerUid, assetId);
-      allow create: if resource == null
-        && canCreateTask07Media(kind, ownerUid, assetId)
-        && request.resource.contentType == 'image/webp'
-        && task07VariantBytesAreBounded(kind, fileName)
-        && task07VariantIsPlanned(
-          firestore.get(task07ManifestPath(assetId)).data,
-          kind,
-          ownerUid,
-          assetId,
-          fileName
+    function task07StagingMetadataMatches(manifest, ownerUid, assetId) {
+      return request.resource.metadata == {
+          'task07AssetId': assetId,
+          'task07ContractVersion': '1',
+          'task07EntityId': manifest.plan.entityId,
+          'task07Kind': manifest.plan.kind,
+          'task07OwnerUid': ownerUid,
+          'task07Role': 'source'
+        };
+    }
+
+    function task07GeneratedAudienceCanRead(audience, ownerUid) {
+      return audience == 'signed-in'
+        || (
+          audience == 'owner-manager'
+          && (
+            request.auth.uid == ownerUid
+            || isCatalogManager()
+          )
         )
-        && task07UploadMetadataMatches(
+        || (
+          audience == 'dm-only'
+          && isDM()
+        );
+    }
+
+    function task07GeneratedManifestMatches(
+      manifest,
+      audience,
+      ownerUid,
+      assetId,
+      generation
+    ) {
+      return task07V2ManifestMatches(manifest, ownerUid, assetId)
+        && manifest.plan.audienceScope == audience
+        && manifest.plan.ownerKey == ownerUid
+        && manifest.generated.generation == generation
+        && manifest.state in ['ready', 'attached', 'superseded'];
+    }
+
+    function task07GeneratedObjectIsReferenced(
+      manifest,
+      audience,
+      ownerUid,
+      assetId,
+      generation,
+      variant
+    ) {
+      let expectedPath = 'media_assets/v1/' + audience + '/' + ownerUid
+        + '/' + assetId + '/' + generation + '/' + variant;
+      return (
+          variant == 'original'
+          && manifest.generated.original.path == expectedPath
+        )
+        || (
+          variant in [
+            'thumbnail', 'thumbnail2x', 'card', 'card2x',
+            'gallery', 'gallery2x', 'poster', 'poster2x'
+          ]
+          && manifest.generated.variants[variant].path == expectedPath
+        );
+    }
+
+    // Browsers may create exactly one immutable staging source. They cannot
+    // read it back, overwrite it, delete it, or write generated media.
+    match /media_uploads/{ownerUid}/{assetId}/source {
+      allow create: if resource == null
+        && isActiveSignedIn()
+        && assetId.matches('^m_[a-f0-9]{40}$')
+        && firestore.exists(task07ManifestPath(assetId))
+        && task07V2ManifestMatches(
           firestore.get(task07ManifestPath(assetId)).data,
-          kind,
+          ownerUid,
+          assetId
+        )
+        && firestore.get(task07ManifestPath(assetId)).data.actorUid
+          == request.auth.uid
+        && firestore.get(task07ManifestPath(assetId)).data.state
+          in ['intent', 'failed']
+        && request.resource.size
+          == firestore.get(task07ManifestPath(assetId)).data.plan.sourceBytes
+        && request.resource.contentType
+          == firestore.get(task07ManifestPath(assetId)).data.plan.sourceContentType
+        && request.resource.cacheControl == 'private, no-store'
+        && request.resource.contentDisposition == 'inline'
+        && task07StagingMetadataMatches(
+          firestore.get(task07ManifestPath(assetId)).data,
+          ownerUid,
+          assetId
+        );
+      allow read, update, delete: if false;
+    }
+
+    match /media_assets/v1/{audience}/{ownerUid}/{assetId}/{generation}/{variant} {
+      allow read: if isActiveSignedIn()
+        && firestore.exists(task07ManifestPath(assetId))
+        && task07GeneratedManifestMatches(
+          firestore.get(task07ManifestPath(assetId)).data,
+          audience,
           ownerUid,
           assetId,
-          task07VariantRole(fileName)
+          generation
+        )
+        && task07GeneratedAudienceCanRead(audience, ownerUid)
+        && task07GeneratedObjectIsReferenced(
+          firestore.get(task07ManifestPath(assetId)).data,
+          audience,
+          ownerUid,
+          assetId,
+          generation,
+          variant
         );
-      allow update, delete: if false;
+      allow write: if false;
     }
 
     match /characters/{fileName} {

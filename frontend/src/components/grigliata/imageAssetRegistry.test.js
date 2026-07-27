@@ -2,10 +2,13 @@ import {
   __configureImageAssetRegistryForTests,
   __getImageAssetRegistryStats,
   __resetImageAssetRegistry,
+  IMAGE_ASSET_PIN_NAMES,
   IMAGE_ASSET_REGISTRY_LIMITS,
   ensureImageAsset,
+  getImageAssetRegistryRuntimeLimits,
   getImageAssetSnapshot,
   preloadImageAssets,
+  pinImageAsset,
   retainImageAsset,
   scheduleImageAssetPreload,
   subscribeToImageAsset,
@@ -183,6 +186,24 @@ describe('imageAssetRegistry', () => {
 
     global.Image = DeferredImage;
     expect(__getImageAssetRegistryStats().limits).toEqual(IMAGE_ASSET_REGISTRY_LIMITS);
+    expect(IMAGE_ASSET_REGISTRY_LIMITS).toMatchObject({
+      profile: 'desktop',
+      maxConcurrentRequests: 4,
+      maxRecords: 96,
+      maxDecodedBytes: 128 * 1024 * 1024,
+      maxTotalDecodedBytes: 384 * 1024 * 1024,
+      maxLowPriorityQueueSize: 32,
+      failureBackoffMs: [1000, 5000, 30000],
+    });
+    expect(getImageAssetRegistryRuntimeLimits({ compact: true })).toMatchObject({
+      profile: 'compact',
+      maxConcurrentRequests: 2,
+      maxRecords: 64,
+      maxDecodedBytes: 64 * 1024 * 1024,
+      maxTotalDecodedBytes: 320 * 1024 * 1024,
+      maxLowPriorityQueueSize: 16,
+      failureBackoffMs: [1000, 5000, 30000],
+    });
     __configureImageAssetRegistryForTests({ maxConcurrentRequests: 2 });
 
     const srcs = Array.from(
@@ -218,6 +239,62 @@ describe('imageAssetRegistry', () => {
     });
   });
 
+  test('bounds the low-priority queue while preserving visible request priority', async () => {
+    const instances = [];
+    class DeferredImage {
+      constructor() {
+        imageConstructorCallCount += 1;
+        this.naturalWidth = 20;
+        this.naturalHeight = 10;
+        instances.push(this);
+      }
+
+      set src(value) {
+        this._src = value;
+      }
+
+      succeed() {
+        this.onload?.();
+      }
+    }
+    global.Image = DeferredImage;
+    __configureImageAssetRegistryForTests({
+      maxConcurrentRequests: 1,
+      maxLowPriorityQueueSize: 2,
+    });
+
+    const first = ensureImageAsset('https://example.com/low-1.png', { priority: 'low' });
+    const second = ensureImageAsset('https://example.com/low-2.png', { priority: 'low' });
+    const third = ensureImageAsset('https://example.com/low-3.png', { priority: 'low' });
+    await expect(
+      ensureImageAsset('https://example.com/low-dropped.png', { priority: 'low' })
+    ).resolves.toBeNull();
+    const visible = ensureImageAsset('https://example.com/visible.png');
+
+    expect(__getImageAssetRegistryStats()).toMatchObject({
+      activeRequestCount: 1,
+      queuedRequestCount: 3,
+      lowPriorityQueuedRequestCount: 2,
+      droppedLowPriorityRequestCount: 1,
+    });
+
+    instances[0].succeed();
+    await flushPromiseJobs();
+    expect(instances[1].src).toBe('https://example.com/visible.png');
+    instances[1].succeed();
+    await flushPromiseJobs();
+    instances[2].succeed();
+    await flushPromiseJobs();
+    instances[3].succeed();
+
+    await expect(Promise.all([first, second, third, visible])).resolves.toHaveLength(4);
+    expect(__getImageAssetRegistryStats()).toMatchObject({
+      activeRequestCount: 0,
+      queuedRequestCount: 0,
+      lowPriorityQueuedRequestCount: 0,
+    });
+  });
+
   test('evicts the least-recently-used unreferenced decoded image under its byte budget', async () => {
     const decodedBytesPerImage = 240 * 160 * 4;
     __configureImageAssetRegistryForTests({
@@ -244,6 +321,44 @@ describe('imageAssetRegistry', () => {
     });
 
     releaseActive();
+  });
+
+  test('excludes explicit active/crossfade pins from settled unpinned caps and exposes redacted pin stats', async () => {
+    const decodedBytesPerImage = 240 * 160 * 4;
+    __configureImageAssetRegistryForTests({
+      maxDecodedBytes: decodedBytesPerImage,
+      maxTotalDecodedBytes: decodedBytesPerImage * 3,
+      maxRecords: 1,
+      releaseProtectionMs: 0,
+    });
+
+    const activeSrc = 'https://example.com/pinned-active-map.png';
+    const outgoingSrc = 'https://example.com/pinned-outgoing-map.png';
+    const coldSrc = 'https://example.com/unpinned-cold-map.png';
+    const releaseActivePin = pinImageAsset(activeSrc, IMAGE_ASSET_PIN_NAMES.ACTIVE_BOARD);
+    const releaseOutgoingPin = pinImageAsset(outgoingSrc, IMAGE_ASSET_PIN_NAMES.CROSSFADE);
+
+    await ensureImageAsset(activeSrc);
+    await ensureImageAsset(outgoingSrc);
+    await ensureImageAsset(coldSrc);
+
+    expect(getImageAssetSnapshot(activeSrc).status).toBe('loaded');
+    expect(getImageAssetSnapshot(outgoingSrc).status).toBe('loaded');
+    expect(__getImageAssetRegistryStats()).toMatchObject({
+      recordCount: 3,
+      pinnedRecordCount: 2,
+      unpinnedRecordCount: 1,
+      pinnedDecodedBytes: decodedBytesPerImage * 2,
+      unpinnedDecodedBytes: decodedBytesPerImage,
+      namedPins: [
+        IMAGE_ASSET_PIN_NAMES.ACTIVE_BOARD,
+        IMAGE_ASSET_PIN_NAMES.CROSSFADE,
+      ],
+    });
+
+    releaseActivePin();
+    releaseOutgoingPin();
+    expect(__getImageAssetRegistryStats().pinnedRecordCount).toBe(0);
   });
 
   test('keeps active and released crossfade images protected until the release grace expires', async () => {
@@ -279,11 +394,10 @@ describe('imageAssetRegistry', () => {
     releaseIncoming();
   });
 
-  test('backs off repeated failures and retries only after the exponential deadline', async () => {
+  test('backs off repeated failures on the deterministic 1s/5s/30s schedule', async () => {
     let now = 0;
     __configureImageAssetRegistryForTests({
-      failureBackoffBaseMs: 100,
-      failureBackoffMaxMs: 1000,
+      failureBackoffMs: [100, 500, 1000],
       now: () => now,
     });
 
@@ -303,11 +417,11 @@ describe('imageAssetRegistry', () => {
     expect(secondError).not.toBe(firstError);
     expect(imageConstructorCallCount).toBe(2);
 
-    now = 299;
+    now = 599;
     await expect(ensureImageAsset(src)).rejects.toBe(secondError);
     expect(imageConstructorCallCount).toBe(2);
 
-    now = 300;
+    now = 600;
     await expect(ensureImageAsset(src)).rejects.toThrow('broken image');
     expect(imageConstructorCallCount).toBe(3);
   });

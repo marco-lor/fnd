@@ -1,12 +1,24 @@
 // file: ./frontend/src/components/bazaar/elements/addWeapon.js
 import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { db } from '../../firebaseConfig';
-import { storage } from '../../firebaseStorage';
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from "../../../performance/firestore";
-import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
-import { uploadCacheableImage } from "../../common/imageStorage";
-import { createDeferredStorageCleanup } from "../../common/deferredStorageCleanup";
+import {
+    createLegacyStorageCleanup,
+    deleteLegacyStoragePath,
+    uploadLegacyBlob,
+    uploadLegacyImage,
+} from "../../common/legacyMediaStorage";
 import useObjectUrl from "../../common/useObjectUrl";
+import { deleteDoc } from "../../../performance/firestore";
+import useTask07MediaOperationOwner from "../../../data/media/useTask07MediaOperationOwner";
+import {
+    isTask07CatalogItemWriterEnabled,
+    runTask07CatalogItemWriter,
+} from "../../../data/media/catalogItemMediaWriter";
+import {
+    describeTask07ConsumerOutcome,
+    task07ConsumerNeedsAttention,
+} from "../../../data/media/mediaConsumerAdapter";
 import { AuthContext } from '../../../AuthContext';
 import { computeValue } from '../../common/computeFormula';
 import { AddSpellButton } from '../../dmDashboard/elements/buttons/addSpell';
@@ -32,7 +44,8 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
     const [isLoading, setIsLoading] = useState(false);
     const [isSchemaLoading, setIsSchemaLoading] = useState(true);
 
-    const { user } = useContext(AuthContext);
+    const { user, role } = useContext(AuthContext);
+    const task07MediaOperationOwner = useTask07MediaOperationOwner();
     const [userParams, setUserParams] = useState({ Base: {}, Combattimento: {} });
     const [userName, setUserName] = useState("");
     const [spellSchema, setSpellSchema] = useState(null);
@@ -381,14 +394,12 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
             return;
         }
         const weaponDocRef = doc(db, "items", docId);
-        const deferredStorageCleanup = createDeferredStorageCleanup(
-            (path) => deleteObject(ref(storage, path)),
-            {
+        const deferredStorageCleanup = createLegacyStorageCleanup({
                 onError: ({ path, error }) => {
                     console.warn("Post-commit weapon media cleanup failed:", path, error);
                 },
             }
-        );
+        });
 
         try {
             if (!editMode) {
@@ -400,6 +411,15 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                 }
             }
 
+            const catalogBefore = !inventoryEditMode && editMode
+                ? (await getDoc(weaponDocRef)).data()
+                : null;
+            const task07V1Write = await isTask07CatalogItemWriterEnabled({
+                actorUid: user?.uid,
+                role,
+                file: imageFile,
+                inventoryEditMode,
+            });
             let finalWeaponData = {
                 item_type: "weapon",
                 General: { ...(weaponFormData.General || {}) },
@@ -408,10 +428,9 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
             };
 
             let newImageUrl = editMode ? (initialData?.General?.image_url ?? null) : null;
-            if (imageFile) {
+            if (imageFile && !task07V1Write) {
                 const weaponImgFileName = `weapon_${docId}_${Date.now()}_${imageFile.name}`;
-                const weaponImgRef = ref(storage, 'items/' + weaponImgFileName);
-                newImageUrl = (await uploadCacheableImage(weaponImgRef, imageFile)).downloadUrl;
+                newImageUrl = (await uploadLegacyImage('items/' + weaponImgFileName, imageFile)).downloadUrl;
                 if (!inventoryEditMode && editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
                     deferredStorageCleanup.addUrl(initialData.General.image_url);
                 }
@@ -434,16 +453,13 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                 let spellVideoUrlToSave = createdSpellData.video_url || initialSpellFromData.video_url || null;
 
                 if (spellObj.imageFile) {
-                    const spellImgRef = ref(storage, `spells/${safeBase}_image`);
-                    spellImageUrlToSave = (await uploadCacheableImage(spellImgRef, spellObj.imageFile)).downloadUrl;
+                    spellImageUrlToSave = (await uploadLegacyImage(`spells/${safeBase}_image`, spellObj.imageFile)).downloadUrl;
                     if (!inventoryEditMode && initialSpellFromData.image_url && initialSpellFromData.image_url !== spellImageUrlToSave) {
                         deferredStorageCleanup.addUrl(initialSpellFromData.image_url);
                     }
                 }
                 if (spellObj.videoFile) {
-                    const spellVidRef = ref(storage, `spells/videos/${safeBase}_video`);
-                    await uploadBytes(spellVidRef, spellObj.videoFile);
-                    spellVideoUrlToSave = await getDownloadURL(spellVidRef);
+                    spellVideoUrlToSave = (await uploadLegacyBlob(`spells/videos/${safeBase}_video`, spellObj.videoFile)).downloadUrl;
                     if (!inventoryEditMode && initialSpellFromData.video_url && initialSpellFromData.video_url !== spellVideoUrlToSave) {
                         deferredStorageCleanup.addUrl(initialSpellFromData.video_url);
                     }
@@ -555,7 +571,7 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                     if (userImageDeleted) {
                         try {
                             const oldPath = decodeURIComponent(userImageDeleted.split('/o/')[1].split('?')[0]);
-                            await deleteObject(ref(storage, oldPath));
+                            await deleteLegacyStoragePath(oldPath);
                         } catch (e) { console.warn('Failed to delete previous user custom image:', e); }
                     }
                     if (showMessage) showMessage(`Arma aggiornata nell'inventario utente.`, 'success');
@@ -567,7 +583,32 @@ export function AddWeaponOverlay({ onClose, showMessage, initialData = null, edi
                 }
                 onClose(true);
             } else {
-                if (editMode) {
+                if (task07V1Write) {
+                    const outcome = await task07MediaOperationOwner.run((signal) => (
+                        runTask07CatalogItemWriter({
+                            actorUid: user.uid,
+                            role,
+                            itemId: weaponDocRef.id,
+                            file: imageFile,
+                            currentItem: catalogBefore || initialData || {},
+                            prepareEntity: () => editMode
+                                ? updateDoc(weaponDocRef, finalWeaponData)
+                                : setDoc(weaponDocRef, finalWeaponData),
+                            rollbackPreparedEntity: () => catalogBefore
+                                ? setDoc(weaponDocRef, catalogBefore)
+                                : deleteDoc(weaponDocRef),
+                            signal,
+                        })
+                    ));
+                    if (task07ConsumerNeedsAttention(outcome)) {
+                        if (showMessage) showMessage(
+                            describeTask07ConsumerOutcome(outcome, "Weapon image"),
+                            "warning"
+                        );
+                    } else if (showMessage) {
+                        showMessage(`Arma "${weaponName}" salvata!`, "success");
+                    }
+                } else if (editMode) {
                     console.log("Updating document:", docId, finalWeaponData);
                     await updateDoc(weaponDocRef, finalWeaponData);
                     if (showMessage) showMessage(`Arma "${weaponName}" aggiornata!`, "success");

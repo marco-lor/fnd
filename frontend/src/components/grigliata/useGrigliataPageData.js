@@ -64,6 +64,7 @@ import {
   buildBackgroundMap,
   normalizeNarrationPlacements,
 } from './narrationScene';
+import { resolveTask07CustomTokenMediaProjection } from './customTokenMedia';
 
 const LIVE_INTERACTION_CLOCK_INTERVAL_MS = 15 * 1000;
 export const GRIGLIATA_SHARED_CHARACTER_PROFILE_QUERY_CHUNK_SIZE = 30;
@@ -1014,19 +1015,27 @@ export default function useGrigliataPageData({
         const foeSource = tokenType === 'foe' && profile?.foeSourceId
           ? foeSourcesById.get(profile.foeSourceId) || null
           : null;
+        const customTokenProjection = tokenType === 'custom'
+          ? resolveTask07CustomTokenMediaProjection({
+            profile,
+            profilesByTokenId: tokenProfilesByTokenId,
+          })
+          : null;
         const projectedImageUrl = isCurrentUserCharacter && currentMedia
           ? currentImageUrl
           : (foeSource
             ? (typeof foeSource?.imageUrl === 'string' ? foeSource.imageUrl.trim() : '')
-            : (placementImageUrl || profile?.imageUrl || ''));
+            : (placementImageUrl || customTokenProjection?.imageUrl || profile?.imageUrl || ''));
         const projectedImagePath = isCurrentUserCharacter && currentMedia
           ? currentImagePath
           : (foeSource
             ? (typeof foeSource?.imagePath === 'string' ? foeSource.imagePath.trim() : '')
-            : (profile?.imagePath || ''));
+            : (customTokenProjection?.imagePath || profile?.imagePath || ''));
         const projectedMedia = isCurrentUserCharacter && currentMedia
           ? currentMedia
-          : (foeSource ? getEntityMedia(foeSource) : getEntityMedia(profile));
+          : (foeSource
+            ? getEntityMedia(foeSource)
+            : (customTokenProjection?.media || getEntityMedia(profile)));
 
         return {
           ...(profile || {}),
@@ -1214,6 +1223,7 @@ export default function useGrigliataPageData({
         imageUrl: tokenProfile.imageUrl || '',
         imagePath: tokenProfile.imagePath || '',
         media: getEntityMedia(tokenProfile),
+        task07MediaRevision: tokenProfile.task07MediaRevision,
         placed: activePlacementCount > 0,
         activePlacementCount,
         col: 0,

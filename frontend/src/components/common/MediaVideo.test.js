@@ -25,12 +25,19 @@ const canonicalGeneration = (id) => String(
 );
 
 const descriptor = (id) => ({
-  path: `media/v1/map-video/user/${canonicalAssetId(id)}/original/source.mp4`,
+  path: `media_assets/v1/signed-in/user/${canonicalAssetId(id)}/${canonicalGeneration(id)}/original`,
   generation: canonicalGeneration(id),
   bytes: 4,
   contentType: 'video/mp4',
   width: 1920,
   height: 1080,
+});
+
+const versionedVideo = (original) => ({
+  schemaVersion: 1,
+  state: 'ready',
+  kind: 'map-video',
+  original,
 });
 
 const configureRuntime = ({ getBlob } = {}) => {
@@ -68,12 +75,12 @@ describe('MediaVideo', () => {
     __resetPrivateMediaAssetsForTests();
   });
 
-  test('resolves only canonical MP4 original descriptors with a safe legacy URL fallback', () => {
+  test('resolves only canonical server video originals with a safe legacy URL fallback', () => {
     const original = descriptor('resolved');
     const result = resolveMediaVideoAsset({
       imageUrl: 'https://legacy.example/map.mp4',
-      media: { original },
-    });
+      media: versionedVideo(original),
+    }, {compatibilityMode: 'derivative-read'});
 
     expect(result).toEqual(expect.objectContaining({
       path: original.path,
@@ -94,26 +101,42 @@ describe('MediaVideo', () => {
       imageUrl: 'javascript:alert(1)',
     }).candidates).toHaveLength(0);
     expect(resolveMediaVideoAsset({
-      media: {
-        original: {
+      media: versionedVideo({
           ...original,
           contentType: 'image/svg+xml',
-        },
-      },
-    }).candidates).toHaveLength(0);
+      }),
+    }, {compatibilityMode: 'derivative-read'}).candidates).toHaveLength(0);
     expect(resolveMediaVideoAsset({
       General: {
-        media: { original },
+        media: versionedVideo(original),
       },
-    }).path).toBe(original.path);
+    }, {compatibilityMode: 'derivative-read'}).path).toBe(original.path);
     expect(resolveMediaVideoAsset({
-      media: {
-        original: {
+      media: versionedVideo({
           ...original,
-          path: 'media/v1/map-video/user/resolved/original.mp4',
-        },
-      },
-    }).candidates).toHaveLength(0);
+          path: `media/v1/map-video/user/${canonicalAssetId('resolved')}/original/source.mp4`,
+      }),
+    }, {compatibilityMode: 'derivative-read'}).candidates).toHaveLength(0);
+    expect(resolveMediaVideoAsset({
+      media: versionedVideo({
+          ...original,
+          contentType: 'video/webm',
+      }),
+    }, {compatibilityMode: 'derivative-read'}).contentType).toBe('video/webm');
+    expect(resolveMediaVideoAsset({
+      imageUrl: 'data:video/webm;base64,AAAA',
+    }).url).toBe('data:video/webm;base64,AAAA');
+    expect(resolveMediaVideoAsset({
+      video_url: 'https://legacy.example/preserved.mp4',
+      media: versionedVideo(original),
+    }, {compatibilityMode: 'shadow'}).url)
+      .toBe('https://legacy.example/preserved.mp4');
+    expect(resolveMediaVideoAsset({
+      media: versionedVideo(original),
+    }, {compatibilityMode: 'legacy'})).toEqual(expect.objectContaining({
+      path: original.path,
+      selectedVariant: 'original',
+    }));
   });
 
   test('loads an authenticated MP4 lease and releases it on replacement and unmount', async () => {
@@ -122,7 +145,8 @@ describe('MediaVideo', () => {
     const second = descriptor('second');
     const view = render(
       <MediaVideo
-        media={{ media: { original: first } }}
+        compatibilityMode="derivative-read"
+        media={{media: versionedVideo(first)}}
         aria-label="Private map preview"
       />
     );
@@ -138,7 +162,8 @@ describe('MediaVideo', () => {
 
     view.rerender(
       <MediaVideo
-        media={{ media: { original: second } }}
+        compatibilityMode="derivative-read"
+        media={{media: versionedVideo(second)}}
         aria-label="Private map preview"
       />
     );
@@ -167,9 +192,10 @@ describe('MediaVideo', () => {
     const original = descriptor('invalid-private');
     render(
       <MediaVideo
+        compatibilityMode="derivative-read"
         media={{
           imageUrl: 'https://legacy.example/fallback.mp4',
-          media: { original },
+          media: versionedVideo(original),
         }}
         aria-label="Fallback map preview"
       />
@@ -186,11 +212,10 @@ describe('MediaVideo', () => {
     const onError = jest.fn();
     render(
       <MediaVideo
+        compatibilityMode="derivative-read"
         media={{
           imageUrl: 'https://legacy.example/fallback.mp4',
-          media: {
-            original: { url: 'https://canonical.example/original.mp4' },
-          },
+          media: versionedVideo({url: 'https://canonical.example/original.mp4'}),
         }}
         aria-label="URL fallback preview"
         onError={onError}

@@ -7,12 +7,24 @@ import {
     getSchema,
 } from '../../../data/configRepository';
 import { collection, doc, updateDoc, getDocs, onSnapshot, getDoc, setDoc } from "../../../performance/firestore";
-import { ref, getDownloadURL, uploadBytes, deleteObject } from "firebase/storage";
-import { uploadCacheableImage } from "../../common/imageStorage";
-import { createDeferredStorageCleanup } from "../../common/deferredStorageCleanup";
+import {
+    createLegacyStorageCleanup,
+    deleteLegacyStoragePath,
+    uploadLegacyBlob,
+    uploadLegacyImage,
+} from "../../common/legacyMediaStorage";
 import useObjectUrl from "../../common/useObjectUrl";
+import { deleteDoc } from "../../../performance/firestore";
+import useTask07MediaOperationOwner from "../../../data/media/useTask07MediaOperationOwner";
+import {
+    isTask07CatalogItemWriterEnabled,
+    runTask07CatalogItemWriter,
+} from "../../../data/media/catalogItemMediaWriter";
+import {
+    describeTask07ConsumerOutcome,
+    task07ConsumerNeedsAttention,
+} from "../../../data/media/mediaConsumerAdapter";
 import { db } from '../../firebaseConfig';
-import { storage } from '../../firebaseStorage';
 import { AuthContext } from '../../../AuthContext';
 import { WeaponOverlay } from '../../common/WeaponOverlay';
 import { SpellOverlay } from '../../common/SpellOverlay';
@@ -39,7 +51,8 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
     const [visibility, setVisibility] = useState('all');
     const [allowedUsers, setAllowedUsers] = useState([]);
 
-    const { user } = useContext(AuthContext);
+    const { user, role } = useContext(AuthContext);
+    const task07MediaOperationOwner = useTask07MediaOperationOwner();
     const [userParams, setUserParams] = useState({ Base: {}, Combattimento: {} });
     const [userName, setUserName] = useState("");
     const [spellSchema, setSpellSchema] = useState(null);
@@ -349,14 +362,12 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
             return;
         }
         const accessorioDocRef = doc(db, "items", docId);
-        const deferredStorageCleanup = createDeferredStorageCleanup(
-            (path) => deleteObject(ref(storage, path)),
-            {
+        const deferredStorageCleanup = createLegacyStorageCleanup({
                 onError: ({ path, error }) => {
                     console.warn("Post-commit accessorio media cleanup failed:", path, error);
                 },
             }
-        );
+        });
         
         try {
             if (!editMode) {
@@ -367,14 +378,22 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                     return;
                 }
             }
+            const catalogBefore = !inventoryEditMode && editMode
+                ? (await getDoc(accessorioDocRef)).data()
+                : null;
+            const task07V1Write = await isTask07CatalogItemWriterEnabled({
+                actorUid: user?.uid,
+                role,
+                file: imageFile,
+                inventoryEditMode,
+            });
             let finalAccessorioData = JSON.parse(JSON.stringify(accessorioFormData));
 
             // Handle image upload
             let newImageUrl = editMode ? (initialData?.General?.image_url ?? null) : null;
-            if (imageFile) {
+            if (imageFile && !task07V1Write) {
                 const accessorioImgFileName = `accessorio_${docId}_${Date.now()}_${imageFile.name}`;
-                const accessorioImgRef = ref(storage, 'items/' + accessorioImgFileName);
-                newImageUrl = (await uploadCacheableImage(accessorioImgRef, imageFile)).downloadUrl;
+                newImageUrl = (await uploadLegacyImage('items/' + accessorioImgFileName, imageFile)).downloadUrl;
                 if (!inventoryEditMode && editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
                     deferredStorageCleanup.addUrl(initialData.General.image_url);
                 }
@@ -394,14 +413,11 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                 let spellVideoUrlToSave = createdSpellData.video_url || '';
                 
                 if (customSpell.imageFile) {
-                    const spellImageRef = ref(storage, `spell_images/${Date.now()}_${customSpell.imageFile.name}`);
-                    spellImageUrlToSave = (await uploadCacheableImage(spellImageRef, customSpell.imageFile)).downloadUrl;
+                    spellImageUrlToSave = (await uploadLegacyImage(`spell_images/${Date.now()}_${customSpell.imageFile.name}`, customSpell.imageFile)).downloadUrl;
                 }
                 
                 if (customSpell.videoFile) {
-                    const spellVideoRef = ref(storage, `spell_videos/${Date.now()}_${customSpell.videoFile.name}`);
-                    const spellVideoSnapshot = await uploadBytes(spellVideoRef, customSpell.videoFile);
-                    spellVideoUrlToSave = await getDownloadURL(spellVideoSnapshot.ref);
+                    spellVideoUrlToSave = (await uploadLegacyBlob(`spell_videos/${Date.now()}_${customSpell.videoFile.name}`, customSpell.videoFile)).downloadUrl;
                 }
                 
                 // Queue old files for cleanup only after the catalog document commits.
@@ -514,7 +530,7 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                     });
                     await updateDoc(targetUserRef, { inventory: nextInv });
                     if (userImageDeleted) {
-                        try { const oldPath = decodeURIComponent(userImageDeleted.split('/o/')[1].split('?')[0]); await deleteObject(ref(storage, oldPath)); } catch (e) { console.warn('Failed to delete previous user custom image:', e); }
+                        try { const oldPath = decodeURIComponent(userImageDeleted.split('/o/')[1].split('?')[0]); await deleteLegacyStoragePath(oldPath); } catch (e) { console.warn('Failed to delete previous user custom image:', e); }
                     }
                     if (showMessage) showMessage(`Accessorio aggiornato nell'inventario utente.`, 'success');
                 } catch (e) {
@@ -525,7 +541,32 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                 }
                 onClose(true);
             } else {
-                if (editMode) {
+                if (task07V1Write) {
+                    const outcome = await task07MediaOperationOwner.run((signal) => (
+                        runTask07CatalogItemWriter({
+                            actorUid: user.uid,
+                            role,
+                            itemId: accessorioDocRef.id,
+                            file: imageFile,
+                            currentItem: catalogBefore || initialData || {},
+                            prepareEntity: () => editMode
+                                ? updateDoc(accessorioDocRef, finalAccessorioData)
+                                : setDoc(accessorioDocRef, finalAccessorioData),
+                            rollbackPreparedEntity: () => catalogBefore
+                                ? setDoc(accessorioDocRef, catalogBefore)
+                                : deleteDoc(accessorioDocRef),
+                            signal,
+                        })
+                    ));
+                    if (task07ConsumerNeedsAttention(outcome)) {
+                        if (showMessage) showMessage(
+                            describeTask07ConsumerOutcome(outcome, "Accessorio image"),
+                            "warning"
+                        );
+                    } else if (showMessage) {
+                        showMessage(`Accessorio "${accessorioName}" salvato!`, "success");
+                    }
+                } else if (editMode) {
                     console.log("Updating document:", docId, finalAccessorioData);
                     await updateDoc(accessorioDocRef, finalAccessorioData);
                     if (showMessage) showMessage(`Accessorio "${accessorioName}" aggiornato!`, "success");

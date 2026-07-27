@@ -29,7 +29,8 @@
     "strict": true,
     "target": "es2017",
     "lib": ["es2017", "dom"],
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "resolveJsonModule": true
   },
   "compileOnSave": true,
   "include": [

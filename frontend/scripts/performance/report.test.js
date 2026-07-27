@@ -28,6 +28,21 @@ test('zero-gate metrics retain the worst iteration instead of hiding a single le
   assert.equal(metrics['home:runtime.activeMediaAfterCleanup'], 1);
 });
 
+test('Task 07 media caps retain the worst observed shell measurement', () => {
+  const metrics = buildMetricMap({
+    browserReport: {
+      scenarios: [
+        { id: 'task07-media-shell', metrics: { 'task07.audioNodes': 0, 'task07.attachedImages': 20 } },
+        { id: 'task07-media-shell', metrics: { 'task07.audioNodes': 1, 'task07.attachedImages': 90 } },
+        { id: 'task07-media-shell', metrics: { 'task07.audioNodes': 0, 'task07.attachedImages': 30 } },
+      ],
+    },
+  });
+
+  assert.equal(metrics['task07-media-shell:task07.audioNodes'], 1);
+  assert.equal(metrics['task07-media-shell:task07.attachedImages'], 90);
+});
+
 test('commit identity always comes from HEAD and rejects a stale inherited GITHUB_SHA', () => {
   const head = 'a'.repeat(40);
   const execFileSync = () => `${head}\n`;

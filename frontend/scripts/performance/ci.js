@@ -29,8 +29,9 @@ const main = async () => {
   run(process.execPath, [path.join(__dirname, 'migrate-firestore-imports.js'), '--check']);
   run(process.execPath, [path.join(__dirname, 'check-shared-config-boundaries.js')]);
   run(process.execPath, [path.join(__dirname, 'check-user-data-boundaries.js')]);
+  run(process.execPath, [path.join(__dirname, 'check-media-boundaries.js')]);
   run(process.execPath, [path.join(__dirname, 'check-query-contracts.js')]);
-  run(process.execPath, ['--test',
+  run(process.execPath, ['--test', '--test-concurrency=1',
     path.join(frontendRoot, 'scripts', 'verify-start.test.js'),
     path.join(__dirname, 'common.test.js'),
     path.join(__dirname, 'emulator-control.test.js'),
@@ -44,11 +45,13 @@ const main = async () => {
     path.join(__dirname, 'check-query-contracts.test.js'),
     path.join(__dirname, 'check-shared-config-boundaries.test.js'),
     path.join(__dirname, 'check-user-data-boundaries.test.js'),
+    path.join(__dirname, 'check-media-boundaries.test.js'),
     path.join(__dirname, 'firestore-persistence-experiment.test.js'),
     path.join(__dirname, 'verify-disabled-build.test.js'),
     path.join(frontendRoot, 'scripts', 'backfill-user-directory.test.js'),
     path.join(frontendRoot, 'scripts', 'task05', 'user-data-migration.test.js'),
     path.join(frontendRoot, 'scripts', 'task05', 'user-data-cutover.test.js'),
+    path.join(frontendRoot, 'scripts', 'task07', 'media-derivative-backfill.test.js'),
     path.join(frontendRoot, 'performance', 'global-setup.test.js'),
     path.join(frontendRoot, 'performance', 'tests', 'browser', 'helpers.test.js'),
   ]);
@@ -64,6 +67,8 @@ const main = async () => {
       'performance/playwright.config.js',
       '--project',
       'chromium',
+      '--workers',
+      '1',
     ]);
   }, {
     cleanupOwnedArtifacts: removePerformanceFirebaseConfig,

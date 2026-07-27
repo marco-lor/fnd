@@ -1,23 +1,62 @@
-const MEBIBYTE = 1024 * 1024;
+import { getTask07RuntimeBudgetProfile } from '../../../data/media/mediaPolicy';
 
-export const IMAGE_ASSET_REGISTRY_LIMITS = Object.freeze({
-  maxDecodedBytes: 96 * MEBIBYTE,
-  maxConcurrentRequests: 4,
-  maxRecords: 192,
-  failureBackoffBaseMs: 1000,
-  failureBackoffMaxMs: 30_000,
-  // Covers the current one-second board/narration crossfades plus scheduling slack.
-  releaseProtectionMs: 2000,
+const FAILURE_BACKOFF_MS = Object.freeze([1_000, 5_000, 30_000]);
+
+export const IMAGE_ASSET_PIN_NAMES = Object.freeze({
+  ACTIVE_BOARD: 'grigliata-active-board',
+  CROSSFADE: 'grigliata-crossfade',
 });
+
+const isCompactImageAssetRuntime = () => {
+  if (typeof navigator !== 'undefined' && navigator.connection?.saveData === true) {
+    return true;
+  }
+  if (typeof window === 'undefined') return false;
+  if (typeof window.matchMedia === 'function') {
+    return window.matchMedia('(max-width: 767px)').matches;
+  }
+  return Number(window.innerWidth) > 0 && Number(window.innerWidth) <= 767;
+};
+
+export const getImageAssetRegistryRuntimeLimits = ({ compact } = {}) => {
+  const hasExplicitProfile = typeof compact === 'boolean';
+  const useCompactProfile = hasExplicitProfile
+    ? compact
+    : isCompactImageAssetRuntime();
+  const saveData = !hasExplicitProfile
+    && typeof navigator !== 'undefined'
+    && navigator.connection?.saveData === true;
+  const budget = getTask07RuntimeBudgetProfile({
+    compact: useCompactProfile,
+    saveData,
+  });
+  return {
+    profile: useCompactProfile ? 'compact' : 'desktop',
+    maxDecodedBytes: budget.maxUnpinnedDecodedBytes,
+    maxTotalDecodedBytes: budget.maxTotalDecodedBytes,
+    maxConcurrentRequests: budget.maxConcurrentRequests,
+    maxRecords: budget.maxUnpinnedRecords,
+    maxLowPriorityQueueSize: budget.maxQueuedPreloads,
+    failureBackoffMs: [...FAILURE_BACKOFF_MS],
+    // Covers the current one-second board/narration crossfades plus scheduling slack.
+    releaseProtectionMs: 2000,
+  };
+};
+
+export const IMAGE_ASSET_REGISTRY_LIMITS = Object.freeze(
+  getImageAssetRegistryRuntimeLimits({ compact: false })
+);
 
 const imageAssetRecords = new Map();
 const pendingImageAssetRequests = [];
 const scheduledImageAssetPreloads = new Set();
+const namedImageAssetPins = new Map();
 
-let imageAssetRegistryConfig = { ...IMAGE_ASSET_REGISTRY_LIMITS };
+let imageAssetRegistryConfig = getImageAssetRegistryRuntimeLimits();
 let imageAssetRegistryGeneration = 0;
 let imageAssetAccessSequence = 0;
 let activeImageAssetRequestCount = 0;
+let droppedLowPriorityRequestCount = 0;
 let evictionTimerHandle = null;
 let evictionTimerDueAt = 0;
 let nowProvider = () => Date.now();
@@ -96,8 +135,10 @@ const getOrCreateImageAssetRecord = (src) => {
     request: null,
     listeners: new Set(),
     refCount: 0,
+    pinNames: new Set(),
     decodedBytes: 0,
     failureCount: 0,
+    backoffBypassFailureCount: 0,
     retryAt: 0,
     protectedUntil: 0,
     lastAccessSequence: 0,
@@ -132,11 +173,9 @@ const estimateDecodedImageBytes = (image) => {
 };
 
 const getImageAssetFailureBackoffMs = (failureCount) => {
-  const exponent = Math.max(0, Math.min(20, failureCount - 1));
-  return Math.min(
-    imageAssetRegistryConfig.failureBackoffMaxMs,
-    imageAssetRegistryConfig.failureBackoffBaseMs * (2 ** exponent)
-  );
+  const schedule = imageAssetRegistryConfig.failureBackoffMs;
+  const index = Math.max(0, Math.min(schedule.length - 1, failureCount - 1));
+  return schedule[index];
 };
 
 const getImageAssetRecordRetentionDeadline = (record) => Math.max(
@@ -156,18 +195,32 @@ const clearImageAssetEvictionTimer = () => {
 
 const getImageAssetRegistryTotals = () => {
   let decodedBytes = 0;
+  let pinnedDecodedBytes = 0;
+  let unpinnedDecodedBytes = 0;
   let loadedRecordCount = 0;
+  let pinnedRecordCount = 0;
+  let unpinnedRecordCount = 0;
   let referencedRecordCount = 0;
 
   imageAssetRecords.forEach((record) => {
-    decodedBytes += record.decodedBytes || 0;
+    const recordDecodedBytes = record.decodedBytes || 0;
+    const pinned = record.pinNames.size > 0;
+    decodedBytes += recordDecodedBytes;
+    pinnedDecodedBytes += pinned ? recordDecodedBytes : 0;
+    unpinnedDecodedBytes += pinned ? 0 : recordDecodedBytes;
     loadedRecordCount += record.status === 'loaded' && !!record.image ? 1 : 0;
+    pinnedRecordCount += pinned ? 1 : 0;
+    unpinnedRecordCount += pinned ? 0 : 1;
     referencedRecordCount += record.refCount > 0 ? 1 : 0;
   });
 
   return {
     decodedBytes,
+    pinnedDecodedBytes,
+    unpinnedDecodedBytes,
     loadedRecordCount,
+    pinnedRecordCount,
+    unpinnedRecordCount,
     referencedRecordCount,
   };
 };
@@ -191,14 +244,34 @@ const scheduleImageAssetCacheTrim = (dueAt) => {
   }, Math.max(0, dueAt - getCurrentTime()));
 };
 
+const disposeImageAssetRecord = (record) => {
+  const image = record?.image || record?.request?.image;
+  if (image) {
+    image.onload = null;
+    image.onerror = null;
+    try {
+      if (typeof image.removeAttribute === 'function') image.removeAttribute('src');
+      else image.src = '';
+    } catch {
+      // Releasing a decoded cache entry must not fail eviction.
+    }
+  }
+  record.image = null;
+  record.decodedBytes = 0;
+};
+
 const trimImageAssetCache = () => {
   clearImageAssetEvictionTimer();
 
   const now = getCurrentTime();
-  let { decodedBytes } = getImageAssetRegistryTotals();
-  let recordCount = imageAssetRecords.size;
-  let needsDecodedByteTrim = decodedBytes > imageAssetRegistryConfig.maxDecodedBytes;
-  let needsRecordTrim = recordCount > imageAssetRegistryConfig.maxRecords;
+  let {
+    decodedBytes,
+    unpinnedDecodedBytes,
+    unpinnedRecordCount,
+  } = getImageAssetRegistryTotals();
+  let needsDecodedByteTrim = unpinnedDecodedBytes > imageAssetRegistryConfig.maxDecodedBytes
+    || decodedBytes > imageAssetRegistryConfig.maxTotalDecodedBytes;
+  let needsRecordTrim = unpinnedRecordCount > imageAssetRegistryConfig.maxRecords;
 
   if (!needsDecodedByteTrim && !needsRecordTrim) {
     return;
@@ -207,14 +280,16 @@ const trimImageAssetCache = () => {
   const candidates = [...imageAssetRecords.values()]
     .filter((record) => (
       record.refCount === 0
+      && record.pinNames.size === 0
       && !record.request
       && getImageAssetRecordRetentionDeadline(record) <= now
     ))
     .sort((left, right) => left.lastAccessSequence - right.lastAccessSequence);
 
   for (const record of candidates) {
-    needsDecodedByteTrim = decodedBytes > imageAssetRegistryConfig.maxDecodedBytes;
-    needsRecordTrim = recordCount > imageAssetRegistryConfig.maxRecords;
+    needsDecodedByteTrim = unpinnedDecodedBytes > imageAssetRegistryConfig.maxDecodedBytes
+      || decodedBytes > imageAssetRegistryConfig.maxTotalDecodedBytes;
+    needsRecordTrim = unpinnedRecordCount > imageAssetRegistryConfig.maxRecords;
     if (!needsDecodedByteTrim && !needsRecordTrim) {
       break;
     }
@@ -228,11 +303,14 @@ const trimImageAssetCache = () => {
 
     imageAssetRecords.delete(record.src);
     decodedBytes = Math.max(0, decodedBytes - (record.decodedBytes || 0));
-    recordCount -= 1;
+    unpinnedDecodedBytes = Math.max(0, unpinnedDecodedBytes - (record.decodedBytes || 0));
+    unpinnedRecordCount -= 1;
+    disposeImageAssetRecord(record);
   }
 
-  needsDecodedByteTrim = decodedBytes > imageAssetRegistryConfig.maxDecodedBytes;
-  needsRecordTrim = recordCount > imageAssetRegistryConfig.maxRecords;
+  needsDecodedByteTrim = unpinnedDecodedBytes > imageAssetRegistryConfig.maxDecodedBytes
+    || decodedBytes > imageAssetRegistryConfig.maxTotalDecodedBytes;
+  needsRecordTrim = unpinnedRecordCount > imageAssetRegistryConfig.maxRecords;
   if (!needsDecodedByteTrim && !needsRecordTrim) {
     return;
   }
@@ -240,6 +318,7 @@ const trimImageAssetCache = () => {
   const nextRetentionDeadline = [...imageAssetRecords.values()]
     .filter((record) => (
       record.refCount === 0
+      && record.pinNames.size === 0
       && !record.request
       && (
         needsRecordTrim
@@ -322,6 +401,7 @@ const startImageAssetRequest = (record, request) => {
 
     if (image) {
       record.failureCount = 0;
+      record.backoffBypassFailureCount = 0;
       record.retryAt = 0;
       record.decodedBytes = estimateDecodedImageBytes(image);
       updateImageAssetRecord(record, {
@@ -367,12 +447,24 @@ const startImageAssetRequest = (record, request) => {
   }
 };
 
+const countQueuedImageAssetRequests = (priority = '') => pendingImageAssetRequests.filter((record) => (
+  record?.request?.state === 'queued'
+  && (!priority || record.request.priority === priority)
+)).length;
+
 const drainImageAssetRequestQueue = () => {
   while (
     activeImageAssetRequestCount < imageAssetRegistryConfig.maxConcurrentRequests
     && pendingImageAssetRequests.length > 0
   ) {
-    const record = pendingImageAssetRequests.shift();
+    const visibleIndex = pendingImageAssetRequests.findIndex((record) => (
+      record?.request?.state === 'queued'
+      && record.request.priority !== 'low'
+    ));
+    const [record] = pendingImageAssetRequests.splice(
+      visibleIndex >= 0 ? visibleIndex : 0,
+      1
+    );
     const request = record?.request;
     if (
       !record
@@ -388,10 +480,12 @@ const drainImageAssetRequestQueue = () => {
   }
 };
 
-const loadImageAssetRecord = (record) => {
+const loadImageAssetRecord = (record, { priority = 'visible', bypassBackoff = false } = {}) => {
   if (!record) {
     return Promise.resolve(null);
   }
+
+  const normalizedPriority = priority === 'low' ? 'low' : 'visible';
 
   touchImageAssetRecord(record);
 
@@ -400,15 +494,43 @@ const loadImageAssetRecord = (record) => {
   }
 
   if (record.request) {
+    if (normalizedPriority === 'visible' && record.request.priority === 'low') {
+      record.request.priority = 'visible';
+      drainImageAssetRequestQueue();
+    }
     return record.request.promise;
   }
 
-  if (
+  const withinFailureBackoff = (
     record.status === 'error'
     && record.error
     && record.retryAt > getCurrentTime()
-  ) {
-    return Promise.reject(record.error);
+  );
+  if (withinFailureBackoff) {
+    if (!bypassBackoff || record.backoffBypassFailureCount === record.failureCount) {
+      return Promise.reject(record.error);
+    }
+    record.backoffBypassFailureCount = record.failureCount;
+  }
+
+  if (normalizedPriority === 'low') {
+    const totals = getImageAssetRegistryTotals();
+    const queueIsFull = countQueuedImageAssetRequests('low')
+      >= imageAssetRegistryConfig.maxLowPriorityQueueSize;
+    const pinnedBudgetIsExhausted = totals.decodedBytes
+      >= imageAssetRegistryConfig.maxTotalDecodedBytes;
+    if (queueIsFull || pinnedBudgetIsExhausted) {
+      droppedLowPriorityRequestCount += 1;
+      if (
+        record.status === 'idle'
+        && record.refCount === 0
+        && record.pinNames.size === 0
+        && record.listeners.size === 0
+      ) {
+        imageAssetRecords.delete(record.src);
+      }
+      return Promise.resolve(null);
+    }
   }
 
   updateImageAssetRecord(record, {
@@ -426,6 +548,7 @@ const loadImageAssetRecord = (record) => {
   });
   const request = {
     generation: imageAssetRegistryGeneration,
+    priority: normalizedPriority,
     state: 'queued',
     image: null,
     promise: loadPromise,
@@ -477,9 +600,42 @@ export function retainImageAsset(src) {
   return retainImageAssetRecord(getOrCreateImageAssetRecord(src));
 }
 
-export function ensureImageAsset(src) {
+export function pinImageAsset(src, pinName) {
+  const normalizedPinName = typeof pinName === 'string' ? pinName.trim() : '';
   const record = getOrCreateImageAssetRecord(src);
-  return loadImageAssetRecord(record);
+  if (!record || !normalizedPinName) return () => {};
+
+  const token = Symbol(normalizedPinName);
+  const previousPin = namedImageAssetPins.get(normalizedPinName);
+  if (previousPin?.record && previousPin.record !== record) {
+    previousPin.record.pinNames.delete(normalizedPinName);
+    touchImageAssetRecord(previousPin.record);
+  }
+  namedImageAssetPins.set(normalizedPinName, { record, token });
+  record.pinNames.add(normalizedPinName);
+  touchImageAssetRecord(record);
+  trimImageAssetCache();
+
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const currentPin = namedImageAssetPins.get(normalizedPinName);
+    if (currentPin?.token !== token) return;
+    namedImageAssetPins.delete(normalizedPinName);
+    record.pinNames.delete(normalizedPinName);
+    record.protectedUntil = Math.max(
+      record.protectedUntil || 0,
+      getCurrentTime() + imageAssetRegistryConfig.releaseProtectionMs
+    );
+    touchImageAssetRecord(record);
+    trimImageAssetCache();
+  };
+}
+
+export function ensureImageAsset(src, options) {
+  const record = getOrCreateImageAssetRecord(src);
+  return loadImageAssetRecord(record, options);
 }
 
 export function preloadImageAssets(srcs) {
@@ -516,7 +672,7 @@ export function preloadImageAssets(srcs) {
 
       const resultIndex = nextIndex;
       nextIndex += 1;
-      ensureImageAsset(uniqueSrcs[resultIndex])
+      ensureImageAsset(uniqueSrcs[resultIndex], { priority: 'low' })
         .then(
           (image) => {
             results[resultIndex] = image;
@@ -627,11 +783,19 @@ export function __getImageAssetRegistryStats() {
     loadedRecordCount: totals.loadedRecordCount,
     referencedRecordCount: totals.referencedRecordCount,
     decodedBytes: totals.decodedBytes,
-    queuedRequestCount: pendingImageAssetRequests.filter((record) => (
-      record?.request?.state === 'queued'
-    )).length,
+    pinnedDecodedBytes: totals.pinnedDecodedBytes,
+    pinnedRecordCount: totals.pinnedRecordCount,
+    unpinnedDecodedBytes: totals.unpinnedDecodedBytes,
+    unpinnedRecordCount: totals.unpinnedRecordCount,
+    namedPins: [...namedImageAssetPins.keys()].sort(),
+    queuedRequestCount: countQueuedImageAssetRequests(),
+    lowPriorityQueuedRequestCount: countQueuedImageAssetRequests('low'),
+    droppedLowPriorityRequestCount,
     activeRequestCount: activeImageAssetRequestCount,
-    limits: { ...imageAssetRegistryConfig },
+    limits: {
+      ...imageAssetRegistryConfig,
+      failureBackoffMs: [...imageAssetRegistryConfig.failureBackoffMs],
+    },
   };
 }
 
@@ -642,23 +806,37 @@ const normalizeNonNegativeInteger = (value, fallback) => (
 );
 
 export function __configureImageAssetRegistryForTests({
+  profile,
   maxDecodedBytes,
+  maxTotalDecodedBytes,
   maxConcurrentRequests,
   maxRecords,
-  failureBackoffBaseMs,
-  failureBackoffMaxMs,
+  maxLowPriorityQueueSize,
+  failureBackoffMs,
   releaseProtectionMs,
   now,
 } = {}) {
-  const nextFailureBackoffBaseMs = normalizeNonNegativeInteger(
-    failureBackoffBaseMs,
-    imageAssetRegistryConfig.failureBackoffBaseMs
+  const nextFailureBackoffMs = Array.isArray(failureBackoffMs)
+    && failureBackoffMs.length > 0
+    && failureBackoffMs.every((delayMs) => Number.isFinite(delayMs) && delayMs >= 0)
+    ? failureBackoffMs.map((delayMs) => Math.floor(delayMs))
+    : [...imageAssetRegistryConfig.failureBackoffMs];
+  const nextMaxDecodedBytes = normalizeNonNegativeInteger(
+    maxDecodedBytes,
+    imageAssetRegistryConfig.maxDecodedBytes
   );
 
   imageAssetRegistryConfig = {
-    maxDecodedBytes: normalizeNonNegativeInteger(
-      maxDecodedBytes,
-      imageAssetRegistryConfig.maxDecodedBytes
+    profile: typeof profile === 'string' && profile.trim()
+      ? profile.trim()
+      : imageAssetRegistryConfig.profile,
+    maxDecodedBytes: nextMaxDecodedBytes,
+    maxTotalDecodedBytes: Math.max(
+      nextMaxDecodedBytes,
+      normalizeNonNegativeInteger(
+        maxTotalDecodedBytes,
+        imageAssetRegistryConfig.maxTotalDecodedBytes
+      )
     ),
     maxConcurrentRequests: Math.max(
       1,
@@ -671,14 +849,14 @@ export function __configureImageAssetRegistryForTests({
       1,
       normalizeNonNegativeInteger(maxRecords, imageAssetRegistryConfig.maxRecords)
     ),
-    failureBackoffBaseMs: nextFailureBackoffBaseMs,
-    failureBackoffMaxMs: Math.max(
-      nextFailureBackoffBaseMs,
+    maxLowPriorityQueueSize: Math.max(
+      1,
       normalizeNonNegativeInteger(
-        failureBackoffMaxMs,
-        imageAssetRegistryConfig.failureBackoffMaxMs
+        maxLowPriorityQueueSize,
+        imageAssetRegistryConfig.maxLowPriorityQueueSize
       )
     ),
+    failureBackoffMs: nextFailureBackoffMs,
     releaseProtectionMs: normalizeNonNegativeInteger(
       releaseProtectionMs,
       imageAssetRegistryConfig.releaseProtectionMs
@@ -704,6 +882,7 @@ export function __resetImageAssetRegistry() {
   });
   scheduledImageAssetPreloads.clear();
   pendingImageAssetRequests.length = 0;
+  namedImageAssetPins.clear();
 
   imageAssetRecords.forEach((record) => {
     const request = record.request;
@@ -720,12 +899,15 @@ export function __resetImageAssetRegistry() {
     record.promise = null;
     record.listeners.clear();
     record.refCount = 0;
+    record.pinNames.clear();
+    disposeImageAssetRecord(record);
   });
 
   imageAssetRecords.clear();
   activeImageAssetRequestCount = 0;
+  droppedLowPriorityRequestCount = 0;
   imageAssetAccessSequence = 0;
-  imageAssetRegistryConfig = { ...IMAGE_ASSET_REGISTRY_LIMITS };
+  imageAssetRegistryConfig = getImageAssetRegistryRuntimeLimits();
   nowProvider = () => Date.now();
 }
 

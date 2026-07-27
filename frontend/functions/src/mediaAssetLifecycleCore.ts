@@ -2,39 +2,70 @@ import {createHash} from "crypto";
 import {
   asItemMediaReferenceScope,
   asMediaKind,
-  buildMediaStoragePlan,
-  InspectedMediaObject,
+  buildTask07StagingPath,
+  ITEM_MEDIA_REFERENCE_SCOPES,
   MEDIA_CONTRACTS,
   MEDIA_CONTRACT_VERSION,
   MEDIA_PROCESSING_LEASE_MS,
   MEDIA_SCHEMA_VERSION,
   ItemMediaReferenceScope,
+  MediaAudienceScope,
   MediaKind,
-  mediaAssetId,
-  MediaVariantName,
   normalizeMediaContentType,
-  parseCanonicalMediaPath,
+  resolveMediaAudienceScope,
   isSafeMediaSegment,
-  validateMediaObject,
+  mediaAssetId,
   validateMediaOperationId,
 } from "./mediaContracts";
+
+export type Task07MediaTargetKind =
+  "profile" | "user-inventory" | "catalog-item" | "npc" | "foe" |
+  "user-technique" | "user-spell" |
+  "grigliata-token" | "grigliata-background";
+
+export type Task07MediaTargetSlot = "media" | "videoMedia";
+
+export interface Task07MediaTargetFields {
+  slot: Task07MediaTargetSlot;
+  mediaField: "media" | "videoMedia";
+  revisionField: "task07MediaRevision" | "task07VideoMediaRevision";
+  updatedAtField: "mediaUpdatedAt" | "videoMediaUpdatedAt";
+}
+
+export interface Task07MediaReferenceSlotScan {
+  assetIds: string[];
+  malformed: boolean;
+}
+
+export type Task07MediaReferenceScan = Record<
+  Task07MediaTargetSlot,
+  Task07MediaReferenceSlotScan
+>;
 
 export interface MediaUploadPlan {
   schemaVersion: number;
   contractVersion: number;
+  policyVersion: number;
   assetId: string;
   kind: MediaKind;
+  targetKind: Task07MediaTargetKind;
   actorUid: string;
   ownerUid: string;
+  ownerKey: string;
   entityId: string;
   referenceScope: ItemMediaReferenceScope | null;
+  audienceScope: MediaAudienceScope;
   previousAssetId: string | null;
   operationId: string;
   sourceContentType: string;
-  requestHash: string;
+  sourceBytes: number;
+  sourcePath: string;
+  // Compatibility alias for callers being migrated. It is staging, not a
+  // browser-writable canonical original.
   originalPath: string;
-  variants: Partial<Record<MediaVariantName, string>>;
-  passthrough: boolean;
+  variants: {};
+  passthrough: false;
+  requestHash: string;
 }
 
 export interface Task07MediaValue {
@@ -42,19 +73,19 @@ export interface Task07MediaValue {
   contractVersion: number;
   assetId: string;
   kind: MediaKind;
-  state: "ready" | "fallback";
-  original: InspectedMediaObject;
-  variants: Partial<Record<MediaVariantName, InspectedMediaObject>>;
+  state: "ready";
+  original: Record<string, unknown>;
+  variants: Record<string, Record<string, unknown>>;
   processing: {
     authoritative: true;
-    fallbackCode: string | null;
+    fallbackCode: null;
   };
 }
 
 export type Task07MediaAssetState =
-  "prepared" | "finalizing" | "ready" | "fallback" | "referenced" |
-  "superseded" | "failed" | "cleanup-pending" | "cleanup-failed" |
-  "cleaned";
+  "intent" | "uploaded" | "processing" | "ready" | "attached" |
+  "superseded" | "cleanup-pending" | "deleted" | "cancelled" |
+  "rejected" | "failed";
 
 const stableStringify = (value: unknown): string => {
   if (Array.isArray(value)) {
@@ -67,9 +98,52 @@ const stableStringify = (value: unknown): string => {
     .join(",")}}`;
 };
 
-const hash = (value: unknown): string => (
-  createHash("sha256").update(stableStringify(value)).digest("hex")
-);
+const hash = (value: unknown): string =>
+  createHash("sha256").update(stableStringify(value)).digest("hex");
+
+const targetKindFor = (
+  kind: MediaKind,
+  referenceScope: ItemMediaReferenceScope | null
+): Task07MediaTargetKind | null => {
+  switch (kind) {
+  case "avatar": return "profile";
+  case "item":
+    return referenceScope === "global-catalog" ?
+      "catalog-item" :
+      referenceScope === "user-inventory" ? "user-inventory" : null;
+  case "token": return "grigliata-token";
+  case "npc": return "npc";
+  case "foe": return "foe";
+  case "technique":
+  case "technique-video": return "user-technique";
+  case "spell":
+  case "spell-video": return "user-spell";
+  case "map":
+  case "map-video": return "grigliata-background";
+  default: return null;
+  }
+};
+
+export const task07MediaTargetFields = (
+  input: Pick<MediaUploadPlan, "kind">
+): Task07MediaTargetFields => {
+  const video = input.kind === "technique-video" ||
+    input.kind === "spell-video";
+  return video ? {
+    slot: "videoMedia",
+    mediaField: "videoMedia",
+    revisionField: "task07VideoMediaRevision",
+    updatedAtField: "videoMediaUpdatedAt",
+  } : {
+    slot: "media",
+    mediaField: "media",
+    revisionField: "task07MediaRevision",
+    updatedAtField: "mediaUpdatedAt",
+  };
+};
+
+const isCanonicalAssetId = (value: unknown): value is string =>
+  typeof value === "string" && /^m_[a-f0-9]{40}$/.test(value);
 
 export const buildTask07MediaUploadPlan = (input: {
   actorUid: unknown;
@@ -80,70 +154,81 @@ export const buildTask07MediaUploadPlan = (input: {
   operationId: unknown;
   kind: unknown;
   sourceContentType: unknown;
+  sourceBytes: unknown;
 }): MediaUploadPlan => {
   const actorUid = typeof input.actorUid === "string" ? input.actorUid.trim() : "";
   const ownerUid = typeof input.ownerUid === "string" ? input.ownerUid.trim() : "";
   const entityId = typeof input.entityId === "string" ? input.entityId.trim() : "";
   const operationId = validateMediaOperationId(input.operationId);
   const kind = asMediaKind(input.kind);
-  const requestedReferenceScope = asItemMediaReferenceScope(
-    input.referenceScope
-  );
-  const rawPreviousAssetId = typeof input.previousAssetId === "string" ?
-    input.previousAssetId.trim() :
-    "";
-  const previousAssetId = rawPreviousAssetId || null;
-  const previousAssetIdIsInvalid =
-    input.previousAssetId !== undefined &&
-    input.previousAssetId !== null &&
-    (
-      typeof input.previousAssetId !== "string" ||
-      !/^m_[a-f0-9]{40}$/.test(rawPreviousAssetId)
-    );
   const sourceContentType = normalizeMediaContentType(input.sourceContentType);
-  if (!isSafeMediaSegment(actorUid) ||
+  const sourceBytes = Number(input.sourceBytes);
+  const requestedScope = asItemMediaReferenceScope(input.referenceScope);
+  const usesScope = kind === "item";
+  const referenceScope = usesScope ? requestedScope : null;
+  const previousAssetId = input.previousAssetId === undefined ||
+    input.previousAssetId === null ?
+    null :
+    typeof input.previousAssetId === "string" ?
+      input.previousAssetId.trim() :
+      "";
+  if (!kind ||
+    !isSafeMediaSegment(actorUid) ||
     !isSafeMediaSegment(ownerUid) ||
     !isSafeMediaSegment(entityId) ||
-    !operationId || !kind ||
-    (kind === "item" && !requestedReferenceScope) ||
-    (kind !== "item" && input.referenceScope !== undefined &&
+    !operationId ||
+    (usesScope && !referenceScope) ||
+    (!usesScope && input.referenceScope !== undefined &&
       input.referenceScope !== null) ||
-    previousAssetIdIsInvalid) {
+    (previousAssetId !== null && !isCanonicalAssetId(previousAssetId)) ||
+    !Number.isSafeInteger(sourceBytes) ||
+    sourceBytes <= 0) {
     throw new TypeError("Media upload identity is invalid.");
   }
-  const referenceScope = kind === "item" ? requestedReferenceScope : null;
+  if (kind === "avatar" && entityId !== ownerUid) {
+    throw new TypeError("Avatar media must target its owner profile.");
+  }
+  const contract = MEDIA_CONTRACTS[kind];
+  if (!contract.source.contentTypes.includes(sourceContentType)) {
+    throw new TypeError(`Unsupported ${kind} media type.`);
+  }
+  if (sourceBytes > contract.source.maxBytes) {
+    throw new TypeError(`${kind} media exceeds the source byte budget.`);
+  }
+  const targetKind = targetKindFor(kind, referenceScope);
+  if (!targetKind) {
+    throw new TypeError(`No Task 07 target adapter is registered for ${kind}.`);
+  }
   const assetId = mediaAssetId(actorUid, operationId);
   if (previousAssetId === assetId) {
     throw new TypeError(
       "Previous media asset must differ from its replacement."
     );
   }
-  const storage = buildMediaStoragePlan({
-    kind,
-    ownerUid,
-    assetId,
-    sourceContentType,
-  });
+  const sourcePath = buildTask07StagingPath(ownerUid, assetId);
   const request = {
     schemaVersion: MEDIA_SCHEMA_VERSION,
     contractVersion: MEDIA_CONTRACT_VERSION,
+    policyVersion: MEDIA_CONTRACT_VERSION,
     assetId,
     kind,
+    targetKind,
     actorUid,
     ownerUid,
+    ownerKey: ownerUid,
     entityId,
     referenceScope,
+    audienceScope: resolveMediaAudienceScope(kind, referenceScope),
     previousAssetId,
     operationId,
     sourceContentType,
-    originalPath: storage.originalPath,
-    variants: storage.variants,
-    passthrough: storage.passthrough,
+    sourceBytes,
+    sourcePath,
+    originalPath: sourcePath,
+    variants: {} as const,
+    passthrough: false as const,
   };
-  return {
-    ...request,
-    requestHash: hash(request),
-  };
+  return {...request, requestHash: hash(request)};
 };
 
 export const isTask07MediaRequestAuthorized = (input: {
@@ -154,23 +239,23 @@ export const isTask07MediaRequestAuthorized = (input: {
   actorRole: string;
 }): boolean => {
   const isOwner = input.actorUid === input.ownerUid;
+  const manager = ["dm", "webmaster"].includes(input.actorRole);
   switch (input.kind) {
-  case "avatar":
-    return isOwner;
+  case "avatar": return isOwner;
   case "item":
-    if (input.referenceScope === "global-catalog") {
-      return isOwner && ["dm", "webmaster"].includes(input.actorRole);
-    }
-    return input.referenceScope === "user-inventory" &&
-      (isOwner || ["dm", "webmaster"].includes(input.actorRole));
-  case "npc":
-    return isOwner && ["dm", "webmaster"].includes(input.actorRole);
+    return input.referenceScope === "global-catalog" ?
+      isOwner && manager :
+      input.referenceScope === "user-inventory" && (isOwner || manager);
+  case "token": return isOwner || input.actorRole === "dm";
+  case "npc": return isOwner && manager;
   case "foe":
   case "map":
-  case "map-video":
-    return isOwner && input.actorRole === "dm";
-  default:
-    return false;
+  case "map-video": return isOwner && input.actorRole === "dm";
+  case "technique":
+  case "technique-video":
+  case "spell":
+  case "spell-video": return isOwner || manager;
+  default: return false;
   }
 };
 
@@ -182,25 +267,84 @@ export const isTask07MediaRetirementAuthorized = (input: {
   actorRole: string;
 }): boolean => {
   const isOwner = input.actorUid === input.ownerUid;
+  const manager = ["dm", "webmaster"].includes(input.actorRole);
   switch (input.kind) {
-  case "avatar":
-    return isOwner;
+  case "avatar": return isOwner;
   case "item":
-    if (input.referenceScope === "global-catalog") {
-      return ["dm", "webmaster"].includes(input.actorRole);
-    }
-    return input.referenceScope === "user-inventory" &&
-      (isOwner || ["dm", "webmaster"].includes(input.actorRole));
-  case "npc":
-    return ["dm", "webmaster"].includes(input.actorRole);
+    return input.referenceScope === "global-catalog" ?
+      manager :
+      input.referenceScope === "user-inventory" && (isOwner || manager);
+  case "npc": return manager;
   case "foe":
   case "map":
-  case "map-video":
-    return input.actorRole === "dm";
-  default:
-    return false;
+  case "map-video": return input.actorRole === "dm";
+  case "token": return isOwner || input.actorRole === "dm";
+  case "technique":
+  case "technique-video":
+  case "spell":
+  case "spell-video": return isOwner || manager;
+  default: return false;
   }
 };
+
+const asReferenceRecord = (
+  value: unknown
+): Record<string, unknown> | null => (
+  value && typeof value === "object" && !Array.isArray(value) ?
+    value as Record<string, unknown> :
+    null
+);
+
+export const scanTask07MediaTargetReferences = (
+  value: unknown
+): Task07MediaReferenceScan => {
+  const root = asReferenceRecord(value) || {};
+  const general = asReferenceRecord(root.General);
+  const containers = general ? [root, general] : [root];
+  const scan = (slot: Task07MediaTargetSlot): Task07MediaReferenceSlotScan => {
+    const assetIds = new Set<string>();
+    let malformed = false;
+    containers.forEach((container) => {
+      const candidate = container[slot];
+      if (candidate === undefined || candidate === null) return;
+      const descriptor = asReferenceRecord(candidate);
+      if (!descriptor || !isCanonicalAssetId(descriptor.assetId)) {
+        malformed = true;
+        return;
+      }
+      assetIds.add(descriptor.assetId);
+    });
+    return {assetIds: [...assetIds].sort(), malformed};
+  };
+  return {media: scan("media"), videoMedia: scan("videoMedia")};
+};
+
+export const task07MediaTargetSlotAssetId = (
+  value: unknown,
+  slot: Task07MediaTargetSlot
+): string | null => {
+  const scan = scanTask07MediaTargetReferences(value)[slot];
+  return !scan.malformed && scan.assetIds.length === 1 ?
+    scan.assetIds[0] :
+    null;
+};
+
+export const task07MediaTargetSlotReferencesAsset = (
+  value: unknown,
+  slot: Task07MediaTargetSlot,
+  assetId: string
+): boolean => {
+  const scan = scanTask07MediaTargetReferences(value)[slot];
+  return !scan.malformed &&
+    scan.assetIds.length === 1 &&
+    scan.assetIds[0] === assetId;
+};
+
+export const task07MediaTargetMayReferenceAsset = (
+  value: unknown,
+  assetId: string
+): boolean => Object.values(scanTask07MediaTargetReferences(value))
+  .some((scan) => scan.malformed || scan.assetIds.includes(assetId));
 
 export const task07MediaReferencePath = (input: {
   kind: MediaKind;
@@ -209,466 +353,133 @@ export const task07MediaReferencePath = (input: {
   referenceScope: ItemMediaReferenceScope | null;
 }): string => {
   switch (input.kind) {
-  case "avatar":
-    return `users/${input.ownerUid}`;
-  case "item": {
+  case "avatar": return `users/${input.ownerUid}`;
+  case "item":
     if (input.referenceScope === "global-catalog") {
       return `items/${input.entityId}`;
     }
     if (input.referenceScope === "user-inventory") {
       return `users/${input.ownerUid}/inventory/${input.entityId}`;
     }
-    throw new TypeError("Item media reference scope is invalid.");
-  }
-  case "npc":
-    return `echi_npcs/${input.entityId}`;
-  case "foe":
-    return `foes/${input.entityId}`;
+    break;
+  case "token": return `grigliata_tokens/${input.entityId}`;
+  case "npc": return `echi_npcs/${input.entityId}`;
+  case "foe": return `foes/${input.entityId}`;
+  case "technique":
+  case "technique-video":
+    return `users/${input.ownerUid}/tecniche/${input.entityId}`;
+  case "spell":
+  case "spell-video":
+    return `users/${input.ownerUid}/spells/${input.entityId}`;
   case "map":
   case "map-video":
     return `grigliata_backgrounds/${input.entityId}`;
+  default:
+    break;
   }
+  throw new TypeError("Task 07 media target is unsupported.");
 };
 
 export const isTask07MediaPlanReferenceCompatible = (
-  firstPlan: MediaUploadPlan | null,
-  secondPlan: MediaUploadPlan | null
+  first: MediaUploadPlan | null,
+  second: MediaUploadPlan | null
 ): boolean => {
-  if (!firstPlan || !secondPlan ||
-    firstPlan.kind !== secondPlan.kind ||
-    firstPlan.referenceScope !== secondPlan.referenceScope) {
-    return false;
-  }
+  if (!first || !second ||
+    first.kind !== second.kind ||
+    first.targetKind !== second.targetKind ||
+    first.referenceScope !== second.referenceScope) return false;
   try {
-    return task07MediaReferencePath(firstPlan) ===
-      task07MediaReferencePath(secondPlan);
+    return task07MediaReferencePath(first) === task07MediaReferencePath(second);
   } catch {
     return false;
   }
 };
 
 export const isTask07PreviousMediaPlanCompatible = (
-  replacementPlan: MediaUploadPlan,
-  previousPlan: MediaUploadPlan | null
-): boolean => {
-  if (!replacementPlan.previousAssetId || !previousPlan ||
-    replacementPlan.assetId === previousPlan.assetId ||
-    replacementPlan.previousAssetId !== previousPlan.assetId) {
-    return false;
-  }
-  return isTask07MediaPlanReferenceCompatible(
-    replacementPlan,
-    previousPlan
-  );
-};
+  replacement: MediaUploadPlan,
+  previous: MediaUploadPlan | null
+): boolean => Boolean(
+  replacement.previousAssetId &&
+  previous &&
+  replacement.previousAssetId === previous.assetId &&
+  replacement.assetId !== previous.assetId &&
+  isTask07MediaPlanReferenceCompatible(replacement, previous)
+);
 
 export const task07MediaRetirementResponseAssetId = (
-  replacementPlan: MediaUploadPlan
-): string | null => (
-  replacementPlan.previousAssetId
-);
-
-export type Task07MediaRetirementChainAction =
-  "supersede" | "already-superseded" |
-  "follow-supersession" | "invalid";
-
-export const task07MediaRetirementChainAction = (input: {
-  replacementAssetId: string;
-  candidateState: unknown;
-  supersededByAssetId?: unknown;
-}): Task07MediaRetirementChainAction => {
-  if (!/^m_[a-f0-9]{40}$/.test(input.replacementAssetId)) return "invalid";
-  const state = typeof input.candidateState === "string" ?
-    input.candidateState :
-    "";
-  const boundReplacement = typeof input.supersededByAssetId === "string" ?
-    input.supersededByAssetId :
-    "";
-  if (boundReplacement &&
-    !/^m_[a-f0-9]{40}$/.test(boundReplacement)) return "invalid";
-  if (state === "referenced") {
-    return boundReplacement ? "invalid" : "supersede";
-  }
-  if (state === "superseded") {
-    if (!boundReplacement ||
-      boundReplacement === input.replacementAssetId) {
-      return "already-superseded";
-    }
-    return "follow-supersession";
-  }
-  if (["cleanup-pending", "cleanup-failed", "cleaned"].includes(state)) {
-    if (!boundReplacement) return "invalid";
-    return boundReplacement === input.replacementAssetId ?
-      "already-superseded" :
-      "follow-supersession";
-  }
-  return "invalid";
-};
-
-export type Task07PreviousRetirementAction =
-  "not-requested" | Task07MediaRetirementChainAction;
-
-export const task07PreviousRetirementAction = (input: {
-  replacementPlan: MediaUploadPlan;
-  previousPlan: MediaUploadPlan | null;
-  previousState: unknown;
-  supersededByAssetId?: unknown;
-}): Task07PreviousRetirementAction => {
-  if (!input.replacementPlan.previousAssetId) return "not-requested";
-  if (!isTask07PreviousMediaPlanCompatible(
-    input.replacementPlan,
-    input.previousPlan
-  )) return "invalid";
-  return task07MediaRetirementChainAction({
-    replacementAssetId: input.replacementPlan.assetId,
-    candidateState: input.previousState,
-    supersededByAssetId: input.supersededByAssetId,
-  });
-};
-
-const storagePathFromValue = (value: string): string => {
-  if (!value.includes("://")) return value;
-  try {
-    const parsed = new URL(value);
-    const isFirebaseHost = [
-      "firebasestorage.googleapis.com",
-      "storage.googleapis.com",
-      "127.0.0.1",
-      "localhost",
-      "::1",
-    ].includes(parsed.hostname);
-    if (!isFirebaseHost) return "";
-    const encoded = parsed.pathname.split("/o/")[1];
-    return encoded ? decodeURIComponent(encoded) : "";
-  } catch {
-    return "";
-  }
-};
-
-const MEDIA_REFERENCE_KEYS = new Set([
-  "imagePath",
-  "imageUrl",
-  "image_url",
-  "path",
-  "url",
-]);
-
-export const containsTask07MediaPath = (
-  value: unknown,
-  expectedPath: string,
-  key = ""
-): boolean => {
-  if (typeof value === "string") {
-    return MEDIA_REFERENCE_KEYS.has(key) &&
-      storagePathFromValue(value) === expectedPath;
-  }
-  if (Array.isArray(value)) {
-    return value.some((entry) => (
-      containsTask07MediaPath(entry, expectedPath, key)
-    ));
-  }
-  if (!value || typeof value !== "object") return false;
-  return Object.entries(value as Record<string, unknown>).some(([name, entry]) => (
-    containsTask07MediaPath(entry, expectedPath, name)
-  ));
-};
-
-export type Task07CanonicalMediaReferenceSelection = {
-  status: "none" | "single" | "invalid" | "ambiguous";
-  media: Record<string, unknown> | null;
-  assetId: string | null;
-};
-
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  Boolean(value && typeof value === "object" && !Array.isArray(value))
-);
-
-export const shouldClearTask07DeletedUserTokenProjection = (
-  uid: string,
-  value: unknown
-): boolean => (
-  isSafeMediaSegment(uid) &&
-  isRecord(value) &&
-  value.ownerUid === uid &&
-  value.tokenType === "character" &&
-  value.imageSource === "profile"
-);
-
-const isCanonicalTask07MediaValue = (
-  value: unknown
-): value is Record<string, unknown> => {
-  if (!isRecord(value) ||
-    value.schemaVersion !== MEDIA_SCHEMA_VERSION ||
-    value.contractVersion !== MEDIA_CONTRACT_VERSION ||
-    typeof value.assetId !== "string" ||
-    !/^m_[a-f0-9]{40}$/.test(value.assetId) ||
-    !asMediaKind(value.kind) ||
-    !["ready", "fallback"].includes(String(value.state)) ||
-    !isRecord(value.original)) {
-    return false;
-  }
-  const parsedOriginal = parseCanonicalMediaPath(value.original.path);
-  return Boolean(parsedOriginal &&
-    parsedOriginal.role === "original" &&
-    parsedOriginal.assetId === value.assetId &&
-    parsedOriginal.kind === value.kind);
-};
-
-export const selectTask07CanonicalMediaReference = (
-  value: unknown
-): Task07CanonicalMediaReferenceSelection => {
-  if (!isRecord(value)) {
-    return {status: "none", media: null, assetId: null};
-  }
-  const general = value.General;
-  const candidates: unknown[] = [];
-  if (Object.prototype.hasOwnProperty.call(value, "media")) {
-    candidates.push(value.media);
-  }
-  if (isRecord(general) &&
-    Object.prototype.hasOwnProperty.call(general, "media")) {
-    candidates.push(general.media);
-  }
-  const unique = new Map<string, Record<string, unknown>>();
-  let invalid = false;
-  candidates.forEach((candidate) => {
-    if (candidate === null) return;
-    if (!isRecord(candidate)) {
-      invalid = true;
-      return;
-    }
-    if (!isCanonicalTask07MediaValue(candidate)) {
-      invalid = true;
-      return;
-    }
-    unique.set(stableStringify(candidate), candidate);
-  });
-  if (invalid) {
-    return {status: "invalid", media: null, assetId: null};
-  }
-  if (unique.size === 0) {
-    return {status: "none", media: null, assetId: null};
-  }
-  if (unique.size > 1) {
-    return {status: "ambiguous", media: null, assetId: null};
-  }
-  const media = [...unique.values()][0];
-  return {
-    status: "single",
-    media,
-    assetId: media.assetId as string,
-  };
-};
-
-export type Task07MediaReferenceRemovalAction =
-  "none" | "replacement-present" | "superseded-grace" |
-  "cleanup-immediate" | "invalid";
-
-export const task07MediaAssetChainsIntersect = (
-  firstAssetIds: readonly string[],
-  secondAssetIds: readonly string[]
-): boolean => {
-  const first = new Set(firstAssetIds.filter((assetId) => (
-    /^m_[a-f0-9]{40}$/.test(assetId)
-  )));
-  return secondAssetIds.some((assetId) => (
-    /^m_[a-f0-9]{40}$/.test(assetId) && first.has(assetId)
-  ));
-};
-
-export const task07MediaReferenceRemovalAction = (input: {
-  beforeValue: unknown;
-  afterValue: unknown;
-  currentValue: unknown;
-  eventAfterExists: boolean;
-  currentExists: boolean;
-  currentOwnsRemovedChain?: boolean;
-}): Task07MediaReferenceRemovalAction => {
-  const before = selectTask07CanonicalMediaReference(input.beforeValue);
-  const after = selectTask07CanonicalMediaReference(input.afterValue);
-  const current = selectTask07CanonicalMediaReference(input.currentValue);
-  if ([before, after, current].some(({status}) => (
-    status === "invalid" || status === "ambiguous"
-  ))) return "invalid";
-  if (before.status !== "single") return "none";
-  if (after.status === "single" &&
-    after.assetId === before.assetId) {
-    return "replacement-present";
-  }
-  if (current.status === "single" &&
-    (
-      current.assetId === before.assetId ||
-      input.currentOwnsRemovedChain
-    )) {
-    return "replacement-present";
-  }
-  return input.eventAfterExists && input.currentExists ?
-    "superseded-grace" :
-    "cleanup-immediate";
-};
-
-export const containsTask07MediaReference = (
-  value: unknown,
-  expectedMedia: unknown
-): boolean => {
-  if (!isCanonicalTask07MediaValue(expectedMedia)) return false;
-  const selected = selectTask07CanonicalMediaReference(value);
-  return selected.status === "single" &&
-    stableStringify(selected.media) === stableStringify(expectedMedia);
-};
-
-export const shouldRecoverCommittedTask07MediaReference = (input: {
-  state: unknown;
-  referenceValue: unknown;
-  expectedMedia: unknown;
-}): boolean => (
-  ["ready", "fallback"].includes(
-    typeof input.state === "string" ? input.state : ""
-  ) && containsTask07MediaReference(
-    input.referenceValue,
-    input.expectedMedia
-  )
-);
-
-const normalizeInspectedObject = (
-  inspected: InspectedMediaObject
-): InspectedMediaObject => ({
-  path: inspected.path,
-  contentType: normalizeMediaContentType(inspected.contentType),
-  bytes: inspected.bytes,
-  width: inspected.width,
-  height: inspected.height,
-  durationMs: inspected.durationMs,
-  orientationDegrees: inspected.orientationDegrees,
-  generation: inspected.generation,
-  cacheControl: inspected.cacheControl,
-});
-
-export const finalizeTask07MediaValue = (input: {
-  plan: MediaUploadPlan;
-  original: InspectedMediaObject;
-  variants: Partial<Record<MediaVariantName, InspectedMediaObject>>;
-}): Task07MediaValue => {
-  const errors: string[] = [];
-  if (input.original.path !== input.plan.originalPath) {
-    errors.push("original-path-mismatch");
-  }
-  if (normalizeMediaContentType(input.original.contentType) !==
-    input.plan.sourceContentType) {
-    errors.push("original-content-type-mismatch");
-  }
-  const originalValidation = validateMediaObject(
-    input.plan.kind,
-    input.original,
-    null,
-    {requirePrivateMetadata: true}
-  );
-  errors.push(...originalValidation.errors.map((code) => `original:${code}`));
-
-  const expectedVariants = Object.entries(input.plan.variants) as Array<
-    [MediaVariantName, string]
-  >;
-  const actualVariantNames = Object.keys(input.variants).sort();
-  const expectedVariantNames = expectedVariants.map(([name]) => name).sort();
-  if (actualVariantNames.join(",") !== expectedVariantNames.join(",")) {
-    errors.push("variant-set-mismatch");
-  }
-  expectedVariants.forEach(([name, expectedPath]) => {
-    const inspected = input.variants[name];
-    if (!inspected) return;
-    if (inspected.path !== expectedPath) errors.push(`${name}:path-mismatch`);
-    const result = validateMediaObject(
-      input.plan.kind,
-      inspected,
-      name,
-      {
-        requirePrivateMetadata: true,
-        sourceDimensions: input.original,
-      }
-    );
-    errors.push(...result.errors.map((code) => `${name}:${code}`));
-  });
-  if (input.plan.passthrough && expectedVariantNames.length) {
-    errors.push("passthrough-variants-forbidden");
-  }
-  if (errors.length) {
-    throw new TypeError(`Media finalization failed: ${[...new Set(errors)].join(",")}`);
-  }
-
-  const variants = Object.fromEntries(
-    expectedVariants.map(([name]) => [
-      name,
-      normalizeInspectedObject(input.variants[name] as InspectedMediaObject),
-    ])
-  ) as Partial<Record<MediaVariantName, InspectedMediaObject>>;
-  return {
-    schemaVersion: MEDIA_SCHEMA_VERSION,
-    contractVersion: MEDIA_CONTRACT_VERSION,
-    assetId: input.plan.assetId,
-    kind: input.plan.kind,
-    state: input.plan.passthrough ? "fallback" : "ready",
-    original: normalizeInspectedObject(input.original),
-    variants,
-    processing: {
-      authoritative: true,
-      fallbackCode: input.plan.passthrough ?
-        "source-mime-passthrough" :
-        null,
-    },
-  };
-};
-
-export const task07MediaCleanupPaths = (
-  plan: Pick<MediaUploadPlan, "assetId" | "kind" | "ownerUid" |
-  "originalPath" | "variants">
-): string[] => {
-  const expectedPrefix = `media/v${MEDIA_SCHEMA_VERSION}/` +
-    `${plan.kind}/${plan.ownerUid}/${plan.assetId}/`;
-  return [plan.originalPath, ...Object.values(plan.variants)]
-    .filter((value): value is string => typeof value === "string")
-    .filter((path) => {
-      const parsed = parseCanonicalMediaPath(path);
-      return Boolean(parsed && path.startsWith(expectedPrefix) &&
-        parsed.assetId === plan.assetId &&
-        parsed.ownerUid === plan.ownerUid &&
-        parsed.kind === plan.kind);
-    })
-    .filter((path, index, paths) => paths.indexOf(path) === index)
-    .sort();
-};
-
-export const task07MediaVariantsForKind = (
-  kind: MediaKind
-): MediaVariantName[] => (
-  Object.keys(MEDIA_CONTRACTS[kind].variants).sort() as MediaVariantName[]
-);
+  replacement: MediaUploadPlan
+): string | null => replacement.previousAssetId;
 
 export const isTask07MediaStateAbandonable = (
   state: unknown
-): boolean => (
-  ["prepared", "failed", "ready", "fallback", "cleanup-failed"]
-    .includes(typeof state === "string" ? state : "")
-);
+): boolean => [
+  "intent", "uploaded", "processing", "failed", "rejected", "ready",
+].includes(typeof state === "string" ? state : "");
+
+const TASK07_MEDIA_CLEANUP_ELIGIBLE_STATES = new Set([
+  "ready", "superseded", "cancelled", "rejected", "failed",
+  "cleanup-pending",
+]);
+
+const TASK07_MEDIA_MANUAL_CLEANUP_RETRY_STATES = new Set([
+  "superseded", "cancelled", "rejected", "failed", "cleanup-pending",
+]);
+
+const TASK07_ACTIVE_CLEANUP_QUEUE_STATES = new Set([
+  "pending", "retry", "processing",
+]);
+
+export const isTask07MediaStateCleanupEligible = (
+  state: unknown
+): boolean => typeof state === "string" &&
+  TASK07_MEDIA_CLEANUP_ELIGIBLE_STATES.has(state);
+
+export const isTask07MediaStateManualCleanupRetryable = (
+  state: unknown
+): boolean => typeof state === "string" &&
+  TASK07_MEDIA_MANUAL_CLEANUP_RETRY_STATES.has(state);
+
+export const isTask07CleanupQueueClaimable = (input: {
+  state: unknown;
+  leaseUntilMs: unknown;
+  nowMs: number;
+}): boolean => {
+  if (input.state === "pending" || input.state === "retry") return true;
+  if (input.state !== "processing") return false;
+  const leaseUntilMs = Number(input.leaseUntilMs);
+  return !Number.isFinite(leaseUntilMs) || leaseUntilMs <= input.nowMs;
+};
+
+export const partitionTask07CleanupSweepRecords = <RecordType extends {
+  state: unknown;
+}>(records: readonly RecordType[]): {
+  active: RecordType[];
+  terminal: RecordType[];
+} => records.reduce((result, record) => {
+  (typeof record.state === "string" &&
+    TASK07_ACTIVE_CLEANUP_QUEUE_STATES.has(record.state) ?
+    result.active : result.terminal).push(record);
+  return result;
+}, {active: [], terminal: []} as {
+  active: RecordType[];
+  terminal: RecordType[];
+});
 
 export const isTask07ProcessingLeaseExpired = (input: {
   state: unknown;
   updatedAtMs: unknown;
   nowMs: number;
   leaseMs?: number;
-}): boolean => {
-  const leaseMs = input.leaseMs ?? MEDIA_PROCESSING_LEASE_MS;
-  return ["finalizing", "processing"].includes(
-    typeof input.state === "string" ? input.state : ""
-  ) &&
-    Number.isFinite(input.updatedAtMs) &&
-    Number(input.updatedAtMs) <= input.nowMs - leaseMs;
-};
+}): boolean => input.state === "processing" &&
+  Number.isFinite(input.updatedAtMs) &&
+  Number(input.updatedAtMs) <=
+    input.nowMs - (input.leaseMs ?? MEDIA_PROCESSING_LEASE_MS);
 
 export const task07CleanupRetryDelayMs = (attempts: unknown): number => {
-  const normalized = Number.isSafeInteger(attempts) ?
+  const count = Number.isSafeInteger(attempts) ?
     Math.max(1, Number(attempts)) :
     1;
-  return Math.min(60 * 60 * 1000, 30_000 * (2 ** (normalized - 1)));
+  return Math.min(60 * 60 * 1000, 30_000 * (2 ** (count - 1)));
 };
 
 export const mapMediaCleanupWithConcurrency = async <Input, Output>(
@@ -683,8 +494,7 @@ export const mapMediaCleanupWithConcurrency = async <Input, Output>(
   let cursor = 0;
   const run = async (): Promise<void> => {
     while (cursor < inputs.length) {
-      const index = cursor;
-      cursor += 1;
+      const index = cursor++;
       results[index] = await worker(inputs[index], index);
     }
   };
@@ -694,3 +504,29 @@ export const mapMediaCleanupWithConcurrency = async <Input, Output>(
   ));
   return results;
 };
+
+export const asStoredTask07MediaUploadPlan = (
+  value: unknown
+): MediaUploadPlan | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const plan = value as Partial<MediaUploadPlan>;
+  try {
+    const rebuilt = buildTask07MediaUploadPlan({
+      actorUid: plan.actorUid,
+      ownerUid: plan.ownerUid,
+      entityId: plan.entityId,
+      referenceScope: plan.referenceScope,
+      previousAssetId: plan.previousAssetId,
+      operationId: plan.operationId,
+      kind: plan.kind,
+      sourceContentType: plan.sourceContentType,
+      sourceBytes: plan.sourceBytes,
+    });
+    return rebuilt.requestHash === plan.requestHash ? rebuilt : null;
+  } catch {
+    return null;
+  }
+};
+
+export const TASK07_MEDIA_REFERENCE_SCOPES =
+  ITEM_MEDIA_REFERENCE_SCOPES;

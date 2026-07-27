@@ -9,16 +9,12 @@ Current status: local candidate only; production activation is prohibited
 Do not deploy, enable, backfill, or apply CORS for Task 07 while any of these
 conditions is true:
 
-- the active Grigliata battle is still running;
-- Task 06 Gate 0A is not fully green;
-- authoritative server-side derivative generation has not been implemented or
-  explicitly replaced through security/performance review;
-- Task 01 does not contain the required blocking media budgets;
-- the one-listener compact music target is not met;
+- the final full frontend, Functions, rules, build, startup, and demo integration
+  gates have not passed from the clean merged revision;
 - the full route, cross-browser, 50-map/token, ten-minute lifecycle, `perf:ci`,
   and two-pass authoritative repeatability gates are incomplete;
-- a staged `legacy`/`shadow`/`derivative-read`/`v1-write` control document is
-  absent; or
+- V1 foe/token copy and spawn operations do not yet acquire an owned canonical
+  family or reviewed reference-ledger entry; or
 - production backup, write-backfill, restore, and reconciliation procedures are
   unreviewed.
 
@@ -222,7 +218,7 @@ Do not manually delete bucket objects to resolve an ambiguous commit. Reconcile
 the entity reference first, then use the authorized confirm, abandon, retire,
 or retry path appropriate to the manifest state.
 
-## Read-only backfill planning
+## Demo-only backfill rehearsal
 
 The only authorized migration command in this candidate is:
 
@@ -230,10 +226,12 @@ The only authorized migration command in this candidate is:
 npm.cmd run task07:media-backfill:plan -- --project demo-fnd-perf --json
 ```
 
-It must have a loopback Firestore emulator. It refuses `--write`, `--execute`,
+Planning and verification are read-only by default. Exact-demo execution is
+available only with loopback Firestore and Functions emulators, the reviewed
+report, and its exact `--approve-fingerprint`; writes are serial and checkpointed,
+and `--resume` is accepted only with `--execute`. The command rejects `--write`,
 live reads, and non-demo projects. Review counts by kind, missing owners,
-canonical skips, and unsupported WebM fallbacks. Its output is an inventory
-plan, not permission to upload or attach media.
+canonical skips, and unsupported fallbacks before any rehearsal.
 
 A production write backfill requires a separate implementation and approval
 covering backup/restore, immutable receipts, resumability, per-entity auth,

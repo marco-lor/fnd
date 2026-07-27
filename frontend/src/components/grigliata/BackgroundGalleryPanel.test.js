@@ -8,6 +8,11 @@ import {
   __resetPrivateMediaAssetsForTests,
 } from '../common/privateMediaAssets';
 
+jest.mock('../../data/media/useTask07MediaReadMode', () => ({
+  __esModule: true,
+  default: jest.fn(() => 'derivative-read'),
+}));
+
 const backgrounds = [{
   id: 'map-1',
   name: 'Sunken Ruins',
@@ -230,6 +235,7 @@ describe('BackgroundGalleryPanel', () => {
             media: {
               kind: 'map-video',
               schemaVersion: 1,
+              state: 'ready',
               original: {
                 url: originalUrl,
                 width: 1920,
@@ -265,7 +271,7 @@ describe('BackgroundGalleryPanel', () => {
     const storage = { name: 'authenticated-storage' };
     const ref = jest.fn((_storage, path) => ({ path }));
     const getBlob = jest.fn(async ({ path }) => (
-      path.endsWith('.mp4')
+      path.endsWith('/original')
         ? new Blob(['data'], { type: 'video/mp4' })
         : new Blob(['data'], { type: 'image/webp' })
     ));
@@ -281,7 +287,7 @@ describe('BackgroundGalleryPanel', () => {
     });
     const assetId = `m_${'b'.repeat(40)}`;
     const original = {
-      path: `media/v1/map-video/dm/${assetId}/original/source.mp4`,
+      path: `media_assets/v1/signed-in/dm/${assetId}/21/original`,
       generation: '101',
       bytes: 4,
       contentType: 'video/mp4',
@@ -289,7 +295,7 @@ describe('BackgroundGalleryPanel', () => {
       height: 1080,
     };
     const poster = {
-      path: `media/v1/map-video/dm/${assetId}/derivatives/v1/poster.webp`,
+      path: `media_assets/v1/signed-in/dm/${assetId}/21/poster`,
       generation: '102',
       bytes: 4,
       contentType: 'image/webp',
@@ -308,6 +314,7 @@ describe('BackgroundGalleryPanel', () => {
             media: {
               kind: 'map-video',
               schemaVersion: 1,
+              state: 'ready',
               original,
               variants: { poster },
             },

@@ -56,6 +56,12 @@ const WORST_CASE_METRICS = new Set([
   'runtime.activeResourcesAfterCleanup',
   'runtime.activeTimeoutsAfterCleanup',
   'runtime.activeMediaAfterCleanup',
+  'task07.attachedImages',
+  'task07.audioNodes',
+  'task07.farOffscreenAttachedImages',
+  'task07.musicStreamListeners',
+  'task07.reducedMotionMeteors',
+  'task07.uniqueFixtureImageRequests',
 ]);
 
 const buildMetricMap = ({ buildReport, browserReport }) => {

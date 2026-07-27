@@ -45,6 +45,12 @@ const STATE_TRANSPORT_FIELDS = new Set([
   'updatedBy',
   'legacySourceHash',
   'legacySourceUpdateTime',
+  'media',
+  'mediaUpdatedAt',
+  'task07MediaRevision',
+  'task07VideoMediaRevision',
+  'videoMedia',
+  'videoMediaUpdatedAt',
 ]);
 
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -218,6 +224,13 @@ export const normalizeV2InventoryDocument = (document) => {
   const catalogItemId = data.catalogItemId || compatibleSnapshot.id || document.id;
   return Object.freeze({
     ...compatibleSnapshot,
+    ...(isRecord(data.media) ? { media: data.media } : {}),
+    ...(Number.isSafeInteger(data.task07MediaRevision)
+      ? { task07MediaRevision: data.task07MediaRevision }
+      : {}),
+    ...(data.mediaUpdatedAt !== undefined
+      ? { mediaUpdatedAt: data.mediaUpdatedAt }
+      : {}),
     id: catalogItemId,
     qty: Number(data.quantity) > 0 ? Number(data.quantity) : compatibleSnapshot.qty,
     _instance: {
@@ -249,6 +262,20 @@ export const normalizeV2PersonalContentDocument = (document) => {
   const name = data.displayName || data.name || nested.name || nested.Nome || document.id;
   return Object.freeze({
     ...nested,
+    ...(isRecord(data.media) ? { media: data.media } : {}),
+    ...(isRecord(data.videoMedia) ? { videoMedia: data.videoMedia } : {}),
+    ...(Number.isSafeInteger(data.task07MediaRevision)
+      ? { task07MediaRevision: data.task07MediaRevision }
+      : {}),
+    ...(Number.isSafeInteger(data.task07VideoMediaRevision)
+      ? { task07VideoMediaRevision: data.task07VideoMediaRevision }
+      : {}),
+    ...(data.mediaUpdatedAt !== undefined
+      ? { mediaUpdatedAt: data.mediaUpdatedAt }
+      : {}),
+    ...(data.videoMediaUpdatedAt !== undefined
+      ? { videoMediaUpdatedAt: data.videoMediaUpdatedAt }
+      : {}),
     name,
     _task05ContentId: document.id,
   });

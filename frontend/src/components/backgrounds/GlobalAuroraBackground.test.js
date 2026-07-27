@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react';
 import { withAsyncResourceOwner } from '../../performance/runtime';
 import GlobalAuroraBackground, {
+  MAX_AURORA_ANIMATABLE_DECORATIONS,
   MAX_AURORA_MOBILE_STAR_COUNT,
   MAX_AURORA_SHOOTING_STARS,
   MAX_AURORA_STAR_COUNT,
@@ -53,13 +54,19 @@ describe('GlobalAuroraBackground', () => {
     }
   });
 
-  test('uses two bounded star-field nodes instead of one node per requested star', () => {
+  test('uses two star fields and a fixed two-slot meteor pool within six animatable elements', () => {
     const { container } = render(<GlobalAuroraBackground density={MAX_AURORA_STAR_COUNT * 10} />);
 
     expect(container.querySelectorAll('.global-aurora__star-field')).toHaveLength(2);
     expect(container.querySelectorAll('.global-aurora__twinkle')).toHaveLength(0);
+    expect(container.querySelectorAll('.shooting-star')).toHaveLength(MAX_AURORA_SHOOTING_STARS);
+    expect(container.querySelectorAll('.shooting-star[data-active=true]')).toHaveLength(0);
+    expect(container.querySelectorAll(
+      '.global-aurora__layer, .global-aurora__layer--b, .global-aurora__star-field, .shooting-star__trail'
+    )).toHaveLength(MAX_AURORA_ANIMATABLE_DECORATIONS);
     expect(MAX_AURORA_STAR_COUNT).toBeLessThan(140);
-    expect(MAX_AURORA_SHOOTING_STARS).toBeLessThanOrEqual(3);
+    expect(MAX_AURORA_SHOOTING_STARS).toBe(2);
+    expect(MAX_AURORA_ANIMATABLE_DECORATIONS).toBeLessThanOrEqual(6);
   });
 
   test('halves decorative star density on a mobile viewport', () => {
@@ -90,7 +97,8 @@ describe('GlobalAuroraBackground', () => {
     const clearIntervalSpy = jest.spyOn(window, 'clearInterval');
     const clearTimeoutSpy = jest.spyOn(window, 'clearTimeout');
 
-    const { rerender, unmount } = render(<GlobalAuroraBackground density={80} />);
+    const { container, rerender, unmount } = render(<GlobalAuroraBackground density={80} />);
+    const fixedSlots = Array.from(container.querySelectorAll('.shooting-star'));
     const clickRegistration = addEventListenerSpy.mock.calls.find(([eventName]) => eventName === 'click');
     expect(clickRegistration).toBeDefined();
 
@@ -98,6 +106,10 @@ describe('GlobalAuroraBackground', () => {
     expect(addEventListenerSpy.mock.calls.filter(([eventName]) => eventName === 'click')).toHaveLength(1);
 
     fireEvent.click(window, { button: 0, clientX: 120, clientY: 80 });
+    Array.from(container.querySelectorAll('.shooting-star')).forEach((slot, index) => {
+      expect(slot).toBe(fixedSlots[index]);
+    });
+    expect(container.querySelectorAll('.shooting-star[data-active=true]')).toHaveLength(1);
     expect(withAsyncResourceOwner).toHaveBeenCalledTimes(2);
     expect(withAsyncResourceOwner.mock.calls.every(([owner]) => owner === 'shell')).toBe(true);
 
@@ -116,11 +128,11 @@ describe('GlobalAuroraBackground', () => {
 
     try {
       fireEvent.click(button, { button: 0, clientX: 10, clientY: 20 });
-      expect(container.querySelectorAll('.shooting-star')).toHaveLength(0);
+      expect(container.querySelectorAll('.shooting-star[data-active=true]')).toHaveLength(0);
       expect(withAsyncResourceOwner).toHaveBeenCalledTimes(1);
 
       fireEvent.click(surface, { button: 0, clientX: 30, clientY: 40 });
-      expect(container.querySelectorAll('.shooting-star')).toHaveLength(1);
+      expect(container.querySelectorAll('.shooting-star[data-active=true]')).toHaveLength(1);
       expect(withAsyncResourceOwner).toHaveBeenCalledTimes(2);
     } finally {
       button.remove();
@@ -139,7 +151,7 @@ describe('GlobalAuroraBackground', () => {
       });
     }
 
-    expect(container.querySelectorAll('.shooting-star'))
+    expect(container.querySelectorAll('.shooting-star[data-active=true]'))
       .toHaveLength(MAX_AURORA_SHOOTING_STARS);
     expect(withAsyncResourceOwner)
       .toHaveBeenCalledTimes(1 + MAX_AURORA_SHOOTING_STARS);
@@ -157,7 +169,7 @@ describe('GlobalAuroraBackground', () => {
       jest.advanceTimersByTime(60_000);
     });
 
-    expect(container.querySelectorAll('.shooting-star')).toHaveLength(0);
+    expect(container.querySelectorAll('.shooting-star[data-active=true]')).toHaveLength(0);
     expect(withAsyncResourceOwner).not.toHaveBeenCalled();
   });
 
@@ -167,7 +179,7 @@ describe('GlobalAuroraBackground', () => {
     const { container } = render(<GlobalAuroraBackground />);
 
     fireEvent.click(window, { button: 0, clientX: 20, clientY: 30 });
-    expect(container.querySelectorAll('.shooting-star')).toHaveLength(1);
+    expect(container.querySelectorAll('.shooting-star[data-active=true]')).toHaveLength(1);
 
     act(() => {
       visibilityState = 'hidden';
@@ -175,12 +187,12 @@ describe('GlobalAuroraBackground', () => {
     });
 
     expect(container.firstChild).toHaveClass('global-aurora--paused');
-    expect(container.querySelectorAll('.shooting-star')).toHaveLength(0);
+    expect(container.querySelectorAll('.shooting-star[data-active=true]')).toHaveLength(0);
     expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
     expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
 
     fireEvent.click(window, { button: 0, clientX: 50, clientY: 60 });
-    expect(container.querySelectorAll('.shooting-star')).toHaveLength(0);
+    expect(container.querySelectorAll('.shooting-star[data-active=true]')).toHaveLength(0);
   });
 
   test('removes expired timeout handles and stays flat during a ten-minute soak', () => {
@@ -208,7 +220,7 @@ describe('GlobalAuroraBackground', () => {
     const { container, unmount } = render(<GlobalAuroraBackground />);
 
     fireEvent.click(window, { button: 0, clientX: 20, clientY: 30 });
-    expect(container.querySelectorAll('.shooting-star')).toHaveLength(1);
+    expect(container.querySelectorAll('.shooting-star[data-active=true]')).toHaveLength(1);
     expect(pendingTimeouts.size).toBe(1);
     expect(activeIntervals.size).toBe(1);
 
@@ -217,7 +229,7 @@ describe('GlobalAuroraBackground', () => {
       pendingTimeouts.clear();
       callbacks.forEach((callback) => callback());
     });
-    expect(container.querySelectorAll('.shooting-star')).toHaveLength(0);
+    expect(container.querySelectorAll('.shooting-star[data-active=true]')).toHaveLength(0);
     expect(pendingTimeouts.size).toBe(0);
 
     Math.random.mockReturnValue(0.9);
@@ -226,7 +238,7 @@ describe('GlobalAuroraBackground', () => {
         Array.from(activeIntervals.values()).forEach((callback) => callback());
       }
     });
-    expect(container.querySelectorAll('.shooting-star')).toHaveLength(0);
+    expect(container.querySelectorAll('.shooting-star[data-active=true]')).toHaveLength(0);
     expect(pendingTimeouts.size).toBe(0);
     expect(activeIntervals.size).toBe(1);
 

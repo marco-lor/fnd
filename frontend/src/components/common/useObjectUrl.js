@@ -26,6 +26,18 @@ export const createObjectUrlLease = (file, {
   };
 };
 
+export const withObjectUrl = async (file, operation, options) => {
+  if (typeof operation !== 'function') {
+    throw new TypeError('Object URL operation must be a function.');
+  }
+  const lease = createObjectUrlLease(file, options);
+  try {
+    return await operation(lease.url);
+  } finally {
+    lease.revoke();
+  }
+};
+
 const useObjectUrl = (file) => {
   const [objectUrl, setObjectUrl] = useState('');
 

@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuthSession } from '../../../AuthContext';
-import { storage } from '../../firebaseStorage';
-import { deleteObject, ref as storageRef } from 'firebase/storage';
 import { FiPackage, FiSearch, FiTrash2, FiPlus, FiMinus } from 'react-icons/fi';
 import { FaCoins } from 'react-icons/fa';
 import { LazyItemDetailsModal as ItemDetailsModal } from './lazyHomeFeatures';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
-import { uploadCacheableImage } from '../../common/imageStorage';
+import {
+	deleteLegacyStoragePath,
+	uploadLegacyImage,
+} from '../../common/legacyMediaStorage';
 import MediaImage, { hasMediaAsset } from '../../common/MediaImage';
+import useObjectUrl from '../../common/useObjectUrl';
 import {
 	useEquipment,
 	useInventory,
@@ -180,8 +182,8 @@ const Inventory = () => {
 	const [vQty, setVQty] = useState('1');
 	const [vBusy, setVBusy] = useState(false);
 	const [vImageFile, setVImageFile] = useState(null);
-	const [vImagePreviewUrl, setVImagePreviewUrl] = useState(null);
 	const [vUploadedImage, setVUploadedImage] = useState(null);
+	const vImagePreviewUrl = useObjectUrl(vImageFile);
 
 	useEffect(() => {
 		setPreviewItem(null);
@@ -202,10 +204,6 @@ const Inventory = () => {
 		setVBusy(false);
 		setVImageFile(null);
 		setVUploadedImage(null);
-		setVImagePreviewUrl((currentUrl) => {
-			if (currentUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(currentUrl);
-			return null;
-		});
 	}, [actionScopeKey]);
 
 	const closeGoldOverlay = () => {
@@ -225,10 +223,6 @@ const Inventory = () => {
 		setVQty('1');
 		setVImageFile(null);
 		setVUploadedImage(null);
-		setVImagePreviewUrl((currentUrl) => {
-			if (currentUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(currentUrl);
-			return null;
-		});
 	};
 
 
@@ -310,11 +304,11 @@ const Inventory = () => {
 				try {
 					const safe = name.replace(/[^a-zA-Z0-9]/g, '_');
 					const fileName = `varie_${user.uid}_${safe}_${Date.now()}_${vImageFile.name}`;
-					const imgRef = storageRef(storage, 'items/' + fileName);
-					const { downloadUrl } = await uploadCacheableImage(imgRef, vImageFile);
-					uploadedImage = { downloadUrl, objectRef: imgRef };
+					const storagePath = 'items/' + fileName;
+					const { downloadUrl } = await uploadLegacyImage(storagePath, vImageFile);
+					uploadedImage = { downloadUrl, storagePath };
 					if (actionScopeRef.current !== submissionScopeKey) {
-						await deleteObject(imgRef).catch((cleanupError) => {
+						await deleteLegacyStoragePath(storagePath).catch((cleanupError) => {
 							console.error('Failed to clean up abandoned varie image', cleanupError);
 						});
 						return;
@@ -342,8 +336,8 @@ const Inventory = () => {
 		} catch (err) {
 			console.error('Error adding custom varie item', err);
 			if (isDefinitiveUserDataCommandError(err)) {
-				if (uploadedImage?.objectRef) {
-					await deleteObject(uploadedImage.objectRef).catch((cleanupError) => {
+				if (uploadedImage?.storagePath) {
+					await deleteLegacyStoragePath(uploadedImage.storagePath).catch((cleanupError) => {
 						console.error('Failed to clean up unused varie image', cleanupError);
 					});
 				}
@@ -677,10 +671,6 @@ const Inventory = () => {
 										onChange={(e) => {
 										const f = e.target.files && e.target.files[0] ? e.target.files[0] : null;
 										setVImageFile(f);
-										setVImagePreviewUrl((currentUrl) => {
-											if (currentUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(currentUrl);
-											return f ? URL.createObjectURL(f) : null;
-										});
 									}}
 									disabled={vBusy || !!vUploadedImage}
 										className="text-xs text-slate-300"
@@ -692,10 +682,6 @@ const Inventory = () => {
 											</div>
 											<button type="button" disabled={vBusy || !!vUploadedImage} onClick={() => {
 												setVImageFile(null);
-												setVImagePreviewUrl((currentUrl) => {
-													if (currentUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(currentUrl);
-													return null;
-												});
 											}} className="text-[11px] text-slate-300 border border-slate-600/60 rounded px-2 py-1 hover:bg-slate-700/40 disabled:opacity-50">Rimuovi</button>
 										</div>
 									)}

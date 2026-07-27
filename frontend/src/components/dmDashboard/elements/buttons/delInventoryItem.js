@@ -4,9 +4,8 @@
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { db } from '../../../firebaseConfig';
-import { storage } from '../../../firebaseStorage';
 import { doc, getDoc, updateDoc } from '../../../../performance/firestore';
-import { ref, deleteObject } from 'firebase/storage';
+import { deleteLegacyStoragePath } from '../../../common/legacyMediaStorage';
 
 /**
  * Props:
@@ -45,6 +44,7 @@ export function DelInventoryItemOverlay({ userId, inventoryItemId, userInventory
       if (!snap.exists()) throw new Error('User not found');
       const data = snap.data() || {};
       const inventory = Array.isArray(data.inventory) ? [...data.inventory] : [];
+      const cleanupPaths = [];
 
       // Determine removal strategy
       if (userInventoryIndex !== null && userInventoryIndex >= 0 && userInventoryIndex < inventory.length) {
@@ -52,7 +52,7 @@ export function DelInventoryItemOverlay({ userId, inventoryItemId, userInventory
         const entry = inventory[userInventoryIndex];
         // If entry had image/video (custom object), consider cleanup
         if (entry && typeof entry === 'object') {
-          await maybeDeleteAssets(entry);
+          cleanupPaths.push(...collectAssetPaths(entry));
         }
         inventory.splice(userInventoryIndex, 1);
       } else {
@@ -66,13 +66,14 @@ export function DelInventoryItemOverlay({ userId, inventoryItemId, userInventory
         if (idx !== -1) {
           const entry = inventory[idx];
           if (entry && typeof entry === 'object') {
-            await maybeDeleteAssets(entry);
+            cleanupPaths.push(...collectAssetPaths(entry));
           }
           inventory.splice(idx, 1);
         }
       }
 
       await updateDoc(userRef, { inventory });
+      await Promise.allSettled(cleanupPaths.map(deleteLegacyStoragePath));
       if (typeof onClose === 'function') onClose(true);
     } catch (err) {
       console.error('Failed deleting inventory item', err);
@@ -83,29 +84,24 @@ export function DelInventoryItemOverlay({ userId, inventoryItemId, userInventory
     }
   };
 
-  const maybeDeleteAssets = async (entry) => {
+  const collectAssetPaths = (entry) => {
     // Delete any uploaded assets associated with this inventory entry.
     // Supports:
     //  - Varie custom objects (image_url / video_url)
     //  - Standard items that have user specific custom images (user_image_custom && user_image_url)
     //  - Any entry with generic image_url / video_url fields
+    const paths = [];
     try {
-      const paths = [];
       if (entry?.image_url) paths.push(entry.image_url);
       if (entry?.video_url) paths.push(entry.video_url);
       if (entry?.user_image_custom && entry?.user_image_url) paths.push(entry.user_image_url);
 
-      for (const url of paths) {
-        if (!url || typeof url !== 'string') continue;
-        try {
-          const path = decodeURIComponent(url.split('/o/')[1].split('?')[0]);
-          await deleteObject(ref(storage, path));
-        } catch (_e) {
-          // Ignore individual deletion failures; continue with others
-        }
-      }
+      return paths
+        .filter((url) => url && typeof url === 'string')
+        .map((url) => decodeURIComponent(url.split('/o/')[1].split('?')[0]));
     } catch (e) {
       console.warn('Asset cleanup failed', e);
+      return [];
     }
   };
 

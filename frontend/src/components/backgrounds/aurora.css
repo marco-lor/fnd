@@ -41,6 +41,9 @@
 .global-aurora__star-field--secondary {
   animation-delay: -3s;
 }
+.global-aurora__vignette {
+  background: radial-gradient(60% 60% at 50% 40%, transparent 60%, rgba(0,0,0,0.45));
+}
 
 .global-aurora--paused .global-aurora__layer,
 .global-aurora--paused .global-aurora__layer--b,
@@ -69,12 +72,21 @@
   position: absolute;
   z-index: 1; /* above base background and stars */
   pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+}
+.shooting-star--active {
+  opacity: 1;
+  visibility: visible;
 }
 .shooting-star__trail {
   position: relative;
   border-radius: 9999px;
   filter: blur(0.3px);
   transform: translate3d(0, 0, 0);
+  animation: none;
+}
+.shooting-star--active .shooting-star__trail {
   animation: meteor-travel var(--duration, 1400ms) cubic-bezier(0.22, 1, 0.36, 1) forwards,
              meteor-fade   var(--duration, 1400ms) ease-out forwards;
 }

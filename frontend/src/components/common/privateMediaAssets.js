@@ -1,45 +1,43 @@
+import { getImageAssetRegistryRuntimeLimits } from './imageAssets/imageAssetRegistry';
+
+const DESKTOP_IMAGE_ASSET_LIMITS = getImageAssetRegistryRuntimeLimits({ compact: false });
+
 export const PRIVATE_MEDIA_MAX_CACHE_BYTES = 32 * 1024 * 1024;
-export const PRIVATE_MEDIA_MAX_DECODED_BYTES = 96 * 1024 * 1024;
-export const PRIVATE_MEDIA_MAX_RECORDS = 128;
+export const PRIVATE_MEDIA_MAX_DECODED_BYTES = DESKTOP_IMAGE_ASSET_LIMITS.maxDecodedBytes;
+export const PRIVATE_MEDIA_MAX_TOTAL_DECODED_BYTES = DESKTOP_IMAGE_ASSET_LIMITS.maxTotalDecodedBytes;
+export const PRIVATE_MEDIA_MAX_RECORDS = DESKTOP_IMAGE_ASSET_LIMITS.maxRecords;
 export const PRIVATE_MEDIA_MAX_DELAYED_RELEASES = 256;
 export const PRIVATE_MEDIA_CROSSFADE_PROTECTION_MS = 2000;
 export const PRIVATE_MEDIA_MAX_RELEASE_DELAY_MS = 2000;
-export const PRIVATE_MEDIA_MAX_ACTIVE_FETCHES = 4;
-export const PRIVATE_MEDIA_FAILURE_BACKOFF_BASE_MS = 1000;
-export const PRIVATE_MEDIA_FAILURE_BACKOFF_MAX_MS = 30000;
+export const PRIVATE_MEDIA_MAX_ACTIVE_FETCHES = DESKTOP_IMAGE_ASSET_LIMITS.maxConcurrentRequests;
+export const PRIVATE_MEDIA_FAILURE_BACKOFF_MS = Object.freeze([1_000, 5_000, 30_000]);
 export const PRIVATE_MEDIA_ALLOWED_CONTENT_TYPES = Object.freeze([
   'image/jpeg',
   'image/png',
   'image/webp',
-  'image/gif',
 ]);
-export const PRIVATE_VIDEO_CONTENT_TYPE = 'video/mp4';
+export const PRIVATE_VIDEO_CONTENT_TYPES = Object.freeze([
+  'video/mp4',
+  'video/webm',
+]);
+// Retained as the default video MIME for callers that imported the old scalar.
+export const PRIVATE_VIDEO_CONTENT_TYPE = PRIVATE_VIDEO_CONTENT_TYPES[0];
 
 const allowedPrivateImageContentTypes = new Set(PRIVATE_MEDIA_ALLOWED_CONTENT_TYPES);
-const allowedPrivateVideoContentTypes = new Set([PRIVATE_VIDEO_CONTENT_TYPE]);
+const allowedPrivateVideoContentTypes = new Set(PRIVATE_VIDEO_CONTENT_TYPES);
 const supportedPrivateMediaContentTypes = new Set([
   ...PRIVATE_MEDIA_ALLOWED_CONTENT_TYPES,
-  PRIVATE_VIDEO_CONTENT_TYPE,
+  ...PRIVATE_VIDEO_CONTENT_TYPES,
 ]);
 
 const CANONICAL_MEDIA_ASSET_ID_PATTERN = /^m_[a-f0-9]{40}$/;
-const PRIVATE_IMAGE_SOURCE_KINDS = new Set([
-  'avatar', 'item', 'npc', 'foe', 'map',
+const PRIVATE_MEDIA_AUDIENCES = new Set([
+  'signed-in', 'owner-manager', 'dm-only',
 ]);
-const PRIVATE_IMAGE_VARIANTS_BY_KIND = Object.freeze({
-  avatar: new Set(['thumbnail', 'card']),
-  item: new Set(['thumbnail', 'card']),
-  npc: new Set(['thumbnail', 'card']),
-  foe: new Set(['thumbnail', 'card']),
-  map: new Set(['thumbnail', 'card', 'board']),
-  'map-video': new Set(['poster']),
-});
-const PRIVATE_IMAGE_EXTENSION_BY_CONTENT_TYPE = Object.freeze({
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'image/gif': 'gif',
-});
+const PRIVATE_MEDIA_DERIVATIVE_NAMES = new Set([
+  'thumbnail', 'thumbnail2x', 'card', 'card2x',
+  'gallery', 'gallery2x', 'poster', 'poster2x',
+]);
 
 const records = new Map();
 const delayedReleaseHandles = new Set();
@@ -97,30 +95,34 @@ const defaultLoadStorageApi = async () => {
   return dependencyPromise;
 };
 
-const createDefaultRuntime = () => ({
-  maxCacheBytes: PRIVATE_MEDIA_MAX_CACHE_BYTES,
-  maxDecodedBytes: PRIVATE_MEDIA_MAX_DECODED_BYTES,
-  maxRecords: PRIVATE_MEDIA_MAX_RECORDS,
-  maxActiveFetches: PRIVATE_MEDIA_MAX_ACTIVE_FETCHES,
-  failureBackoffBaseMs: PRIVATE_MEDIA_FAILURE_BACKOFF_BASE_MS,
-  failureBackoffMaxMs: PRIVATE_MEDIA_FAILURE_BACKOFF_MAX_MS,
-  now: () => Date.now(),
-  loadStorageApi: defaultLoadStorageApi,
-  createObjectURL: (blob) => {
-    if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
-      throw createPrivateMediaError(
-        'private-media-object-url-unavailable',
-        'Private media object URLs are unavailable.'
-      );
-    }
-    return URL.createObjectURL(blob);
-  },
-  revokeObjectURL: (url) => {
-    if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
-      URL.revokeObjectURL(url);
-    }
-  },
-});
+const createDefaultRuntime = () => {
+  const limits = getImageAssetRegistryRuntimeLimits();
+  return {
+    profile: limits.profile,
+    maxCacheBytes: PRIVATE_MEDIA_MAX_CACHE_BYTES,
+    maxDecodedBytes: limits.maxDecodedBytes,
+    maxTotalDecodedBytes: limits.maxTotalDecodedBytes,
+    maxRecords: limits.maxRecords,
+    maxActiveFetches: limits.maxConcurrentRequests,
+    failureBackoffMs: [...PRIVATE_MEDIA_FAILURE_BACKOFF_MS],
+    now: () => Date.now(),
+    loadStorageApi: defaultLoadStorageApi,
+    createObjectURL: (blob) => {
+      if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+        throw createPrivateMediaError(
+          'private-media-object-url-unavailable',
+          'Private media object URLs are unavailable.'
+        );
+      }
+      return URL.createObjectURL(blob);
+    },
+    revokeObjectURL: (url) => {
+      if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+        URL.revokeObjectURL(url);
+      }
+    },
+  };
+};
 
 let runtime = createDefaultRuntime();
 
@@ -157,35 +159,33 @@ const parseCanonicalPrivateMediaPath = (path) => {
   if (!hasSafeStoragePathSegments(path)) return null;
   const parts = path.split('/');
   if (
-    parts.length < 7
-    || parts[0] !== 'media'
+    parts.length !== 7
+    || parts[0] !== 'media_assets'
     || parts[1] !== 'v1'
+    || !PRIVATE_MEDIA_AUDIENCES.has(parts[2])
     || !CANONICAL_MEDIA_ASSET_ID_PATTERN.test(parts[4])
+    || !/^[1-9][0-9]*$/.test(parts[5])
   ) return null;
 
-  if (parts.length === 7 && parts[5] === 'original') {
-    const originalMatch = /^source\.(jpg|png|webp|gif|mp4)$/.exec(parts[6]);
-    if (!originalMatch) return null;
+  if (parts[6] === 'original') {
     return {
-      kind: parts[2],
+      audience: parts[2],
+      ownerKey: parts[3],
+      assetId: parts[4],
+      sourceGeneration: parts[5],
       role: 'original',
-      extension: originalMatch[1],
       variant: '',
     };
   }
 
-  if (
-    parts.length === 8
-    && parts[5] === 'derivatives'
-    && parts[6] === 'v1'
-  ) {
-    const derivativeMatch = /^(thumbnail|card|board|poster)\.webp$/.exec(parts[7]);
-    if (!derivativeMatch) return null;
+  if (PRIVATE_MEDIA_DERIVATIVE_NAMES.has(parts[6])) {
     return {
-      kind: parts[2],
+      audience: parts[2],
+      ownerKey: parts[3],
+      assetId: parts[4],
+      sourceGeneration: parts[5],
       role: 'derivative',
-      extension: 'webp',
-      variant: derivativeMatch[1],
+      variant: parts[6],
     };
   }
 
@@ -247,16 +247,12 @@ export const normalizePrivateMediaDescriptor = (value) => {
   if (!parsed) return null;
 
   if (parsed.role === 'original') {
-    return (
-      PRIVATE_IMAGE_SOURCE_KINDS.has(parsed.kind)
-      && PRIVATE_IMAGE_EXTENSION_BY_CONTENT_TYPE[normalized.contentType]
-        === parsed.extension
-    ) ? normalized : null;
+    return normalized;
   }
 
   return (
     normalized.contentType === 'image/webp'
-    && PRIVATE_IMAGE_VARIANTS_BY_KIND[parsed.kind]?.has(parsed.variant)
+    && PRIVATE_MEDIA_DERIVATIVE_NAMES.has(parsed.variant)
   ) ? normalized : null;
 };
 
@@ -268,9 +264,7 @@ export const normalizePrivateVideoDescriptor = (value) => {
   if (!normalized) return null;
   const parsed = parseCanonicalPrivateMediaPath(normalized.path);
   return (
-    parsed?.kind === 'map-video'
-    && parsed.role === 'original'
-    && parsed.extension === 'mp4'
+    parsed?.role === 'original'
   ) ? normalized : null;
 };
 
@@ -339,8 +333,19 @@ const findEvictionCandidate = (excludedKey = '') => (
     .sort((left, right) => left.lastAccess - right.lastAccess)[0]
 );
 
+const getUnreferencedPrivateMediaTotals = () => {
+  let decodedBytes = 0;
+  let recordCount = 0;
+  records.forEach((record) => {
+    if (record.refCount > 0) return;
+    decodedBytes += record.decodedBytes || 0;
+    recordCount += 1;
+  });
+  return { decodedBytes, recordCount };
+};
+
 const reserveRecordCapacity = () => {
-  while (records.size >= runtime.maxRecords) {
+  while (getUnreferencedPrivateMediaTotals().recordCount >= runtime.maxRecords) {
     const candidate = findEvictionCandidate();
     if (!candidate || !removeRecord(candidate)) {
       throw createPrivateMediaError(
@@ -378,10 +383,26 @@ const getDescriptorDecodedBytes = (descriptor) => {
   );
 };
 
-const reserveDecodedCapacity = (decodedBytes, protectedKey) => {
-  while (cachedDecodedBytes + decodedBytes > runtime.maxDecodedBytes) {
-    const candidate = findEvictionCandidate(protectedKey);
+const reserveDecodedCapacity = (decodedBytes, protectedRecord) => {
+  while (true) {
+    const unreferencedDecodedBytes = getUnreferencedPrivateMediaTotals().decodedBytes;
+    const exceedsUnreferencedBudget = unreferencedDecodedBytes
+      + (protectedRecord.refCount === 0 ? decodedBytes : 0)
+      > runtime.maxDecodedBytes;
+    const exceedsTotalBudget = cachedDecodedBytes + decodedBytes
+      > runtime.maxTotalDecodedBytes;
+    if (!exceedsUnreferencedBudget && !exceedsTotalBudget) return;
+
+    const candidate = findEvictionCandidate(protectedRecord.key);
     if (!candidate || !removeRecord(candidate)) {
+      // One explicitly referenced legacy map may itself exceed the total cap.
+      // It remains usable and visible in stats; all unreferenced work has
+      // already been evicted and low-priority image work is gated separately.
+      if (
+        protectedRecord.refCount > 0
+        && decodedBytes > runtime.maxTotalDecodedBytes
+        && !exceedsUnreferencedBudget
+      ) return;
       throw createPrivateMediaError(
         'private-media-decoded-budget-exceeded',
         'The private media decoded-image budget is exhausted.'
@@ -391,10 +412,14 @@ const reserveDecodedCapacity = (decodedBytes, protectedKey) => {
 };
 
 const trimInactiveRecordsToBudgets = () => {
-  while (
-    cachedBytes > runtime.maxCacheBytes
-    || cachedDecodedBytes > runtime.maxDecodedBytes
-  ) {
+  while (true) {
+    const unreferencedTotals = getUnreferencedPrivateMediaTotals();
+    if (
+      cachedBytes <= runtime.maxCacheBytes
+      && cachedDecodedBytes <= runtime.maxTotalDecodedBytes
+      && unreferencedTotals.decodedBytes <= runtime.maxDecodedBytes
+      && unreferencedTotals.recordCount <= runtime.maxRecords
+    ) return;
     const candidate = findEvictionCandidate();
     if (!candidate || !removeRecord(candidate)) return;
   }
@@ -423,9 +448,11 @@ const validateFetchedBlob = (blob, descriptor) => {
   }
 };
 
-const getFailureBackoffMs = (failureCount) => Math.min(
-  runtime.failureBackoffMaxMs,
-  runtime.failureBackoffBaseMs * (2 ** Math.min(8, Math.max(0, failureCount - 1)))
+const getFailureBackoffMs = (failureCount) => (
+  runtime.failureBackoffMs[Math.max(
+    0,
+    Math.min(runtime.failureBackoffMs.length - 1, failureCount - 1)
+  )]
 );
 
 const markRecordFailed = (record, error) => {
@@ -456,7 +483,7 @@ const fetchRecord = async (record, epoch) => {
     validateFetchedBlob(blob, record.descriptor);
     reserveByteCapacity(blob.size, record.key);
     const decodedBytes = getDescriptorDecodedBytes(record.descriptor);
-    reserveDecodedCapacity(decodedBytes, record.key);
+    reserveDecodedCapacity(decodedBytes, record);
     const objectUrl = runtime.createObjectURL(blob);
     if (typeof objectUrl !== 'string' || !objectUrl) {
       throw createPrivateMediaError(
@@ -661,28 +688,37 @@ export const acquirePrivateVideoAsset = (value) => (
   acquireNormalizedPrivateMediaAsset(normalizePrivateVideoDescriptor(value))
 );
 
-export const getPrivateMediaAssetCacheSnapshot = () => ({
-  activeFetches,
-  cachedBytes,
-  cachedDecodedBytes,
-  maxActiveFetches: runtime.maxActiveFetches,
-  maxCacheBytes: runtime.maxCacheBytes,
-  maxDecodedBytes: runtime.maxDecodedBytes,
-  maxRecords: runtime.maxRecords,
-  delayedReleaseCount: delayedReleaseHandles.size,
-  queuedFetches: pendingRecords.filter((record) => record.status === 'queued').length,
-  recordCount: records.size,
-  records: Array.from(records.values()).map((record) => ({
-    key: record.key,
-    path: record.descriptor.path,
-    generation: record.descriptor.generation,
-    status: record.status,
-    refCount: record.refCount,
-    bytes: record.cachedBytes,
-    decodedBytes: record.decodedBytes,
-    retryAt: record.retryAt,
-  })),
-});
+export const getPrivateMediaAssetCacheSnapshot = () => {
+  const unreferencedTotals = getUnreferencedPrivateMediaTotals();
+  return {
+    profile: runtime.profile,
+    activeFetches,
+    cachedBytes,
+    cachedDecodedBytes,
+    referencedDecodedBytes: Math.max(0, cachedDecodedBytes - unreferencedTotals.decodedBytes),
+    unreferencedDecodedBytes: unreferencedTotals.decodedBytes,
+    unreferencedRecordCount: unreferencedTotals.recordCount,
+    maxActiveFetches: runtime.maxActiveFetches,
+    maxCacheBytes: runtime.maxCacheBytes,
+    maxDecodedBytes: runtime.maxDecodedBytes,
+    maxTotalDecodedBytes: runtime.maxTotalDecodedBytes,
+    maxRecords: runtime.maxRecords,
+    failureBackoffMs: [...runtime.failureBackoffMs],
+    delayedReleaseCount: delayedReleaseHandles.size,
+    queuedFetches: pendingRecords.filter((record) => record.status === 'queued').length,
+    recordCount: records.size,
+    records: Array.from(records.values()).map((record) => ({
+      key: record.key,
+      path: record.descriptor.path,
+      generation: record.descriptor.generation,
+      status: record.status,
+      refCount: record.refCount,
+      bytes: record.cachedBytes,
+      decodedBytes: record.decodedBytes,
+      retryAt: record.retryAt,
+    })),
+  };
+};
 
 export const __resetPrivateMediaAssetsForTests = () => {
   runtimeEpoch += 1;
@@ -713,14 +749,18 @@ export const __configurePrivateMediaAssetsForTests = (overrides = {}) => {
   };
   runtime.maxCacheBytes = Math.max(1, Math.floor(runtime.maxCacheBytes));
   runtime.maxDecodedBytes = Math.max(1, Math.floor(runtime.maxDecodedBytes));
+  runtime.maxTotalDecodedBytes = Math.max(
+    runtime.maxDecodedBytes,
+    Math.floor(runtime.maxTotalDecodedBytes)
+  );
   runtime.maxRecords = Math.max(1, Math.floor(runtime.maxRecords));
   runtime.maxActiveFetches = Math.max(
     1,
     Math.min(PRIVATE_MEDIA_MAX_ACTIVE_FETCHES, Math.floor(runtime.maxActiveFetches))
   );
-  runtime.failureBackoffBaseMs = Math.max(1, runtime.failureBackoffBaseMs);
-  runtime.failureBackoffMaxMs = Math.max(
-    runtime.failureBackoffBaseMs,
-    runtime.failureBackoffMaxMs
-  );
+  runtime.failureBackoffMs = Array.isArray(runtime.failureBackoffMs)
+    && runtime.failureBackoffMs.length > 0
+    && runtime.failureBackoffMs.every((delayMs) => Number.isFinite(delayMs) && delayMs >= 1)
+    ? runtime.failureBackoffMs.map((delayMs) => Math.floor(delayMs))
+    : [...PRIVATE_MEDIA_FAILURE_BACKOFF_MS];
 };

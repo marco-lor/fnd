@@ -486,6 +486,19 @@ test('explained Firestore startup warning drift fails repeatability', () => {
   );
 });
 
+test('Task 07 media cap drift fails deterministic repeatability', () => {
+  const left = report('run-a', 1000);
+  const right = report('run-b', 1000);
+  setScenarioMetric(left, 'task07.audioNodes', 0);
+  setScenarioMetric(right, 'task07.audioNodes', 1);
+
+  const result = compare(left, right, 15);
+  const metric = result.deterministic
+    .find(({ key }) => key === 'home:task07.audioNodes');
+  assert.equal(result.status, 'fail');
+  assert.equal(metric.status, 'fail');
+});
+
 test('different commits, browsers, or build assets cannot be compared', () => {
   const left = report('run-a', 1000);
   const right = report('run-b', 1000);

@@ -10,6 +10,7 @@ import {
   MIN_GRIGLIATA_TOKEN_SIZE_SQUARES,
   MIN_GRID_CELL_SIZE,
 } from './constants';
+import { withObjectUrl } from '../common/useObjectUrl';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -482,33 +483,28 @@ export const fitViewportToBounds = (
   };
 };
 
-export const readFileImageDimensions = (file) => new Promise((resolve, reject) => {
-  const objectUrl = URL.createObjectURL(file);
+export const readFileImageDimensions = (file) => withObjectUrl(file, (objectUrl) => new Promise((resolve, reject) => {
   const image = new window.Image();
 
   image.onload = () => {
     const width = image.naturalWidth || image.width;
     const height = image.naturalHeight || image.height;
-    URL.revokeObjectURL(objectUrl);
     resolve({ width, height });
   };
 
   image.onerror = () => {
-    URL.revokeObjectURL(objectUrl);
     reject(new Error('Unable to read image dimensions.'));
   };
 
   image.src = objectUrl;
-});
+}));
 
-export const readFileVideoMetadata = (file) => new Promise((resolve, reject) => {
-  const objectUrl = URL.createObjectURL(file);
+export const readFileVideoMetadata = (file) => withObjectUrl(file, (objectUrl) => new Promise((resolve, reject) => {
   const video = document.createElement('video');
 
   const cleanup = () => {
     video.onloadedmetadata = null;
     video.onerror = null;
-    URL.revokeObjectURL(objectUrl);
   };
 
   video.preload = 'metadata';
@@ -532,4 +528,4 @@ export const readFileVideoMetadata = (file) => new Promise((resolve, reject) => 
   };
 
   video.src = objectUrl;
-});
+}));

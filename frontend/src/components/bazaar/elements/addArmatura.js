@@ -1,12 +1,24 @@
 // file: ./frontend/src/components/bazaar/elements/addArmatura.js
 import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { db } from '../../firebaseConfig';
-import { storage } from '../../firebaseStorage';
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from "../../../performance/firestore";
-import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
-import { uploadCacheableImage } from "../../common/imageStorage";
-import { createDeferredStorageCleanup } from "../../common/deferredStorageCleanup";
+import {
+    createLegacyStorageCleanup,
+    deleteLegacyStoragePath,
+    uploadLegacyBlob,
+    uploadLegacyImage,
+} from "../../common/legacyMediaStorage";
 import useObjectUrl from "../../common/useObjectUrl";
+import { deleteDoc } from "../../../performance/firestore";
+import useTask07MediaOperationOwner from "../../../data/media/useTask07MediaOperationOwner";
+import {
+    isTask07CatalogItemWriterEnabled,
+    runTask07CatalogItemWriter,
+} from "../../../data/media/catalogItemMediaWriter";
+import {
+    describeTask07ConsumerOutcome,
+    task07ConsumerNeedsAttention,
+} from "../../../data/media/mediaConsumerAdapter";
 import { AuthContext } from '../../../AuthContext';
 import { computeValue } from '../../common/computeFormula';
 import { AddSpellButton } from '../../dmDashboard/elements/buttons/addSpell';
@@ -32,7 +44,8 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
     const [isLoading, setIsLoading] = useState(false);
     const [isSchemaLoading, setIsSchemaLoading] = useState(true);
 
-    const { user } = useContext(AuthContext);
+    const { user, role } = useContext(AuthContext);
+    const task07MediaOperationOwner = useTask07MediaOperationOwner();
     const [userParams, setUserParams] = useState({ Base: {}, Combattimento: {} });
     const [userName, setUserName] = useState("");
     const [spellSchema, setSpellSchema] = useState(null);
@@ -381,14 +394,12 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
             return;
         }
         const armaturaDocRef = doc(db, "items", docId);
-        const deferredStorageCleanup = createDeferredStorageCleanup(
-            (path) => deleteObject(ref(storage, path)),
-            {
+        const deferredStorageCleanup = createLegacyStorageCleanup({
                 onError: ({ path, error }) => {
                     console.warn("Post-commit armatura media cleanup failed:", path, error);
                 },
             }
-        );
+        });
         
         try {
             if (!editMode) {
@@ -399,14 +410,22 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                     return;
                 }
             }
+            const catalogBefore = !inventoryEditMode && editMode
+                ? (await getDoc(armaturaDocRef)).data()
+                : null;
+            const task07V1Write = await isTask07CatalogItemWriterEnabled({
+                actorUid: user?.uid,
+                role,
+                file: imageFile,
+                inventoryEditMode,
+            });
             let finalArmaturaData = JSON.parse(JSON.stringify(armaturaFormData));
 
             // Handle image upload
             let newImageUrl = editMode ? (initialData?.General?.image_url ?? null) : null;
-            if (imageFile) {
+            if (imageFile && !task07V1Write) {
                 const armaturaImgFileName = `armatura_${docId}_${Date.now()}_${imageFile.name}`;
-                const armaturaImgRef = ref(storage, 'items/' + armaturaImgFileName);
-                newImageUrl = (await uploadCacheableImage(armaturaImgRef, imageFile)).downloadUrl;
+                newImageUrl = (await uploadLegacyImage('items/' + armaturaImgFileName, imageFile)).downloadUrl;
                 if (!inventoryEditMode && editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
                     deferredStorageCleanup.addUrl(initialData.General.image_url);
                 }
@@ -426,14 +445,11 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                 let spellVideoUrlToSave = createdSpellData.video_url || '';
                 
                 if (customSpell.imageFile) {
-                    const spellImageRef = ref(storage, `spell_images/${Date.now()}_${customSpell.imageFile.name}`);
-                    spellImageUrlToSave = (await uploadCacheableImage(spellImageRef, customSpell.imageFile)).downloadUrl;
+                    spellImageUrlToSave = (await uploadLegacyImage(`spell_images/${Date.now()}_${customSpell.imageFile.name}`, customSpell.imageFile)).downloadUrl;
                 }
                 
                 if (customSpell.videoFile) {
-                    const spellVideoRef = ref(storage, `spell_videos/${Date.now()}_${customSpell.videoFile.name}`);
-                    const spellVideoSnapshot = await uploadBytes(spellVideoRef, customSpell.videoFile);
-                    spellVideoUrlToSave = await getDownloadURL(spellVideoSnapshot.ref);
+                    spellVideoUrlToSave = (await uploadLegacyBlob(`spell_videos/${Date.now()}_${customSpell.videoFile.name}`, customSpell.videoFile)).downloadUrl;
                 }
                 
                 // Queue old files for cleanup only after the catalog document commits.
@@ -546,7 +562,7 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                     });
                     await updateDoc(targetUserRef, { inventory: nextInv });
                     if (userImageDeleted) {
-                        try { const oldPath = decodeURIComponent(userImageDeleted.split('/o/')[1].split('?')[0]); await deleteObject(ref(storage, oldPath)); } catch (e) { console.warn('Failed to delete previous user custom image:', e); }
+                        try { const oldPath = decodeURIComponent(userImageDeleted.split('/o/')[1].split('?')[0]); await deleteLegacyStoragePath(oldPath); } catch (e) { console.warn('Failed to delete previous user custom image:', e); }
                     }
                     if (showMessage) showMessage(`Armatura aggiornata nell'inventario utente.`, 'success');
                 } catch (e) {
@@ -557,7 +573,32 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                 }
                 onClose(true);
             } else {
-                if (editMode) {
+                if (task07V1Write) {
+                    const outcome = await task07MediaOperationOwner.run((signal) => (
+                        runTask07CatalogItemWriter({
+                            actorUid: user.uid,
+                            role,
+                            itemId: armaturaDocRef.id,
+                            file: imageFile,
+                            currentItem: catalogBefore || initialData || {},
+                            prepareEntity: () => editMode
+                                ? updateDoc(armaturaDocRef, finalArmaturaData)
+                                : setDoc(armaturaDocRef, finalArmaturaData),
+                            rollbackPreparedEntity: () => catalogBefore
+                                ? setDoc(armaturaDocRef, catalogBefore)
+                                : deleteDoc(armaturaDocRef),
+                            signal,
+                        })
+                    ));
+                    if (task07ConsumerNeedsAttention(outcome)) {
+                        if (showMessage) showMessage(
+                            describeTask07ConsumerOutcome(outcome, "Armatura image"),
+                            "warning"
+                        );
+                    } else if (showMessage) {
+                        showMessage(`Armatura "${armaturaName}" salvata!`, "success");
+                    }
+                } else if (editMode) {
                     console.log("Updating document:", docId, finalArmaturaData);
                     await updateDoc(armaturaDocRef, finalArmaturaData);
                     if (showMessage) showMessage(`Armatura "${armaturaName}" aggiornata!`, "success");

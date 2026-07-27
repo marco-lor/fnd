@@ -1,15 +1,29 @@
 // file: ./frontend/src/components/characterCreation/CharacterCreation.js
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { db } from "../firebaseConfig";
-import { storage } from "../firebaseStorage";
-import { ref } from "firebase/storage";
-import { doc, getDoc, updateDoc, setDoc } from "../../performance/firestore";
+import {
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+} from "../../performance/firestore";
 import { useAuth } from "../../AuthContext";
 import GlobalAuroraBackground from "../backgrounds/GlobalAuroraBackground";
-import { uploadCacheableImage } from "../common/imageStorage";
+import { uploadLegacyImage } from "../common/legacyMediaStorage";
 import useObjectUrl from "../common/useObjectUrl";
 import { getSchema, getVarie } from '../../data/configRepository';
+import { isTask07MediaV1WriteEnabled } from '../../data/media/mediaFeatureFlags';
+import { createTask07MediaOperationOwner } from '../../data/media/mediaOperationOwner';
+import {
+  runCharacterCreationAvatarV1Write,
+  task07ProfileRevision,
+} from './characterCreationAvatarMedia';
+import {
+  finalizeCharacterCreationMediaTarget,
+  prepareCharacterCreationMediaTarget,
+  rollbackCharacterCreationMediaTarget,
+} from '../../data/userData/userDataRepository';
 // Import the components for each step
 import RaceSelection from "./elements/RaceSelection";
 import AnimaShardSelection from "./elements/AnimaShardSelection";
@@ -46,6 +60,22 @@ function CharacterCreation() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const avatarOperationOwnerRef = useRef(null);
+  const componentMountedRef = useRef(true);
+  const pendingAvatarAttemptRef = useRef(null);
+
+  useEffect(() => {
+    componentMountedRef.current = true;
+    const owner = createTask07MediaOperationOwner();
+    avatarOperationOwnerRef.current = owner;
+    return () => {
+      componentMountedRef.current = false;
+      owner.dispose('Character Creation was unmounted.');
+      if (avatarOperationOwnerRef.current === owner) {
+        avatarOperationOwnerRef.current = null;
+      }
+    };
+  }, []);
 
   // Total number of steps in the character creation process
   const totalSteps = 4; // Now we have 4 steps: Race, Anima, Points Distribution, Details
@@ -100,6 +130,10 @@ function CharacterCreation() {
   // Handle image selection and preview
   const handleImageChange = (e) => {
     const selectedFile = e.target.files[0];
+    avatarOperationOwnerRef.current?.cancel(
+      'The Character Creation avatar selection changed.'
+    );
+    pendingAvatarAttemptRef.current = null;
     if (selectedFile) {
       if (!selectedFile.type.startsWith('image/')) {
           setError("Please select a valid image file.");
@@ -226,41 +260,183 @@ function CharacterCreation() {
 
     setLoading(true);
     setError("");
+    let avatarLease = null;
 
     try {
       const userDocRef = doc(db, "users", user.uid);
       const userDocSnap = await getDoc(userDocRef);
-
-      // Base data for update/set operation
-      const characterUpdateData = {
-          characterId: characterName.trim(),
-          // race: selectedRace.id, // Store the race name
-          // anima: selectedAnima.name, // Store the anima shard name
-          // animaLevelUpBonus: selectedAnima.levelUpBonus, // Store the level up bonus for future level-ups
-          'flags.characterCreationDone': true,
-          'settings.lock_param_base': true,
-          'settings.lock_param_combat': true
+      const userData = userDocSnap.exists() ? userDocSnap.data() : null;
+      const characterBaseData = {
+        characterId: characterName.trim(),
+        // race: selectedRace.id, // Store the race name
+        // anima: selectedAnima.name, // Store the anima shard name
+        // animaLevelUpBonus: selectedAnima.levelUpBonus, // Store the level up bonus for future level-ups
+        'settings.lock_param_base': true,
+        'settings.lock_param_combat': true,
       };
 
-      // Handle image upload if a file is present
+      const buildCharacterInitialData = async ({
+        characterCreationDone,
+        specificData,
+      }) => {
+        const schemaData = await getSchema('schema_pg');
+        let characterInitialData = {};
+
+        if (schemaData) {
+          characterInitialData = JSON.parse(JSON.stringify(schemaData));
+          console.log("Using schema_pg for initial data.");
+        } else {
+          console.warn("schema_pg not found, creating user with minimal data.");
+          characterInitialData = {
+            Parametri: { Base: {}, Combattimento: {} },
+            stats: { level: 1, hpTotal: 10, hpCurrent: 10, manaTotal: 10, manaCurrent: 10, essenzaTotal: 0, essenzaCurrent: 0, basePointsAvailable: 4, basePointsSpent: 0, combatTokensAvailable: 50, combatTokensSpent: 0 },
+            inventory: [], tecniche: {}, spells: {}, conoscenze: {}, professioni: {}, lingue: {}, settings: { theme: 'dark', notifications: true }, flags: {},
+          };
+        }
+
+        characterInitialData = {
+          ...characterInitialData,
+          ...specificData,
+          email: user.email,
+          username: user.email ? user.email.split("@")[0] : `user_${user.uid.substring(0, 5)}`,
+          role: "player",
+          createdAt: new Date().toISOString(),
+        };
+        characterInitialData.Parametri = characterInitialData.Parametri || { Base: {}, Combattimento: {} };
+        characterInitialData.stats = {
+          ...(characterInitialData.stats || {}),
+          essenzaTotal: Number(characterInitialData.stats?.essenzaTotal) || 0,
+          essenzaCurrent: Number(characterInitialData.stats?.essenzaCurrent) || 0,
+        };
+        characterInitialData.flags = {
+          ...(characterInitialData.flags || {}),
+          characterCreationDone,
+        };
+        return characterInitialData;
+      };
+
+      const finalizeCharacterDocument = async () => {
+        await finalizeCharacterCreationMediaTarget(
+          user.uid,
+          characterBaseData
+        );
+      };
+
+      const actorRole = typeof userData?.role === 'string'
+        ? userData.role.trim().toLowerCase()
+        : userDocSnap.exists() ? '' : 'player';
       if (imageFile) {
-        // Generate and store both URL and storage path
-        const safeFileName = `${characterName.trim().replace(/\s+/g, '_')}_${user.uid}_${Date.now()}`;
-        const imagePath = `characters/${safeFileName}`;
-        const imageRef = ref(storage, imagePath);
-        const { downloadUrl: imageUrl } = await uploadCacheableImage(imageRef, imageFile);
-        characterUpdateData.imageUrl = imageUrl;
-        characterUpdateData.imagePath = imagePath;
-      } else if (userDocSnap.exists() && userDocSnap.data()?.imageUrl) {
-         const existingImageUrl = userDocSnap.data()?.imageUrl;
-         const existingImagePath = userDocSnap.data()?.imagePath || parseStoragePathFromUrl(existingImageUrl);
-         characterUpdateData.imageUrl = existingImageUrl; // Keep existing
-         if (existingImagePath) {
-           characterUpdateData.imagePath = existingImagePath;
-         }
+        const owner = avatarOperationOwnerRef.current;
+        if (!owner || owner.isDisposed()) {
+          if (componentMountedRef.current) setLoading(false);
+          return;
+        }
+        avatarLease = owner.start(
+          'A newer Character Creation avatar operation replaced this one.'
+        );
+      }
+      const writesTask07Avatar = !!imageFile && await isTask07MediaV1WriteEnabled({
+        purpose: 'avatar',
+        role: actorRole,
+        uid: user.uid,
+      });
+      if (avatarLease && !avatarLease.isCurrent()) return;
+
+      if (writesTask07Avatar) {
+        const adapter = await import(
+          /* webpackChunkName: "feature-task07-media" */
+          '../../data/media/mediaConsumerAdapter'
+        );
+        if (!avatarLease.isCurrent()) return;
+
+        const pendingAttempt = pendingAvatarAttemptRef.current;
+        const reusesPendingAttempt = pendingAttempt?.file === imageFile
+          && pendingAttempt.uid === user.uid;
+        const expectedRevision = reusesPendingAttempt
+          ? pendingAttempt.expectedRevision
+          : task07ProfileRevision(userData);
+        const previousAssetId = reusesPendingAttempt
+          ? pendingAttempt.previousAssetId
+          : adapter.getTask07PreviousAssetId(userData);
+        pendingAvatarAttemptRef.current = {
+          expectedRevision,
+          file: imageFile,
+          previousAssetId,
+          uid: user.uid,
+        };
+
+        const preparedTargetData = userDocSnap.exists()
+          ? null
+          : await buildCharacterInitialData({
+            characterCreationDone: false,
+            specificData: characterBaseData,
+          });
+        if (!avatarLease.isCurrent()) return;
+        let targetCreatedByAttempt = false;
+        const prepareEntity = async () => {
+          if (!preparedTargetData) {
+            throw new Error(
+              "Character profile disappeared before avatar preparation."
+            );
+          }
+          const created = await prepareCharacterCreationMediaTarget(
+            user.uid,
+            preparedTargetData
+          );
+          targetCreatedByAttempt = targetCreatedByAttempt || created;
+        };
+        const rollbackPreparedEntity = async () => {
+          if (!targetCreatedByAttempt) return;
+          await rollbackCharacterCreationMediaTarget(user.uid);
+        };
+
+        const outcome = await runCharacterCreationAvatarV1Write({
+          actorUid: user.uid,
+          expectedRevision,
+          file: imageFile,
+          finalizeCharacter: finalizeCharacterDocument,
+          prepareEntity,
+          previousAssetId,
+          rollbackPreparedEntity,
+          runConsumerUpload: adapter.runTask07ConsumerUpload,
+          runWithReceipt: adapter.runWithTask07MediaOperationReceipt,
+          signal: avatarLease.signal,
+        });
+        if (!avatarLease.isCurrent()) return;
+        if (adapter.task07ConsumerNeedsAttention(outcome)) {
+          const attention = outcome.characterFinalizationFailed
+            ? 'Profile image was attached, but character completion was not saved. Select Create Character again without changing the selected image; do not upload it again.'
+            : adapter.describeTask07ConsumerOutcome(outcome, 'Profile image');
+          setError(attention);
+          setLoading(false);
+          return;
+        }
+        pendingAvatarAttemptRef.current = null;
+        navigate("/home");
+        return;
       }
 
-      // Check if user document exists to decide between set (create) or update
+      avatarLease?.release();
+      avatarLease = null;
+
+      const characterUpdateData = { ...characterBaseData };
+      // Preserve the legacy path for rollback modes and submissions without a
+      // new avatar. V1 attachment deliberately leaves these fields untouched.
+      if (imageFile) {
+        const safeFileName = `${characterName.trim().replace(/\s+/g, '_')}_${user.uid}_${Date.now()}`;
+        const imagePath = `characters/${safeFileName}`;
+        const { downloadUrl: imageUrl } = await uploadLegacyImage(imagePath, imageFile);
+        characterUpdateData.imageUrl = imageUrl;
+        characterUpdateData.imagePath = imagePath;
+      } else if (userData?.imageUrl) {
+        const existingImageUrl = userData.imageUrl;
+        const existingImagePath = userData.imagePath || parseStoragePathFromUrl(existingImageUrl);
+        characterUpdateData.imageUrl = existingImageUrl;
+        if (existingImagePath) {
+          characterUpdateData.imagePath = existingImagePath;
+        }
+      }
+
       if (!userDocSnap.exists()) {
         console.log("User document doesn't exist, creating new one.");
         const schemaData = await getSchema('schema_pg');
@@ -301,11 +477,7 @@ function CharacterCreation() {
 
         await setDoc(userDocRef, characterInitialData);
         console.log("New user document created.");
-
       } else {
-        // For existing user, update the character data
-        const userData = userDocSnap.data();
-
         // Ensure we have a flags object
         if (!userData.flags) {
           userData.flags = {};
@@ -324,17 +496,33 @@ function CharacterCreation() {
         console.log("User document updated.");
       }
 
+      pendingAvatarAttemptRef.current = null;
       navigate("/home"); // Navigate on success
-
     } catch (error) {
       console.error("Error in character creation/update:", error);
-      setError(`Character creation failed: ${error.message}`);
-      setLoading(false); // Keep user on page to see error
+      if (componentMountedRef.current) {
+        if (!avatarLease || avatarLease.isCurrent()) {
+          setError(`Character creation failed: ${error.message}`);
+        }
+        setLoading(false); // Keep user on page to see error
+      }
+    } finally {
+      const owner = avatarOperationOwnerRef.current;
+      const cancelledWithoutReplacement = avatarLease
+        && !avatarLease.isCurrent()
+        && !owner?.hasActiveOperation();
+      avatarLease?.release();
+      if (cancelledWithoutReplacement && componentMountedRef.current) {
+        setLoading(false);
+      }
     }
   };
 
   // Handle cancel action
   const handleCancel = () => {
+    avatarOperationOwnerRef.current?.cancel(
+      'Character Creation was cancelled.'
+    );
     navigate("/");
   };
 

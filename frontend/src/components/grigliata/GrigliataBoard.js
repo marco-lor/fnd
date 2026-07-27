@@ -66,6 +66,10 @@ import {
 } from './tokenStatuses';
 import { useImageAssetSnapshot } from '../common/imageAssets/useImageAsset';
 import {
+  IMAGE_ASSET_PIN_NAMES,
+  pinImageAsset,
+} from '../common/imageAssets/imageAssetRegistry';
+import {
   PRIVATE_MEDIA_CROSSFADE_PROTECTION_MS,
   resolveMediaSourceAsset,
   useResolvedMediaSource,
@@ -760,13 +764,26 @@ const buildBattlemapImageLayer = ({
     opacity,
   };
 };
-const getBackgroundMediaAssetKey = (background) => {
+const getBackgroundMediaAssetKey = (background, { fullQuality = false } = {}) => {
   const assetType = getBackgroundAssetType(background);
-  return resolveMediaSourceAsset(background, {
+  const options = {
     fallbackSrc: background?.imageUrl || '',
     kind: assetType,
-    variant: assetType === 'video' ? 'original' : 'board',
-  }).assetKey;
+    variant: assetType === 'video' || fullQuality ? 'original' : 'gallery',
+  };
+  // This is a change-detection fingerprint, not a source decision. Include
+  // both contracts so a canonical update is observable while the mounted
+  // reader remains solely responsible for applying the actor rollout mode.
+  return JSON.stringify([
+    resolveMediaSourceAsset(background, {
+      ...options,
+      compatibilityMode: 'legacy',
+    }).assetKey,
+    resolveMediaSourceAsset(background, {
+      ...options,
+      compatibilityMode: 'derivative-read',
+    }).assetKey,
+  ]);
 };
 const NarrationPlacementImage = ({
   placement,
@@ -774,15 +791,17 @@ const NarrationPlacementImage = ({
   opacity = 1,
   transitionRole = 'stable',
   isPrimary = false,
+  isCrossfadePin = false,
   isManager = false,
   onMoveNarrationPlacement = null,
 }) => {
   const assetType = getBackgroundAssetType(background);
+  const useFullQualityImage = isPrimary || isCrossfadePin;
   const mediaSource = useResolvedMediaSource(background, {
     fallbackSrc: background?.imageUrl || '',
     kind: assetType,
     releaseDelayMs: PRIVATE_MEDIA_CROSSFADE_PROTECTION_MS,
-    variant: assetType === 'video' ? 'original' : 'board',
+    variant: assetType === 'video' || useFullQualityImage ? 'original' : 'gallery',
   });
   const advanceNarrationMediaFallback = mediaSource.advanceFallback;
   const narrationMediaStatus = mediaSource.status;
@@ -815,6 +834,14 @@ const NarrationPlacementImage = ({
     rawAssetSnapshot.error,
     rawAssetSnapshot.status,
   ]);
+
+  useEffect(() => {
+    if (assetType !== 'image' || !mediaSource.url) return undefined;
+    const pinName = isCrossfadePin
+      ? IMAGE_ASSET_PIN_NAMES.CROSSFADE
+      : (isPrimary ? IMAGE_ASSET_PIN_NAMES.ACTIVE_BOARD : '');
+    return pinName ? pinImageAsset(mediaSource.url, pinName) : undefined;
+  }, [assetType, isCrossfadePin, isPrimary, mediaSource.url]);
 
   if (
     !placement?.id
@@ -2307,7 +2334,7 @@ export default function GrigliataBoard({
     fallbackSrc: activeBackground?.imageUrl || '',
     kind: activeBackgroundAssetType,
     releaseDelayMs: PRIVATE_MEDIA_CROSSFADE_PROTECTION_MS,
-    variant: activeBackgroundAssetType === 'video' ? 'original' : 'board',
+    variant: 'original',
   });
   const advanceActiveBackgroundFallback = activeBackgroundMediaSource.advanceFallback;
   const activeBackgroundMediaStatus = activeBackgroundMediaSource.status;
@@ -2365,6 +2392,32 @@ export default function GrigliataBoard({
   const battlemapVideoFrameAnimationHandleRef = useRef(null);
   const previousNarrationOverlayActiveRef = useRef(isNarrationOverlayActive);
   const lastFitKeyRef = useRef('');
+
+  useEffect(() => {
+    if (
+      isNarrationOverlayActive
+      || activeBackgroundAssetType !== 'image'
+      || !activeBackgroundMediaSource.url
+    ) return undefined;
+    return pinImageAsset(
+      activeBackgroundMediaSource.url,
+      IMAGE_ASSET_PIN_NAMES.ACTIVE_BOARD
+    );
+  }, [
+    activeBackgroundAssetType,
+    activeBackgroundMediaSource.url,
+    isNarrationOverlayActive,
+  ]);
+
+  useEffect(() => {
+    const fadingLayer = battlemapImageTransition.fadingOutLayer;
+    if (
+      isNarrationOverlayActive
+      || fadingLayer?.assetType !== 'image'
+      || !fadingLayer.src
+    ) return undefined;
+    return pinImageAsset(fadingLayer.src, IMAGE_ASSET_PIN_NAMES.CROSSFADE);
+  }, [battlemapImageTransition.fadingOutLayer, isNarrationOverlayActive]);
   const narrationBackgroundsById = useMemo(
     () => buildBackgroundMap(narrationBackgrounds),
     [narrationBackgrounds]
@@ -2490,7 +2543,9 @@ export default function GrigliataBoard({
     canonicalNarrationEntries.map((entry) => ({
       id: entry.placement.id,
       backgroundId: entry.placement.backgroundId,
-      mediaAssetKey: getBackgroundMediaAssetKey(entry.background),
+      mediaAssetKey: getBackgroundMediaAssetKey(entry.background, {
+        fullQuality: entry.isPrimary,
+      }),
       x: entry.placement.x,
       y: entry.placement.y,
       width: entry.placement.width,
@@ -3177,6 +3232,12 @@ export default function GrigliataBoard({
     [resolvedBackground, normalizedGrid, placedTokens]
   );
   const isNarrationVisualActive = narrationImageTransition.entries.length > 0;
+  const narrationCrossfadePinKey = (
+    narrationImageTransition.entries.find((entry) => (
+      entry.transitionRole === 'outgoing' && entry.isPrimary
+    ))
+    || narrationImageTransition.entries.find((entry) => entry.transitionRole === 'outgoing')
+  )?.key || '';
   const narrationImageBounds = useMemo(
     () => (isNarrationVisualActive
       ? buildNarrationPlacementBounds(narrationImageTransition.boundsPlacements) || buildNarrationImageBounds(resolvedBackground)
@@ -6632,6 +6693,7 @@ export default function GrigliataBoard({
                     opacity={entry.opacity}
                     transitionRole={entry.transitionRole}
                     isPrimary={entry.isPrimary}
+                    isCrossfadePin={entry.key === narrationCrossfadePinKey}
                     isManager={isManager && entry.transitionRole !== 'outgoing'}
                     onMoveNarrationPlacement={entry.transitionRole === 'outgoing' ? null : onMoveNarrationPlacement}
                   />

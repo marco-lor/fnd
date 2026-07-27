@@ -389,6 +389,78 @@ describe('user-data repository compatibility', () => {
     }));
   });
 
+  test('projects canonical inventory and personal slots without losing independent revisions', () => {
+    const imageMedia = {
+      assetId: `m_${'a'.repeat(40)}`,
+      original: { path: 'media_assets/v1/image' },
+    };
+    const videoMedia = {
+      assetId: `m_${'b'.repeat(40)}`,
+      original: { path: 'media_assets/v1/video' },
+    };
+    const mediaUpdatedAt = { seconds: 10 };
+    const videoMediaUpdatedAt = { seconds: 11 };
+    const inventory = normalizeV2InventoryDocument({
+      id: 'inventory-media',
+      data: () => ({
+        currentSnapshot: {
+          General: { Nome: 'Corda', image_url: 'items/legacy-rope.png' },
+          item_type: 'varie',
+        },
+        media: imageMedia,
+        mediaUpdatedAt,
+        task07MediaRevision: 3,
+      }),
+    });
+    const personal = normalizeV2PersonalContentDocument({
+      id: 'spell-media',
+      data: () => ({
+        displayName: 'Luce',
+        data: {
+          Nome: 'Luce',
+          image_url: 'spells/legacy-light.png',
+          video_url: 'spells/legacy-light.mp4',
+        },
+        media: imageMedia,
+        videoMedia,
+        mediaUpdatedAt,
+        videoMediaUpdatedAt,
+        task07MediaRevision: 4,
+        task07VideoMediaRevision: 7,
+      }),
+    });
+
+    expect(inventory).toEqual(expect.objectContaining({
+      media: imageMedia,
+      mediaUpdatedAt,
+      task07MediaRevision: 3,
+      General: expect.objectContaining({
+        image_url: 'items/legacy-rope.png',
+      }),
+    }));
+    expect(personal).toEqual(expect.objectContaining({
+      media: imageMedia,
+      videoMedia,
+      mediaUpdatedAt,
+      videoMediaUpdatedAt,
+      task07MediaRevision: 4,
+      task07VideoMediaRevision: 7,
+      image_url: 'spells/legacy-light.png',
+      video_url: 'spells/legacy-light.mp4',
+      _task05ContentId: 'spell-media',
+    }));
+
+    expect(compareUserDomainValues({
+      Luce: {
+        Nome: 'Luce',
+        image_url: 'spells/legacy-light.png',
+        video_url: 'spells/legacy-light.mp4',
+      },
+    }, mapV2PersonalContentItems([personal]), {
+      domain: USER_DATA_DOMAINS.SPELLS,
+    }).valueMismatch).toBe(false);
+  });
+
   test('composes the fixed V2 domains into the temporary legacy view', () => {
     const result = composeLegacyCompatibleUserData({
       profile: { role: 'player', characterId: 'Aster', summary: { level: 5 } },

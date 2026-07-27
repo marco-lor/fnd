@@ -2,6 +2,11 @@ import React from 'react';
 import { render, waitFor } from '@testing-library/react';
 import NarrationPlacementPicker from './NarrationPlacementPicker';
 
+jest.mock('../../data/media/useTask07MediaReadMode', () => ({
+  __esModule: true,
+  default: jest.fn(() => 'derivative-read'),
+}));
+
 describe('NarrationPlacementPicker media thumbnails', () => {
   test('uses descriptor thumbnails and video posters while retaining safe legacy image fallback', async () => {
     const descriptorThumbnailUrl = 'https://example.com/descriptor-thumbnail.webp';
@@ -15,6 +20,7 @@ describe('NarrationPlacementPicker media thumbnails', () => {
         media: {
           kind: 'map',
           schemaVersion: 1,
+          state: 'ready',
           variants: {
             thumbnail: {
               url: descriptorThumbnailUrl,
@@ -59,6 +65,7 @@ describe('NarrationPlacementPicker media thumbnails', () => {
           media: {
             kind: 'map-video',
             schemaVersion: 1,
+            state: 'ready',
             original: {
               url: videoOriginalUrl,
               contentType: 'video/mp4',

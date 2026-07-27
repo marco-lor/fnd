@@ -76,15 +76,25 @@ import {
   cleanupTask07RemovedFoeMedia,
   cleanupTask07RemovedInventoryMedia,
   cleanupTask07RemovedNpcMedia,
+  cleanupTask07RemovedSpellMedia,
+  cleanupTask07RemovedTechniqueMedia,
+  cleanupTask07RemovedTokenMedia,
   cleanupTask07RemovedUserMedia,
   sweepTask07MediaOrphans,
   task07AbandonMediaAsset,
+  task07AttachMediaAsset,
   task07ConfirmMediaReference,
-  task07FinalizeMediaUpload,
+  task07GetMediaStatus,
   task07PrepareMediaUpload,
   task07RetireMediaAsset,
   task07RetryMediaCleanup,
 } from "./mediaAssetLifecycle";
+import {task07ProcessMediaUpload} from "./mediaAssetProcessor";
+import {
+  syncTask07MusicStreamFromControl,
+  syncTask07MusicStreamFromPlayback,
+  syncTask07MusicStreamFromSession,
+} from "./grigliataMusicStream";
 import {usesDemoConsolidatedOwner} from "./demoConsolidatedOwner";
 
 admin.initializeApp();
@@ -157,12 +167,20 @@ export {
   cleanupTask07RemovedFoeMedia,
   cleanupTask07RemovedInventoryMedia,
   cleanupTask07RemovedNpcMedia,
+  cleanupTask07RemovedSpellMedia,
+  cleanupTask07RemovedTechniqueMedia,
+  cleanupTask07RemovedTokenMedia,
   cleanupTask07RemovedUserMedia,
   sweepTask07MediaOrphans,
   task07AbandonMediaAsset,
+  task07AttachMediaAsset,
   task07ConfirmMediaReference,
-  task07FinalizeMediaUpload,
+  task07GetMediaStatus,
   task07PrepareMediaUpload,
+  task07ProcessMediaUpload,
   task07RetireMediaAsset,
   task07RetryMediaCleanup,
+  syncTask07MusicStreamFromControl,
+  syncTask07MusicStreamFromPlayback,
+  syncTask07MusicStreamFromSession,
 };

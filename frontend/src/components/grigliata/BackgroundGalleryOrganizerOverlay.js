@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { FiTrash2 } from 'react-icons/fi';
 import { isVideoBackground } from './boardUtils';
-import MediaImage, { resolveMediaAsset } from '../common/MediaImage';
+import MediaImage, { hasMediaAsset } from '../common/MediaImage';
 import MediaFolderOrganizerOverlay from './MediaFolderOrganizerOverlay';
 import {
   buildGalleryFolderOptions,
@@ -33,6 +33,7 @@ const buildVideoPosterMedia = (manifest) => {
   return {
     media: {
       schemaVersion: manifest.schemaVersion,
+      kind: manifest.kind || 'map-video',
       state: manifest.state,
       variants: poster ? { poster } : {},
     },
@@ -46,7 +47,7 @@ const buildOrganizerThumbnail = (background) => {
   const src = isVideo ? '' : (background?.imageUrl || '');
   const variant = isVideo ? 'poster' : 'thumbnail';
   return {
-    asset: resolveMediaAsset(media, { fallbackSrc: src, variant }),
+    available: hasMediaAsset(media, { fallbackSrc: src, variant }),
     isVideo,
     media,
     src,
@@ -97,7 +98,7 @@ export default function BackgroundGalleryOrganizerOverlay({
       isItemSelectionEnabled
       renderItem={({ item: background, itemId, moving, dragProps, isSelectionEnabled, isSelected, onSelectedChange }) => {
         const {
-          asset: thumbnailAsset,
+          available: thumbnailAvailable,
           isVideo,
           media: thumbnailMedia,
           src: thumbnailSrc,
@@ -130,7 +131,7 @@ export default function BackgroundGalleryOrganizerOverlay({
               </label>
             )}
             <div className="h-16 overflow-hidden rounded-lg border border-slate-700 bg-slate-950">
-              {thumbnailAsset.candidates.length > 0 && (
+              {thumbnailAvailable && (
                 <MediaImage
                   media={thumbnailMedia}
                   src={thumbnailSrc}

@@ -46,6 +46,50 @@ The checked-in artifacts are:
 
 Raw traces, screenshots, authentication state, emulator data and logs, detailed network captures, and heap data are written only to ignored output directories and are uploaded as CI artifacts.
 
+## Task 07 media validation
+
+Task 07 has deliberately serial entry points so local validation cannot create a
+large browser or test-worker fan-out:
+
+- `npm run perf:check-media-boundaries` compares the client and Functions policy
+  copies and rejects raw object URLs, direct Storage operations, and reserved
+  generated/staging paths outside reviewed adapters.
+- `npm run test:task07` runs the Task 07 Node tests with concurrency 1, then the
+  focused frontend tests with Jest `--runInBand --watchman=false`.
+- `npm run perf:media` runs the read-only Task 07 Chromium media routes with one
+  Playwright worker against `demo-fnd-perf` only.
+- `npm run perf:media:cross-browser` runs the reduced read-only smoke in Firefox
+  and WebKit, still with one worker.
+- `npm run perf:media:soak` runs for at least ten minutes and at least three
+  complete cycles by default. Each cycle activates all 50 deterministic maps,
+  renders the 200-token fixture board, and proves that the named active-board
+  and outgoing-crossfade leases overlap during every map change before checking
+  settled registry ownership, the exact desktop caps, and no greater than 5%
+  upward trend across the final three samples. `FND_TASK07_SOAK_CYCLES=3..5`
+  changes the minimum cycle count. A shorter developer smoke is accepted only
+  with `FND_TASK07_SOAK_SMOKE=1`; its
+  `FND_TASK07_SOAK_DURATION_MS=30000..300000` setting is not acceptance
+  evidence. Production/scheduled durations can be extended from 600000 through
+  3600000 milliseconds but cannot be shortened. The project always uses one
+  Playwright worker and does not run as part of the ordinary Chromium project.
+
+The pull-request `task07-pr-gate` runs the focused frontend suite, Functions
+lint/build/tests, the media boundary check, Task 07 rules, and Task 07 callable
+integration in one serial job. Node tests use concurrency 1 and the browser
+entry points use one Playwright worker.
+
+The Task 07 fixture uses valid deterministic PNG/JPEG/WebP objects, an EXIF
+orientation case, corrupt and unsupported inputs, a short WAV, a video poster,
+50 maps split across two fixture folders, and the existing large collections.
+Storage seeding is sequential.
+
+The soak is the one state-changing browser benchmark: it refuses any origin
+other than its owned loopback server and the harness is hard-bound to the exact
+`demo-fnd-perf` project. It activates only deterministic fixture maps, and the
+owned emulator process is discarded afterward. It never targets an online
+Firebase project or a live Grigliata board. The smoke override remains a wiring
+check; only a full-duration run can supply ten-minute lifecycle evidence.
+
 ## Budget policy
 
 Blocking budgets reject missing required scenarios or metrics, fixture drift, runtime errors, failed requests, leaked route resources, exposed normal-build instrumentation, and regressions from the accepted baseline. Long-term targets remain visibly failed until their owning implementation task resolves them; target failures do not make Task 01 fail.

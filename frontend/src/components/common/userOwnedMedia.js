@@ -1,9 +1,13 @@
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "../../performance/firestore";
-import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { auth, db } from "../firebaseConfig";
-import { storage } from "../firebaseStorage";
-import { uploadCacheableImage } from "./imageStorage";
+import {
+  deleteLegacyStoragePath,
+  uploadLegacyBlob,
+  uploadLegacyImage,
+} from "./legacyMediaStorage";
+import { tryPersistTask07PersonalMedia } from "../../data/media/personalMediaWriter";
+import { mutatePersonalContent } from "../../data/userData/userDataCommands";
 
 const COLLECTION_CONFIG = {
   tecniche: {
@@ -20,10 +24,21 @@ const COLLECTION_CONFIG = {
   },
 };
 
+const PERSONAL_COMMAND_KINDS = Object.freeze({
+  spells: "spell",
+  tecniche: "tecnica",
+});
+
 const AUTH_WAIT_TIMEOUT_MS = 5000;
 const USER_DATA_TRANSPORT_FIELDS = new Set([
   '_task05',
   '_task05ContentId',
+  'media',
+  'mediaUpdatedAt',
+  'task07MediaRevision',
+  'task07VideoMediaRevision',
+  'videoMedia',
+  'videoMediaUpdatedAt',
   'createdAt',
   'displayName',
   'id',
@@ -160,7 +175,7 @@ async function deleteStoragePath(storagePath) {
   }
 
   try {
-    await deleteObject(ref(storage, storagePath));
+    await deleteLegacyStoragePath(storagePath);
     return true;
   } catch (error) {
     console.warn("Storage cleanup failed for path:", storagePath, error);
@@ -176,14 +191,16 @@ async function uploadFile(collectionKey, userId, itemName, suffix, file, folder)
   const config = getCollectionConfig(collectionKey);
   const safeBase = `${config.prefix}_${userId}_${sanitizeStorageName(itemName)}_${Date.now()}`;
   const storagePath = `${folder}/${safeBase}_${suffix}`;
-  const storageRef = ref(storage, storagePath);
   await ensureStorageUploadAuth();
 
-  const downloadUrl = file?.type?.startsWith("image/")
-    ? (await uploadCacheableImage(storageRef, file)).downloadUrl
-    : await uploadBytes(storageRef, file).then((snapshot) => getDownloadURL(snapshot?.ref || storageRef));
+  const uploaded = file?.type?.startsWith("image/")
+    ? await uploadLegacyImage(storagePath, file)
+    : await uploadLegacyBlob(storagePath, file);
 
-  return { downloadUrl, storagePath };
+  return {
+    downloadUrl: uploaded.downloadUrl,
+    storagePath: uploaded.storagePath || storagePath,
+  };
 }
 
 async function loadUserCollection(userId, collectionKey) {
@@ -206,10 +223,12 @@ async function persistOwnedEntry({
   collectionKey,
   originalName,
   entryData,
+  originalEntity = entryData,
   imageFile = null,
   videoFile = null,
   removeImage = false,
   removeVideo = false,
+  signal = null,
 }) {
   const cleanEntryData = stripUserDataTransportFields(entryData);
   const trimmedName = cleanEntryData?.Nome?.trim();
@@ -225,6 +244,45 @@ async function persistOwnedEntry({
     ...cleanEntryData,
     Nome: trimmedName,
   };
+
+  const task07Entry = { ...nextEntry };
+  if (!removeImage && previousEntry.image_url && !task07Entry.image_url) {
+    task07Entry.image_url = previousEntry.image_url;
+  }
+  if (!removeVideo && previousEntry.video_url && !task07Entry.video_url) {
+    task07Entry.video_url = previousEntry.video_url;
+  }
+  const task07Result = await tryPersistTask07PersonalMedia({
+    userId,
+    collectionKey,
+    originalEntity,
+    entryData: task07Entry,
+    imageFile,
+    videoFile,
+    removeImage,
+    removeVideo,
+    signal,
+  });
+  if (task07Result) {
+    const outcomeNeedsAttention = task07Result.outcomes?.some((outcome) => (
+      outcome?.status === "attached-result-unknown"
+      || outcome?.status === "attach-acknowledgement-unknown"
+    ));
+    if (!outcomeNeedsAttention) {
+      await Promise.allSettled([
+        removeImage
+          ? deleteStorageFileByUrl(previousEntry.image_url)
+          : Promise.resolve(false),
+        removeVideo
+          ? deleteStorageFileByUrl(previousEntry.video_url)
+          : Promise.resolve(false),
+      ]);
+    }
+    return {
+      ...task07Result,
+      data: task07Entry,
+    };
+  }
 
   let uploadedImagePath = null;
   let uploadedVideoPath = null;
@@ -310,6 +368,30 @@ async function persistOwnedEntry({
 }
 
 async function deleteOwnedEntry({ userId, collectionKey, itemName, itemData }) {
+  const contentId = normalizeContentId(itemData?._task05ContentId);
+  const commandKind = PERSONAL_COMMAND_KINDS[collectionKey];
+  if (contentId && commandKind) {
+    await mutatePersonalContent({
+      userId,
+      kind: commandKind,
+      action: "delete",
+      contentId,
+      retryKey: [
+        "task07-personal-delete",
+        collectionKey,
+        userId,
+        contentId,
+        Number(itemData?.task07MediaRevision) || 0,
+        Number(itemData?.task07VideoMediaRevision) || 0,
+      ].join(":"),
+    });
+    await Promise.allSettled([
+      deleteStorageFileByUrl(itemData?.image_url),
+      deleteStorageFileByUrl(itemData?.video_url),
+    ]);
+    return true;
+  }
+
   const { userRef, collection } = await loadUserCollection(userId, collectionKey);
   const currentEntry = itemData || collection[itemName] || null;
 

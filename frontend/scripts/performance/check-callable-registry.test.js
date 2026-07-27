@@ -6,7 +6,7 @@ const { checkCallableRegistry } = require('./check-callable-registry');
 
 test('callable manifest covers Functions exports and frontend acquisition boundaries', () => {
   assert.deepEqual(checkCallableRegistry(), {
-    callableCount: 36,
+    callableCount: 37,
     regions: ['europe-west8', 'europe-west1', 'us-central1'],
   });
 });

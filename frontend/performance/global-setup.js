@@ -28,6 +28,8 @@ const STARTUP_TIMEOUT_MS = 240_000;
 const STARTUP_REQUEST_TIMEOUT_MS = 10_000;
 const STARTUP_INTERVAL_MS = 500;
 const MAX_SEED_BACKGROUND_INVOCATIONS = 50;
+const TASK07_MEDIA_INTEGRATION_ENABLED =
+  process.env.FND_TASK07_MEDIA_INTEGRATION === '1';
 const READINESS_BACKGROUND_TRIGGERS = new Set([
   'europe-west8-updateHpTotal',
   'europe-west8-updateManaTotal',
@@ -42,6 +44,10 @@ const READINESS_BACKGROUND_TRIGGERS = new Set([
   'europe-west8-cleanupTask07RemovedInventoryMedia',
   'europe-west8-cleanupTask07RemovedNpcMedia',
   'europe-west8-cleanupTask07RemovedUserMedia',
+  'europe-west8-syncTask07MusicStreamFromControl',
+  'europe-west8-syncTask07MusicStreamFromPlayback',
+  'europe-west8-syncTask07MusicStreamFromSession',
+  'europe-west8-task07ProcessMediaUpload',
 ]);
 
 const summarizeTriggerActivityText = (contents = '') => {
@@ -349,6 +355,30 @@ module.exports = async () => {
     stage = 'post-seed-health';
     report.health = await collectEmulatorHealth('post-seed');
 
+    if (TASK07_MEDIA_INTEGRATION_ENABLED) {
+      stage = 'task07-callable-integration';
+      const task07Callables = childProcess.spawnSync(
+        process.execPath,
+        [
+          '--test',
+          '--test-concurrency=1',
+          path.join(
+            frontendRoot,
+            'performance',
+            'tests',
+            'task07-media-callables.test.js'
+          ),
+        ],
+        { cwd: frontendRoot, env: process.env, encoding: 'utf8' }
+      );
+      if (task07Callables.status !== 0) {
+        throw new Error(
+          `Task 07 callable integration tests failed.\n${task07Callables.stdout || ''}\n${task07Callables.stderr || ''}`
+        );
+      }
+      process.stdout.write(task07Callables.stdout || '');
+    }
+
     stage = 'disable-measurement-triggers';
     await disableBackgroundTriggersWithRecovery({ projectId });
     triggersDisabled = true;
@@ -359,9 +389,15 @@ module.exports = async () => {
     report.measurementWindow.triggerActivityBaseline = report.triggerActivity;
 
     stage = 'security-rules';
+    const ruleTestFiles = [
+      path.join(frontendRoot, 'performance', 'tests', 'firestore-rules.test.js'),
+      ...(TASK07_MEDIA_INTEGRATION_ENABLED ? [
+        path.join(frontendRoot, 'performance', 'tests', 'task07-media-rules.test.js'),
+      ] : []),
+    ];
     const rules = childProcess.spawnSync(
       process.execPath,
-      ['--test', path.join(frontendRoot, 'performance', 'tests', 'firestore-rules.test.js')],
+      ['--test', '--test-concurrency=1', ...ruleTestFiles],
       { cwd: frontendRoot, env: process.env, encoding: 'utf8' }
     );
     if (rules.status !== 0) {

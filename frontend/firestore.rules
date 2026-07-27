@@ -106,7 +106,11 @@ service cloud.firestore {
       let plan = manifest.get("plan", {});
       let canonicalMedia = manifest.get("media", {});
       let canonicalOriginal = canonicalMedia.get("original", {});
-      return (
+      // Task 07 v1 attachment is now an enumerated Admin transaction. Client
+      // rules retain unchanged existing references for ordinary entity edits,
+      // but no browser write may introduce or replace a media asset ID.
+      // Admin SDK writes bypass this rule after adapter validation.
+      return false && (
           value is map
           && assetId.matches('^m_[a-f0-9]{40}$')
           && hasManifest
@@ -167,7 +171,18 @@ service cloud.firestore {
       let nested = general.get("media", null);
       let hasTopLevel = data.keys().hasAny(["media"]) && topLevel != null;
       let hasNested = general.keys().hasAny(["media"]) && nested != null;
-      return hasTopLevel
+      // Revision counters, attachment timestamps, and the secondary video
+      // slot are written only by the enumerated Admin attachment adapters.
+      // A client may preserve them on a later ordinary edit, but may never
+      // introduce them while creating or replacing a reference.
+      let hasClientSuppliedServerFields = data.keys().hasAny([
+        "task07MediaRevision",
+        "mediaUpdatedAt",
+        "videoMedia",
+        "task07VideoMediaRevision",
+        "videoMediaUpdatedAt"
+      ]);
+      return !hasClientSuppliedServerFields && (hasTopLevel
         ? (
           (
             !hasNested
@@ -193,7 +208,7 @@ service cloud.firestore {
               expectedReferencePath
             )
             : true
-        );
+        ));
     }
 
     function task07MediaAssetId(value) {
@@ -207,6 +222,8 @@ service cloud.firestore {
       let existingGeneral = mapOrEmpty(existingData, "General");
       return task07MediaAssetId(data.get("media", null))
           == task07MediaAssetId(existingData.get("media", null))
+        && task07MediaAssetId(data.get("videoMedia", null))
+          == task07MediaAssetId(existingData.get("videoMedia", null))
         && task07MediaAssetId(nextGeneral.get("media", null))
           == task07MediaAssetId(existingGeneral.get("media", null));
     }
@@ -216,6 +233,16 @@ service cloud.firestore {
       let existingGeneral = mapOrEmpty(existingData, "General");
       return data.get("media", null)
           == existingData.get("media", null)
+        && data.get("task07MediaRevision", null)
+          == existingData.get("task07MediaRevision", null)
+        && data.get("mediaUpdatedAt", null)
+          == existingData.get("mediaUpdatedAt", null)
+        && data.get("videoMedia", null)
+          == existingData.get("videoMedia", null)
+        && data.get("task07VideoMediaRevision", null)
+          == existingData.get("task07VideoMediaRevision", null)
+        && data.get("videoMediaUpdatedAt", null)
+          == existingData.get("videoMediaUpdatedAt", null)
         && nextGeneral.get("media", null)
           == existingGeneral.get("media", null);
     }
@@ -520,6 +547,8 @@ service cloud.firestore {
           "customTemplateId",
           "imageSource",
           "media",
+          "task07MediaRevision",
+          "mediaUpdatedAt",
           "createdAt",
           "createdBy",
           "updatedAt",
@@ -2105,6 +2134,11 @@ service cloud.firestore {
         && isValidGrigliataMusicPlaybackSession(resource.data, sessionId);
     }
 
+    match /grigliata_music_stream/{streamId} {
+      allow get: if isSignedIn() && streamId == "current";
+      allow list, create, update, delete: if false;
+    }
+
     match /grigliata_tokens/{tokenId} {
       allow read: if isSignedIn()
         && (
@@ -2347,6 +2381,8 @@ service cloud.firestore {
           "imageUrl",
           "imagePath",
           "media",
+          "task07MediaRevision",
+          "mediaUpdatedAt",
           "description",
           "notes",
           "createdBy",
@@ -2410,6 +2446,8 @@ service cloud.firestore {
           "imageUrl",
           "imagePath",
           "media",
+          "task07MediaRevision",
+          "mediaUpdatedAt",
           "description",
           "notes",
           "createdBy",

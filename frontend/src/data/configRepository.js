@@ -16,6 +16,7 @@ const CONFIG_DOCUMENT_IDS = Object.freeze({
   COMMON_SPELLS: 'spells_common',
   COMMON_TECHNIQUES: 'tecniche_common',
   LEGACY_UTILS: 'utils',
+  TASK07_MEDIA: 'task07_media',
 });
 
 export const CONFIG_SCHEMA_IDS = Object.freeze([
@@ -36,6 +37,7 @@ const METRIC_KEYS = Object.freeze({
   possibleLists: 'config.possible-lists.get.v1',
   commonSpells: 'config.common-spells.get.v1',
   commonTechniques: 'config.common-techniques.get.v1',
+  task07Media: 'config.task07-media.get.v1',
 });
 
 const INSTANCE_KEYS = Object.freeze({
@@ -44,6 +46,7 @@ const INSTANCE_KEYS = Object.freeze({
   commonSpells: 'config:common-spells',
   commonTechniques: 'config:common-techniques:standalone',
   commonTechniquesLegacyFirst: 'config:common-techniques:legacy-first',
+  task07Media: 'config:task07-media',
   schemaPrefix: 'config:schema:',
 });
 
@@ -146,6 +149,15 @@ export const getCommonTechniques = ({ legacyFirst = false } = {}) => {
   });
 };
 
+export const getTask07MediaControlDocument = () => getConfigCached({
+  metricKey: METRIC_KEYS.task07Media,
+  instanceKey: INSTANCE_KEYS.task07Media,
+  load: () => readUtilsDocument(
+    CONFIG_DOCUMENT_IDS.TASK07_MEDIA,
+    METRIC_KEYS.task07Media
+  ),
+});
+
 export const invalidateConfig = (documentId) => {
   if (CONFIG_SCHEMA_ID_SET.has(documentId)) {
     return invalidate(`${INSTANCE_KEYS.schemaPrefix}${documentId}`);
@@ -164,6 +176,7 @@ export const invalidateConfig = (documentId) => {
     [CONFIG_DOCUMENT_IDS.VARIE]: INSTANCE_KEYS.varie,
     [CONFIG_DOCUMENT_IDS.POSSIBLE_LISTS]: INSTANCE_KEYS.possibleLists,
     [CONFIG_DOCUMENT_IDS.COMMON_SPELLS]: INSTANCE_KEYS.commonSpells,
+    [CONFIG_DOCUMENT_IDS.TASK07_MEDIA]: INSTANCE_KEYS.task07Media,
   };
   const instanceKey = instanceKeyByDocumentId[documentId];
   if (!instanceKey) {

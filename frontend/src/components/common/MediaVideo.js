@@ -7,6 +7,7 @@ import {
 export { resolveMediaVideoAsset };
 
 const MediaVideo = ({
+  compatibilityMode = 'auto',
   fallback = null,
   media,
   onError,
@@ -20,6 +21,7 @@ const MediaVideo = ({
   const [loaded, setLoaded] = useState(false);
   onErrorRef.current = onError;
   const source = useResolvedMediaSource(media, {
+    compatibilityMode,
     fallbackSrc: src,
     kind: 'video',
     variant: 'original',

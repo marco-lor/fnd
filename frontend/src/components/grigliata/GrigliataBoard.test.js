@@ -27,6 +27,11 @@ import {
   __resetPrivateMediaAssetsForTests,
 } from '../common/privateMediaAssets';
 import {
+  __getImageAssetRegistryStats,
+  __resetImageAssetRegistry,
+  IMAGE_ASSET_PIN_NAMES,
+} from '../common/imageAssets/imageAssetRegistry';
+import {
   FOG_RASTER_MASK_ENCODING,
   FOG_RASTER_PROFILE_ID,
   createEmptyFogRasterMaskBytes,
@@ -69,6 +74,10 @@ jest.mock('../common/imageAssets/useImageAsset', () => ({
     image: null,
     error: null,
   })),
+}));
+jest.mock('../../data/media/useTask07MediaReadMode', () => ({
+  __esModule: true,
+  default: jest.fn(() => 'derivative-read'),
 }));
 jest.mock('../common/DiceRoller', () => function MockDiceRoller(props) {
   return (
@@ -557,6 +566,7 @@ describe('GrigliataBoard', () => {
 
   afterEach(() => {
     __resetPrivateMediaAssetsForTests();
+    __resetImageAssetRegistry();
     jest.clearAllTimers();
     jest.useRealTimers();
     resizeObserverInstance = null;
@@ -648,24 +658,24 @@ describe('GrigliataBoard', () => {
     expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
   });
 
-  test('loads the canonical full-quality board derivative through an authenticated lease', async () => {
+  test('loads the canonical full-quality original through an authenticated active-board lease', async () => {
     useReducedMotion.mockReturnValue(true);
     const storage = { name: 'authenticated-storage' };
     const ref = jest.fn((_storage, path) => ({ path }));
-    const getBlob = jest.fn(async () => new Blob(['data'], { type: 'image/webp' }));
+    const getBlob = jest.fn(async () => new Blob(['data'], { type: 'image/png' }));
     __configurePrivateMediaAssetsForTests({
       loadStorageApi: jest.fn(async () => ({ storage, ref, getBlob })),
-      createObjectURL: jest.fn(() => 'blob:private-board-derivative'),
+      createObjectURL: jest.fn(() => 'blob:private-board-original'),
       revokeObjectURL: jest.fn(),
     });
     const assetId = `m_${'d'.repeat(40)}`;
-    const board = {
-      path: `media/v1/map/dm/${assetId}/derivatives/v1/board.webp`,
-      generation: '302',
+    const original = {
+      path: `media_assets/v1/signed-in/dm/${assetId}/17/original`,
+      generation: '301',
       bytes: 4,
-      contentType: 'image/webp',
-      width: 2560,
-      height: 1440,
+      contentType: 'image/png',
+      width: 3840,
+      height: 2160,
     };
 
     render(
@@ -677,16 +687,11 @@ describe('GrigliataBoard', () => {
             imageWidth: 0,
             imageHeight: 0,
             media: {
+              schemaVersion: 1,
+              state: 'ready',
               kind: 'map',
-              original: {
-                path: `media/v1/map/dm/${assetId}/original/source.png`,
-                generation: '301',
-                bytes: 4,
-                contentType: 'image/png',
-                width: 3840,
-                height: 2160,
-              },
-              variants: { board },
+              original,
+              variants: {},
             },
           },
         })}
@@ -695,13 +700,16 @@ describe('GrigliataBoard', () => {
 
     const activeImage = await screen.findByTestId('battlemap-image-active');
     expect(getBlob).toHaveBeenCalledTimes(1);
-    expect(getBlob).toHaveBeenCalledWith({ path: board.path }, board.bytes);
-    expect(useImageAssetSnapshot).toHaveBeenCalledWith('blob:private-board-derivative');
-    expect(activeImage).toHaveAttribute('data-width', '2560');
-    expect(activeImage).toHaveAttribute('data-height', '1440');
+    expect(getBlob).toHaveBeenCalledWith({ path: original.path }, original.bytes);
+    expect(useImageAssetSnapshot).toHaveBeenCalledWith('blob:private-board-original');
+    expect(activeImage).toHaveAttribute('data-width', '3840');
+    expect(activeImage).toHaveAttribute('data-height', '2160');
+    expect(__getImageAssetRegistryStats().namedPins).toEqual([
+      IMAGE_ASSET_PIN_NAMES.ACTIVE_BOARD,
+    ]);
   });
 
-  test('renders video battlemap backgrounds through the existing Konva image layer', async () => {
+  test('renders canonical video battlemap backgrounds through the existing Konva image layer', async () => {
     useReducedMotion.mockReturnValue(true);
     const storage = { name: 'authenticated-storage' };
     const ref = jest.fn((_storage, path) => ({ path }));
@@ -743,7 +751,7 @@ describe('GrigliataBoard', () => {
     try {
       const assetId = `m_${'e'.repeat(40)}`;
       const original = {
-        path: `media/v1/map-video/dm/${assetId}/original/source.mp4`,
+        path: `media_assets/v1/signed-in/dm/${assetId}/18/original`,
         generation: '401',
         bytes: 4,
         contentType: 'video/mp4',
@@ -760,6 +768,8 @@ describe('GrigliataBoard', () => {
               imageHeight: 1620,
               assetType: 'video',
               media: {
+                schemaVersion: 1,
+                state: 'ready',
                 kind: 'map-video',
                 original,
               },
@@ -835,7 +845,7 @@ describe('GrigliataBoard', () => {
     try {
       const assetId = `m_${'f'.repeat(40)}`;
       const original = {
-        path: `media/v1/map-video/dm/${assetId}/original/source.mp4`,
+        path: `media_assets/v1/signed-in/dm/${assetId}/19/original`,
         generation: '501',
         bytes: 4,
         contentType: 'video/mp4',
@@ -866,6 +876,8 @@ describe('GrigliataBoard', () => {
               imageWidth: 1920,
               imageHeight: 1080,
               media: {
+                schemaVersion: 1,
+                state: 'ready',
                 kind: 'map-video',
                 original,
               },
@@ -924,7 +936,7 @@ describe('GrigliataBoard', () => {
       revokeObjectURL: jest.fn(),
     });
     const thumbnail = {
-      path: `media/v1/avatar/user/m_${'a'.repeat(40)}/derivatives/v1/thumbnail.webp`,
+      path: `media_assets/v1/signed-in/user/m_${'a'.repeat(40)}/20/thumbnail`,
       generation: '1',
       bytes: 4,
       contentType: 'image/webp',
@@ -945,6 +957,7 @@ describe('GrigliataBoard', () => {
             media: {
               kind: 'avatar',
               schemaVersion: 1,
+              state: 'ready',
               variants: { thumbnail },
             },
             placed: true,
@@ -3041,6 +3054,10 @@ describe('GrigliataBoard', () => {
     expect(screen.getByTestId('battlemap-image-outgoing')).toBeInTheDocument();
     expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-width', '1920');
     expect(screen.getByTestId('battlemap-image-outgoing')).toHaveAttribute('data-width', '1280');
+    expect(__getImageAssetRegistryStats().namedPins).toEqual([
+      IMAGE_ASSET_PIN_NAMES.ACTIVE_BOARD,
+      IMAGE_ASSET_PIN_NAMES.CROSSFADE,
+    ]);
 
     await act(async () => {
       jest.advanceTimersByTime(240);
@@ -3048,6 +3065,9 @@ describe('GrigliataBoard', () => {
 
     expect(screen.getByTestId('battlemap-image-active')).toHaveAttribute('data-width', '1920');
     expect(screen.queryByTestId('battlemap-image-outgoing')).not.toBeInTheDocument();
+    expect(__getImageAssetRegistryStats().namedPins).toEqual([
+      IMAGE_ASSET_PIN_NAMES.ACTIVE_BOARD,
+    ]);
   });
 
   test('fades into the narration battlemap without showing the combat map underneath', async () => {

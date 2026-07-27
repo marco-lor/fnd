@@ -1,13 +1,18 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  buildDeterministicMediaObjects,
+  buildDeterministicPng,
   buildDocuments,
   buildManifest,
+  buildShortWav,
   clearEmulators,
   FIXTURE_VERSION,
   PERFORMANCE_STORAGE_BUCKET,
   runSeedFixture,
   TASK06_BACKEND_CONFIG,
+  TASK07_MEDIA_CONTROL,
+  TASK07_STORAGE_OBJECT_COUNT,
 } = require('./fixtures');
 const fixtureManifest = require('../../performance/fixture-manifest.json');
 
@@ -25,15 +30,37 @@ test('fixture generation is stable and contains the required scale', () => {
   assert.equal(first.counts.echi_npcs, 500);
   assert.equal(first.counts.map_markers, 2000);
   assert.equal(first.counts.encounters, 100);
+  assert.equal(first.counts.grigliata_backgrounds, 50);
+  assert.equal(first.counts.grigliata_gallery_folders, 2);
+  assert.equal(first.counts.grigliata_music_stream, 1);
   assert.equal(first.counts.grigliata_token_placements, 200);
   assert.equal(first.counts.grigliata_fog_memory_tiles, 1024);
   assert.equal(first.counts.app_config, 1);
+  assert.equal(first.storageObjectCount, TASK07_STORAGE_OBJECT_COUNT);
   assert.deepEqual(
     firstDocuments.find(({path: documentPath}) => (
       documentPath === 'app_config/task06_backend'
     ))?.data,
     TASK06_BACKEND_CONFIG
   );
+  assert.deepEqual(
+    firstDocuments.find(({path: documentPath}) => (
+      documentPath === 'utils/task07_media'
+    ))?.data,
+    TASK07_MEDIA_CONTROL
+  );
+  const galleryFolderIds = new Set(firstDocuments
+    .filter(({ path: documentPath }) => documentPath.startsWith('grigliata_gallery_folders/'))
+    .map(({ path: documentPath }) => documentPath.split('/')[1]));
+  const galleryBackgrounds = firstDocuments
+    .filter(({ path: documentPath }) => documentPath.startsWith('grigliata_backgrounds/'));
+  assert.deepEqual(galleryFolderIds, new Set(['fixture-atlas-a', 'fixture-atlas-b']));
+  for (const folderId of galleryFolderIds) {
+    assert.equal(
+      galleryBackgrounds.filter(({ data }) => data.galleryFolderId === folderId).length,
+      25
+    );
+  }
 
   const boardState = firstDocuments.find(({ path: documentPath }) => (
     documentPath === 'grigliata_state/current'
@@ -48,12 +75,52 @@ test('fixture generation is stable and contains the required scale', () => {
 
   assert.equal(new Set(firstDocuments.map((entry) => entry.path)).size, firstDocuments.length);
   assert.equal(fixtureManifest.documentCount, first.documentCount);
+  assert.equal(fixtureManifest.storageObjectCount, first.storageObjectCount);
   assert.equal(fixtureManifest.canonicalHash, first.hash);
   assert.deepEqual(fixtureManifest.counts, Object.fromEntries(
     Object.entries(first.counts).filter(([collectionName]) => (
       fixtureManifest.counts[collectionName] !== undefined
     ))
   ));
+});
+
+test('Task 07 media catalog is deterministic, realistic, and format-complete', () => {
+  const pngA = buildDeterministicPng({ width: 96, height: 64, seed: 7 });
+  const pngB = buildDeterministicPng({ width: 96, height: 64, seed: 7 });
+  assert.deepEqual(pngA, pngB);
+  assert.equal(pngA.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+  assert.equal(pngA.readUInt32BE(16), 96);
+  assert.equal(pngA.readUInt32BE(20), 64);
+
+  const wav = buildShortWav();
+  assert.equal(wav.subarray(0, 4).toString('ascii'), 'RIFF');
+  assert.equal(wav.subarray(8, 12).toString('ascii'), 'WAVE');
+
+  const objects = buildDeterministicMediaObjects();
+  assert.equal(objects.length, TASK07_STORAGE_OBJECT_COUNT);
+  assert.equal(objects.filter(({ caseId }) => caseId === 'valid-png').length, 128);
+  assert.deepEqual(new Set(objects.map(({ caseId }) => caseId)), new Set([
+    'valid-png',
+    'valid-jpeg',
+    'valid-webp',
+    'exif-orientation-6',
+    'corrupt-image',
+    'unsupported-gif',
+    'short-audio',
+    'video-poster',
+    'corrupt-video',
+  ]));
+  assert.equal(new Set(objects.map(({ path: objectPath }) => objectPath)).size, objects.length);
+  const jpeg = objects.find(({ caseId }) => caseId === 'valid-jpeg').contents;
+  assert.equal(jpeg.subarray(0, 2).toString('hex'), 'ffd8');
+  assert.equal(jpeg.subarray(-2).toString('hex'), 'ffd9');
+  const webp = objects.find(({ caseId }) => caseId === 'valid-webp').contents;
+  assert.equal(webp.subarray(0, 4).toString('ascii'), 'RIFF');
+  assert.equal(webp.subarray(8, 12).toString('ascii'), 'WEBP');
+  assert.match(
+    objects.find(({ caseId }) => caseId === 'exif-orientation-6').contents.toString('latin1'),
+    /Exif/
+  );
 });
 
 test('emulator cleanup clears exact loopback services then the whole demo Storage bucket', async () => {

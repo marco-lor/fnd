@@ -5,6 +5,8 @@ import { db } from '../../../firebaseConfig';
 import { doc, getDoc } from "../../../../performance/firestore";
 import { getSchema } from '../../../../data/configRepository';
 import { saveTecnicaForUser } from '../../../common/userOwnedMedia';
+import useObjectUrl from '../../../common/useObjectUrl';
+import useTask07MediaOperationOwner from '../../../../data/media/useTask07MediaOperationOwner';
 
 // --- Style definition moved here ---
 const sleekButtonStyle = "w-36 px-2 py-1 bg-gradient-to-r from-blue-800 to-indigo-900 hover:from-blue-700 hover:to-indigo-800 text-white text-xs font-medium rounded-md transition-all duration-150 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 shadow-sm";
@@ -28,14 +30,15 @@ export function AddTecnicaButton({ onClick }) {
 
 // --- Existing Overlay Component (unchanged logic) ---
 export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
+  const task07MediaOperationOwner = useTask07MediaOperationOwner();
   const [schema, setSchema] = useState(null);
   const [tecnicaFormData, setTecnicaFormData] = useState({});
   const [imageFile, setImageFile] = useState(null);
-  const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
   const [videoFile, setVideoFile] = useState(null);
-  const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
   const [userName, setUserName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const imagePreviewUrl = useObjectUrl(imageFile);
+  const videoPreviewUrl = useObjectUrl(videoFile);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -75,36 +78,17 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
     fetchData();
   }, [userId]);
 
-  useEffect(() => {
-    return () => {
-      if (imagePreviewUrl?.startsWith('blob:')) {
-        URL.revokeObjectURL(imagePreviewUrl);
-      }
-      if (videoPreviewUrl?.startsWith('blob:')) {
-        URL.revokeObjectURL(videoPreviewUrl);
-      }
-    };
-  }, [imagePreviewUrl, videoPreviewUrl]);
-
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      if (imagePreviewUrl?.startsWith('blob:')) {
-        URL.revokeObjectURL(imagePreviewUrl);
-      }
       setImageFile(file);
-      setImagePreviewUrl(URL.createObjectURL(file));
     }
   };
 
   const handleVideoChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      if (videoPreviewUrl?.startsWith('blob:')) {
-        URL.revokeObjectURL(videoPreviewUrl);
-      }
       setVideoFile(file);
-      setVideoPreviewUrl(URL.createObjectURL(file));
     }
   };
 
@@ -125,13 +109,14 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
         Effetto: tecnicaFormData.Effetto || ""
       };
 
-      await saveTecnicaForUser({
+      await task07MediaOperationOwner.run((signal) => saveTecnicaForUser({
         userId,
         originalName: tecnicaName,
         entryData: tecnicaData,
         imageFile,
         videoFile,
-      });
+        signal,
+      }));
 
       onClose(true);
     } catch (error) {

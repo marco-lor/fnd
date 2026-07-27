@@ -7,6 +7,7 @@ import {
   doc, getDoc,
 } from "../../../../performance/firestore";
 import { getSchema } from '../../../../data/configRepository';
+import useTask07MediaOperationOwner from '../../../../data/media/useTask07MediaOperationOwner';
 
 /**
  * EditSpellOverlay – API unchanged for callers.
@@ -19,6 +20,7 @@ import { getSchema } from '../../../../data/configRepository';
  *                      false ⇒ cancelled / error
  */
 export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
+  const task07MediaOperationOwner = useTask07MediaOperationOwner();
   const [schema,   setSchema]   = useState(null);
   const [userName, setUserName] = useState("");
 
@@ -49,15 +51,17 @@ export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
         try { delete newData.azione; } catch {}
       }
 
-      await saveSpellForUser({
+      await task07MediaOperationOwner.run((signal) => saveSpellForUser({
         userId,
         originalName: spellName,
+        originalEntity: spellData,
         entryData: newData,
         imageFile,
         videoFile,
         removeImage,
         removeVideo,
-      });
+        signal,
+      }));
       onClose(true);
 
     } catch (err) {

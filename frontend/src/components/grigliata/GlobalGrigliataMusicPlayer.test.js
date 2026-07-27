@@ -1,141 +1,118 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import GlobalGrigliataMusicPlayer, {
+  buildLegacyGrigliataMusicStream,
+  EMPTY_GRIGLIATA_MUSIC_STREAM,
+  GRIGLIATA_MUSIC_STREAM_COLLECTION,
+  GRIGLIATA_MUSIC_STREAM_DOC_ID,
   MAX_GLOBAL_GRIGLIATA_MUSIC_AUDIO_NODES,
   MAX_GLOBAL_GRIGLIATA_MUSIC_SESSIONS,
-  subscribeToGrigliataMusicPlayback,
-  subscribeToGrigliataMusicPlaybackSessions,
+  isTask07MusicStreamRevisionAccepted,
+  normalizeGrigliataMusicStream,
+  subscribeToGrigliataMusicStream,
+  task07MusicStreamsMatch,
 } from './GlobalGrigliataMusicPlayer';
 import { useAuth } from '../../AuthContext';
 import * as firestoreRuntime from '../../performance/firestore';
 import * as performanceRuntime from '../../performance/runtime';
 
-const mockDocs = {};
-const mockListeners = [];
-let mockPlaybackSessions = [];
-const mockSessionListeners = [];
-
-const mockNotifyListeners = () => {
-  mockListeners.forEach((listener) => {
-    listener.onPlaybackState(mockDocs['grigliata_music_playback/current']);
-  });
-};
-
-const setPlaybackDoc = (value) => {
-  mockDocs['grigliata_music_playback/current'] = value;
-  mockNotifyListeners();
-};
-
-const mockNotifySessionListeners = () => {
-  mockSessionListeners.forEach((listener) => {
-    listener.onPlaybackSessions(mockPlaybackSessions);
-  });
-};
-
-const setPlaybackSessions = (value) => {
-  mockPlaybackSessions = value;
-  mockNotifySessionListeners();
-};
-
-const prepareAudioElement = (audio) => {
-  let currentTime = 0;
-
-  Object.defineProperty(audio, 'readyState', {
-    configurable: true,
-    get: () => 4,
-  });
-
-  Object.defineProperty(audio, 'currentTime', {
-    configurable: true,
-    get: () => currentTime,
-    set: (value) => {
-      currentTime = value;
-    },
-  });
-};
-
-jest.mock('../../AuthContext', () => ({
-  useAuth: jest.fn(),
-}));
-
-jest.mock('../firebaseConfig', () => ({
-  db: {},
-}));
-
-jest.mock('firebase/firestore', () => ({
+jest.mock('../../AuthContext', () => ({ useAuth: jest.fn() }));
+jest.mock('../firebaseConfig', () => ({ db: { name: 'test-db' } }));
+jest.mock('../../performance/firestore', () => ({
   collection: jest.fn(),
   doc: jest.fn(),
-  limit: jest.fn(),
+  labelFirestoreTarget: jest.fn((target) => target),
   onSnapshot: jest.fn(),
-  orderBy: jest.fn(),
-  query: jest.fn(),
-  where: jest.fn(),
+}));
+jest.mock('../../performance/runtime', () => ({
+  withAsyncResourceOwner: jest.fn((_owner, callback) => callback()),
 }));
 
+const makeSession = (id, overrides = {}) => ({
+  id,
+  status: overrides.status || 'playing',
+  trackId: id,
+  trackName: `Track ${id}`,
+  audioUrl: `https://example.com/audio/${id}.mp3`,
+  durationMs: 120000,
+  offsetMs: 2000,
+  loop: false,
+  startedAtMs: overrides.status === 'paused' || overrides.status === 'stopped' ? 0 : 9000,
+  updatedAtMs: 9000,
+  updatedAt: new Date(9000),
+  ...overrides,
+});
+
+const makeStream = (sessions = [], overrides = {}) => ({
+  schemaVersion: 1,
+  revision: 1,
+  volume: 0.4,
+  sessions,
+  sourceHash: 'a'.repeat(64),
+  updatedAt: new Date('2026-07-27T00:00:00.000Z'),
+  ...overrides,
+});
+
 describe('GlobalGrigliataMusicPlayer', () => {
+  let authState;
+  let streamHandlers;
+  let subscribeToMusicStream;
+  let unsubscribe;
   let playSpy;
   let pauseSpy;
   let loadSpy;
   let dateNowSpy;
-  let subscribeToPlaybackState;
-  let subscribeToPlaybackSessions;
+  let originalReadyState;
+  let originalCurrentTime;
+  let mediaTimes;
+
+  const candidatePlayer = () => (
+    <GlobalGrigliataMusicPlayer
+      musicModeOverride="derivative-read"
+      subscribeToMusicStream={subscribeToMusicStream}
+    />
+  );
+
+  const emitStream = async (stream) => {
+    await act(async () => {
+      streamHandlers.onMusicStream(stream);
+    });
+  };
 
   beforeEach(() => {
-    mockListeners.splice(0, mockListeners.length);
-    mockSessionListeners.splice(0, mockSessionListeners.length);
-    mockPlaybackSessions = [];
-    mockDocs['grigliata_music_playback/current'] = {
-      status: 'stopped',
-      trackId: '',
-      trackName: '',
-      audioUrl: '',
-      durationMs: 0,
-      offsetMs: 0,
-      volume: 0.65,
-      startedAt: null,
-      commandId: '',
-      updatedBy: '',
-    };
-
-    useAuth.mockReturnValue({
-      user: {
-        uid: 'user-1',
-      },
-      userData: {
-        settings: {},
-      },
+    authState = { user: { uid: 'user-1' }, userData: { settings: {} } };
+    useAuth.mockImplementation(() => authState);
+    unsubscribe = jest.fn();
+    streamHandlers = null;
+    subscribeToMusicStream = jest.fn((onMusicStream, onError) => {
+      streamHandlers = { onMusicStream, onError };
+      onMusicStream(makeStream());
+      return unsubscribe;
     });
 
-    subscribeToPlaybackState = jest.fn((onPlaybackState) => {
-      const listener = { onPlaybackState };
-      mockListeners.push(listener);
-      onPlaybackState(mockDocs['grigliata_music_playback/current']);
+    firestoreRuntime.doc.mockReset();
+    firestoreRuntime.labelFirestoreTarget.mockReset();
+    firestoreRuntime.labelFirestoreTarget.mockImplementation((target) => target);
+    firestoreRuntime.onSnapshot.mockReset();
+    performanceRuntime.withAsyncResourceOwner.mockClear();
+    performanceRuntime.withAsyncResourceOwner.mockImplementation((_owner, callback) => callback());
 
-      return () => {
-        const listenerIndex = mockListeners.indexOf(listener);
-        if (listenerIndex >= 0) {
-          mockListeners.splice(listenerIndex, 1);
-        }
-      };
+    mediaTimes = new WeakMap();
+    originalReadyState = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'readyState');
+    originalCurrentTime = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime');
+    Object.defineProperty(HTMLMediaElement.prototype, 'readyState', {
+      configurable: true,
+      get: () => 4,
     });
-
-    subscribeToPlaybackSessions = jest.fn((onPlaybackSessions) => {
-      const listener = { onPlaybackSessions };
-      mockSessionListeners.push(listener);
-      onPlaybackSessions(mockPlaybackSessions);
-
-      return () => {
-        const listenerIndex = mockSessionListeners.indexOf(listener);
-        if (listenerIndex >= 0) {
-          mockSessionListeners.splice(listenerIndex, 1);
-        }
-      };
+    Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', {
+      configurable: true,
+      get() { return mediaTimes.get(this) || 0; },
+      set(value) { mediaTimes.set(this, value); },
     });
-
     playSpy = jest.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve());
     pauseSpy = jest.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
     loadSpy = jest.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {});
-    dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(10_000);
+    dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(10000);
   });
 
   afterEach(() => {
@@ -143,594 +120,404 @@ describe('GlobalGrigliataMusicPlayer', () => {
     pauseSpy.mockRestore();
     loadSpy.mockRestore();
     dateNowSpy.mockRestore();
-  });
-
-  test('owns its global Firestore subscriptions as shell resources', () => {
-    const playbackTarget = { path: 'grigliata_music_playback/current' };
-    const sessionsTarget = { path: 'grigliata_music_playback_sessions' };
-    const statusConstraint = { type: 'where-status-active' };
-    const newestConstraint = { type: 'order-updated-desc' };
-    const sessionLimitConstraint = { type: 'limit-active-sessions' };
-    const sessionsQuery = { path: 'grigliata_music_playback_sessions?active' };
-    firestoreRuntime.doc.mockReturnValueOnce(playbackTarget);
-    firestoreRuntime.collection.mockReturnValueOnce(sessionsTarget);
-    firestoreRuntime.where.mockReturnValueOnce(statusConstraint);
-    firestoreRuntime.orderBy.mockReturnValueOnce(newestConstraint);
-    firestoreRuntime.limit.mockReturnValueOnce(sessionLimitConstraint);
-    firestoreRuntime.query.mockReturnValueOnce(sessionsQuery);
-    const snapshotSpy = jest.spyOn(firestoreRuntime, 'onSnapshot').mockReturnValue(jest.fn());
-    const ownerSpy = jest.spyOn(performanceRuntime, 'withAsyncResourceOwner');
-    const labelSpy = jest.spyOn(firestoreRuntime, 'labelFirestoreTarget');
-
-    try {
-      subscribeToGrigliataMusicPlayback(jest.fn(), jest.fn());
-      subscribeToGrigliataMusicPlaybackSessions(jest.fn(), jest.fn());
-
-      expect(firestoreRuntime.where).toHaveBeenCalledWith('status', 'in', ['playing', 'paused']);
-      expect(firestoreRuntime.orderBy).toHaveBeenCalledWith('updatedAt', 'desc');
-      expect(firestoreRuntime.limit).toHaveBeenCalledWith(MAX_GLOBAL_GRIGLIATA_MUSIC_SESSIONS);
-      expect(firestoreRuntime.query).toHaveBeenCalledWith(
-        sessionsTarget,
-        statusConstraint,
-        newestConstraint,
-        sessionLimitConstraint
-      );
-      expect(ownerSpy).toHaveBeenCalledTimes(2);
-      expect(ownerSpy.mock.calls.every(([owner]) => owner === 'shell')).toBe(true);
-      expect(labelSpy).toHaveBeenNthCalledWith(
-        1,
-        playbackTarget,
-        'grigliata.music-playback.subscribe.v1',
-        'shell'
-      );
-      expect(labelSpy).toHaveBeenNthCalledWith(
-        2,
-        sessionsQuery,
-        'grigliata.music-sessions.subscribe.v1',
-        'shell'
-      );
-    } finally {
-      ownerSpy.mockRestore();
-      labelSpy.mockRestore();
-      snapshotSpy.mockRestore();
+    if (originalReadyState) {
+      Object.defineProperty(HTMLMediaElement.prototype, 'readyState', originalReadyState);
+    } else {
+      delete HTMLMediaElement.prototype.readyState;
+    }
+    if (originalCurrentTime) {
+      Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', originalCurrentTime);
+    } else {
+      delete HTMLMediaElement.prototype.currentTime;
     }
   });
 
-  test('reacts to playing, paused, and stopped playback states', async () => {
-    const { container } = render(
-      <GlobalGrigliataMusicPlayer subscribeToPlaybackState={subscribeToPlaybackState} />
+  test('owns exactly one authenticated-shell listener on the compact stream document', () => {
+    const target = { path: 'grigliata_music_stream/current' };
+    const onMusicStream = jest.fn();
+    const snapshotUnsubscribe = jest.fn();
+    firestoreRuntime.doc.mockReturnValue(target);
+    firestoreRuntime.onSnapshot.mockReturnValue(snapshotUnsubscribe);
+
+    const result = subscribeToGrigliataMusicStream(onMusicStream, jest.fn());
+
+    expect(firestoreRuntime.doc).toHaveBeenCalledWith(
+      expect.any(Object),
+      GRIGLIATA_MUSIC_STREAM_COLLECTION,
+      GRIGLIATA_MUSIC_STREAM_DOC_ID
     );
-    const audio = container.querySelector('audio');
-    prepareAudioElement(audio);
-
-    await waitFor(() => {
-      expect(subscribeToPlaybackState).toHaveBeenCalledTimes(1);
-    });
-
-    playSpy.mockClear();
-    pauseSpy.mockClear();
-
-    await act(async () => {
-      setPlaybackDoc({
-        status: 'playing',
-        trackId: 'track-1',
-        trackName: 'Battle Theme',
-        audioUrl: 'https://example.com/audio/battle-theme.mp3',
-        durationMs: 120_000,
-        offsetMs: 2_000,
-        volume: 0.35,
-        startedAt: { toMillis: () => 7_000 },
-        commandId: 'cmd-play',
-        updatedBy: 'user-1',
-      });
-    });
-
-    await waitFor(() => {
-      expect(playSpy).toHaveBeenCalled();
-    });
-
-    expect(audio.currentTime).toBe(5);
-    expect(audio.volume).toBeCloseTo(0.35);
-
-    await act(async () => {
-      setPlaybackDoc({
-        status: 'paused',
-        trackId: 'track-1',
-        trackName: 'Battle Theme',
-        audioUrl: 'https://example.com/audio/battle-theme.mp3',
-        durationMs: 120_000,
-        offsetMs: 9_000,
-        volume: 0.48,
-        startedAt: null,
-        commandId: 'cmd-pause',
-        updatedBy: 'user-1',
-      });
-    });
-
-    await waitFor(() => {
-      expect(audio.currentTime).toBe(9);
-    });
-
-    expect(pauseSpy).toHaveBeenCalled();
-    expect(audio.volume).toBeCloseTo(0.48);
-
-    await act(async () => {
-      setPlaybackDoc({
-        status: 'stopped',
-        trackId: '',
-        trackName: '',
-        audioUrl: '',
-        durationMs: 0,
-        offsetMs: 0,
-        volume: 0.2,
-        startedAt: null,
-        commandId: 'cmd-stop',
-        updatedBy: 'user-1',
-      });
-    });
-
-    await waitFor(() => {
-      expect(audio.getAttribute('src')).toBe(null);
-    });
-
-    expect(audio.currentTime).toBe(0);
-    expect(audio.volume).toBeCloseTo(0.2);
+    expect(firestoreRuntime.labelFirestoreTarget).toHaveBeenCalledWith(
+      target,
+      'grigliata.music-stream.subscribe.v1',
+      'shell'
+    );
+    expect(firestoreRuntime.onSnapshot).toHaveBeenCalledTimes(1);
+    expect(performanceRuntime.withAsyncResourceOwner).toHaveBeenCalledTimes(1);
+    expect(performanceRuntime.withAsyncResourceOwner).toHaveBeenCalledWith('shell', expect.any(Function));
+    expect(result).toBe(snapshotUnsubscribe);
   });
 
-  test('caps shared playback at one audio node and selects the newest bounded session', async () => {
-    setPlaybackDoc({
-      status: 'stopped',
-      trackId: '',
-      trackName: '',
-      audioUrl: '',
-      durationMs: 0,
-      offsetMs: 0,
-      volume: 0.4,
-      startedAt: null,
-      commandId: 'cmd-volume',
-      updatedBy: 'user-1',
-    });
-
-    const { container } = render(
-      <GlobalGrigliataMusicPlayer
-        subscribeToPlaybackState={subscribeToPlaybackState}
-        subscribeToPlaybackSessions={subscribeToPlaybackSessions}
-      />
-    );
-
-    await waitFor(() => {
-      expect(subscribeToPlaybackState).toHaveBeenCalledTimes(1);
-      expect(subscribeToPlaybackSessions).toHaveBeenCalledTimes(1);
-    });
-
-    const activeSessions = [
-      {
-        id: 'track-1',
-        status: 'playing',
-        trackId: 'track-1',
-        trackName: 'Battle Theme',
-        audioUrl: 'https://example.com/audio/battle-theme.mp3',
-        durationMs: 120_000,
-        offsetMs: 2_000,
-        loop: false,
-        startedAt: { toMillis: () => 7_000 },
-        commandId: 'cmd-battle',
-        updatedBy: 'user-1',
-      },
-      {
-        id: 'track-2',
-        status: 'playing',
-        trackId: 'track-2',
-        trackName: 'Cavern Drone',
-        audioUrl: 'https://example.com/audio/cavern-drone.mp3',
-        durationMs: 240_000,
-        offsetMs: 4_000,
-        loop: true,
-        startedAt: { toMillis: () => 9_000 },
-        commandId: 'cmd-drone',
-        updatedBy: 'user-1',
-      },
+  test('requires the exact versioned envelope and rejects revision downgrade or conflict', () => {
+    const diagnostic = jest.fn();
+    const invalidStreams = [
+      makeStream([], { schemaVersion: 2 }),
+      makeStream([], { revision: 0 }),
+      makeStream([], { sourceHash: 'not-a-hash' }),
+      makeStream([], { updatedAt: null }),
+      makeStream([], { volume: '0.4' }),
     ];
-
-    await act(async () => {
-      setPlaybackSessions(activeSessions);
+    invalidStreams.forEach((stream) => {
+      expect(normalizeGrigliataMusicStream(stream, diagnostic))
+        .toBe(EMPTY_GRIGLIATA_MUSIC_STREAM);
     });
+    expect(diagnostic).toHaveBeenCalledTimes(invalidStreams.length);
+    expect(diagnostic).toHaveBeenCalledWith('invalid-envelope', 0);
 
-    await waitFor(() => {
-      expect(container.querySelectorAll('audio')).toHaveLength(MAX_GLOBAL_GRIGLIATA_MUSIC_AUDIO_NODES);
-    });
-
-    const audio = container.querySelector('audio');
-    prepareAudioElement(audio);
-    playSpy.mockClear();
-    pauseSpy.mockClear();
-
-    await act(async () => {
-      setPlaybackSessions(activeSessions.map((session) => ({
-        ...session,
-        commandId: `${session.commandId}-resync`,
-      })));
-    });
-
-    await waitFor(() => {
-      expect(playSpy).toHaveBeenCalledTimes(1);
-    });
-
-    expect(audio.dataset.grigliataAudioUrl).toBe('https://example.com/audio/cavern-drone.mp3');
-    expect(audio.currentTime).toBe(5);
-    expect(audio.loop).toBe(true);
-    expect(audio.volume).toBeCloseTo(0.4);
-
-    await act(async () => {
-      setPlaybackDoc({
-        status: 'stopped',
-        trackId: '',
-        trackName: '',
-        audioUrl: '',
-        durationMs: 0,
-        offsetMs: 0,
-        volume: 0.22,
-        startedAt: null,
-        commandId: 'cmd-volume-2',
-        updatedBy: 'user-1',
-      });
-    });
-
-    await waitFor(() => {
-      expect(audio.volume).toBeCloseTo(0.22);
-    });
-
-    await act(async () => {
-      setPlaybackSessions([activeSessions[0]]);
-    });
-
-    await waitFor(() => {
-      expect(container.querySelectorAll('audio')).toHaveLength(MAX_GLOBAL_GRIGLIATA_MUSIC_AUDIO_NODES);
-    });
-    expect(audio.getAttribute('src')).toBe(null);
-    expect(container.querySelector('audio').dataset.grigliataAudioUrl).toBe(
-      'https://example.com/audio/battle-theme.mp3'
-    );
+    const revisionTwo = normalizeGrigliataMusicStream(makeStream([], {
+      revision: 2,
+      sourceHash: 'b'.repeat(64),
+    }), diagnostic);
+    const same = normalizeGrigliataMusicStream(makeStream([], {
+      revision: 2,
+      sourceHash: 'b'.repeat(64),
+    }), diagnostic);
+    const conflict = normalizeGrigliataMusicStream(makeStream([], {
+      revision: 2,
+      sourceHash: 'c'.repeat(64),
+    }), diagnostic);
+    const rollback = normalizeGrigliataMusicStream(makeStream([], {
+      revision: 1,
+      sourceHash: 'a'.repeat(64),
+    }), diagnostic);
+    expect(isTask07MusicStreamRevisionAccepted(revisionTwo, same)).toBe(true);
+    expect(isTask07MusicStreamRevisionAccepted(revisionTwo, conflict)).toBe(false);
+    expect(isTask07MusicStreamRevisionAccepted(revisionTwo, rollback)).toBe(false);
   });
 
-  test('preserves the audio node across shell rerenders and disconnects it on sign-out', async () => {
+  test('legacy compatibility preserves session precedence and matches the projection', () => {
+    const playbackState = {
+      status: 'playing',
+      trackId: 'legacy-track',
+      trackName: 'Legacy track',
+      audioUrl: 'https://example.com/audio/legacy.mp3',
+      durationMs: 120000,
+      offsetMs: 2000,
+      volume: 0.4,
+      startedAt: new Date(8000),
+      updatedAt: new Date(9000),
+    };
+    const activeSession = makeSession('session-track');
+    const legacy = buildLegacyGrigliataMusicStream({
+      playbackState,
+      playbackSessions: [activeSession],
+    });
+    expect(legacy.sessions.map(({ id }) => id)).toEqual(['session-track']);
+    const projected = normalizeGrigliataMusicStream(
+      makeStream([activeSession])
+    );
+    expect(task07MusicStreamsMatch(legacy, projected)).toBe(true);
+    expect(task07MusicStreamsMatch(legacy, {
+      ...projected,
+      volume: 0.5,
+    })).toBe(false);
+
+    const fallback = buildLegacyGrigliataMusicStream({
+      playbackState,
+      playbackSessions: [],
+    });
+    expect(fallback.sessions).toEqual([
+      expect.objectContaining({
+        id: 'legacy-current',
+        trackId: 'legacy-track',
+        startedAtMs: 8000,
+        updatedAtMs: 9000,
+      }),
+    ]);
+  });
+
+  test('rollout modes retain legacy playback, compare in shadow, and switch to one stream', async () => {
+    const legacyState = jest.fn((onValue) => {
+      onValue({ status: 'stopped', volume: 0.4 });
+      return jest.fn();
+    });
+    const legacySessions = jest.fn((onValue) => {
+      onValue([makeSession('legacy')]);
+      return jest.fn();
+    });
+    const stream = jest.fn((onValue) => {
+      onValue(makeStream([makeSession('legacy')]));
+      return jest.fn();
+    });
+    const paritySpy = jest.spyOn(console, 'info').mockImplementation(() => {});
+    const { rerender } = render(
+      <GlobalGrigliataMusicPlayer
+        musicModeOverride="legacy"
+        subscribeToPlaybackState={legacyState}
+        subscribeToPlaybackSessions={legacySessions}
+        subscribeToMusicStream={stream}
+      />
+    );
+    expect(legacyState).toHaveBeenCalledTimes(1);
+    expect(legacySessions).toHaveBeenCalledTimes(1);
+    expect(stream).not.toHaveBeenCalled();
+
+    rerender(
+      <GlobalGrigliataMusicPlayer
+        musicModeOverride="shadow"
+        subscribeToPlaybackState={legacyState}
+        subscribeToPlaybackSessions={legacySessions}
+        subscribeToMusicStream={stream}
+      />
+    );
+    await waitFor(() => expect(stream).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(paritySpy).toHaveBeenCalledWith(
+      'Task07 music shadow parity.',
+      expect.objectContaining({ matches: true })
+    ));
+
+    rerender(
+      <GlobalGrigliataMusicPlayer
+        musicModeOverride="derivative-read"
+        subscribeToPlaybackState={legacyState}
+        subscribeToPlaybackSessions={legacySessions}
+        subscribeToMusicStream={stream}
+      />
+    );
+    await waitFor(() => expect(stream).toHaveBeenCalledTimes(2));
+    expect(legacyState).toHaveBeenCalledTimes(2);
+    expect(legacySessions).toHaveBeenCalledTimes(2);
+    paritySpy.mockRestore();
+  });
+
+  test('renders zero audio nodes for empty, paused, stopped, and locally muted playback', async () => {
     const { container, rerender } = render(
-      <GlobalGrigliataMusicPlayer
-        subscribeToPlaybackState={subscribeToPlaybackState}
-        subscribeToPlaybackSessions={subscribeToPlaybackSessions}
-      />
+      candidatePlayer()
     );
-    const audio = container.querySelector('audio');
-    prepareAudioElement(audio);
+    expect(container.querySelectorAll('audio')).toHaveLength(0);
 
-    await waitFor(() => {
-      expect(subscribeToPlaybackState).toHaveBeenCalledTimes(1);
-      expect(subscribeToPlaybackSessions).toHaveBeenCalledTimes(1);
-    });
-
-    await act(async () => {
-      setPlaybackDoc({
-        status: 'playing',
-        trackId: 'track-route',
-        trackName: 'Persistent Theme',
-        audioUrl: 'https://example.com/audio/persistent-theme.mp3',
-        durationMs: 120_000,
-        offsetMs: 3_000,
-        volume: 0.5,
-        startedAt: { toMillis: () => 9_000 },
-        commandId: 'cmd-route',
-        updatedBy: 'user-1',
-      });
-    });
-
-    await waitFor(() => {
-      expect(playSpy).toHaveBeenCalled();
-    });
-
-    const sourceBeforeRerender = audio.dataset.grigliataAudioUrl;
-    const offsetBeforeRerender = audio.currentTime;
-    rerender(
-      <GlobalGrigliataMusicPlayer
-        subscribeToPlaybackState={subscribeToPlaybackState}
-        subscribeToPlaybackSessions={subscribeToPlaybackSessions}
-      />
-    );
-
-    expect(container.querySelector('audio')).toBe(audio);
-    expect(audio.dataset.grigliataAudioUrl).toBe(sourceBeforeRerender);
-    expect(audio.currentTime).toBe(offsetBeforeRerender);
-    expect(subscribeToPlaybackState).toHaveBeenCalledTimes(1);
-    expect(subscribeToPlaybackSessions).toHaveBeenCalledTimes(1);
-
-    useAuth.mockReturnValue({
-      user: null,
-      userData: null,
-    });
-    rerender(
-      <GlobalGrigliataMusicPlayer
-        subscribeToPlaybackState={subscribeToPlaybackState}
-        subscribeToPlaybackSessions={subscribeToPlaybackSessions}
-      />
-    );
-
-    await waitFor(() => {
-      expect(container.querySelectorAll('audio')).toHaveLength(0);
-    });
-    expect(audio.getAttribute('src')).toBe(null);
-    expect(mockListeners).toHaveLength(0);
-    expect(mockSessionListeners).toHaveLength(0);
-  });
-
-  test('does not attach to an already finished playback session for late joiners', async () => {
-    const { container } = render(
-      <GlobalGrigliataMusicPlayer subscribeToPlaybackState={subscribeToPlaybackState} />
-    );
-    const audio = container.querySelector('audio');
-    prepareAudioElement(audio);
-
-    await waitFor(() => {
-      expect(subscribeToPlaybackState).toHaveBeenCalledTimes(1);
-    });
-
-    playSpy.mockClear();
-    pauseSpy.mockClear();
-
-    await act(async () => {
-      setPlaybackDoc({
-        status: 'playing',
-        trackId: 'track-1',
-        trackName: 'Battle Theme',
-        audioUrl: 'https://example.com/audio/battle-theme.mp3',
-        durationMs: 6_000,
-        offsetMs: 4_000,
-        volume: 0.72,
-        startedAt: { toMillis: () => 1_000 },
-        commandId: 'cmd-expired',
-        updatedBy: 'user-1',
-      });
-    });
-
-    await waitFor(() => {
-      expect(audio.currentTime).toBe(6);
-    });
-
+    await emitStream(makeStream([makeSession('paused', { status: 'paused' })]));
+    expect(container.querySelectorAll('audio')).toHaveLength(0);
     expect(playSpy).not.toHaveBeenCalled();
+
+    await emitStream(makeStream());
+    expect(container.querySelectorAll('audio')).toHaveLength(0);
+
+    await emitStream(makeStream([
+      makeSession('finished', { durationMs: 1000, offsetMs: 1000, startedAtMs: 1000 }),
+    ]));
+    expect(container.querySelectorAll('audio')).toHaveLength(0);
+
+    authState = {
+      user: { uid: 'user-1' },
+      userData: { settings: { grigliata_music_muted: true } },
+    };
+    rerender(candidatePlayer());
+    await emitStream(makeStream([makeSession('muted')]));
+    expect(container.querySelectorAll('audio')).toHaveLength(0);
+    expect(playSpy).not.toHaveBeenCalled();
+    expect(subscribeToMusicStream).toHaveBeenCalledTimes(1);
+  });
+
+  test('renders and plays up to four preload-none sessions with authoritative offsets and loop state', async () => {
+    const sessions = [
+      makeSession('track-1'),
+      makeSession('track-2', { loop: true, durationMs: 2500 }),
+      makeSession('track-3', { offsetMs: 7000 }),
+      makeSession('track-4', { offsetMs: 0 }),
+    ];
+    const { container } = render(
+      candidatePlayer()
+    );
+    await emitStream(makeStream(sessions, { volume: 0.27 }));
+
+    await waitFor(() => expect(playSpy).toHaveBeenCalledTimes(4));
+    const audioNodes = container.querySelectorAll('audio');
+    expect(audioNodes).toHaveLength(MAX_GLOBAL_GRIGLIATA_MUSIC_AUDIO_NODES);
+    expect(MAX_GLOBAL_GRIGLIATA_MUSIC_AUDIO_NODES).toBe(MAX_GLOBAL_GRIGLIATA_MUSIC_SESSIONS);
+    audioNodes.forEach((audio) => {
+      expect(audio.getAttribute('preload')).toBe('none');
+      expect(audio.volume).toBeCloseTo(0.27);
+      expect(audio.dataset.grigliataAudioUrl).toMatch(/^https:\/\/example\.com\/audio\//);
+    });
+
+    const firstAudio = container.querySelector('audio[data-session-id=track-1]');
+    const loopingAudio = container.querySelector('audio[data-session-id=track-2]');
+    expect(firstAudio.currentTime).toBe(3);
+    expect(firstAudio.loop).toBe(false);
+    expect(loopingAudio.currentTime).toBe(0.5);
+    expect(loopingAudio.loop).toBe(true);
+  });
+
+  test('fails closed above the cap with a count-only diagnostic and clears owned sources', async () => {
+    const diagnosticSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { container } = render(
+        candidatePlayer()
+      );
+      await emitStream(makeStream([makeSession('owned')]));
+      await waitFor(() => expect(playSpy).toHaveBeenCalledTimes(1));
+      const previousAudio = container.querySelector('audio');
+      expect(previousAudio.dataset.grigliataAudioUrl).toContain('/owned.mp3');
+
+      const overCapSessions = Array.from(
+        { length: MAX_GLOBAL_GRIGLIATA_MUSIC_SESSIONS + 1 },
+        (_, index) => makeSession(`secret-${index}`)
+      );
+      await emitStream(makeStream(overCapSessions));
+
+      await waitFor(() => expect(container.querySelectorAll('audio')).toHaveLength(0));
+      expect(previousAudio.getAttribute('src')).toBe(null);
+      expect(previousAudio.dataset.grigliataAudioUrl).toBeUndefined();
+      expect(diagnosticSpy).toHaveBeenCalledWith(
+        'Rejected invalid Grigliata music stream.',
+        { reason: 'over-cap', sessionCount: 5, maxSessions: 4 }
+      );
+      expect(JSON.stringify(diagnosticSpy.mock.calls)).not.toContain('secret-');
+    } finally {
+      diagnosticSpy.mockRestore();
+    }
+  });
+
+  test('removes the node and source when a playing session becomes paused', async () => {
+    const { container } = render(
+      candidatePlayer()
+    );
+    await emitStream(makeStream([makeSession('pause-me')]));
+    await waitFor(() => expect(playSpy).toHaveBeenCalledTimes(1));
+    const previousAudio = container.querySelector('audio');
+
+    await emitStream(makeStream([makeSession('pause-me', { status: 'paused', offsetMs: 8000 })]));
+
+    await waitFor(() => expect(container.querySelectorAll('audio')).toHaveLength(0));
+    expect(previousAudio.getAttribute('src')).toBe(null);
+    expect(previousAudio.currentTime).toBe(0);
     expect(pauseSpy).toHaveBeenCalled();
-    expect(audio.volume).toBeCloseTo(0.72);
   });
 
-  test('shows an unlock prompt when autoplay is blocked and retries on demand', async () => {
-    const playError = new Error('Autoplay blocked');
-    playError.name = 'NotAllowedError';
-    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-    playSpy.mockImplementationOnce(() => Promise.reject(playError));
+  test('natural completion removes the node and clears its source ownership', async () => {
+    const { container } = render(candidatePlayer());
+    await emitStream(makeStream([makeSession('ended')]));
+    await waitFor(() => expect(playSpy).toHaveBeenCalledTimes(1));
+    const audio = container.querySelector('audio');
+    fireEvent.ended(audio);
+    await waitFor(() => expect(container.querySelectorAll('audio')).toHaveLength(0));
+    expect(audio.getAttribute('src')).toBe(null);
+    expect(audio.dataset.grigliataAudioUrl).toBeUndefined();
+  });
 
+  test('mute fences an in-flight play and releases the pending source', async () => {
+    let resolvePlay;
+    playSpy.mockImplementationOnce(() => new Promise((resolve) => {
+      resolvePlay = resolve;
+    }));
+    const { container, rerender } = render(candidatePlayer());
+    await emitStream(makeStream([makeSession('pending')]));
+    await waitFor(() => expect(playSpy).toHaveBeenCalledTimes(1));
+    const audio = container.querySelector('audio');
+
+    authState = {
+      user: { uid: 'user-1' },
+      userData: { settings: { grigliata_music_muted: true } },
+    };
+    rerender(candidatePlayer());
+    await waitFor(() => expect(container.querySelectorAll('audio')).toHaveLength(0));
+    await act(async () => resolvePlay());
+    expect(audio.getAttribute('src')).toBe(null);
+    expect(audio.dataset.grigliataAudioUrl).toBeUndefined();
+  });
+
+  test('keeps audio nodes stable across shell rerenders without resubscribing or restarting', async () => {
+    const { container, rerender } = render(
+      candidatePlayer()
+    );
+    await emitStream(makeStream([makeSession('navigation')]));
+    await waitFor(() => expect(playSpy).toHaveBeenCalledTimes(1));
+    const audioBeforeNavigation = container.querySelector('audio');
+    const offsetBeforeNavigation = audioBeforeNavigation.currentTime;
+    playSpy.mockClear();
+
+    rerender(candidatePlayer());
+
+    expect(container.querySelector('audio')).toBe(audioBeforeNavigation);
+    expect(audioBeforeNavigation.currentTime).toBe(offsetBeforeNavigation);
+    expect(subscribeToMusicStream).toHaveBeenCalledTimes(1);
+    expect(playSpy).not.toHaveBeenCalled();
+  });
+
+  test('loads no node while muted and computes the current offset after unmuting', async () => {
+    authState = {
+      user: { uid: 'user-1' },
+      userData: { settings: { grigliata_music_muted: true } },
+    };
+    const { container, rerender } = render(
+      candidatePlayer()
+    );
+    await emitStream(makeStream([makeSession('resume', { offsetMs: 4000, startedAtMs: 8000 })]));
+    expect(container.querySelectorAll('audio')).toHaveLength(0);
+    expect(playSpy).not.toHaveBeenCalled();
+
+    authState = { user: { uid: 'user-1' }, userData: { settings: {} } };
+    rerender(candidatePlayer());
+
+    await waitFor(() => expect(playSpy).toHaveBeenCalledTimes(1));
+    const audio = container.querySelector('audio');
+    expect(audio.currentTime).toBe(6);
+    expect(audio.getAttribute('preload')).toBe('none');
+    expect(subscribeToMusicStream).toHaveBeenCalledTimes(1);
+  });
+
+  test('shows one unlock prompt for blocked autoplay and retries every playing session', async () => {
+    const autoplayError = new Error('Autoplay blocked');
+    autoplayError.name = 'NotAllowedError';
+    playSpy.mockRejectedValueOnce(autoplayError);
+    const { container } = render(
+      candidatePlayer()
+    );
+    await emitStream(makeStream([makeSession('blocked-1'), makeSession('blocked-2')]));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /enable audio/i })).toBeInTheDocument());
+    expect(container.querySelectorAll('audio')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: /enable audio/i }));
+
+    await waitFor(() => expect(playSpy.mock.calls.length).toBeGreaterThanOrEqual(4));
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /enable audio/i })).not.toBeInTheDocument();
+    });
+  });
+
+  test('sign-out disconnects the one listener and clears node ownership and source state', async () => {
+    const { container, rerender } = render(
+      candidatePlayer()
+    );
+    await emitStream(makeStream([makeSession('sign-out')]));
+    await waitFor(() => expect(playSpy).toHaveBeenCalledTimes(1));
+    const previousAudio = container.querySelector('audio');
+
+    authState = { user: null, userData: null };
+    rerender(candidatePlayer());
+
+    await waitFor(() => expect(unsubscribe).toHaveBeenCalledTimes(1));
+    expect(container.querySelectorAll('audio')).toHaveLength(0);
+    expect(previousAudio.getAttribute('src')).toBe(null);
+    expect(previousAudio.dataset.grigliataAudioUrl).toBeUndefined();
+  });
+
+  test('fails closed and clears playback when the compact stream listener disconnects', async () => {
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     try {
       const { container } = render(
-        <GlobalGrigliataMusicPlayer subscribeToPlaybackState={subscribeToPlaybackState} />
+        candidatePlayer()
       );
-      const audio = container.querySelector('audio');
-      prepareAudioElement(audio);
-
-      await waitFor(() => {
-        expect(subscribeToPlaybackState).toHaveBeenCalledTimes(1);
-      });
+      await emitStream(makeStream([makeSession('disconnect')]));
+      await waitFor(() => expect(playSpy).toHaveBeenCalledTimes(1));
 
       await act(async () => {
-        setPlaybackDoc({
-          status: 'playing',
-          trackId: 'track-1',
-          trackName: 'Battle Theme',
-          audioUrl: 'https://example.com/audio/battle-theme.mp3',
-          durationMs: 120_000,
-          offsetMs: 0,
-          volume: 0.28,
-          startedAt: { toMillis: () => 9_000 },
-          commandId: 'cmd-blocked',
-          updatedBy: 'user-1',
-        });
+        streamHandlers.onError(new Error('private details'));
       });
 
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /enable audio/i })).toBeInTheDocument();
-      });
-
-      fireEvent.click(screen.getByRole('button', { name: /enable audio/i }));
-
-      await waitFor(() => {
-        expect(playSpy).toHaveBeenCalledTimes(2);
-      });
-
-      await waitFor(() => {
-        expect(screen.queryByRole('button', { name: /enable audio/i })).not.toBeInTheDocument();
-      });
-
-      expect(audio.volume).toBeCloseTo(0.28);
-      expect(consoleErrorSpy).not.toHaveBeenCalled();
-    } finally {
-      consoleErrorSpy.mockRestore();
-    }
-  });
-
-  test('loads zero audio bytes while muted and resumes at the shared offset after unmuting', async () => {
-    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-
-    try {
-      useAuth.mockReturnValue({
-        user: {
-          uid: 'user-1',
-        },
-        userData: {
-          settings: {
-            grigliata_music_muted: true,
-          },
-        },
-      });
-
-      const { container, rerender } = render(
-        <GlobalGrigliataMusicPlayer subscribeToPlaybackState={subscribeToPlaybackState} />
-      );
-      const audio = container.querySelector('audio');
-      prepareAudioElement(audio);
-
-      await waitFor(() => {
-        expect(subscribeToPlaybackState).toHaveBeenCalledTimes(1);
-      });
-
-      await act(async () => {
-        setPlaybackDoc({
-          status: 'playing',
-          trackId: 'track-1',
-          trackName: 'Battle Theme',
-          audioUrl: 'https://example.com/audio/battle-theme.mp3',
-          durationMs: 120_000,
-          offsetMs: 0,
-          volume: 0.28,
-          startedAt: { toMillis: () => 9_000 },
-          commandId: 'cmd-muted',
-          updatedBy: 'user-1',
-        });
-      });
-
-      expect(playSpy).not.toHaveBeenCalled();
-      expect(audio.muted).toBe(true);
-      expect(audio.dataset.grigliataAudioUrl).toBeUndefined();
-      expect(audio.getAttribute('src')).toBe(null);
-      expect(audio.currentTime).toBe(0);
-      expect(screen.queryByRole('button', { name: /enable audio/i })).not.toBeInTheDocument();
-
-      useAuth.mockReturnValue({
-        user: {
-          uid: 'user-1',
-        },
-        userData: {
-          settings: {
-            grigliata_music_muted: false,
-          },
-        },
-      });
-
-      rerender(<GlobalGrigliataMusicPlayer subscribeToPlaybackState={subscribeToPlaybackState} />);
-
-      await waitFor(() => {
-        expect(playSpy).toHaveBeenCalledTimes(1);
-      });
-
-      expect(audio.muted).toBe(false);
-      expect(audio.dataset.grigliataAudioUrl).toBe('https://example.com/audio/battle-theme.mp3');
-      expect(audio.currentTime).toBe(1);
-      expect(screen.queryByRole('button', { name: /enable audio/i })).not.toBeInTheDocument();
-    } finally {
-      consoleErrorSpy.mockRestore();
-    }
-  });
-
-  test('logs and clears the shared audio source when loading fails during seek', async () => {
-    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-
-    try {
-      const { container } = render(
-        <GlobalGrigliataMusicPlayer subscribeToPlaybackState={subscribeToPlaybackState} />
-      );
-      const audio = container.querySelector('audio');
-      let currentTime = 0;
-      let canSeek = false;
-
-      Object.defineProperty(audio, 'readyState', {
-        configurable: true,
-        get: () => 0,
-      });
-
-      Object.defineProperty(audio, 'currentTime', {
-        configurable: true,
-        get: () => currentTime,
-        set: (value) => {
-          if (!canSeek) {
-            throw new Error('metadata unavailable');
-          }
-
-          currentTime = value;
-        },
-      });
-
-      await waitFor(() => {
-        expect(subscribeToPlaybackState).toHaveBeenCalledTimes(1);
-      });
-
-      await act(async () => {
-        setPlaybackDoc({
-          status: 'playing',
-          trackId: 'track-1',
-          trackName: 'Battle Theme',
-          audioUrl: 'https://example.com/audio/battle-theme.mp3',
-          durationMs: 120_000,
-          offsetMs: 9_000,
-          volume: 0.48,
-          startedAt: null,
-          commandId: 'cmd-load-failed',
-          updatedBy: 'user-1',
-        });
-      });
-
-      canSeek = true;
-
-      await act(async () => {
-        audio.dispatchEvent(new Event('error'));
-      });
-
-      await waitFor(() => {
-        expect(consoleErrorSpy).toHaveBeenCalledWith(
-          'Failed to prepare Grigliata music playback:',
-          expect.objectContaining({ name: 'GrigliataAudioLoadError' })
-        );
-      });
-
-      expect(audio.getAttribute('src')).toBe(null);
-      expect(screen.queryByRole('button', { name: /enable audio/i })).not.toBeInTheDocument();
-    } finally {
-      consoleErrorSpy.mockRestore();
-    }
-  });
-
-  test('ignores interrupted play requests without showing the unlock prompt', async () => {
-    const playError = new Error('The play() request was interrupted by a call to pause().');
-    playError.name = 'AbortError';
-    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-    playSpy.mockImplementationOnce(() => Promise.reject(playError));
-
-    try {
-      const { container } = render(
-        <GlobalGrigliataMusicPlayer subscribeToPlaybackState={subscribeToPlaybackState} />
-      );
-      const audio = container.querySelector('audio');
-      prepareAudioElement(audio);
-
-      await waitFor(() => {
-        expect(subscribeToPlaybackState).toHaveBeenCalledTimes(1);
-      });
-
-      await act(async () => {
-        setPlaybackDoc({
-          status: 'playing',
-          trackId: 'track-1',
-          trackName: 'Battle Theme',
-          audioUrl: 'https://example.com/audio/battle-theme.mp3',
-          durationMs: 120_000,
-          offsetMs: 0,
-          volume: 0.45,
-          startedAt: { toMillis: () => 9_000 },
-          commandId: 'cmd-aborted',
-          updatedBy: 'user-1',
-        });
-      });
-
-      await waitFor(() => {
-        expect(playSpy).toHaveBeenCalled();
-      });
-
-      expect(screen.queryByRole('button', { name: /enable audio/i })).not.toBeInTheDocument();
-      expect(audio.volume).toBeCloseTo(0.45);
-      expect(consoleErrorSpy).not.toHaveBeenCalled();
+      await waitFor(() => expect(container.querySelectorAll('audio')).toHaveLength(0));
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load the Grigliata music stream.');
+      expect(JSON.stringify(consoleErrorSpy.mock.calls)).not.toContain('private details');
     } finally {
       consoleErrorSpy.mockRestore();
     }

@@ -93,7 +93,7 @@ describe('Firebase callable registry', () => {
       await registry.getCallable(logicalKey)({probe: true});
     }
 
-    expect(entries).toHaveLength(36);
+    expect(entries).toHaveLength(37);
     expect(getFunctions).toHaveBeenCalledTimes(
       callableManifest.supportedRegions.length
     );
@@ -120,7 +120,8 @@ describe('Firebase callable registry', () => {
       .toBe('europe-west8');
     [
       'task07PrepareMediaUpload',
-      'task07FinalizeMediaUpload',
+      'task07GetMediaStatus',
+      'task07AttachMediaAsset',
       'task07ConfirmMediaReference',
       'task07AbandonMediaAsset',
       'task07RetireMediaAsset',
@@ -130,7 +131,9 @@ describe('Firebase callable registry', () => {
         functionId: logicalKey,
         region: 'europe-west8',
         owner: 'media-lifecycle',
-        compatibilityAliasOf: null,
+        compatibilityAliasOf: logicalKey === 'task07ConfirmMediaReference'
+          ? 'task07AttachMediaAsset'
+          : null,
       });
     });
   });

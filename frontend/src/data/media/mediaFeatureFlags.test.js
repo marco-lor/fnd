@@ -26,14 +26,14 @@ test('Task 07 media stays disabled by default', () => {
   expect(loadFlag()).toBe(false);
 });
 
-test('the dedicated flag enables Task 07 without performance mode', () => {
+test('the old dedicated flag cannot bypass the rollout control document', () => {
   process.env.REACT_APP_TASK07_MEDIA_PIPELINE = '1';
   delete process.env.REACT_APP_FND_PERF;
-  expect(loadFlag()).toBe(true);
+  expect(loadFlag()).toBe(false);
 });
 
-test('demo performance mode continues to exercise Task 07', () => {
+test('performance mode cannot bypass the rollout control document', () => {
   delete process.env.REACT_APP_TASK07_MEDIA_PIPELINE;
   process.env.REACT_APP_FND_PERF = '1';
-  expect(loadFlag()).toBe(true);
+  expect(loadFlag()).toBe(false);
 });

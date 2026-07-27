@@ -114,8 +114,14 @@
       "owner": "media-lifecycle",
       "compatibilityAliasOf": null
     },
-    "task07FinalizeMediaUpload": {
-      "functionId": "task07FinalizeMediaUpload",
+    "task07GetMediaStatus": {
+      "functionId": "task07GetMediaStatus",
+      "region": "europe-west8",
+      "owner": "media-lifecycle",
+      "compatibilityAliasOf": null
+    },
+    "task07AttachMediaAsset": {
+      "functionId": "task07AttachMediaAsset",
       "region": "europe-west8",
       "owner": "media-lifecycle",
       "compatibilityAliasOf": null
@@ -124,7 +130,7 @@
       "functionId": "task07ConfirmMediaReference",
       "region": "europe-west8",
       "owner": "media-lifecycle",
-      "compatibilityAliasOf": null
+      "compatibilityAliasOf": "task07AttachMediaAsset"
     },
     "task07AbandonMediaAsset": {
       "functionId": "task07AbandonMediaAsset",

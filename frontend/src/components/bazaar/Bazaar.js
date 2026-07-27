@@ -24,12 +24,16 @@ import { useResources } from '../../data/userData/userDataHooks';
 import { createUserOperationId } from '../../data/userData/userDataCommands';
 import { isUserDataCommandStageResolved } from '../../data/userData/userDataCommandRouting';
 import MediaImage, { hasMediaAsset } from '../common/MediaImage';
+import { normalizeCatalogItemMedia } from './catalogItemMedia';
 
 function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purchasing, purchaseDisabled, userGold }) {
   const [imageError, setImageError] = useState(false);
   const title = item.General?.Nome || 'Oggetto Sconosciuto';
-  const imageUrl = item.General?.image_url;
-  const hasImage = hasMediaAsset(item.General, { fallbackSrc: imageUrl, variant: 'card' });
+  const { media: itemMedia, fallbackSrc: imageUrl } = normalizeCatalogItemMedia(item);
+  const hasImage = hasMediaAsset(itemMedia, {
+    fallbackSrc: imageUrl,
+    variant: 'card',
+  });
   const slot = item.General?.Slot || '-';
   const tipo = item.Specific?.Tipo || '-';
   const hands = item.Specific?.Hands != null ? item.Specific.Hands : '-';
@@ -59,7 +63,7 @@ function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purch
       <div className="relative mb-3 aspect-[4/3] overflow-hidden rounded-xl border border-gray-700/70 bg-gray-900/70">
         {hasImage && !imageError ? (
           <MediaImage
-            media={item.General}
+            media={itemMedia}
             src={imageUrl}
             variant="card"
             alt={title}

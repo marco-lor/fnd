@@ -1,10 +1,17 @@
+import { webcrypto } from 'node:crypto';
+import { TextEncoder } from 'node:util';
 import { Task07MediaPipelineError } from './mediaErrors';
 import {
+  TASK07_MEDIA_OPERATION_RECEIPT_STORAGE_KEY,
+  Task07MediaOperationReceiptError,
   buildTask07MediaEntityPatch,
   buildTask07MediaOperationId,
+  buildTask07MediaStableRevision,
+  createTask07MediaOperationOwner,
   describeTask07ConsumerOutcome,
   getTask07PreviousAssetId,
   runTask07ConsumerUpload,
+  runWithTask07MediaOperationReceipt,
   task07ConsumerNeedsAttention,
 } from './mediaConsumerAdapter';
 
@@ -15,14 +22,19 @@ const file = {
   lastModified: 5678,
 };
 const previousAssetId = `m_${'a'.repeat(40)}`;
+const assetId = `m_${'b'.repeat(40)}`;
+const generatedPrefix = `media_assets/v1/signed-in/user-1/${assetId}/7/`;
 const media = {
   schemaVersion: 1,
   contractVersion: 1,
-  assetId: `m_${'b'.repeat(40)}`,
+  assetId,
   kind: 'avatar',
   state: 'ready',
+  generation: '7',
+  audience: 'signed-in',
+  ownerUid: 'user-1',
   original: {
-    path: `media/v1/avatar/user-1/m_${'b'.repeat(40)}/original/source.png`,
+    path: `${generatedPrefix}original`,
     contentType: 'image/png',
     bytes: 1234,
     width: 400,
@@ -31,6 +43,47 @@ const media = {
   },
   variants: {},
 };
+
+const originalTextEncoder = global.TextEncoder;
+
+beforeAll(() => {
+  global.TextEncoder = TextEncoder;
+});
+
+afterAll(() => {
+  global.TextEncoder = originalTextEncoder;
+});
+
+const createMemoryStorage = () => {
+  const values = new Map();
+  return {
+    getItem: jest.fn((key) => values.get(key) ?? null),
+    setItem: jest.fn((key, value) => values.set(key, value)),
+    removeItem: jest.fn((key) => values.delete(key)),
+    values,
+  };
+};
+
+const readReceipts = (storage) => {
+  const serialized = storage.values.get(
+    TASK07_MEDIA_OPERATION_RECEIPT_STORAGE_KEY
+  );
+  return serialized ? JSON.parse(serialized).receipts : [];
+};
+
+const durableOperationInput = (overrides = {}) => ({
+  actorUid: 'private-actor-uid',
+  ownerUid: 'private-owner-uid',
+  entityId: 'private-entity-id',
+  kind: 'avatar',
+  file,
+  expectedRevision: 4,
+  invoke: jest.fn().mockResolvedValue({ handled: true, status: 'complete' }),
+  storage: createMemoryStorage(),
+  cryptoImpl: webcrypto,
+  now: () => 1_780_000_000_000,
+  ...overrides,
+});
 
 describe('Task 07 media consumer adapter', () => {
   test('builds a stable bounded operation ID from the explicit upload revision', () => {
@@ -53,7 +106,7 @@ describe('Task 07 media consumer adapter', () => {
     })).not.toBe(first);
   });
 
-  test('does not invoke the pipeline when the rollout flag is disabled', async () => {
+  test('does not invoke the pipeline when v1 writes are disabled', async () => {
     const runPipeline = jest.fn();
 
     await expect(runTask07ConsumerUpload({}, {
@@ -66,144 +119,129 @@ describe('Task 07 media consumer adapter', () => {
     expect(runPipeline).not.toHaveBeenCalled();
   });
 
-  test('passes the previous asset and exact finalized media to the entity commit', async () => {
-    const commitEntity = jest.fn(async () => {});
-    const runPipeline = jest.fn(async (input) => {
-      expect(input.previousAssetId).toBe(previousAssetId);
-      await input.commitEntity(media);
-      return {
-        assetId: media.assetId,
-        media,
-        retirement: {
-          requested: true,
-          assetId: previousAssetId,
-          state: 'superseded',
-          replay: false,
-          graceHours: 24,
-        },
-      };
-    });
-
-    const outcome = await runTask07ConsumerUpload({
+  test('passes the server attachment contract through without a client entity commit', async () => {
+    const input = {
       file,
       ownerUid: 'user-1',
       entityId: 'user-1',
       operationId: 'task07:avatar:revision:0123456789abcdef',
       kind: 'avatar',
       previousAssetId,
-      commitEntity,
-    }, {
-      enabled: true,
-      runPipeline,
+      expectedRevision: 4,
+    };
+    const result = {
+      assetId,
+      upload: { entries: [{ role: 'source', path: `media_uploads/user-1/${assetId}/source` }] },
+      status: { ok: true, assetId, state: 'ready', ready: true },
+      confirmation: { ok: true, assetId, state: 'attached' },
+    };
+    const runPipeline = jest.fn(async (received) => {
+      expect(received).toBe(input);
+      expect(received).not.toHaveProperty('commitEntity');
+      return result;
     });
 
-    expect(commitEntity).toHaveBeenCalledTimes(1);
-    expect(commitEntity).toHaveBeenCalledWith(media);
-    expect(outcome).toMatchObject({
+    await expect(runTask07ConsumerUpload(input, {
+      enabled: true,
+      runPipeline,
+    })).resolves.toEqual({
+      ...result,
       handled: true,
       status: 'complete',
-      media,
     });
+    expect(runPipeline).toHaveBeenCalledTimes(1);
   });
 
-  test('surfaces an ambiguous confirm failure without rethrowing or falling back', async () => {
-    const commitEntity = jest.fn(async () => {});
-    const runPipeline = jest.fn(async (input) => {
-      await input.commitEntity(media);
-      throw new Task07MediaPipelineError('confirm unavailable', {
-        code: 'unavailable',
-        stage: 'confirm',
-        assetId: media.assetId,
-        committed: true,
-      });
+  test('surfaces an interrupted result after confirmed server attachment', async () => {
+    const error = new Task07MediaPipelineError('attach response interrupted', {
+      code: 'unavailable',
+      stage: 'attach',
+      assetId,
+      committed: true,
+      commitAttempted: true,
     });
-
-    const outcome = await runTask07ConsumerUpload({
-      commitEntity,
-    }, {
+    const outcome = await runTask07ConsumerUpload({}, {
       enabled: true,
-      runPipeline,
+      runPipeline: jest.fn(async () => { throw error; }),
     });
 
-    expect(commitEntity).toHaveBeenCalledWith(media);
     expect(outcome).toMatchObject({
       handled: true,
-      status: 'committed-confirm-pending',
-      assetId: media.assetId,
-      media,
+      status: 'attached-result-unknown',
+      assetId,
       error: {
         code: 'unavailable',
-        message: 'confirm unavailable',
+        message: 'attach response interrupted',
       },
     });
     expect(task07ConsumerNeedsAttention(outcome)).toBe(true);
     expect(describeTask07ConsumerOutcome(outcome, 'Avatar'))
-      .toMatch(/saved.*confirmation is pending.*Do not upload it again/i);
+      .toMatch(/attached.*final response was interrupted.*Do not upload it again/i);
   });
 
-  test('surfaces an unknown commit acknowledgement without abandoning or inviting retry', async () => {
-    const commitEntity = jest.fn(async () => {
-      throw new Error('connection lost after write');
+  test('surfaces an unknown server attach acknowledgement without inviting retry', async () => {
+    const error = new Task07MediaPipelineError('attach acknowledgement unknown', {
+      code: 'unavailable',
+      stage: 'attach',
+      assetId,
+      committed: false,
+      commitAttempted: true,
     });
-    const runPipeline = jest.fn(async (input) => {
-      try {
-        await input.commitEntity(media);
-      } catch (cause) {
-        throw new Task07MediaPipelineError('commit acknowledgement unknown', {
-          code: 'unavailable',
-          stage: 'commit',
-          assetId: media.assetId,
-          committed: false,
-          commitAttempted: true,
-          cause,
-        });
-      }
-      throw new Error('Expected the commit mock to reject.');
-    });
-
-    const outcome = await runTask07ConsumerUpload({
-      commitEntity,
-    }, {
+    const outcome = await runTask07ConsumerUpload({}, {
       enabled: true,
-      runPipeline,
+      runPipeline: jest.fn(async () => { throw error; }),
     });
 
     expect(outcome).toMatchObject({
       handled: true,
-      status: 'commit-acknowledgement-unknown',
-      assetId: media.assetId,
-      media,
+      status: 'attach-acknowledgement-unknown',
+      assetId,
+      error: {
+        code: 'unavailable',
+        message: 'attach acknowledgement unknown',
+      },
     });
     expect(task07ConsumerNeedsAttention(outcome)).toBe(true);
     expect(describeTask07ConsumerOutcome(outcome, 'Map image'))
-      .toMatch(/acknowledgement is uncertain.*Do not upload it again/i);
+      .toMatch(/attachment acknowledgement is uncertain.*Do not upload it again/i);
   });
 
-  test('rethrows pre-commit failures so the consumer cannot treat them as saved', async () => {
-    const error = new Task07MediaPipelineError('upload failed', {
-      stage: 'upload',
+  test('rethrows a definitive attach rejection instead of retaining false ambiguity', async () => {
+    const error = new Task07MediaPipelineError('revision changed', {
+      code: 'functions/failed-precondition',
+      stage: 'attach',
+      assetId,
       committed: false,
+      commitAttempted: true,
     });
-    await expect(runTask07ConsumerUpload({
-      commitEntity: jest.fn(),
-    }, {
+
+    await expect(runTask07ConsumerUpload({}, {
       enabled: true,
-      runPipeline: jest.fn(async () => {
-        throw error;
-      }),
+      runPipeline: jest.fn(async () => { throw error; }),
     })).rejects.toBe(error);
   });
 
-  test('builds a path-only compatibility patch and validates previous asset IDs', () => {
+  test('rethrows pre-attach failures so the consumer cannot treat them as saved', async () => {
+    const error = new Task07MediaPipelineError('upload failed', {
+      stage: 'upload',
+      committed: false,
+      commitAttempted: false,
+    });
+    await expect(runTask07ConsumerUpload({}, {
+      enabled: true,
+      runPipeline: jest.fn(async () => { throw error; }),
+    })).rejects.toBe(error);
+  });
+
+  test('keeps compatibility patches path-only and validates previous asset IDs', () => {
     const patch = buildTask07MediaEntityPatch(media, {
       includeEmptyImageUrl: true,
     });
     expect(patch).toEqual({
       media,
-      imagePath: media.original.path,
+      imagePath: `${generatedPrefix}original`,
       imageUrl: '',
     });
-    expect(patch.media).toBe(media);
     expect(JSON.stringify(patch)).not.toMatch(/https?:|downloadurl|bearer|token=/i);
     expect(getTask07PreviousAssetId({ media: { assetId: previousAssetId } }))
       .toBe(previousAssetId);
@@ -211,5 +249,220 @@ describe('Task 07 media consumer adapter', () => {
       .toBe(previousAssetId);
     expect(getTask07PreviousAssetId({ media: { assetId: 'not-an-asset' } }))
       .toBeNull();
+  });
+
+  test('builds exact server-revision identities without a wall-clock component', () => {
+    expect(buildTask07MediaStableRevision({
+      expectedRevision: 4,
+      attempt: 0,
+    })).toBe('r4.a0');
+    expect(buildTask07MediaStableRevision({
+      expectedRevision: 4,
+      attempt: 1,
+    })).toBe('r4.a1');
+    expect(() => buildTask07MediaStableRevision({
+      expectedRevision: 4.5,
+    })).toThrow(Task07MediaOperationReceiptError);
+    expect(() => buildTask07MediaStableRevision({
+      expectedRevision: Date.now(),
+    })).toThrow(Task07MediaOperationReceiptError);
+  });
+
+  test('persists only an opaque receipt before invocation and clears it on success', async () => {
+    const storage = createMemoryStorage();
+    const invoke = jest.fn(async ({ operationId, stableRevision }) => {
+      const serialized = storage.values.get(
+        TASK07_MEDIA_OPERATION_RECEIPT_STORAGE_KEY
+      );
+      expect(stableRevision).toBe('r4.a0');
+      expect(operationId).toMatch(/^task07:avatar:r4\.a0:[a-f0-9]{40}$/);
+      expect(serialized).toContain(operationId);
+      [
+        'private-actor-uid',
+        'private-owner-uid',
+        'private-entity-id',
+        file.name,
+        'https://',
+      ].forEach((privateValue) => {
+        expect(serialized).not.toContain(privateValue);
+      });
+      return { handled: true, status: 'complete' };
+    });
+
+    await runWithTask07MediaOperationReceipt(durableOperationInput({
+      storage,
+      invoke,
+    }));
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(readReceipts(storage)).toEqual([]);
+    expect(storage.removeItem)
+      .toHaveBeenCalledWith(TASK07_MEDIA_OPERATION_RECEIPT_STORAGE_KEY);
+  });
+
+  test('retains and reuses the exact operation ID after an ambiguous disconnect', async () => {
+    const storage = createMemoryStorage();
+    const disconnect = new Task07MediaPipelineError('connection interrupted', {
+      code: 'unavailable',
+      stage: 'attach',
+      assetId,
+      committed: false,
+      commitAttempted: true,
+    });
+    const firstInvoke = jest.fn().mockRejectedValue(disconnect);
+
+    await expect(runWithTask07MediaOperationReceipt(durableOperationInput({
+      storage,
+      invoke: firstInvoke,
+    }))).rejects.toBe(disconnect);
+    const retainedOperationId = readReceipts(storage)[0].operationId;
+
+    const resumedInvoke = jest.fn().mockResolvedValue({
+      handled: true,
+      status: 'complete',
+      replay: true,
+    });
+    await runWithTask07MediaOperationReceipt(durableOperationInput({
+      storage,
+      invoke: resumedInvoke,
+    }));
+
+    expect(firstInvoke.mock.calls[0][0].operationId).toBe(retainedOperationId);
+    expect(resumedInvoke.mock.calls[0][0].operationId).toBe(retainedOperationId);
+    expect(readReceipts(storage)).toEqual([]);
+  });
+
+  test('resumes original CAS inputs when entity state advanced after an ambiguous attach', async () => {
+    const storage = createMemoryStorage();
+    const firstInvoke = jest.fn().mockResolvedValue({
+      handled: true,
+      status: 'attach-acknowledgement-unknown',
+      assetId,
+    });
+
+    await runWithTask07MediaOperationReceipt(durableOperationInput({
+      storage,
+      previousAssetId,
+      invoke: firstInvoke,
+    }));
+    const retained = readReceipts(storage)[0];
+
+    const resumedInvoke = jest.fn().mockResolvedValue({
+      handled: true,
+      status: 'complete',
+      replay: true,
+    });
+    await runWithTask07MediaOperationReceipt(durableOperationInput({
+      storage,
+      expectedRevision: 5,
+      previousAssetId: assetId,
+      invoke: resumedInvoke,
+    }));
+
+    expect(resumedInvoke).toHaveBeenCalledWith(expect.objectContaining({
+      operationId: retained.operationId,
+      stableRevision: 'r4.a0',
+      expectedRevision: 4,
+      previousAssetId,
+    }));
+    expect(readReceipts(storage)).toEqual([]);
+  });
+
+  test('adopts current CAS inputs only after the retained operation is definitively rejected', async () => {
+    const storage = createMemoryStorage();
+    await runWithTask07MediaOperationReceipt(durableOperationInput({
+      storage,
+      previousAssetId,
+      invoke: jest.fn().mockResolvedValue({
+        handled: true,
+        status: 'attach-acknowledgement-unknown',
+        assetId,
+      }),
+    }));
+    const definitiveRejection = new Task07MediaPipelineError('revision changed', {
+      code: 'functions/failed-precondition',
+      stage: 'attach',
+      assetId,
+      committed: false,
+      commitAttempted: true,
+    });
+
+    await expect(runWithTask07MediaOperationReceipt(durableOperationInput({
+      storage,
+      expectedRevision: 5,
+      previousAssetId: assetId,
+      invoke: jest.fn().mockRejectedValue(definitiveRejection),
+    }))).rejects.toBe(definitiveRejection);
+
+    expect(readReceipts(storage)[0]).toMatchObject({
+      attempt: 1,
+      expectedRevision: 5,
+      previousAssetId: assetId,
+    });
+    expect(readReceipts(storage)[0].operationId).toMatch(/^task07:avatar:r5\.a1:/);
+  });
+
+  test('retains attention outcomes but rotates after definitive pre-attach cleanup', async () => {
+    const storage = createMemoryStorage();
+    const uncertainInvoke = jest.fn().mockResolvedValue({
+      handled: true,
+      status: 'attach-acknowledgement-unknown',
+      assetId,
+    });
+    await runWithTask07MediaOperationReceipt(durableOperationInput({
+      storage,
+      invoke: uncertainInvoke,
+    }));
+    const uncertainOperationId = readReceipts(storage)[0].operationId;
+
+    const definitiveError = new Task07MediaPipelineError('upload cancelled', {
+      code: 'aborted',
+      stage: 'upload',
+      assetId,
+      committed: false,
+      commitAttempted: false,
+      abandonment: { ok: true },
+    });
+    await expect(runWithTask07MediaOperationReceipt(durableOperationInput({
+      storage,
+      invoke: jest.fn().mockRejectedValue(definitiveError),
+    }))).rejects.toBe(definitiveError);
+
+    const rotated = readReceipts(storage)[0];
+    expect(rotated.attempt).toBe(1);
+    expect(rotated.operationId).not.toBe(uncertainOperationId);
+    expect(rotated.operationId).toMatch(/^task07:avatar:r4\.a1:/);
+  });
+
+  test('fails closed on malformed receipt state before invoking', async () => {
+    const storage = createMemoryStorage();
+    storage.values.set(
+      TASK07_MEDIA_OPERATION_RECEIPT_STORAGE_KEY,
+      '{malformed'
+    );
+    const invoke = jest.fn();
+
+    await expect(runWithTask07MediaOperationReceipt(durableOperationInput({
+      storage,
+      invoke,
+    }))).rejects.toBeInstanceOf(Task07MediaOperationReceiptError);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  test('operation owner cancels replacement and unmount leases without stale release races', () => {
+    const owner = createTask07MediaOperationOwner();
+    const first = owner.start();
+    const second = owner.start('replacement selected');
+
+    expect(first.signal.aborted).toBe(true);
+    expect(first.isCurrent()).toBe(false);
+    expect(second.isCurrent()).toBe(true);
+    first.release();
+    expect(owner.hasActiveOperation()).toBe(true);
+
+    expect(owner.dispose('route unmounted')).toBe(true);
+    expect(second.signal.aborted).toBe(true);
+    expect(owner.hasActiveOperation()).toBe(false);
+    expect(() => owner.start()).toThrow(/disposed/i);
   });
 });

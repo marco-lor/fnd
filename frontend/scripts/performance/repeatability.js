@@ -60,6 +60,7 @@ const isDeterministicMetric = (key) => (
   || (/:firestore\./.test(key) && !/:firestore\.documentsDelivered$/.test(key))
   || /:resource\.(javascript|css|image|font)\.(uniqueCount|uniqueGzipBytes|uniqueFingerprint)$/.test(key)
   || /:resource\.other\.(uniqueCount|uniqueFingerprint)$/.test(key)
+  || /:task07\.(attachedImages|audioNodes|farOffscreenAttachedImages|managedImages|musicStreamListeners|reducedMotionMeteors|uniqueFixtureImageRequests)$/.test(key)
   || key.startsWith('build:')
 );
 

@@ -2,8 +2,10 @@ const path = require('path');
 const { defineConfig } = require('@playwright/test');
 const manifest = require('./scenarios.json');
 const { ensureDirectory, frontendRoot, resolvePortableJavaHome } = require('../scripts/performance/common');
+const { resolveTask07SoakRuntime } = require('../scripts/performance/task07-soak-contract');
 
 const portableJavaHome = resolvePortableJavaHome();
+const task07SoakRuntime = resolveTask07SoakRuntime();
 const emulatorConfigRoot = path.join(frontendRoot, '.perf-emulator-data', 'config');
 ensureDirectory(emulatorConfigRoot);
 const emulatorEnvironment = {
@@ -73,7 +75,7 @@ module.exports = defineConfig({
     {
       name: 'chromium',
       dependencies: ['auth-setup'],
-      testIgnore: /asset-warmup\.setup\.js|auth\.setup\.js|firestore-persistence\.experiment\.js/,
+      testIgnore: /asset-warmup\.setup\.js|auth\.setup\.js|firestore-persistence\.experiment\.js|task07-media-(?:cross-browser\.smoke|soak\.performance)\.js/,
       use: { browserName: 'chromium', launchOptions: { args: ['--js-flags=--expose-gc'] } },
     },
     {
@@ -85,14 +87,47 @@ module.exports = defineConfig({
     {
       name: 'firefox-smoke',
       dependencies: ['auth-setup'],
-      testMatch: /cross-browser\.smoke\.js/,
+      testMatch: /(?:^|[\\/])(?:cross-browser|task07-media-cross-browser)\.smoke\.js$/,
       use: { browserName: 'firefox' },
     },
     {
       name: 'webkit-smoke',
       dependencies: ['auth-setup'],
-      testMatch: /cross-browser\.smoke\.js/,
+      testMatch: /(?:^|[\\/])(?:cross-browser|task07-media-cross-browser)\.smoke\.js$/,
       use: { browserName: 'webkit' },
+    },
+    {
+      name: 'task07-chromium',
+      dependencies: ['auth-setup'],
+      testMatch: /task07-media-(?:shell|routes)\.performance\.js/,
+      use: {
+        browserName: 'chromium',
+        launchOptions: { args: ['--js-flags=--expose-gc'] },
+      },
+    },
+    {
+      name: 'task07-firefox',
+      dependencies: ['auth-setup'],
+      testMatch: /task07-media-cross-browser\.smoke\.js/,
+      use: { browserName: 'firefox' },
+    },
+    {
+      name: 'task07-webkit',
+      dependencies: ['auth-setup'],
+      testMatch: /task07-media-cross-browser\.smoke\.js/,
+      use: { browserName: 'webkit' },
+    },
+    {
+      name: 'task07-soak',
+      dependencies: ['auth-setup'],
+      testMatch: /task07-media-soak\.performance\.js/,
+      timeout: task07SoakRuntime.timeoutMs,
+      use: {
+        browserName: 'chromium',
+        launchOptions: { args: ['--js-flags=--expose-gc'] },
+        trace: 'off',
+        screenshot: 'only-on-failure',
+      },
     },
   ],
 });

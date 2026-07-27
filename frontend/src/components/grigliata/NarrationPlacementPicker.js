@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { FiArrowDown, FiArrowLeft, FiArrowRight, FiArrowUp, FiMove, FiX } from 'react-icons/fi';
-import MediaImage, { resolveMediaAsset } from '../common/MediaImage';
+import MediaImage, { hasMediaAsset } from '../common/MediaImage';
 import { isVideoBackground } from './boardUtils';
 import {
   buildBackgroundMap,
@@ -41,6 +41,7 @@ const buildVideoPosterMedia = (manifest) => {
   return {
     media: {
       schemaVersion: manifest.schemaVersion,
+      kind: manifest.kind || 'map-video',
       state: manifest.state,
       variants: poster ? { poster } : {},
     },
@@ -54,7 +55,7 @@ const buildNarrationThumbnail = (background) => {
   const src = isVideo ? '' : (background?.imageUrl || '');
   const variant = isVideo ? 'poster' : 'thumbnail';
   return {
-    asset: resolveMediaAsset(media, { fallbackSrc: src, variant }),
+    available: hasMediaAsset(media, { fallbackSrc: src, variant }),
     media,
     src,
     variant,
@@ -166,7 +167,7 @@ export default function NarrationPlacementPicker({
                   className="absolute overflow-hidden rounded border border-sky-300/50 bg-sky-500/15"
                   style={previewStyle}
                 >
-                  {placementThumbnail.asset.candidates.length > 0 && (
+                  {placementThumbnail.available && (
                     <MediaImage
                       media={placementThumbnail.media}
                       src={placementThumbnail.src}
@@ -182,7 +183,7 @@ export default function NarrationPlacementPicker({
               );
             })}
             <div className="absolute bottom-2 right-2 h-10 w-10 overflow-hidden rounded-md border border-amber-300/70 bg-amber-500/20 shadow-lg shadow-black/40">
-              {selectedBackgroundThumbnail.asset.candidates.length > 0 && (
+              {selectedBackgroundThumbnail.available && (
                 <MediaImage
                   media={selectedBackgroundThumbnail.media}
                   src={selectedBackgroundThumbnail.src}

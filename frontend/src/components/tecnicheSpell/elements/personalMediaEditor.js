@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom";
 import { saveSpellForUser, saveTecnicaForUser } from "../../common/userOwnedMedia";
+import useObjectUrl from "../../common/useObjectUrl";
+import useTask07MediaOperationOwner from "../../../data/media/useTask07MediaOperationOwner";
 
 const MEDIA_CONFIG = {
   spell: {
@@ -60,6 +62,7 @@ export default function PersonalMediaEditor({
   itemData,
   onClose,
 }) {
+  const task07MediaOperationOwner = useTask07MediaOperationOwner();
   const [imageFile, setImageFile] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(itemData?.image_url || null);
   const [videoFile, setVideoFile] = useState(null);
@@ -68,6 +71,10 @@ export default function PersonalMediaEditor({
   const [videoRemoved, setVideoRemoved] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const imageObjectUrl = useObjectUrl(imageFile);
+  const videoObjectUrl = useObjectUrl(videoFile);
+  const resolvedImagePreviewUrl = imageObjectUrl || imagePreviewUrl;
+  const resolvedVideoPreviewUrl = videoObjectUrl || videoPreviewUrl;
 
   const config = useMemo(() => MEDIA_CONFIG[itemType], [itemType]);
 
@@ -80,17 +87,6 @@ export default function PersonalMediaEditor({
     setVideoRemoved(false);
   }, [itemData]);
 
-  useEffect(() => {
-    return () => {
-      if (imagePreviewUrl?.startsWith("blob:")) {
-        URL.revokeObjectURL(imagePreviewUrl);
-      }
-      if (videoPreviewUrl?.startsWith("blob:")) {
-        URL.revokeObjectURL(videoPreviewUrl);
-      }
-    };
-  }, [imagePreviewUrl, videoPreviewUrl]);
-
   const updatePreview = (event, mediaType) => {
     const file = event.target.files?.[0];
     if (!file) {
@@ -98,36 +94,24 @@ export default function PersonalMediaEditor({
     }
 
     if (mediaType === "image") {
-      if (imagePreviewUrl?.startsWith("blob:")) {
-        URL.revokeObjectURL(imagePreviewUrl);
-      }
       setImageFile(file);
-      setImagePreviewUrl(URL.createObjectURL(file));
+      setImagePreviewUrl(null);
       setImageRemoved(false);
       return;
     }
 
-    if (videoPreviewUrl?.startsWith("blob:")) {
-      URL.revokeObjectURL(videoPreviewUrl);
-    }
     setVideoFile(file);
-    setVideoPreviewUrl(URL.createObjectURL(file));
+    setVideoPreviewUrl(null);
     setVideoRemoved(false);
   };
 
   const clearImage = () => {
-    if (imagePreviewUrl?.startsWith("blob:")) {
-      URL.revokeObjectURL(imagePreviewUrl);
-    }
     setImageFile(null);
     setImagePreviewUrl(null);
     setImageRemoved(true);
   };
 
   const clearVideo = () => {
-    if (videoPreviewUrl?.startsWith("blob:")) {
-      URL.revokeObjectURL(videoPreviewUrl);
-    }
     setVideoFile(null);
     setVideoPreviewUrl(null);
     setVideoRemoved(true);
@@ -142,9 +126,10 @@ export default function PersonalMediaEditor({
     setIsSaving(true);
 
     try {
-      await config.save({
+      await task07MediaOperationOwner.run((signal) => config.save({
         userId,
         originalName: itemName,
+        originalEntity: itemData,
         entryData: {
           ...itemData,
           Nome: itemData?.Nome || itemName,
@@ -153,7 +138,8 @@ export default function PersonalMediaEditor({
         videoFile,
         removeImage: imageRemoved,
         removeVideo: videoRemoved,
-      });
+        signal,
+      }));
 
       onClose(true);
     } catch (error) {
@@ -220,7 +206,7 @@ export default function PersonalMediaEditor({
                   onChange={(event) => updatePreview(event, "image")}
                   className="w-full text-sm text-white file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
                 />
-                <MediaPreview kind="Image" previewUrl={imagePreviewUrl} onClear={clearImage} />
+                <MediaPreview kind="Image" previewUrl={resolvedImagePreviewUrl} onClear={clearImage} />
               </div>
 
               <div>
@@ -231,7 +217,7 @@ export default function PersonalMediaEditor({
                   onChange={(event) => updatePreview(event, "video")}
                   className="w-full text-sm text-white file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
                 />
-                <MediaPreview kind="Video" previewUrl={videoPreviewUrl} onClear={clearVideo} />
+                <MediaPreview kind="Video" previewUrl={resolvedVideoPreviewUrl} onClear={clearVideo} />
                 <p className="text-gray-400 text-xs mt-1">Consigliato: video breve (&lt;30s) e di dimensioni ridotte.</p>
               </div>
             </div>

@@ -1,9 +1,8 @@
 // file: ./frontend/src/components/bazaar/elements/comparisonComponent.js
 import React, { useContext, useState, useEffect, useRef, useMemo } from 'react';
 import { deleteDoc, doc, onSnapshot, getDoc } from '../../../performance/firestore';
-import { ref, deleteObject } from 'firebase/storage';
 import { db } from '../../firebaseConfig';
-import { storage } from '../../firebaseStorage';
+import { createLegacyStorageCleanup } from '../../common/legacyMediaStorage';
 import { computeValue } from '../../common/computeFormula';
 import { AuthContext } from '../../../AuthContext';
 import {
@@ -16,6 +15,8 @@ import {
 import { FaTrash, FaEdit } from 'react-icons/fa';
 import { GiSpellBook } from "react-icons/gi";
 import { getSchema, getVarie } from '../../../data/configRepository';
+import MediaImage, { hasMediaAsset } from '../../common/MediaImage';
+import { normalizeCatalogItemMedia } from '../catalogItemMedia';
 
 const SpellCard = ({ spellName, spell, userData }) => {
   const [isHovered, setIsHovered] = useState(false);
@@ -469,22 +470,16 @@ export default function ComparisonPanel({ item, showMessage }) {
   const ridCostoTecSingola = general.ridCostoTecSingola || {};
   const ridCostoSpellSingola = general.ridCostoSpellSingola || {};
 
-  const imageUrl = general.image_url;
+  const { media: itemMedia, fallbackSrc: imageUrl } = normalizeCatalogItemMedia(item);
+  const hasItemImage = hasMediaAsset(itemMedia, {
+    fallbackSrc: imageUrl || '',
+    variant: 'card',
+  });
   const itemName = general.Nome || 'Oggetto Sconosciuto';
 
-  // pre-load image to detect 404s
   useEffect(() => {
-    setImageError(false);
-    if (!imageUrl) { setImageError(true); return; }
-
-    const img = new Image();
-    img.onload  = () => setImageError(false);
-    img.onerror = () => {
-      console.warn(`Failed to load image: ${imageUrl}`);
-      setImageError(true);
-    };
-    img.src = imageUrl;
-  }, [imageUrl]);
+    setImageError(!hasItemImage);
+  }, [hasItemImage, imageUrl]);
 
   /* ----------------------------------------------------------------------- */
   /*  Table rendering helpers                                                */
@@ -589,21 +584,14 @@ export default function ComparisonPanel({ item, showMessage }) {
   const handleConfirmDelete = async () => {
     setShowDeleteConfirmation(false);
     console.log(`Attempting to delete item: ${item.id} (${itemName})`);
+    const storageCleanup = createLegacyStorageCleanup({
+      onError: ({ path, error }) => {
+        console.warn(`Post-commit Bazaar media cleanup failed for "${path}":`, error);
+      },
+    });
 
     try {
-      // delete item image
-      if (imageUrl) {
-        try {
-          const path = decodeURIComponent(imageUrl.split('/o/')[1].split('?')[0]);
-          await deleteObject(ref(storage, path));
-          console.log(`Deleted item image: ${path}`);
-        } catch (e) {
-          console.warn(
-            `Failed to delete item image for "${itemName}":`,
-            e.code === 'storage/object-not-found' ? 'File not found.' : e.message
-          );
-        }
-      }
+      storageCleanup.addUrl(imageUrl);
 
       // delete spell assets if any
       const itemSpells = general.spells;
@@ -612,27 +600,14 @@ export default function ComparisonPanel({ item, showMessage }) {
           const spell = itemSpells[spellName];
           if (!spell || typeof spell !== 'object') continue;
 
-          const maybeDelete = async (url, desc) => {
-            if (!url) return;
-            try {
-              const p = decodeURIComponent(url.split('/o/')[1].split('?')[0]);
-              await deleteObject(ref(storage, p));
-              console.log(`Deleted ${desc}: ${p}`);
-            } catch (err) {
-              console.warn(
-                `Failed to delete ${desc} for "${spellName}":`,
-                err.code === 'storage/object-not-found' ? 'File not found.' : err.message
-              );
-            }
-          };
-
-          await maybeDelete(spell.image_url, 'spell image');
-          await maybeDelete(spell.video_url, 'spell video');
+          storageCleanup.addUrl(spell.image_url);
+          storageCleanup.addUrl(spell.video_url);
         }
       }
 
       // delete firestore doc
       await deleteDoc(doc(db, 'items', item.id));
+      await storageCleanup.flush();
       console.log('Item document deleted successfully from Firestore.');
       showMessage?.(`"${itemName}" eliminato con successo.`);
     } catch (err) {
@@ -700,13 +675,20 @@ export default function ComparisonPanel({ item, showMessage }) {
         {/* ----------------------------------------------------------------- */}
         {/*  FULL-PANEL BACKGROUND IMAGE (from old version)                   */}
         {/* ----------------------------------------------------------------- */}
-        {!imageError && imageUrl ? (
-          <div
+        {!imageError && hasItemImage ? (
+          <MediaImage
+            media={itemMedia}
+            src={imageUrl || ''}
+            variant="card"
+            alt=""
+            width={640}
+            height={480}
+            sizes="(max-width: 1024px) 100vw, 640px"
             className="
-              absolute inset-0 bg-cover bg-center
+              absolute inset-0 h-full w-full object-cover
               transition-transform duration-300 ease-in-out
             "
-            style={{ backgroundImage: `url(${imageUrl})` }}
+            onError={() => setImageError(true)}
           />
         ) : (
           <div className="absolute inset-0 bg-gray-800 flex items-center justify-center">

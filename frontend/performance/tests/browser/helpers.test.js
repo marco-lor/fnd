@@ -514,14 +514,14 @@ test('only intentional Task 07 fixture-image detach aborts are explained', () =>
     lifecyclePhase: 'auth-transition',
     resourceType: 'image',
     failure: 'net::ERR_ABORTED',
-    url: 'http://127.0.0.1:9199/v0/b/demo-fnd-perf.appspot.com/o/performance%2Fimage-013.svg?alt=media&token=performance-token',
+    url: 'http://127.0.0.1:9199/v0/b/demo-fnd-perf.appspot.com/o/performance%2Fimage-013.png?alt=media&token=performance-token',
   };
   assert.equal(isExpectedTask07MediaDetachmentCancellation(exact), true);
   assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, lifecyclePhase: 'connection-drain' }), false);
   assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, resourceType: 'fetch' }), false);
   assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, failure: 'net::ERR_FAILED' }), false);
   assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, url: exact.url.replace('127.0.0.1:9199', 'storage.googleapis.com') }), false);
-  assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, url: exact.url.replace('image-013.svg', 'other.svg') }), false);
+  assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, url: exact.url.replace('image-013.png', 'other.png') }), false);
   assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, firebaseProjectId: 'live-fnd' }), false);
 });
 

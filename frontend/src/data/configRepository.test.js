@@ -3,6 +3,7 @@ import {
   getCommonTechniques,
   getPossibleLists,
   getSchema,
+  getTask07MediaControlDocument,
   getVarie,
   invalidateConfig,
 } from './configRepository';
@@ -186,5 +187,25 @@ describe('configRepository', () => {
       'config.possible-lists.get.v1',
       'config.common-spells.get.v1',
     ]);
+  });
+
+  test('reads and invalidates the reviewed Task 07 rollout document', async () => {
+    const control = {
+      mode: 'shadow',
+      schemaVersion: 1,
+      policyVersion: 1,
+      enabledPurposes: ['avatar'],
+      enabledRoles: ['player'],
+      enabledUids: ['user-1'],
+    };
+    getDoc.mockResolvedValueOnce(snapshot(control));
+
+    await expect(getTask07MediaControlDocument()).resolves.toBe(control);
+    expect(doc).toHaveBeenCalledWith(
+      expect.anything(),
+      'utils',
+      'task07_media'
+    );
+    expect(invalidateConfig('task07_media')).toBe(true);
   });
 });

@@ -163,6 +163,166 @@
       "maximum": 50,
       "tolerance": null,
       "ownerTask": "17"
+    },
+    {
+      "id": "task07-offscreen-media-detachment",
+      "scenario": "task07-media-shell",
+      "metric": "task07.farOffscreenAttachedImages",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "07"
+    },
+    {
+      "id": "task07-attached-image-cap",
+      "scenario": "task07-media-shell",
+      "metric": "task07.attachedImages",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 80,
+      "tolerance": null,
+      "ownerTask": "07"
+    },
+    {
+      "id": "task07-unique-image-request-cap",
+      "scenario": "task07-media-shell",
+      "metric": "task07.uniqueFixtureImageRequests",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 64,
+      "tolerance": null,
+      "ownerTask": "07"
+    },
+    {
+      "id": "task07-stopped-shell-audio-dormant",
+      "scenario": "task07-media-shell",
+      "metric": "task07.audioNodes",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "07"
+    },
+    {
+      "id": "task07-compact-music-stream-listener-cap",
+      "scenario": "task07-media-shell",
+      "metric": "task07.musicStreamListeners",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 1,
+      "tolerance": null,
+      "ownerTask": "07"
+    },
+    {
+      "id": "task07-reduced-motion-meteors-dormant",
+      "scenario": "task07-media-shell",
+      "metric": "task07.reducedMotionMeteors",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "07"
+    },
+    {
+      "id": "task07-desktop-registry-request-concurrency",
+      "scenario": "task07-registry-desktop",
+      "metric": "task07.registryRequestConcurrencyLimit",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 4,
+      "tolerance": null,
+      "ownerTask": "07"
+    },
+    {
+      "id": "task07-desktop-unpinned-registry-records",
+      "scenario": "task07-registry-desktop",
+      "metric": "task07.unpinnedRegistryRecords",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 96,
+      "tolerance": null,
+      "ownerTask": "07"
+    },
+    {
+      "id": "task07-desktop-unpinned-decoded-bytes",
+      "scenario": "task07-registry-desktop",
+      "metric": "task07.unpinnedEstimatedDecodedBytes",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 134217728,
+      "tolerance": null,
+      "ownerTask": "07"
+    },
+    {
+      "id": "task07-desktop-total-decoded-bytes",
+      "scenario": "task07-registry-desktop",
+      "metric": "task07.totalEstimatedDecodedBytes",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 402653184,
+      "tolerance": null,
+      "ownerTask": "07"
+    },
+    {
+      "id": "task07-desktop-low-priority-preloads",
+      "scenario": "task07-registry-desktop",
+      "metric": "task07.lowPriorityQueuedPreloads",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 32,
+      "tolerance": null,
+      "ownerTask": "07"
+    },
+    {
+      "id": "task07-compact-registry-request-concurrency",
+      "scenario": "task07-registry-compact",
+      "metric": "task07.registryRequestConcurrencyLimit",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 2,
+      "tolerance": null,
+      "ownerTask": "07"
+    },
+    {
+      "id": "task07-compact-unpinned-registry-records",
+      "scenario": "task07-registry-compact",
+      "metric": "task07.unpinnedRegistryRecords",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 64,
+      "tolerance": null,
+      "ownerTask": "07"
+    },
+    {
+      "id": "task07-compact-unpinned-decoded-bytes",
+      "scenario": "task07-registry-compact",
+      "metric": "task07.unpinnedEstimatedDecodedBytes",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 67108864,
+      "tolerance": null,
+      "ownerTask": "07"
+    },
+    {
+      "id": "task07-compact-total-decoded-bytes",
+      "scenario": "task07-registry-compact",
+      "metric": "task07.totalEstimatedDecodedBytes",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 335544320,
+      "tolerance": null,
+      "ownerTask": "07"
+    },
+    {
+      "id": "task07-compact-low-priority-preloads",
+      "scenario": "task07-registry-compact",
+      "metric": "task07.lowPriorityQueuedPreloads",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 16,
+      "tolerance": null,
+      "ownerTask": "07"
     }
   ]
 }

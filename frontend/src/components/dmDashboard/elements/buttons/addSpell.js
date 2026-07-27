@@ -2,16 +2,16 @@
 import React, { useEffect, useState } from "react";
 import { SpellOverlay } from "../../../common/SpellOverlay";
 import { db } from "../../../firebaseConfig";
-import { storage } from "../../../firebaseStorage";
 import { saveSpellForUser } from "../../../common/userOwnedMedia";
 import {
   doc, getDoc, updateDoc,
 } from "../../../../performance/firestore";
 import {
-  ref, uploadBytes, getDownloadURL,
-} from "firebase/storage";
-import { uploadCacheableImage } from "../../../common/imageStorage";
+  uploadLegacyBlob,
+  uploadLegacyImage,
+} from "../../../common/legacyMediaStorage";
 import { getSchema } from '../../../../data/configRepository';
+import useTask07MediaOperationOwner from '../../../../data/media/useTask07MediaOperationOwner';
 
 /* ------------------------------------------------------------------ */
 /*  A. Pure button – API unchanged                                    */
@@ -37,6 +37,7 @@ export function AddSpellButton({ onClick }) {
 /*  B. Overlay wrapper (decoupled saving logic)                       */
 /* ------------------------------------------------------------------ */
 export function AddSpellOverlay({ userId, onClose, savePath = null }) {
+  const task07MediaOperationOwner = useTask07MediaOperationOwner();
   const [schema,   setSchema]   = useState(null);
   const [userName, setUserName] = useState("");
 
@@ -72,26 +73,28 @@ export function AddSpellOverlay({ userId, onClose, savePath = null }) {
       /* 1. optional media upload                            */
       /* ---------------------------------------------------- */
       if (!isItemSave) {
-        await saveSpellForUser({
+        await task07MediaOperationOwner.run((signal) => saveSpellForUser({
           userId,
           originalName: spellName,
           entryData: spellData,
           imageFile,
           videoFile,
-        });
+          signal,
+        }));
 
         onClose(true);
         return;
       }
 
       if (imageFile) {
-        const imgRef  = ref(storage, `spells/${safeBase}_image`);
-        spellData.image_url = (await uploadCacheableImage(imgRef, imageFile)).downloadUrl;
+        spellData.image_url = (
+          await uploadLegacyImage(`spells/${safeBase}_image`, imageFile)
+        ).downloadUrl;
       }
       if (videoFile) {
-        const vidRef  = ref(storage, `spells/videos/${safeBase}_video`);
-        await uploadBytes(vidRef, videoFile);
-        spellData.video_url = await getDownloadURL(vidRef);
+        spellData.video_url = (
+          await uploadLegacyBlob(`spells/videos/${safeBase}_video`, videoFile)
+        ).downloadUrl;
       }
 
       /* ---------------------------------------------------- */

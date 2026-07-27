@@ -11,7 +11,10 @@ import {
   PRIVATE_MEDIA_MAX_ACTIVE_FETCHES,
   PRIVATE_MEDIA_MAX_CACHE_BYTES,
   PRIVATE_MEDIA_MAX_DECODED_BYTES,
+  PRIVATE_MEDIA_MAX_TOTAL_DECODED_BYTES,
   PRIVATE_MEDIA_MAX_RECORDS,
+  PRIVATE_MEDIA_FAILURE_BACKOFF_MS,
+  PRIVATE_VIDEO_CONTENT_TYPES,
 } from './privateMediaAssets';
 
 const canonicalAssetId = (id) => {
@@ -27,7 +30,7 @@ const canonicalGeneration = (id) => String(
 );
 
 const descriptor = (id, bytes = 2, overrides = {}) => ({
-  path: `media/v1/avatar/user/${canonicalAssetId(id)}/derivatives/v1/thumbnail.webp`,
+  path: `media_assets/v1/signed-in/user/${canonicalAssetId(id)}/${canonicalGeneration(id)}/thumbnail`,
   generation: canonicalGeneration(id),
   bytes,
   contentType: 'image/webp',
@@ -43,6 +46,7 @@ const createRuntime = ({
   maxActiveFetches = PRIVATE_MEDIA_MAX_ACTIVE_FETCHES,
   maxCacheBytes = PRIVATE_MEDIA_MAX_CACHE_BYTES,
   maxDecodedBytes = PRIVATE_MEDIA_MAX_DECODED_BYTES,
+  maxTotalDecodedBytes = PRIVATE_MEDIA_MAX_TOTAL_DECODED_BYTES,
   maxRecords = PRIVATE_MEDIA_MAX_RECORDS,
   now = () => Date.now(),
 } = {}) => {
@@ -59,6 +63,7 @@ const createRuntime = ({
     maxActiveFetches,
     maxCacheBytes,
     maxDecodedBytes,
+    maxTotalDecodedBytes,
     maxRecords,
     now,
     loadStorageApi,
@@ -93,6 +98,18 @@ describe('privateMediaAssets', () => {
       value.path,
       value.generation,
     ]));
+    const gallery2x = descriptor('gallery-density', 4, {
+      path: `media_assets/v1/signed-in/user/${canonicalAssetId('gallery-density')}/${canonicalGeneration('gallery-density')}/gallery2x`,
+      width: 768,
+      height: 432,
+    });
+    expect(normalizePrivateMediaDescriptor(gallery2x)).toEqual(gallery2x);
+    const thumbnail2x = descriptor('thumbnail-density', 4, {
+      path: `media_assets/v1/owner-manager/user/${canonicalAssetId('thumbnail-density')}/${canonicalGeneration('thumbnail-density')}/thumbnail2x`,
+      width: 192,
+      height: 192,
+    });
+    expect(normalizePrivateMediaDescriptor(thumbnail2x)).toEqual(thumbnail2x);
     expect(normalizePrivateMediaDescriptor({
       ...value,
       path: 'https://example.test/bearer.webp',
@@ -119,28 +136,74 @@ describe('privateMediaAssets', () => {
     })).toBeNull();
     expect(normalizePrivateMediaDescriptor({
       ...value,
-      path: 'media/v1/avatar/user/asset/derivatives/v1/thumbnail.webp',
+      path: `media/v1/avatar/user/${canonicalAssetId('legacy')}/derivatives/v1/thumbnail.webp`,
     })).toBeNull();
     expect(normalizePrivateMediaDescriptor({
       ...value,
-      path: `media/v1/avatar/user/${canonicalAssetId('normalized')}/derivatives/v1/poster.webp`,
+      path: `media_assets/v1/signed-in/user/asset/${canonicalGeneration('normalized')}/thumbnail`,
     })).toBeNull();
     expect(normalizePrivateMediaDescriptor({
       ...value,
-      path: `media/v1/avatar/user/${canonicalAssetId('normalized')}/original/source.png`,
-      contentType: 'image/webp',
+      path: `media_assets/v1/signed-in/user/${canonicalAssetId('normalized')}/${canonicalGeneration('normalized')}/board`,
     })).toBeNull();
     expect(normalizePrivateVideoDescriptor({
       ...value,
-      path: `media/v1/map-video/user/${canonicalAssetId('normalized')}/original/source.mp4`,
+      path: `media_assets/v1/signed-in/user/${canonicalAssetId('normalized')}/${canonicalGeneration('normalized')}/original`,
       contentType: 'video/mp4',
       generation: '0',
     })).toBeNull();
   });
 
-  test('normalizes and acquires MP4 descriptors through the shared bounded cache', async () => {
+  test('accepts the exact descriptors emitted by the server processor', () => {
+    const assetId = `m_${'a'.repeat(40)}`;
+    const original = {
+      path: `media_assets/v1/signed-in/user-a/${assetId}/7/original`,
+      generation: '1700000000000001',
+      bytes: 10,
+      contentType: 'image/png',
+      width: 400,
+      height: 300,
+    };
+    const thumbnail = {
+      path: `media_assets/v1/signed-in/user-a/${assetId}/7/thumbnail`,
+      generation: '1700000000000002',
+      bytes: 14,
+      contentType: 'image/webp',
+      width: 64,
+      height: 64,
+    };
+
+    expect(normalizePrivateMediaDescriptor(original)).toEqual(original);
+    expect(normalizePrivateMediaDescriptor(thumbnail)).toEqual(thumbnail);
+    expect(normalizePrivateMediaDescriptor({
+      ...thumbnail,
+      path: thumbnail.path.replace('/signed-in/', '/public/'),
+    })).toBeNull();
+    expect(normalizePrivateMediaDescriptor({
+      ...thumbnail,
+      path: thumbnail.path.replace('/7/', '/0/'),
+    })).toBeNull();
+    expect(normalizePrivateMediaDescriptor({
+      ...thumbnail,
+      contentType: 'image/png',
+    })).toBeNull();
+    expect(normalizePrivateMediaDescriptor({
+      ...original,
+      contentType: 'image/gif',
+    })).toBeNull();
+  });
+
+  test('shares the desktop registry caps and deterministic failure schedule', () => {
+    expect(PRIVATE_MEDIA_MAX_ACTIVE_FETCHES).toBe(4);
+    expect(PRIVATE_MEDIA_MAX_RECORDS).toBe(96);
+    expect(PRIVATE_MEDIA_MAX_DECODED_BYTES).toBe(128 * 1024 * 1024);
+    expect(PRIVATE_MEDIA_MAX_TOTAL_DECODED_BYTES).toBe(384 * 1024 * 1024);
+    expect(PRIVATE_MEDIA_FAILURE_BACKOFF_MS).toEqual([1000, 5000, 30000]);
+  });
+
+  test('normalizes server MP4 and WebM originals and acquires them through the shared bounded cache', async () => {
     const value = descriptor('video', 4, {
-      path: `media/v1/map-video/user/${canonicalAssetId('video')}/original/source.mp4`,
+      path: `media_assets/v1/signed-in/user/${canonicalAssetId('video')}/${canonicalGeneration('video')}/original`,
       contentType: 'video/mp4',
       width: 3840,
       height: 2160,
@@ -165,6 +228,18 @@ describe('privateMediaAssets', () => {
       value.path,
       value.generation,
     ]));
+    const webm = {
+      ...value,
+      path: `media_assets/v1/owner-manager/user/${canonicalAssetId('video')}/8/original`,
+      generation: '901',
+      contentType: 'video/webm',
+    };
+    expect(PRIVATE_VIDEO_CONTENT_TYPES).toEqual(['video/mp4', 'video/webm']);
+    expect(normalizePrivateVideoDescriptor(webm)).toEqual(webm);
+    expect(normalizePrivateVideoDescriptor({
+      ...webm,
+      path: webm.path.replace('/original', '/poster'),
+    })).toBeNull();
 
     const lease = acquirePrivateVideoAsset(value);
     await expect(lease.promise).resolves.toEqual(expect.objectContaining({
@@ -238,6 +313,7 @@ describe('privateMediaAssets', () => {
       code: 'private-media-type-mismatch',
     });
     firstLease.release();
+    expect(getPrivateMediaAssetCacheSnapshot().records[0].retryAt).toBe(1100);
 
     const backedOffLease = acquirePrivateMediaAsset(value);
     await expect(backedOffLease.promise).rejects.toMatchObject({
@@ -260,6 +336,7 @@ describe('privateMediaAssets', () => {
     const runtime = createRuntime({
       maxCacheBytes: 16,
       maxDecodedBytes: 64,
+      maxTotalDecodedBytes: 64,
       maxRecords: 4,
       now: () => now,
     });
@@ -300,6 +377,44 @@ describe('privateMediaAssets', () => {
       recordCount: 1,
     }));
     retryLease.release();
+  });
+
+  test('admits active and crossfade decoded leases above the settled unreferenced cap', async () => {
+    const runtime = createRuntime({
+      maxCacheBytes: 16,
+      maxDecodedBytes: 64,
+      maxTotalDecodedBytes: 128,
+      maxRecords: 4,
+    });
+    const activeLease = acquirePrivateMediaAsset(descriptor('active-map', 4, {
+      width: 4,
+      height: 4,
+    }));
+    const crossfadeLease = acquirePrivateMediaAsset(descriptor('crossfade-map', 4, {
+      width: 4,
+      height: 4,
+    }));
+    const [activeResult] = await Promise.all([
+      activeLease.promise,
+      crossfadeLease.promise,
+    ]);
+
+    expect(getPrivateMediaAssetCacheSnapshot()).toEqual(expect.objectContaining({
+      cachedDecodedBytes: 128,
+      referencedDecodedBytes: 128,
+      unreferencedDecodedBytes: 0,
+      recordCount: 2,
+    }));
+
+    activeLease.release();
+    crossfadeLease.release();
+    expect(getPrivateMediaAssetCacheSnapshot()).toEqual(expect.objectContaining({
+      cachedDecodedBytes: 64,
+      unreferencedDecodedBytes: 64,
+      unreferencedRecordCount: 1,
+      recordCount: 1,
+    }));
+    expect(runtime.revokeObjectURL).toHaveBeenCalledWith(activeResult.url);
   });
 
   test('tracks one bounded delayed release and cancels it on an immediate release', async () => {

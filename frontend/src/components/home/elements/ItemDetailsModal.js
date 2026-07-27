@@ -4,8 +4,7 @@ import { FaTimes } from 'react-icons/fa';
 import { useAuth } from '../../../AuthContext';
 import { computeValue } from '../../common/computeFormula';
 import { db } from '../../firebaseConfig';
-import { storage } from '../../firebaseStorage';
-import { ref as storageRef, deleteObject } from 'firebase/storage';
+import { deleteLegacyStoragePath } from '../../common/legacyMediaStorage';
 import { doc, getDoc, updateDoc } from '../../../performance/firestore';
 import { FiTrash2 } from 'react-icons/fi';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
@@ -245,7 +244,7 @@ const ItemDetailsModal = ({ item, onClose }) => {
       if (deletedImageUrl) {
         try {
           const path = decodeURIComponent(deletedImageUrl.split('/o/')[1].split('?')[0]);
-          await deleteObject(storageRef(storage, path));
+          await deleteLegacyStoragePath(path);
         } catch (e) {
           console.warn('Failed to delete varie image from storage (modal)', e);
         }

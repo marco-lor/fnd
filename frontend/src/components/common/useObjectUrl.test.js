@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
-import useObjectUrl, { createObjectUrlLease } from './useObjectUrl';
+import useObjectUrl, { createObjectUrlLease, withObjectUrl } from './useObjectUrl';
 
 const Preview = ({ file }) => {
   const url = useObjectUrl(file);
@@ -61,5 +61,16 @@ describe('useObjectUrl', () => {
     expect(URL.createObjectURL).not.toHaveBeenCalled();
     view.unmount();
     expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+  });
+
+  test('withObjectUrl always revokes after success and failure', async () => {
+    await expect(withObjectUrl(new Blob(['ok']), async (url) => `used:${url}`))
+      .resolves.toBe('used:blob:preview-1');
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview-1');
+
+    await expect(withObjectUrl(new Blob(['bad']), async () => {
+      throw new Error('decode failed');
+    })).rejects.toThrow('decode failed');
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview-2');
   });
 });

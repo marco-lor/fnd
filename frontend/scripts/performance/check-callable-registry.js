@@ -24,13 +24,31 @@ const walkJavaScript = (directory) => fs.readdirSync(directory, { withFileTypes:
     return /\.(?:js|jsx)$/.test(entry.name) ? [absolutePath] : [];
   });
 
-const collectOnCallExports = () => fs.readdirSync(functionsSourceRoot)
-  .filter((filename) => filename.endsWith('.ts'))
-  .flatMap((filename) => {
+const collectOnCallExports = () => {
+  const callables = new Set();
+  const aliases = [];
+  for (const filename of fs.readdirSync(functionsSourceRoot)
+    .filter((candidate) => candidate.endsWith('.ts'))) {
     const source = fs.readFileSync(path.join(functionsSourceRoot, filename), 'utf8');
-    return [...source.matchAll(/\bexport\s+const\s+([A-Za-z0-9_]+)\s*=\s*onCall\b/g)]
-      .map((match) => match[1]);
-  });
+    for (const match of source.matchAll(
+      /\bexport\s+const\s+([A-Za-z0-9_]+)\s*=\s*onCall\b/g
+    )) callables.add(match[1]);
+    for (const match of source.matchAll(
+      /\bexport\s+const\s+([A-Za-z0-9_]+)\s*=\s*([A-Za-z0-9_]+)\s*;/g
+    )) aliases.push({ name: match[1], target: match[2] });
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const { name, target } of aliases) {
+      if (callables.has(target) && !callables.has(name)) {
+        callables.add(name);
+        changed = true;
+      }
+    }
+  }
+  return [...callables];
+};
 
 const checkCallableRegistry = () => {
   const failures = [];

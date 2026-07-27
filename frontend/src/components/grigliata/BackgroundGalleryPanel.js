@@ -11,7 +11,7 @@ import {
   getWritableGalleryFolderId,
   UNFILED_GALLERY_FOLDER_ID,
 } from './galleryFolders';
-import MediaImage, { resolveMediaAsset } from '../common/MediaImage';
+import MediaImage, { hasMediaAsset } from '../common/MediaImage';
 import MediaVideo, { resolveMediaVideoAsset } from '../common/MediaVideo';
 
 const GALLERY_ACTION_BASE_CLASS_NAME = 'inline-flex h-9 w-9 items-center justify-center rounded-md border transition-colors disabled:cursor-not-allowed disabled:opacity-60';
@@ -29,6 +29,7 @@ const buildVideoPosterMedia = (background) => {
   return {
     media: {
       schemaVersion: manifest.schemaVersion,
+      kind: manifest.kind || 'map-video',
       state: manifest.state,
       variants: poster ? { poster } : {},
     },
@@ -246,12 +247,15 @@ export default function BackgroundGalleryPanel({
                   ? buildVideoPosterMedia(background)
                   : background;
                 const thumbnailVariant = isVideo ? 'poster' : 'thumbnail';
-                const thumbnailAsset = resolveMediaAsset(thumbnailMedia, {
+                const thumbnailAvailable = hasMediaAsset(thumbnailMedia, {
                   variant: thumbnailVariant,
                 });
-                const previewAsset = isVideo
-                  ? resolveMediaVideoAsset(background, { fallbackSrc: background.imageUrl || '' })
-                  : thumbnailAsset;
+                const previewAvailable = isVideo
+                  ? resolveMediaVideoAsset(background, {
+                    compatibilityMode: 'derivative-read',
+                    fallbackSrc: background.imageUrl || '',
+                  }).candidates.length > 0
+                  : thumbnailAvailable;
                 const isUsePending = activatingBackgroundId === background.id;
                 const isNarrationPending = narrationActionBackgroundId === background.id;
                 const isDestructiveActionLocked = destructiveActionLockedBackgroundIdSet.has(background.id);
@@ -298,7 +302,7 @@ export default function BackgroundGalleryPanel({
                           onClick={() => onSelectBackground(background.id)}
                           className="block h-full w-full"
                         >
-                          {(isVideo || thumbnailAsset.candidates.length > 0) && (
+                          {(isVideo || thumbnailAvailable) && (
                             <MediaImage
                               media={thumbnailMedia}
                               src={isVideo ? '' : background.imageUrl || ''}
@@ -311,7 +315,7 @@ export default function BackgroundGalleryPanel({
                             />
                           )}
                         </button>
-                        {previewAsset.candidates.length > 0 && (
+                        {previewAvailable && (
                           <button
                             type="button"
                             aria-label={`Preview ${backgroundName}`}

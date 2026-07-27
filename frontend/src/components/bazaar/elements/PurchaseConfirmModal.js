@@ -1,6 +1,8 @@
 // file: ./frontend/src/components/bazaar/elements/PurchaseConfirmModal.js
 import React, { useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import MediaImage, { hasMediaAsset } from '../../common/MediaImage';
+import { normalizeCatalogItemMedia } from '../catalogItemMedia';
 
 /**
  * Purchase confirmation modal.
@@ -15,7 +17,11 @@ export default function PurchaseConfirmModal({ item, userGold, onConfirm, onClos
   const name = item?.General?.Nome || 'Oggetto';
   const price = typeof item?.General?.prezzo === 'number' ? item.General.prezzo : parseInt(item?.General?.prezzo, 10) || 0;
   const affordable = userGold >= price;
-  const imageUrl = item?.General?.image_url;
+  const { media: itemMedia, fallbackSrc: imageUrl } = normalizeCatalogItemMedia(item);
+  const hasImage = hasMediaAsset(itemMedia, {
+    fallbackSrc: imageUrl || '',
+    variant: 'thumbnail',
+  });
 
   const handleKey = useCallback((e) => { if (e.key === 'Escape') onClose(); }, [onClose]);
   useEffect(() => { document.addEventListener('keydown', handleKey); return () => document.removeEventListener('keydown', handleKey); }, [handleKey]);
@@ -36,7 +42,18 @@ export default function PurchaseConfirmModal({ item, userGold, onConfirm, onClos
             <div className="p-5 flex gap-4">
               <div className="flex-shrink-0">
                 <div className="relative w-20 h-20 rounded-xl border border-slate-600/60 bg-slate-700/40 overflow-hidden flex items-center justify-center text-slate-400 text-xs">
-                  {imageUrl ? <img src={imageUrl} alt={name} className="w-full h-full object-cover" /> : <span>{name.charAt(0)}</span>}
+                  {hasImage ? (
+                    <MediaImage
+                      media={itemMedia}
+                      src={imageUrl || ''}
+                      variant="thumbnail"
+                      alt={name}
+                      width={80}
+                      height={80}
+                      sizes="80px"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : <span>{name.charAt(0)}</span>}
                   <div className="absolute inset-0 pointer-events-none ring-1 ring-inset ring-white/5" />
                 </div>
               </div>

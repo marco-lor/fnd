@@ -2,7 +2,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { auth, db } from '../firebaseConfig';
-import { storage } from '../firebaseStorage';
 import {
   addDoc,
   collection,
@@ -14,12 +13,14 @@ import {
   setDoc,
   updateDoc,
 } from '../../performance/firestore';
-import { ref as storageRef, deleteObject } from 'firebase/storage';
 import { FiPlus, FiChevronDown, FiChevronRight, FiEdit2, FiTrash2, FiX, FiCopy } from 'react-icons/fi';
 import { computeParamTotals, deepClone, Pill, SectionTitle } from './elements/utils';
 import RadarChart from './elements/RadarChart';
 import { FoeFormModal } from './elements/lazyFoeEditors';
-import { uploadCacheableImage } from '../common/imageStorage';
+import {
+  deleteLegacyStoragePath,
+  uploadLegacyImage,
+} from '../common/legacyMediaStorage';
 import { getSchema } from '../../data/configRepository';
 import { getCallable } from '../../data/functions/callableRegistry';
 import {
@@ -28,7 +29,8 @@ import {
 import {
   runWithDurableOperationIntent,
 } from '../../data/functions/backendOperationIntentStore';
-import { TASK07_MEDIA_PIPELINE_ENABLED } from '../../data/media/mediaFeatureFlags';
+import { isTask07MediaV1WriteEnabled } from '../../data/media/mediaFeatureFlags';
+import useTask07MediaOperationOwner from '../../data/media/useTask07MediaOperationOwner';
 import MediaImage, { hasMediaAsset } from '../common/MediaImage';
 import {
   buildCanonicalFoeImageRemovalPayload,
@@ -228,6 +230,7 @@ const FoeRow = ({ foe, onEdit, onDelete, onDuplicate }) => {
 };
 
 const FoesHub = () => {
+  const task07MediaOperationOwner = useTask07MediaOperationOwner();
   const [foes, setFoes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [schema, setSchema] = useState(null);
@@ -330,7 +333,7 @@ const FoesHub = () => {
       // Only legacy main and nested legacy objects remain client-deletable.
       try {
         await Promise.allSettled(
-          clientDeletablePaths.map((path) => deleteObject(storageRef(storage, path)))
+          clientDeletablePaths.map((path) => deleteLegacyStoragePath(path))
         );
       } catch (e) {
         console.warn('Some foe asset deletions failed', e);
@@ -368,8 +371,7 @@ const FoesHub = () => {
           const safe = (entry.name || folder).toString().trim().replace(/\s+/g, '_').slice(0, 40) || folder;
           const fname = `${safe}_${Date.now()}`;
           const path = `foes/${folder}/${fname}`;
-          const ref = storageRef(storage, path);
-          ({ downloadUrl: eUrl } = await uploadCacheableImage(ref, entry.imageFile));
+          ({ downloadUrl: eUrl } = await uploadLegacyImage(path, entry.imageFile));
           ePath = path;
         } else if (entry.removeImage) {
           eUrl = '';
@@ -382,12 +384,15 @@ const FoesHub = () => {
         return { name: entry.name || '', description: entry.description || '', danni: entry.danni || '', effetti: entry.effetti || '', imageUrl: eUrl, imagePath: ePath };
       };
 
-      if (TASK07_MEDIA_PIPELINE_ENABLED && imageFile && !removeImage) {
+      if (imageFile && !removeImage && await isTask07MediaV1WriteEnabled({
+        purpose: 'foe',
+        role: 'dm',
+        uid: auth.currentUser?.uid || '',
+      })) {
         const actorUid = auth.currentUser?.uid || '';
         const foeRef = editing?.id
           ? doc(db, 'foes', editing.id)
           : doc(collection(db, 'foes'));
-        const revision = Date.now();
         const withTec = Array.isArray(basePayload.tecniche)
           ? await Promise.all(basePayload.tecniche.map((entry) => uploadEntryImage('tecniche', entry)))
           : [];
@@ -398,11 +403,10 @@ const FoesHub = () => {
         basePayload.spells = withSp;
 
         const {
-          buildTask07MediaEntityPatch,
-          buildTask07MediaOperationId,
           describeTask07ConsumerOutcome,
           getTask07PreviousAssetId,
           runTask07ConsumerUpload,
+          runWithTask07MediaOperationReceipt,
           task07ConsumerNeedsAttention,
         } = await import(
           /* webpackChunkName: "feature-task07-media" */
@@ -410,36 +414,64 @@ const FoesHub = () => {
         );
         const payload = {
           ...basePayload,
-          imageUrl: '',
-          imagePath: '',
+          // Keep the last legacy reference while the authoritative attachment
+          // is written. Immediate Task 07 rollback must not depend on the new
+          // manifest, and the server will preserve these fields transactionally.
+          imageUrl: editing?.imageUrl || '',
+          imagePath: editing?.imagePath || '',
           updated_at: serverTimestamp(),
         };
-        const outcome = await runTask07ConsumerUpload({
-          file: imageFile,
-          ownerUid: actorUid,
-          entityId: foeRef.id,
-          operationId: buildTask07MediaOperationId({
-            kind: 'foe',
+        const currentFoe = editing?.id
+          ? foes.find((foe) => foe.id === editing.id) || editing
+          : null;
+        const expectedRevision = Number.isSafeInteger(currentFoe?.task07MediaRevision)
+          ? currentFoe.task07MediaRevision
+          : 0;
+        const previousAssetId = getTask07PreviousAssetId(currentFoe);
+        const operationLease = task07MediaOperationOwner.start(
+          'Foe media upload was replaced.'
+        );
+        let outcome;
+        try {
+          outcome = await runWithTask07MediaOperationReceipt({
+            actorUid,
             ownerUid: actorUid,
             entityId: foeRef.id,
+            kind: 'foe',
             file: imageFile,
-            revision,
-          }),
-          kind: 'foe',
-          previousAssetId: getTask07PreviousAssetId(editing),
-          commitEntity: (media) => {
-            const committedPayload = {
-              ...payload,
-              ...buildTask07MediaEntityPatch(media, { includeEmptyImageUrl: true }),
-            };
-            return editing?.id
-              ? updateDoc(foeRef, committedPayload)
-              : setDoc(foeRef, {
-                ...committedPayload,
-                created_at: serverTimestamp(),
-              });
-          },
-        });
+            expectedRevision,
+            previousAssetId,
+            signal: operationLease.signal,
+            invoke: ({
+              operationId,
+              expectedRevision: receiptExpectedRevision,
+              previousAssetId: receiptPreviousAssetId,
+              signal,
+            }) => runTask07ConsumerUpload({
+              file: imageFile,
+              ownerUid: actorUid,
+              entityId: foeRef.id,
+              operationId,
+              kind: 'foe',
+              previousAssetId: receiptPreviousAssetId,
+              expectedRevision: receiptExpectedRevision,
+              prepareEntity: () => (
+                editing?.id
+                  ? updateDoc(foeRef, payload)
+                  : setDoc(foeRef, {
+                    ...payload,
+                    created_at: serverTimestamp(),
+                  })
+              ),
+              ...(editing?.id ? {} : {
+                rollbackPreparedEntity: () => deleteDoc(foeRef),
+              }),
+              signal,
+            }),
+          });
+        } finally {
+          operationLease.release();
+        }
 
         try {
           const cleanupList = [];
@@ -457,7 +489,7 @@ const FoesHub = () => {
             const nextPath = next?.imagePath || '';
             if (prevPath && prevPath !== nextPath && (prev?.imageFile || prev?.removeImage)) cleanupList.push(prevPath);
           });
-          await Promise.allSettled(cleanupList.map((path) => deleteObject(storageRef(storage, path))));
+          await Promise.allSettled(cleanupList.map((path) => deleteLegacyStoragePath(path)));
         } catch (cleanupError) {
           console.warn('cleanup old foe entry image failed', cleanupError);
         }
@@ -478,8 +510,7 @@ const FoesHub = () => {
         const safeName = (basePayload?.name || 'foe').toString().trim().replace(/\s+/g, '_').slice(0, 40) || 'foe';
         const fileName = `${safeName}_${Date.now()}`;
         const path = `foes/${fileName}`;
-        const fileRef = storageRef(storage, path);
-        ({ downloadUrl: imageUrl } = await uploadCacheableImage(fileRef, imageFile));
+        ({ downloadUrl: imageUrl } = await uploadLegacyImage(path, imageFile));
         imagePath = path;
       }
 
@@ -522,7 +553,7 @@ const FoesHub = () => {
           && oldPath !== newPath
           && shouldClientDeleteFoeMainStorageObject(editing)
         ) {
-          await deleteObject(storageRef(storage, oldPath));
+          await deleteLegacyStoragePath(oldPath);
         }
         // cleanup tecniche/spells old images when replaced or removed
         const cleanupList = [];
@@ -542,7 +573,7 @@ const FoesHub = () => {
           const nextPath = next?.imagePath || '';
           if (prevPath && prevPath !== nextPath && (prev?.imageFile || prev?.removeImage)) cleanupList.push(prevPath);
         });
-        await Promise.allSettled(cleanupList.map((p) => deleteObject(storageRef(storage, p))));
+        await Promise.allSettled(cleanupList.map((p) => deleteLegacyStoragePath(p)));
       } catch (e) {
         console.warn('cleanup old foe image failed', e);
       }

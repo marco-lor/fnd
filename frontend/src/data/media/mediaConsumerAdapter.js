@@ -1,6 +1,15 @@
 import { summarizeTask07Error } from './mediaErrors';
-import { TASK07_MEDIA_PIPELINE_ENABLED } from './mediaFeatureFlags';
 import { runTask07MediaPipeline } from './mediaPipeline';
+
+export { createTask07MediaOperationOwner } from './mediaOperationOwner';
+export {
+  TASK07_MEDIA_OPERATION_RECEIPT_STORAGE_KEY,
+  Task07MediaOperationReceiptError,
+  buildTask07MediaStableRevision,
+  runWithTask07MediaOperationReceipt,
+  task07MediaFailureCanRotateReceipt,
+  task07MediaReceiptOutcomeIsAmbiguous,
+} from './mediaOperationReceiptStore';
 
 const TASK07_OPERATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 const TASK07_ASSET_ID_PATTERN = /^m_[a-f0-9]{40}$/;
@@ -105,16 +114,16 @@ export const buildTask07MediaEntityPatch = (
 };
 
 export const task07ConsumerNeedsAttention = (outcome) => (
-  outcome?.status === 'committed-confirm-pending'
-  || outcome?.status === 'commit-acknowledgement-unknown'
+  outcome?.status === 'attached-result-unknown'
+  || outcome?.status === 'attach-acknowledgement-unknown'
 );
 
 export const describeTask07ConsumerOutcome = (outcome, subject = 'Media') => {
-  if (outcome?.status === 'committed-confirm-pending') {
-    return `${subject} was saved, but final confirmation is pending. Do not upload it again.`;
+  if (outcome?.status === 'attached-result-unknown') {
+    return `${subject} was attached, but the final response was interrupted. Do not upload it again.`;
   }
-  if (outcome?.status === 'commit-acknowledgement-unknown') {
-    return `${subject} save acknowledgement is uncertain. Do not upload it again while recovery verifies the reference.`;
+  if (outcome?.status === 'attach-acknowledgement-unknown') {
+    return `${subject} attachment acknowledgement is uncertain. Do not upload it again while status recovery verifies the reference.`;
   }
   return '';
 };
@@ -122,7 +131,7 @@ export const describeTask07ConsumerOutcome = (outcome, subject = 'Media') => {
 export const runTask07ConsumerUpload = async (
   input,
   {
-    enabled = TASK07_MEDIA_PIPELINE_ENABLED,
+    enabled = true,
     runPipeline = runTask07MediaPipeline,
   } = {}
 ) => {
@@ -132,33 +141,43 @@ export const runTask07ConsumerUpload = async (
       status: 'legacy',
     };
   }
-  if (typeof input?.commitEntity !== 'function') {
-    throw new TypeError('Task 07 consumer upload requires commitEntity(media).');
-  }
-
-  let committedMedia = null;
   try {
-    const result = await runPipeline({
-      ...input,
-      commitEntity: async (media) => {
-        committedMedia = media;
-        await input.commitEntity(media);
-      },
-    });
+    const result = await runPipeline(input);
     return {
       ...result,
       handled: true,
       status: 'complete',
     };
   } catch (error) {
-    if (error?.committed === true || error?.commitAttempted === true) {
+    const errorCode = typeof error?.code === 'string'
+      ? error.code.replace(/^functions\//, '')
+      : '';
+    const attachResultIsUncertain = (
+      error?.committed === true
+      || (
+        error?.commitAttempted === true
+        && (
+          !errorCode
+          || [
+            'aborted',
+            'cancelled',
+            'deadline-exceeded',
+            'internal',
+            'invalid-attach-response',
+            'resource-exhausted',
+            'unavailable',
+            'unknown',
+          ].includes(errorCode)
+        )
+      )
+    );
+    if (attachResultIsUncertain) {
       return {
         handled: true,
         status: error?.committed === true
-          ? 'committed-confirm-pending'
-          : 'commit-acknowledgement-unknown',
-        assetId: error.assetId || committedMedia?.assetId || null,
-        media: committedMedia,
+          ? 'attached-result-unknown'
+          : 'attach-acknowledgement-unknown',
+        assetId: error.assetId || null,
         error: summarizeTask07Error(error),
       };
     }

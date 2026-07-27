@@ -18,13 +18,13 @@ import { deleteDoc, doc, getDoc } from '../../performance/firestore';
 import { useShellLayout } from './shellLayout';
 import { GRIGLIATA_PAGE_PRESENCE_COLLECTION } from '../grigliata/presence';
 import { canPrefetchModules } from './lazyLoading';
-import { TASK07_MEDIA_PIPELINE_ENABLED } from '../../data/media/mediaFeatureFlags';
+import { isTask07MediaV1WriteEnabled } from '../../data/media/mediaFeatureFlags';
+import useTask07MediaOperationOwner from '../../data/media/useTask07MediaOperationOwner';
 import { updateUserProfileMedia } from '../../data/userData/userDataRepository';
 import { prefetchRoute } from '../../routes/routeRegistry';
 import ProfileMediaDialogs from './lazyProfileMedia';
 import MediaImage, {
   hasMediaAsset,
-  resolveMediaAsset,
 } from './MediaImage';
 
 const NAV_ITEMS = [
@@ -355,6 +355,7 @@ const Navbar = () => {
   const navigate = useNavigate();
   const { user, logout, getCurrentProfile } = useAuthSession();
   const { shellProfile } = useShellProfile();
+  const task07MediaOperationOwner = useTask07MediaOperationOwner();
   const userData = useMemo(() => shellProfile ? ({
     role: shellProfile.role,
     characterId: shellProfile.characterId,
@@ -363,7 +364,6 @@ const Navbar = () => {
     imageUrl: shellProfile.avatarUrl,
     media: shellProfile.avatarMedia || null,
   }) : null, [shellProfile]);
-  const profilePreviewAsset = resolveMediaAsset(userData, { variant: 'board' });
   const canPreviewProfile = hasMediaAsset(userData, { variant: 'board' });
   const {
     closeMobileNav,
@@ -449,38 +449,59 @@ const Navbar = () => {
     if (!selectedFile || !user) return;
     setIsUploading(true);
     try {
-      if (TASK07_MEDIA_PIPELINE_ENABLED) {
+      if (await isTask07MediaV1WriteEnabled({
+        purpose: 'avatar',
+        role,
+        uid: user.uid,
+      })) {
         const {
-          buildTask07MediaEntityPatch,
-          buildTask07MediaOperationId,
           describeTask07ConsumerOutcome,
           getTask07PreviousAssetId,
           runTask07ConsumerUpload,
+          runWithTask07MediaOperationReceipt,
           task07ConsumerNeedsAttention,
         } = await import(
           /* webpackChunkName: "feature-task07-media" */
           '../../data/media/mediaConsumerAdapter'
         );
         const liveProfile = getCurrentProfile();
-        const revision = Date.now();
-        const outcome = await runTask07ConsumerUpload({
-          file: selectedFile,
-          ownerUid: user.uid,
-          entityId: user.uid,
-          operationId: buildTask07MediaOperationId({
-            kind: 'avatar',
+        const expectedRevision = Number.isSafeInteger(liveProfile?.task07MediaRevision)
+          ? liveProfile.task07MediaRevision
+          : 0;
+        const previousAssetId = getTask07PreviousAssetId(liveProfile);
+        const operationLease = task07MediaOperationOwner.start(
+          'Profile media upload was replaced.'
+        );
+        let outcome;
+        try {
+          outcome = await runWithTask07MediaOperationReceipt({
+            actorUid: user.uid,
             ownerUid: user.uid,
             entityId: user.uid,
+            kind: 'avatar',
             file: selectedFile,
-            revision,
-          }),
-          kind: 'avatar',
-          previousAssetId: getTask07PreviousAssetId(liveProfile),
-          commitEntity: (media) => updateUserProfileMedia(
-            user.uid,
-            buildTask07MediaEntityPatch(media, { includeEmptyImageUrl: true })
-          ),
-        });
+            expectedRevision,
+            previousAssetId,
+            signal: operationLease.signal,
+            invoke: ({
+              operationId,
+              expectedRevision: receiptExpectedRevision,
+              previousAssetId: receiptPreviousAssetId,
+              signal,
+            }) => runTask07ConsumerUpload({
+              file: selectedFile,
+              ownerUid: user.uid,
+              entityId: user.uid,
+              operationId,
+              kind: 'avatar',
+              previousAssetId: receiptPreviousAssetId,
+              expectedRevision: receiptExpectedRevision,
+              signal,
+            }),
+          });
+        } finally {
+          operationLease.release();
+        }
         setSelectedFile(null);
         if (task07ConsumerNeedsAttention(outcome)) {
           setUploadError(describeTask07ConsumerOutcome(outcome, 'Profile image'));
@@ -489,14 +510,13 @@ const Navbar = () => {
         setIsUploadOpen(false);
         return;
       }
-      const [storageModule, storageApi, imageStorage] = await Promise.all([
-      import(/* webpackChunkName: "feature-profile-media" */ '../firebaseStorage'),
-      import(/* webpackChunkName: "feature-profile-media" */ 'firebase/storage'),
-      import(/* webpackChunkName: "feature-profile-media" */ './imageStorage'),
-      ]);
-      const { storage } = storageModule;
-      const { ref: storageRef, deleteObject } = storageApi;
-      const { uploadCacheableImage } = imageStorage;
+      const {
+        deleteLegacyStoragePath,
+        uploadLegacyImage,
+      } = await import(
+        /* webpackChunkName: "feature-profile-media" */
+        './legacyMediaStorage'
+      );
       const liveProfile = getCurrentProfile();
       let uploadedImagePath = '';
       // construct filename same as CharacterCreation: characterId_uid_timestamp
@@ -504,15 +524,14 @@ const Navbar = () => {
       const safeName = characterId.replace(/\s+/g, '_');
       const safeFileName = `${safeName}_${user.uid}_${Date.now()}`;
       const imagePath = `characters/${safeFileName}`;
-      const fileRef = storageRef(storage, imagePath);
-      const { downloadUrl: url } = await uploadCacheableImage(fileRef, selectedFile);
+      const { downloadUrl: url } = await uploadLegacyImage(imagePath, selectedFile);
       uploadedImagePath = imagePath;
       try {
         // Commit the new metadata before deleting the previously referenced object.
         await updateUserProfileMedia(user.uid, { imageUrl: url, imagePath });
       } catch (metadataError) {
         try {
-          await deleteObject(storageRef(storage, uploadedImagePath));
+          await deleteLegacyStoragePath(uploadedImagePath);
         } catch (cleanupError) {
           console.error('New profile image rollback failed:', cleanupError);
         }
@@ -521,7 +540,7 @@ const Navbar = () => {
 
       if (liveProfile?.imagePath && liveProfile.imagePath !== imagePath) {
         try {
-          await deleteObject(storageRef(storage, liveProfile.imagePath));
+          await deleteLegacyStoragePath(liveProfile.imagePath);
         } catch (cleanupError) {
           // The newly committed profile remains valid; server-side orphan
           // cleanup can retry removal without rolling user metadata back.
@@ -702,7 +721,7 @@ const Navbar = () => {
       {isPreviewOpen || isUploadOpen ? (
         <ProfileMediaDialogs
           mode={isPreviewOpen ? 'preview' : 'upload'}
-          imageUrl={profilePreviewAsset.url}
+          imageUrl={userData?.imageUrl || ''}
           media={userData}
           isUploading={isUploading}
           onClose={() => {

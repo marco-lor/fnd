@@ -7,10 +7,12 @@ import {
   collection,
   doc,
   documentId,
+  getDoc,
   labelFirestoreTarget,
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   updateDoc,
 } from '../../performance/firestore';
 import { recordPerfEvent } from '../../performance/runtime';
@@ -83,6 +85,86 @@ export const updateUserProfileMedia = (uid, patch) => updateDoc(
   doc(db, 'users', validateUid(uid)),
   normalizeUserProfileMediaPatch(patch)
 );
+
+const TASK07_USER_COLLECTIONS = new Set(['inventory', 'spells', 'tecniche']);
+
+const validateUserEntityId = (value) => {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(normalized)) {
+    throw new TypeError('A valid user-data entity ID is required.');
+  }
+  return normalized;
+};
+
+export const readUserDataRole = async (uid) => {
+  const snapshot = await getDoc(doc(db, 'users', validateUid(uid)));
+  const role = snapshot.exists() ? snapshot.data()?.role : null;
+  return typeof role === 'string' ? role.trim().toLowerCase() : '';
+};
+
+export const readUserOwnedDataDocument = async (uid, collectionId, entityId) => {
+  if (!TASK07_USER_COLLECTIONS.has(collectionId)) {
+    throw new TypeError('Unsupported user-data collection.');
+  }
+  const snapshot = await getDoc(doc(
+    db,
+    'users',
+    validateUid(uid),
+    collectionId,
+    validateUserEntityId(entityId)
+  ));
+  return snapshot.exists()
+    ? { id: snapshot.id, data: snapshot.data() || {} }
+    : null;
+};
+
+export const prepareCharacterCreationMediaTarget = (uid, data) => {
+  const target = doc(db, 'users', validateUid(uid));
+  return runTransaction(db, async (transaction) => {
+    const current = await transaction.get(target);
+    if (current.exists()) return false;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new TypeError('Character Creation target data is required.');
+    }
+    transaction.set(target, data);
+    return true;
+  });
+};
+
+export const rollbackCharacterCreationMediaTarget = (uid) => {
+  const target = doc(db, 'users', validateUid(uid));
+  return runTransaction(db, async (transaction) => {
+    const current = await transaction.get(target);
+    if (!current.exists()) return false;
+    const data = current.data() || {};
+    const hasAttachedMedia = data.media
+      || (Number.isSafeInteger(data.task07MediaRevision)
+        && data.task07MediaRevision > 0);
+    if (hasAttachedMedia || data.flags?.characterCreationDone === true) {
+      return false;
+    }
+    transaction.delete(target);
+    return true;
+  });
+};
+
+export const finalizeCharacterCreationMediaTarget = (uid, patch) => {
+  const target = doc(db, 'users', validateUid(uid));
+  return runTransaction(db, async (transaction) => {
+    const current = await transaction.get(target);
+    if (!current.exists()) {
+      throw new Error('Character profile disappeared before completion.');
+    }
+    const data = current.data() || {};
+    transaction.update(target, {
+      ...patch,
+      flags: {
+        ...(data.flags || {}),
+        characterCreationDone: true,
+      },
+    });
+  });
+};
 
 const normalizeDocumentSnapshot = (snapshot) => (
   snapshot?.exists?.() ? snapshot.data() : null

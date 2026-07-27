@@ -1,15 +1,20 @@
 import React, { useState } from "react";
 import { doc, getDoc, updateDoc } from "../../../../../performance/firestore";
-import { ref as storageRef } from "firebase/storage";
 
 import { db } from "../../../../firebaseConfig";
-import { storage } from "../../../../firebaseStorage";
-import { uploadCacheableImage } from "../../../../common/imageStorage";
+import { uploadLegacyImage } from "../../../../common/legacyMediaStorage";
 import useObjectUrl from "../../../../common/useObjectUrl";
+import useTask07MediaOperationOwner from "../../../../../data/media/useTask07MediaOperationOwner";
+import { tryPersistTask07VarieMedia } from "../../../../../data/media/privateInventoryMediaWriter";
+import {
+  describeTask07ConsumerOutcome,
+  task07ConsumerNeedsAttention,
+} from "../../../../../data/media/mediaConsumerAdapter";
 
 // Overlay to add a new custom Varie item to a user's inventory (DM side)
 // Mirrors the fields used by player Inventory add-varie overlay for consistency.
 const AddVarieItemOverlay = ({ userId, onClose }) => {
+  const task07MediaOperationOwner = useTask07MediaOperationOwner();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [quantity, setQuantity] = useState("1");
@@ -28,6 +33,28 @@ const AddVarieItemOverlay = ({ userId, onClose }) => {
     const qtyNum = Math.max(1, Math.abs(parseInt(quantity, 10) || 1));
     try {
       setBusy(true);
+      if (imageFile) {
+        const task07Result = await task07MediaOperationOwner.run((signal) => (
+          tryPersistTask07VarieMedia({
+            userId,
+            snapshot: {
+              name: cleanName,
+              description: (description || "").trim(),
+              type: "varie",
+            },
+            quantity: qtyNum,
+            file: imageFile,
+            signal,
+          })
+        ));
+        if (task07Result) {
+          if (task07ConsumerNeedsAttention(task07Result.outcome)) {
+            alert(describeTask07ConsumerOutcome(task07Result.outcome, "Inventory image"));
+          }
+          closeAll(true);
+          return;
+        }
+      }
       const userDocRef = doc(db, "users", userId);
       const userSnap = await getDoc(userDocRef);
       if (!userSnap.exists()) throw new Error("User not found");
@@ -38,8 +65,7 @@ const AddVarieItemOverlay = ({ userId, onClose }) => {
         try {
           const safe = cleanName.replace(/[^a-zA-Z0-9]/g, "_");
           const fileName = `varie_${userId}_${safe}_${Date.now()}_${imageFile.name}`;
-          const imgRef = storageRef(storage, `items/${fileName}`);
-          ({ downloadUrl: image_url } = await uploadCacheableImage(imgRef, imageFile));
+          ({ downloadUrl: image_url } = await uploadLegacyImage(`items/${fileName}`, imageFile));
         } catch (e) {
           console.warn("Failed uploading varie image", e);
         }

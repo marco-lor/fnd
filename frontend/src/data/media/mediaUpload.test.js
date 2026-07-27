@@ -1,125 +1,233 @@
 import {
-  buildTask07UploadEntries,
-  buildTask07UploadMetadata,
+  buildTask07SourceUpload,
+  getTask07UploadQueueStats,
+  isTask07StagingSourcePath,
   TASK07_MEDIA_UPLOAD_CONCURRENCY,
-  TASK07_PRIVATE_IMMUTABLE_CACHE_CONTROL,
-  uploadGeneratedTask07Media,
+  TASK07_STAGING_CACHE_CONTROL,
+  uploadTask07Source,
 } from './mediaUpload';
 
-const createFixture = () => {
-  const original = new Blob(['original'], { type: 'image/jpeg' });
-  const thumbnail = new Blob(['thumbnail'], { type: 'image/webp' });
-  const card = new Blob(['card'], { type: 'image/webp' });
-  const board = new Blob(['board'], { type: 'image/webp' });
-  const upload = {
-    assetId: 'm_asset',
-    contractVersion: 1,
-    entityId: 'map-1',
-    kind: 'map',
-    ownerUid: 'user-1',
-    sourceContentType: 'image/jpeg',
-    originalPath: 'media/v1/map/user-1/m_asset/original/source.jpg',
-    variants: {
-      thumbnail: 'media/v1/map/user-1/m_asset/derivatives/v1/thumbnail.webp',
-      card: 'media/v1/map/user-1/m_asset/derivatives/v1/card.webp',
-      board: 'media/v1/map/user-1/m_asset/derivatives/v1/board.webp',
-    },
-  };
-  const generated = {
-    original: { blob: original, contentType: 'image/jpeg' },
-    variants: {
-      thumbnail: { blob: thumbnail, contentType: 'image/webp' },
-      card: { blob: card, contentType: 'image/webp' },
-      board: { blob: board, contentType: 'image/webp' },
-    },
-  };
-  return { upload, generated };
+const assetId = `m_${'a'.repeat(40)}`;
+const file = new Blob(['source'], { type: 'image/jpeg' });
+const upload = {
+  assetId,
+  purpose: 'avatar',
+  targetKind: 'profile',
+  sourcePath: `media_uploads/user-1/${assetId}/source`,
+  sourceContentType: 'image/jpeg',
+  sourceBytes: file.size,
+  sourceMetadata: {
+    task07AssetId: assetId,
+    task07EntityId: 'user-1',
+    task07Kind: 'avatar',
+    task07OwnerUid: 'user-1',
+    task07Role: 'source',
+  },
+  cacheControl: TASK07_STAGING_CACHE_CONTROL,
+  contentDisposition: 'inline',
+  expiresInSeconds: 3600,
 };
 
-describe('Task 07 bounded resumable media uploads', () => {
-  test('uploads the original and exact declared variants with concurrency capped at three', async () => {
-    const { upload, generated } = createFixture();
-    let active = 0;
-    let maximumActive = 0;
-    const uploadOne = jest.fn(async (entry, { onProgress }) => {
-      active += 1;
-      maximumActive = Math.max(maximumActive, active);
-      onProgress({
-        bytesTransferred: Math.floor(entry.blob.size / 2),
-        totalBytes: entry.blob.size,
-      });
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      active -= 1;
-      return { path: entry.path };
-    });
-    const progress = [];
-    const result = await uploadGeneratedTask07Media({
-      upload,
-      generated,
-      concurrency: 99,
-      onProgress: (value) => progress.push(value),
-    }, { uploadOne });
+describe('Task 07 staging source uploads', () => {
+  test('accepts only the server-issued staging path and exact source contract', () => {
+    expect(TASK07_MEDIA_UPLOAD_CONCURRENCY).toBe(1);
+    expect(isTask07StagingSourcePath(upload.sourcePath)).toBe(true);
+    expect(isTask07StagingSourcePath(
+      `media_assets/v1/signed-in/user-1/${assetId}/1/original`
+    )).toBe(false);
+    expect(isTask07StagingSourcePath(
+      `media/v1/avatar/user-1/${assetId}/original/source.jpg`
+    )).toBe(false);
 
-    expect(uploadOne).toHaveBeenCalledTimes(4);
-    expect(maximumActive).toBe(TASK07_MEDIA_UPLOAD_CONCURRENCY);
-    expect(result.entries.map((entry) => entry.path)).toEqual([
-      upload.originalPath,
-      upload.variants.board,
-      upload.variants.card,
-      upload.variants.thumbnail,
-    ]);
-    expect(progress.at(-1)).toMatchObject({
-      stage: 'upload',
-      fraction: 1,
-    });
-  });
-
-  test('uses private immutable metadata and never creates a download URL', () => {
-    const { upload, generated } = createFixture();
-    const [entry] = buildTask07UploadEntries(upload, generated);
-    expect(buildTask07UploadMetadata(upload, entry)).toEqual({
-      contentType: 'image/jpeg',
-      cacheControl: TASK07_PRIVATE_IMMUTABLE_CACHE_CONTROL,
-      contentDisposition: 'inline',
-      customMetadata: {
-        task07AssetId: 'm_asset',
-        task07ContractVersion: '1',
-        task07EntityId: 'map-1',
-        task07Kind: 'map',
-        task07OwnerUid: 'user-1',
-        task07Role: 'original',
+    expect(buildTask07SourceUpload(upload, file)).toEqual({
+      path: upload.sourcePath,
+      blob: file,
+      metadata: {
+        contentType: 'image/jpeg',
+        cacheControl: TASK07_STAGING_CACHE_CONTROL,
+        contentDisposition: 'inline',
+        customMetadata: upload.sourceMetadata,
       },
     });
-    expect(buildTask07UploadMetadata(upload, entry)).not.toHaveProperty('downloadURL');
-    expect(buildTask07UploadMetadata(upload, entry)).not.toHaveProperty('authorization');
   });
 
-  test('rejects variant mismatch before starting storage work and propagates cancellation', async () => {
-    const { upload, generated } = createFixture();
-    delete generated.variants.card;
-    const uploadOne = jest.fn();
-    await expect(uploadGeneratedTask07Media({
-      upload,
-      generated,
-    }, { uploadOne })).rejects.toMatchObject({
-      code: 'variant-set-mismatch',
-    });
-    expect(uploadOne).not.toHaveBeenCalled();
+  test.each([
+    ['path', { sourcePath: `media_assets/v1/signed-in/user-1/${assetId}/1/original` },
+      'invalid-staging-path'],
+    ['byte count', { sourceBytes: file.size + 1 }, 'staging-source-mismatch'],
+    ['content type', { sourceContentType: 'image/png' }, 'staging-source-mismatch'],
+    ['cache policy', { cacheControl: 'private, max-age=31536000, immutable' },
+      'invalid-staging-cache-contract'],
+    ['metadata', { sourceMetadata: {} }, 'invalid-staging-metadata'],
+  ])('rejects a mismatched server %s before storage starts', (_label, patch, code) => {
+    expect(() => buildTask07SourceUpload({ ...upload, ...patch }, file))
+      .toThrow(expect.objectContaining({ code, stage: 'upload' }));
+  });
 
-    const fresh = createFixture();
+  test('starts one resumable source upload and reports bounded progress', async () => {
+    const storage = { name: 'storage' };
+    const storageRef = { fullPath: upload.sourcePath };
+    const snapshot = { ref: storageRef };
+    const unsubscribe = jest.fn();
+    const task = {
+      snapshot,
+      cancel: jest.fn(),
+      on: jest.fn((_event, progress, _error, complete) => {
+        progress({ bytesTransferred: 2, totalBytes: file.size });
+        complete();
+        return unsubscribe;
+      }),
+    };
+    const ref = jest.fn(() => storageRef);
+    const uploadBytesResumable = jest.fn(() => task);
+    const progress = [];
+
+    await expect(uploadTask07Source({
+      upload,
+      file,
+      onProgress: (value) => progress.push(value),
+    }, {
+      loadApi: async () => ({ storage, ref, uploadBytesResumable }),
+    })).resolves.toEqual({
+      entries: [{ role: 'source', path: upload.sourcePath }],
+      snapshot,
+    });
+
+    expect(ref).toHaveBeenCalledWith(storage, upload.sourcePath);
+    expect(uploadBytesResumable).toHaveBeenCalledTimes(1);
+    expect(uploadBytesResumable).toHaveBeenCalledWith(
+      storageRef,
+      file,
+      buildTask07SourceUpload(upload, file).metadata
+    );
+    expect(progress).toEqual([
+      expect.objectContaining({
+        stage: 'upload',
+        role: 'source',
+        path: upload.sourcePath,
+        bytesTransferred: 2,
+        totalBytes: file.size,
+      }),
+      expect.objectContaining({
+        stage: 'upload',
+        role: 'source',
+        path: upload.sourcePath,
+        fraction: 1,
+      }),
+    ]);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  test('cancels the resumable source task when the caller aborts', async () => {
     const controller = new AbortController();
-    const waitingUpload = jest.fn((_entry, { signal }) => new Promise((_resolve, reject) => {
-      signal.addEventListener('abort', () => {
-        const error = new Error('cancelled');
-        error.name = 'AbortError';
-        reject(error);
-      }, { once: true });
-    }));
-    const promise = uploadGeneratedTask07Media({
-      ...fresh,
+    let rejectUpload;
+    const unsubscribe = jest.fn();
+    const task = {
+      snapshot: {},
+      cancel: jest.fn(),
+      on: jest.fn((_event, _progress, error) => {
+        rejectUpload = error;
+        return unsubscribe;
+      }),
+    };
+    const promise = uploadTask07Source({
+      upload,
+      file,
       signal: controller.signal,
-    }, { uploadOne: waitingUpload });
-    controller.abort('user-cancelled');
-    await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+    }, {
+      loadApi: async () => ({
+        storage: {},
+        ref: jest.fn(() => ({})),
+        uploadBytesResumable: jest.fn(() => task),
+      }),
+    });
+
+    await Promise.resolve();
+    expect(rejectUpload).toEqual(expect.any(Function));
+    controller.abort('view-unmounted');
+
+    await expect(promise).rejects.toMatchObject({
+      name: 'AbortError',
+      code: 'aborted',
+    });
+    expect(task.cancel).toHaveBeenCalledTimes(1);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  test('serializes concurrent sources and releases the slot after completion', async () => {
+    const completions = [];
+    const uploadBytesResumable = jest.fn(() => {
+      const task = {
+        snapshot: {},
+        on: jest.fn((_event, _progress, _error, complete) => {
+          completions.push(complete);
+          return jest.fn();
+        }),
+      };
+      return task;
+    });
+    const loadApi = async () => ({
+      storage: {},
+      ref: jest.fn(() => ({})),
+      uploadBytesResumable,
+    });
+
+    const first = uploadTask07Source({ upload, file }, { loadApi });
+    const second = uploadTask07Source({ upload, file }, { loadApi });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(uploadBytesResumable).toHaveBeenCalledTimes(1);
+    expect(getTask07UploadQueueStats()).toEqual({
+      active: 1,
+      pending: 1,
+      concurrency: 1,
+    });
+
+    completions.shift()();
+    await first;
+    await Promise.resolve();
+    expect(uploadBytesResumable).toHaveBeenCalledTimes(2);
+    expect(getTask07UploadQueueStats().active).toBe(1);
+    completions.shift()();
+    await second;
+    expect(getTask07UploadQueueStats()).toEqual({
+      active: 0,
+      pending: 0,
+      concurrency: 1,
+    });
+  });
+
+  test('aborts a queued source without starting another network task', async () => {
+    const completions = [];
+    const uploadBytesResumable = jest.fn(() => ({
+      snapshot: {},
+      on: jest.fn((_event, _progress, _error, complete) => {
+        completions.push(complete);
+        return jest.fn();
+      }),
+    }));
+    const loadApi = async () => ({
+      storage: {},
+      ref: jest.fn(() => ({})),
+      uploadBytesResumable,
+    });
+    const first = uploadTask07Source({ upload, file }, { loadApi });
+    const controller = new AbortController();
+    const queued = uploadTask07Source({
+      upload,
+      file,
+      signal: controller.signal,
+    }, { loadApi });
+    await Promise.resolve();
+    await Promise.resolve();
+    controller.abort('dialog-closed');
+    await expect(queued).rejects.toMatchObject({
+      name: 'AbortError',
+      code: 'aborted',
+    });
+    expect(uploadBytesResumable).toHaveBeenCalledTimes(1);
+    expect(getTask07UploadQueueStats().pending).toBe(0);
+    completions.shift()();
+    await first;
   });
 });

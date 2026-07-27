@@ -5,8 +5,11 @@ import { db } from '../../../firebaseConfig';
 import { doc, getDoc } from "../../../../performance/firestore";
 import { getSchema } from '../../../../data/configRepository';
 import { saveTecnicaForUser } from '../../../common/userOwnedMedia';
+import useObjectUrl from '../../../common/useObjectUrl';
+import useTask07MediaOperationOwner from '../../../../data/media/useTask07MediaOperationOwner';
 
 export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose }) {
+  const task07MediaOperationOwner = useTask07MediaOperationOwner();
   const [schema, setSchema] = useState(null);
   const [tecnicaFormData, setTecnicaFormData] = useState({});
   const [imageFile, setImageFile] = useState(null);
@@ -17,6 +20,10 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
   const [videoRemoved, setVideoRemoved] = useState(false);
   const [userName, setUserName] = useState("");
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const imageObjectUrl = useObjectUrl(imageFile);
+  const videoObjectUrl = useObjectUrl(videoFile);
+  const resolvedImagePreviewUrl = imageObjectUrl || imagePreviewUrl;
+  const resolvedVideoPreviewUrl = videoObjectUrl || videoPreviewUrl;
 
   useEffect(() => {
     const fetchData = async () => {
@@ -65,25 +72,11 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
     fetchData();
   }, [userId, tecnicaName, tecnicaData]);
 
-  useEffect(() => {
-    return () => {
-      if (imagePreviewUrl?.startsWith('blob:')) {
-        URL.revokeObjectURL(imagePreviewUrl);
-      }
-      if (videoPreviewUrl?.startsWith('blob:')) {
-        URL.revokeObjectURL(videoPreviewUrl);
-      }
-    };
-  }, [imagePreviewUrl, videoPreviewUrl]);
-
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      if (imagePreviewUrl?.startsWith('blob:')) {
-        URL.revokeObjectURL(imagePreviewUrl);
-      }
       setImageFile(file);
-      setImagePreviewUrl(URL.createObjectURL(file));
+      setImagePreviewUrl(null);
       setImageRemoved(false);
     }
   };
@@ -91,28 +84,19 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
   const handleVideoChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      if (videoPreviewUrl?.startsWith('blob:')) {
-        URL.revokeObjectURL(videoPreviewUrl);
-      }
       setVideoFile(file);
-      setVideoPreviewUrl(URL.createObjectURL(file));
+      setVideoPreviewUrl(null);
       setVideoRemoved(false);
     }
   };
 
   const clearImage = () => {
-    if (imagePreviewUrl?.startsWith('blob:')) {
-      URL.revokeObjectURL(imagePreviewUrl);
-    }
     setImageFile(null);
     setImagePreviewUrl(null);
     setImageRemoved(true);
   };
 
   const clearVideo = () => {
-    if (videoPreviewUrl?.startsWith('blob:')) {
-      URL.revokeObjectURL(videoPreviewUrl);
-    }
     setVideoFile(null);
     setVideoPreviewUrl(null);
     setVideoRemoved(true);
@@ -133,15 +117,17 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
         Costo: parseInt(tecnicaFormData.Costo) || 0
       };
 
-      await saveTecnicaForUser({
+      await task07MediaOperationOwner.run((signal) => saveTecnicaForUser({
         userId,
         originalName: tecnicaName,
+        originalEntity: tecnicaData,
         entryData: updatedTecnicaData,
         imageFile,
         videoFile,
         removeImage: imageRemoved,
         removeVideo: videoRemoved,
-      });
+        signal,
+      }));
 
       onClose(true);
     } catch (error) {
@@ -238,9 +224,9 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
                       onChange={handleImageChange}
                       className="w-full text-white"
                     />
-                    {imagePreviewUrl && (
+                    {resolvedImagePreviewUrl && (
                       <div className="mt-2 relative w-24 h-24">
-                        <img src={imagePreviewUrl} alt="Preview" className="w-full h-full object-cover rounded" />
+                        <img src={resolvedImagePreviewUrl} alt="Preview" className="w-full h-full object-cover rounded" />
                         <button
                           type="button"
                           onClick={clearImage}
@@ -250,7 +236,7 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
                         </button>
                       </div>
                     )}
-                    {!imagePreviewUrl && (
+                    {!resolvedImagePreviewUrl && (
                       <div className="mt-2 w-24 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">
                         No Image
                       </div>
@@ -265,10 +251,10 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
                       onChange={handleVideoChange}
                       className="w-full text-white"
                     />
-                    {videoPreviewUrl && (
+                    {resolvedVideoPreviewUrl && (
                       <div className="mt-2 relative">
                         <video
-                          src={videoPreviewUrl}
+                          src={resolvedVideoPreviewUrl}
                           controls
                           className="w-full max-h-48 rounded"
                         />
@@ -281,7 +267,7 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
                         </button>
                       </div>
                     )}
-                    {!videoPreviewUrl && (
+                    {!resolvedVideoPreviewUrl && (
                       <div className="mt-2 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">
                         No Video
                       </div>

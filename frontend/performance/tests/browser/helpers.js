@@ -36,7 +36,7 @@ const demoFirestoreStreamOperation = (url) => {
 };
 
 const STORAGE_EMULATOR_ORIGIN = 'http://127.0.0.1:9199';
-const TASK07_FIXTURE_IMAGE_PATH = /^\/v0\/b\/demo-fnd-perf\.appspot\.com\/o\/performance%2Fimage-\d{3}\.svg$/i;
+const TASK07_FIXTURE_IMAGE_PATH = /^\/v0\/b\/demo-fnd-perf\.appspot\.com\/o\/performance%2Fimage-\d{3}\.png$/i;
 const STATIC_ASSET_WARMUP_PATH = /^static\/(js|css)\/[^/]+\.(js|css)$/;
 const BROWSER_ASSET_WARMUP_ORIGIN = 'http://127.0.0.1:5000';
 const BROWSER_ASSET_WARMUP_BATCH_SIZE = 4;

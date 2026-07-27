@@ -24,6 +24,7 @@ jobs:
       - run: npm run perf:check-firestore-imports
       - run: npm run perf:check-shared-config-boundaries
       - run: npm run perf:check-user-data-boundaries
+      - run: npm run perf:check-media-boundaries
       - run: npm run perf:check-query-contracts
       - run: npm test -- --watch=false --runInBand --watchman=false
         env: { CI: 'true' }
@@ -41,6 +42,32 @@ jobs:
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm test
+
+  task07-pr-gate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      CI: 'true'
+      NODE_OPTIONS: --max-old-space-size=2048
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            frontend/functions/package-lock.json
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - run: npm ci
+      - run: npm run test:task07
+      - run: npm --prefix functions ci
+      - run: npm --prefix functions run lint
+      - run: npm --prefix functions run build
+      - run: node --test --test-concurrency=1 functions/test/*.test.js
+      - run: npm run perf:check-media-boundaries
+      - run: npx firebase emulators:exec --project demo-fnd-perf --only auth,firestore,functions,storage "node scripts/performance/rules-exec.js --task07-only"
 
   emulator-rules:
     runs-on: ubuntu-latest
@@ -79,6 +106,8 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 21 }
       - run: npm ci
+      - run: npm --prefix functions ci
+      - run: npm --prefix functions run build
       - run: npx playwright install --with-deps chromium
       - run: npm run build:production
       - run: npm run perf:verify-disabled
@@ -103,6 +132,8 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 21 }
       - run: npm ci
+      - run: npm --prefix functions ci
+      - run: npm --prefix functions run build
       - run: npx playwright install --with-deps firefox webkit
       - run: npm run perf:build
       - run: npm run perf:smoke-cross-browser
@@ -124,9 +155,13 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 21 }
       - run: npm ci
+      - run: npm --prefix functions ci
+      - run: npm --prefix functions run build
       - run: npx playwright install --with-deps chromium
       - run: npm run perf:authoritative
         env: { FND_PERF_REFERENCE_MACHINE: 'github-hosted-runner' }
+      - run: npm run perf:media:soak
+        if: ${{ !cancelled() }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:

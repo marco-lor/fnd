@@ -1,4 +1,5 @@
 import { timestampToMillis } from './boardUtils';
+import { withObjectUrl } from '../common/useObjectUrl';
 
 export const GRIGLIATA_MUSIC_TRACK_COLLECTION = 'grigliata_music_tracks';
 export const GRIGLIATA_MUSIC_PLAYBACK_COLLECTION = 'grigliata_music_playback';
@@ -290,45 +291,44 @@ export const buildGrigliataMusicPlaybackState = ({
   };
 };
 
-export const readAudioFileMetadata = (file) => new Promise((resolve, reject) => {
+export const readAudioFileMetadata = (file) => {
   if (!file) {
-    reject(new Error('Audio file is required.'));
-    return;
+    return Promise.reject(new Error('Audio file is required.'));
   }
 
-  const objectUrl = URL.createObjectURL(file);
-  const audio = document.createElement('audio');
+  return withObjectUrl(file, (objectUrl) => new Promise((resolve, reject) => {
+    const audio = document.createElement('audio');
 
-  const cleanup = () => {
-    audio.removeAttribute('src');
-    try {
-      audio.load();
-    } catch (error) {
-      // Ignore cleanup failures from detached audio elements.
-    }
-    URL.revokeObjectURL(objectUrl);
-  };
+    const cleanup = () => {
+      audio.removeAttribute('src');
+      try {
+        audio.load();
+      } catch (error) {
+        // Ignore cleanup failures from detached audio elements.
+      }
+    };
 
-  audio.preload = 'metadata';
+    audio.preload = 'metadata';
 
-  audio.onloadedmetadata = () => {
-    const durationSeconds = Number(audio.duration);
-    cleanup();
+    audio.onloadedmetadata = () => {
+      const durationSeconds = Number(audio.duration);
+      cleanup();
 
-    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
-      reject(new Error('Unable to determine the audio duration.'));
-      return;
-    }
+      if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+        reject(new Error('Unable to determine the audio duration.'));
+        return;
+      }
 
-    resolve({
-      durationMs: Math.round(durationSeconds * 1000),
-    });
-  };
+      resolve({
+        durationMs: Math.round(durationSeconds * 1000),
+      });
+    };
 
-  audio.onerror = () => {
-    cleanup();
-    reject(new Error('Unable to read the selected audio file.'));
-  };
+    audio.onerror = () => {
+      cleanup();
+      reject(new Error('Unable to read the selected audio file.'));
+    };
 
-  audio.src = objectUrl;
-});
+    audio.src = objectUrl;
+  }));
+};

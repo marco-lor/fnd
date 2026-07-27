@@ -255,7 +255,8 @@ describe("shell cache validation", () => {
 
   test("projects only the path-based avatar descriptor and accepts old caches without it", () => {
     const assetId = `m_${"a".repeat(40)}`;
-    const pathPrefix = `media/v1/avatar/uid-1/${assetId}`;
+    const generation = "11";
+    const pathPrefix = `media_assets/v1/signed-in/uid-1/${assetId}/${generation}/`;
     const projected = projectShellProfile("uid-1", {
       role: "player",
       imageUrl: "https://example.com/legacy-avatar.png",
@@ -265,9 +266,12 @@ describe("shell cache validation", () => {
         assetId,
         kind: "avatar",
         state: "ready",
+        generation,
+        audience: "signed-in",
+        ownerUid: "uid-1",
         original: {
-          path: `${pathPrefix}/original/source.png`,
-          generation: "11",
+          path: `${pathPrefix}original`,
+          generation,
           contentType: "image/png",
           bytes: 1000,
           width: 400,
@@ -277,8 +281,8 @@ describe("shell cache validation", () => {
         },
         variants: {
           thumbnail: {
-            path: `${pathPrefix}/derivatives/v1/thumbnail.webp`,
-            generation: "12",
+            path: `${pathPrefix}thumbnail`,
+            generation,
             contentType: "image/webp",
             bytes: 500,
             width: 96,
@@ -296,10 +300,13 @@ describe("shell cache validation", () => {
       assetId,
       kind: "avatar",
       state: "ready",
+      generation,
+      audience: "signed-in",
+      ownerUid: "uid-1",
       original: expect.not.objectContaining({ downloadUrl: expect.anything() }),
       variants: {
         thumbnail: expect.objectContaining({
-          path: `${pathPrefix}/derivatives/v1/thumbnail.webp`,
+          path: `${pathPrefix}thumbnail`,
         }),
       },
     });
@@ -309,15 +316,18 @@ describe("shell cache validation", () => {
 
   test("rejects noncanonical avatar object paths and derivative MIME types", () => {
     const assetId = `m_${"b".repeat(40)}`;
-    const prefix = `media/v1/avatar/uid-1/${assetId}/`;
+    const prefix = `media_assets/v1/signed-in/uid-1/${assetId}/1/`;
     const base = {
       schemaVersion: 1,
       contractVersion: 1,
       assetId,
       kind: "avatar",
       state: "ready",
+      generation: "1",
+      audience: "signed-in",
+      ownerUid: "uid-1",
       original: {
-        path: `${prefix}original/source.png`,
+        path: `${prefix}original`,
         generation: "1",
         contentType: "image/png",
         bytes: 100,
@@ -333,9 +343,15 @@ describe("shell cache validation", () => {
       media: {
         ...base,
         variants: {
-          thumbnail: { ...base.original, path: `${prefix}derivatives/v1/thumbnail.webp` },
+          thumbnail: { ...base.original, path: `${prefix}thumbnail` },
         },
       },
+    }).avatarMedia).toBeNull();
+    expect(projectShellProfile("uid-1", {
+      media: { ...base, ownerUid: "uid-2" },
+    }).avatarMedia).toBeNull();
+    expect(projectShellProfile("uid-1", {
+      media: { ...base, original: { ...base.original, path: `media/v1/avatar/uid-1/${assetId}/original/source.png` } },
     }).avatarMedia).toBeNull();
   });
 

@@ -27,11 +27,13 @@ import {
   where,
   writeBatch,
 } from '../../performance/firestore';
-import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
 import { useAuth } from '../../AuthContext';
 import { auth, db } from '../firebaseConfig';
-import { storage } from '../firebaseStorage';
-import { uploadCacheableImage } from '../common/imageStorage';
+import {
+  deleteLegacyStoragePath,
+  uploadLegacyBlob,
+  uploadLegacyImage,
+} from '../common/legacyMediaStorage';
 import { hasMediaAsset } from '../common/MediaImage';
 import { hasCanonicalTask07MediaAssetId } from '../common/canonicalMediaAsset';
 import { getCallable } from '../../data/functions/callableRegistry';
@@ -41,7 +43,8 @@ import {
 import {
   runWithDurableOperationIntent,
 } from '../../data/functions/backendOperationIntentStore';
-import { TASK07_MEDIA_PIPELINE_ENABLED } from '../../data/media/mediaFeatureFlags';
+import { isTask07MediaV1WriteEnabled } from '../../data/media/mediaFeatureFlags';
+import useTask07MediaOperationOwner from '../../data/media/useTask07MediaOperationOwner';
 import {
   buildGrigliataLightingSummary,
   GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION,
@@ -185,6 +188,14 @@ import {
   TURN_EFFECT_KIND_SHIELD,
 } from './turnOrder';
 import useGrigliataPageData from './useGrigliataPageData';
+import {
+  buildTask07CustomTokenCreateIntentKey,
+  buildTask07CustomTokenTemplatePayload,
+  isTask07CustomTokenImageSupported,
+  resolveTask07CustomTokenTarget,
+  runTask07CustomTokenMediaWrite,
+  runTask07CustomTokenProjectionBridge,
+} from './customTokenMedia';
 import useGrigliataLightingMetadata from './useGrigliataLightingMetadata';
 import useGrigliataLightingRenderInput from './useGrigliataLightingRenderInput';
 import useGrigliataWallRuntimeState from './useGrigliataWallRuntimeState';
@@ -608,6 +619,9 @@ export default function GrigliataPage() {
   }, []);
 
   const { user, userData, loading } = useAuth();
+  const task07MediaOperationOwner = useTask07MediaOperationOwner();
+  const customTokenCreateTargetRef = useRef(null);
+  const customTokenReplacementTargetRef = useRef(null);
   const { topInset } = useShellLayout();
   const currentUserId = user?.uid || '';
   const currentUserEmail = user?.email || '';
@@ -2749,10 +2763,8 @@ export default function GrigliataPage() {
 
     try {
       const { durationMs } = await readAudioFileMetadata(file);
-      const fileRef = storageRef(storage, storagePath);
-      await uploadBytes(fileRef, file);
+      const { downloadUrl: audioUrl } = await uploadLegacyBlob(storagePath, file);
       uploadedPath = storagePath;
-      const audioUrl = await getDownloadURL(fileRef);
 
       await addDoc(collection(db, GRIGLIATA_MUSIC_TRACK_COLLECTION), {
         name: trackName || 'Untitled Track',
@@ -2776,7 +2788,7 @@ export default function GrigliataPage() {
 
       if (uploadedPath) {
         try {
-          await deleteObject(storageRef(storage, uploadedPath));
+          await deleteLegacyStoragePath(uploadedPath);
         } catch (cleanupError) {
           console.warn('Music upload cleanup failed:', cleanupError);
         }
@@ -3193,9 +3205,7 @@ export default function GrigliataPage() {
       || getFileExtensionFromContentType(file.type)
       || '.png';
     const imagePath = `grigliata/tokens/${currentUserId}/${safeName}_${Date.now()}${fileExtension}`;
-    const imageRef = storageRef(storage, imagePath);
-
-    const { downloadUrl: imageUrl } = await uploadCacheableImage(imageRef, file);
+    const { downloadUrl: imageUrl } = await uploadLegacyImage(imagePath, file);
 
     return {
       imageUrl,
@@ -3226,6 +3236,7 @@ export default function GrigliataPage() {
     }
 
     let uploadedPath = '';
+    let task07CreateTarget = null;
     const nextHpTotal = normalizeNonNegativeNumericValue(hpCurrent, 0);
     const nextManaTotal = normalizeNonNegativeNumericValue(manaCurrent, 0);
     const nextShieldTotal = normalizeNonNegativeNumericValue(shieldCurrent, 0);
@@ -3233,6 +3244,87 @@ export default function GrigliataPage() {
     setBoardError('');
     setIsCreatingCustomToken(true);
     try {
+      if (isTask07CustomTokenImageSupported(imageFile) && await isTask07MediaV1WriteEnabled({
+        purpose: 'token',
+        role,
+        uid: currentUserId,
+      })) {
+        const createIntentKey = buildTask07CustomTokenCreateIntentKey({
+          label: trimmedLabel,
+          file: imageFile,
+          notes: normalizeTokenNotesValue(notes),
+          hpTotal: nextHpTotal,
+          manaTotal: nextManaTotal,
+          shieldTotal: nextShieldTotal,
+        });
+        let createTarget = customTokenCreateTargetRef.current;
+        if (!createTarget || createTarget.intentKey !== createIntentKey) {
+          createTarget = {
+            intentKey: createIntentKey,
+            templateRef: doc(collection(db, 'grigliata_tokens')),
+          };
+          customTokenCreateTargetRef.current = createTarget;
+        }
+        task07CreateTarget = createTarget;
+
+        const adapter = await import(
+          /* webpackChunkName: "feature-task07-media" */
+          '../../data/media/mediaConsumerAdapter'
+        );
+        const { templateRef } = createTarget;
+        uploadedPath = createTarget.legacyImage?.imagePath || '';
+        const bridgeResult = await runTask07CustomTokenProjectionBridge({
+          state: createTarget,
+          uploadLegacyProjection: async () => {
+            const legacyImage = await uploadCustomTokenImage({
+              file: imageFile,
+              tokenLabel: trimmedLabel,
+            });
+            uploadedPath = legacyImage.imagePath;
+            return legacyImage;
+          },
+          attachCanonical: (legacyImage) => runTask07CustomTokenMediaWrite({
+            adapter,
+            operationOwner: task07MediaOperationOwner,
+            actorUid: currentUserId,
+            ownerUid: currentUserId,
+            tokenId: templateRef.id,
+            file: imageFile,
+            expectedRevision: 0,
+            previousAssetId: null,
+            // Merge makes prepare idempotent: replay after a lost attach response
+            // cannot erase canonical media or its server revision.
+            prepareEntity: () => setDoc(templateRef, buildTask07CustomTokenTemplatePayload({
+              tokenId: templateRef.id,
+              ownerUid: currentUserId,
+              label: trimmedLabel,
+              imageUrl: legacyImage.imageUrl,
+              imagePath: legacyImage.imagePath,
+              notes: normalizeTokenNotesValue(notes),
+              hpTotal: nextHpTotal,
+              manaTotal: nextManaTotal,
+              shieldTotal: nextShieldTotal,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            }), { merge: true }),
+            rollbackPreparedEntity: () => deleteDoc(templateRef),
+          }),
+          outcomeNeedsAttention: adapter.task07ConsumerNeedsAttention,
+        });
+
+        if (!bridgeResult.complete) {
+          setBoardError(adapter.describeTask07ConsumerOutcome(
+            bridgeResult.outcome,
+            'Custom-token image'
+          ));
+          return false;
+        }
+        if (customTokenCreateTargetRef.current === createTarget) {
+          customTokenCreateTargetRef.current = null;
+        }
+        return true;
+      }
+
       const { imageUrl, imagePath } = await uploadCustomTokenImage({
         file: imageFile,
         tokenLabel: trimmedLabel,
@@ -3270,9 +3362,22 @@ export default function GrigliataPage() {
       console.error('Failed to create custom Grigliata token:', error);
       setBoardError(error?.message || 'Unable to create that custom token right now.');
 
-      if (uploadedPath) {
+      const canDiscardUploadedLegacy = (
+        !task07CreateTarget
+        || (
+          error?.committed !== true
+          && (
+            error?.targetRollback?.ok === true
+            || !error?.assetId
+          )
+        )
+      );
+      if (uploadedPath && canDiscardUploadedLegacy) {
         try {
-          await deleteObject(storageRef(storage, uploadedPath));
+          await deleteLegacyStoragePath(uploadedPath);
+          if (task07CreateTarget?.legacyImage?.imagePath === uploadedPath) {
+            task07CreateTarget.legacyImage = null;
+          }
         } catch (cleanupError) {
           console.warn('Custom token upload cleanup failed:', cleanupError);
         }
@@ -3306,12 +3411,100 @@ export default function GrigliataPage() {
     }
 
     let uploadedPath = '';
+    let task07ReplacementState = null;
     let nextImageUrl = existingToken.imageUrl || '';
     let nextImagePath = existingToken.imagePath || '';
 
     setBoardError('');
     setUpdatingCustomTokenId(tokenId);
     try {
+      if (
+        imageFile
+        && isTask07CustomTokenImageSupported(imageFile)
+        && await isTask07MediaV1WriteEnabled({
+          purpose: 'token',
+          role,
+          uid: currentUserId,
+        })
+      ) {
+        const target = resolveTask07CustomTokenTarget({
+          token: existingToken,
+          tokenId,
+          actorUid: currentUserId,
+        });
+        if (target) {
+          const replacementIntentKey = `${tokenId}:${buildTask07CustomTokenCreateIntentKey({
+            label: trimmedLabel,
+            file: imageFile,
+            notes: '',
+            hpTotal: 0,
+            manaTotal: 0,
+            shieldTotal: 0,
+          })}`;
+          let replacementState = customTokenReplacementTargetRef.current;
+          if (!replacementState || replacementState.intentKey !== replacementIntentKey) {
+            replacementState = {
+              intentKey: replacementIntentKey,
+              legacyImage: null,
+              mediaAttached: false,
+            };
+            customTokenReplacementTargetRef.current = replacementState;
+          }
+          task07ReplacementState = replacementState;
+          const adapter = await import(
+            /* webpackChunkName: "feature-task07-media" */
+            '../../data/media/mediaConsumerAdapter'
+          );
+          const previousAssetId = adapter.getTask07PreviousAssetId(existingToken);
+          uploadedPath = replacementState.legacyImage?.imagePath || '';
+          const bridgeResult = await runTask07CustomTokenProjectionBridge({
+            state: replacementState,
+            uploadLegacyProjection: async () => {
+              const legacyImage = await uploadCustomTokenImage({
+                file: imageFile,
+                tokenLabel: trimmedLabel,
+              });
+              uploadedPath = legacyImage.imagePath;
+              return legacyImage;
+            },
+            attachCanonical: () => runTask07CustomTokenMediaWrite({
+              adapter,
+              operationOwner: task07MediaOperationOwner,
+              actorUid: currentUserId,
+              ownerUid: target.ownerUid,
+              tokenId: target.entityId,
+              file: imageFile,
+              expectedRevision: target.expectedRevision,
+              previousAssetId,
+            }),
+            // Publish only after canonical attachment. Non-owner players can
+            // read visible placements but not another owner's token document,
+            // so this bridge remains necessary until a sanitized projection exists.
+            publishLegacyProjection: (legacyImage) => (
+              updateGrigliataCustomTokenTemplateCallable({
+                tokenId,
+                label: trimmedLabel,
+                imageUrl: legacyImage.imageUrl,
+                imagePath: legacyImage.imagePath,
+              })
+            ),
+            outcomeNeedsAttention: adapter.task07ConsumerNeedsAttention,
+          });
+
+          if (!bridgeResult.complete) {
+            setBoardError(adapter.describeTask07ConsumerOutcome(
+              bridgeResult.outcome,
+              'Custom-token image'
+            ));
+            return false;
+          }
+          if (customTokenReplacementTargetRef.current === replacementState) {
+            customTokenReplacementTargetRef.current = null;
+          }
+          return true;
+        }
+      }
+
       if (imageFile) {
         const uploadedImage = await uploadCustomTokenImage({
           file: imageFile,
@@ -3334,9 +3527,20 @@ export default function GrigliataPage() {
       console.error('Failed to update custom Grigliata token:', error);
       setBoardError(error?.message || 'Unable to update that custom token right now.');
 
-      if (uploadedPath) {
+      const canDiscardUploadedLegacy = (
+        !task07ReplacementState
+        || (
+          task07ReplacementState.mediaAttached !== true
+          && error?.committed !== true
+          && error?.commitAttempted !== true
+        )
+      );
+      if (uploadedPath && canDiscardUploadedLegacy) {
         try {
-          await deleteObject(storageRef(storage, uploadedPath));
+          await deleteLegacyStoragePath(uploadedPath);
+          if (task07ReplacementState?.legacyImage?.imagePath === uploadedPath) {
+            task07ReplacementState.legacyImage = null;
+          }
         } catch (cleanupError) {
           console.warn('Custom token replacement cleanup failed:', cleanupError);
         }
@@ -3567,63 +3771,88 @@ export default function GrigliataPage() {
   };
 
   const uploadBackgroundFile = async (file, fileIndex) => {
-    if (TASK07_MEDIA_PIPELINE_ENABLED) {
-      const assetType = getBackgroundUploadAssetType(file);
+    const controlledAssetType = getBackgroundUploadAssetType(file);
+    const controlledKind = controlledAssetType === 'video' ? 'map-video' : 'map';
+    if (await isTask07MediaV1WriteEnabled({
+      purpose: controlledKind,
+      role,
+      uid: user.uid,
+    })) {
+      const assetType = controlledAssetType;
       const mapName = getDisplayNameFromFileName(file.name).trim();
       const backgroundRef = doc(collection(db, 'grigliata_backgrounds'));
-      const revision = `${Date.now()}-${fileIndex}`;
 
       try {
         const {
-          buildTask07MediaEntityPatch,
-          buildTask07MediaOperationId,
           describeTask07ConsumerOutcome,
           runTask07ConsumerUpload,
+          runWithTask07MediaOperationReceipt,
           task07ConsumerNeedsAttention,
         } = await import(
           /* webpackChunkName: "feature-task07-media" */
           '../../data/media/mediaConsumerAdapter'
         );
-        const kind = assetType === 'video' ? 'map-video' : 'map';
-        const outcome = await runTask07ConsumerUpload({
-          file,
-          ownerUid: user.uid,
-          entityId: backgroundRef.id,
-          operationId: buildTask07MediaOperationId({
-            kind,
+        const kind = controlledKind;
+        const expectedRevision = 0;
+        const operationLease = task07MediaOperationOwner.start(
+          'Map media upload was replaced.'
+        );
+        let outcome;
+        try {
+          outcome = await runWithTask07MediaOperationReceipt({
+            actorUid: user.uid,
             ownerUid: user.uid,
             entityId: backgroundRef.id,
+            kind,
             file,
-            revision,
-          }),
-          kind,
-          previousAssetId: null,
-          commitEntity: (media) => {
-            const original = media.original;
-            const backgroundPayload = {
-              name: mapName || 'Untitled Map',
-              ...buildTask07MediaEntityPatch(media, { includeEmptyImageUrl: true }),
-              imageWidth: original.width,
-              imageHeight: original.height,
-              assetType,
-              contentType: original.contentType,
-              fileName: file.name || '',
-              sizeBytes: original.bytes,
-              grid: normalizeGridConfig(DEFAULT_GRID),
-              isGridVisible: true,
-              galleryFolderId: getWritableGalleryFolderId(selectedGalleryFolderId),
-              createdAt: serverTimestamp(),
-              createdBy: user.uid,
-              updatedAt: serverTimestamp(),
-              updatedBy: user.uid,
-            };
+            expectedRevision,
+            previousAssetId: null,
+            signal: operationLease.signal,
+            invoke: ({
+              operationId,
+              expectedRevision: receiptExpectedRevision,
+              previousAssetId: receiptPreviousAssetId,
+              signal,
+            }) => runTask07ConsumerUpload({
+              file,
+              ownerUid: user.uid,
+              entityId: backgroundRef.id,
+              operationId,
+              kind,
+              previousAssetId: receiptPreviousAssetId,
+              expectedRevision: receiptExpectedRevision,
+              prepareEntity: () => {
+                const backgroundPayload = {
+                  name: mapName || 'Untitled Map',
+                  imageUrl: '',
+                  imagePath: '',
+                  imageWidth: 0,
+                  imageHeight: 0,
+                  assetType,
+                  contentType: file.type || '',
+                  fileName: file.name || '',
+                  sizeBytes: file.size || 0,
+                  grid: normalizeGridConfig(DEFAULT_GRID),
+                  isGridVisible: true,
+                  galleryFolderId: getWritableGalleryFolderId(selectedGalleryFolderId),
+                  createdAt: serverTimestamp(),
+                  createdBy: user.uid,
+                  updatedAt: serverTimestamp(),
+                  updatedBy: user.uid,
+                };
 
-            if (assetType === 'video') {
-              backgroundPayload.durationMs = original.durationMs || 0;
-            }
-            return setDoc(backgroundRef, backgroundPayload);
-          },
-        });
+                if (assetType === 'video') {
+                  backgroundPayload.durationMs = 0;
+                }
+                return setDoc(backgroundRef, backgroundPayload);
+              },
+              rollbackPreparedEntity: () => deleteDoc(backgroundRef),
+              signal,
+            }),
+          });
+        } finally {
+          operationLease.release();
+        }
 
         return {
           ...outcome,
@@ -3654,15 +3883,11 @@ export default function GrigliataPage() {
       const mediaMetadata = assetType === 'video'
         ? await readFileVideoMetadata(file)
         : await readFileImageDimensions(file);
-      const fileRef = storageRef(storage, storagePath);
       const imageUpload = assetType === 'image'
-        ? await uploadCacheableImage(fileRef, file)
-        : null;
-      if (assetType === 'video') {
-        await uploadBytes(fileRef, file);
-      }
+        ? await uploadLegacyImage(storagePath, file)
+        : await uploadLegacyBlob(storagePath, file);
       uploadedPath = storagePath;
-      const imageUrl = imageUpload?.downloadUrl || await getDownloadURL(fileRef);
+      const imageUrl = imageUpload.downloadUrl;
 
       const backgroundPayload = {
         name: mapName || 'Untitled Map',
@@ -3694,7 +3919,7 @@ export default function GrigliataPage() {
 
       if (uploadedPath) {
         try {
-          await deleteObject(storageRef(storage, uploadedPath));
+          await deleteLegacyStoragePath(uploadedPath);
         } catch (cleanupError) {
           console.warn('Background upload cleanup failed:', cleanupError);
         }
@@ -4967,7 +5192,7 @@ export default function GrigliataPage() {
         && !hasCanonicalTask07MediaAssetId(background)
       ) {
         try {
-          await deleteObject(storageRef(storage, background.imagePath));
+          await deleteLegacyStoragePath(background.imagePath);
         } catch (storageError) {
           if (storageError?.code !== 'storage/object-not-found') {
             throw storageError;

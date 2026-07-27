@@ -1,13 +1,21 @@
 import React, { useRef, useState } from "react";
 import { doc, getDoc, updateDoc } from "../../../../../performance/firestore";
-import { ref as storageRef, deleteObject } from "firebase/storage";
 
 import { db } from "../../../../firebaseConfig";
-import { storage } from "../../../../firebaseStorage";
-import { uploadCacheableImage } from "../../../../common/imageStorage";
+import {
+  deleteLegacyStoragePath,
+  uploadLegacyImage,
+} from "../../../../common/legacyMediaStorage";
 import useObjectUrl from "../../../../common/useObjectUrl";
+import useTask07MediaOperationOwner from "../../../../../data/media/useTask07MediaOperationOwner";
+import { tryPersistTask07VarieMedia } from "../../../../../data/media/privateInventoryMediaWriter";
+import {
+  describeTask07ConsumerOutcome,
+  task07ConsumerNeedsAttention,
+} from "../../../../../data/media/mediaConsumerAdapter";
 
 const EditVarieItemOverlay = ({ userId, initialData, inventoryItemId, onClose }) => {
+  const task07MediaOperationOwner = useTask07MediaOperationOwner();
   const [name, setName] = useState(initialData?.name || initialData?.General?.Nome || "");
   const [description, setDescription] = useState(initialData?.description || "");
   const [quantity, setQuantity] = useState(
@@ -32,6 +40,32 @@ const EditVarieItemOverlay = ({ userId, initialData, inventoryItemId, onClose })
 
     try {
       setBusy(true);
+      if (imageFile) {
+        const task07Result = await task07MediaOperationOwner.run((signal) => (
+          tryPersistTask07VarieMedia({
+            userId,
+            inventoryItemId,
+            snapshot: {
+              name: cleanName,
+              description: (description || "").trim(),
+              type: "varie",
+              ...(originalUrlRef.current
+                ? { image_url: originalUrlRef.current }
+                : {}),
+            },
+            quantity: qtyNumber,
+            file: imageFile,
+            signal,
+          })
+        ));
+        if (task07Result) {
+          if (task07ConsumerNeedsAttention(task07Result.outcome)) {
+            alert(describeTask07ConsumerOutcome(task07Result.outcome, "Inventory image"));
+          }
+          closeAll(true);
+          return;
+        }
+      }
       const userDocRef = doc(db, "users", userId);
       const userDocSnap = await getDoc(userDocRef);
       if (!userDocSnap.exists()) throw new Error("User not found");
@@ -43,8 +77,7 @@ const EditVarieItemOverlay = ({ userId, initialData, inventoryItemId, onClose })
       if (imageFile) {
         const safe = cleanName.replace(/[^a-zA-Z0-9]/g, "_");
         const fileName = `varie_${userId}_${safe}_${Date.now()}_${imageFile.name}`;
-        const imageRef = storageRef(storage, `items/${fileName}`);
-        ({ downloadUrl: newImageUrl } = await uploadCacheableImage(imageRef, imageFile));
+        ({ downloadUrl: newImageUrl } = await uploadLegacyImage(`items/${fileName}`, imageFile));
         if (originalUrlRef.current && originalUrlRef.current !== newImageUrl) {
           setRemoveExisting(true);
         }
@@ -83,7 +116,7 @@ const EditVarieItemOverlay = ({ userId, initialData, inventoryItemId, onClose })
       if (removeExisting && originalUrlRef.current && originalUrlRef.current !== newImageUrl) {
         try {
           const path = decodeURIComponent(originalUrlRef.current.split("/o/")[1].split("?")[0]);
-          await deleteObject(storageRef(storage, path));
+          await deleteLegacyStoragePath(path);
         } catch (error) {
           console.warn("Failed to delete previous image", error);
         }

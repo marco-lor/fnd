@@ -5,17 +5,29 @@ import {
   useRef,
   useState,
 } from 'react';
-import { resolveMediaAsset } from './MediaImage';
+import {
+  getTask07MediaPurpose,
+  resolveMediaAsset,
+} from './MediaImage';
 import {
   acquirePrivateMediaAsset,
   acquirePrivateVideoAsset,
   normalizePrivateVideoDescriptor,
   PRIVATE_MEDIA_CROSSFADE_PROTECTION_MS,
 } from './privateMediaAssets';
+import useTask07MediaReadMode from '../../data/media/useTask07MediaReadMode';
 
 export { PRIVATE_MEDIA_CROSSFADE_PROTECTION_MS };
 
-const VIDEO_URL_FIELDS = ['url', 'downloadUrl', 'imageUrl', 'image_url'];
+const VIDEO_URL_FIELDS = [
+  'url',
+  'downloadUrl',
+  'videoUrl',
+  'video_url',
+  'imageUrl',
+  'image_url',
+];
+const DERIVATIVE_READ_MODES = new Set(['derivative-read', 'v1-write']);
 
 const isRecord = (value) => (
   value != null && typeof value === 'object' && !Array.isArray(value)
@@ -29,7 +41,7 @@ const positiveNumber = (value) => {
 const isAllowedVideoUrl = (value) => (
   /^https?:\/\//i.test(value)
   || /^blob:/i.test(value)
-  || /^data:video\/mp4(?:;|,)/i.test(value)
+  || /^data:video\/(?:mp4|webm)(?:;|,)/i.test(value)
   || /^\/(?!\/)/.test(value)
 );
 
@@ -66,13 +78,13 @@ const normalizeVideoDescriptor = (value) => {
   };
 };
 
-const appendVideoCandidates = (candidates, descriptor) => {
+const appendVideoCandidates = (candidates, variant, descriptor) => {
   if (!descriptor) return;
   if (descriptor.privateAsset) {
     candidates.push({
       ...descriptor,
       url: '',
-      variant: 'original',
+      variant,
       sourceKey: `path:${descriptor.path}:${descriptor.generation}`,
     });
   }
@@ -82,7 +94,7 @@ const appendVideoCandidates = (candidates, descriptor) => {
       path: '',
       generation: '',
       privateAsset: null,
-      variant: 'original',
+      variant,
       sourceKey: `url:${descriptor.url}`,
     });
   }
@@ -99,13 +111,24 @@ const dedupeCandidates = (candidates) => {
 
 export const resolveMediaVideoAsset = (
   mediaOrEntity,
-  { fallbackSrc = '' } = {}
+  {
+    compatibilityMode = 'legacy',
+    fallbackSrc = '',
+  } = {}
 ) => {
   const entity = isRecord(mediaOrEntity) ? mediaOrEntity : {};
   const general = isRecord(entity.General) ? entity.General : null;
-  const manifest = isRecord(entity.media)
-    ? entity.media
-    : (isRecord(general?.media) ? general.media : (general || entity));
+  const manifest = isRecord(entity.videoMedia)
+    ? entity.videoMedia
+    : (
+      isRecord(general?.videoMedia)
+        ? general.videoMedia
+        : (
+          isRecord(entity.media)
+            ? entity.media
+            : (isRecord(general?.media) ? general.media : (general || entity))
+        )
+    );
   const original = normalizeVideoDescriptor(manifest.original);
   const legacy = normalizeVideoDescriptor({
     url: fallbackSrc
@@ -119,9 +142,25 @@ export const resolveMediaVideoAsset = (
       ?? general?.imageHeight ?? general?.height
       ?? manifest.imageHeight ?? manifest.height,
   });
+  const schemaVersion = Number(manifest.schemaVersion) || null;
+  const state = typeof manifest.state === 'string'
+    ? manifest.state.trim().toLowerCase()
+    : '';
+  const readsCanonical = schemaVersion === 1
+    && state === 'ready'
+    && DERIVATIVE_READ_MODES.has(compatibilityMode);
   const collectedCandidates = [];
-  appendVideoCandidates(collectedCandidates, original);
-  appendVideoCandidates(collectedCandidates, legacy);
+  if (readsCanonical) {
+    appendVideoCandidates(collectedCandidates, 'original', original);
+  }
+  appendVideoCandidates(collectedCandidates, 'legacy', legacy);
+  if (schemaVersion === 1 && state === 'ready' && !readsCanonical && !legacy) {
+    // A v1-only video has no legacy object to restore. Rollback modes may use
+    // the validated canonical original but never a poster/derivative.
+    appendVideoCandidates(collectedCandidates, 'original', original);
+  } else if (schemaVersion !== 1) {
+    appendVideoCandidates(collectedCandidates, 'legacy', original);
+  }
   const candidates = dedupeCandidates(collectedCandidates);
   const selected = candidates[0] || null;
   const assetKey = JSON.stringify(candidates.map((candidate) => ({
@@ -147,15 +186,20 @@ export const resolveMediaVideoAsset = (
 export const resolveMediaSourceAsset = (
   media,
   {
+    compatibilityMode = 'legacy',
     fallbackSrc = '',
     kind = 'image',
     variant = 'board',
   } = {}
 ) => {
   if (kind === 'video') {
-    return resolveMediaVideoAsset(media, { fallbackSrc });
+    return resolveMediaVideoAsset(media, {compatibilityMode, fallbackSrc});
   }
-  const asset = resolveMediaAsset(media, { fallbackSrc, variant });
+  const asset = resolveMediaAsset(media, {
+    compatibilityMode,
+    fallbackSrc,
+    variant,
+  });
   return {
     ...asset,
     assetKey: `image:${asset.assetKey}`,
@@ -223,17 +267,40 @@ const releaseLease = (lease, delayMs = 0) => {
 export const useResolvedMediaSource = (
   media,
   {
+    compatibilityMode = 'auto',
     fallbackSrc = '',
     kind = 'image',
     releaseDelayMs = 0,
     variant = 'board',
   } = {}
 ) => {
+  const purpose = useMemo(() => {
+    if (kind !== 'video') return getTask07MediaPurpose(media);
+    const entity = isRecord(media) ? media : {};
+    const general = isRecord(entity.General) ? entity.General : null;
+    const manifest = isRecord(entity.videoMedia)
+      ? entity.videoMedia
+      : (
+        isRecord(general?.videoMedia)
+          ? general.videoMedia
+          : (
+            isRecord(entity.media)
+              ? entity.media
+              : (isRecord(general?.media) ? general.media : entity)
+          )
+      );
+    return typeof manifest.kind === 'string' ? manifest.kind.trim() : '';
+  }, [kind, media]);
+  const readerMode = useTask07MediaReadMode({
+    override: compatibilityMode,
+    purpose,
+  });
   const asset = useMemo(() => resolveMediaSourceAsset(media, {
+    compatibilityMode: readerMode,
     fallbackSrc,
     kind,
     variant,
-  }), [fallbackSrc, kind, media, variant]);
+  }), [fallbackSrc, kind, media, readerMode, variant]);
   const [cursor, setCursor] = useState({ assetKey: '', index: 0 });
   const [sourceState, setSourceState] = useState(null);
   const privateLeaseRef = useRef(null);

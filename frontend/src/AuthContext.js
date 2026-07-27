@@ -11,6 +11,7 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { beginAsyncResourceOwner, withAsyncResourceOwner } from "./performance/runtime";
 import { auth } from "./components/firebaseConfig";
 import { setRepositoryActor } from "./data/repositoryRuntime";
+import { buildTask07GeneratedFamilyPrefix } from "./data/media/mediaPaths";
 import { subscribeAuthProfileAggregate } from "./data/userData/userDataRepository";
 
 export const AuthContext = createContext(undefined);
@@ -76,7 +77,6 @@ const normalizeShellMediaPositiveInteger = (value) => {
 };
 
 const SHELL_AVATAR_CONTENT_TYPE_EXTENSIONS = Object.freeze({
-  "image/gif": "gif",
   "image/jpeg": "jpg",
   "image/png": "png",
   "image/webp": "webp",
@@ -95,15 +95,12 @@ const normalizeShellMediaDescriptor = (value, expectedPrefix, { variant = null }
   const bytes = normalizeShellMediaPositiveInteger(value.bytes);
   const width = normalizeShellMediaPositiveInteger(value.width);
   const height = normalizeShellMediaPositiveInteger(value.height);
-  const originalExtension = SHELL_AVATAR_CONTENT_TYPE_EXTENSIONS[contentType];
   const expectedPath = variant
-    ? `${expectedPrefix}derivatives/v1/${variant}.webp`
-    : originalExtension
-      ? `${expectedPrefix}original/source.${originalExtension}`
-      : "";
+    ? `${expectedPrefix}${variant}`
+    : `${expectedPrefix}original`;
   const contentTypeIsAllowed = variant
     ? contentType === "image/webp"
-    : Boolean(originalExtension);
+    : Boolean(SHELL_AVATAR_CONTENT_TYPE_EXTENSIONS[contentType]);
   if (
     path !== expectedPath
     || !generation
@@ -131,16 +128,29 @@ const normalizeShellAvatarMedia = (uid, value) => {
     value.schemaVersion !== 1
     || value.contractVersion !== 1
     || value.kind !== "avatar"
-    || !["ready", "fallback"].includes(value.state)
+    || value.state !== "ready"
     || !/^m_[a-f0-9]{40}$/.test(assetId)
+    || !/^[1-9][0-9]*$/.test(String(value.generation || ""))
+    || value.audience !== "signed-in"
+    || value.ownerUid !== uid
   ) {
     return null;
   }
-  const expectedPrefix = `media/v1/avatar/${uid}/${assetId}/`;
+  let expectedPrefix;
+  try {
+    expectedPrefix = buildTask07GeneratedFamilyPrefix({
+      audience: value.audience,
+      ownerKey: value.ownerUid,
+      assetId,
+      sourceGeneration: value.generation,
+    });
+  } catch (_error) {
+    return null;
+  }
   const original = normalizeShellMediaDescriptor(value.original, expectedPrefix);
   if (!original) return null;
   const variants = {};
-  for (const variant of ["thumbnail", "card"]) {
+  for (const variant of ["thumbnail", "thumbnail2x", "card"]) {
     if (!value.variants?.[variant]) continue;
     const descriptor = normalizeShellMediaDescriptor(
       value.variants[variant],
@@ -156,6 +166,9 @@ const normalizeShellAvatarMedia = (uid, value) => {
     assetId,
     kind: "avatar",
     state: value.state,
+    generation: String(value.generation),
+    audience: value.audience,
+    ownerUid: value.ownerUid,
     original,
     variants,
   };

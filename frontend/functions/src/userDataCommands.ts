@@ -60,6 +60,8 @@ import {isUserDataLegacyDrainFrozen} from "./userDataBridge";
 import {
   hasUntrustedTask07InventoryMedia,
   mergeUntrustedInventorySnapshotPatch,
+  preserveTrustedTask07PersonalContent,
+  stripTask07PersonalContentProjection,
   stripUntrustedTask07InventoryMedia,
 } from "./task07ServerBoundary";
 
@@ -434,9 +436,14 @@ export const task05PurchaseItem = onCall(
         ? [...access.targetSnapshot.get("inventory")]
         : [];
       const catalogVersion = catalogSnapshot.updateTime?.toMillis() ?? null;
-      // Only this Admin-read catalog document may introduce a trusted global
-      // Task 07 media projection into a user-owned inventory document.
-      const snapshot = {...catalogData, id: itemId};
+      // A catalog attachment has one authoritative reference path. Copying it
+      // into a user inventory snapshot would create an untracked second
+      // reference that cleanup cannot prove safe. Keep the compatibility
+      // legacy fields, but clean the complete Task 07 descriptor/CAS family.
+      const snapshot = stripUntrustedTask07InventoryMedia({
+        ...catalogData,
+        id: itemId,
+      });
       currentInventory.push(legacyInventoryEntry(
         snapshot,
         inventoryId,
@@ -1024,9 +1031,13 @@ export const task05MutateInventory = onCall(
         const catalogRef = context.db.doc(`items/${itemId}`);
         const catalog = await context.transaction.get(catalogRef);
         if (!catalog.exists) fail("not-found", "Catalog item not found.");
-        // A grant may project Task 07 media only from this Admin-read global
-        // catalog document; the callable request never supplies the snapshot.
-        const snapshot = {...(catalog.data() ?? {}), id: itemId};
+        // Grants follow the same copy boundary as purchases: legacy media is
+        // retained for compatibility, while canonical ownership/CAS fields
+        // are stripped until this inventory target receives its own family.
+        const snapshot = stripUntrustedTask07InventoryMedia({
+          ...(catalog.data() ?? {}),
+          id: itemId,
+        });
         const kind = inventoryKind(snapshot);
         const documentCount = kind === "varie" ? 1 : quantity;
         const rootInventory = Array.isArray(access.targetSnapshot.get("inventory"))
@@ -1299,7 +1310,21 @@ export const task05MutatePersonalContent = onCall(
         return {success: true, contentId, deleted: true};
       }
 
-      const contentData = asRecord(request.data?.data);
+      let contentData: UnknownRecord;
+      try {
+        contentData = preserveTrustedTask07PersonalContent(
+          request.data?.data,
+          existing.data()
+        );
+      } catch (error) {
+        if ((error as Error)?.message === "task07-personal-media-injection") {
+          fail(
+            "invalid-argument",
+            "Personal content cannot set Task 07 media."
+          );
+        }
+        throw error;
+      }
       const name = asTrimmedString(
         request.data?.name ?? contentData.Nome ?? contentData.name
       );
@@ -1369,7 +1394,9 @@ export const task05MutatePersonalContent = onCall(
       if (oldReservation) context.transaction.delete(oldReservation);
       if (oldName && oldName !== name) delete rootContent[oldName];
       rootContent[name] = {
-        ...cloneWithoutUndefined(contentData) as UnknownRecord,
+        ...cloneWithoutUndefined(
+          stripTask07PersonalContentProjection(contentData)
+        ) as UnknownRecord,
         id: contentId,
       };
       if (context.writeLegacy) {

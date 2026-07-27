@@ -2,6 +2,11 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import BackgroundGalleryOrganizerOverlay from './BackgroundGalleryOrganizerOverlay';
 
+jest.mock('../../data/media/useTask07MediaReadMode', () => ({
+  __esModule: true,
+  default: jest.fn(() => 'derivative-read'),
+}));
+
 const folders = [
   { id: 'folder-a', name: 'Boss Arenas' },
   { id: 'folder-b', name: 'Cities' },
@@ -160,6 +165,7 @@ describe('BackgroundGalleryOrganizerOverlay', () => {
               media: {
                 kind: 'map',
                 schemaVersion: 1,
+                state: 'ready',
                 variants: {
                   thumbnail: {
                     url: imageThumbnailUrl,
@@ -178,6 +184,7 @@ describe('BackgroundGalleryOrganizerOverlay', () => {
                 media: {
                   kind: 'map-video',
                   schemaVersion: 1,
+                  state: 'ready',
                   original: {
                     url: videoOriginalUrl,
                     contentType: 'video/mp4',

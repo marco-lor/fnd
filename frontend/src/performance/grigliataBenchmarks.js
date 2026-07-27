@@ -1,5 +1,6 @@
 import { filterFogVisibleTokens } from '../components/grigliata/fogVisibilityFiltering';
 import { rasterizeFogPolygonsToTiles } from '../components/grigliata/fogRasterMemory';
+import { __getImageAssetRegistryStats } from '../components/common/imageAssets/imageAssetRegistry';
 import { recordPerfEvent } from './runtime';
 
 const WARMUP_ITERATIONS = 5;
@@ -86,7 +87,10 @@ export const runGrigliataMicrobenchmarks = () => {
 };
 
 export const installGrigliataBenchmarkBridge = () => {
-  const bridge = { runAll: runGrigliataMicrobenchmarks };
+  const bridge = {
+    getImageRegistryStats: __getImageAssetRegistryStats,
+    runAll: runGrigliataMicrobenchmarks,
+  };
   window.__FND_PERF_BENCHMARKS__ = bridge;
   return () => {
     if (window.__FND_PERF_BENCHMARKS__ === bridge) delete window.__FND_PERF_BENCHMARKS__;

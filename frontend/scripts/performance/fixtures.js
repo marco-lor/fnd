@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const path = require('path');
+const zlib = require('node:zlib');
 const {
   OWNED_PERFORMANCE_ENVIRONMENT,
   assertPerformanceProject,
@@ -37,7 +38,7 @@ const initializeAdmin = () => {
   bucket = getStorage(app).bucket();
 };
 
-const FIXTURE_VERSION = 'fnd-performance-v1';
+const FIXTURE_VERSION = 'fnd-performance-v2-task07-media';
 const FIXED_TIME = '2026-01-01T00:00:00.000Z';
 const PASSWORD = 'PerfTest!123';
 const BATCH_SIZE = 350;
@@ -54,14 +55,157 @@ const TASK06_BACKEND_CONFIG = Object.freeze({
   derivedOwnerMode: 'authoritative',
   enabledOperationKinds: TASK06_OPERATION_KINDS,
 });
+const TASK07_MEDIA_CONTROL = Object.freeze({
+  schemaVersion: 1,
+  policyVersion: 1,
+  mode: 'derivative-read',
+  enabledPurposes: ['*'],
+  enabledRoles: ['*'],
+  enabledUids: ['*'],
+});
+const TASK07_EMPTY_MUSIC_STREAM = Object.freeze({
+  schemaVersion: 1,
+  volume: 0.65,
+  sessions: [],
+});
+const TASK07_EMPTY_MUSIC_STREAM_HASH = sha256(
+  JSON.stringify(TASK07_EMPTY_MUSIC_STREAM)
+);
 
 const pad = (value, width = 4) => String(value).padStart(width, '0');
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const fixtureEmail = (uid) => `${uid}@example.test`;
 const mediaUrl = (index) => {
-  const objectName = `performance/image-${pad(index % 128, 3)}.svg`;
+  const objectName = `performance/image-${pad(index % 128, 3)}.png`;
   return `${OWNED_PERFORMANCE_ENVIRONMENT.STORAGE_EMULATOR_HOST}/v0/b/${PERFORMANCE_STORAGE_BUCKET}/o/${encodeURIComponent(objectName)}?alt=media&token=performance-token`;
 };
+
+const PNG_SIGNATURE = Buffer.from('89504e470d0a1a0a', 'hex');
+const JPEG_FIXTURE = Buffer.from(
+  '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABD/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/EB//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/EB//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/EB//2Q==',
+  'base64'
+);
+const WEBP_FIXTURE = Buffer.from(
+  'UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEAAUAmJaQAA3AA/v89WAAAAA==',
+  'base64'
+);
+const GIF_FIXTURE = Buffer.from(
+  'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
+  'base64'
+);
+
+const buildCrc32Table = () => Array.from({ length: 256 }, (_, value) => {
+  let current = value;
+  for (let bit = 0; bit < 8; bit += 1) {
+    current = (current & 1) ? (0xedb88320 ^ (current >>> 1)) : (current >>> 1);
+  }
+  return current >>> 0;
+});
+const CRC32_TABLE = buildCrc32Table();
+
+const crc32 = (contents) => {
+  let checksum = 0xffffffff;
+  for (const byte of contents) {
+    checksum = CRC32_TABLE[(checksum ^ byte) & 0xff] ^ (checksum >>> 8);
+  }
+  return (checksum ^ 0xffffffff) >>> 0;
+};
+
+const pngChunk = (type, contents) => {
+  const typeBytes = Buffer.from(type, 'ascii');
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(contents.length);
+  const checksum = Buffer.alloc(4);
+  checksum.writeUInt32BE(crc32(Buffer.concat([typeBytes, contents])));
+  return Buffer.concat([length, typeBytes, contents, checksum]);
+};
+
+const buildDeterministicPng = ({ width, height, seed = 0 }) => {
+  const rowBytes = 1 + width * 3;
+  const pixels = Buffer.alloc(rowBytes * height);
+  for (let y = 0; y < height; y += 1) {
+    const rowOffset = y * rowBytes;
+    pixels[rowOffset] = 0;
+    for (let x = 0; x < width; x += 1) {
+      const offset = rowOffset + 1 + x * 3;
+      pixels[offset] = (seed * 29 + x * 3 + y) % 256;
+      pixels[offset + 1] = (seed * 47 + x + y * 2) % 256;
+      pixels[offset + 2] = (seed * 71 + x * 2 + y * 3) % 256;
+    }
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 2;
+  return Buffer.concat([
+    PNG_SIGNATURE,
+    pngChunk('IHDR', header),
+    pngChunk('IDAT', zlib.deflateSync(pixels, { level: 6 })),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
+};
+
+const buildOrientationSixJpeg = () => {
+  const exif = Buffer.from(
+    '4578696600004d4d002a00000008000101120003000000010006000000000000',
+    'hex'
+  );
+  const segment = Buffer.alloc(4);
+  segment.writeUInt16BE(0xffe1, 0);
+  segment.writeUInt16BE(exif.length + 2, 2);
+  return Buffer.concat([JPEG_FIXTURE.subarray(0, 2), segment, exif, JPEG_FIXTURE.subarray(2)]);
+};
+
+const buildShortWav = () => {
+  const sampleRate = 8000;
+  const sampleCount = 2000;
+  const dataBytes = sampleCount * 2;
+  const wav = Buffer.alloc(44 + dataBytes);
+  wav.write('RIFF', 0, 'ascii');
+  wav.writeUInt32LE(36 + dataBytes, 4);
+  wav.write('WAVEfmt ', 8, 'ascii');
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(sampleRate, 24);
+  wav.writeUInt32LE(sampleRate * 2, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write('data', 36, 'ascii');
+  wav.writeUInt32LE(dataBytes, 40);
+  for (let index = 0; index < sampleCount; index += 1) {
+    const sample = Math.round(Math.sin((index / sampleRate) * Math.PI * 440 * 2) * 4096);
+    wav.writeInt16LE(sample, 44 + index * 2);
+  }
+  return wav;
+};
+
+const primaryImageDimensions = (index) => (
+  index < 96 ? { width: 96, height: 96 }
+    : index < 120 ? { width: 320, height: 240 }
+      : index < 126 ? { width: 640, height: 360 }
+        : { width: 768, height: 512 }
+);
+
+const buildDeterministicMediaObjects = () => [
+  ...Array.from({ length: 128 }, (_, index) => ({
+    caseId: 'valid-png',
+    contentType: 'image/png',
+    contents: buildDeterministicPng({ ...primaryImageDimensions(index), seed: index }),
+    path: `performance/image-${pad(index, 3)}.png`,
+  })),
+  { caseId: 'valid-jpeg', contentType: 'image/jpeg', contents: JPEG_FIXTURE, path: 'performance/formats/valid.jpg' },
+  { caseId: 'valid-webp', contentType: 'image/webp', contents: WEBP_FIXTURE, path: 'performance/formats/valid.webp' },
+  { caseId: 'exif-orientation-6', contentType: 'image/jpeg', contents: buildOrientationSixJpeg(), path: 'performance/formats/orientation-6.jpg' },
+  { caseId: 'corrupt-image', contentType: 'image/jpeg', contents: Buffer.from('not-a-jpeg'), path: 'performance/formats/corrupt.jpg' },
+  { caseId: 'unsupported-gif', contentType: 'image/gif', contents: GIF_FIXTURE, path: 'performance/formats/unsupported.gif' },
+  { caseId: 'short-audio', contentType: 'audio/wav', contents: buildShortWav(), path: 'performance/media/short.wav' },
+  { caseId: 'video-poster', contentType: 'image/png', contents: buildDeterministicPng({ width: 384, height: 216, seed: 991 }), path: 'performance/media/video-poster.png' },
+  { caseId: 'corrupt-video', contentType: 'video/mp4', contents: Buffer.from('000000186674797069736f6d00000200', 'hex'), path: 'performance/media/corrupt.mp4' },
+];
+
+const TASK07_STORAGE_OBJECT_COUNT = 136;
 
 const accountDefinitions = [
   { uid: 'perf-new-player', role: 'player', characterCreationDone: false },
@@ -94,7 +238,7 @@ const buildUser = ({ uid, role = 'player', characterCreationDone = true }, index
   created_at: FIXED_TIME,
   flags: { characterCreationDone },
   imageUrl: mediaUrl(index),
-  imagePath: `performance/image-${pad(index % 128, 3)}.svg`,
+  imagePath: `performance/image-${pad(index % 128, 3)}.png`,
   settings: { grigliata_music_muted: false },
   stats: {
     level: 5,
@@ -152,6 +296,7 @@ const buildDocuments = () => {
   const add = (documentPath, data) => documents.push({ path: documentPath, data });
 
   add('app_config/task06_backend', TASK06_BACKEND_CONFIG);
+  add('utils/task07_media', TASK07_MEDIA_CONTROL);
 
   const primaryAccounts = new Map(accountDefinitions.map((account, index) => [account.uid, buildUser(account, index)]));
   for (let index = 0; index < 200; index += 1) {
@@ -269,6 +414,18 @@ const buildDocuments = () => {
     }
   }
 
+  add('grigliata_gallery_folders/fixture-atlas-a', {
+    name: 'Fixture Atlas A',
+    normalizedName: 'fixture atlas a',
+    createdAt: FIXED_TIME,
+    updatedAt: FIXED_TIME,
+  });
+  add('grigliata_gallery_folders/fixture-atlas-b', {
+    name: 'Fixture Atlas B',
+    normalizedName: 'fixture atlas b',
+    createdAt: FIXED_TIME,
+    updatedAt: FIXED_TIME,
+  });
   add('grigliata_state/current', {
     activeBackgroundId: 'perf-map',
     presentationBackgroundId: '',
@@ -279,20 +436,41 @@ const buildDocuments = () => {
     legacyPlacementVisibilityCleanupCompletedAt: FIXED_TIME,
     updatedAt: FIXED_TIME,
   });
-  add('grigliata_backgrounds/perf-map', {
-    name: 'Performance map',
-    imageUrl: mediaUrl(0),
-    imagePath: 'performance/image-000.svg',
-    assetType: 'image',
-    galleryFolderId: '',
-    width: 5000,
-    height: 5000,
-    grid: { cellSizePx: 50, offsetXPx: 0, offsetYPx: 0 },
-    fogOfWarEnabled: true,
-    createdAt: FIXED_TIME,
+  for (let index = 0; index < 50; index += 1) {
+    const backgroundId = index === 0 ? 'perf-map' : `perf-map-${pad(index, 3)}`;
+    add(`grigliata_backgrounds/${backgroundId}`, {
+      name: `Performance map ${index + 1}`,
+      imageUrl: mediaUrl(index),
+      imagePath: `performance/image-${pad(index % 128, 3)}.png`,
+      assetType: 'image',
+      galleryFolderId: index < 25 ? 'fixture-atlas-a' : 'fixture-atlas-b',
+      width: index < 48 ? 5000 : 7680,
+      height: index < 48 ? 5000 : 4320,
+      grid: { cellSizePx: 50, offsetXPx: 0, offsetYPx: 0 },
+      fogOfWarEnabled: true,
+      createdAt: FIXED_TIME,
+      updatedAt: FIXED_TIME,
+    });
+  }
+  add('grigliata_music_playback/current', {
+    status: 'stopped',
+    trackId: '',
+    trackName: '',
+    audioUrl: '',
+    durationMs: 0,
+    offsetMs: 0,
+    volume: 0.65,
+    startedAt: null,
+    commandId: 'music_perf_fixture',
+    updatedAt: FIXED_TIME,
+    updatedBy: 'perf-dm',
+  });
+  add('grigliata_music_stream/current', {
+    ...TASK07_EMPTY_MUSIC_STREAM,
+    revision: 1,
+    sourceHash: TASK07_EMPTY_MUSIC_STREAM_HASH,
     updatedAt: FIXED_TIME,
   });
-  add('grigliata_music_playback/current', { status: 'stopped', volume: 0.65, updatedAt: FIXED_TIME });
 
   for (let index = 0; index < 200; index += 1) {
     const ownerUid = index < 5 ? ['perf-player', 'perf-peer-2', 'perf-peer-3', 'perf-peer-4', 'perf-peer-5'][index] : `perf-user-${pad(index)}`;
@@ -302,7 +480,7 @@ const buildDocuments = () => {
       characterId: `Performance Hero ${index + 1}`,
       label: `Token ${index}`,
       imageUrl: mediaUrl(index),
-      imagePath: `performance/image-${pad(index % 128, 3)}.svg`,
+      imagePath: `performance/image-${pad(index % 128, 3)}.png`,
       tokenType: 'custom',
       customTokenRole: 'template',
       customTemplateId: tokenId,
@@ -431,32 +609,36 @@ const seedAccounts = async () => {
 
 const seedStorage = async () => {
   initializeAdmin();
-  const uploads = Array.from({ length: 128 }, (_, index) => async () => {
-    const targetBytes = index < 112 ? 8192 : index < 126 ? 65536 : 524288;
-    const prefix = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#${(index * 7919).toString(16).padStart(6, '0').slice(-6)}"/><text x="4" y="34">${index}</text><!--`;
-    const suffix = '--></svg>';
-    const padding = 'x'.repeat(Math.max(0, targetBytes - Buffer.byteLength(prefix) - Buffer.byteLength(suffix)));
-    const contents = Buffer.from(`${prefix}${padding}${suffix}`);
+  const objects = buildDeterministicMediaObjects();
+  if (objects.length !== TASK07_STORAGE_OBJECT_COUNT) {
+    throw new Error(
+      `Task 07 fixture catalog expected ${TASK07_STORAGE_OBJECT_COUNT} objects; `
+      + `built ${objects.length}.`
+    );
+  }
+  for (const object of objects) {
     let lastError;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
-        await bucket.file(`performance/image-${pad(index, 3)}.svg`).save(contents, {
+        await bucket.file(object.path).save(object.contents, {
           resumable: false,
           metadata: {
-            contentType: 'image/svg+xml',
-            metadata: { firebaseStorageDownloadTokens: 'performance-token' },
+            cacheControl: 'private, no-store',
+            contentType: object.contentType,
+            metadata: {
+              firebaseStorageDownloadTokens: 'performance-token',
+              task07FixtureCase: object.caseId,
+            },
           },
         });
-        return;
+        lastError = null;
+        break;
       } catch (error) {
         lastError = error;
         await delay(250 * attempt);
       }
     }
-    throw lastError;
-  });
-  for (let offset = 0; offset < uploads.length; offset += 4) {
-    await Promise.all(uploads.slice(offset, offset + 4).map((upload) => upload()));
+    if (lastError) throw lastError;
   }
 };
 
@@ -491,7 +673,13 @@ const buildManifest = (documents) => {
     return result;
   }, {});
   const canonical = JSON.stringify(normalizeCanonical(documents));
-  return { version: FIXTURE_VERSION, counts, hash: sha256(canonical), documentCount: documents.length };
+  return {
+    version: FIXTURE_VERSION,
+    counts,
+    hash: sha256(canonical),
+    documentCount: documents.length,
+    storageObjectCount: TASK07_STORAGE_OBJECT_COUNT,
+  };
 };
 
 const waitForFunctionsReady = async () => {
@@ -590,7 +778,7 @@ const verifyFixture = async () => {
   const metadata = await db.doc('perf_meta/fixture').get();
   if (!metadata.exists) throw new Error('Fixture metadata is missing. Run npm run perf:seed.');
   const manifest = metadata.data();
-  const checks = ['users', 'user_directory', 'items', 'foes', 'echi_npcs', 'map_markers', 'encounters', 'grigliata_token_placements', 'grigliata_fog_memory_tiles'];
+  const checks = ['users', 'user_directory', 'items', 'foes', 'echi_npcs', 'map_markers', 'encounters', 'grigliata_backgrounds', 'grigliata_gallery_folders', 'grigliata_token_placements', 'grigliata_fog_memory_tiles'];
   for (const collectionName of checks) {
     const snapshot = await db.collection(collectionName).count().get();
     const actual = snapshot.data().count;
@@ -607,7 +795,12 @@ const verifyFixture = async () => {
     throw new Error(`Auth fixture count mismatch: expected ${accountDefinitions.length}, found ${authUsers.users.length}.`);
   }
   const [storageFiles] = await bucket.getFiles({ prefix: 'performance/' });
-  if (storageFiles.length !== 128) throw new Error(`Storage fixture count mismatch: expected 128, found ${storageFiles.length}.`);
+  if (storageFiles.length !== TASK07_STORAGE_OBJECT_COUNT) {
+    throw new Error(
+      `Storage fixture count mismatch: expected ${TASK07_STORAGE_OBJECT_COUNT}, `
+      + `found ${storageFiles.length}.`
+    );
+  }
   const report = { ...manifest, verifiedAt: new Date().toISOString(), projectId };
   writeJson(path.join(resultsDir, 'fixture-report.json'), report);
   console.log(`Fixture verified (${manifest.documentCount} documents, ${manifest.hash}).`);
@@ -685,11 +878,16 @@ if (require.main === module) {
 }
 
 module.exports = {
+  buildDeterministicMediaObjects,
+  buildDeterministicPng,
   buildDocuments,
   buildManifest,
+  buildShortWav,
   clearEmulators,
   FIXTURE_VERSION,
   PERFORMANCE_STORAGE_BUCKET,
   runSeedFixture,
   TASK06_BACKEND_CONFIG,
+  TASK07_MEDIA_CONTROL,
+  TASK07_STORAGE_OBJECT_COUNT,
 };

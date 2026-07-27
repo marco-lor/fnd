@@ -11,18 +11,13 @@ This runbook describes a possible future rollout; it is not current permission
 to perform one. Keep the production flag unset and do not deploy any Task 07
 plane until all of the following blockers are closed and reviewed:
 
-- the preceding Task 06 `perf:ci`, cleanup, comparison, repeatability, and
-  baseline gates are fully green;
-- derivative generation is authoritative on the server as planned, or an
-  equivalent browser-generation design is explicitly approved with the missing
-  security and cross-browser evidence;
-- Task 01 owns every blocking media/decoded-memory/request/audio budget;
-- the authenticated shell uses the required single compact music stream;
+- the final full frontend, Functions, rules, build, startup, and demo integration
+  gates pass from the clean merged revision;
 - the full route matrix, Chromium/Firefox/WebKit media cases, 50-map/token soak,
   ten-minute lifecycle run, `perf:ci`, and two-pass authoritative comparison
   pass from a clean committed candidate;
-- the staged `legacy`/`shadow`/`derivative-read`/`v1-write` control document and
-  allowlists exist; and
+- V1 foe/token copy and spawn operations acquire an owned canonical family or
+  a reviewed reference-ledger entry rather than depending on legacy fallback;
 - production backup, write-backfill, restore, and reconciliation tooling is
   implemented and approved.
 
