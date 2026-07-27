@@ -1,6 +1,7 @@
 # Task 06 implementation evidence
 
-Date: 2026-07-26. Candidate scope: repository plus local
+Date: 2026-07-26. Closure date: 2026-07-27. Status: locally validated for
+roadmap progression; Task 07 may start. Evidence scope: repository plus local
 `demo-fnd-perf` emulators. No Firebase deployment, production configuration,
 online data/rules/index change, or live Grigliata navigation is evidence here.
 
@@ -51,7 +52,18 @@ These results are from local commands against the exact demo project
 | `npm start` smoke | `cd frontend && npm run verify:start` | `/home` returned HTTP 200 on owned port 3001; the existing port-3000 process was untouched. |
 | Instrumented-build safeguard | `cd frontend && npm run perf:build` | Passed with exactly 2 pinned callback occurrences and 1 executable WebChannel callsite. |
 | Broad performance CI | `cd frontend && npm run perf:ci` | 157/157 harness checks, 14/14 plus 3/3 emulator rules groups, and 19/19 browser tests passed; every blocking comparison gate passed. |
-| Authoritative repeatability | `cd frontend && npm run perf:authoritative` | Pending the required clean local validation commit. |
+| Authoritative repeatability | `cd frontend && npm run perf:authoritative` | Not accepted. The first clean two-run pair completed 61/61 browser cases per run but exceeded the timing-repeatability threshold, with 92.42% maximum relative variance. After the measurement contract was hardened, a fresh pair was deliberately not rerun; the user accepted the remaining evidence as sufficient to close Task 06. No baseline was accepted. |
+
+## Closure decision
+
+On 2026-07-27, the user accepted Task 06 as validated for local roadmap
+progression based on the complete correctness, emulator, build, startup, and
+broad performance-CI evidence above. This closes Task 06 as a prerequisite and
+allows Task 07 to start.
+
+This sequencing decision does not turn the repeatability result into a pass.
+Authoritative repeatability remains unavailable as performance-baseline
+evidence, and production deployment/rollout remains a separate gated decision.
 
 The current pass closed the two prior browser cleanup blockers. The deterministic
 fixture now records all three completed legacy-placement migrations, so the
@@ -81,6 +93,7 @@ Firebase deployment, online config/data/rules/index mutation, baseline
 acceptance, push, or production rollout was performed. The declared index
 and TTL policies remain undeployed.
 
-The authoritative runner requires a clean commit. A scoped commit on the
-isolated validation branch is used only to generate repeatability evidence;
-it is not pushed and does not authorize deployment or baseline acceptance.
+The scoped local validation commits are
+`c606309df3eee2ce3609c48c0c1a6c9fd6599d27` and
+`22781c432097ca7479e10e4a89f64d31b581c48c`. They were not pushed and do not
+authorize deployment or baseline acceptance.

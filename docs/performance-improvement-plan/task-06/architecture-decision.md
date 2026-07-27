@@ -1,7 +1,9 @@
 # Task 06 architecture decision
 
-Date: 2026-07-23. Status: local/demo-emulator candidate. Nothing in this
-decision authorizes a Firebase deployment or a production rollout change.
+Date: 2026-07-23. Status: locally validated candidate for roadmap progression
+as of 2026-07-27; Task 07 may start. Nothing in this decision authorizes a
+Firebase deployment, a production rollout change, or performance-baseline
+acceptance.
 
 ## Decision
 

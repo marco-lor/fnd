@@ -4,6 +4,18 @@ This directory is a read-only architecture and implementation plan created on 20
 
 The tasks are intentionally ordered and must be implemented one at a time. Each task should land as a separately measurable change. Do not start a later task until the preceding task's acceptance gates pass, unless the later file explicitly marks work as independent.
 
+## Current sequence status
+
+Task 06 was accepted as locally validated for roadmap progression on
+2026-07-27. Task 07 may start.
+
+This closure is based on the passing full frontend, Functions, backend,
+emulator, build, startup, and 19/19 broad browser-performance checks recorded
+in `task-06/implementation-evidence.md`. It does not mean Task 06 was deployed
+or that a new performance baseline was accepted. The final two-run
+authoritative repeatability certification was explicitly waived for Task 06
+closure and remains unavailable as baseline-acceptance evidence.
+
 ## Documents
 
 - [`00-performance-audit.md`](./00-performance-audit.md) contains the repository-wide analysis, evidence, priorities, route coverage, and baseline.

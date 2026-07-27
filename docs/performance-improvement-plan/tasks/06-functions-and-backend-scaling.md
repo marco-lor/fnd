@@ -2,17 +2,20 @@
 
 Depends on Tasks 04 and 05.
 
-## Local candidate status
+## Validated local candidate status
 
-The implementation is present in the working tree as a local/demo-emulator
-candidate. See:
+The implementation was accepted as locally validated for roadmap progression
+on 2026-07-27. Task 07 may start. See:
 
 - `../task-06/architecture-decision.md`
 - `../task-06/function-region-inventory.md`
 - `../task-06/operations-runbook.md`
 - `../task-06/implementation-evidence.md`
 
-This status does not authorize deployment or any online rollout/config change.
+This status does not authorize deployment, any online rollout/config change,
+or acceptance of a new performance baseline. The final two-run authoritative
+repeatability certification was not accepted and was explicitly waived as a
+Task 06 sequencing blocker.
 
 ## Outcome
 
