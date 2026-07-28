@@ -395,10 +395,9 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
         }
         const armaturaDocRef = doc(db, "items", docId);
         const deferredStorageCleanup = createLegacyStorageCleanup({
-                onError: ({ path, error }) => {
-                    console.warn("Post-commit armatura media cleanup failed:", path, error);
-                },
-            }
+            onError: ({ path, error }) => {
+                console.warn("Post-commit armatura media cleanup failed:", path, error);
+            },
         });
         
         try {

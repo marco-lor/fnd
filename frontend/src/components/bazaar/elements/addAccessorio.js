@@ -363,10 +363,9 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
         }
         const accessorioDocRef = doc(db, "items", docId);
         const deferredStorageCleanup = createLegacyStorageCleanup({
-                onError: ({ path, error }) => {
-                    console.warn("Post-commit accessorio media cleanup failed:", path, error);
-                },
-            }
+            onError: ({ path, error }) => {
+                console.warn("Post-commit accessorio media cleanup failed:", path, error);
+            },
         });
         
         try {

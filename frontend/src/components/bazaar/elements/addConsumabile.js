@@ -369,10 +369,9 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
         }
         const consumabileDocRef = doc(db, "items", docId);
         const deferredStorageCleanup = createLegacyStorageCleanup({
-                onError: ({ path, error }) => {
-                    console.warn("Post-commit consumabile media cleanup failed:", path, error);
-                },
-            }
+            onError: ({ path, error }) => {
+                console.warn("Post-commit consumabile media cleanup failed:", path, error);
+            },
         });
         
         try {
