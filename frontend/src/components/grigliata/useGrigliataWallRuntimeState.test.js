@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import useGrigliataWallRuntimeState from './useGrigliataWallRuntimeState';
 
 const mockBuildDocTarget = (...segments) => ({
@@ -110,5 +110,67 @@ describe('useGrigliataWallRuntimeState', () => {
     });
     expect(screen.getByTestId('background-id')).toHaveTextContent('');
     expect(screen.getByTestId('segment-count')).toHaveTextContent('0');
+  });
+
+  test('ignores a stale wall-state callback after switching maps', async () => {
+    const listeners = [];
+    firestore.onSnapshot.mockImplementation((target, onNext, onError) => {
+      const listener = { target, onNext, onError };
+      listeners.push(listener);
+      return jest.fn();
+    });
+    const buildSnapshot = (backgroundId, isOpen) => ({
+      id: backgroundId,
+      exists: () => true,
+      data: () => ({
+        backgroundId,
+        segments: {
+          'wall-2': {
+            isOpen,
+            updatedBy: 'dm-1',
+          },
+        },
+        updatedBy: 'dm-1',
+      }),
+    });
+    const findListener = (backgroundId) => listeners.find((listener) => (
+      listener.target?.path === `grigliata_wall_state/${backgroundId}`
+    ));
+
+    const { rerender } = render(
+      <HookProbe backgroundId={'map-1'} currentUserId={'player-1'} />
+    );
+    await waitFor(() => {
+      expect(findListener('map-1')).toBeDefined();
+    });
+    const mapOneListener = findListener('map-1');
+    act(() => {
+      mapOneListener.onNext(buildSnapshot('map-1', true));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('ready')).toHaveTextContent('true');
+      expect(screen.getByTestId('background-id')).toHaveTextContent('map-1');
+      expect(screen.getByTestId('open-state')).toHaveTextContent('true');
+    });
+
+    rerender(<HookProbe backgroundId={'map-2'} currentUserId={'player-1'} />);
+    await waitFor(() => {
+      expect(findListener('map-2')).toBeDefined();
+    });
+    act(() => {
+      findListener('map-2').onNext(buildSnapshot('map-2', false));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('ready')).toHaveTextContent('true');
+      expect(screen.getByTestId('background-id')).toHaveTextContent('map-2');
+      expect(screen.getByTestId('open-state')).toHaveTextContent('false');
+    });
+
+    act(() => {
+      mapOneListener.onNext(buildSnapshot('map-1', true));
+    });
+    expect(screen.getByTestId('ready')).toHaveTextContent('true');
+    expect(screen.getByTestId('background-id')).toHaveTextContent('map-2');
+    expect(screen.getByTestId('open-state')).toHaveTextContent('false');
   });
 });

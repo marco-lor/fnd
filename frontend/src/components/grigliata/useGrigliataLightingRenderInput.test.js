@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import useGrigliataLightingRenderInput from './useGrigliataLightingRenderInput';
 
 const mockBuildDocTarget = (...segments) => ({
@@ -118,5 +118,70 @@ describe('useGrigliataLightingRenderInput', () => {
     expect(screen.getByTestId('light-count')).toHaveTextContent('1');
     expect(screen.getByTestId('darkness-count')).toHaveTextContent('1');
     expect(screen.getByTestId('light-color')).toHaveTextContent('#AABBCC');
+  });
+
+  test('ignores a stale render-input callback after switching maps', async () => {
+    const listeners = [];
+    firestore.onSnapshot.mockImplementation((target, onNext, onError) => {
+      const listener = { target, onNext, onError };
+      listeners.push(listener);
+      return jest.fn();
+    });
+    const buildSnapshot = (backgroundId, color) => ({
+      id: backgroundId,
+      exists: () => true,
+      data: () => ({
+        backgroundId,
+        scene: { darkness: 0.5, globalLight: false },
+        walls: [],
+        lights: [{
+          id: `${backgroundId}-light`,
+          x: 35,
+          y: 35,
+          brightRadiusPx: 140,
+          dimRadiusPx: 0,
+          color,
+        }],
+        darknessSources: [],
+      }),
+    });
+    const findListener = (backgroundId) => listeners.find((listener) => (
+      listener.target?.path === `grigliata_lighting_render_inputs/${backgroundId}`
+    ));
+
+    const { rerender } = render(
+      <HookProbe backgroundId={'map-1'} currentUserId={'player-1'} />
+    );
+    await waitFor(() => {
+      expect(findListener('map-1')).toBeDefined();
+    });
+    const mapOneListener = findListener('map-1');
+    act(() => {
+      mapOneListener.onNext(buildSnapshot('map-1', '#AA1133'));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('ready')).toHaveTextContent('true');
+      expect(screen.getByTestId('background-id')).toHaveTextContent('map-1');
+    });
+
+    rerender(<HookProbe backgroundId={'map-2'} currentUserId={'player-1'} />);
+    await waitFor(() => {
+      expect(findListener('map-2')).toBeDefined();
+    });
+    act(() => {
+      findListener('map-2').onNext(buildSnapshot('map-2', '#224466'));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('ready')).toHaveTextContent('true');
+      expect(screen.getByTestId('background-id')).toHaveTextContent('map-2');
+      expect(screen.getByTestId('light-color')).toHaveTextContent('#224466');
+    });
+
+    act(() => {
+      mapOneListener.onNext(buildSnapshot('map-1', '#FF0000'));
+    });
+    expect(screen.getByTestId('ready')).toHaveTextContent('true');
+    expect(screen.getByTestId('background-id')).toHaveTextContent('map-2');
+    expect(screen.getByTestId('light-color')).toHaveTextContent('#224466');
   });
 });

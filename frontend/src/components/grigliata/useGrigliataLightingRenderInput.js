@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   doc,
   onSnapshot,
@@ -13,37 +13,74 @@ export default function useGrigliataLightingRenderInput({
   backgroundId = '',
   currentUserId = '',
 }) {
-  const [lightingRenderInput, setLightingRenderInput] = useState(null);
-  const [isLightingRenderInputReady, setIsLightingRenderInputReady] = useState(false);
+  const [lightingRenderInputState, setLightingRenderInputState] = useState({
+    backgroundId: '',
+    value: null,
+    isReady: false,
+  });
+  const subscriptionGenerationRef = useRef(0);
+  const hasMatchingState = lightingRenderInputState.backgroundId === backgroundId;
+  const lightingRenderInput = hasMatchingState ? lightingRenderInputState.value : null;
+  const isLightingRenderInputReady = hasMatchingState && lightingRenderInputState.isReady;
 
   useEffect(() => {
+    const subscriptionGeneration = subscriptionGenerationRef.current + 1;
+    subscriptionGenerationRef.current = subscriptionGeneration;
+
     if (!currentUserId || !backgroundId) {
-      setLightingRenderInput(null);
-      setIsLightingRenderInputReady(false);
+      setLightingRenderInputState({
+        backgroundId: '',
+        value: null,
+        isReady: false,
+      });
       return undefined;
     }
 
-    setIsLightingRenderInputReady(false);
+    const subscribedBackgroundId = backgroundId;
+    setLightingRenderInputState({
+      backgroundId: subscribedBackgroundId,
+      value: null,
+      isReady: false,
+    });
 
     const unsubscribe = onSnapshot(
-      doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, backgroundId),
+      doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, subscribedBackgroundId),
       (snapshot) => {
-        setLightingRenderInput(snapshot.exists()
-          ? normalizeGrigliataLightingRenderInput({
-            backgroundId: snapshot.id,
-            ...snapshot.data(),
-          })
-          : null);
-        setIsLightingRenderInputReady(true);
+        if (subscriptionGenerationRef.current !== subscriptionGeneration) {
+          return;
+        }
+
+        setLightingRenderInputState({
+          backgroundId: subscribedBackgroundId,
+          value: snapshot.exists()
+            ? normalizeGrigliataLightingRenderInput({
+              backgroundId: snapshot.id,
+              ...snapshot.data(),
+            })
+            : null,
+          isReady: true,
+        });
       },
       (error) => {
+        if (subscriptionGenerationRef.current !== subscriptionGeneration) {
+          return;
+        }
+
         console.error('Failed to load Grigliata lighting render input:', error);
-        setLightingRenderInput(null);
-        setIsLightingRenderInputReady(true);
+        setLightingRenderInputState({
+          backgroundId: subscribedBackgroundId,
+          value: null,
+          isReady: true,
+        });
       }
     );
 
-    return () => unsubscribe();
+    return () => {
+      if (subscriptionGenerationRef.current === subscriptionGeneration) {
+        subscriptionGenerationRef.current += 1;
+      }
+      unsubscribe();
+    };
   }, [backgroundId, currentUserId]);
 
   return {

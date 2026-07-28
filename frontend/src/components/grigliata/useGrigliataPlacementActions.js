@@ -184,6 +184,7 @@ export default function useGrigliataPlacementActions({
         }
 
         return {
+          backgroundId: activeBackgroundId,
           tokenId,
           ownerUid: placement.ownerUid,
           placementId,
