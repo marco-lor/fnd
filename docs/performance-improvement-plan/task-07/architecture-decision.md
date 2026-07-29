@@ -182,6 +182,10 @@ manifest.
   manifest; it cannot delete an arbitrary bucket prefix.
 - Disabling the write flag does not delete canonical objects or manifests.
 - Rollback never requires mounting, refreshing, or manipulating a live battle.
+- Canonical foe duplication uses the Task 06 V2 receipt as its operation owner,
+  copies generation-pinned objects into a distinct Task 07 family, and attaches
+  that family in the same transaction that creates the new foe. The legacy
+  callable rejects canonical state rather than silently falling back.
 
 ## Consequences
 
@@ -193,5 +197,5 @@ integration. Existing records continue to render through legacy fallbacks, and
 The trade-off is that the candidate is deliberately additive and incomplete
 relative to the full Task 07 definition of done. Production activation remains
 blocked by the final full regression, emulator, route/cross-browser, soak, and
-repeatability evidence; V1-owned foe/token copy semantics; and a reviewed
+repeatability evidence; V1-owned token copy/spawn semantics; and a reviewed
 production migration/backup/restore path.

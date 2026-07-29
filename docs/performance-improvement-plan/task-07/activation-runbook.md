@@ -16,8 +16,10 @@ plane until all of the following blockers are closed and reviewed:
 - the full route matrix, Chromium/Firefox/WebKit media cases, 50-map/token soak,
   ten-minute lifecycle run, `perf:ci`, and two-pass authoritative comparison
   pass from a clean committed candidate;
-- V1 foe/token copy and spawn operations acquire an owned canonical family or
-  a reviewed reference-ledger entry rather than depending on legacy fallback;
+- V1 token copy and spawn operations acquire an owned canonical family or a
+  reviewed reference-ledger entry rather than depending on legacy fallback;
+- the Task 06 `duplicate-foe` V2 operation is deployed and enabled anywhere
+  Task 07 foe `v1-write` is allowed;
 - production backup, write-backfill, restore, and reconciliation tooling is
   implemented and approved.
 
@@ -35,7 +37,10 @@ gates later become green.
 4. Confirm the production bucket name and every production web origin. Add any
    reviewed custom domain to `frontend/storage.cors.task07.json`; do not add a
    wildcard origin.
-5. Confirm App Check and authenticated callable behavior in the intended
+5. Confirm the `duplicateFoeWithAssetsV2` callable and Task 06
+   `duplicate-foe` operation are deployed, enabled, and receipt-replay tested
+   before allowing Task 07 foe `v1-write`.
+6. Confirm App Check and authenticated callable behavior in the intended
    production configuration before enabling the client flag.
 
 ## Why CORS is required

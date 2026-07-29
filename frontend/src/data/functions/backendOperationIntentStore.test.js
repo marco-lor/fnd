@@ -83,6 +83,66 @@ describe('durable Task 06 operation intents', () => {
     expect(storedEntries(storage)).toEqual([]);
   });
 
+  test('retires a definitive failure so the next explicit attempt gets a fresh ID', async () => {
+    const storage = createMemoryStorage();
+    const ids = ['delete-npc-operation-0001', 'delete-npc-operation-0002'];
+    const createOperationId = jest.fn(() => ids.shift());
+    const definitiveError = Object.assign(new Error('invalid request'), {
+      code: 'functions/invalid-argument',
+    });
+    const isDefinitiveError = jest.fn((error) => (
+      error?.code === 'functions/invalid-argument'
+    ));
+
+    await expect(runIntent({
+      storage,
+      createOperationId,
+      isDefinitiveError,
+      invoke: jest.fn().mockRejectedValue(definitiveError),
+    })).rejects.toBe(definitiveError);
+
+    expect(isDefinitiveError).toHaveBeenCalledWith(definitiveError);
+    expect(storedEntries(storage)).toEqual([]);
+
+    const retryInvoke = jest.fn().mockResolvedValue({status: 'completed'});
+    await runIntent({
+      storage,
+      createOperationId,
+      isDefinitiveError,
+      invoke: retryInvoke,
+    });
+
+    expect(retryInvoke).toHaveBeenCalledWith('delete-npc-operation-0002');
+    expect(createOperationId).toHaveBeenCalledTimes(2);
+  });
+
+  test.each([
+    'functions/unavailable',
+    'functions/aborted',
+  ])('reuses its ID after classified non-definitive %s', async (code) => {
+    const storage = createMemoryStorage();
+    const firstError = Object.assign(new Error(code), {code});
+    const isDefinitiveError = jest.fn(() => false);
+
+    await expect(runIntent({
+      storage,
+      isDefinitiveError,
+      invoke: jest.fn().mockRejectedValue(firstError),
+    })).rejects.toBe(firstError);
+
+    const retryCreate = jest.fn(() => 'delete-npc-operation-0002');
+    const retryInvoke = jest.fn().mockResolvedValue({status: 'completed'});
+    await runIntent({
+      storage,
+      createOperationId: retryCreate,
+      isDefinitiveError,
+      invoke: retryInvoke,
+    });
+
+    expect(retryCreate).not.toHaveBeenCalled();
+    expect(retryInvoke).toHaveBeenCalledWith('delete-npc-operation-0001');
+  });
+
   test('separates changed requests and actors without serializing either identity', async () => {
     const storage = createMemoryStorage();
     let sequence = 0;
@@ -174,6 +234,87 @@ describe('durable Task 06 operation intents', () => {
       {status: 'completed'},
     ]);
     expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  test('deduplicates concurrent definitive failures and retires the ID once', async () => {
+    const storage = createMemoryStorage();
+    const terminalError = new Error('terminal');
+    const invoke = jest.fn().mockRejectedValue(terminalError);
+    const isDefinitiveError = jest.fn(() => true);
+
+    const first = runIntent({storage, invoke, isDefinitiveError});
+    const second = runIntent({storage, invoke, isDefinitiveError});
+    const settled = Promise.allSettled([first, second]);
+
+    await expect(settled).resolves.toEqual([
+      {status: 'rejected', reason: terminalError},
+      {status: 'rejected', reason: terminalError},
+    ]);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(isDefinitiveError).toHaveBeenCalledTimes(1);
+    expect(storedEntries(storage)).toEqual([]);
+  });
+
+  test('a definitive failure clears only its exact stored intent', async () => {
+    const storage = createMemoryStorage();
+    let sequence = 0;
+    const createOperationId = () => (
+      `delete-npc-operation-${String(++sequence).padStart(4, '0')}`
+    );
+
+    await expect(runIntent({
+      storage,
+      intent: {npcId: 'neighbor-private-npc'},
+      createOperationId,
+      invoke: jest.fn().mockRejectedValue(new Error('offline')),
+    })).rejects.toThrow('offline');
+
+    const terminalError = new Error('terminal');
+    await expect(runIntent({
+      storage,
+      createOperationId,
+      isDefinitiveError: () => true,
+      invoke: jest.fn().mockRejectedValue(terminalError),
+    })).rejects.toBe(terminalError);
+
+    expect(storedEntries(storage).map(({operationId}) => operationId))
+      .toEqual(['delete-npc-operation-0001']);
+  });
+
+  test.each([
+    ['throws', () => { throw new Error('classifier failed'); }],
+    ['returns a non-boolean', () => 'yes'],
+  ])('fails closed when the definitive classifier %s', async (_, classifier) => {
+    const storage = createMemoryStorage();
+    const invocationError = new Error('terminal candidate');
+
+    await expect(runIntent({
+      storage,
+      isDefinitiveError: classifier,
+      invoke: jest.fn().mockRejectedValue(invocationError),
+    })).rejects.toBeInstanceOf(BackendOperationIntentError);
+
+    expect(storedEntries(storage)[0].operationId)
+      .toBe('delete-npc-operation-0001');
+  });
+
+  test('fails closed when a definitive intent cannot be cleared', async () => {
+    const storage = createMemoryStorage();
+    storage.setItem.mockImplementation((key, value) => {
+      if (JSON.parse(value).entries.length === 0) {
+        throw new DOMException('blocked', 'SecurityError');
+      }
+      storage.values.set(key, value);
+    });
+
+    await expect(runIntent({
+      storage,
+      isDefinitiveError: () => true,
+      invoke: jest.fn().mockRejectedValue(new Error('terminal')),
+    })).rejects.toBeInstanceOf(BackendOperationIntentError);
+
+    expect(storedEntries(storage)[0].operationId)
+      .toBe('delete-npc-operation-0001');
   });
 
   test('malformed or oversized state fails closed before invocation', async () => {

@@ -69,6 +69,7 @@ test("operation views expose bounded public progress only", () => {
       failed: 0,
     },
     retryable: true,
+    retryOperationAfterCleanup: false,
   });
   assert.deepEqual(view, {
     operationId: "operation_123",

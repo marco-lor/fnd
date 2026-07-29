@@ -36,14 +36,15 @@ export class Task07TargetAdapterError extends Error {
   }
 }
 
-type StoredMediaObject = InspectedMediaObject & {
+export type StoredTask07MediaObject = InspectedMediaObject & {
   checksum: string;
+  role?: "original" | MediaVariantName;
 };
 
-type ReadyGeneratedMedia = {
+export type ReadyTask07GeneratedMedia = {
   generation: string;
-  original: StoredMediaObject;
-  variants: Partial<Record<MediaVariantName, StoredMediaObject>>;
+  original: StoredTask07MediaObject;
+  variants: Partial<Record<MediaVariantName, StoredTask07MediaObject>>;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -54,7 +55,7 @@ const asGeneratedObject = (
   plan: MediaUploadPlan,
   generation: string,
   expectedVariant: MediaVariantName | null
-): StoredMediaObject | null => {
+): StoredTask07MediaObject | null => {
   if (!isRecord(value)) return null;
   const parsed = parseCanonicalMediaPath(value.path);
   const checksum = typeof value.checksum === "string" ? value.checksum : "";
@@ -74,13 +75,13 @@ const asGeneratedObject = (
     typeof value.cacheControl !== "string") {
     return null;
   }
-  return value as unknown as StoredMediaObject;
+  return value as unknown as StoredTask07MediaObject;
 };
 
-const readyGeneratedMedia = (
+export const task07ReadyGeneratedMediaFromManifest = (
   data: admin.firestore.DocumentData,
   plan: MediaUploadPlan
-): ReadyGeneratedMedia => {
+): ReadyTask07GeneratedMedia => {
   const generated = isRecord(data.generated) ? data.generated : {};
   const sourceGeneration = typeof generated.generation === "string" ?
     generated.generation :
@@ -116,7 +117,9 @@ const readyGeneratedMedia = (
       "Media variant set is incomplete."
     );
   }
-  const variants: Partial<Record<MediaVariantName, StoredMediaObject>> = {};
+  const variants: Partial<
+    Record<MediaVariantName, StoredTask07MediaObject>
+  > = {};
   expectedVariants.forEach((variant) => {
     const object = asGeneratedObject(
       storedVariants[variant],
@@ -242,7 +245,7 @@ export const task07MediaValueFromReadyManifest = (
   data: admin.firestore.DocumentData,
   plan: MediaUploadPlan
 ): Record<string, unknown> => {
-  const generated = readyGeneratedMedia(data, plan);
+  const generated = task07ReadyGeneratedMediaFromManifest(data, plan);
   return {
     schemaVersion: MEDIA_SCHEMA_VERSION,
     contractVersion: MEDIA_CONTRACT_VERSION,
@@ -268,7 +271,7 @@ export const task07TargetAttachmentPatch = (input: {
   revision: number;
   timestamp: admin.firestore.Timestamp;
 }): admin.firestore.UpdateData<admin.firestore.DocumentData> => {
-  const original = input.media.original as StoredMediaObject;
+  const original = input.media.original as StoredTask07MediaObject;
   const fields = task07MediaTargetFields(input.plan);
   const current = input.current || {};
   const currentImageUrl = typeof current.imageUrl === "string" ?
@@ -331,6 +334,50 @@ export const assertTask07TargetDocumentBudget = (input: {
       "Media target exceeds its document-size budget."
     );
   }
+};
+
+export const buildTask07NewTargetAttachment = (input: {
+  assetData: admin.firestore.DocumentData;
+  plan: MediaUploadPlan;
+  targetData: admin.firestore.DocumentData;
+  timestamp: admin.firestore.Timestamp;
+}): {
+  targetData: admin.firestore.DocumentData;
+  referencePath: string;
+  targetSlot: "media" | "videoMedia";
+  revision: 1;
+} => {
+  if (input.assetData.state !== "ready" ||
+    input.plan.previousAssetId !== null) {
+    throw new Task07TargetAdapterError(
+      "failed-precondition",
+      "New-target media must be ready and have no previous attachment."
+    );
+  }
+  const referencePath = task07MediaReferencePath(input.plan);
+  const targetSlot = task07MediaTargetFields(input.plan).slot;
+  const media = task07MediaValueFromReadyManifest(
+    input.assetData,
+    input.plan
+  );
+  const patch = task07TargetAttachmentPatch({
+    current: input.targetData,
+    media,
+    plan: input.plan,
+    revision: 1,
+    timestamp: input.timestamp,
+  });
+  assertTask07TargetDocumentBudget({
+    current: input.targetData,
+    patch,
+    plan: input.plan,
+  });
+  return {
+    targetData: {...input.targetData, ...patch},
+    referencePath,
+    targetSlot,
+    revision: 1,
+  };
 };
 
 export const attachTask07ReadyAssetTransaction = async (input: {

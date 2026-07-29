@@ -6,6 +6,7 @@ const {
 } = require("../lib/mediaAssetLifecycleCore");
 const {
   assertTask07TargetDocumentBudget,
+  buildTask07NewTargetAttachment,
   task07TargetAttachmentPatch,
   validateTask07MediaTarget,
 } = require("../lib/mediaTargetAdapters");
@@ -129,6 +130,70 @@ test("authoritative attachments retain noncanonical legacy rollback references",
     imagePath: originalPath,
     imageUrl: "",
   });
+});
+
+test("ready media can be attached while creating a new foe target", () => {
+  const foe = buildPlan({
+    kind: "foe",
+    entityId: "new-foe",
+    operationId: "foe_new_target_1234",
+  });
+  const generatedPath =
+    `media_assets/v1/dm-only/owner-a/${foe.assetId}/7`;
+  const stored = (role, path, index) => ({
+    path,
+    contentType: role === "original" ? "image/png" : "image/webp",
+    bytes: 100 + index,
+    width: 96,
+    height: 96,
+    durationMs: null,
+    orientationDegrees: 0,
+    checksum: String(index + 1).repeat(64).slice(0, 64),
+    role,
+    generation: String(10 + index),
+    cacheControl: "private, max-age=31536000, immutable",
+  });
+  const assetData = {
+    state: "ready",
+    generated: {
+      generation: "7",
+      original: stored("original", `${generatedPath}/original`, 0),
+      variants: {
+        thumbnail: stored("thumbnail", `${generatedPath}/thumbnail`, 1),
+        thumbnail2x: stored("thumbnail2x", `${generatedPath}/thumbnail2x`, 2),
+        card: stored("card", `${generatedPath}/card`, 3),
+        card2x: stored("card2x", `${generatedPath}/card2x`, 4),
+      },
+    },
+  };
+  const timestamp = {marker: "timestamp"};
+  const canonicalOnly = buildTask07NewTargetAttachment({
+    assetData,
+    plan: foe,
+    targetData: {name: "Clone", imagePath: "", imageUrl: ""},
+    timestamp,
+  });
+  assert.equal(canonicalOnly.referencePath, "foes/new-foe");
+  assert.equal(canonicalOnly.revision, 1);
+  assert.equal(canonicalOnly.targetData.media.assetId, foe.assetId);
+  assert.equal(canonicalOnly.targetData.task07MediaRevision, 1);
+  assert.equal(
+    canonicalOnly.targetData.imagePath,
+    `${generatedPath}/original`
+  );
+
+  const dual = buildTask07NewTargetAttachment({
+    assetData,
+    plan: foe,
+    targetData: {
+      name: "Clone",
+      imagePath: "foes/operations/receipt/main.png",
+      imageUrl: "https://legacy.example/main.png",
+    },
+    timestamp,
+  });
+  assert.equal(dual.targetData.imagePath, "foes/operations/receipt/main.png");
+  assert.equal(dual.targetData.imageUrl, "https://legacy.example/main.png");
 });
 
 test("map attachment keeps legacy dimensions together with its legacy source", () => {

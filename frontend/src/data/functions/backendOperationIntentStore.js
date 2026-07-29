@@ -232,6 +232,7 @@ export const runWithDurableOperationIntent = async ({
   kind,
   intent,
   invoke,
+  isDefinitiveError,
   storage,
   cryptoImpl = globalThis.crypto,
   now = () => Date.now(),
@@ -247,6 +248,14 @@ export const runWithDurableOperationIntent = async ({
   }
   if (typeof invoke !== 'function') {
     throw new BackendOperationIntentError('Operation invocation is required.');
+  }
+  if (
+    isDefinitiveError !== undefined
+    && typeof isDefinitiveError !== 'function'
+  ) {
+    throw new BackendOperationIntentError(
+      'Operation error classification must be a function.'
+    );
   }
 
   const canonicalIntent = {
@@ -269,7 +278,44 @@ export const runWithDurableOperationIntent = async ({
       now: now(),
       createOperationId,
     });
-    const result = await invoke(operationId);
+    let result;
+    try {
+      result = await invoke(operationId);
+    } catch (invocationError) {
+      if (isDefinitiveError === undefined) throw invocationError;
+
+      let isDefinitive;
+      try {
+        isDefinitive = isDefinitiveError(invocationError);
+        if (typeof isDefinitive !== 'boolean') {
+          throw new TypeError(
+            'Operation error classification must return a boolean.'
+          );
+        }
+      } catch (classificationError) {
+        throw new BackendOperationIntentError(
+          'Unable to classify the failed operation safely; its recovery identity was retained.',
+          classificationError
+        );
+      }
+      if (!isDefinitive) throw invocationError;
+
+      try {
+        clearIntent({
+          storage: resolvedStorage,
+          kind,
+          intentDigest,
+          operationId,
+          now: now(),
+        });
+      } catch (storageError) {
+        throw new BackendOperationIntentError(
+          'Unable to retire the failed operation safely; its recovery identity was retained.',
+          storageError
+        );
+      }
+      throw invocationError;
+    }
     clearIntent({
       storage: resolvedStorage,
       kind,

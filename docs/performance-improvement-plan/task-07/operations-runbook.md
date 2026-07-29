@@ -13,8 +13,10 @@ conditions is true:
   gates have not passed from the clean merged revision;
 - the full route, cross-browser, 50-map/token, ten-minute lifecycle, `perf:ci`,
   and two-pass authoritative repeatability gates are incomplete;
-- V1 foe/token copy and spawn operations do not yet acquire an owned canonical
+- V1 token copy and spawn operations do not yet acquire an owned canonical
   family or reviewed reference-ledger entry; or
+- Task 07 foe `v1-write` can be enabled without the Task 06 `duplicate-foe` V2
+  operation being deployed and enabled; or
 - production backup, write-backfill, restore, and reconciliation procedures are
   unreviewed.
 

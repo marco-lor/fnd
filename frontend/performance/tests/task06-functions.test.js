@@ -7,6 +7,19 @@ const {
   getFirestore,
 } = require('firebase-admin/firestore');
 const {getStorage} = require('firebase-admin/storage');
+const {
+  buildTask07MediaUploadPlan,
+} = require('../../functions/lib/mediaAssetLifecycleCore');
+const {
+  buildGeneratedMediaStoragePlan,
+  buildTask07PrivateStorageMetadata,
+  MEDIA_CONTRACT_VERSION,
+  MEDIA_PRIVATE_CACHE_CONTROL,
+  MEDIA_SCHEMA_VERSION,
+} = require('../../functions/lib/mediaContracts');
+const {
+  task07MediaValueFromReadyManifest,
+} = require('../../functions/lib/mediaTargetAdapters');
 const callableManifest = require('../../src/data/functions/callableManifest.json');
 const {
   PERFORMANCE_ENVIRONMENT_MODE,
@@ -26,6 +39,12 @@ const LOCK_OPERATION_ID = 'task06-lock-scale-0001';
 const NPC_OPERATION_ID = 'task06-delete-npc-0001';
 const ENCOUNTER_OPERATION_ID = 'task06-delete-encounter-0001';
 const FOE_OPERATION_ID = 'task06-duplicate-foe-0001';
+const FOE_CANONICAL_OPERATION_ID = 'task06-duplicate-foe-canonical-0001';
+const FOE_CANONICAL_TERMINAL_ID = 'task06-foe-canonical-terminal-0001';
+const FOE_CANONICAL_REPAIRED_ID = 'task06-foe-canonical-repaired-0001';
+const FOE_ACTIVE_LEASE_ID = 'task06-foe-active-lease-0001';
+const FOE_CLEANUP_OWNER_ID = 'task06-foe-cleanup-owner-0001';
+const FOE_GATE_CLEANUP_ID = 'task06-foe-gate-cleanup-0001';
 const TERMINAL_STATUSES = new Set([
   'paused',
   'completed',
@@ -132,12 +151,25 @@ const invokeCallable = async (functionId, data) => {
   );
   const body = await response.json();
   if (!response.ok || body.error) {
-    throw new Error(
+    const error = new Error(
       `${functionId} failed with HTTP ${response.status}: `
       + JSON.stringify(body.error || body)
     );
+    error.code = String(body?.error?.status || body?.error?.code || '');
+    error.httpStatus = response.status;
+    error.callableError = body.error || body;
+    throw error;
   }
   return body.data ?? body.result;
+};
+
+const operationDocument = async (operationId) => {
+  const snapshot = await db.collection('backend_operations')
+    .where('operationId', '==', operationId)
+    .limit(1)
+    .get();
+  assert.equal(snapshot.size, 1, `Missing operation ${operationId}.`);
+  return snapshot.docs[0];
 };
 
 const waitForOperation = async (
@@ -258,6 +290,134 @@ const task06BackendConfig = () => ({
     'duplicate-foe',
   ],
 });
+
+const task07FoeWriteConfig = (uid) => ({
+  schemaVersion: 1,
+  policyVersion: MEDIA_CONTRACT_VERSION,
+  mode: 'v1-write',
+  enabledPurposes: ['foe'],
+  enabledRoles: ['dm'],
+  enabledUids: [uid],
+});
+
+const seedCanonicalFoe = async ({bucket, sourceFoeId}) => {
+  const originalBuffer = Buffer.from('task07-canonical-foe-original');
+  const sourcePlan = buildTask07MediaUploadPlan({
+    actorUid: actor.uid,
+    ownerUid: actor.uid,
+    entityId: sourceFoeId,
+    operationId: 'task07_foe_clone_source_0001',
+    kind: 'foe',
+    sourceContentType: 'image/png',
+    sourceBytes: originalBuffer.byteLength,
+  });
+  const storagePlan = buildGeneratedMediaStoragePlan({
+    kind: 'foe',
+    audienceScope: sourcePlan.audienceScope,
+    ownerKey: sourcePlan.ownerKey,
+    assetId: sourcePlan.assetId,
+    sourceGeneration: '7',
+  });
+  const objects = [
+    {role: 'original', path: storagePlan.originalPath, buffer: originalBuffer},
+    ...Object.entries(storagePlan.variants).map(([role, path], index) => ({
+      role,
+      path,
+      buffer: Buffer.from(`task07-${role}-${index}`),
+    })),
+  ];
+  const descriptors = new Map();
+  for (let index = 0; index < objects.length; index += 1) {
+    const object = objects[index];
+    const checksum = String(index + 1).repeat(64).slice(0, 64);
+    const contentType = object.role === 'original'
+      ? 'image/png'
+      : 'image/webp';
+    await bucket.file(object.path).save(object.buffer, {
+      resumable: false,
+      metadata: {
+        contentType,
+        cacheControl: MEDIA_PRIVATE_CACHE_CONTROL,
+        contentDisposition: 'inline',
+        metadata: {
+          ...buildTask07PrivateStorageMetadata({
+            assetId: sourcePlan.assetId,
+            entityId: sourceFoeId,
+            kind: 'foe',
+            ownerUid: actor.uid,
+            role: object.role,
+          }),
+          task07Checksum: checksum,
+        },
+      },
+    });
+    const [metadata] = await bucket.file(object.path).getMetadata();
+    descriptors.set(object.role, {
+      path: object.path,
+      contentType,
+      bytes: object.buffer.byteLength,
+      width: object.role === 'original' ? 640 : 96,
+      height: object.role === 'original' ? 480 : 96,
+      durationMs: null,
+      orientationDegrees: 0,
+      checksum,
+      role: object.role,
+      generation: String(metadata.generation),
+      cacheControl: String(metadata.cacheControl || ''),
+    });
+  }
+  const manifest = {
+    schemaVersion: MEDIA_SCHEMA_VERSION,
+    policyVersion: MEDIA_CONTRACT_VERSION,
+    assetId: sourcePlan.assetId,
+    generation: '7',
+    state: 'attached',
+    purpose: 'foe',
+    audience: sourcePlan.audienceScope,
+    ownerUid: actor.uid,
+    actorUid: actor.uid,
+    targetKind: 'foe',
+    targetId: sourceFoeId,
+    previousAssetId: null,
+    requestHash: sourcePlan.requestHash,
+    plan: sourcePlan,
+    generated: {
+      generation: '7',
+      original: descriptors.get('original'),
+      variants: Object.fromEntries(
+        [...descriptors.entries()].filter(([role]) => role !== 'original')
+      ),
+    },
+    attachment: {
+      referencePath: `foes/${sourceFoeId}`,
+      targetSlot: 'media',
+      revision: 1,
+      attachedAt: Timestamp.now(),
+    },
+    retention: {},
+    error: {code: null, retryable: false, attempts: 1},
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+  };
+  const media = task07MediaValueFromReadyManifest(manifest, sourcePlan);
+  await withBackgroundTriggersDisabled(async () => {
+    await Promise.all([
+      db.doc(`media_assets/${sourcePlan.assetId}`).set(manifest),
+      db.doc(`foes/${sourceFoeId}`).set({
+        name: 'Task 07 canonical source',
+        imagePath: storagePlan.originalPath,
+        imageUrl: '',
+        media,
+        task07MediaRevision: 1,
+        mediaUpdatedAt: Timestamp.now(),
+        tecniche: [],
+        spells: [],
+        stats: {hpTotal: 30, manaTotal: 12},
+      }),
+    ]);
+  }, {projectId: PERFORMANCE_PROJECT_ID});
+  return {sourcePlan, manifest, objects};
+};
 
 const actorDocument = () => ({
   role: 'dm',
@@ -964,6 +1124,390 @@ test('foe duplication cleans partial Storage copies and resumes with one receipt
   assert.equal(replay.replayed, true);
   assert.equal(replay.newFoeId, completed.newFoeId);
   assert.deepEqual(replay.assets, completed.assets);
+});
+
+test('foe duplication owns and atomically attaches a canonical media family', async () => {
+  await resetTask06ControlPlane();
+  await withBackgroundTriggersDisabled(async () => {
+    await db.doc('utils/task07_media').set(task07FoeWriteConfig(actor.uid));
+  }, {projectId: PERFORMANCE_PROJECT_ID});
+  const sourceFoeId = 'task07-canonical-clone-source';
+  const bucket = getStorage(app).bucket();
+  const seeded = await seedCanonicalFoe({bucket, sourceFoeId});
+
+  await assert.rejects(
+    invokeCallable('duplicateFoeWithAssets', {
+      sourceFoeId,
+      newFoeName: 'Unsafe compatibility duplicate',
+    }),
+    /Canonical foe media requires the resumable duplication callable/
+  );
+
+  const completed = await invokeCallable('duplicateFoeWithAssetsV2', {
+    operationId: FOE_CANONICAL_OPERATION_ID,
+    sourceFoeId,
+    newFoeName: 'Task 07 canonical duplicate',
+  });
+  assert.equal(completed.replayed, false);
+  assert.ok(completed.assets.canonicalMain);
+  assert.equal(
+    completed.assets.canonicalMain.sourceAssetId,
+    seeded.sourcePlan.assetId
+  );
+  assert.notEqual(
+    completed.assets.canonicalMain.assetId,
+    seeded.sourcePlan.assetId
+  );
+
+  const [source, duplicate, destinationManifest, sourceManifest] =
+    await Promise.all([
+      db.doc(`foes/${sourceFoeId}`).get(),
+      db.doc(`foes/${completed.newFoeId}`).get(),
+      db.doc(
+        `media_assets/${completed.assets.canonicalMain.assetId}`
+      ).get(),
+      db.doc(`media_assets/${seeded.sourcePlan.assetId}`).get(),
+    ]);
+  assert.equal(duplicate.exists, true);
+  assert.equal(duplicate.get('name'), 'Task 07 canonical duplicate');
+  assert.equal(
+    duplicate.get('media.assetId'),
+    completed.assets.canonicalMain.assetId
+  );
+  assert.equal(duplicate.get('task07MediaRevision'), 1);
+  assert.equal(
+    duplicate.get('imagePath'),
+    completed.assets.canonicalMain.originalPath
+  );
+  assert.equal(duplicate.get('imageUrl'), '');
+  assert.equal(destinationManifest.get('state'), 'attached');
+  assert.equal(
+    destinationManifest.get('attachment.referencePath'),
+    `foes/${completed.newFoeId}`
+  );
+  assert.equal(destinationManifest.get('attachment.targetSlot'), 'media');
+  assert.equal(
+    destinationManifest.get('clone.sourceAssetId'),
+    seeded.sourcePlan.assetId
+  );
+  assert.equal(source.get('media.assetId'), seeded.sourcePlan.assetId);
+  assert.equal(sourceManifest.get('state'), 'attached');
+
+  const generated = destinationManifest.get('generated');
+  const destinationObjects = [
+    generated.original,
+    ...Object.values(generated.variants),
+  ];
+  assert.equal(destinationObjects.length, 5);
+  for (const object of destinationObjects) {
+    const [metadata] = await bucket.file(object.path).getMetadata();
+    assert.equal(
+      metadata.metadata.task07AssetId,
+      completed.assets.canonicalMain.assetId
+    );
+    assert.equal(metadata.metadata.task07EntityId, completed.newFoeId);
+    assert.equal(metadata.metadata.task07OwnerUid, actor.uid);
+    assert.equal(
+      metadata.metadata.firebaseStorageDownloadTokens,
+      undefined
+    );
+    assert.equal(metadata.cacheControl, MEDIA_PRIVATE_CACHE_CONTROL);
+    assert.equal(metadata.contentDisposition, 'inline');
+  }
+
+  const replay = await invokeCallable('duplicateFoeWithAssetsV2', {
+    operationId: FOE_CANONICAL_OPERATION_ID,
+    sourceFoeId,
+    newFoeName: 'Task 07 canonical duplicate',
+  });
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.newFoeId, completed.newFoeId);
+  assert.deepEqual(replay.assets, completed.assets);
+});
+
+test('terminal canonical copy failure retires only after cleanup and a fresh ID succeeds', async () => {
+  await resetTask06ControlPlane();
+  await withBackgroundTriggersDisabled(async () => {
+    await db.doc('utils/task07_media').set(task07FoeWriteConfig(actor.uid));
+  }, {projectId: PERFORMANCE_PROJECT_ID});
+  const sourceFoeId = 'task07-canonical-terminal-source';
+  const bucket = getStorage(app).bucket();
+  const seeded = await seedCanonicalFoe({bucket, sourceFoeId});
+  await bucket.file(seeded.objects[0].path).delete();
+  const request = {
+    sourceFoeId,
+    newFoeName: 'Task 07 repaired duplicate',
+  };
+
+  await withBackgroundTriggersDisabled(async () => {
+    await assert.rejects(
+      invokeCallable('duplicateFoeWithAssetsV2', {
+        ...request,
+        operationId: FOE_CANONICAL_TERMINAL_ID,
+      }),
+      (error) => {
+        assert.match(error.code, /FAILED_PRECONDITION/i);
+        return true;
+      }
+    );
+    const operation = await operationDocument(FOE_CANONICAL_TERMINAL_ID);
+    assert.equal(operation.get('status'), 'failed');
+    assert.equal(operation.get('retryable'), false);
+    assert.equal(operation.get('retryOperationAfterCleanup'), undefined);
+    assert.equal(operation.get('errorClass'), 'source-object-missing');
+    const clone = operation.get('canonicalMediaClone');
+    const manifestRef = db.doc(`media_assets/${clone.destinationAssetId}`);
+    const cleanupRef = db.doc(`media_asset_cleanup/${clone.destinationAssetId}`);
+    const [manifest, cleanup] = await Promise.all([
+      manifestRef.get(),
+      cleanupRef.get(),
+    ]);
+    assert.equal(manifest.get('state'), 'rejected');
+    assert.equal(cleanup.get('state'), 'pending');
+
+    await Promise.all([
+      manifestRef.update({state: 'cleanup-pending'}),
+      operation.ref.update({
+        status: 'cleanup-pending',
+        phase: 'cleanup',
+        retryable: true,
+        retryOperationAfterCleanup: false,
+      }),
+    ]);
+    await assert.rejects(
+      invokeCallable('duplicateFoeWithAssetsV2', {
+        ...request,
+        operationId: FOE_CANONICAL_TERMINAL_ID,
+      }),
+      (error) => {
+        assert.match(error.code, /FAILED_PRECONDITION/i);
+        return true;
+      }
+    );
+    assert.equal((await manifestRef.get()).get('state'), 'cleanup-pending');
+    assert.equal((await cleanupRef.get()).get('state'), 'pending');
+
+    await Promise.all([
+      manifestRef.update({state: 'deleted'}),
+      cleanupRef.update({state: 'complete'}),
+      operation.ref.update({
+        status: 'cleanup-pending',
+        phase: 'cleanup',
+        retryable: true,
+        retryOperationAfterCleanup: false,
+      }),
+    ]);
+    await assert.rejects(
+      invokeCallable('duplicateFoeWithAssetsV2', {
+        ...request,
+        operationId: FOE_CANONICAL_TERMINAL_ID,
+      }),
+      (error) => {
+        assert.match(error.code, /FAILED_PRECONDITION/i);
+        return true;
+      }
+    );
+    assert.equal((await manifestRef.get()).get('state'), 'deleted');
+    assert.equal((await cleanupRef.get()).get('state'), 'complete');
+  }, {projectId: PERFORMANCE_PROJECT_ID});
+
+  const repaired = await seedCanonicalFoe({bucket, sourceFoeId});
+  const completed = await invokeCallable('duplicateFoeWithAssetsV2', {
+    ...request,
+    operationId: FOE_CANONICAL_REPAIRED_ID,
+  });
+  assert.equal(completed.replayed, false);
+  assert.equal(
+    completed.assets.canonicalMain.sourceAssetId,
+    repaired.sourcePlan.assetId
+  );
+  const retired = await operationDocument(FOE_CANONICAL_TERMINAL_ID);
+  assert.equal(retired.get('status'), 'failed');
+  assert.equal(retired.get('retryable'), false);
+});
+
+test('active foe lease stays aborted while expired source drift cleans terminally', async () => {
+  await resetTask06ControlPlane();
+  const sourceFoeId = 'task06-foe-active-lease-source';
+  const sourcePath = 'foes/task06/active-lease-missing.png';
+  const request = {
+    operationId: FOE_ACTIVE_LEASE_ID,
+    sourceFoeId,
+    newFoeName: 'Active lease duplicate',
+  };
+  await db.doc(`foes/${sourceFoeId}`).set({
+    name: 'Active lease source',
+    imagePath: sourcePath,
+    imageUrl: 'https://example.invalid/active-lease.png',
+    tecniche: [],
+    spells: [],
+    stats: {hpTotal: 10, manaTotal: 4},
+  });
+  await assert.rejects(
+    invokeCallable('duplicateFoeWithAssetsV2', request),
+    (error) => {
+      assert.match(error.code, /UNAVAILABLE/i);
+      return true;
+    }
+  );
+  let operation = await operationDocument(FOE_ACTIVE_LEASE_ID);
+  const leaseOwner = 'another-invocation';
+  await operation.ref.update({
+    status: 'running',
+    phase: 'copy-assets',
+    retryable: false,
+    leaseOwner,
+    leaseExpiresAt: Timestamp.fromMillis(Date.now() + 60_000),
+  });
+
+  await assert.rejects(
+    invokeCallable('duplicateFoeWithAssetsV2', request),
+    (error) => {
+      assert.match(error.code, /ABORTED/i);
+      return true;
+    }
+  );
+  operation = await operation.ref.get();
+  assert.equal(operation.get('leaseOwner'), leaseOwner);
+  assert.equal(operation.get('phase'), 'copy-assets');
+
+  await Promise.all([
+    operation.ref.update({
+      leaseExpiresAt: Timestamp.fromMillis(Date.now() - 1_000),
+    }),
+    db.doc(`foes/${sourceFoeId}`).update({name: 'Drifted source'}),
+  ]);
+  await assert.rejects(
+    invokeCallable('duplicateFoeWithAssetsV2', request),
+    (error) => {
+      assert.match(error.code, /FAILED_PRECONDITION/i);
+      return true;
+    }
+  );
+  operation = await operation.ref.get();
+  assert.equal(operation.get('status'), 'failed');
+  assert.equal(operation.get('retryable'), false);
+  assert.equal(operation.get('errorClass'), 'source-drift');
+  assert.equal(operation.get('retryOperationAfterCleanup'), undefined);
+});
+
+test('cleanup-pending foe receipts remain owner-resumable without DM role', async () => {
+  await resetTask06ControlPlane();
+  const sourceFoeId = 'task06-foe-cleanup-owner-source';
+  const request = {
+    operationId: FOE_CLEANUP_OWNER_ID,
+    sourceFoeId,
+    newFoeName: 'Cleanup owner duplicate',
+  };
+  await db.doc(`foes/${sourceFoeId}`).set({
+    name: 'Cleanup owner source',
+    imagePath: 'foes/task06/cleanup-owner-missing.png',
+    imageUrl: 'https://example.invalid/cleanup-owner.png',
+    tecniche: [],
+    spells: [],
+    stats: {hpTotal: 10, manaTotal: 4},
+  });
+  await assert.rejects(
+    invokeCallable('duplicateFoeWithAssetsV2', request),
+    (error) => {
+      assert.match(error.code, /UNAVAILABLE/i);
+      return true;
+    }
+  );
+  let operation = await operationDocument(FOE_CLEANUP_OWNER_ID);
+  const [entry] = operation.get('assetManifest');
+  const bucket = getStorage(app).bucket();
+  await bucket.file(entry.destinationPath).save(Buffer.from('owned-copy'));
+  await Promise.all([
+    operation.ref.update({
+      status: 'cleanup-pending',
+      phase: 'cleanup',
+      retryable: false,
+      retryOperationAfterCleanup: FieldValue.delete(),
+      leaseOwner: FieldValue.delete(),
+      leaseExpiresAt: FieldValue.delete(),
+    }),
+    db.doc(`users/${actor.uid}`).update({role: 'player'}),
+  ]);
+
+  await assert.rejects(
+    invokeCallable('duplicateFoeWithAssetsV2', request),
+    (error) => {
+      assert.match(error.code, /UNAVAILABLE/i);
+      return true;
+    }
+  );
+  operation = await operation.ref.get();
+  assert.equal(operation.get('status'), 'failed');
+  assert.equal(operation.get('retryable'), true);
+  assert.equal(operation.get('retryOperationAfterCleanup'), undefined);
+  assert.deepEqual(await bucket.file(entry.destinationPath).exists(), [false]);
+
+  await operation.ref.update({
+    status: 'cleanup-pending',
+    phase: 'cleanup',
+    retryable: true,
+    retryOperationAfterCleanup: true,
+  });
+  await assert.rejects(
+    invokeCallable('duplicateFoeWithAssetsV2', request),
+    (error) => {
+      assert.match(error.code, /UNAVAILABLE/i);
+      return true;
+    }
+  );
+  operation = await operation.ref.get();
+  assert.equal(operation.get('status'), 'failed');
+  assert.equal(operation.get('retryable'), true);
+  await db.doc(`users/${actor.uid}`).set(actorDocument());
+});
+
+test('disabling the duplication gate cleans an existing receipt before retirement', async () => {
+  await resetTask06ControlPlane();
+  const sourceFoeId = 'task06-foe-gate-cleanup-source';
+  const request = {
+    operationId: FOE_GATE_CLEANUP_ID,
+    sourceFoeId,
+    newFoeName: 'Gate cleanup duplicate',
+  };
+  await db.doc(`foes/${sourceFoeId}`).set({
+    name: 'Gate cleanup source',
+    imagePath: 'foes/task06/gate-cleanup-missing.png',
+    imageUrl: 'https://example.invalid/gate-cleanup.png',
+    tecniche: [],
+    spells: [],
+    stats: {hpTotal: 10, manaTotal: 4},
+  });
+  await assert.rejects(
+    invokeCallable('duplicateFoeWithAssetsV2', request),
+    (error) => {
+      assert.match(error.code, /UNAVAILABLE/i);
+      return true;
+    }
+  );
+  let operation = await operationDocument(FOE_GATE_CLEANUP_ID);
+  const [entry] = operation.get('assetManifest');
+  const bucket = getStorage(app).bucket();
+  await bucket.file(entry.destinationPath).save(Buffer.from('owned-copy'));
+  const disabled = task06BackendConfig();
+  disabled.enabledOperationKinds = disabled.enabledOperationKinds
+    .filter((kind) => kind !== 'duplicate-foe');
+  await db.doc('app_config/task06_backend').set(disabled);
+
+  await assert.rejects(
+    invokeCallable('duplicateFoeWithAssetsV2', request),
+    (error) => {
+      assert.match(error.code, /FAILED_PRECONDITION/i);
+      return true;
+    }
+  );
+  operation = await operation.ref.get();
+  assert.equal(operation.get('status'), 'failed');
+  assert.equal(operation.get('retryable'), false);
+  assert.equal(operation.get('errorClass'), 'task06-disabled');
+  assert.equal(operation.get('retryOperationAfterCleanup'), undefined);
+  assert.deepEqual(await bucket.file(entry.destinationPath).exists(), [false]);
+  await resetTask06ControlPlane();
 });
 
 test('every callable manifest entry is reachable in its declared emulator region', async () => {

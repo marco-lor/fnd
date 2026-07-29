@@ -35,14 +35,13 @@ import MediaImage, { hasMediaAsset } from '../common/MediaImage';
 import {
   buildCanonicalFoeImageRemovalPayload,
   collectClientDeletableFoeStoragePaths,
+  isDefinitiveFoeDuplicationError,
   shouldClientDeleteFoeMainStorageObject,
+  shouldUseDurableFoeDuplication,
 } from './foeMediaLifecycle';
 
-const duplicateFoeWithAssets = getCallable(
-  TASK06_LOCAL_CANDIDATE
-    ? 'duplicateFoeWithAssetsV2'
-    : 'duplicateFoeWithAssets'
-);
+const duplicateFoeWithAssetsLegacy = getCallable('duplicateFoeWithAssets');
+const duplicateFoeWithAssetsV2 = getCallable('duplicateFoeWithAssetsV2');
 
 // Allow only persisted HTTP(S) image URLs when reading/saving.
 // This prevents storing temporary blob:/data: URLs in Firestore.
@@ -598,18 +597,23 @@ const FoesHub = () => {
         sourceFoeId: dupTarget.id,
         newFoeName: dupName.trim(),
       };
-      if (TASK06_LOCAL_CANDIDATE) {
+      const useDurableDuplication = shouldUseDurableFoeDuplication(
+        dupTarget,
+        { force: TASK06_LOCAL_CANDIDATE }
+      );
+      if (useDurableDuplication) {
         await runWithDurableOperationIntent({
           actorUid: auth.currentUser?.uid,
           kind: 'duplicate-foe',
           intent: duplicateRequest,
-          invoke: (operationId) => duplicateFoeWithAssets({
+          isDefinitiveError: isDefinitiveFoeDuplicationError,
+          invoke: (operationId) => duplicateFoeWithAssetsV2({
             ...duplicateRequest,
             operationId,
           }),
         });
       } else {
-        await duplicateFoeWithAssets(duplicateRequest);
+        await duplicateFoeWithAssetsLegacy(duplicateRequest);
       }
       // Optional: we could resolve URLs for previews here using getDownloadURL on returned paths
       // but no need to mutate state; the Firestore onSnapshot will include the new doc
@@ -618,7 +622,10 @@ const FoesHub = () => {
       setDupName('');
     } catch (e) {
       console.error('duplicate foe failed', e);
-      setDupError('Duplicazione fallita.');
+      setDupError(
+        typeof e?.message === 'string' && e.message.trim()
+          ? e.message.trim() : 'Duplicazione fallita.'
+      );
     } finally {
       setDupBusy(false);
     }

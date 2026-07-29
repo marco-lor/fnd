@@ -18,6 +18,43 @@ export const shouldClientDeleteFoeMainStorageObject = (foe) => (
   !hasCanonicalTask07MediaAssetId(foe)
 );
 
+const isRecord = (value) => (
+  Boolean(value && typeof value === 'object' && !Array.isArray(value))
+);
+
+const hasTask07DuplicateState = (foe) => {
+  const root = isRecord(foe) ? foe : {};
+  const general = isRecord(root.General) ? root.General : {};
+  return [root, general].some((container) => (
+    isRecord(container.media)
+    || isRecord(container.videoMedia)
+    || String(container.imagePath || '').trim().startsWith('media_assets/')
+  ));
+};
+
+export const shouldUseDurableFoeDuplication = (
+  foe,
+  { force = false } = {}
+) => Boolean(
+  force
+  || hasCanonicalTask07MediaAssetId(foe)
+  || hasTask07DuplicateState(foe)
+);
+
+const DEFINITIVE_FOE_DUPLICATION_ERROR_CODES = new Set([
+  'failed-precondition',
+  'invalid-argument',
+  'not-found',
+  'already-exists',
+]);
+
+export const isDefinitiveFoeDuplicationError = (error) => {
+  const code = typeof error?.code === 'string'
+    ? error.code.replace(/^functions\//, '')
+    : '';
+  return DEFINITIVE_FOE_DUPLICATION_ERROR_CODES.has(code);
+};
+
 export const collectClientDeletableFoeStoragePaths = (foe) => {
   const paths = new Set();
   const addPath = (item) => {

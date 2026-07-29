@@ -3,6 +3,10 @@ import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import {getStorage} from "firebase-admin/storage";
 import {randomUUID} from "crypto";
+import {
+  task07CanonicalFoeMediaAssetId,
+  Task07MediaClonePlanError,
+} from "./mediaAssetCloneCore";
 
 export type LegacyDuplicatePayload = {
   sourceFoeId?: string;
@@ -97,6 +101,20 @@ export const duplicateFoeWithAssetsLegacyHandler = async (
     throw new HttpsError("not-found", "Source foe not found");
   }
   const source = sourceSnapshot.data() || {};
+  try {
+    if (task07CanonicalFoeMediaAssetId(source)) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Canonical foe media requires the resumable duplication callable."
+      );
+    }
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    if (error instanceof Task07MediaClonePlanError) {
+      throw new HttpsError("failed-precondition", error.message);
+    }
+    throw error;
+  }
   const bucket = getStorage().bucket();
 
   const copyFile = async (

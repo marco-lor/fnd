@@ -1,7 +1,9 @@
 import {
   buildCanonicalFoeImageRemovalPayload,
   collectClientDeletableFoeStoragePaths,
+  isDefinitiveFoeDuplicationError,
   shouldClientDeleteFoeMainStorageObject,
+  shouldUseDurableFoeDuplication,
 } from './foeMediaLifecycle';
 
 const canonicalFoe = {
@@ -58,5 +60,52 @@ describe('foe media lifecycle ownership', () => {
       media: deleteFieldSentinel,
       name: 'Canonical foe',
     });
+  });
+
+  test('routes canonical and malformed Task 07 state through durable duplication', () => {
+    expect(shouldUseDurableFoeDuplication(canonicalFoe)).toBe(true);
+    expect(shouldUseDurableFoeDuplication({
+      General: { media: canonicalFoe.media },
+    })).toBe(true);
+    expect(shouldUseDurableFoeDuplication({ media: {} })).toBe(true);
+    expect(shouldUseDurableFoeDuplication({
+      imagePath: 'media_assets/v1/dm-only/dm/bad',
+    })).toBe(true);
+    expect(shouldUseDurableFoeDuplication({
+      imagePath: 'foes/main/legacy.png',
+    })).toBe(false);
+    expect(shouldUseDurableFoeDuplication({}, { force: true })).toBe(true);
+  });
+
+  test.each([
+    'failed-precondition',
+    'functions/failed-precondition',
+    'invalid-argument',
+    'functions/invalid-argument',
+    'not-found',
+    'functions/not-found',
+    'already-exists',
+    'functions/already-exists',
+  ])('classifies %s as a definitive duplication error', (code) => {
+    expect(isDefinitiveFoeDuplicationError({code})).toBe(true);
+  });
+
+  test.each([
+    'unavailable',
+    'functions/deadline-exceeded',
+    'internal',
+    'functions/unknown',
+    'aborted',
+    'functions/unauthenticated',
+    'permission-denied',
+    'custom-code',
+    '',
+  ])('retains duplication recovery identity for %s', (code) => {
+    expect(isDefinitiveFoeDuplicationError({code})).toBe(false);
+  });
+
+  test('retains duplication recovery identity for errors without a code', () => {
+    expect(isDefinitiveFoeDuplicationError(new Error('offline'))).toBe(false);
+    expect(isDefinitiveFoeDuplicationError(null)).toBe(false);
   });
 });
