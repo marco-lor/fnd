@@ -4,6 +4,9 @@ const childProcess = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { frontendRoot, resolvePortableJavaHome } = require('./common');
+const {
+  assertFirebaseStorageRuntimePatched,
+} = require('../apply-firebase-tools-patch');
 
 const skipJava = process.argv.includes('--skip-java');
 const skipBrowser = process.argv.includes('--skip-browser');
@@ -32,6 +35,12 @@ if (!skipJava) {
 const firebaseCli = path.join(frontendRoot, 'node_modules', 'firebase-tools', 'lib', 'bin', 'firebase.js');
 if (!fs.existsSync(firebaseCli)) {
   problems.push('firebase-tools is not installed. Run npm install in frontend/.');
+} else {
+  try {
+    assertFirebaseStorageRuntimePatched({frontendRoot});
+  } catch (error) {
+    problems.push(error.message);
+  }
 }
 
 if (!skipBrowser) {
