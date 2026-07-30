@@ -7,6 +7,8 @@ const {
 const {
   assertTask07TargetDocumentBudget,
   buildTask07NewTargetAttachment,
+  task07FoeCanonicalMediaStateFromTarget,
+  task07FoeCanonicalRetirementPatch,
   task07TargetAttachmentPatch,
   validateTask07MediaTarget,
 } = require("../lib/mediaTargetAdapters");
@@ -44,6 +46,67 @@ const targetSnapshot = (path, data = {}) => {
     data: () => data,
   };
 };
+
+test("foe media state normalizes root-only, General-only, and exact mirrors", () => {
+  const assetId = `m_${"a".repeat(40)}`;
+  const media = {
+    assetId,
+    state: "ready",
+    original: {path: "media/original.png", width: 96},
+  };
+
+  assert.deepEqual(task07FoeCanonicalMediaStateFromTarget({
+    media,
+    task07MediaRevision: 4,
+  }), {assetId, revision: 4, conflict: false});
+  assert.deepEqual(task07FoeCanonicalMediaStateFromTarget({
+    General: {media, task07MediaRevision: 99},
+  }), {assetId, revision: 0, conflict: false});
+  assert.deepEqual(task07FoeCanonicalMediaStateFromTarget({
+    media,
+    task07MediaRevision: 7,
+    General: {
+      media: JSON.parse(JSON.stringify(media)),
+      task07MediaRevision: 7,
+    },
+  }), {assetId, revision: 7, conflict: false});
+});
+
+test("foe media state rejects descriptor and explicit revision conflicts", () => {
+  const firstAssetId = `m_${"b".repeat(40)}`;
+  const secondAssetId = `m_${"c".repeat(40)}`;
+  const media = {
+    assetId: firstAssetId,
+    state: "ready",
+    original: {path: "media/original.png", width: 96},
+  };
+  const conflictCases = [
+    {
+      media,
+      General: {
+        media: {...media, original: {...media.original, width: 192}},
+      },
+    },
+    {
+      media,
+      General: {media: {...media, assetId: secondAssetId}},
+    },
+    {
+      media,
+      task07MediaRevision: 2,
+      General: {
+        media: JSON.parse(JSON.stringify(media)),
+        task07MediaRevision: 3,
+      },
+    },
+  ];
+
+  conflictCases.forEach((target) => {
+    const state = task07FoeCanonicalMediaStateFromTarget(target);
+    assert.equal(state.conflict, true);
+    assert.equal(state.assetId, null);
+  });
+});
 
 test("personal art and video attachment patches use independent CAS slots", () => {
   const technique = buildPlan({
@@ -132,6 +195,223 @@ test("authoritative attachments retain noncanonical legacy rollback references",
   });
 });
 
+test("foe replacement normalizes nested media and legacy aliases only", () => {
+  const foe = buildPlan({
+    kind: "foe",
+    operationId: "foe_normalize_reference_1234",
+  });
+  const timestamp = {marker: "timestamp"};
+  const media = {
+    assetId: foe.assetId,
+    original: {path: "media/new-original.png"},
+  };
+  const patch = task07TargetAttachmentPatch({
+    current: {
+      imagePath: "foes/legacy.png",
+      imageUrl: "https://legacy.example/foe.png",
+    },
+    media,
+    normalizeFoeCanonicalRoot: true,
+    plan: foe,
+    revision: 5,
+    timestamp,
+  });
+
+  assert.equal(patch.media, media);
+  assert.equal(patch.task07MediaRevision, 5);
+  assert.equal(patch.imagePath, "foes/legacy.png");
+  assert.equal(patch.imageUrl, "https://legacy.example/foe.png");
+  for (const field of [
+    "image_url",
+    "url",
+    "downloadUrl",
+    "General.media",
+    "General.mediaUpdatedAt",
+    "General.task07MediaRevision",
+    "General.imagePath",
+    "General.imageUrl",
+    "General.image_url",
+    "General.url",
+    "General.downloadUrl",
+  ]) {
+    assert.equal(Object.hasOwn(patch, field), true, field);
+  }
+  assert.equal(Object.hasOwn(patch, "General.videoMedia"), false);
+  assert.equal(Object.hasOwn(patch, "General.label"), false);
+});
+
+test("foe replacement promotes a General legacy fallback when root is absent", () => {
+  const foe = buildPlan({
+    kind: "foe",
+    operationId: "foe_promote_general_fallback_1234",
+  });
+  const timestamp = {marker: "timestamp"};
+  const media = {
+    assetId: foe.assetId,
+    original: {path: "media/new-original.png"},
+  };
+  const patch = task07TargetAttachmentPatch({
+    current: {
+      General: {
+        imagePath: "foes/general-legacy.png",
+        imageUrl: "https://legacy.example/general-legacy.png",
+        image_url: "https://canonical.example/do-not-promote.png",
+        label: "preserved",
+      },
+    },
+    media,
+    normalizeFoeCanonicalRoot: true,
+    plan: foe,
+    revision: 3,
+    timestamp,
+  });
+
+  assert.equal(patch.imagePath, "foes/general-legacy.png");
+  assert.equal(
+    patch.imageUrl,
+    "https://legacy.example/general-legacy.png"
+  );
+  assert.equal(Object.hasOwn(patch, "General.imagePath"), true);
+  assert.equal(Object.hasOwn(patch, "General.imageUrl"), true);
+  assert.equal(Object.hasOwn(patch, "General.image_url"), true);
+  assert.equal(Object.hasOwn(patch, "General.label"), false);
+});
+
+test("foe replacement keeps root image aliases authoritative", () => {
+  const foe = buildPlan({
+    kind: "foe",
+    operationId: "foe_root_alias_precedence_1234",
+  });
+  const timestamp = {marker: "timestamp"};
+  const newOriginalPath =
+    `media_assets/v1/dm-only/owner-a/${foe.assetId}/7/original`;
+  const media = {
+    assetId: foe.assetId,
+    original: {path: newOriginalPath},
+  };
+  const generalFallback = {
+    imagePath: "foes/general-legacy.png",
+    imageUrl: "https://legacy.example/general-legacy.png",
+  };
+  const legacyRootPatch = task07TargetAttachmentPatch({
+    current: {
+      imagePath: "foes/root-legacy.png",
+      imageUrl: "https://legacy.example/root-legacy.png",
+      General: generalFallback,
+    },
+    media,
+    normalizeFoeCanonicalRoot: true,
+    plan: foe,
+    revision: 4,
+    timestamp,
+  });
+  assert.equal(legacyRootPatch.imagePath, "foes/root-legacy.png");
+  assert.equal(
+    legacyRootPatch.imageUrl,
+    "https://legacy.example/root-legacy.png"
+  );
+
+  const canonicalRootPatch = task07TargetAttachmentPatch({
+    current: {
+      imagePath:
+        `media_assets/v1/dm-only/owner-a/m_${"d".repeat(40)}/6/original`,
+      imageUrl: "",
+      General: generalFallback,
+    },
+    media,
+    normalizeFoeCanonicalRoot: true,
+    plan: foe,
+    revision: 4,
+    timestamp,
+  });
+  assert.equal(canonicalRootPatch.imagePath, generalFallback.imagePath);
+  assert.equal(canonicalRootPatch.imageUrl, generalFallback.imageUrl);
+
+  const oldCanonicalPath =
+    `media_assets/v1/dm-only/owner-a/m_${"e".repeat(40)}/6/original`;
+  const canonicalUrlPatch = task07TargetAttachmentPatch({
+    current: {
+      imagePath: oldCanonicalPath,
+      imageUrl:
+        `https://firebasestorage.googleapis.com/v0/b/demo/o/` +
+        `${encodeURIComponent(oldCanonicalPath)}?alt=media`,
+      General: generalFallback,
+    },
+    media,
+    normalizeFoeCanonicalRoot: true,
+    plan: foe,
+    revision: 4,
+    timestamp,
+  });
+  assert.equal(canonicalUrlPatch.imagePath, generalFallback.imagePath);
+  assert.equal(canonicalUrlPatch.imageUrl, generalFallback.imageUrl);
+});
+
+test("foe replacement does not promote General canonical-only aliases", () => {
+  const foe = buildPlan({
+    kind: "foe",
+    operationId: "foe_ignore_general_canonical_1234",
+  });
+  const timestamp = {marker: "timestamp"};
+  const newOriginalPath =
+    `media_assets/v1/dm-only/owner-a/${foe.assetId}/7/original`;
+  const patch = task07TargetAttachmentPatch({
+    current: {
+      General: {
+        imagePath:
+          `media_assets/v1/dm-only/owner-a/m_${"e".repeat(40)}/6/original`,
+        imageUrl: "",
+        image_url: "https://canonical.example/alternate.png",
+        url: "https://canonical.example/source.png",
+        downloadUrl: "https://canonical.example/download.png",
+      },
+    },
+    media: {
+      assetId: foe.assetId,
+      original: {path: newOriginalPath},
+    },
+    normalizeFoeCanonicalRoot: true,
+    plan: foe,
+    revision: 5,
+    timestamp,
+  });
+
+  assert.equal(patch.imagePath, newOriginalPath);
+  assert.equal(patch.imageUrl, "");
+});
+
+test("foe retirement clears canonical controls and every image alias", () => {
+  const timestamp = {marker: "timestamp"};
+  const patch = task07FoeCanonicalRetirementPatch({
+    revision: 8,
+    timestamp,
+  });
+
+  assert.equal(patch.task07MediaRevision, 9);
+  assert.equal(patch.mediaUpdatedAt, timestamp);
+  for (const field of [
+    "media",
+    "imagePath",
+    "imageUrl",
+    "image_url",
+    "url",
+    "downloadUrl",
+    "General.media",
+    "General.mediaUpdatedAt",
+    "General.task07MediaRevision",
+    "General.imagePath",
+    "General.imageUrl",
+    "General.image_url",
+    "General.url",
+    "General.downloadUrl",
+  ]) {
+    assert.equal(Object.hasOwn(patch, field), true, field);
+  }
+  assert.equal(Object.hasOwn(patch, "videoMedia"), false);
+  assert.equal(Object.hasOwn(patch, "General.videoMedia"), false);
+  assert.equal(Object.hasOwn(patch, "General.label"), false);
+});
+
 test("ready media can be attached while creating a new foe target", () => {
   const foe = buildPlan({
     kind: "foe",
@@ -170,7 +450,12 @@ test("ready media can be attached while creating a new foe target", () => {
   const canonicalOnly = buildTask07NewTargetAttachment({
     assetData,
     plan: foe,
-    targetData: {name: "Clone", imagePath: "", imageUrl: ""},
+    targetData: {
+      name: "Clone",
+      imagePath: "",
+      imageUrl: "",
+      General: {label: "preserved"},
+    },
     timestamp,
   });
   assert.equal(canonicalOnly.referencePath, "foes/new-foe");
@@ -180,6 +465,11 @@ test("ready media can be attached while creating a new foe target", () => {
   assert.equal(
     canonicalOnly.targetData.imagePath,
     `${generatedPath}/original`
+  );
+  assert.deepEqual(canonicalOnly.targetData.General, {label: "preserved"});
+  assert.equal(
+    Object.keys(canonicalOnly.targetData).some((field) => field.includes(".")),
+    false
   );
 
   const dual = buildTask07NewTargetAttachment({
@@ -224,6 +514,7 @@ test("map attachment keeps legacy dimensions together with its legacy source", (
       assetType: "image",
     },
     media,
+    normalizeFoeCanonicalRoot: true,
     plan: map,
     revision: 4,
     timestamp,

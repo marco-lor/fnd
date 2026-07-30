@@ -9,18 +9,24 @@ import {
   StatsEditor,
   TecnicheEditor,
 } from './lazyFoeEditors';
-import MediaImage from '../../common/MediaImage';
+import MediaImage, { hasMediaAsset } from '../../common/MediaImage';
 import useObjectUrl from '../../common/useObjectUrl';
 
 const isSafeImageUrl = (url) => typeof url === 'string' && /^https?:\/\//i.test(url);
 
-const FoeFormModal = ({ open, initial, onCancel, onSave, schema }) => {
+const FoeFormModal = ({ open, initial, onCancel, onSave, schema, busy = false, error = '' }) => {
   const [foe, setFoe] = useState(() => deepClone(initial));
   const [tab, setTab] = useState('general');
   // jsonErr removed (was unused)
   const [imageFile, setImageFile] = useState(null);
   const [removeExisting, setRemoveExisting] = useState(false);
   const previewUrl = useObjectUrl(imageFile);
+  const hasExistingImage = hasMediaAsset(foe, { variant: 'card' });
+  const showsImage = !removeExisting && Boolean(previewUrl || hasExistingImage);
+  // A local selection must win over a persisted canonical manifest while the
+  // user is reviewing a replacement.
+  const previewMedia = previewUrl ? { imageUrl: previewUrl } : foe;
+  const previewSrc = previewUrl || (isSafeImageUrl(foe?.imageUrl) ? foe.imageUrl : '');
 
   // Reset form when opening / switching initial foe
   useEffect(() => {
@@ -60,7 +66,11 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema }) => {
 
   const content = (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" role="dialog" aria-modal="true">
-      <div className="w-full max-w-6xl max-h-[95vh] overflow-hidden rounded-2xl border border-slate-700/60 bg-slate-900/95 shadow-2xl flex flex-col">
+      <fieldset
+        disabled={busy}
+        aria-busy={busy}
+        className="w-full min-w-0 max-w-6xl max-h-[95vh] m-0 p-0 overflow-hidden rounded-2xl border border-slate-700/60 bg-slate-900/95 shadow-2xl flex flex-col"
+      >
         <div className="relative shrink-0">
           <div className="h-24 w-full bg-gradient-to-r from-indigo-600/20 via-fuchsia-600/20 to-sky-600/20" />
           <button className="absolute right-3 top-3 text-slate-300 hover:text-white" onClick={onCancel} aria-label="close">
@@ -87,9 +97,12 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema }) => {
                     <input type="number" min={1} className="w-full rounded-lg bg-slate-900/60 px-3 py-2 text-white border border-slate-700/60 focus:outline-none focus:ring-2 focus:ring-indigo-500/50" value={Number(foe?.stats?.level || 1)} onChange={(e) => setField('stats.level', Number(e.target.value || 1))} />
                   </label>
                 </div>
-                <button onClick={() => onSave(foe, { imageFile, removeImage: removeExisting, originalImageUrl: initial?.imageUrl || null, originalImagePath: initial?.imagePath || null })} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600/80 hover:bg-indigo-600 text-white px-4 py-2 border border-indigo-400/40">
-                  Save
-                </button>
+                <div className="flex flex-col items-start gap-2 sm:items-end">
+                  {error && <div className="max-w-sm text-sm text-red-300" role="alert">{error}</div>}
+                  <button onClick={() => onSave(foe, { imageFile, removeImage: removeExisting, originalImageUrl: initial?.imageUrl || null, originalImagePath: initial?.imagePath || null })} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600/80 hover:bg-indigo-600 text-white px-4 py-2 border border-indigo-400/40 disabled:cursor-wait disabled:opacity-60">
+                    {busy ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
               </div>
 
               {/* Tabs */}
@@ -122,22 +135,20 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema }) => {
                       <div className="text-[11px] text-slate-300 mb-1">Image</div>
                       <div className="flex items-center gap-3">
                         <div className="w-20 h-20 rounded-lg overflow-hidden border border-slate-700/60 bg-slate-900/60 flex items-center justify-center text-slate-400">
-                          {(() => {
-                            const src = previewUrl || (isSafeImageUrl(foe?.imageUrl) ? foe.imageUrl : null);
-                            return src ? (
-                              <MediaImage
-                                src={src}
-                                variant="card"
-                                alt="preview"
-                                width={80}
-                                height={80}
-                                loading="eager"
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <span>No Img</span>
-                            );
-                          })()}
+                          {showsImage ? (
+                            <MediaImage
+                              media={previewMedia}
+                              src={previewSrc}
+                              variant="card"
+                              alt="preview"
+                              width={80}
+                              height={80}
+                              loading="eager"
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <span>No Img</span>
+                          )}
                         </div>
                         <div className="flex flex-col gap-2">
                           <input
@@ -150,18 +161,25 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema }) => {
                             }}
                             className="block text-sm text-slate-200 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-600/80 file:text-white hover:file:bg-indigo-600"
                           />
-                          {(previewUrl || foe?.imageUrl) && (
+                          {!removeExisting && (previewUrl || hasExistingImage) && (
                             <button
                               type="button"
                               onClick={() => {
                                 setImageFile(null);
                                 setRemoveExisting(true);
-                                setField('imageUrl', '');
-                                setField('imagePath', '');
                               }}
                               className="px-3 py-1 rounded-md border border-red-400/40 text-red-200 hover:bg-red-500/10 text-[12px] self-start"
                             >
                               Remove image
+                            </button>
+                          )}
+                          {removeExisting && (
+                            <button
+                              type="button"
+                              onClick={() => setRemoveExisting(false)}
+                              className="px-3 py-1 rounded-md border border-slate-400/40 text-slate-200 hover:bg-slate-500/10 text-[12px] self-start"
+                            >
+                              Undo remove
                             </button>
                           )}
                         </div>
@@ -202,7 +220,7 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema }) => {
             </div>
           </div>
         </div>
-      </div>
+      </fieldset>
     </div>
   );
 

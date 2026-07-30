@@ -158,6 +158,16 @@ test("conflicting, detached, and unsupported foe media fail closed", () => {
   };
   assert.throws(() => buildClone(conflict), /malformed or conflicting/);
 
+  const revisionConflict = sourceFixture();
+  revisionConflict.source.General = {
+    media: {...revisionConflict.source.media},
+    task07MediaRevision: 3,
+  };
+  assert.throws(
+    () => buildClone(revisionConflict),
+    /malformed or conflicting/
+  );
+
   const detachedPath = sourceFixture();
   delete detachedPath.source.media;
   assert.throws(() => buildClone(detachedPath), /not backed/);

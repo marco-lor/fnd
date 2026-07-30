@@ -3,6 +3,7 @@ import {
   asStoredTask07MediaUploadPlan,
   isTask07MediaRequestAuthorized,
   MediaUploadPlan,
+  scanTask07MediaTargetReferences,
   task07MediaReferencePath,
   task07MediaTargetFields,
   task07MediaTargetSlotReferencesAsset,
@@ -17,8 +18,10 @@ import {
 } from "./mediaContracts";
 import {
   evaluateDocumentBudget,
+  hashValue,
   USER_ITEM_MAX_BYTES,
 } from "./userDataV2";
+import {isTask07CanonicalStoragePath} from "./task07ServerBoundary";
 import {task07MediaWritesV1ForActor} from "./task07MediaControl";
 
 export class Task07TargetAdapterError extends Error {
@@ -49,6 +52,26 @@ export type ReadyTask07GeneratedMedia = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === "object" && !Array.isArray(value));
+
+const legacyImageReferenceFrom = (
+  value: unknown
+): {imagePath: string; imageUrl: string} | null => {
+  const container = isRecord(value) ? value : {};
+  const imagePath = typeof container.imagePath === "string" ?
+    container.imagePath.trim() :
+    "";
+  const imageUrl = typeof container.imageUrl === "string" ?
+    container.imageUrl.trim() :
+    "";
+  const legacyImagePath = imagePath &&
+    !isTask07CanonicalStoragePath(imagePath) ? imagePath : "";
+  const legacyImageUrl = imageUrl &&
+    !isTask07CanonicalStoragePath(imageUrl) ? imageUrl : "";
+  return legacyImagePath || legacyImageUrl ? {
+    imagePath: legacyImagePath,
+    imageUrl: legacyImageUrl,
+  } : null;
+};
 
 const asGeneratedObject = (
   value: unknown,
@@ -138,21 +161,87 @@ export const task07ReadyGeneratedMediaFromManifest = (
   return {generation: sourceGeneration, original, variants};
 };
 
-const exactAttachedMedia = (
-  data: admin.firestore.DocumentData | undefined,
-  plan: MediaUploadPlan
-): Record<string, unknown> | null => (
-  isRecord(data?.[task07MediaTargetFields(plan).mediaField]) ?
-    data?.[task07MediaTargetFields(plan).mediaField] as Record<string, unknown> :
-    null
-);
-
-const targetRevision = (
+const rootTargetRevision = (
   data: admin.firestore.DocumentData | undefined,
   plan: MediaUploadPlan
 ): number => {
   const value = data?.[task07MediaTargetFields(plan).revisionField];
   return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : 0;
+};
+
+export type Task07FoeCanonicalMediaState = {
+  assetId: string | null;
+  revision: number;
+  conflict: boolean;
+};
+
+const hasOwn = (value: Record<string, unknown>, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(value, key);
+
+const isRevision = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && Number(value) >= 0;
+
+export const task07FoeCanonicalMediaStateFromTarget = (
+  data: admin.firestore.DocumentData | undefined
+): Task07FoeCanonicalMediaState => {
+  const root = isRecord(data) ? data : {};
+  const general = isRecord(root.General) ? root.General : null;
+  const rootMediaValue = root.media;
+  const generalMediaValue = general?.media;
+  const rootHasMedia = rootMediaValue !== undefined && rootMediaValue !== null;
+  const generalHasMedia = generalMediaValue !== undefined &&
+    generalMediaValue !== null;
+  const rootRevisionIsExplicit = hasOwn(root, "task07MediaRevision");
+  const generalRevisionIsExplicit = Boolean(
+    general && hasOwn(general, "task07MediaRevision")
+  );
+  const rootRevisionValue = root.task07MediaRevision;
+  const generalRevisionValue = general?.task07MediaRevision;
+  const scan = scanTask07MediaTargetReferences(root).media;
+  let conflict = scan.malformed || scan.assetIds.length > 1;
+
+  if (rootRevisionIsExplicit && !isRevision(rootRevisionValue)) {
+    conflict = true;
+  }
+  if (rootHasMedia && generalHasMedia) {
+    if (!isRecord(rootMediaValue) || !isRecord(generalMediaValue) ||
+      hashValue(rootMediaValue) !== hashValue(generalMediaValue)) {
+      conflict = true;
+    }
+    if (generalRevisionIsExplicit && !isRevision(generalRevisionValue)) {
+      conflict = true;
+    }
+    if (rootRevisionIsExplicit && generalRevisionIsExplicit &&
+      isRevision(rootRevisionValue) && isRevision(generalRevisionValue) &&
+      rootRevisionValue !== generalRevisionValue) {
+      conflict = true;
+    }
+  }
+
+  return {
+    assetId: !conflict && scan.assetIds.length === 1 ? scan.assetIds[0] : null,
+    revision: isRevision(rootRevisionValue) ? rootRevisionValue : 0,
+    conflict,
+  };
+};
+
+const targetMediaState = (
+  data: admin.firestore.DocumentData | undefined,
+  plan: MediaUploadPlan
+): Task07FoeCanonicalMediaState => {
+  if (plan.targetKind === "foe" &&
+    task07MediaTargetFields(plan).slot === "media") {
+    return task07FoeCanonicalMediaStateFromTarget(data);
+  }
+  const fields = task07MediaTargetFields(plan);
+  const media = isRecord(data?.[fields.mediaField]) ?
+    data?.[fields.mediaField] as Record<string, unknown> :
+    null;
+  return {
+    assetId: typeof media?.assetId === "string" ? media.assetId : null,
+    revision: rootTargetRevision(data, plan),
+    conflict: false,
+  };
 };
 
 const attachmentMatchesTargetSlot = (input: {
@@ -267,6 +356,7 @@ export const task07MediaValueFromReadyManifest = (
 export const task07TargetAttachmentPatch = (input: {
   current?: admin.firestore.DocumentData;
   media: Record<string, unknown>;
+  normalizeFoeCanonicalRoot?: boolean;
   plan: MediaUploadPlan;
   revision: number;
   timestamp: admin.firestore.Timestamp;
@@ -274,22 +364,28 @@ export const task07TargetAttachmentPatch = (input: {
   const original = input.media.original as StoredTask07MediaObject;
   const fields = task07MediaTargetFields(input.plan);
   const current = input.current || {};
-  const currentImageUrl = typeof current.imageUrl === "string" ?
-    current.imageUrl.trim() :
-    "";
-  const currentImagePath = typeof current.imagePath === "string" ?
-    current.imagePath.trim() :
-    "";
-  const preservesLegacyImageReference = Boolean(
-    currentImageUrl ||
-    (currentImagePath && !parseCanonicalMediaPath(currentImagePath))
+  const normalizesFoeCanonicalRoot = Boolean(
+    input.normalizeFoeCanonicalRoot &&
+    input.plan.targetKind === "foe" && fields.slot === "media"
   );
+  const currentGeneral = normalizesFoeCanonicalRoot &&
+    isRecord(current.General) ? current.General : {};
+  const rootLegacyImageReference = legacyImageReferenceFrom(current);
+  const generalLegacyImageReference = normalizesFoeCanonicalRoot ?
+    legacyImageReferenceFrom(currentGeneral) :
+    null;
+  const preservedLegacyImageReference =
+    rootLegacyImageReference || generalLegacyImageReference;
+  const preservesLegacyImageReference = Boolean(preservedLegacyImageReference);
   const patch: admin.firestore.UpdateData<admin.firestore.DocumentData> = {
     [fields.mediaField]: input.media,
     [fields.revisionField]: input.revision,
     [fields.updatedAtField]: input.timestamp,
   };
-  if ([
+  if (normalizesFoeCanonicalRoot) {
+    patch.imagePath = preservedLegacyImageReference?.imagePath || original.path;
+    patch.imageUrl = preservedLegacyImageReference?.imageUrl || "";
+  } else if ([
     "profile", "npc", "foe", "grigliata-token", "grigliata-background",
   ].includes(input.plan.targetKind) && !preservesLegacyImageReference) {
     patch.imagePath = original.path;
@@ -306,8 +402,44 @@ export const task07TargetAttachmentPatch = (input: {
       patch.durationMs = original.durationMs || 0;
     }
   }
+  if (normalizesFoeCanonicalRoot) {
+    patch.image_url = admin.firestore.FieldValue.delete();
+    patch.url = admin.firestore.FieldValue.delete();
+    patch.downloadUrl = admin.firestore.FieldValue.delete();
+    patch["General.media"] = admin.firestore.FieldValue.delete();
+    patch["General.mediaUpdatedAt"] = admin.firestore.FieldValue.delete();
+    patch["General.task07MediaRevision"] =
+      admin.firestore.FieldValue.delete();
+    patch["General.imagePath"] = admin.firestore.FieldValue.delete();
+    patch["General.imageUrl"] = admin.firestore.FieldValue.delete();
+    patch["General.image_url"] = admin.firestore.FieldValue.delete();
+    patch["General.url"] = admin.firestore.FieldValue.delete();
+    patch["General.downloadUrl"] = admin.firestore.FieldValue.delete();
+  }
   return patch;
 };
+
+export const task07FoeCanonicalRetirementPatch = (input: {
+  revision: number;
+  timestamp: admin.firestore.Timestamp;
+}): admin.firestore.UpdateData<admin.firestore.DocumentData> => ({
+  media: admin.firestore.FieldValue.delete(),
+  task07MediaRevision: input.revision + 1,
+  mediaUpdatedAt: input.timestamp,
+  imagePath: admin.firestore.FieldValue.delete(),
+  imageUrl: admin.firestore.FieldValue.delete(),
+  image_url: admin.firestore.FieldValue.delete(),
+  url: admin.firestore.FieldValue.delete(),
+  downloadUrl: admin.firestore.FieldValue.delete(),
+  "General.media": admin.firestore.FieldValue.delete(),
+  "General.mediaUpdatedAt": admin.firestore.FieldValue.delete(),
+  "General.task07MediaRevision": admin.firestore.FieldValue.delete(),
+  "General.imagePath": admin.firestore.FieldValue.delete(),
+  "General.imageUrl": admin.firestore.FieldValue.delete(),
+  "General.image_url": admin.firestore.FieldValue.delete(),
+  "General.url": admin.firestore.FieldValue.delete(),
+  "General.downloadUrl": admin.firestore.FieldValue.delete(),
+});
 
 export const assertTask07TargetDocumentBudget = (input: {
   current: admin.firestore.DocumentData;
@@ -446,11 +578,17 @@ export const attachTask07ReadyAssetTransaction = async (input: {
     if (asset.get("state") === "attached" &&
       attachmentMatchesTargetSlot({asset, referencePath, plan})) {
       const target = await transaction.get(input.db.doc(referencePath));
-      if (!task07MediaTargetSlotReferencesAsset(
-        target.data(),
-        targetSlot,
-        input.assetId
-      )) {
+      const foeState = plan.targetKind === "foe" && targetSlot === "media" ?
+        task07FoeCanonicalMediaStateFromTarget(target.data()) :
+        null;
+      const stillReferencesAsset = foeState ?
+        !foeState.conflict && foeState.assetId === input.assetId :
+        task07MediaTargetSlotReferencesAsset(
+          target.data(),
+          targetSlot,
+          input.assetId
+        );
+      if (!stillReferencesAsset) {
         throw new Task07TargetAdapterError(
           "failed-precondition",
           "Attached media target no longer references this asset."
@@ -462,7 +600,9 @@ export const attachTask07ReadyAssetTransaction = async (input: {
         previousAssetId: plan.previousAssetId,
         referencePath,
         targetSlot,
-        revision: targetRevision(target.data(), plan),
+        revision: foeState ?
+          foeState.revision :
+          rootTargetRevision(target.data(), plan),
       };
     }
     if (asset.get("state") !== "ready") {
@@ -475,7 +615,14 @@ export const attachTask07ReadyAssetTransaction = async (input: {
     const referenceRef = input.db.doc(referencePath);
     const target = await transaction.get(referenceRef);
     validateTask07MediaTarget({plan, target});
-    const revision = targetRevision(target.data(), plan);
+    const currentState = targetMediaState(target.data(), plan);
+    if (currentState.conflict) {
+      throw new Task07TargetAdapterError(
+        "failed-precondition",
+        "Foe media bindings conflict."
+      );
+    }
+    const revision = currentState.revision;
     if (input.expectedRevision !== undefined &&
       input.expectedRevision !== null &&
       input.expectedRevision !== revision) {
@@ -484,11 +631,7 @@ export const attachTask07ReadyAssetTransaction = async (input: {
         "Media target revision changed."
       );
     }
-    const currentMedia = exactAttachedMedia(target.data(), plan);
-    const currentAssetId = typeof currentMedia?.assetId === "string" ?
-      currentMedia.assetId :
-      null;
-    if (currentAssetId !== plan.previousAssetId) {
+    if (currentState.assetId !== plan.previousAssetId) {
       throw new Task07TargetAdapterError(
         "failed-precondition",
         "Previous media does not match the target."
@@ -519,6 +662,7 @@ export const attachTask07ReadyAssetTransaction = async (input: {
     const targetPatch = task07TargetAttachmentPatch({
       current: target.data() || {},
       media,
+      normalizeFoeCanonicalRoot: true,
       plan,
       revision: revision + 1,
       timestamp,

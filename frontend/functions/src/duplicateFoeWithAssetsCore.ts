@@ -1,5 +1,26 @@
 type UnknownRecord = Record<string, unknown>;
 
+type StripTask07MediaOptions = {
+  canonicalClone?: boolean;
+};
+
+const TASK07_MEDIA_CONTROL_FIELDS = [
+  "media",
+  "mediaUpdatedAt",
+  "task07MediaRevision",
+  "videoMedia",
+  "videoMediaUpdatedAt",
+  "task07VideoMediaRevision",
+] as const;
+
+const TASK07_IMAGE_ALIAS_FIELDS = [
+  "imagePath",
+  "imageUrl",
+  "image_url",
+  "url",
+  "downloadUrl",
+] as const;
+
 const isPlainRecord = (value: unknown): value is UnknownRecord => {
   if (!value ||
     typeof value !== "object" ||
@@ -9,32 +30,26 @@ const isPlainRecord = (value: unknown): value is UnknownRecord => {
 };
 
 /**
- * A duplicated foe is a distinct Task 07 reference target. Reusing either
- * canonical descriptor would bind the new foe to a manifest whose entityId
- * still belongs to the source foe. Keep legacy fields copyable, but require a
- * future media-copy workflow to attach a newly finalized canonical asset.
+ * A canonical duplicate is a distinct Task 07 reference target. Strip every
+ * source media binding and image alias before its newly finalized asset is
+ * attached. The legacy duplication path keeps its existing copy semantics.
  */
 export const stripTask07MediaFromDuplicatedFoe = (
-  source: UnknownRecord
+  source: UnknownRecord,
+  options: StripTask07MediaOptions = {}
 ): UnknownRecord => {
   const copyable = {...source};
-  delete copyable.media;
-  delete copyable.mediaUpdatedAt;
-  delete copyable.task07MediaRevision;
-  delete copyable.videoMedia;
-  delete copyable.videoMediaUpdatedAt;
-  delete copyable.task07VideoMediaRevision;
-  if (!isPlainRecord(copyable.General)) return copyable;
+  const general = isPlainRecord(copyable.General) ?
+    {...copyable.General} :
+    null;
+  if (general) copyable.General = general;
+  if (!options.canonicalClone) return copyable;
 
-  const general = {...copyable.General};
-  delete general.media;
-  delete general.mediaUpdatedAt;
-  delete general.task07MediaRevision;
-  delete general.videoMedia;
-  delete general.videoMediaUpdatedAt;
-  delete general.task07VideoMediaRevision;
-  return {
-    ...copyable,
-    General: general,
+  const stripCanonicalAliases = (target: UnknownRecord): void => {
+    TASK07_MEDIA_CONTROL_FIELDS.forEach((field) => delete target[field]);
+    TASK07_IMAGE_ALIAS_FIELDS.forEach((field) => delete target[field]);
   };
+  stripCanonicalAliases(copyable);
+  if (general) stripCanonicalAliases(general);
+  return copyable;
 };

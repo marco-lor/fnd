@@ -6,7 +6,6 @@ import {
   addDoc,
   collection,
   deleteDoc,
-  deleteField,
   doc,
   onSnapshot,
   serverTimestamp,
@@ -33,10 +32,12 @@ import { isTask07MediaV1WriteEnabled } from '../../data/media/mediaFeatureFlags'
 import useTask07MediaOperationOwner from '../../data/media/useTask07MediaOperationOwner';
 import MediaImage, { hasMediaAsset } from '../common/MediaImage';
 import {
-  buildCanonicalFoeImageRemovalPayload,
+  buildCanonicalFoeClientPayload,
+  classifyFoeImageSave,
+  collectClientDeletableFoeMainStoragePaths,
   collectClientDeletableFoeStoragePaths,
+  isClientDeletableFoeStoragePath,
   isDefinitiveFoeDuplicationError,
-  shouldClientDeleteFoeMainStorageObject,
   shouldUseDurableFoeDuplication,
 } from './foeMediaLifecycle';
 
@@ -47,6 +48,19 @@ const duplicateFoeWithAssetsV2 = getCallable('duplicateFoeWithAssetsV2');
 // This prevents storing temporary blob:/data: URLs in Firestore.
 const isSafeImageUrl = (u) => typeof u === 'string' && /^https?:\/\//i.test(u);
 const normalizeImageUrl = (u) => (isSafeImageUrl(u) ? u : '');
+const persistedImagePath = (item = {}) => {
+  const explicitPath = typeof item?.imagePath === 'string' ? item.imagePath.trim() : '';
+  if (explicitPath) return explicitPath;
+  const encodedPath = typeof item?.imageUrl === 'string'
+    ? item.imageUrl.split('/o/')[1]?.split('?')[0] || ''
+    : '';
+  if (!encodedPath) return '';
+  try {
+    return decodeURIComponent(encodedPath);
+  } catch {
+    return '';
+  }
+};
 
 
 const FoeRow = ({ foe, onEdit, onDelete, onDuplicate }) => {
@@ -237,6 +251,7 @@ const FoesHub = () => {
   const [editing, setEditing] = useState(null); // foe doc or null
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [modalError, setModalError] = useState('');
   // Duplicate modal state
   const [dupOpen, setDupOpen] = useState(false);
   const [dupTarget, setDupTarget] = useState(null);
@@ -296,11 +311,13 @@ const FoesHub = () => {
 
   const handleCreate = () => {
     setEditing(null);
+    setModalError('');
     setModalOpen(true);
   };
 
   const handleEdit = (foe) => {
     setEditing(foe);
+    setModalError('');
     setModalOpen(true);
   };
 
@@ -351,9 +368,42 @@ const FoesHub = () => {
     try {
       setBusy(true);
       setError('');
+      setModalError('');
       const { imageFile, removeImage, originalImageUrl, originalImagePath } = options;
+      const currentFoe = editing?.id
+        ? foes.find((foe) => foe.id === editing.id) || null
+        : null;
+      const task07WriteEnabled = Boolean(imageFile && !removeImage) && (
+        await isTask07MediaV1WriteEnabled({
+          purpose: 'foe',
+          role: 'dm',
+          uid: auth.currentUser?.uid || '',
+        })
+      );
+      const imageSave = classifyFoeImageSave({
+        currentFoe: currentFoe || editing,
+        hasImageFile: Boolean(imageFile),
+        initialFoe: editing,
+        removeImage: Boolean(removeImage),
+        task07WriteEnabled,
+      });
+      if (imageSave.mode === 'blocked') {
+        const blockedError = new Error(imageSave.message);
+        blockedError.code = imageSave.code;
+        throw blockedError;
+      }
+
       // Keep File references for nested items; we'll replace arrays after upload
-      const basePayload = { ...foeData };
+      const canonicalEdit = Boolean(editing?.id) && (
+        imageSave.binding.status !== 'none'
+        || imageSave.mode === 'canonical-upload'
+        || imageSave.mode === 'canonical-remove'
+      );
+      const basePayload = canonicalEdit
+        ? buildCanonicalFoeClientPayload(foeData, {
+          omitMainImageFields: imageSave.mode !== 'canonical-upload',
+        })
+        : { ...foeData };
       // Ensure current hp/mana mirror totals at save time
       const hpTotal = Number(basePayload?.stats?.hpTotal || 0);
       const manaTotal = Number(basePayload?.stats?.manaTotal || 0);
@@ -383,11 +433,40 @@ const FoesHub = () => {
         return { name: entry.name || '', description: entry.description || '', danni: entry.danni || '', effetti: entry.effetti || '', imageUrl: eUrl, imagePath: ePath };
       };
 
-      if (imageFile && !removeImage && await isTask07MediaV1WriteEnabled({
-        purpose: 'foe',
-        role: 'dm',
-        uid: auth.currentUser?.uid || '',
-      })) {
+      const cleanupReplacedEntryImages = async (withTec, withSp) => {
+        try {
+          const cleanupList = [];
+          const collectReplacedPaths = (previousItems, nextItems) => {
+            previousItems.forEach((previous, index) => {
+              const previousPath = persistedImagePath(previous);
+              const nextPath = persistedImagePath(nextItems[index]);
+              if (
+                previousPath
+                && previousPath !== nextPath
+                && (previous?.imageFile || previous?.removeImage)
+                && isClientDeletableFoeStoragePath(previousPath)
+              ) {
+                cleanupList.push(previousPath);
+              }
+            });
+          };
+          collectReplacedPaths(
+            Array.isArray(foeData?.tecniche) ? foeData.tecniche : [],
+            withTec
+          );
+          collectReplacedPaths(
+            Array.isArray(foeData?.spells) ? foeData.spells : [],
+            withSp
+          );
+          await Promise.allSettled(
+            [...new Set(cleanupList)].map((path) => deleteLegacyStoragePath(path))
+          );
+        } catch (cleanupError) {
+          console.warn('cleanup old foe entry image failed', cleanupError);
+        }
+      };
+
+      if (imageSave.mode === 'canonical-upload') {
         const actorUid = auth.currentUser?.uid || '';
         const foeRef = editing?.id
           ? doc(db, 'foes', editing.id)
@@ -403,7 +482,6 @@ const FoesHub = () => {
 
         const {
           describeTask07ConsumerOutcome,
-          getTask07PreviousAssetId,
           runTask07ConsumerUpload,
           runWithTask07MediaOperationReceipt,
           task07ConsumerNeedsAttention,
@@ -416,17 +494,16 @@ const FoesHub = () => {
           // Keep the last legacy reference while the authoritative attachment
           // is written. Immediate Task 07 rollback must not depend on the new
           // manifest, and the server will preserve these fields transactionally.
-          imageUrl: editing?.imageUrl || '',
-          imagePath: editing?.imagePath || '',
+          imageUrl: currentFoe
+            ? currentFoe.imageUrl || ''
+            : editing?.imageUrl || '',
+          imagePath: currentFoe
+            ? currentFoe.imagePath || ''
+            : editing?.imagePath || '',
           updated_at: serverTimestamp(),
         };
-        const currentFoe = editing?.id
-          ? foes.find((foe) => foe.id === editing.id) || editing
-          : null;
-        const expectedRevision = Number.isSafeInteger(currentFoe?.task07MediaRevision)
-          ? currentFoe.task07MediaRevision
-          : 0;
-        const previousAssetId = getTask07PreviousAssetId(currentFoe);
+        const expectedRevision = imageSave.binding.revision;
+        const previousAssetId = imageSave.binding.assetId;
         const operationLease = task07MediaOperationOwner.start(
           'Foe media upload was replaced.'
         );
@@ -472,32 +549,61 @@ const FoesHub = () => {
           operationLease.release();
         }
 
-        try {
-          const cleanupList = [];
-          const prevTec = Array.isArray(foeData?.tecniche) ? foeData.tecniche : [];
-          prevTec.forEach((prev, idx) => {
-            const next = withTec[idx];
-            const prevPath = prev?.imagePath || (prev?.imageUrl ? decodeURIComponent(prev.imageUrl.split('/o/')[1]?.split('?')[0]) : null);
-            const nextPath = next?.imagePath || '';
-            if (prevPath && prevPath !== nextPath && (prev?.imageFile || prev?.removeImage)) cleanupList.push(prevPath);
-          });
-          const prevSp = Array.isArray(foeData?.spells) ? foeData.spells : [];
-          prevSp.forEach((prev, idx) => {
-            const next = withSp[idx];
-            const prevPath = prev?.imagePath || (prev?.imageUrl ? decodeURIComponent(prev.imageUrl.split('/o/')[1]?.split('?')[0]) : null);
-            const nextPath = next?.imagePath || '';
-            if (prevPath && prevPath !== nextPath && (prev?.imageFile || prev?.removeImage)) cleanupList.push(prevPath);
-          });
-          await Promise.allSettled(cleanupList.map((path) => deleteLegacyStoragePath(path)));
-        } catch (cleanupError) {
-          console.warn('cleanup old foe entry image failed', cleanupError);
-        }
+        await cleanupReplacedEntryImages(withTec, withSp);
 
         setModalOpen(false);
         setEditing(null);
         if (task07ConsumerNeedsAttention(outcome)) {
           setError(describeTask07ConsumerOutcome(outcome, 'Foe image'));
         }
+        return;
+      }
+
+      if (imageSave.mode === 'canonical-remove') {
+        const foeRef = doc(db, 'foes', editing.id);
+        const withTec = Array.isArray(basePayload.tecniche)
+          ? await Promise.all(basePayload.tecniche.map((entry) => uploadEntryImage('tecniche', entry)))
+          : [];
+        const withSp = Array.isArray(basePayload.spells)
+          ? await Promise.all(basePayload.spells.map((entry) => uploadEntryImage('spells', entry)))
+          : [];
+        basePayload.tecniche = withTec;
+        basePayload.spells = withSp;
+
+        // Persist only client-owned, nonmedia fields before asking the server
+        // to atomically detach and retire the canonical asset.
+        await updateDoc(foeRef, {
+          ...basePayload,
+          updated_at: serverTimestamp(),
+        });
+        const { retireTask07MediaAsset } = await import(
+          /* webpackChunkName: "feature-task07-media" */
+          '../../data/media/mediaPipeline'
+        );
+        await retireTask07MediaAsset(imageSave.binding.assetId);
+
+        // Retirement acknowledgement clears the document reference. The only
+        // browser-owned main object that can now be removed is a legacy
+        // rollback fallback under foes/**.
+        try {
+          const legacyFallbackPaths = new Set([
+            ...collectClientDeletableFoeMainStoragePaths(editing),
+            ...collectClientDeletableFoeMainStoragePaths(currentFoe),
+            ...collectClientDeletableFoeMainStoragePaths({
+              imagePath: originalImagePath,
+              imageUrl: originalImageUrl,
+            }),
+          ]);
+          await Promise.allSettled(
+            [...legacyFallbackPaths].map((path) => deleteLegacyStoragePath(path))
+          );
+          await cleanupReplacedEntryImages(withTec, withSp);
+        } catch (cleanupError) {
+          console.warn('cleanup retired foe fallback failed', cleanupError);
+        }
+
+        setModalOpen(false);
+        setEditing(null);
         return;
       }
 
@@ -524,15 +630,12 @@ const FoesHub = () => {
       basePayload.tecniche = withTec;
       basePayload.spells = withSp;
 
-      let payload = {
+      const payload = {
         ...basePayload,
         imageUrl: normalizeImageUrl(imageUrl) || '',
         imagePath: imagePath || '',
         updated_at: serverTimestamp(),
       };
-      if (removeImage) {
-        payload = buildCanonicalFoeImageRemovalPayload(payload, editing, deleteField());
-      }
 
       let docId = editing?.id;
       if (docId) {
@@ -544,35 +647,20 @@ const FoesHub = () => {
 
       // If we uploaded/replaced or removed, delete the original image from storage
       try {
-        const oldPath = originalImagePath || (originalImageUrl ? decodeURIComponent(originalImageUrl.split('/o/')[1]?.split('?')[0]) : null);
+        const oldPath = persistedImagePath({
+          imagePath: originalImagePath,
+          imageUrl: originalImageUrl,
+        });
         const newPath = imagePath;
         if (
           (imageFile || removeImage)
           && oldPath
           && oldPath !== newPath
-          && shouldClientDeleteFoeMainStorageObject(editing)
+          && isClientDeletableFoeStoragePath(oldPath)
         ) {
           await deleteLegacyStoragePath(oldPath);
         }
-        // cleanup tecniche/spells old images when replaced or removed
-        const cleanupList = [];
-        const prevTec = Array.isArray(foeData?.tecniche) ? foeData.tecniche : [];
-        const nextTec = withTec;
-        prevTec.forEach((prev, idx) => {
-          const next = nextTec[idx];
-          const prevPath = prev?.imagePath || (prev?.imageUrl ? decodeURIComponent(prev.imageUrl.split('/o/')[1]?.split('?')[0]) : null);
-          const nextPath = next?.imagePath || '';
-          if (prevPath && prevPath !== nextPath && (prev?.imageFile || prev?.removeImage)) cleanupList.push(prevPath);
-        });
-        const prevSp = Array.isArray(foeData?.spells) ? foeData.spells : [];
-        const nextSp = withSp;
-        prevSp.forEach((prev, idx) => {
-          const next = nextSp[idx];
-          const prevPath = prev?.imagePath || (prev?.imageUrl ? decodeURIComponent(prev.imageUrl.split('/o/')[1]?.split('?')[0]) : null);
-          const nextPath = next?.imagePath || '';
-          if (prevPath && prevPath !== nextPath && (prev?.imageFile || prev?.removeImage)) cleanupList.push(prevPath);
-        });
-        await Promise.allSettled(cleanupList.map((p) => deleteLegacyStoragePath(p)));
+        await cleanupReplacedEntryImages(withTec, withSp);
       } catch (e) {
         console.warn('cleanup old foe image failed', e);
       }
@@ -581,7 +669,7 @@ const FoesHub = () => {
       setEditing(null);
     } catch (e) {
       console.error('save foe failed', e);
-      setError('Salvataggio fallito.');
+      setModalError(e?.message || 'Salvataggio fallito.');
     } finally {
       setBusy(false);
     }
@@ -671,9 +759,16 @@ const FoesHub = () => {
     <FoeFormModal
       open
       initial={initialForModal}
-      onCancel={() => { setModalOpen(false); setEditing(null); }}
+      onCancel={() => {
+        if (busy) return;
+        setModalOpen(false);
+        setEditing(null);
+        setModalError('');
+      }}
       onSave={handleSave}
       schema={schema}
+      busy={busy}
+      error={modalError}
     />
   ) : null}
       {dupOpen && createPortal(

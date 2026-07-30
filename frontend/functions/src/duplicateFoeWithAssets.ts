@@ -164,7 +164,7 @@ const buildManifest = (
   receiptId: string
 ): ManifestEntry[] => {
   const entries: Array<{key: string; path: string; name: string}> = [];
-  const mainPath = sourcePath(source);
+  const mainPath = sourcePath(source) || sourcePath(asRecord(source.General));
   if (mainPath) {
     entries.push({key: "main", path: mainPath, name: "main"});
   }
@@ -1364,7 +1364,9 @@ const duplicateFoeHandler = async (
   );
   const sourceStats = asRecord(source.stats);
   const payload = {
-    ...stripTask07MediaFromDuplicatedFoe(source),
+    ...stripTask07MediaFromDuplicatedFoe(source, {
+      canonicalClone: Boolean(claim.clone),
+    }),
     name: newFoeName,
     imagePath: mainCopy.path,
     imageUrl: mainCopy.url,

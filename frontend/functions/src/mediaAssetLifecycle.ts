@@ -24,6 +24,8 @@ import {
 import {task07ProcessMediaUpload} from "./mediaAssetProcessor";
 import {
   attachTask07ReadyAssetTransaction,
+  task07FoeCanonicalMediaStateFromTarget,
+  task07FoeCanonicalRetirementPatch,
   Task07TargetAdapterError,
   validateTask07MediaTarget,
 } from "./mediaTargetAdapters";
@@ -124,12 +126,19 @@ const requireAssetId = (value: unknown): string => {
   return assetId;
 };
 
-const mediaAssetIdFromTarget = (
+const mediaBindingFromTarget = (
   data: admin.firestore.DocumentData | undefined,
-  plan: Pick<MediaUploadPlan, "kind">
-): string | null => {
+  plan: Pick<MediaUploadPlan, "kind" | "targetKind">
+): {assetId: string | null; revision: number; conflict: boolean} => {
   const fields = task07MediaTargetFields(plan);
-  return task07MediaTargetSlotAssetId(data, fields.slot);
+  if (plan.targetKind === "foe" && fields.slot === "media") {
+    return task07FoeCanonicalMediaStateFromTarget(data);
+  }
+  return {
+    assetId: task07MediaTargetSlotAssetId(data, fields.slot),
+    revision: Number(data?.[fields.revisionField]) || 0,
+    conflict: false,
+  };
 };
 
 const publicUploadPlan = (plan: MediaUploadPlan) => ({
@@ -231,7 +240,9 @@ export const task07PrepareMediaUpload = onCall(
       } catch (error) {
         return mapAdapterError(error);
       }
-      if (mediaAssetIdFromTarget(target.data(), plan) !== plan.previousAssetId) {
+      const targetBinding = mediaBindingFromTarget(target.data(), plan);
+      if (targetBinding.conflict ||
+        targetBinding.assetId !== plan.previousAssetId) {
         fail(
           "failed-precondition",
           "previousAssetId must match the target media reference."
@@ -433,7 +444,8 @@ export const task07RetireMediaAsset = onCall(
       const referencePath = task07MediaReferencePath(plan);
       const targetRef = db.doc(referencePath);
       const target = await transaction.get(targetRef);
-      if (mediaAssetIdFromTarget(target.data(), plan) !== assetId) {
+      const targetBinding = mediaBindingFromTarget(target.data(), plan);
+      if (targetBinding.conflict || targetBinding.assetId !== assetId) {
         fail("failed-precondition", "Media target changed.");
       }
       const targetFields = task07MediaTargetFields(plan);
@@ -445,25 +457,30 @@ export const task07RetireMediaAsset = onCall(
       );
       const targetUpdate: admin.firestore.UpdateData<
         admin.firestore.DocumentData
-      > = {
-        [targetFields.mediaField]: admin.firestore.FieldValue.delete(),
-        [targetFields.revisionField]:
-          (Number(target.get(targetFields.revisionField)) || 0) + 1,
-        [targetFields.updatedAtField]: now,
-      };
-      if ([
-        "profile", "npc", "foe", "grigliata-token",
-        "grigliata-background",
-      ].includes(plan.targetKind)) {
-        targetUpdate.imagePath = admin.firestore.FieldValue.delete();
-        targetUpdate.imageUrl = "";
-      }
-      if (plan.targetKind === "grigliata-background") {
-        targetUpdate.imageWidth = admin.firestore.FieldValue.delete();
-        targetUpdate.imageHeight = admin.firestore.FieldValue.delete();
-        targetUpdate.contentType = admin.firestore.FieldValue.delete();
-        targetUpdate.sizeBytes = admin.firestore.FieldValue.delete();
-        targetUpdate.durationMs = admin.firestore.FieldValue.delete();
+      > = plan.targetKind === "foe" && targetFields.slot === "media" ?
+        task07FoeCanonicalRetirementPatch({
+          revision: targetBinding.revision,
+          timestamp: now,
+        }) :
+        {
+          [targetFields.mediaField]: admin.firestore.FieldValue.delete(),
+          [targetFields.revisionField]: targetBinding.revision + 1,
+          [targetFields.updatedAtField]: now,
+        };
+      if (plan.targetKind !== "foe") {
+        if ([
+          "profile", "npc", "grigliata-token", "grigliata-background",
+        ].includes(plan.targetKind)) {
+          targetUpdate.imagePath = admin.firestore.FieldValue.delete();
+          targetUpdate.imageUrl = "";
+        }
+        if (plan.targetKind === "grigliata-background") {
+          targetUpdate.imageWidth = admin.firestore.FieldValue.delete();
+          targetUpdate.imageHeight = admin.firestore.FieldValue.delete();
+          targetUpdate.contentType = admin.firestore.FieldValue.delete();
+          targetUpdate.sizeBytes = admin.firestore.FieldValue.delete();
+          targetUpdate.durationMs = admin.firestore.FieldValue.delete();
+        }
       }
       transaction.update(targetRef, targetUpdate);
       transaction.update(ref, {

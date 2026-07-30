@@ -247,6 +247,29 @@ service cloud.firestore {
           == existingGeneral.get("media", null);
     }
 
+    function hasNoTask07FoeGeneralServerFields(data) {
+      return !mapOrEmpty(data, "General").keys().hasAny([
+        "task07MediaRevision",
+        "mediaUpdatedAt",
+        "videoMedia",
+        "task07VideoMediaRevision",
+        "videoMediaUpdatedAt"
+      ]);
+    }
+
+    function task07FoeGeneralServerFieldsUnchanged(data, existingData) {
+      return !mapOrEmpty(data, "General")
+        .diff(mapOrEmpty(existingData, "General"))
+        .affectedKeys()
+        .hasAny([
+          "task07MediaRevision",
+          "mediaUpdatedAt",
+          "videoMedia",
+          "task07VideoMediaRevision",
+          "videoMediaUpdatedAt"
+        ]);
+    }
+
     function isValidUserDataRolloutStage(stage) {
       return stage in [
         "legacy-read",
@@ -1841,25 +1864,16 @@ service cloud.firestore {
           foeId,
           null,
           "foes/" + foeId
-        );
+        )
+        && hasNoTask07FoeGeneralServerFields(request.resource.data);
       allow update: if isDM()
-        && (
-          task07MediaAssetIdsUnchanged(
-            request.resource.data,
-            resource.data
-          )
-            ? task07MediaReferencesUnchanged(
-              request.resource.data,
-              resource.data
-            )
-            : hasValidOptionalTask07MediaReference(
-              request.resource.data,
-              "foe",
-              null,
-              foeId,
-              null,
-              "foes/" + foeId
-            )
+        && task07MediaReferencesUnchanged(
+          request.resource.data,
+          resource.data
+        )
+        && task07FoeGeneralServerFieldsUnchanged(
+          request.resource.data,
+          resource.data
         );
       allow delete: if isDM();
     }

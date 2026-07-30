@@ -68,3 +68,18 @@ test(`reference-removal triggers retry transient delivery failures`, () => {
     /const referenceRemovalTrigger[\s\S]*?retry:\s*true/
   );
 });
+
+test("foe prepare and retirement reject conflicts and mutate canonically", () => {
+  assert.match(
+    lifecycleSource,
+    /task07FoeCanonicalMediaStateFromTarget\(data\)/
+  );
+  assert.equal(
+    (lifecycleSource.match(/targetBinding\.conflict/g) || []).length,
+    2
+  );
+  assert.match(
+    lifecycleSource,
+    /task07FoeCanonicalRetirementPatch\(\{[\s\S]*?revision:\s*targetBinding\.revision,[\s\S]*?transaction\.update\(targetRef, targetUpdate\)/
+  );
+});

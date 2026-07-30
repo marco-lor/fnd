@@ -8,6 +8,7 @@ const {
 } = require('@firebase/rules-unit-testing');
 const {
   collection,
+  deleteField,
   deleteDoc,
   doc,
   getDoc,
@@ -431,6 +432,23 @@ test('ordinary target edits preserve immutable Task 07 server fields', async () 
       safePatch: {name: 'Foe after'},
     },
     {
+      path: 'foes/task07-general-foe-rules',
+      uid: USERS.dm.uid,
+      data: {
+        name: 'General foe before',
+        General: {
+          label: 'Preserved metadata',
+          media: canonicalMedia,
+          task07MediaRevision: 1,
+          mediaUpdatedAt: timestamp,
+          videoMedia: {...canonicalMedia, assetId: assetId('8')},
+          task07VideoMediaRevision: 1,
+          videoMediaUpdatedAt: timestamp,
+        },
+      },
+      safePatch: {name: 'General foe after'},
+    },
+    {
       path: 'grigliata_backgrounds/task07-background-rules',
       uid: USERS.dm.uid,
       data: {
@@ -473,6 +491,37 @@ test('ordinary target edits preserve immutable Task 07 server fields', async () 
     }
 
     const dm = environment.authenticatedContext(USERS.dm.uid).firestore();
+    await assertFails(updateDoc(doc(dm, 'foes/task07-foe-rules'), {
+      media: deleteField(),
+      task07MediaRevision: deleteField(),
+      mediaUpdatedAt: deleteField(),
+      imagePath: deleteField(),
+      imageUrl: '',
+    }));
+    await assertFails(updateDoc(doc(dm, 'foes/task07-general-foe-rules'), {
+      'General.media': deleteField(),
+      'General.imagePath': deleteField(),
+      'General.imageUrl': deleteField(),
+    }));
+    const generalFoe = doc(dm, 'foes/task07-general-foe-rules');
+    for (const patch of [
+      {'General.task07MediaRevision': 2},
+      {'General.mediaUpdatedAt': new Date('2026-07-27T00:02:00.000Z')},
+      {'General.videoMedia': {...canonicalMedia, assetId: assetId('7')}},
+      {'General.task07VideoMediaRevision': 2},
+      {'General.videoMediaUpdatedAt': new Date('2026-07-27T00:02:00.000Z')},
+      {'General.task07MediaRevision': deleteField()},
+      {'General.videoMedia': deleteField()},
+    ]) {
+      await assertFails(updateDoc(generalFoe, patch));
+    }
+    await assertFails(updateDoc(doc(dm, 'foes/task07-foe-rules'), {
+      'General.videoMedia': {...canonicalMedia, assetId: assetId('7')},
+    }));
+    await assertFails(setDoc(doc(dm, 'foes/task07-client-general-control-create'), {
+      name: 'Rejected nested client control field',
+      General: {task07MediaRevision: 0},
+    }));
     await assertFails(setDoc(doc(dm, 'items/task07-client-control-create'), {
       name: 'Rejected client control field',
       task07MediaRevision: 0,

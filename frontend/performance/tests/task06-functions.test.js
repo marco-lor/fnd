@@ -40,6 +40,12 @@ const NPC_OPERATION_ID = 'task06-delete-npc-0001';
 const ENCOUNTER_OPERATION_ID = 'task06-delete-encounter-0001';
 const FOE_OPERATION_ID = 'task06-duplicate-foe-0001';
 const FOE_CANONICAL_OPERATION_ID = 'task06-duplicate-foe-canonical-0001';
+const FOE_CANONICAL_GENERAL_OPERATION_ID =
+  'task06-duplicate-foe-canonical-general-0001';
+const FOE_CANONICAL_GENERAL_ROUNDTRIP_ID =
+  'task06-duplicate-foe-canonical-general-0002';
+const FOE_CANONICAL_GENERAL_FALLBACK_ID =
+  'task06-duplicate-foe-canonical-general-fallback-0001';
 const FOE_CANONICAL_TERMINAL_ID = 'task06-foe-canonical-terminal-0001';
 const FOE_CANONICAL_REPAIRED_ID = 'task06-foe-canonical-repaired-0001';
 const FOE_ACTIVE_LEASE_ID = 'task06-foe-active-lease-0001';
@@ -300,7 +306,12 @@ const task07FoeWriteConfig = (uid) => ({
   enabledUids: [uid],
 });
 
-const seedCanonicalFoe = async ({bucket, sourceFoeId}) => {
+const seedCanonicalFoe = async ({
+  bucket,
+  generalLegacyFallbackPath = '',
+  sourceFoeId,
+  mediaLocation = 'root',
+}) => {
   const originalBuffer = Buffer.from('task07-canonical-foe-original');
   const sourcePlan = buildTask07MediaUploadPlan({
     actorUid: actor.uid,
@@ -366,6 +377,15 @@ const seedCanonicalFoe = async ({bucket, sourceFoeId}) => {
       cacheControl: String(metadata.cacheControl || ''),
     });
   }
+  if (generalLegacyFallbackPath) {
+    await bucket.file(generalLegacyFallbackPath).save(
+      Buffer.from('task07-general-legacy-fallback'),
+      {
+        resumable: false,
+        metadata: {contentType: 'image/png'},
+      }
+    );
+  }
   const manifest = {
     schemaVersion: MEDIA_SCHEMA_VERSION,
     policyVersion: MEDIA_CONTRACT_VERSION,
@@ -400,20 +420,38 @@ const seedCanonicalFoe = async ({bucket, sourceFoeId}) => {
     updatedAt: Timestamp.now(),
   };
   const media = task07MediaValueFromReadyManifest(manifest, sourcePlan);
+  const mediaUpdatedAt = Timestamp.now();
+  const foeData = {
+    name: 'Task 07 canonical source',
+    tecniche: [],
+    spells: [],
+    stats: {hpTotal: 30, manaTotal: 12},
+  };
+  if (mediaLocation === 'general') {
+    foeData.General = {
+      label: 'Preserved General metadata',
+      media,
+      task07MediaRevision: 1,
+      mediaUpdatedAt,
+      imagePath: generalLegacyFallbackPath || storagePlan.originalPath,
+      imageUrl: `https://legacy.invalid/${sourcePlan.assetId}/image.png`,
+      image_url: `https://legacy.invalid/${sourcePlan.assetId}/image-alt.png`,
+      url: `https://legacy.invalid/${sourcePlan.assetId}/url.png`,
+      downloadUrl: `https://legacy.invalid/${sourcePlan.assetId}/download.png`,
+    };
+  } else {
+    Object.assign(foeData, {
+      imagePath: storagePlan.originalPath,
+      imageUrl: '',
+      media,
+      task07MediaRevision: 1,
+      mediaUpdatedAt,
+    });
+  }
   await withBackgroundTriggersDisabled(async () => {
     await Promise.all([
       db.doc(`media_assets/${sourcePlan.assetId}`).set(manifest),
-      db.doc(`foes/${sourceFoeId}`).set({
-        name: 'Task 07 canonical source',
-        imagePath: storagePlan.originalPath,
-        imageUrl: '',
-        media,
-        task07MediaRevision: 1,
-        mediaUpdatedAt: Timestamp.now(),
-        tecniche: [],
-        spells: [],
-        stats: {hpTotal: 30, manaTotal: 12},
-      }),
+      db.doc(`foes/${sourceFoeId}`).set(foeData),
     ]);
   }, {projectId: PERFORMANCE_PROJECT_ID});
   return {sourcePlan, manifest, objects};
@@ -1223,6 +1261,163 @@ test('foe duplication owns and atomically attaches a canonical media family', as
   assert.equal(replay.replayed, true);
   assert.equal(replay.newFoeId, completed.newFoeId);
   assert.deepEqual(replay.assets, completed.assets);
+});
+
+test('General-only canonical foe duplication normalizes and round-trips', async () => {
+  await resetTask06ControlPlane();
+  await withBackgroundTriggersDisabled(async () => {
+    await db.doc('utils/task07_media').set(task07FoeWriteConfig(actor.uid));
+  }, {projectId: PERFORMANCE_PROJECT_ID});
+  const sourceFoeId = 'task07-general-canonical-clone-source';
+  const bucket = getStorage(app).bucket();
+  const seeded = await seedCanonicalFoe({
+    bucket,
+    sourceFoeId,
+    mediaLocation: 'general',
+  });
+
+  const first = await invokeCallable('duplicateFoeWithAssetsV2', {
+    operationId: FOE_CANONICAL_GENERAL_OPERATION_ID,
+    sourceFoeId,
+    newFoeName: 'Task 07 normalized duplicate',
+  });
+  const firstTarget = await db.doc(`foes/${first.newFoeId}`).get();
+  const firstData = firstTarget.data();
+  assert.equal(firstTarget.exists, true);
+  assert.equal(firstData.media.assetId, first.assets.canonicalMain.assetId);
+  assert.equal(firstData.imagePath, first.assets.canonicalMain.originalPath);
+  assert.equal(firstData.imageUrl, '');
+  assert.equal(firstData.General.label, 'Preserved General metadata');
+  for (const field of [
+    'media',
+    'task07MediaRevision',
+    'mediaUpdatedAt',
+    'imagePath',
+    'imageUrl',
+    'image_url',
+    'url',
+    'downloadUrl',
+  ]) {
+    assert.equal(firstData.General[field], undefined);
+  }
+  assert.equal(
+    JSON.stringify(firstData).includes(seeded.sourcePlan.assetId),
+    false
+  );
+
+  const second = await invokeCallable('duplicateFoeWithAssetsV2', {
+    operationId: FOE_CANONICAL_GENERAL_ROUNDTRIP_ID,
+    sourceFoeId: first.newFoeId,
+    newFoeName: 'Task 07 round-trip duplicate',
+  });
+  const secondTarget = await db.doc(`foes/${second.newFoeId}`).get();
+  assert.equal(secondTarget.exists, true);
+  assert.equal(
+    secondTarget.get('media.assetId'),
+    second.assets.canonicalMain.assetId
+  );
+  assert.notEqual(
+    second.assets.canonicalMain.assetId,
+    first.assets.canonicalMain.assetId
+  );
+  assert.equal(secondTarget.get('General.media'), undefined);
+  assert.equal(
+    secondTarget.get('General.label'),
+    'Preserved General metadata'
+  );
+});
+
+test('General-only canonical duplication preserves a safe legacy rollback object', async () => {
+  await resetTask06ControlPlane();
+  await withBackgroundTriggersDisabled(async () => {
+    await db.doc('utils/task07_media').set(task07FoeWriteConfig(actor.uid));
+  }, {projectId: PERFORMANCE_PROJECT_ID});
+  const sourceFoeId = 'task07-general-canonical-fallback-source';
+  const legacyFallbackPath = `foes/${sourceFoeId}/legacy.png`;
+  const bucket = getStorage(app).bucket();
+  await seedCanonicalFoe({
+    bucket,
+    generalLegacyFallbackPath: legacyFallbackPath,
+    sourceFoeId,
+    mediaLocation: 'general',
+  });
+
+  const completed = await invokeCallable('duplicateFoeWithAssetsV2', {
+    operationId: FOE_CANONICAL_GENERAL_FALLBACK_ID,
+    sourceFoeId,
+    newFoeName: 'Task 07 fallback duplicate',
+  });
+  const target = await db.doc(`foes/${completed.newFoeId}`).get();
+  assert.equal(target.exists, true);
+  assert.equal(
+    target.get('media.assetId'),
+    completed.assets.canonicalMain.assetId
+  );
+  assert.equal(target.get('imagePath'), completed.assets.main.path);
+  assert.match(target.get('imagePath'), /^foes\/operations\//);
+  assert.notEqual(
+    target.get('imagePath'),
+    completed.assets.canonicalMain.originalPath
+  );
+  assert.equal(target.get('General.imagePath'), undefined);
+  const [copiedFallbackExists] = await bucket
+    .file(completed.assets.main.path)
+    .exists();
+  assert.equal(copiedFallbackExists, true);
+});
+
+test('General-only canonical foe retirement clears image aliases atomically', async () => {
+  await resetTask06ControlPlane();
+  await withBackgroundTriggersDisabled(async () => {
+    await db.doc('utils/task07_media').set(task07FoeWriteConfig(actor.uid));
+  }, {projectId: PERFORMANCE_PROJECT_ID});
+  const sourceFoeId = 'task07-general-canonical-retire-source';
+  const bucket = getStorage(app).bucket();
+  const seeded = await seedCanonicalFoe({
+    bucket,
+    sourceFoeId,
+    mediaLocation: 'general',
+  });
+  const videoAssetId = `m_${'f'.repeat(40)}`;
+  await db.doc(`foes/${sourceFoeId}`).update({
+    'General.videoMedia': {assetId: videoAssetId},
+    'General.task07VideoMediaRevision': 4,
+    'General.videoMediaUpdatedAt': Timestamp.now(),
+  });
+
+  const retired = await invokeCallable('task07RetireMediaAsset', {
+    assetId: seeded.sourcePlan.assetId,
+  });
+  assert.equal(retired.ok, true);
+  assert.equal(retired.state, 'superseded');
+
+  const [target, manifest, cleanup] = await Promise.all([
+    db.doc(`foes/${sourceFoeId}`).get(),
+    db.doc(`media_assets/${seeded.sourcePlan.assetId}`).get(),
+    db.doc(`media_asset_cleanup/${seeded.sourcePlan.assetId}`).get(),
+  ]);
+  assert.equal(target.get('media'), undefined);
+  assert.equal(target.get('General.media'), undefined);
+  assert.equal(target.get('General.task07MediaRevision'), undefined);
+  assert.equal(target.get('General.mediaUpdatedAt'), undefined);
+  assert.equal(target.get('General.imagePath'), undefined);
+  assert.equal(target.get('General.imageUrl'), undefined);
+  assert.equal(target.get('General.image_url'), undefined);
+  assert.equal(target.get('General.url'), undefined);
+  assert.equal(target.get('General.downloadUrl'), undefined);
+  assert.equal(target.get('General.label'), 'Preserved General metadata');
+  assert.equal(target.get('General.videoMedia.assetId'), videoAssetId);
+  assert.equal(target.get('General.task07VideoMediaRevision'), 4);
+  assert.equal(target.get('task07MediaRevision'), 1);
+  assert.equal(manifest.get('state'), 'superseded');
+  assert.equal(cleanup.get('state'), 'pending');
+  assert.equal(cleanup.get('reason'), 'retired');
+
+  const replay = await invokeCallable('task07RetireMediaAsset', {
+    assetId: seeded.sourcePlan.assetId,
+  });
+  assert.equal(replay.ok, true);
+  assert.equal(replay.state, 'superseded');
 });
 
 test('terminal canonical copy failure retires only after cleanup and a fresh ID succeeds', async () => {

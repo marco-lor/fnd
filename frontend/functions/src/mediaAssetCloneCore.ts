@@ -15,6 +15,7 @@ import {
 import {
   ReadyTask07GeneratedMedia,
   StoredTask07MediaObject,
+  task07FoeCanonicalMediaStateFromTarget,
   task07MediaValueFromReadyManifest,
   task07ReadyGeneratedMediaFromManifest,
 } from "./mediaTargetAdapters";
@@ -107,13 +108,14 @@ export const task07CanonicalFoeMediaAssetId = (
       "Foe canonical video media is unsupported."
     );
   }
-  if (scan.media.malformed || scan.media.assetIds.length > 1) {
+  const canonicalState = task07FoeCanonicalMediaStateFromTarget(source);
+  if (canonicalState.conflict) {
     throw new Task07MediaClonePlanError(
       "canonical-reference-invalid",
       "Foe canonical media reference is malformed or conflicting."
     );
   }
-  const descriptorAssetId = scan.media.assetIds[0] || null;
+  const descriptorAssetId = canonicalState.assetId;
   const pathAssetId = canonicalImagePathAssetId(source);
   if (pathAssetId && pathAssetId !== descriptorAssetId) {
     throw new Task07MediaClonePlanError(
