@@ -1,0 +1,5234 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-17T23:28:42.960Z",
+  "projectId": "demo-fnd-perf",
+  "environment": {
+    "platform": "win32",
+    "architecture": "x64",
+    "node": "22.22.2",
+    "referenceMachine": "local-reference",
+    "cpuModel": "Intel(R) Core(TM) i7-5820K CPU @ 3.30GHz",
+    "cpuCount": 12,
+    "totalMemoryBytes": 85728866304
+  },
+  "fixture": {
+    "version": "fnd-performance-v1",
+    "counts": {
+      "echi_npcs": 500,
+      "encounters": 100,
+      "foes": 500,
+      "grigliata_background_lighting": 1,
+      "grigliata_backgrounds": 1,
+      "grigliata_fog_memory_tiles": 1024,
+      "grigliata_lighting_render_inputs": 1,
+      "grigliata_music_playback": 1,
+      "grigliata_music_tracks": 500,
+      "grigliata_state": 1,
+      "grigliata_token_placements": 200,
+      "grigliata_tokens": 200,
+      "grigliata_wall_state": 1,
+      "items": 1000,
+      "map_markers": 2000,
+      "users": 200,
+      "utils": 12
+    },
+    "hash": "8756b05342b3371cd56c87cd31a236262267755ce66e9fa6085a1cca9bb0bdba",
+    "documentCount": 7678,
+    "verifiedAt": "2026-07-17T22:58:09.696Z",
+    "projectId": "demo-fnd-perf"
+  },
+  "fixtureManifest": {
+    "schemaVersion": 1,
+    "version": "fnd-performance-v1",
+    "projectId": "demo-fnd-perf",
+    "documentCount": 7678,
+    "storageObjectCount": 128,
+    "canonicalHash": "8756b05342b3371cd56c87cd31a236262267755ce66e9fa6085a1cca9bb0bdba",
+    "counts": {
+      "users": 200,
+      "items": 1000,
+      "foes": 500,
+      "echi_npcs": 500,
+      "map_markers": 2000,
+      "encounters": 100,
+      "grigliata_tokens": 200,
+      "grigliata_token_placements": 200,
+      "grigliata_fog_memory_tiles": 1024,
+      "grigliata_music_tracks": 500
+    }
+  },
+  "normalBuildVerification": {
+    "schemaVersion": 1,
+    "generatedAt": "2026-07-17T23:26:33.201Z",
+    "buildMode": "normal-production",
+    "instrumentationAbsent": true,
+    "matches": []
+  },
+  "build": {
+    "schemaVersion": 1,
+    "generatedAt": "2026-07-17T23:25:02.814Z",
+    "buildMode": "performance",
+    "projectId": "demo-fnd-perf",
+    "sourceMapsPresent": false,
+    "instrumentationMarkerPresent": true,
+    "totals": {
+      "image": {
+        "rawBytes": 14908220,
+        "gzipBytes": 14901005,
+        "brotliBytes": 14625400,
+        "files": 5
+      },
+      "javascript": {
+        "rawBytes": 2680065,
+        "gzipBytes": 708886,
+        "brotliBytes": 536892,
+        "files": 2
+      },
+      "css": {
+        "rawBytes": 135573,
+        "gzipBytes": 23139,
+        "brotliBytes": 17885,
+        "files": 1
+      },
+      "other": {
+        "rawBytes": 16415,
+        "gzipBytes": 1908,
+        "brotliBytes": 1461,
+        "files": 4
+      },
+      "html": {
+        "rawBytes": 1174,
+        "gzipBytes": 551,
+        "brotliBytes": 389,
+        "files": 1
+      }
+    },
+    "assets": [
+      {
+        "path": "static/media/mappa_art.f0014e39bef1067f3d6e.png",
+        "category": "image",
+        "classification": "asset",
+        "rawBytes": 7994651,
+        "gzipBytes": 7990740,
+        "brotliBytes": 7825094,
+        "sha256": "24616aa4ab4c5acc5189cd03d146129ae9ce4f216275d6ac772247ce41168452"
+      },
+      {
+        "path": "static/media/mappa_precisa.c975b7624b0a7e5f3d30.png",
+        "category": "image",
+        "classification": "asset",
+        "rawBytes": 6894688,
+        "gzipBytes": 6891618,
+        "brotliBytes": 6781818,
+        "sha256": "e53ad9b884877865d0786058c6fcbd7801fb62014c3eba14142dc9bf6828360e"
+      },
+      {
+        "path": "static/js/main.5adefc28.js",
+        "category": "javascript",
+        "classification": "entry",
+        "rawBytes": 2672724,
+        "gzipBytes": 706239,
+        "brotliBytes": 534487,
+        "sha256": "9d4fae86b27d574b01ae103e7875ca14d5b3b671fabc8fcb66c7379070a4e1d6"
+      },
+      {
+        "path": "static/css/main.8f1a133d.css",
+        "category": "css",
+        "classification": "asset",
+        "rawBytes": 135573,
+        "gzipBytes": 23139,
+        "brotliBytes": 17885,
+        "sha256": "9b3def3317c5b73b7e1f0c976b33eb58aaf63a8cfd2fe6e1ef62cccb17dffb54"
+      },
+      {
+        "path": "static/js/main.5adefc28.js.LICENSE.txt",
+        "category": "other",
+        "classification": "entry",
+        "rawBytes": 15348,
+        "gzipBytes": 1344,
+        "brotliBytes": 999,
+        "sha256": "0ed3a695c75974fed4028759c545664e06b6eea5f6aba9dffc43d7908096077e"
+      },
+      {
+        "path": "logo512.png",
+        "category": "image",
+        "classification": "asset",
+        "rawBytes": 9664,
+        "gzipBytes": 9663,
+        "brotliBytes": 9607,
+        "sha256": "9ea4f4da7050c0cc408926f6a39c253624e9babb1d43c7977cd821445a60b461"
+      },
+      {
+        "path": "static/js/685.693e6852.chunk.js",
+        "category": "javascript",
+        "classification": "async",
+        "rawBytes": 7341,
+        "gzipBytes": 2647,
+        "brotliBytes": 2405,
+        "sha256": "6ab599d061f99475faaebdd1ce2b385a58072d85df0401cfa5284e3ac214cd13"
+      },
+      {
+        "path": "logo192.png",
+        "category": "image",
+        "classification": "asset",
+        "rawBytes": 5347,
+        "gzipBytes": 5333,
+        "brotliBytes": 5289,
+        "sha256": "c386396ec70db3608075b5fbfaac4ab1ccaa86ba05a68ab393ec551eb66c3e00"
+      },
+      {
+        "path": "favicon.ico",
+        "category": "image",
+        "classification": "asset",
+        "rawBytes": 3870,
+        "gzipBytes": 3651,
+        "brotliBytes": 3592,
+        "sha256": "3d10f7da6c603178340081668c4ac5b3ae9743ca9a262ab0fcd312fbb9f48bdd"
+      },
+      {
+        "path": "index.html",
+        "category": "html",
+        "classification": "asset",
+        "rawBytes": 1174,
+        "gzipBytes": 551,
+        "brotliBytes": 389,
+        "sha256": "1c60850a389d53c1e70e0bd44a776a3ed2dc0f538a327883725e8ce5705a0997"
+      },
+      {
+        "path": "manifest.json",
+        "category": "other",
+        "classification": "asset",
+        "rawBytes": 505,
+        "gzipBytes": 258,
+        "brotliBytes": 204,
+        "sha256": "a315a8dde77589701631063c3479e3d97aa387bbaa75507ef335b1f6b4eaa208"
+      },
+      {
+        "path": "asset-manifest.json",
+        "category": "other",
+        "classification": "asset",
+        "rawBytes": 495,
+        "gzipBytes": 228,
+        "brotliBytes": 203,
+        "sha256": "ffe562d0514fb02b2f899db84a9abdf69fe7498fea269559563467f221e4e80e"
+      },
+      {
+        "path": "robots.txt",
+        "category": "other",
+        "classification": "asset",
+        "rawBytes": 67,
+        "gzipBytes": 78,
+        "brotliBytes": 55,
+        "sha256": "90d24bc3bf698ac1e173739502298ccca72adf1f564fab05f484b8c48d1cadd2"
+      }
+    ]
+  },
+  "browser": {
+    "schemaVersion": 1,
+    "generatedAt": "2026-07-17T23:05:23.360Z",
+    "environment": {
+      "node": "v22.22.2",
+      "platform": "win32",
+      "architecture": "x64",
+      "cpuModel": "Intel(R) Core(TM) i7-5820K CPU @ 3.30GHz",
+      "cpuCount": 12,
+      "totalMemoryBytes": 85728866304,
+      "projectId": "demo-fnd-perf"
+    },
+    "scenarios": [
+      {
+        "schemaVersion": 1,
+        "scenarioId": "admin",
+        "route": "/admin",
+        "role": "webmaster",
+        "iteration": 1,
+        "metrics": {
+          "web-vital.CLS": 0.00025994379072359397,
+          "web-vital.LCP": 2148,
+          "web-vital.TTFB": 9.599999997764826,
+          "runtime.maxLongTaskMs": 462,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 204,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 19622784,
+          "runtime.finalDomNodes": 13432,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 9,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 36,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 9,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "admin",
+        "route": "/admin",
+        "role": "webmaster",
+        "iteration": 2,
+        "metrics": {
+          "web-vital.CLS": 0.00025994379072359397,
+          "web-vital.LCP": 2068,
+          "web-vital.TTFB": 9.800000000745058,
+          "runtime.maxLongTaskMs": 481,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 204,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 18081332,
+          "runtime.finalDomNodes": 13223,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 9,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 36,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 9,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "admin",
+        "route": "/admin",
+        "role": "webmaster",
+        "iteration": 3,
+        "metrics": {
+          "web-vital.CLS": 0.00025994379072359397,
+          "web-vital.LCP": 2016,
+          "web-vital.TTFB": 9.900000002235174,
+          "runtime.maxLongTaskMs": 389,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 204,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 18059068,
+          "runtime.finalDomNodes": 13223,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 9,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 35,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 9,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "bazaar",
+        "route": "/bazaar",
+        "role": "player",
+        "iteration": 1,
+        "metrics": {
+          "web-vital.CLS": 0.2434517403978052,
+          "web-vital.LCP": 900,
+          "web-vital.TTFB": 6.400000002235174,
+          "runtime.maxLongTaskMs": 293,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 1007,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 46955772,
+          "runtime.finalDomNodes": 35431,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 9,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 52,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 9,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "bazaar",
+        "route": "/bazaar",
+        "role": "player",
+        "iteration": 2,
+        "metrics": {
+          "web-vital.CLS": 0.2434517403978052,
+          "web-vital.LCP": 1060,
+          "web-vital.TTFB": 7.899999998509884,
+          "runtime.maxLongTaskMs": 316,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 1007,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 46971016,
+          "runtime.finalDomNodes": 35431,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 9,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 52,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 9,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "bazaar",
+        "route": "/bazaar",
+        "role": "player",
+        "iteration": 3,
+        "metrics": {
+          "web-vital.CLS": 0.2434517403978052,
+          "web-vital.LCP": 1000,
+          "web-vital.TTFB": 7.300000000745058,
+          "runtime.maxLongTaskMs": 299,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 1007,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 18642208,
+          "runtime.finalDomNodes": 1705,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 9,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 51,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 9,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "character-creation",
+        "route": "/character-creation",
+        "role": "new-player",
+        "iteration": 1,
+        "metrics": {
+          "web-vital.CLS": 0.6186909225903421,
+          "web-vital.LCP": 1364,
+          "web-vital.TTFB": 9.600000001490116,
+          "runtime.maxLongTaskMs": 476,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 4,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 1,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 11898196,
+          "runtime.finalDomNodes": 585,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 7,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1
+        },
+        "eventCount": 24,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 7,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "character-creation",
+        "route": "/character-creation",
+        "role": "new-player",
+        "iteration": 2,
+        "metrics": {
+          "web-vital.CLS": 0.6216030303578318,
+          "web-vital.LCP": 1260,
+          "web-vital.TTFB": 8.699999999254942,
+          "runtime.maxLongTaskMs": 441,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 4,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 1,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 11811596,
+          "runtime.finalDomNodes": 585,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 7,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1
+        },
+        "eventCount": 24,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 7,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "character-creation",
+        "route": "/character-creation",
+        "role": "new-player",
+        "iteration": 3,
+        "metrics": {
+          "web-vital.CLS": 0.6428706122336891,
+          "web-vital.LCP": 1416,
+          "web-vital.TTFB": 10.300000000745058,
+          "runtime.maxLongTaskMs": 474,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 4,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 1,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 11904876,
+          "runtime.finalDomNodes": 585,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 7,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2
+        },
+        "eventCount": 24,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 7,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "codex",
+        "route": "/codex",
+        "role": "player",
+        "iteration": 1,
+        "metrics": {
+          "web-vital.CLS": 0.36965345798029337,
+          "web-vital.LCP": 3700,
+          "web-vital.TTFB": 9.799999997019768,
+          "runtime.maxLongTaskMs": 454,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 4,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 16020360,
+          "runtime.finalDomNodes": 3639,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 7,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 34,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 7,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "codex",
+        "route": "/codex",
+        "role": "player",
+        "iteration": 2,
+        "metrics": {
+          "web-vital.CLS": 0.0007001444080075446,
+          "web-vital.LCP": 2880,
+          "web-vital.TTFB": 18.099999997764826,
+          "runtime.maxLongTaskMs": 505,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 4,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 12060060,
+          "runtime.finalDomNodes": 3639,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 7,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 33,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 7,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "codex",
+        "route": "/codex",
+        "role": "player",
+        "iteration": 3,
+        "metrics": {
+          "web-vital.CLS": 0.0005005987975823046,
+          "web-vital.LCP": 3608,
+          "web-vital.TTFB": 27.799999997019768,
+          "runtime.maxLongTaskMs": 468,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 4,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 16012664,
+          "runtime.finalDomNodes": 3639,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 7,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 34,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 7,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "combat",
+        "route": "/combat",
+        "role": "player",
+        "iteration": 1,
+        "metrics": {
+          "web-vital.CLS": 0.023226633498371056,
+          "web-vital.LCP": 1324,
+          "web-vital.TTFB": 11.099999997764826,
+          "runtime.maxLongTaskMs": 424,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 445,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 13632984,
+          "runtime.finalDomNodes": 5810,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 10,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 56,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 10,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "combat",
+        "route": "/combat",
+        "role": "player",
+        "iteration": 2,
+        "metrics": {
+          "web-vital.CLS": 0.023226633498371056,
+          "web-vital.LCP": 1536,
+          "web-vital.TTFB": 14.300000000745058,
+          "runtime.maxLongTaskMs": 468,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 445,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 15474744,
+          "runtime.finalDomNodes": 5810,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 10,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 56,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 10,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "combat",
+        "route": "/combat",
+        "role": "player",
+        "iteration": 3,
+        "metrics": {
+          "web-vital.CLS": 0.023226633498371056,
+          "web-vital.LCP": 1408,
+          "web-vital.TTFB": 8.800000000745058,
+          "runtime.maxLongTaskMs": 467,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 445,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 15344120,
+          "runtime.finalDomNodes": 5813,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 10,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 56,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 10,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "dm-dashboard",
+        "route": "/dm-dashboard",
+        "role": "dm",
+        "iteration": 1,
+        "metrics": {
+          "web-vital.CLS": 0.432518060110168,
+          "web-vital.LCP": 1104,
+          "web-vital.TTFB": 31.300000000745058,
+          "runtime.maxLongTaskMs": 415,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 1203,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 56431564,
+          "runtime.finalDomNodes": 65282,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 9,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 57,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 9,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "dm-dashboard",
+        "route": "/dm-dashboard",
+        "role": "dm",
+        "iteration": 2,
+        "metrics": {
+          "web-vital.CLS": 0.432518060110168,
+          "web-vital.LCP": 1348,
+          "web-vital.TTFB": 9.599999997764826,
+          "runtime.maxLongTaskMs": 485,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 1203,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 73451628,
+          "runtime.finalDomNodes": 68516,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 9,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 58,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 9,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "dm-dashboard",
+        "route": "/dm-dashboard",
+        "role": "dm",
+        "iteration": 3,
+        "metrics": {
+          "web-vital.CLS": 0.43548238945687584,
+          "web-vital.LCP": 1440,
+          "web-vital.TTFB": 9.100000001490116,
+          "runtime.maxLongTaskMs": 516,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 1203,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 59232512,
+          "runtime.finalDomNodes": 68542,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 9,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 58,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 9,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "echi-di-viaggio",
+        "route": "/echi-di-viaggio",
+        "role": "player",
+        "iteration": 1,
+        "metrics": {
+          "web-vital.CLS": 0.09021288124785665,
+          "web-vital.LCP": 1908,
+          "web-vital.TTFB": 17.699999999254942,
+          "runtime.maxLongTaskMs": 1193,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 3003,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 63414132,
+          "runtime.finalDomNodes": 108703,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 7,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 14889939,
+          "resource.image.gzipBytes": 14889339,
+          "resource.image.count": 130
+        },
+        "eventCount": 72,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 7,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 130,
+            "transferBytes": 14889939,
+            "encodedBytes": 14889339
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "echi-di-viaggio",
+        "route": "/echi-di-viaggio",
+        "role": "player",
+        "iteration": 2,
+        "metrics": {
+          "web-vital.CLS": 0.09021288124785665,
+          "web-vital.LCP": 2012,
+          "web-vital.TTFB": 13.300000000745058,
+          "runtime.maxLongTaskMs": 1141,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 3003,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 63387608,
+          "runtime.finalDomNodes": 108715,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 7,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 14889939,
+          "resource.image.gzipBytes": 14889339,
+          "resource.image.count": 130
+        },
+        "eventCount": 72,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 7,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 130,
+            "transferBytes": 14889939,
+            "encodedBytes": 14889339
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "echi-di-viaggio",
+        "route": "/echi-di-viaggio",
+        "role": "player",
+        "iteration": 3,
+        "metrics": {
+          "web-vital.CLS": 0.09021288124785665,
+          "web-vital.LCP": 2000,
+          "web-vital.TTFB": 20.900000002235174,
+          "runtime.maxLongTaskMs": 1227,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 3003,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 62112076,
+          "runtime.finalDomNodes": 108706,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 7,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 14889939,
+          "resource.image.gzipBytes": 14889339,
+          "resource.image.count": 130
+        },
+        "eventCount": 71,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 7,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 130,
+            "transferBytes": 14889939,
+            "encodedBytes": 14889339
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "foes-hub",
+        "route": "/foes-hub",
+        "role": "dm",
+        "iteration": 1,
+        "metrics": {
+          "web-vital.CLS": 0.00024042057827503428,
+          "web-vital.LCP": 1196,
+          "web-vital.TTFB": 12.800000000745058,
+          "runtime.maxLongTaskMs": 512,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 504,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 55629848,
+          "runtime.finalDomNodes": 60393,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 8,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 128
+        },
+        "eventCount": 47,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 8,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 128,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "foes-hub",
+        "route": "/foes-hub",
+        "role": "dm",
+        "iteration": 2,
+        "metrics": {
+          "web-vital.CLS": 0.00024042057827503428,
+          "web-vital.INP": 224,
+          "web-vital.LCP": 1348,
+          "web-vital.TTFB": 15.5,
+          "runtime.maxLongTaskMs": 477,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 504,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 59239532,
+          "runtime.finalDomNodes": 60405,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 8,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 128
+        },
+        "eventCount": 46,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 8,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 128,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "foes-hub",
+        "route": "/foes-hub",
+        "role": "dm",
+        "iteration": 3,
+        "metrics": {
+          "web-vital.CLS": 0.00024042057827503428,
+          "web-vital.LCP": 1300,
+          "web-vital.TTFB": 8.900000002235174,
+          "runtime.maxLongTaskMs": 502,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 504,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 59475888,
+          "runtime.finalDomNodes": 60393,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 8,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 128
+        },
+        "eventCount": 48,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 8,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 128,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "grigliata-five-peer",
+        "route": "/grigliata",
+        "role": "five-peer",
+        "iteration": 1,
+        "metrics": {
+          "runtime.peerConvergenceMs": 5421,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 4,
+          "firestore.changedDocumentsDelivered": 363
+        },
+        "eventCount": 28275,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "peerCount": 5,
+        "diagnostics": {
+          "peerFailures": [
+            {
+              "role": "dm",
+              "failures": []
+            },
+            {
+              "role": "player",
+              "failures": []
+            },
+            {
+              "role": "peer-2",
+              "failures": []
+            },
+            {
+              "role": "peer-3",
+              "failures": []
+            },
+            {
+              "role": "peer-4",
+              "failures": []
+            }
+          ]
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "grigliata-manager",
+        "route": "/grigliata",
+        "role": "dm",
+        "iteration": 1,
+        "metrics": {
+          "web-vital.CLS": 0.0022884789737654325,
+          "web-vital.INP": 592,
+          "web-vital.LCP": 1548,
+          "web-vital.TTFB": 11,
+          "runtime.maxLongTaskMs": 503,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 1121,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 2,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 129905156,
+          "runtime.finalDomNodes": 49461,
+          "microbenchmark.visibility.median": 0.3999999985098839,
+          "microbenchmark.visibility.p95": 1.0999999977648258,
+          "microbenchmark.visibility.allocations": 0,
+          "microbenchmark.fog-raster.median": 47.70000000298023,
+          "microbenchmark.fog-raster.p95": 56.70000000298023,
+          "microbenchmark.fog-raster.allocations": 0,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 61,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 128
+        },
+        "eventCount": 5854,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 61,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 128,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "grigliata-manager",
+        "route": "/grigliata",
+        "role": "dm",
+        "iteration": 2,
+        "metrics": {
+          "web-vital.CLS": 0.0022884789737654325,
+          "web-vital.LCP": 1480,
+          "web-vital.TTFB": 15,
+          "runtime.maxLongTaskMs": 465,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 1121,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 2,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 129171792,
+          "runtime.finalDomNodes": 49452,
+          "microbenchmark.visibility.median": 0.30000000074505806,
+          "microbenchmark.visibility.p95": 0.4000000022351742,
+          "microbenchmark.visibility.allocations": 0,
+          "microbenchmark.fog-raster.median": 42.80000000074506,
+          "microbenchmark.fog-raster.p95": 48.30000000074506,
+          "microbenchmark.fog-raster.allocations": 0,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 61,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 128
+        },
+        "eventCount": 5663,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 61,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 128,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "grigliata-manager",
+        "route": "/grigliata",
+        "role": "dm",
+        "iteration": 3,
+        "metrics": {
+          "web-vital.CLS": 0.0022884789737654325,
+          "web-vital.LCP": 1508,
+          "web-vital.TTFB": 20.799999997019768,
+          "runtime.maxLongTaskMs": 494,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 1121,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 2,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 74885104,
+          "runtime.finalDomNodes": 49461,
+          "microbenchmark.visibility.median": 0.30000000074505806,
+          "microbenchmark.visibility.p95": 0.6000000014901161,
+          "microbenchmark.visibility.allocations": 0,
+          "microbenchmark.fog-raster.median": 47,
+          "microbenchmark.fog-raster.p95": 66.60000000149012,
+          "microbenchmark.fog-raster.allocations": 0,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 53,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 128
+        },
+        "eventCount": 5859,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 53,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 128,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "grigliata-player",
+        "route": "/grigliata",
+        "role": "player",
+        "iteration": 1,
+        "metrics": {
+          "web-vital.CLS": 0.015244838811929335,
+          "web-vital.LCP": 1892,
+          "web-vital.TTFB": 11.100000001490116,
+          "runtime.maxLongTaskMs": 681,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 1248,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 2,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 36734716,
+          "runtime.finalDomNodes": 2880,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 12,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 128
+        },
+        "eventCount": 2601,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 12,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 128,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "grigliata-player",
+        "route": "/grigliata",
+        "role": "player",
+        "iteration": 2,
+        "metrics": {
+          "web-vital.CLS": 0.015244838811929335,
+          "web-vital.LCP": 1856,
+          "web-vital.TTFB": 12.599999997764826,
+          "runtime.maxLongTaskMs": 699,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 1248,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 2,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 36073772,
+          "runtime.finalDomNodes": 2880,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 12,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 128
+        },
+        "eventCount": 2562,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 12,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 128,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "grigliata-player",
+        "route": "/grigliata",
+        "role": "player",
+        "iteration": 3,
+        "metrics": {
+          "web-vital.CLS": 0.015244838811929335,
+          "web-vital.LCP": 1856,
+          "web-vital.TTFB": 9,
+          "runtime.maxLongTaskMs": 640,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 1251,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 1,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 19796120,
+          "runtime.finalDomNodes": 2376,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 13,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 128
+        },
+        "eventCount": 4074,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 13,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 128,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "home",
+        "route": "/home",
+        "role": "player",
+        "iteration": 1,
+        "metrics": {
+          "web-vital.CLS": 0.21457287808641978,
+          "web-vital.INP": 1128,
+          "web-vital.LCP": 2660,
+          "web-vital.TTFB": 122.30000000074506,
+          "runtime.maxLongTaskMs": 496,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 24,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 3,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 39536180,
+          "runtime.finalDomNodes": 23598,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 12,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 115,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 12,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "home",
+        "route": "/home",
+        "role": "player",
+        "iteration": 2,
+        "metrics": {
+          "web-vital.CLS": 0.21457287808641978,
+          "web-vital.INP": 624,
+          "web-vital.LCP": 1768,
+          "web-vital.TTFB": 47.80000000074506,
+          "runtime.maxLongTaskMs": 360,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 24,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 3,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 40035528,
+          "runtime.finalDomNodes": 24108,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 12,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 113,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 12,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "home",
+        "route": "/home",
+        "role": "player",
+        "iteration": 3,
+        "metrics": {
+          "web-vital.CLS": 0.21457287808641978,
+          "web-vital.LCP": 1580,
+          "web-vital.TTFB": 111.90000000223517,
+          "runtime.maxLongTaskMs": 431,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 24,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 3,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 40466028,
+          "runtime.finalDomNodes": 23598,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 12,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 111,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 12,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "login-cold",
+        "route": "/",
+        "role": "anonymous",
+        "iteration": 1,
+        "metrics": {
+          "web-vital.CLS": 0.00019693930041152262,
+          "web-vital.LCP": 968,
+          "web-vital.TTFB": 9.899999998509884,
+          "runtime.maxLongTaskMs": 355,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 0,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 9425728,
+          "runtime.finalDomNodes": 648,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 3,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1
+        },
+        "eventCount": 10,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 3,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "login-cold",
+        "route": "/",
+        "role": "anonymous",
+        "iteration": 2,
+        "metrics": {
+          "web-vital.CLS": 0.00019693930041152262,
+          "web-vital.LCP": 988,
+          "web-vital.TTFB": 9.600000001490116,
+          "runtime.maxLongTaskMs": 424,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 0,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 9435232,
+          "runtime.finalDomNodes": 648,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 3,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1
+        },
+        "eventCount": 9,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 3,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "login-cold",
+        "route": "/",
+        "role": "anonymous",
+        "iteration": 3,
+        "metrics": {
+          "web-vital.CLS": 0.00019693930041152262,
+          "web-vital.LCP": 1240,
+          "web-vital.TTFB": 34.400000002235174,
+          "runtime.maxLongTaskMs": 475,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 0,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 9432468,
+          "runtime.finalDomNodes": 648,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 3,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1
+        },
+        "eventCount": 10,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 3,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "login-warm",
+        "route": "/",
+        "role": "anonymous",
+        "iteration": 1,
+        "metrics": {
+          "web-vital.CLS": 0,
+          "web-vital.LCP": 652,
+          "web-vital.TTFB": 30.599999997764826,
+          "runtime.maxLongTaskMs": 51,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 0,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 11202596,
+          "runtime.finalDomNodes": 1257,
+          "resource.other.transferBytes": 0,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 3,
+          "resource.javascript.transferBytes": 0,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 0,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.font.transferBytes": 0,
+          "resource.font.gzipBytes": 52916,
+          "resource.font.count": 2
+        },
+        "eventCount": 8,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 3,
+            "transferBytes": 0,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 0,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 22088
+          },
+          "font": {
+            "count": 2,
+            "transferBytes": 0,
+            "encodedBytes": 52916
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "login-warm",
+        "route": "/",
+        "role": "anonymous",
+        "iteration": 2,
+        "metrics": {
+          "web-vital.CLS": 0,
+          "web-vital.LCP": 428,
+          "web-vital.TTFB": 7,
+          "runtime.maxLongTaskMs": 50,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 0,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 11009180,
+          "runtime.finalDomNodes": 1257,
+          "resource.other.transferBytes": 0,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 3,
+          "resource.javascript.transferBytes": 0,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 0,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.font.transferBytes": 0,
+          "resource.font.gzipBytes": 52916,
+          "resource.font.count": 2
+        },
+        "eventCount": 8,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 3,
+            "transferBytes": 0,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 0,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 22088
+          },
+          "font": {
+            "count": 2,
+            "transferBytes": 0,
+            "encodedBytes": 52916
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "login-warm",
+        "route": "/",
+        "role": "anonymous",
+        "iteration": 3,
+        "metrics": {
+          "web-vital.CLS": 0,
+          "web-vital.LCP": 436,
+          "web-vital.TTFB": 10.399999998509884,
+          "runtime.maxLongTaskMs": 57,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 0,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 10981980,
+          "runtime.finalDomNodes": 1257,
+          "resource.other.transferBytes": 0,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 3,
+          "resource.javascript.transferBytes": 0,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 0,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.font.transferBytes": 0,
+          "resource.font.gzipBytes": 52916,
+          "resource.font.count": 2
+        },
+        "eventCount": 8,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 3,
+            "transferBytes": 0,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 0,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 22088
+          },
+          "font": {
+            "count": 2,
+            "transferBytes": 0,
+            "encodedBytes": 52916
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "tecniche-spell",
+        "route": "/tecniche-spell",
+        "role": "player",
+        "iteration": 1,
+        "metrics": {
+          "web-vital.CLS": 0.0623869973851166,
+          "web-vital.LCP": 1348,
+          "web-vital.TTFB": 6.800000000745058,
+          "runtime.maxLongTaskMs": 386,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 27,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 12006840,
+          "runtime.finalDomNodes": 2754,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 9,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 104,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 9,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "tecniche-spell",
+        "route": "/tecniche-spell",
+        "role": "player",
+        "iteration": 2,
+        "metrics": {
+          "web-vital.CLS": 0.0623869973851166,
+          "web-vital.LCP": 1464,
+          "web-vital.TTFB": 10.5,
+          "runtime.maxLongTaskMs": 484,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 27,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 1,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 11963920,
+          "runtime.finalDomNodes": 2754,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 9,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 104,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 9,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      },
+      {
+        "schemaVersion": 1,
+        "scenarioId": "tecniche-spell",
+        "route": "/tecniche-spell",
+        "role": "player",
+        "iteration": 3,
+        "metrics": {
+          "web-vital.CLS": 0.0623869973851166,
+          "web-vital.LCP": 1632,
+          "web-vital.TTFB": 8.600000001490116,
+          "runtime.maxLongTaskMs": 476,
+          "runtime.consoleErrors": 0,
+          "runtime.unhandledErrors": 0,
+          "runtime.failedRequests": 0,
+          "runtime.synchronousNetworkCalls": 0,
+          "firestore.documentsDelivered": 27,
+          "firestore.activeListenersAfterCleanup": 0,
+          "runtime.activeResourcesAfterCleanup": 0,
+          "runtime.activeTimeoutsAfterCleanup": 0,
+          "runtime.activeMediaAfterCleanup": 0,
+          "runtime.finalHeapBytes": 11940248,
+          "runtime.finalDomNodes": 2754,
+          "resource.other.transferBytes": 2254,
+          "resource.other.gzipBytes": 1354,
+          "resource.other.count": 8,
+          "resource.javascript.transferBytes": 673342,
+          "resource.javascript.gzipBytes": 672742,
+          "resource.javascript.count": 2,
+          "resource.css.transferBytes": 22388,
+          "resource.css.gzipBytes": 22088,
+          "resource.css.count": 1,
+          "resource.image.transferBytes": 0,
+          "resource.image.gzipBytes": 0,
+          "resource.image.count": 1
+        },
+        "eventCount": 104,
+        "readiness": {
+          "shell-visible": true,
+          "data-ready": true,
+          "interactive": true
+        },
+        "resources": {
+          "other": {
+            "count": 8,
+            "transferBytes": 2254,
+            "encodedBytes": 1354
+          },
+          "javascript": {
+            "count": 2,
+            "transferBytes": 673342,
+            "encodedBytes": 672742
+          },
+          "css": {
+            "count": 1,
+            "transferBytes": 22388,
+            "encodedBytes": 22088
+          },
+          "image": {
+            "count": 1,
+            "transferBytes": 0,
+            "encodedBytes": 0
+          }
+        },
+        "diagnostics": {
+          "consoleErrors": [],
+          "unhandledErrors": [],
+          "failedRequests": []
+        }
+      }
+    ]
+  },
+  "scenarioManifest": {
+    "schemaVersion": 1,
+    "viewport": {
+      "width": 1440,
+      "height": 900,
+      "deviceScaleFactor": 1
+    },
+    "locale": "en-US",
+    "timezoneId": "Europe/Rome",
+    "scenarios": [
+      {
+        "id": "login-cold",
+        "route": "/",
+        "role": "anonymous",
+        "interaction": "toggle-password",
+        "cache": "cold"
+      },
+      {
+        "id": "login-warm",
+        "route": "/",
+        "role": "anonymous",
+        "interaction": "toggle-password",
+        "cache": "warm"
+      },
+      {
+        "id": "character-creation",
+        "route": "/character-creation",
+        "role": "new-player",
+        "interaction": "select-race"
+      },
+      {
+        "id": "home",
+        "route": "/home",
+        "role": "player",
+        "interaction": "reversible-stat"
+      },
+      {
+        "id": "bazaar",
+        "route": "/bazaar",
+        "role": "player",
+        "interaction": "filter-and-open"
+      },
+      {
+        "id": "tecniche-spell",
+        "route": "/tecniche-spell",
+        "role": "player",
+        "interaction": "filter-and-open"
+      },
+      {
+        "id": "codex",
+        "route": "/codex",
+        "role": "player",
+        "interaction": "category-and-search"
+      },
+      {
+        "id": "combat",
+        "route": "/combat",
+        "role": "player",
+        "interaction": "select-large-encounter"
+      },
+      {
+        "id": "echi-di-viaggio",
+        "route": "/echi-di-viaggio",
+        "role": "player",
+        "interaction": "hover-marker"
+      },
+      {
+        "id": "dm-dashboard",
+        "route": "/dm-dashboard",
+        "role": "dm",
+        "interaction": "expand-player"
+      },
+      {
+        "id": "foes-hub",
+        "route": "/foes-hub",
+        "role": "dm",
+        "interaction": "filter-and-select"
+      },
+      {
+        "id": "admin",
+        "route": "/admin",
+        "role": "webmaster",
+        "interaction": "search-users"
+      },
+      {
+        "id": "grigliata-player",
+        "route": "/grigliata",
+        "role": "player",
+        "interaction": "pan-zoom-select"
+      },
+      {
+        "id": "grigliata-manager",
+        "route": "/grigliata",
+        "role": "dm",
+        "interaction": "pan-zoom-move-open-library"
+      },
+      {
+        "id": "grigliata-five-peer",
+        "route": "/grigliata",
+        "role": "five-peer",
+        "interaction": "placement-convergence",
+        "scheduledOnly": true
+      }
+    ]
+  },
+  "budgetConfiguration": {
+    "schemaVersion": 1,
+    "budgets": [
+      {
+        "id": "entry-javascript-regression",
+        "scenario": "build",
+        "metric": "javascript.entry.gzipBytes",
+        "severity": "blocking",
+        "comparison": "relative-to-baseline",
+        "maximum": null,
+        "tolerance": {
+          "percent": 10,
+          "absoluteBytes": 30720
+        },
+        "ownerTask": "01"
+      },
+      {
+        "id": "login-entry-target",
+        "scenario": "login-cold",
+        "metric": "resource.javascript.gzipBytes",
+        "severity": "target",
+        "comparison": "absolute",
+        "maximum": 256000,
+        "tolerance": null,
+        "ownerTask": "03"
+      },
+      {
+        "id": "no-console-errors",
+        "scenario": "all",
+        "metric": "runtime.consoleErrors",
+        "severity": "blocking",
+        "comparison": "absolute",
+        "maximum": 0,
+        "tolerance": null,
+        "ownerTask": "01"
+      },
+      {
+        "id": "no-unhandled-errors",
+        "scenario": "all",
+        "metric": "runtime.unhandledErrors",
+        "severity": "blocking",
+        "comparison": "absolute",
+        "maximum": 0,
+        "tolerance": null,
+        "ownerTask": "01"
+      },
+      {
+        "id": "no-failed-requests",
+        "scenario": "all",
+        "metric": "runtime.failedRequests",
+        "severity": "blocking",
+        "comparison": "absolute",
+        "maximum": 0,
+        "tolerance": null,
+        "ownerTask": "01"
+      },
+      {
+        "id": "no-route-listener-leaks",
+        "scenario": "all",
+        "metric": "firestore.activeListenersAfterCleanup",
+        "severity": "blocking",
+        "comparison": "absolute",
+        "maximum": 0,
+        "tolerance": null,
+        "ownerTask": "01"
+      },
+      {
+        "id": "no-route-resource-leaks",
+        "scenario": "all",
+        "metric": "runtime.activeResourcesAfterCleanup",
+        "severity": "blocking",
+        "comparison": "absolute",
+        "maximum": 0,
+        "tolerance": null,
+        "ownerTask": "01"
+      },
+      {
+        "id": "route-javascript-transfer-regression",
+        "scenario": "all",
+        "metric": "resource.javascript.gzipBytes",
+        "severity": "blocking",
+        "comparison": "relative-to-baseline",
+        "maximum": null,
+        "tolerance": {
+          "percent": 10,
+          "absoluteBytes": 30720
+        },
+        "ownerTask": "01"
+      },
+      {
+        "id": "initial-collection-view-bounded-target",
+        "scenario": "all",
+        "metric": "firestore.documentsDelivered",
+        "severity": "target",
+        "comparison": "absolute",
+        "maximum": 500,
+        "tolerance": null,
+        "ownerTask": "04"
+      },
+      {
+        "id": "no-sync-network-target",
+        "scenario": "login-cold",
+        "metric": "runtime.synchronousNetworkCalls",
+        "severity": "target",
+        "comparison": "absolute",
+        "maximum": 0,
+        "tolerance": null,
+        "ownerTask": "02"
+      },
+      {
+        "id": "lcp-target",
+        "scenario": "all",
+        "metric": "web-vital.LCP",
+        "severity": "target",
+        "comparison": "absolute",
+        "maximum": 2500,
+        "tolerance": null,
+        "ownerTask": "22"
+      },
+      {
+        "id": "inp-target",
+        "scenario": "all",
+        "metric": "web-vital.INP",
+        "severity": "target",
+        "comparison": "absolute",
+        "maximum": 200,
+        "tolerance": null,
+        "ownerTask": "22"
+      },
+      {
+        "id": "cls-target",
+        "scenario": "all",
+        "metric": "web-vital.CLS",
+        "severity": "target",
+        "comparison": "absolute",
+        "maximum": 0.1,
+        "tolerance": null,
+        "ownerTask": "22"
+      },
+      {
+        "id": "grigliata-long-task-target",
+        "scenario": "grigliata-player",
+        "metric": "runtime.maxLongTaskMs",
+        "severity": "target",
+        "comparison": "absolute",
+        "maximum": 50,
+        "tolerance": null,
+        "ownerTask": "17"
+      }
+    ]
+  },
+  "metrics": {
+    "build:javascript.entry.gzipBytes": 706239,
+    "admin:web-vital.CLS": 0.00025994379072359397,
+    "admin:web-vital.CLS.p95": 0.00025994379072359397,
+    "admin:web-vital.LCP": 2148,
+    "admin:web-vital.LCP.p95": 2148,
+    "admin:web-vital.TTFB": 9.900000002235174,
+    "admin:web-vital.TTFB.p95": 9.900000002235174,
+    "admin:runtime.maxLongTaskMs": 462,
+    "admin:runtime.maxLongTaskMs.p95": 481,
+    "admin:runtime.consoleErrors": 0,
+    "admin:runtime.consoleErrors.p95": 0,
+    "admin:runtime.unhandledErrors": 0,
+    "admin:runtime.unhandledErrors.p95": 0,
+    "admin:runtime.failedRequests": 0,
+    "admin:runtime.failedRequests.p95": 0,
+    "admin:runtime.synchronousNetworkCalls": 0,
+    "admin:runtime.synchronousNetworkCalls.p95": 0,
+    "admin:firestore.documentsDelivered": 204,
+    "admin:firestore.documentsDelivered.p95": 204,
+    "admin:firestore.activeListenersAfterCleanup": 0,
+    "admin:firestore.activeListenersAfterCleanup.p95": 0,
+    "admin:runtime.activeResourcesAfterCleanup": 0,
+    "admin:runtime.activeResourcesAfterCleanup.p95": 0,
+    "admin:runtime.activeTimeoutsAfterCleanup": 0,
+    "admin:runtime.activeTimeoutsAfterCleanup.p95": 0,
+    "admin:runtime.activeMediaAfterCleanup": 0,
+    "admin:runtime.activeMediaAfterCleanup.p95": 0,
+    "admin:runtime.finalHeapBytes": 18081332,
+    "admin:runtime.finalHeapBytes.p95": 19622784,
+    "admin:runtime.finalDomNodes": 13223,
+    "admin:runtime.finalDomNodes.p95": 13432,
+    "admin:resource.other.transferBytes": 2254,
+    "admin:resource.other.transferBytes.p95": 2254,
+    "admin:resource.other.gzipBytes": 1354,
+    "admin:resource.other.gzipBytes.p95": 1354,
+    "admin:resource.other.count": 9,
+    "admin:resource.other.count.p95": 9,
+    "admin:resource.javascript.transferBytes": 673342,
+    "admin:resource.javascript.transferBytes.p95": 673342,
+    "admin:resource.javascript.gzipBytes": 672742,
+    "admin:resource.javascript.gzipBytes.p95": 672742,
+    "admin:resource.javascript.count": 2,
+    "admin:resource.javascript.count.p95": 2,
+    "admin:resource.css.transferBytes": 22388,
+    "admin:resource.css.transferBytes.p95": 22388,
+    "admin:resource.css.gzipBytes": 22088,
+    "admin:resource.css.gzipBytes.p95": 22088,
+    "admin:resource.css.count": 1,
+    "admin:resource.css.count.p95": 1,
+    "admin:resource.image.transferBytes": 0,
+    "admin:resource.image.transferBytes.p95": 0,
+    "admin:resource.image.gzipBytes": 0,
+    "admin:resource.image.gzipBytes.p95": 0,
+    "admin:resource.image.count": 1,
+    "admin:resource.image.count.p95": 1,
+    "bazaar:web-vital.CLS": 0.2434517403978052,
+    "bazaar:web-vital.CLS.p95": 0.2434517403978052,
+    "bazaar:web-vital.LCP": 1060,
+    "bazaar:web-vital.LCP.p95": 1060,
+    "bazaar:web-vital.TTFB": 7.899999998509884,
+    "bazaar:web-vital.TTFB.p95": 7.899999998509884,
+    "bazaar:runtime.maxLongTaskMs": 299,
+    "bazaar:runtime.maxLongTaskMs.p95": 316,
+    "bazaar:runtime.consoleErrors": 0,
+    "bazaar:runtime.consoleErrors.p95": 0,
+    "bazaar:runtime.unhandledErrors": 0,
+    "bazaar:runtime.unhandledErrors.p95": 0,
+    "bazaar:runtime.failedRequests": 0,
+    "bazaar:runtime.failedRequests.p95": 0,
+    "bazaar:runtime.synchronousNetworkCalls": 0,
+    "bazaar:runtime.synchronousNetworkCalls.p95": 0,
+    "bazaar:firestore.documentsDelivered": 1007,
+    "bazaar:firestore.documentsDelivered.p95": 1007,
+    "bazaar:firestore.activeListenersAfterCleanup": 0,
+    "bazaar:firestore.activeListenersAfterCleanup.p95": 0,
+    "bazaar:runtime.activeResourcesAfterCleanup": 0,
+    "bazaar:runtime.activeResourcesAfterCleanup.p95": 0,
+    "bazaar:runtime.activeTimeoutsAfterCleanup": 0,
+    "bazaar:runtime.activeTimeoutsAfterCleanup.p95": 0,
+    "bazaar:runtime.activeMediaAfterCleanup": 0,
+    "bazaar:runtime.activeMediaAfterCleanup.p95": 0,
+    "bazaar:runtime.finalHeapBytes": 46955772,
+    "bazaar:runtime.finalHeapBytes.p95": 46971016,
+    "bazaar:runtime.finalDomNodes": 35431,
+    "bazaar:runtime.finalDomNodes.p95": 35431,
+    "bazaar:resource.other.transferBytes": 2254,
+    "bazaar:resource.other.transferBytes.p95": 2254,
+    "bazaar:resource.other.gzipBytes": 1354,
+    "bazaar:resource.other.gzipBytes.p95": 1354,
+    "bazaar:resource.other.count": 9,
+    "bazaar:resource.other.count.p95": 9,
+    "bazaar:resource.javascript.transferBytes": 673342,
+    "bazaar:resource.javascript.transferBytes.p95": 673342,
+    "bazaar:resource.javascript.gzipBytes": 672742,
+    "bazaar:resource.javascript.gzipBytes.p95": 672742,
+    "bazaar:resource.javascript.count": 2,
+    "bazaar:resource.javascript.count.p95": 2,
+    "bazaar:resource.css.transferBytes": 22388,
+    "bazaar:resource.css.transferBytes.p95": 22388,
+    "bazaar:resource.css.gzipBytes": 22088,
+    "bazaar:resource.css.gzipBytes.p95": 22088,
+    "bazaar:resource.css.count": 1,
+    "bazaar:resource.css.count.p95": 1,
+    "bazaar:resource.image.transferBytes": 0,
+    "bazaar:resource.image.transferBytes.p95": 0,
+    "bazaar:resource.image.gzipBytes": 0,
+    "bazaar:resource.image.gzipBytes.p95": 0,
+    "bazaar:resource.image.count": 1,
+    "bazaar:resource.image.count.p95": 1,
+    "character-creation:web-vital.CLS": 0.6428706122336891,
+    "character-creation:web-vital.CLS.p95": 0.6428706122336891,
+    "character-creation:web-vital.LCP": 1416,
+    "character-creation:web-vital.LCP.p95": 1416,
+    "character-creation:web-vital.TTFB": 10.300000000745058,
+    "character-creation:web-vital.TTFB.p95": 10.300000000745058,
+    "character-creation:runtime.maxLongTaskMs": 474,
+    "character-creation:runtime.maxLongTaskMs.p95": 476,
+    "character-creation:runtime.consoleErrors": 0,
+    "character-creation:runtime.consoleErrors.p95": 0,
+    "character-creation:runtime.unhandledErrors": 0,
+    "character-creation:runtime.unhandledErrors.p95": 0,
+    "character-creation:runtime.failedRequests": 0,
+    "character-creation:runtime.failedRequests.p95": 0,
+    "character-creation:runtime.synchronousNetworkCalls": 0,
+    "character-creation:runtime.synchronousNetworkCalls.p95": 0,
+    "character-creation:firestore.documentsDelivered": 4,
+    "character-creation:firestore.documentsDelivered.p95": 4,
+    "character-creation:firestore.activeListenersAfterCleanup": 0,
+    "character-creation:firestore.activeListenersAfterCleanup.p95": 0,
+    "character-creation:runtime.activeResourcesAfterCleanup": 0,
+    "character-creation:runtime.activeResourcesAfterCleanup.p95": 0,
+    "character-creation:runtime.activeTimeoutsAfterCleanup": 1,
+    "character-creation:runtime.activeTimeoutsAfterCleanup.p95": 1,
+    "character-creation:runtime.activeMediaAfterCleanup": 0,
+    "character-creation:runtime.activeMediaAfterCleanup.p95": 0,
+    "character-creation:runtime.finalHeapBytes": 11898196,
+    "character-creation:runtime.finalHeapBytes.p95": 11904876,
+    "character-creation:runtime.finalDomNodes": 585,
+    "character-creation:runtime.finalDomNodes.p95": 585,
+    "character-creation:resource.other.transferBytes": 2254,
+    "character-creation:resource.other.transferBytes.p95": 2254,
+    "character-creation:resource.other.gzipBytes": 1354,
+    "character-creation:resource.other.gzipBytes.p95": 1354,
+    "character-creation:resource.other.count": 7,
+    "character-creation:resource.other.count.p95": 7,
+    "character-creation:resource.javascript.transferBytes": 673342,
+    "character-creation:resource.javascript.transferBytes.p95": 673342,
+    "character-creation:resource.javascript.gzipBytes": 672742,
+    "character-creation:resource.javascript.gzipBytes.p95": 672742,
+    "character-creation:resource.javascript.count": 2,
+    "character-creation:resource.javascript.count.p95": 2,
+    "character-creation:resource.css.transferBytes": 22388,
+    "character-creation:resource.css.transferBytes.p95": 22388,
+    "character-creation:resource.css.gzipBytes": 22088,
+    "character-creation:resource.css.gzipBytes.p95": 22088,
+    "character-creation:resource.css.count": 1,
+    "character-creation:resource.css.count.p95": 1,
+    "codex:web-vital.CLS": 0.36965345798029337,
+    "codex:web-vital.CLS.p95": 0.36965345798029337,
+    "codex:web-vital.LCP": 3700,
+    "codex:web-vital.LCP.p95": 3700,
+    "codex:web-vital.TTFB": 27.799999997019768,
+    "codex:web-vital.TTFB.p95": 27.799999997019768,
+    "codex:runtime.maxLongTaskMs": 468,
+    "codex:runtime.maxLongTaskMs.p95": 505,
+    "codex:runtime.consoleErrors": 0,
+    "codex:runtime.consoleErrors.p95": 0,
+    "codex:runtime.unhandledErrors": 0,
+    "codex:runtime.unhandledErrors.p95": 0,
+    "codex:runtime.failedRequests": 0,
+    "codex:runtime.failedRequests.p95": 0,
+    "codex:runtime.synchronousNetworkCalls": 0,
+    "codex:runtime.synchronousNetworkCalls.p95": 0,
+    "codex:firestore.documentsDelivered": 4,
+    "codex:firestore.documentsDelivered.p95": 4,
+    "codex:firestore.activeListenersAfterCleanup": 0,
+    "codex:firestore.activeListenersAfterCleanup.p95": 0,
+    "codex:runtime.activeResourcesAfterCleanup": 0,
+    "codex:runtime.activeResourcesAfterCleanup.p95": 0,
+    "codex:runtime.activeTimeoutsAfterCleanup": 0,
+    "codex:runtime.activeTimeoutsAfterCleanup.p95": 0,
+    "codex:runtime.activeMediaAfterCleanup": 0,
+    "codex:runtime.activeMediaAfterCleanup.p95": 0,
+    "codex:runtime.finalHeapBytes": 16012664,
+    "codex:runtime.finalHeapBytes.p95": 16020360,
+    "codex:runtime.finalDomNodes": 3639,
+    "codex:runtime.finalDomNodes.p95": 3639,
+    "codex:resource.other.transferBytes": 2254,
+    "codex:resource.other.transferBytes.p95": 2254,
+    "codex:resource.other.gzipBytes": 1354,
+    "codex:resource.other.gzipBytes.p95": 1354,
+    "codex:resource.other.count": 7,
+    "codex:resource.other.count.p95": 7,
+    "codex:resource.javascript.transferBytes": 673342,
+    "codex:resource.javascript.transferBytes.p95": 673342,
+    "codex:resource.javascript.gzipBytes": 672742,
+    "codex:resource.javascript.gzipBytes.p95": 672742,
+    "codex:resource.javascript.count": 2,
+    "codex:resource.javascript.count.p95": 2,
+    "codex:resource.css.transferBytes": 22388,
+    "codex:resource.css.transferBytes.p95": 22388,
+    "codex:resource.css.gzipBytes": 22088,
+    "codex:resource.css.gzipBytes.p95": 22088,
+    "codex:resource.css.count": 1,
+    "codex:resource.css.count.p95": 1,
+    "codex:resource.image.transferBytes": 0,
+    "codex:resource.image.transferBytes.p95": 0,
+    "codex:resource.image.gzipBytes": 0,
+    "codex:resource.image.gzipBytes.p95": 0,
+    "codex:resource.image.count": 1,
+    "codex:resource.image.count.p95": 1,
+    "combat:web-vital.CLS": 0.023226633498371056,
+    "combat:web-vital.CLS.p95": 0.023226633498371056,
+    "combat:web-vital.LCP": 1536,
+    "combat:web-vital.LCP.p95": 1536,
+    "combat:web-vital.TTFB": 14.300000000745058,
+    "combat:web-vital.TTFB.p95": 14.300000000745058,
+    "combat:runtime.maxLongTaskMs": 467,
+    "combat:runtime.maxLongTaskMs.p95": 468,
+    "combat:runtime.consoleErrors": 0,
+    "combat:runtime.consoleErrors.p95": 0,
+    "combat:runtime.unhandledErrors": 0,
+    "combat:runtime.unhandledErrors.p95": 0,
+    "combat:runtime.failedRequests": 0,
+    "combat:runtime.failedRequests.p95": 0,
+    "combat:runtime.synchronousNetworkCalls": 0,
+    "combat:runtime.synchronousNetworkCalls.p95": 0,
+    "combat:firestore.documentsDelivered": 445,
+    "combat:firestore.documentsDelivered.p95": 445,
+    "combat:firestore.activeListenersAfterCleanup": 0,
+    "combat:firestore.activeListenersAfterCleanup.p95": 0,
+    "combat:runtime.activeResourcesAfterCleanup": 0,
+    "combat:runtime.activeResourcesAfterCleanup.p95": 0,
+    "combat:runtime.activeTimeoutsAfterCleanup": 0,
+    "combat:runtime.activeTimeoutsAfterCleanup.p95": 0,
+    "combat:runtime.activeMediaAfterCleanup": 0,
+    "combat:runtime.activeMediaAfterCleanup.p95": 0,
+    "combat:runtime.finalHeapBytes": 15344120,
+    "combat:runtime.finalHeapBytes.p95": 15474744,
+    "combat:runtime.finalDomNodes": 5810,
+    "combat:runtime.finalDomNodes.p95": 5813,
+    "combat:resource.other.transferBytes": 2254,
+    "combat:resource.other.transferBytes.p95": 2254,
+    "combat:resource.other.gzipBytes": 1354,
+    "combat:resource.other.gzipBytes.p95": 1354,
+    "combat:resource.other.count": 10,
+    "combat:resource.other.count.p95": 10,
+    "combat:resource.javascript.transferBytes": 673342,
+    "combat:resource.javascript.transferBytes.p95": 673342,
+    "combat:resource.javascript.gzipBytes": 672742,
+    "combat:resource.javascript.gzipBytes.p95": 672742,
+    "combat:resource.javascript.count": 2,
+    "combat:resource.javascript.count.p95": 2,
+    "combat:resource.css.transferBytes": 22388,
+    "combat:resource.css.transferBytes.p95": 22388,
+    "combat:resource.css.gzipBytes": 22088,
+    "combat:resource.css.gzipBytes.p95": 22088,
+    "combat:resource.css.count": 1,
+    "combat:resource.css.count.p95": 1,
+    "combat:resource.image.transferBytes": 0,
+    "combat:resource.image.transferBytes.p95": 0,
+    "combat:resource.image.gzipBytes": 0,
+    "combat:resource.image.gzipBytes.p95": 0,
+    "combat:resource.image.count": 1,
+    "combat:resource.image.count.p95": 1,
+    "dm-dashboard:web-vital.CLS": 0.43548238945687584,
+    "dm-dashboard:web-vital.CLS.p95": 0.43548238945687584,
+    "dm-dashboard:web-vital.LCP": 1440,
+    "dm-dashboard:web-vital.LCP.p95": 1440,
+    "dm-dashboard:web-vital.TTFB": 31.300000000745058,
+    "dm-dashboard:web-vital.TTFB.p95": 31.300000000745058,
+    "dm-dashboard:runtime.maxLongTaskMs": 485,
+    "dm-dashboard:runtime.maxLongTaskMs.p95": 516,
+    "dm-dashboard:runtime.consoleErrors": 0,
+    "dm-dashboard:runtime.consoleErrors.p95": 0,
+    "dm-dashboard:runtime.unhandledErrors": 0,
+    "dm-dashboard:runtime.unhandledErrors.p95": 0,
+    "dm-dashboard:runtime.failedRequests": 0,
+    "dm-dashboard:runtime.failedRequests.p95": 0,
+    "dm-dashboard:runtime.synchronousNetworkCalls": 0,
+    "dm-dashboard:runtime.synchronousNetworkCalls.p95": 0,
+    "dm-dashboard:firestore.documentsDelivered": 1203,
+    "dm-dashboard:firestore.documentsDelivered.p95": 1203,
+    "dm-dashboard:firestore.activeListenersAfterCleanup": 0,
+    "dm-dashboard:firestore.activeListenersAfterCleanup.p95": 0,
+    "dm-dashboard:runtime.activeResourcesAfterCleanup": 0,
+    "dm-dashboard:runtime.activeResourcesAfterCleanup.p95": 0,
+    "dm-dashboard:runtime.activeTimeoutsAfterCleanup": 0,
+    "dm-dashboard:runtime.activeTimeoutsAfterCleanup.p95": 0,
+    "dm-dashboard:runtime.activeMediaAfterCleanup": 0,
+    "dm-dashboard:runtime.activeMediaAfterCleanup.p95": 0,
+    "dm-dashboard:runtime.finalHeapBytes": 59232512,
+    "dm-dashboard:runtime.finalHeapBytes.p95": 73451628,
+    "dm-dashboard:runtime.finalDomNodes": 68516,
+    "dm-dashboard:runtime.finalDomNodes.p95": 68542,
+    "dm-dashboard:resource.other.transferBytes": 2254,
+    "dm-dashboard:resource.other.transferBytes.p95": 2254,
+    "dm-dashboard:resource.other.gzipBytes": 1354,
+    "dm-dashboard:resource.other.gzipBytes.p95": 1354,
+    "dm-dashboard:resource.other.count": 9,
+    "dm-dashboard:resource.other.count.p95": 9,
+    "dm-dashboard:resource.javascript.transferBytes": 673342,
+    "dm-dashboard:resource.javascript.transferBytes.p95": 673342,
+    "dm-dashboard:resource.javascript.gzipBytes": 672742,
+    "dm-dashboard:resource.javascript.gzipBytes.p95": 672742,
+    "dm-dashboard:resource.javascript.count": 2,
+    "dm-dashboard:resource.javascript.count.p95": 2,
+    "dm-dashboard:resource.css.transferBytes": 22388,
+    "dm-dashboard:resource.css.transferBytes.p95": 22388,
+    "dm-dashboard:resource.css.gzipBytes": 22088,
+    "dm-dashboard:resource.css.gzipBytes.p95": 22088,
+    "dm-dashboard:resource.css.count": 1,
+    "dm-dashboard:resource.css.count.p95": 1,
+    "dm-dashboard:resource.image.transferBytes": 0,
+    "dm-dashboard:resource.image.transferBytes.p95": 0,
+    "dm-dashboard:resource.image.gzipBytes": 0,
+    "dm-dashboard:resource.image.gzipBytes.p95": 0,
+    "dm-dashboard:resource.image.count": 1,
+    "dm-dashboard:resource.image.count.p95": 1,
+    "echi-di-viaggio:web-vital.CLS": 0.09021288124785665,
+    "echi-di-viaggio:web-vital.CLS.p95": 0.09021288124785665,
+    "echi-di-viaggio:web-vital.LCP": 2012,
+    "echi-di-viaggio:web-vital.LCP.p95": 2012,
+    "echi-di-viaggio:web-vital.TTFB": 20.900000002235174,
+    "echi-di-viaggio:web-vital.TTFB.p95": 20.900000002235174,
+    "echi-di-viaggio:runtime.maxLongTaskMs": 1193,
+    "echi-di-viaggio:runtime.maxLongTaskMs.p95": 1227,
+    "echi-di-viaggio:runtime.consoleErrors": 0,
+    "echi-di-viaggio:runtime.consoleErrors.p95": 0,
+    "echi-di-viaggio:runtime.unhandledErrors": 0,
+    "echi-di-viaggio:runtime.unhandledErrors.p95": 0,
+    "echi-di-viaggio:runtime.failedRequests": 0,
+    "echi-di-viaggio:runtime.failedRequests.p95": 0,
+    "echi-di-viaggio:runtime.synchronousNetworkCalls": 0,
+    "echi-di-viaggio:runtime.synchronousNetworkCalls.p95": 0,
+    "echi-di-viaggio:firestore.documentsDelivered": 3003,
+    "echi-di-viaggio:firestore.documentsDelivered.p95": 3003,
+    "echi-di-viaggio:firestore.activeListenersAfterCleanup": 0,
+    "echi-di-viaggio:firestore.activeListenersAfterCleanup.p95": 0,
+    "echi-di-viaggio:runtime.activeResourcesAfterCleanup": 0,
+    "echi-di-viaggio:runtime.activeResourcesAfterCleanup.p95": 0,
+    "echi-di-viaggio:runtime.activeTimeoutsAfterCleanup": 0,
+    "echi-di-viaggio:runtime.activeTimeoutsAfterCleanup.p95": 0,
+    "echi-di-viaggio:runtime.activeMediaAfterCleanup": 0,
+    "echi-di-viaggio:runtime.activeMediaAfterCleanup.p95": 0,
+    "echi-di-viaggio:runtime.finalHeapBytes": 63387608,
+    "echi-di-viaggio:runtime.finalHeapBytes.p95": 63414132,
+    "echi-di-viaggio:runtime.finalDomNodes": 108706,
+    "echi-di-viaggio:runtime.finalDomNodes.p95": 108715,
+    "echi-di-viaggio:resource.other.transferBytes": 2254,
+    "echi-di-viaggio:resource.other.transferBytes.p95": 2254,
+    "echi-di-viaggio:resource.other.gzipBytes": 1354,
+    "echi-di-viaggio:resource.other.gzipBytes.p95": 1354,
+    "echi-di-viaggio:resource.other.count": 7,
+    "echi-di-viaggio:resource.other.count.p95": 7,
+    "echi-di-viaggio:resource.javascript.transferBytes": 673342,
+    "echi-di-viaggio:resource.javascript.transferBytes.p95": 673342,
+    "echi-di-viaggio:resource.javascript.gzipBytes": 672742,
+    "echi-di-viaggio:resource.javascript.gzipBytes.p95": 672742,
+    "echi-di-viaggio:resource.javascript.count": 2,
+    "echi-di-viaggio:resource.javascript.count.p95": 2,
+    "echi-di-viaggio:resource.css.transferBytes": 22388,
+    "echi-di-viaggio:resource.css.transferBytes.p95": 22388,
+    "echi-di-viaggio:resource.css.gzipBytes": 22088,
+    "echi-di-viaggio:resource.css.gzipBytes.p95": 22088,
+    "echi-di-viaggio:resource.css.count": 1,
+    "echi-di-viaggio:resource.css.count.p95": 1,
+    "echi-di-viaggio:resource.image.transferBytes": 14889939,
+    "echi-di-viaggio:resource.image.transferBytes.p95": 14889939,
+    "echi-di-viaggio:resource.image.gzipBytes": 14889339,
+    "echi-di-viaggio:resource.image.gzipBytes.p95": 14889339,
+    "echi-di-viaggio:resource.image.count": 130,
+    "echi-di-viaggio:resource.image.count.p95": 130,
+    "foes-hub:web-vital.CLS": 0.00024042057827503428,
+    "foes-hub:web-vital.CLS.p95": 0.00024042057827503428,
+    "foes-hub:web-vital.LCP": 1348,
+    "foes-hub:web-vital.LCP.p95": 1348,
+    "foes-hub:web-vital.TTFB": 15.5,
+    "foes-hub:web-vital.TTFB.p95": 15.5,
+    "foes-hub:runtime.maxLongTaskMs": 502,
+    "foes-hub:runtime.maxLongTaskMs.p95": 512,
+    "foes-hub:runtime.consoleErrors": 0,
+    "foes-hub:runtime.consoleErrors.p95": 0,
+    "foes-hub:runtime.unhandledErrors": 0,
+    "foes-hub:runtime.unhandledErrors.p95": 0,
+    "foes-hub:runtime.failedRequests": 0,
+    "foes-hub:runtime.failedRequests.p95": 0,
+    "foes-hub:runtime.synchronousNetworkCalls": 0,
+    "foes-hub:runtime.synchronousNetworkCalls.p95": 0,
+    "foes-hub:firestore.documentsDelivered": 504,
+    "foes-hub:firestore.documentsDelivered.p95": 504,
+    "foes-hub:firestore.activeListenersAfterCleanup": 0,
+    "foes-hub:firestore.activeListenersAfterCleanup.p95": 0,
+    "foes-hub:runtime.activeResourcesAfterCleanup": 0,
+    "foes-hub:runtime.activeResourcesAfterCleanup.p95": 0,
+    "foes-hub:runtime.activeTimeoutsAfterCleanup": 0,
+    "foes-hub:runtime.activeTimeoutsAfterCleanup.p95": 0,
+    "foes-hub:runtime.activeMediaAfterCleanup": 0,
+    "foes-hub:runtime.activeMediaAfterCleanup.p95": 0,
+    "foes-hub:runtime.finalHeapBytes": 59239532,
+    "foes-hub:runtime.finalHeapBytes.p95": 59475888,
+    "foes-hub:runtime.finalDomNodes": 60393,
+    "foes-hub:runtime.finalDomNodes.p95": 60405,
+    "foes-hub:resource.other.transferBytes": 2254,
+    "foes-hub:resource.other.transferBytes.p95": 2254,
+    "foes-hub:resource.other.gzipBytes": 1354,
+    "foes-hub:resource.other.gzipBytes.p95": 1354,
+    "foes-hub:resource.other.count": 8,
+    "foes-hub:resource.other.count.p95": 8,
+    "foes-hub:resource.javascript.transferBytes": 673342,
+    "foes-hub:resource.javascript.transferBytes.p95": 673342,
+    "foes-hub:resource.javascript.gzipBytes": 672742,
+    "foes-hub:resource.javascript.gzipBytes.p95": 672742,
+    "foes-hub:resource.javascript.count": 2,
+    "foes-hub:resource.javascript.count.p95": 2,
+    "foes-hub:resource.css.transferBytes": 22388,
+    "foes-hub:resource.css.transferBytes.p95": 22388,
+    "foes-hub:resource.css.gzipBytes": 22088,
+    "foes-hub:resource.css.gzipBytes.p95": 22088,
+    "foes-hub:resource.css.count": 1,
+    "foes-hub:resource.css.count.p95": 1,
+    "foes-hub:resource.image.transferBytes": 0,
+    "foes-hub:resource.image.transferBytes.p95": 0,
+    "foes-hub:resource.image.gzipBytes": 0,
+    "foes-hub:resource.image.gzipBytes.p95": 0,
+    "foes-hub:resource.image.count": 128,
+    "foes-hub:resource.image.count.p95": 128,
+    "foes-hub:web-vital.INP": 224,
+    "grigliata-five-peer:runtime.peerConvergenceMs": 5421,
+    "grigliata-five-peer:runtime.consoleErrors": 0,
+    "grigliata-five-peer:runtime.unhandledErrors": 0,
+    "grigliata-five-peer:runtime.failedRequests": 0,
+    "grigliata-five-peer:firestore.activeListenersAfterCleanup": 0,
+    "grigliata-five-peer:runtime.activeResourcesAfterCleanup": 0,
+    "grigliata-five-peer:runtime.activeTimeoutsAfterCleanup": 4,
+    "grigliata-five-peer:firestore.changedDocumentsDelivered": 363,
+    "grigliata-manager:web-vital.CLS": 0.0022884789737654325,
+    "grigliata-manager:web-vital.CLS.p95": 0.0022884789737654325,
+    "grigliata-manager:web-vital.INP": 592,
+    "grigliata-manager:web-vital.LCP": 1548,
+    "grigliata-manager:web-vital.LCP.p95": 1548,
+    "grigliata-manager:web-vital.TTFB": 20.799999997019768,
+    "grigliata-manager:web-vital.TTFB.p95": 20.799999997019768,
+    "grigliata-manager:runtime.maxLongTaskMs": 494,
+    "grigliata-manager:runtime.maxLongTaskMs.p95": 503,
+    "grigliata-manager:runtime.consoleErrors": 0,
+    "grigliata-manager:runtime.consoleErrors.p95": 0,
+    "grigliata-manager:runtime.unhandledErrors": 0,
+    "grigliata-manager:runtime.unhandledErrors.p95": 0,
+    "grigliata-manager:runtime.failedRequests": 0,
+    "grigliata-manager:runtime.failedRequests.p95": 0,
+    "grigliata-manager:runtime.synchronousNetworkCalls": 0,
+    "grigliata-manager:runtime.synchronousNetworkCalls.p95": 0,
+    "grigliata-manager:firestore.documentsDelivered": 1121,
+    "grigliata-manager:firestore.documentsDelivered.p95": 1121,
+    "grigliata-manager:firestore.activeListenersAfterCleanup": 0,
+    "grigliata-manager:firestore.activeListenersAfterCleanup.p95": 0,
+    "grigliata-manager:runtime.activeResourcesAfterCleanup": 0,
+    "grigliata-manager:runtime.activeResourcesAfterCleanup.p95": 0,
+    "grigliata-manager:runtime.activeTimeoutsAfterCleanup": 2,
+    "grigliata-manager:runtime.activeTimeoutsAfterCleanup.p95": 2,
+    "grigliata-manager:runtime.activeMediaAfterCleanup": 0,
+    "grigliata-manager:runtime.activeMediaAfterCleanup.p95": 0,
+    "grigliata-manager:runtime.finalHeapBytes": 129171792,
+    "grigliata-manager:runtime.finalHeapBytes.p95": 129905156,
+    "grigliata-manager:runtime.finalDomNodes": 49461,
+    "grigliata-manager:runtime.finalDomNodes.p95": 49461,
+    "grigliata-manager:microbenchmark.visibility.median": 0.30000000074505806,
+    "grigliata-manager:microbenchmark.visibility.median.p95": 0.3999999985098839,
+    "grigliata-manager:microbenchmark.visibility.p95": 0.6000000014901161,
+    "grigliata-manager:microbenchmark.visibility.p95.p95": 1.0999999977648258,
+    "grigliata-manager:microbenchmark.visibility.allocations": 0,
+    "grigliata-manager:microbenchmark.visibility.allocations.p95": 0,
+    "grigliata-manager:microbenchmark.fog-raster.median": 47,
+    "grigliata-manager:microbenchmark.fog-raster.median.p95": 47.70000000298023,
+    "grigliata-manager:microbenchmark.fog-raster.p95": 56.70000000298023,
+    "grigliata-manager:microbenchmark.fog-raster.p95.p95": 66.60000000149012,
+    "grigliata-manager:microbenchmark.fog-raster.allocations": 0,
+    "grigliata-manager:microbenchmark.fog-raster.allocations.p95": 0,
+    "grigliata-manager:resource.other.transferBytes": 2254,
+    "grigliata-manager:resource.other.transferBytes.p95": 2254,
+    "grigliata-manager:resource.other.gzipBytes": 1354,
+    "grigliata-manager:resource.other.gzipBytes.p95": 1354,
+    "grigliata-manager:resource.other.count": 61,
+    "grigliata-manager:resource.other.count.p95": 61,
+    "grigliata-manager:resource.javascript.transferBytes": 673342,
+    "grigliata-manager:resource.javascript.transferBytes.p95": 673342,
+    "grigliata-manager:resource.javascript.gzipBytes": 672742,
+    "grigliata-manager:resource.javascript.gzipBytes.p95": 672742,
+    "grigliata-manager:resource.javascript.count": 2,
+    "grigliata-manager:resource.javascript.count.p95": 2,
+    "grigliata-manager:resource.css.transferBytes": 22388,
+    "grigliata-manager:resource.css.transferBytes.p95": 22388,
+    "grigliata-manager:resource.css.gzipBytes": 22088,
+    "grigliata-manager:resource.css.gzipBytes.p95": 22088,
+    "grigliata-manager:resource.css.count": 1,
+    "grigliata-manager:resource.css.count.p95": 1,
+    "grigliata-manager:resource.image.transferBytes": 0,
+    "grigliata-manager:resource.image.transferBytes.p95": 0,
+    "grigliata-manager:resource.image.gzipBytes": 0,
+    "grigliata-manager:resource.image.gzipBytes.p95": 0,
+    "grigliata-manager:resource.image.count": 128,
+    "grigliata-manager:resource.image.count.p95": 128,
+    "grigliata-player:web-vital.CLS": 0.015244838811929335,
+    "grigliata-player:web-vital.CLS.p95": 0.015244838811929335,
+    "grigliata-player:web-vital.LCP": 1892,
+    "grigliata-player:web-vital.LCP.p95": 1892,
+    "grigliata-player:web-vital.TTFB": 12.599999997764826,
+    "grigliata-player:web-vital.TTFB.p95": 12.599999997764826,
+    "grigliata-player:runtime.maxLongTaskMs": 681,
+    "grigliata-player:runtime.maxLongTaskMs.p95": 699,
+    "grigliata-player:runtime.consoleErrors": 0,
+    "grigliata-player:runtime.consoleErrors.p95": 0,
+    "grigliata-player:runtime.unhandledErrors": 0,
+    "grigliata-player:runtime.unhandledErrors.p95": 0,
+    "grigliata-player:runtime.failedRequests": 0,
+    "grigliata-player:runtime.failedRequests.p95": 0,
+    "grigliata-player:runtime.synchronousNetworkCalls": 0,
+    "grigliata-player:runtime.synchronousNetworkCalls.p95": 0,
+    "grigliata-player:firestore.documentsDelivered": 1248,
+    "grigliata-player:firestore.documentsDelivered.p95": 1251,
+    "grigliata-player:firestore.activeListenersAfterCleanup": 0,
+    "grigliata-player:firestore.activeListenersAfterCleanup.p95": 0,
+    "grigliata-player:runtime.activeResourcesAfterCleanup": 0,
+    "grigliata-player:runtime.activeResourcesAfterCleanup.p95": 0,
+    "grigliata-player:runtime.activeTimeoutsAfterCleanup": 2,
+    "grigliata-player:runtime.activeTimeoutsAfterCleanup.p95": 2,
+    "grigliata-player:runtime.activeMediaAfterCleanup": 0,
+    "grigliata-player:runtime.activeMediaAfterCleanup.p95": 0,
+    "grigliata-player:runtime.finalHeapBytes": 36073772,
+    "grigliata-player:runtime.finalHeapBytes.p95": 36734716,
+    "grigliata-player:runtime.finalDomNodes": 2880,
+    "grigliata-player:runtime.finalDomNodes.p95": 2880,
+    "grigliata-player:resource.other.transferBytes": 2254,
+    "grigliata-player:resource.other.transferBytes.p95": 2254,
+    "grigliata-player:resource.other.gzipBytes": 1354,
+    "grigliata-player:resource.other.gzipBytes.p95": 1354,
+    "grigliata-player:resource.other.count": 12,
+    "grigliata-player:resource.other.count.p95": 13,
+    "grigliata-player:resource.javascript.transferBytes": 673342,
+    "grigliata-player:resource.javascript.transferBytes.p95": 673342,
+    "grigliata-player:resource.javascript.gzipBytes": 672742,
+    "grigliata-player:resource.javascript.gzipBytes.p95": 672742,
+    "grigliata-player:resource.javascript.count": 2,
+    "grigliata-player:resource.javascript.count.p95": 2,
+    "grigliata-player:resource.css.transferBytes": 22388,
+    "grigliata-player:resource.css.transferBytes.p95": 22388,
+    "grigliata-player:resource.css.gzipBytes": 22088,
+    "grigliata-player:resource.css.gzipBytes.p95": 22088,
+    "grigliata-player:resource.css.count": 1,
+    "grigliata-player:resource.css.count.p95": 1,
+    "grigliata-player:resource.image.transferBytes": 0,
+    "grigliata-player:resource.image.transferBytes.p95": 0,
+    "grigliata-player:resource.image.gzipBytes": 0,
+    "grigliata-player:resource.image.gzipBytes.p95": 0,
+    "grigliata-player:resource.image.count": 128,
+    "grigliata-player:resource.image.count.p95": 128,
+    "home:web-vital.CLS": 0.21457287808641978,
+    "home:web-vital.CLS.p95": 0.21457287808641978,
+    "home:web-vital.INP": 1128,
+    "home:web-vital.INP.p95": 1128,
+    "home:web-vital.LCP": 2660,
+    "home:web-vital.LCP.p95": 2660,
+    "home:web-vital.TTFB": 122.30000000074506,
+    "home:web-vital.TTFB.p95": 122.30000000074506,
+    "home:runtime.maxLongTaskMs": 431,
+    "home:runtime.maxLongTaskMs.p95": 496,
+    "home:runtime.consoleErrors": 0,
+    "home:runtime.consoleErrors.p95": 0,
+    "home:runtime.unhandledErrors": 0,
+    "home:runtime.unhandledErrors.p95": 0,
+    "home:runtime.failedRequests": 0,
+    "home:runtime.failedRequests.p95": 0,
+    "home:runtime.synchronousNetworkCalls": 0,
+    "home:runtime.synchronousNetworkCalls.p95": 0,
+    "home:firestore.documentsDelivered": 24,
+    "home:firestore.documentsDelivered.p95": 24,
+    "home:firestore.activeListenersAfterCleanup": 0,
+    "home:firestore.activeListenersAfterCleanup.p95": 0,
+    "home:runtime.activeResourcesAfterCleanup": 0,
+    "home:runtime.activeResourcesAfterCleanup.p95": 0,
+    "home:runtime.activeTimeoutsAfterCleanup": 3,
+    "home:runtime.activeTimeoutsAfterCleanup.p95": 3,
+    "home:runtime.activeMediaAfterCleanup": 0,
+    "home:runtime.activeMediaAfterCleanup.p95": 0,
+    "home:runtime.finalHeapBytes": 40035528,
+    "home:runtime.finalHeapBytes.p95": 40466028,
+    "home:runtime.finalDomNodes": 23598,
+    "home:runtime.finalDomNodes.p95": 24108,
+    "home:resource.other.transferBytes": 2254,
+    "home:resource.other.transferBytes.p95": 2254,
+    "home:resource.other.gzipBytes": 1354,
+    "home:resource.other.gzipBytes.p95": 1354,
+    "home:resource.other.count": 12,
+    "home:resource.other.count.p95": 12,
+    "home:resource.javascript.transferBytes": 673342,
+    "home:resource.javascript.transferBytes.p95": 673342,
+    "home:resource.javascript.gzipBytes": 672742,
+    "home:resource.javascript.gzipBytes.p95": 672742,
+    "home:resource.javascript.count": 2,
+    "home:resource.javascript.count.p95": 2,
+    "home:resource.css.transferBytes": 22388,
+    "home:resource.css.transferBytes.p95": 22388,
+    "home:resource.css.gzipBytes": 22088,
+    "home:resource.css.gzipBytes.p95": 22088,
+    "home:resource.css.count": 1,
+    "home:resource.css.count.p95": 1,
+    "home:resource.image.transferBytes": 0,
+    "home:resource.image.transferBytes.p95": 0,
+    "home:resource.image.gzipBytes": 0,
+    "home:resource.image.gzipBytes.p95": 0,
+    "home:resource.image.count": 1,
+    "home:resource.image.count.p95": 1,
+    "login-cold:web-vital.CLS": 0.00019693930041152262,
+    "login-cold:web-vital.CLS.p95": 0.00019693930041152262,
+    "login-cold:web-vital.LCP": 1240,
+    "login-cold:web-vital.LCP.p95": 1240,
+    "login-cold:web-vital.TTFB": 34.400000002235174,
+    "login-cold:web-vital.TTFB.p95": 34.400000002235174,
+    "login-cold:runtime.maxLongTaskMs": 424,
+    "login-cold:runtime.maxLongTaskMs.p95": 475,
+    "login-cold:runtime.consoleErrors": 0,
+    "login-cold:runtime.consoleErrors.p95": 0,
+    "login-cold:runtime.unhandledErrors": 0,
+    "login-cold:runtime.unhandledErrors.p95": 0,
+    "login-cold:runtime.failedRequests": 0,
+    "login-cold:runtime.failedRequests.p95": 0,
+    "login-cold:runtime.synchronousNetworkCalls": 0,
+    "login-cold:runtime.synchronousNetworkCalls.p95": 0,
+    "login-cold:firestore.documentsDelivered": 0,
+    "login-cold:firestore.documentsDelivered.p95": 0,
+    "login-cold:firestore.activeListenersAfterCleanup": 0,
+    "login-cold:firestore.activeListenersAfterCleanup.p95": 0,
+    "login-cold:runtime.activeResourcesAfterCleanup": 0,
+    "login-cold:runtime.activeResourcesAfterCleanup.p95": 0,
+    "login-cold:runtime.activeTimeoutsAfterCleanup": 0,
+    "login-cold:runtime.activeTimeoutsAfterCleanup.p95": 0,
+    "login-cold:runtime.activeMediaAfterCleanup": 0,
+    "login-cold:runtime.activeMediaAfterCleanup.p95": 0,
+    "login-cold:runtime.finalHeapBytes": 9432468,
+    "login-cold:runtime.finalHeapBytes.p95": 9435232,
+    "login-cold:runtime.finalDomNodes": 648,
+    "login-cold:runtime.finalDomNodes.p95": 648,
+    "login-cold:resource.other.transferBytes": 2254,
+    "login-cold:resource.other.transferBytes.p95": 2254,
+    "login-cold:resource.other.gzipBytes": 1354,
+    "login-cold:resource.other.gzipBytes.p95": 1354,
+    "login-cold:resource.other.count": 3,
+    "login-cold:resource.other.count.p95": 3,
+    "login-cold:resource.javascript.transferBytes": 673342,
+    "login-cold:resource.javascript.transferBytes.p95": 673342,
+    "login-cold:resource.javascript.gzipBytes": 672742,
+    "login-cold:resource.javascript.gzipBytes.p95": 672742,
+    "login-cold:resource.javascript.count": 2,
+    "login-cold:resource.javascript.count.p95": 2,
+    "login-cold:resource.css.transferBytes": 22388,
+    "login-cold:resource.css.transferBytes.p95": 22388,
+    "login-cold:resource.css.gzipBytes": 22088,
+    "login-cold:resource.css.gzipBytes.p95": 22088,
+    "login-cold:resource.css.count": 1,
+    "login-cold:resource.css.count.p95": 1,
+    "login-warm:web-vital.CLS": 0,
+    "login-warm:web-vital.CLS.p95": 0,
+    "login-warm:web-vital.LCP": 652,
+    "login-warm:web-vital.LCP.p95": 652,
+    "login-warm:web-vital.TTFB": 30.599999997764826,
+    "login-warm:web-vital.TTFB.p95": 30.599999997764826,
+    "login-warm:runtime.maxLongTaskMs": 51,
+    "login-warm:runtime.maxLongTaskMs.p95": 57,
+    "login-warm:runtime.consoleErrors": 0,
+    "login-warm:runtime.consoleErrors.p95": 0,
+    "login-warm:runtime.unhandledErrors": 0,
+    "login-warm:runtime.unhandledErrors.p95": 0,
+    "login-warm:runtime.failedRequests": 0,
+    "login-warm:runtime.failedRequests.p95": 0,
+    "login-warm:runtime.synchronousNetworkCalls": 0,
+    "login-warm:runtime.synchronousNetworkCalls.p95": 0,
+    "login-warm:firestore.documentsDelivered": 0,
+    "login-warm:firestore.documentsDelivered.p95": 0,
+    "login-warm:firestore.activeListenersAfterCleanup": 0,
+    "login-warm:firestore.activeListenersAfterCleanup.p95": 0,
+    "login-warm:runtime.activeResourcesAfterCleanup": 0,
+    "login-warm:runtime.activeResourcesAfterCleanup.p95": 0,
+    "login-warm:runtime.activeTimeoutsAfterCleanup": 0,
+    "login-warm:runtime.activeTimeoutsAfterCleanup.p95": 0,
+    "login-warm:runtime.activeMediaAfterCleanup": 0,
+    "login-warm:runtime.activeMediaAfterCleanup.p95": 0,
+    "login-warm:runtime.finalHeapBytes": 11009180,
+    "login-warm:runtime.finalHeapBytes.p95": 11202596,
+    "login-warm:runtime.finalDomNodes": 1257,
+    "login-warm:runtime.finalDomNodes.p95": 1257,
+    "login-warm:resource.other.transferBytes": 0,
+    "login-warm:resource.other.transferBytes.p95": 0,
+    "login-warm:resource.other.gzipBytes": 1354,
+    "login-warm:resource.other.gzipBytes.p95": 1354,
+    "login-warm:resource.other.count": 3,
+    "login-warm:resource.other.count.p95": 3,
+    "login-warm:resource.javascript.transferBytes": 0,
+    "login-warm:resource.javascript.transferBytes.p95": 0,
+    "login-warm:resource.javascript.gzipBytes": 672742,
+    "login-warm:resource.javascript.gzipBytes.p95": 672742,
+    "login-warm:resource.javascript.count": 2,
+    "login-warm:resource.javascript.count.p95": 2,
+    "login-warm:resource.css.transferBytes": 0,
+    "login-warm:resource.css.transferBytes.p95": 0,
+    "login-warm:resource.css.gzipBytes": 22088,
+    "login-warm:resource.css.gzipBytes.p95": 22088,
+    "login-warm:resource.css.count": 1,
+    "login-warm:resource.css.count.p95": 1,
+    "login-warm:resource.font.transferBytes": 0,
+    "login-warm:resource.font.transferBytes.p95": 0,
+    "login-warm:resource.font.gzipBytes": 52916,
+    "login-warm:resource.font.gzipBytes.p95": 52916,
+    "login-warm:resource.font.count": 2,
+    "login-warm:resource.font.count.p95": 2,
+    "tecniche-spell:web-vital.CLS": 0.0623869973851166,
+    "tecniche-spell:web-vital.CLS.p95": 0.0623869973851166,
+    "tecniche-spell:web-vital.LCP": 1632,
+    "tecniche-spell:web-vital.LCP.p95": 1632,
+    "tecniche-spell:web-vital.TTFB": 10.5,
+    "tecniche-spell:web-vital.TTFB.p95": 10.5,
+    "tecniche-spell:runtime.maxLongTaskMs": 476,
+    "tecniche-spell:runtime.maxLongTaskMs.p95": 484,
+    "tecniche-spell:runtime.consoleErrors": 0,
+    "tecniche-spell:runtime.consoleErrors.p95": 0,
+    "tecniche-spell:runtime.unhandledErrors": 0,
+    "tecniche-spell:runtime.unhandledErrors.p95": 0,
+    "tecniche-spell:runtime.failedRequests": 0,
+    "tecniche-spell:runtime.failedRequests.p95": 0,
+    "tecniche-spell:runtime.synchronousNetworkCalls": 0,
+    "tecniche-spell:runtime.synchronousNetworkCalls.p95": 0,
+    "tecniche-spell:firestore.documentsDelivered": 27,
+    "tecniche-spell:firestore.documentsDelivered.p95": 27,
+    "tecniche-spell:firestore.activeListenersAfterCleanup": 0,
+    "tecniche-spell:firestore.activeListenersAfterCleanup.p95": 0,
+    "tecniche-spell:runtime.activeResourcesAfterCleanup": 0,
+    "tecniche-spell:runtime.activeResourcesAfterCleanup.p95": 0,
+    "tecniche-spell:runtime.activeTimeoutsAfterCleanup": 0,
+    "tecniche-spell:runtime.activeTimeoutsAfterCleanup.p95": 1,
+    "tecniche-spell:runtime.activeMediaAfterCleanup": 0,
+    "tecniche-spell:runtime.activeMediaAfterCleanup.p95": 0,
+    "tecniche-spell:runtime.finalHeapBytes": 11963920,
+    "tecniche-spell:runtime.finalHeapBytes.p95": 12006840,
+    "tecniche-spell:runtime.finalDomNodes": 2754,
+    "tecniche-spell:runtime.finalDomNodes.p95": 2754,
+    "tecniche-spell:resource.other.transferBytes": 2254,
+    "tecniche-spell:resource.other.transferBytes.p95": 2254,
+    "tecniche-spell:resource.other.gzipBytes": 1354,
+    "tecniche-spell:resource.other.gzipBytes.p95": 1354,
+    "tecniche-spell:resource.other.count": 9,
+    "tecniche-spell:resource.other.count.p95": 9,
+    "tecniche-spell:resource.javascript.transferBytes": 673342,
+    "tecniche-spell:resource.javascript.transferBytes.p95": 673342,
+    "tecniche-spell:resource.javascript.gzipBytes": 672742,
+    "tecniche-spell:resource.javascript.gzipBytes.p95": 672742,
+    "tecniche-spell:resource.javascript.count": 2,
+    "tecniche-spell:resource.javascript.count.p95": 2,
+    "tecniche-spell:resource.css.transferBytes": 22388,
+    "tecniche-spell:resource.css.transferBytes.p95": 22388,
+    "tecniche-spell:resource.css.gzipBytes": 22088,
+    "tecniche-spell:resource.css.gzipBytes.p95": 22088,
+    "tecniche-spell:resource.css.count": 1,
+    "tecniche-spell:resource.css.count.p95": 1,
+    "tecniche-spell:resource.image.transferBytes": 0,
+    "tecniche-spell:resource.image.transferBytes.p95": 0,
+    "tecniche-spell:resource.image.gzipBytes": 0,
+    "tecniche-spell:resource.image.gzipBytes.p95": 0,
+    "tecniche-spell:resource.image.count": 1,
+    "tecniche-spell:resource.image.count.p95": 1
+  },
+  "budgetResults": [
+    {
+      "id": "scenario-completeness",
+      "severity": "blocking",
+      "status": "pass",
+      "missing": []
+    },
+    {
+      "id": "metric-completeness",
+      "severity": "blocking",
+      "status": "pass",
+      "missing": []
+    },
+    {
+      "id": "fixture-integrity",
+      "severity": "blocking",
+      "status": "pass",
+      "actual": "8756b05342b3371cd56c87cd31a236262267755ce66e9fa6085a1cca9bb0bdba"
+    },
+    {
+      "id": "instrumented-build-integrity",
+      "severity": "blocking",
+      "status": "pass"
+    },
+    {
+      "id": "normal-build-instrumentation-absent",
+      "severity": "blocking",
+      "status": "pass"
+    },
+    {
+      "id": "entry-javascript-regression",
+      "scenario": "build",
+      "metric": "javascript.entry.gzipBytes",
+      "severity": "blocking",
+      "comparison": "relative-to-baseline",
+      "maximum": null,
+      "tolerance": {
+        "percent": 10,
+        "absoluteBytes": 30720
+      },
+      "ownerTask": "01",
+      "status": "pass",
+      "evaluations": [
+        {
+          "key": "build:javascript.entry.gzipBytes",
+          "actual": 706239,
+          "allowed": 776862.9,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "id": "login-entry-target",
+      "scenario": "login-cold",
+      "metric": "resource.javascript.gzipBytes",
+      "severity": "target",
+      "comparison": "absolute",
+      "maximum": 256000,
+      "tolerance": null,
+      "ownerTask": "03",
+      "status": "fail",
+      "evaluations": [
+        {
+          "key": "login-cold:resource.javascript.gzipBytes",
+          "actual": 672742,
+          "allowed": 256000,
+          "status": "fail"
+        }
+      ]
+    },
+    {
+      "id": "no-console-errors",
+      "scenario": "all",
+      "metric": "runtime.consoleErrors",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "01",
+      "status": "pass",
+      "evaluations": [
+        {
+          "key": "admin:runtime.consoleErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "bazaar:runtime.consoleErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "character-creation:runtime.consoleErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "codex:runtime.consoleErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "combat:runtime.consoleErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "dm-dashboard:runtime.consoleErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "echi-di-viaggio:runtime.consoleErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "foes-hub:runtime.consoleErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-five-peer:runtime.consoleErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-manager:runtime.consoleErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-player:runtime.consoleErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "home:runtime.consoleErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "login-cold:runtime.consoleErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "login-warm:runtime.consoleErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "tecniche-spell:runtime.consoleErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "id": "no-unhandled-errors",
+      "scenario": "all",
+      "metric": "runtime.unhandledErrors",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "01",
+      "status": "pass",
+      "evaluations": [
+        {
+          "key": "admin:runtime.unhandledErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "bazaar:runtime.unhandledErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "character-creation:runtime.unhandledErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "codex:runtime.unhandledErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "combat:runtime.unhandledErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "dm-dashboard:runtime.unhandledErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "echi-di-viaggio:runtime.unhandledErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "foes-hub:runtime.unhandledErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-five-peer:runtime.unhandledErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-manager:runtime.unhandledErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-player:runtime.unhandledErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "home:runtime.unhandledErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "login-cold:runtime.unhandledErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "login-warm:runtime.unhandledErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "tecniche-spell:runtime.unhandledErrors",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "id": "no-failed-requests",
+      "scenario": "all",
+      "metric": "runtime.failedRequests",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "01",
+      "status": "pass",
+      "evaluations": [
+        {
+          "key": "admin:runtime.failedRequests",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "bazaar:runtime.failedRequests",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "character-creation:runtime.failedRequests",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "codex:runtime.failedRequests",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "combat:runtime.failedRequests",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "dm-dashboard:runtime.failedRequests",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "echi-di-viaggio:runtime.failedRequests",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "foes-hub:runtime.failedRequests",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-five-peer:runtime.failedRequests",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-manager:runtime.failedRequests",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-player:runtime.failedRequests",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "home:runtime.failedRequests",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "login-cold:runtime.failedRequests",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "login-warm:runtime.failedRequests",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "tecniche-spell:runtime.failedRequests",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "id": "no-route-listener-leaks",
+      "scenario": "all",
+      "metric": "firestore.activeListenersAfterCleanup",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "01",
+      "status": "pass",
+      "evaluations": [
+        {
+          "key": "admin:firestore.activeListenersAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "bazaar:firestore.activeListenersAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "character-creation:firestore.activeListenersAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "codex:firestore.activeListenersAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "combat:firestore.activeListenersAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "dm-dashboard:firestore.activeListenersAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "echi-di-viaggio:firestore.activeListenersAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "foes-hub:firestore.activeListenersAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-five-peer:firestore.activeListenersAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-manager:firestore.activeListenersAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-player:firestore.activeListenersAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "home:firestore.activeListenersAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "login-cold:firestore.activeListenersAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "login-warm:firestore.activeListenersAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "tecniche-spell:firestore.activeListenersAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "id": "no-route-resource-leaks",
+      "scenario": "all",
+      "metric": "runtime.activeResourcesAfterCleanup",
+      "severity": "blocking",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "01",
+      "status": "pass",
+      "evaluations": [
+        {
+          "key": "admin:runtime.activeResourcesAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "bazaar:runtime.activeResourcesAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "character-creation:runtime.activeResourcesAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "codex:runtime.activeResourcesAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "combat:runtime.activeResourcesAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "dm-dashboard:runtime.activeResourcesAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "echi-di-viaggio:runtime.activeResourcesAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "foes-hub:runtime.activeResourcesAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-five-peer:runtime.activeResourcesAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-manager:runtime.activeResourcesAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-player:runtime.activeResourcesAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "home:runtime.activeResourcesAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "login-cold:runtime.activeResourcesAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "login-warm:runtime.activeResourcesAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        },
+        {
+          "key": "tecniche-spell:runtime.activeResourcesAfterCleanup",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "id": "route-javascript-transfer-regression",
+      "scenario": "all",
+      "metric": "resource.javascript.gzipBytes",
+      "severity": "blocking",
+      "comparison": "relative-to-baseline",
+      "maximum": null,
+      "tolerance": {
+        "percent": 10,
+        "absoluteBytes": 30720
+      },
+      "ownerTask": "01",
+      "status": "pass",
+      "evaluations": [
+        {
+          "key": "admin:resource.javascript.gzipBytes",
+          "actual": 672742,
+          "allowed": 740016.2,
+          "status": "pass"
+        },
+        {
+          "key": "bazaar:resource.javascript.gzipBytes",
+          "actual": 672742,
+          "allowed": 740016.2,
+          "status": "pass"
+        },
+        {
+          "key": "character-creation:resource.javascript.gzipBytes",
+          "actual": 672742,
+          "allowed": 740016.2,
+          "status": "pass"
+        },
+        {
+          "key": "codex:resource.javascript.gzipBytes",
+          "actual": 672742,
+          "allowed": 740016.2,
+          "status": "pass"
+        },
+        {
+          "key": "combat:resource.javascript.gzipBytes",
+          "actual": 672742,
+          "allowed": 740016.2,
+          "status": "pass"
+        },
+        {
+          "key": "dm-dashboard:resource.javascript.gzipBytes",
+          "actual": 672742,
+          "allowed": 740016.2,
+          "status": "pass"
+        },
+        {
+          "key": "echi-di-viaggio:resource.javascript.gzipBytes",
+          "actual": 672742,
+          "allowed": 740016.2,
+          "status": "pass"
+        },
+        {
+          "key": "foes-hub:resource.javascript.gzipBytes",
+          "actual": 672742,
+          "allowed": 740016.2,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-manager:resource.javascript.gzipBytes",
+          "actual": 672742,
+          "allowed": 740016.2,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-player:resource.javascript.gzipBytes",
+          "actual": 672742,
+          "allowed": 740016.2,
+          "status": "pass"
+        },
+        {
+          "key": "home:resource.javascript.gzipBytes",
+          "actual": 672742,
+          "allowed": 740016.2,
+          "status": "pass"
+        },
+        {
+          "key": "login-cold:resource.javascript.gzipBytes",
+          "actual": 672742,
+          "allowed": 740016.2,
+          "status": "pass"
+        },
+        {
+          "key": "login-warm:resource.javascript.gzipBytes",
+          "actual": 672742,
+          "allowed": 740016.2,
+          "status": "pass"
+        },
+        {
+          "key": "tecniche-spell:resource.javascript.gzipBytes",
+          "actual": 672742,
+          "allowed": 740016.2,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "id": "initial-collection-view-bounded-target",
+      "scenario": "all",
+      "metric": "firestore.documentsDelivered",
+      "severity": "target",
+      "comparison": "absolute",
+      "maximum": 500,
+      "tolerance": null,
+      "ownerTask": "04",
+      "status": "fail",
+      "evaluations": [
+        {
+          "key": "admin:firestore.documentsDelivered",
+          "actual": 204,
+          "allowed": 500,
+          "status": "pass"
+        },
+        {
+          "key": "bazaar:firestore.documentsDelivered",
+          "actual": 1007,
+          "allowed": 500,
+          "status": "fail"
+        },
+        {
+          "key": "character-creation:firestore.documentsDelivered",
+          "actual": 4,
+          "allowed": 500,
+          "status": "pass"
+        },
+        {
+          "key": "codex:firestore.documentsDelivered",
+          "actual": 4,
+          "allowed": 500,
+          "status": "pass"
+        },
+        {
+          "key": "combat:firestore.documentsDelivered",
+          "actual": 445,
+          "allowed": 500,
+          "status": "pass"
+        },
+        {
+          "key": "dm-dashboard:firestore.documentsDelivered",
+          "actual": 1203,
+          "allowed": 500,
+          "status": "fail"
+        },
+        {
+          "key": "echi-di-viaggio:firestore.documentsDelivered",
+          "actual": 3003,
+          "allowed": 500,
+          "status": "fail"
+        },
+        {
+          "key": "foes-hub:firestore.documentsDelivered",
+          "actual": 504,
+          "allowed": 500,
+          "status": "fail"
+        },
+        {
+          "key": "grigliata-manager:firestore.documentsDelivered",
+          "actual": 1121,
+          "allowed": 500,
+          "status": "fail"
+        },
+        {
+          "key": "grigliata-player:firestore.documentsDelivered",
+          "actual": 1248,
+          "allowed": 500,
+          "status": "fail"
+        },
+        {
+          "key": "home:firestore.documentsDelivered",
+          "actual": 24,
+          "allowed": 500,
+          "status": "pass"
+        },
+        {
+          "key": "login-cold:firestore.documentsDelivered",
+          "actual": 0,
+          "allowed": 500,
+          "status": "pass"
+        },
+        {
+          "key": "login-warm:firestore.documentsDelivered",
+          "actual": 0,
+          "allowed": 500,
+          "status": "pass"
+        },
+        {
+          "key": "tecniche-spell:firestore.documentsDelivered",
+          "actual": 27,
+          "allowed": 500,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "id": "no-sync-network-target",
+      "scenario": "login-cold",
+      "metric": "runtime.synchronousNetworkCalls",
+      "severity": "target",
+      "comparison": "absolute",
+      "maximum": 0,
+      "tolerance": null,
+      "ownerTask": "02",
+      "status": "pass",
+      "evaluations": [
+        {
+          "key": "login-cold:runtime.synchronousNetworkCalls",
+          "actual": 0,
+          "allowed": 0,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "id": "lcp-target",
+      "scenario": "all",
+      "metric": "web-vital.LCP",
+      "severity": "target",
+      "comparison": "absolute",
+      "maximum": 2500,
+      "tolerance": null,
+      "ownerTask": "22",
+      "status": "fail",
+      "evaluations": [
+        {
+          "key": "admin:web-vital.LCP",
+          "actual": 2148,
+          "allowed": 2500,
+          "status": "pass"
+        },
+        {
+          "key": "bazaar:web-vital.LCP",
+          "actual": 1060,
+          "allowed": 2500,
+          "status": "pass"
+        },
+        {
+          "key": "character-creation:web-vital.LCP",
+          "actual": 1416,
+          "allowed": 2500,
+          "status": "pass"
+        },
+        {
+          "key": "codex:web-vital.LCP",
+          "actual": 3700,
+          "allowed": 2500,
+          "status": "fail"
+        },
+        {
+          "key": "combat:web-vital.LCP",
+          "actual": 1536,
+          "allowed": 2500,
+          "status": "pass"
+        },
+        {
+          "key": "dm-dashboard:web-vital.LCP",
+          "actual": 1440,
+          "allowed": 2500,
+          "status": "pass"
+        },
+        {
+          "key": "echi-di-viaggio:web-vital.LCP",
+          "actual": 2012,
+          "allowed": 2500,
+          "status": "pass"
+        },
+        {
+          "key": "foes-hub:web-vital.LCP",
+          "actual": 1348,
+          "allowed": 2500,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-manager:web-vital.LCP",
+          "actual": 1548,
+          "allowed": 2500,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-player:web-vital.LCP",
+          "actual": 1892,
+          "allowed": 2500,
+          "status": "pass"
+        },
+        {
+          "key": "home:web-vital.LCP",
+          "actual": 2660,
+          "allowed": 2500,
+          "status": "fail"
+        },
+        {
+          "key": "login-cold:web-vital.LCP",
+          "actual": 1240,
+          "allowed": 2500,
+          "status": "pass"
+        },
+        {
+          "key": "login-warm:web-vital.LCP",
+          "actual": 652,
+          "allowed": 2500,
+          "status": "pass"
+        },
+        {
+          "key": "tecniche-spell:web-vital.LCP",
+          "actual": 1632,
+          "allowed": 2500,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "id": "inp-target",
+      "scenario": "all",
+      "metric": "web-vital.INP",
+      "severity": "target",
+      "comparison": "absolute",
+      "maximum": 200,
+      "tolerance": null,
+      "ownerTask": "22",
+      "status": "fail",
+      "evaluations": [
+        {
+          "key": "foes-hub:web-vital.INP",
+          "actual": 224,
+          "allowed": 200,
+          "status": "fail"
+        },
+        {
+          "key": "grigliata-manager:web-vital.INP",
+          "actual": 592,
+          "allowed": 200,
+          "status": "fail"
+        },
+        {
+          "key": "home:web-vital.INP",
+          "actual": 1128,
+          "allowed": 200,
+          "status": "fail"
+        }
+      ]
+    },
+    {
+      "id": "cls-target",
+      "scenario": "all",
+      "metric": "web-vital.CLS",
+      "severity": "target",
+      "comparison": "absolute",
+      "maximum": 0.1,
+      "tolerance": null,
+      "ownerTask": "22",
+      "status": "fail",
+      "evaluations": [
+        {
+          "key": "admin:web-vital.CLS",
+          "actual": 0.00025994379072359397,
+          "allowed": 0.1,
+          "status": "pass"
+        },
+        {
+          "key": "bazaar:web-vital.CLS",
+          "actual": 0.2434517403978052,
+          "allowed": 0.1,
+          "status": "fail"
+        },
+        {
+          "key": "character-creation:web-vital.CLS",
+          "actual": 0.6428706122336891,
+          "allowed": 0.1,
+          "status": "fail"
+        },
+        {
+          "key": "codex:web-vital.CLS",
+          "actual": 0.36965345798029337,
+          "allowed": 0.1,
+          "status": "fail"
+        },
+        {
+          "key": "combat:web-vital.CLS",
+          "actual": 0.023226633498371056,
+          "allowed": 0.1,
+          "status": "pass"
+        },
+        {
+          "key": "dm-dashboard:web-vital.CLS",
+          "actual": 0.43548238945687584,
+          "allowed": 0.1,
+          "status": "fail"
+        },
+        {
+          "key": "echi-di-viaggio:web-vital.CLS",
+          "actual": 0.09021288124785665,
+          "allowed": 0.1,
+          "status": "pass"
+        },
+        {
+          "key": "foes-hub:web-vital.CLS",
+          "actual": 0.00024042057827503428,
+          "allowed": 0.1,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-manager:web-vital.CLS",
+          "actual": 0.0022884789737654325,
+          "allowed": 0.1,
+          "status": "pass"
+        },
+        {
+          "key": "grigliata-player:web-vital.CLS",
+          "actual": 0.015244838811929335,
+          "allowed": 0.1,
+          "status": "pass"
+        },
+        {
+          "key": "home:web-vital.CLS",
+          "actual": 0.21457287808641978,
+          "allowed": 0.1,
+          "status": "fail"
+        },
+        {
+          "key": "login-cold:web-vital.CLS",
+          "actual": 0.00019693930041152262,
+          "allowed": 0.1,
+          "status": "pass"
+        },
+        {
+          "key": "login-warm:web-vital.CLS",
+          "actual": 0,
+          "allowed": 0.1,
+          "status": "pass"
+        },
+        {
+          "key": "tecniche-spell:web-vital.CLS",
+          "actual": 0.0623869973851166,
+          "allowed": 0.1,
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "id": "grigliata-long-task-target",
+      "scenario": "grigliata-player",
+      "metric": "runtime.maxLongTaskMs",
+      "severity": "target",
+      "comparison": "absolute",
+      "maximum": 50,
+      "tolerance": null,
+      "ownerTask": "17",
+      "status": "fail",
+      "evaluations": [
+        {
+          "key": "grigliata-player:runtime.maxLongTaskMs",
+          "actual": 681,
+          "allowed": 50,
+          "status": "fail"
+        }
+      ]
+    }
+  ]
+}

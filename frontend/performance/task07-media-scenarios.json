@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "scenarios": [
+    {
+      "id": "task07-home-media",
+      "route": "/home",
+      "role": "player",
+      "minimumManagedImages": 400,
+      "maximumAttachedImages": 80,
+      "assertOffscreenDetachment": true
+    },
+    {
+      "id": "task07-bazaar-media",
+      "route": "/bazaar",
+      "role": "player",
+      "minimumManagedImages": 1,
+      "maximumAttachedImages": 96,
+      "assertOffscreenDetachment": true
+    },
+    {
+      "id": "task07-techniques-media",
+      "route": "/tecniche-spell",
+      "role": "player",
+      "minimumManagedImages": 1,
+      "maximumAttachedImages": 96
+    },
+    {
+      "id": "task07-echoes-media",
+      "route": "/echi-di-viaggio",
+      "role": "player",
+      "minimumManagedImages": 1,
+      "maximumAttachedImages": 96
+    },
+    {
+      "id": "task07-foes-media",
+      "route": "/foes-hub",
+      "role": "dm",
+      "minimumManagedImages": 1,
+      "maximumAttachedImages": 96,
+      "assertOffscreenDetachment": true
+    },
+    {
+      "id": "task07-grigliata-media",
+      "route": "/grigliata",
+      "role": "dm",
+      "minimumManagedImages": 1,
+      "maximumAttachedImages": 96
+    }
+  ]
+}

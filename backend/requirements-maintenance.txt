@@ -1,0 +1,5 @@
+# Install this file only on an explicitly controlled maintenance workstation.
+-r requirements-health.txt
+firebase-admin==6.6.0
+google-cloud-firestore==2.20.0
+google-cloud-storage==2.19.0

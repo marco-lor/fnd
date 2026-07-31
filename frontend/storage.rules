@@ -1,0 +1,639 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDocPath(uid) {
+      return /databases/(default)/documents/users/$(uid);
+    }
+
+    function isActiveUser(uid) {
+      // Storage rules permit only two cross-service Firestore document reads;
+      // the root pending marker blocks an in-flight deletion, and a missing
+      // root fails closed after deletion. Firestore rules separately prevent
+      // recreation whenever the durable deletion-job tombstone exists.
+      let userData = firestore.get(userDocPath(uid)).data;
+      return userData == null
+        ? false
+        : userData.get("deletionState", null) != "pending";
+    }
+
+    function isActiveSignedIn() {
+      return isSignedIn()
+        ? isActiveUser(request.auth.uid)
+        : false;
+    }
+
+    function userRole() {
+      return isActiveSignedIn()
+        ? firestore.get(userDocPath(request.auth.uid)).data.role
+        : null;
+    }
+
+    function isDM() {
+      return userRole() == "dm";
+    }
+
+    function isWebmaster() {
+      return userRole() == "webmaster";
+    }
+
+    function isCatalogManager() {
+      return isDM() || isWebmaster();
+    }
+
+    function filenameBelongsToCaller(fileName) {
+      return isActiveSignedIn()
+        && fileName.matches('^.*' + request.auth.uid + '.*$');
+    }
+
+    function isCallerOwnedVarieFile(fileName) {
+      return isActiveSignedIn()
+        && fileName.matches('^varie_' + request.auth.uid + '_.*$');
+    }
+
+    function isImage(maxBytes) {
+      return request.resource != null
+        && request.resource.size <= maxBytes
+        && request.resource.contentType.matches('^image/.+$');
+    }
+
+    function isAudio(maxBytes) {
+      return request.resource != null
+        && request.resource.size <= maxBytes
+        && request.resource.contentType.matches('^audio/.+$');
+    }
+
+    function isVideo(maxBytes) {
+      return request.resource != null
+        && request.resource.size <= maxBytes
+        && request.resource.contentType.matches('^video/.+$');
+    }
+
+    function task07ManifestPath(assetId) {
+      return /databases/(default)/documents/media_assets/$(assetId);
+    }
+
+    function task07KindIsKnown(kind) {
+      return kind in [
+        'avatar',
+        'item',
+        'npc',
+        'foe',
+        'map',
+        'map-video'
+      ];
+    }
+
+    function task07ManifestMatches(manifest, kind, ownerUid, assetId) {
+      return manifest.schemaVersion == 1
+        && manifest.contractVersion == 1
+        && task07KindIsKnown(kind)
+        && assetId.matches('^m_[a-f0-9]{40}$')
+        && manifest.assetId == assetId
+        && manifest.kind == kind
+        && manifest.ownerUid == ownerUid
+        && manifest.contractVersion == 1
+        && manifest.plan.schemaVersion == 1
+        && manifest.plan.contractVersion == 1
+        && manifest.plan.assetId == assetId
+        && manifest.plan.kind == kind
+        && manifest.plan.actorUid == manifest.actorUid
+        && manifest.plan.ownerUid == ownerUid
+        && manifest.plan.entityId == manifest.entityId
+        && manifest.plan.get("referenceScope", null)
+          == manifest.get("referenceScope", null)
+        && (
+          kind == 'item'
+            ? manifest.get("referenceScope", null) in [
+              'global-catalog',
+              'user-inventory'
+            ]
+            : manifest.get("referenceScope", null) == null
+        );
+    }
+
+    function task07AudienceCanRead(manifest) {
+      return (
+          manifest.kind in ['avatar', 'npc', 'map', 'map-video']
+        )
+        || (
+          manifest.kind == 'foe'
+          && isDM()
+        )
+        || (
+          manifest.kind == 'item'
+          && (
+            manifest.get("referenceScope", null) == 'global-catalog'
+            || (
+              manifest.get("referenceScope", null) == 'user-inventory'
+              && (
+                request.auth.uid == manifest.ownerUid
+                || isCatalogManager()
+              )
+            )
+          )
+        );
+    }
+
+    function canReadTask07Media(kind, ownerUid, assetId) {
+      let manifest = firestore.get(task07ManifestPath(assetId)).data;
+      let sharedState = manifest.state in [
+        'ready', 'fallback', 'referenced', 'superseded'
+      ];
+      return isActiveSignedIn()
+        && task07ManifestMatches(manifest, kind, ownerUid, assetId)
+        && task07AudienceCanRead(manifest)
+        && (
+          manifest.actorUid == request.auth.uid
+          || sharedState
+        );
+    }
+
+    function canCreateTask07Media(kind, ownerUid, assetId) {
+      let manifest = firestore.get(task07ManifestPath(assetId)).data;
+      return isActiveSignedIn()
+        && task07ManifestMatches(manifest, kind, ownerUid, assetId)
+        && manifest.actorUid == request.auth.uid
+        && manifest.state in ['prepared', 'failed'];
+    }
+
+    function task07VariantRole(fileName) {
+      return fileName == 'thumbnail.webp' ? 'thumbnail'
+        : fileName == 'card.webp' ? 'card'
+        : fileName == 'board.webp' ? 'board'
+        : fileName == 'poster.webp' ? 'poster'
+        : '';
+    }
+
+    // Cloud Storage write rules expose custom metadata, size, content type,
+    // contentDisposition, name, and bucket. cacheControl is not exposed by
+    // Rules; the browser stamps it and the server finalizer verifies it before
+    // an asset becomes shared.
+    // Exact map equality rejects missing, altered, and extra client metadata.
+    function task07UploadMetadataMatches(
+      manifest,
+      kind,
+      ownerUid,
+      assetId,
+      role
+    ) {
+      let metadata = request.resource.metadata;
+      return metadata == {
+          'task07AssetId': assetId,
+          'task07ContractVersion': '1',
+          'task07EntityId': manifest.plan.entityId,
+          'task07Kind': kind,
+          'task07OwnerUid': ownerUid,
+          'task07Role': role
+        }
+        && assetId == manifest.plan.assetId
+        && kind == manifest.plan.kind
+        && ownerUid == manifest.plan.ownerUid;
+    }
+
+    function task07SourceBytesAreBounded(kind) {
+      return request.resource.size > 0
+        && request.resource.size <= (
+          kind == 'avatar' ? 5 * 1024 * 1024
+          : kind == 'map' ? 15 * 1024 * 1024
+          : kind == 'map-video' ? 25 * 1024 * 1024
+          : 8 * 1024 * 1024
+        );
+    }
+
+    function task07SourceFileMatches(kind, fileName) {
+      return (
+          request.resource.contentType == 'image/jpeg'
+          && fileName == 'source.jpg'
+          && kind != 'map-video'
+        )
+        || (
+          request.resource.contentType == 'image/png'
+          && fileName == 'source.png'
+          && kind != 'map-video'
+        )
+        || (
+          request.resource.contentType == 'image/webp'
+          && fileName == 'source.webp'
+          && kind != 'map-video'
+        )
+        || (
+          request.resource.contentType == 'image/gif'
+          && fileName == 'source.gif'
+          && kind != 'map-video'
+        )
+        || (
+          request.resource.contentType == 'video/mp4'
+          && fileName == 'source.mp4'
+          && kind == 'map-video'
+        );
+    }
+
+    function task07VariantBytesAreBounded(kind, fileName) {
+      return request.resource.size > 0
+        && (
+          (
+            fileName == 'thumbnail.webp'
+            && request.resource.size <= (
+              kind == 'avatar' || kind == 'item' ? 128 * 1024
+              : kind == 'npc' || kind == 'foe' ? 160 * 1024
+              : 256 * 1024
+            )
+          )
+          || (
+            fileName == 'card.webp'
+            && request.resource.size <= (
+              kind == 'avatar' ? 384 * 1024
+              : kind == 'item' ? 512 * 1024
+              : kind == 'npc' || kind == 'foe' ? 640 * 1024
+              : 1024 * 1024
+            )
+          )
+          || (
+            fileName == 'board.webp'
+            && kind == 'map'
+            && request.resource.size <= 4 * 1024 * 1024
+          )
+          || (
+            fileName == 'poster.webp'
+            && kind == 'map-video'
+            && request.resource.size <= 256 * 1024
+          )
+        );
+    }
+
+    function task07VariantIsPlanned(
+      manifest,
+      kind,
+      ownerUid,
+      assetId,
+      fileName
+    ) {
+      let prefix = 'media/v1/' + kind + '/' + ownerUid + '/' + assetId
+        + '/derivatives/v1/';
+      return (
+          fileName == 'thumbnail.webp'
+          && manifest.plan.variants.thumbnail == prefix + fileName
+        )
+        || (
+          fileName == 'card.webp'
+          && manifest.plan.variants.card == prefix + fileName
+        )
+        || (
+          fileName == 'board.webp'
+          && manifest.plan.variants.board == prefix + fileName
+        )
+        || (
+          fileName == 'poster.webp'
+          && manifest.plan.variants.poster == prefix + fileName
+        );
+    }
+
+    function task07V2ManifestMatches(manifest, ownerUid, assetId) {
+      return manifest.schemaVersion == 1
+        && manifest.policyVersion == 1
+        && manifest.assetId == assetId
+        && manifest.ownerUid == ownerUid
+        && manifest.plan.schemaVersion == 1
+        && manifest.plan.policyVersion == 1
+        && manifest.plan.contractVersion == 1
+        && manifest.plan.assetId == assetId
+        && manifest.plan.ownerUid == ownerUid
+        && manifest.plan.sourcePath
+          == 'media_uploads/' + ownerUid + '/' + assetId + '/source'
+        && manifest.plan.sourceBytes > 0
+        && manifest.plan.sourceBytes <= (
+          manifest.plan.kind == 'avatar' ? 5 * 1024 * 1024
+          : manifest.plan.kind == 'map' ? 15 * 1024 * 1024
+          : manifest.plan.kind in [
+              'technique-video', 'spell-video', 'map-video', 'music'
+            ] ? 25 * 1024 * 1024
+          : 8 * 1024 * 1024
+        )
+        && manifest.plan.kind in [
+          'avatar', 'item', 'token', 'npc', 'foe', 'technique', 'spell',
+          'map', 'technique-video', 'spell-video', 'map-video', 'music'
+        ];
+    }
+
+    function task07StagingMetadataMatches(manifest, ownerUid, assetId) {
+      return request.resource.metadata == {
+          'task07AssetId': assetId,
+          'task07ContractVersion': '1',
+          'task07EntityId': manifest.plan.entityId,
+          'task07Kind': manifest.plan.kind,
+          'task07OwnerUid': ownerUid,
+          'task07Role': 'source'
+        };
+    }
+
+    function task07FoeOperationReceiptPath(receiptId) {
+      return /databases/(default)/documents/task07_foe_media_operations/$(receiptId);
+    }
+
+    function task07FoeOperationCreateMatches(
+      actorUid,
+      receiptId,
+      foeId,
+      slot,
+      fileName
+    ) {
+      let receipt = firestore.get(
+        task07FoeOperationReceiptPath(receiptId)
+      ).data;
+      let upload = receipt.uploadsBySlot[slot];
+      return resource == null
+        && isDM()
+        && request.auth.uid == actorUid
+        && receipt.schemaVersion == 1
+        && receipt.status == 'pending'
+        && receipt.actorUid == actorUid
+        && receipt.foeId == foeId
+        && upload.path == 'foes/task07-operations/' + actorUid + '/'
+          + receiptId + '/' + foeId + '/' + slot + '/' + fileName
+        && upload.fileName == fileName
+        && upload.bytes > 0
+        && upload.bytes <= 8 * 1024 * 1024
+        && request.resource.size == upload.bytes
+        && request.resource.contentType == upload.contentType
+        && request.resource.contentType in [
+          'image/jpeg', 'image/png', 'image/webp', 'image/gif'
+        ]
+        && request.resource.contentDisposition == 'inline'
+        && request.resource.metadata == upload.metadata;
+    }
+
+    function task07GeneratedAudienceCanRead(audience, ownerUid) {
+      return audience == 'signed-in'
+        || (
+          audience == 'owner-manager'
+          && (
+            request.auth.uid == ownerUid
+            || isCatalogManager()
+          )
+        )
+        || (
+          audience == 'dm-only'
+          && isDM()
+        );
+    }
+
+    function task07GeneratedManifestMatches(
+      manifest,
+      audience,
+      ownerUid,
+      assetId,
+      generation
+    ) {
+      return task07V2ManifestMatches(manifest, ownerUid, assetId)
+        && manifest.plan.audienceScope == audience
+        && manifest.plan.ownerKey == ownerUid
+        && manifest.generated.generation == generation
+        && manifest.state in ['ready', 'attached', 'superseded'];
+    }
+
+    function task07GeneratedObjectIsReferenced(
+      manifest,
+      audience,
+      ownerUid,
+      assetId,
+      generation,
+      variant
+    ) {
+      let expectedPath = 'media_assets/v1/' + audience + '/' + ownerUid
+        + '/' + assetId + '/' + generation + '/' + variant;
+      return (
+          variant == 'original'
+          && manifest.generated.original.path == expectedPath
+        )
+        || (
+          variant in [
+            'thumbnail', 'thumbnail2x', 'card', 'card2x',
+            'gallery', 'gallery2x', 'poster', 'poster2x'
+          ]
+          && manifest.generated.variants[variant].path == expectedPath
+        );
+    }
+
+    // Browsers may create exactly one immutable staging source. They cannot
+    // read it back, overwrite it, delete it, or write generated media.
+    match /media_uploads/{ownerUid}/{assetId}/source {
+      allow create: if resource == null
+        && isActiveSignedIn()
+        && assetId.matches('^m_[a-f0-9]{40}$')
+        && firestore.exists(task07ManifestPath(assetId))
+        && task07V2ManifestMatches(
+          firestore.get(task07ManifestPath(assetId)).data,
+          ownerUid,
+          assetId
+        )
+        && firestore.get(task07ManifestPath(assetId)).data.actorUid
+          == request.auth.uid
+        && firestore.get(task07ManifestPath(assetId)).data.state
+          in ['intent', 'failed']
+        && request.resource.size
+          == firestore.get(task07ManifestPath(assetId)).data.plan.sourceBytes
+        && request.resource.contentType
+          == firestore.get(task07ManifestPath(assetId)).data.plan.sourceContentType
+        && request.resource.contentDisposition == 'inline'
+        && task07StagingMetadataMatches(
+          firestore.get(task07ManifestPath(assetId)).data,
+          ownerUid,
+          assetId
+        );
+      allow read, update, delete: if false;
+    }
+
+    match /media_assets/v1/{audience}/{ownerUid}/{assetId}/{generation}/{variant} {
+      allow read: if isActiveSignedIn()
+        && firestore.exists(task07ManifestPath(assetId))
+        && task07GeneratedManifestMatches(
+          firestore.get(task07ManifestPath(assetId)).data,
+          audience,
+          ownerUid,
+          assetId,
+          generation
+        )
+        && task07GeneratedAudienceCanRead(audience, ownerUid)
+        && task07GeneratedObjectIsReferenced(
+          firestore.get(task07ManifestPath(assetId)).data,
+          audience,
+          ownerUid,
+          assetId,
+          generation,
+          variant
+        );
+      allow write: if false;
+    }
+
+    match /characters/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if filenameBelongsToCaller(fileName)
+        && isImage(8 * 1024 * 1024);
+      allow delete: if filenameBelongsToCaller(fileName) || isWebmaster();
+    }
+
+    match /items/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if (
+          isCatalogManager()
+          || isCallerOwnedVarieFile(fileName)
+        )
+        && isImage(8 * 1024 * 1024);
+      allow delete: if isCatalogManager()
+        || isCallerOwnedVarieFile(fileName);
+    }
+
+    match /tecnicas/videos/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if filenameBelongsToCaller(fileName)
+        && isVideo(25 * 1024 * 1024);
+      allow delete: if filenameBelongsToCaller(fileName);
+    }
+
+    match /tecnicas/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if filenameBelongsToCaller(fileName)
+        && isImage(8 * 1024 * 1024);
+      allow delete: if filenameBelongsToCaller(fileName);
+    }
+
+    match /spells/videos/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if (
+          isCatalogManager()
+          || filenameBelongsToCaller(fileName)
+        )
+        && isVideo(25 * 1024 * 1024);
+      allow delete: if isCatalogManager() || filenameBelongsToCaller(fileName);
+    }
+
+    match /spells/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if (
+          isCatalogManager()
+          || filenameBelongsToCaller(fileName)
+        )
+        && isImage(8 * 1024 * 1024);
+      allow delete: if isCatalogManager() || filenameBelongsToCaller(fileName);
+    }
+
+    match /spell_images/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isCatalogManager() && isImage(8 * 1024 * 1024);
+      allow delete: if isCatalogManager();
+    }
+
+    match /spell_videos/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isCatalogManager() && isVideo(25 * 1024 * 1024);
+      allow delete: if isCatalogManager();
+    }
+
+    match /foes/task07-operations/{actorUid}/{receiptId}/{foeId}/{slot}/{fileName} {
+      allow read: if isDM();
+      allow create: if task07FoeOperationCreateMatches(
+        actorUid,
+        receiptId,
+        foeId,
+        slot,
+        fileName
+      );
+      // Staged generations are server-owned after receipt-bound creation.
+      // Client deletion cannot prove that no live foe still references them.
+      allow update, delete: if false;
+    }
+
+    match /foes/{firstSegment}/{remaining=**} {
+      allow read: if isDM();
+      allow create, update, delete: if isDM()
+        && firstSegment != 'task07-operations';
+    }
+
+    match /echi_npcs/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isCatalogManager()
+        && request.auth.uid == userId
+        && isImage(8 * 1024 * 1024);
+      allow delete: if isCatalogManager();
+    }
+
+    // Canonical Task 05 user-owned media. Metadata changes are committed by
+    // callable functions before an old object is removed; these paths never
+    // overlap shared catalog assets.
+    match /users/{userId}/profile/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isActiveSignedIn()
+        && request.auth.uid == userId
+        && isImage(8 * 1024 * 1024);
+      allow delete: if false;
+    }
+
+    match /users/{userId}/inventory/{inventoryId}/{fileName} {
+      allow read: if isSignedIn()
+        && (request.auth.uid == userId || isCatalogManager());
+      allow create, update: if isActiveSignedIn()
+        && isActiveUser(userId)
+        && (request.auth.uid == userId || isCatalogManager())
+        && isImage(8 * 1024 * 1024);
+      allow delete: if false;
+    }
+
+    match /users/{userId}/spells/{contentId}/{fileName} {
+      allow read: if isSignedIn()
+        && (request.auth.uid == userId || isCatalogManager());
+      allow create, update: if isActiveSignedIn()
+        && isActiveUser(userId)
+        && (request.auth.uid == userId || isCatalogManager())
+        && (
+          isImage(8 * 1024 * 1024)
+          || isVideo(25 * 1024 * 1024)
+        );
+      allow delete: if false;
+    }
+
+    match /users/{userId}/tecniche/{contentId}/{fileName} {
+      allow read: if isSignedIn()
+        && (request.auth.uid == userId || isCatalogManager());
+      allow create, update: if isActiveSignedIn()
+        && isActiveUser(userId)
+        && (request.auth.uid == userId || isCatalogManager())
+        && (
+          isImage(8 * 1024 * 1024)
+          || isVideo(25 * 1024 * 1024)
+        );
+      allow delete: if false;
+    }
+
+    match /grigliata/backgrounds/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isDM()
+        && request.auth.uid == userId
+        && (
+          isImage(15 * 1024 * 1024)
+          || isVideo(25 * 1024 * 1024)
+        );
+      allow delete: if isDM();
+    }
+
+    match /grigliata/music/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isDM()
+        && request.auth.uid == userId
+        && isAudio(25 * 1024 * 1024);
+      allow delete: if isDM();
+    }
+
+    match /grigliata/tokens/{userId}/{fileName} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isDM());
+      allow create, update: if isActiveSignedIn()
+        && request.auth.uid == userId
+        && isImage(8 * 1024 * 1024);
+      allow delete: if (isActiveSignedIn() && request.auth.uid == userId) || isDM();
+    }
+  }
+}

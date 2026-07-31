@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fnd.local/schemas/firestore-restore-report-v1.json",
+  "title": "FND recursive Firestore restore dry-run report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "mode", "complete", "projectId", "backupHash", "planFingerprint", "counts", "documents"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "mode": { "const": "dry-run" },
+    "complete": { "const": true },
+    "projectId": { "type": "string", "minLength": 1 },
+    "backupHash": { "$ref": "#/$defs/sha256" },
+    "planFingerprint": { "$ref": "#/$defs/sha256" },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["documents", "create", "update", "unchanged"],
+      "properties": {
+        "documents": { "$ref": "#/$defs/count" },
+        "create": { "$ref": "#/$defs/count" },
+        "update": { "$ref": "#/$defs/count" },
+        "unchanged": { "$ref": "#/$defs/count" }
+      }
+    },
+    "documents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pathHash", "action", "expectedFieldsHash", "existingFieldsHash"],
+        "properties": {
+          "pathHash": { "$ref": "#/$defs/sha256" },
+          "action": { "enum": ["create", "update", "unchanged"] },
+          "expectedFieldsHash": { "$ref": "#/$defs/sha256" },
+          "existingFieldsHash": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "count": { "type": "integer", "minimum": 0 }
+  }
+}

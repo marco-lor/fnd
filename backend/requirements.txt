@@ -1,0 +1,2 @@
+# Render/runtime compatibility: the deployed surface is health-only.
+-r requirements-health.txt

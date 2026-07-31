@@ -1,0 +1,113 @@
+{
+  "name": "frontend",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@fortawesome/free-solid-svg-icons": "^6.7.2",
+    "@fortawesome/react-fontawesome": "^0.2.2",
+    "firebase": "^12.12.1",
+    "framer-motion": "^12.4.5",
+    "konva": "^9.3.20",
+    "polygon-clipping": "^0.15.7",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-icons": "^5.5.0",
+    "react-konva": "^18.2.10",
+    "react-router-dom": "^7.1.3",
+    "react-scripts": "5.0.1",
+    "three": "^0.176.0",
+    "web-vitals": "^4.2.4"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "verify:start": "node scripts/verify-start.js",
+    "build": "react-scripts build",
+    "build:production": "node scripts/build-production.js",
+    "verify:production-build": "node scripts/build-production.js --verify-only",
+    "release:test": "node --test scripts/firebase-backend-release-guard.test.js scripts/forced-release-environment.test.js",
+    "users:backfill-directory": "node scripts/backfill-user-directory.js",
+    "users:migrate-v2": "node scripts/task05/user-data-migration.js",
+    "users:cutover-v2": "node scripts/task05/user-data-cutover.js",
+    "grigliata:backfill-media-folders": "node scripts/backfill-grigliata-media-folders.js --project fatin-test --auth firebase-cli",
+    "task07:media-backfill:plan": "node scripts/task07/media-derivative-backfill.js",
+    "task07:test": "npm run task07:test:node",
+    "task07:test:node": "node --test --test-concurrency=1 scripts/bounded-child-process.test.js scripts/task07/media-derivative-backfill.test.js scripts/task07/run-media-integration.test.js scripts/performance/check-media-boundaries.test.js scripts/performance/fixtures.test.js scripts/performance/task07-harness.test.js",
+    "task07:test:jest": "node scripts/task07/run-focused-jest.js",
+    "test:task07": "npm run task07:test:node && npm run task07:test:jest",
+    "images:backfill-cache": "node scripts/backfill-image-cache-metadata.js --project fatin-test --bucket fatin-test.firebasestorage.app --auth firebase-cli",
+    "images:test-cache": "node --test scripts/backfill-image-cache-metadata.test.js",
+    "postinstall": "node scripts/apply-firebase-tools-patch.js",
+    "perf:preflight": "node scripts/performance/preflight.js",
+    "perf:build": "node scripts/performance/build.js",
+    "perf:verify-disabled": "node scripts/performance/verify-disabled-build.js",
+    "perf:emulators": "node scripts/performance/emulators.js",
+    "perf:seed": "node scripts/performance/fixtures.js seed",
+    "perf:verify-fixture": "node scripts/performance/fixtures.js verify",
+    "perf:fixture-determinism": "node scripts/performance/fixtures.js determinism",
+    "perf:run": "playwright test --config performance/playwright.config.js --project chromium",
+    "perf:smoke-cross-browser": "playwright test --config performance/playwright.config.js --project firefox-smoke --project webkit-smoke",
+    "perf:media": "node scripts/task07/run-media-integration.js",
+    "perf:media:cross-browser": "playwright test --config performance/playwright.config.js --project task07-firefox --project task07-webkit --workers=1",
+    "perf:media:soak": "playwright test --config performance/playwright.config.js --project task07-soak --workers=1",
+    "perf:compare": "node scripts/performance/compare.js",
+    "perf:snapshot": "node scripts/performance/snapshot-authoritative.js",
+    "perf:repeatability": "node scripts/performance/repeatability.js",
+    "perf:authoritative": "node scripts/performance/authoritative.js",
+    "perf:firestore-persistence-experiment": "node scripts/performance/firestore-persistence-experiment.js",
+    "perf:functions-integration": "node scripts/performance/task06/functions-integration.js",
+    "perf:ci": "node scripts/performance/ci.js",
+    "perf:baseline": "node scripts/performance/accept-baseline.js",
+    "perf:test": "node --test --test-concurrency=1 scripts/firebase-backend-release-guard.test.js scripts/forced-release-environment.test.js scripts/verify-start.test.js scripts/backfill-user-directory.test.js scripts/task05/user-data-migration.test.js scripts/task05/user-data-cutover.test.js scripts/task07/media-derivative-backfill.test.js scripts/performance/common.test.js scripts/performance/emulator-control.test.js scripts/performance/emulators.test.js scripts/performance/deterministic-static-server.test.js scripts/performance/fixtures.test.js scripts/performance/compare.test.js scripts/performance/report.test.js scripts/performance/repeatability.test.js scripts/performance/authoritative.test.js scripts/performance/snapshot-authoritative.test.js scripts/performance/check-media-boundaries.test.js scripts/performance/task07-harness.test.js scripts/performance/check-query-contracts.test.js scripts/performance/check-shared-config-boundaries.test.js scripts/performance/check-user-data-boundaries.test.js scripts/performance/check-callable-registry.test.js scripts/performance/firestore-persistence-experiment.test.js scripts/performance/firebase-storage-runtime-patch.test.js scripts/performance/task06/functions-integration-runner.test.js scripts/performance/task06/run-integration-tests.test.js scripts/performance/verify-disabled-build.test.js performance/global-setup.test.js performance/tests/browser/helpers.test.js",
+    "perf:rules": "node --test --test-concurrency=1 performance/tests/firestore-rules.test.js performance/tests/task06-rules.test.js performance/tests/task07-media-rules.test.js",
+    "perf:check-firestore-imports": "node scripts/performance/migrate-firestore-imports.js --check",
+    "perf:check-callable-registry": "node scripts/performance/check-callable-registry.js",
+    "perf:check-query-contracts": "node scripts/performance/check-query-contracts.js",
+    "perf:check-shared-config-boundaries": "node scripts/performance/check-shared-config-boundaries.js",
+    "perf:check-user-data-boundaries": "node scripts/performance/check-user-data-boundaries.js",
+    "perf:check-media-boundaries": "node scripts/performance/check-media-boundaries.js",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "fb:login": "npx firebase login",
+    "fb:whoami": "npx firebase projects:list",
+    "fb:init": "npx firebase init firestore:rules,storage:rules --project fatin-test --force",
+    "fb:emulators": "npx firebase emulators:start --only firestore,storage,functions,hosting --project fatin-test",
+    "fb:deploy:rules": "npx firebase deploy --only firestore:rules,firestore:indexes,storage --project fatin-test",
+    "fb:deploy:hosting": "npx firebase deploy --only hosting --project fatin-test",
+    "fb:deploy:functions": "npx firebase deploy --only functions --project fatin-test",
+    "fb:deploy:all": "npx firebase deploy --only firestore,storage,functions,hosting --project fatin-test"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
+    "@playwright/test": "^1.61.1",
+    "@testing-library/jest-dom": "^6.6.4",
+    "@testing-library/react": "^16.3.0",
+    "autoprefixer": "^10.4.16",
+    "firebase-admin": "^13.0.2",
+    "firebase-tools": "15.16.0",
+    "patch-package": "8.0.0",
+    "postcss": "^8.4.31",
+    "tailwindcss": "^3.3.5",
+    "typescript": "^4.9.5"
+  }
+}

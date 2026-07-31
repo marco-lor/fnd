@@ -1,0 +1,426 @@
+{
+  "schemaVersion": 1,
+  "policyVersion": 1,
+  "privateCacheControl": "private, max-age=31536000, immutable",
+  "stagingCacheControl": "private, no-store",
+  "retention": {
+    "unattachedHours": 24,
+    "supersededGraceHours": 168,
+    "cleanupMaxAttempts": 8
+  },
+  "purposes": {
+    "avatar": {
+      "mediaType": "image",
+      "audienceScope": "signed-in",
+      "contentTypes": ["image/jpeg", "image/png", "image/webp"],
+      "maxBytes": 5242880,
+      "maxWidth": 4096,
+      "maxHeight": 4096,
+      "maxPixels": 16000000,
+      "maxDurationMs": null,
+      "variants": {
+        "thumbnail": {
+          "width": 64,
+          "height": 64,
+          "fit": "cover",
+          "quality": 78,
+          "maxBytes": 65536
+        },
+        "thumbnail2x": {
+          "width": 128,
+          "height": 128,
+          "fit": "cover",
+          "quality": 78,
+          "maxBytes": 131072
+        },
+        "card": {
+          "width": 256,
+          "height": 256,
+          "fit": "cover",
+          "quality": 78,
+          "maxBytes": 262144
+        }
+      }
+    },
+    "item": {
+      "mediaType": "image",
+      "audienceScope": "scope-dependent",
+      "contentTypes": ["image/jpeg", "image/png", "image/webp"],
+      "maxBytes": 8388608,
+      "maxWidth": 4096,
+      "maxHeight": 4096,
+      "maxPixels": 24000000,
+      "maxDurationMs": null,
+      "variants": {
+        "thumbnail": {
+          "width": 96,
+          "height": 96,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 98304
+        },
+        "thumbnail2x": {
+          "width": 192,
+          "height": 192,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 196608
+        },
+        "card": {
+          "width": 320,
+          "height": 320,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 393216
+        },
+        "card2x": {
+          "width": 640,
+          "height": 640,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 786432
+        }
+      }
+    },
+    "token": {
+      "mediaType": "image",
+      "audienceScope": "signed-in",
+      "contentTypes": ["image/jpeg", "image/png", "image/webp"],
+      "maxBytes": 8388608,
+      "maxWidth": 4096,
+      "maxHeight": 4096,
+      "maxPixels": 24000000,
+      "maxDurationMs": null,
+      "variants": {
+        "thumbnail": {
+          "width": 96,
+          "height": 96,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 98304
+        },
+        "thumbnail2x": {
+          "width": 192,
+          "height": 192,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 196608
+        },
+        "card": {
+          "width": 320,
+          "height": 320,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 393216
+        },
+        "card2x": {
+          "width": 640,
+          "height": 640,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 786432
+        }
+      }
+    },
+    "npc": {
+      "mediaType": "image",
+      "audienceScope": "signed-in",
+      "contentTypes": ["image/jpeg", "image/png", "image/webp"],
+      "maxBytes": 8388608,
+      "maxWidth": 4096,
+      "maxHeight": 4096,
+      "maxPixels": 24000000,
+      "maxDurationMs": null,
+      "variants": {
+        "thumbnail": {
+          "width": 96,
+          "height": 96,
+          "fit": "cover",
+          "quality": 78,
+          "maxBytes": 98304
+        },
+        "thumbnail2x": {
+          "width": 192,
+          "height": 192,
+          "fit": "cover",
+          "quality": 78,
+          "maxBytes": 196608
+        },
+        "card": {
+          "width": 320,
+          "height": 320,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 393216
+        },
+        "card2x": {
+          "width": 640,
+          "height": 640,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 786432
+        }
+      }
+    },
+    "foe": {
+      "mediaType": "image",
+      "audienceScope": "dm-only",
+      "contentTypes": ["image/jpeg", "image/png", "image/webp"],
+      "maxBytes": 8388608,
+      "maxWidth": 4096,
+      "maxHeight": 4096,
+      "maxPixels": 24000000,
+      "maxDurationMs": null,
+      "variants": {
+        "thumbnail": {
+          "width": 96,
+          "height": 96,
+          "fit": "cover",
+          "quality": 78,
+          "maxBytes": 98304
+        },
+        "thumbnail2x": {
+          "width": 192,
+          "height": 192,
+          "fit": "cover",
+          "quality": 78,
+          "maxBytes": 196608
+        },
+        "card": {
+          "width": 320,
+          "height": 320,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 393216
+        },
+        "card2x": {
+          "width": 640,
+          "height": 640,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 786432
+        }
+      }
+    },
+    "technique": {
+      "mediaType": "image",
+      "audienceScope": "scope-dependent",
+      "contentTypes": ["image/jpeg", "image/png", "image/webp"],
+      "maxBytes": 8388608,
+      "maxWidth": 4096,
+      "maxHeight": 4096,
+      "maxPixels": 24000000,
+      "maxDurationMs": null,
+      "variants": {
+        "thumbnail": {
+          "width": 96,
+          "height": 96,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 98304
+        },
+        "thumbnail2x": {
+          "width": 192,
+          "height": 192,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 196608
+        },
+        "card": {
+          "width": 320,
+          "height": 320,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 393216
+        },
+        "card2x": {
+          "width": 640,
+          "height": 640,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 786432
+        }
+      }
+    },
+    "spell": {
+      "mediaType": "image",
+      "audienceScope": "scope-dependent",
+      "contentTypes": ["image/jpeg", "image/png", "image/webp"],
+      "maxBytes": 8388608,
+      "maxWidth": 4096,
+      "maxHeight": 4096,
+      "maxPixels": 24000000,
+      "maxDurationMs": null,
+      "variants": {
+        "thumbnail": {
+          "width": 96,
+          "height": 96,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 98304
+        },
+        "thumbnail2x": {
+          "width": 192,
+          "height": 192,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 196608
+        },
+        "card": {
+          "width": 320,
+          "height": 320,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 393216
+        },
+        "card2x": {
+          "width": 640,
+          "height": 640,
+          "fit": "inside",
+          "quality": 78,
+          "maxBytes": 786432
+        }
+      }
+    },
+    "map": {
+      "mediaType": "image",
+      "audienceScope": "signed-in",
+      "contentTypes": ["image/jpeg", "image/png", "image/webp"],
+      "maxBytes": 15728640,
+      "maxWidth": 8192,
+      "maxHeight": 8192,
+      "maxPixels": 32000000,
+      "maxDurationMs": null,
+      "variants": {
+        "gallery": {
+          "width": 384,
+          "height": 384,
+          "fit": "inside",
+          "quality": 75,
+          "maxBytes": 393216
+        },
+        "gallery2x": {
+          "width": 768,
+          "height": 768,
+          "fit": "inside",
+          "quality": 75,
+          "maxBytes": 1048576
+        }
+      }
+    },
+    "technique-video": {
+      "mediaType": "video",
+      "audienceScope": "scope-dependent",
+      "contentTypes": ["video/mp4", "video/webm"],
+      "maxBytes": 26214400,
+      "maxWidth": 1920,
+      "maxHeight": 1080,
+      "maxPixels": 2073600,
+      "maxDurationMs": 600000,
+      "variants": {
+        "poster": {
+          "width": 384,
+          "height": 384,
+          "fit": "inside",
+          "quality": 75,
+          "maxBytes": 393216
+        },
+        "poster2x": {
+          "width": 768,
+          "height": 768,
+          "fit": "inside",
+          "quality": 75,
+          "maxBytes": 1048576
+        }
+      }
+    },
+    "spell-video": {
+      "mediaType": "video",
+      "audienceScope": "scope-dependent",
+      "contentTypes": ["video/mp4", "video/webm"],
+      "maxBytes": 26214400,
+      "maxWidth": 1920,
+      "maxHeight": 1080,
+      "maxPixels": 2073600,
+      "maxDurationMs": 600000,
+      "variants": {
+        "poster": {
+          "width": 384,
+          "height": 384,
+          "fit": "inside",
+          "quality": 75,
+          "maxBytes": 393216
+        },
+        "poster2x": {
+          "width": 768,
+          "height": 768,
+          "fit": "inside",
+          "quality": 75,
+          "maxBytes": 1048576
+        }
+      }
+    },
+    "map-video": {
+      "mediaType": "video",
+      "audienceScope": "signed-in",
+      "contentTypes": ["video/mp4", "video/webm"],
+      "maxBytes": 26214400,
+      "maxWidth": 3840,
+      "maxHeight": 2160,
+      "maxPixels": 8294400,
+      "maxDurationMs": 600000,
+      "variants": {
+        "poster": {
+          "width": 384,
+          "height": 384,
+          "fit": "inside",
+          "quality": 75,
+          "maxBytes": 393216
+        },
+        "poster2x": {
+          "width": 768,
+          "height": 768,
+          "fit": "inside",
+          "quality": 75,
+          "maxBytes": 1048576
+        }
+      }
+    },
+    "music": {
+      "mediaType": "audio",
+      "audienceScope": "signed-in",
+      "contentTypes": [
+        "audio/mpeg",
+        "audio/mp4",
+        "audio/aac",
+        "audio/ogg",
+        "audio/wav",
+        "audio/x-wav"
+      ],
+      "maxBytes": 26214400,
+      "maxWidth": null,
+      "maxHeight": null,
+      "maxPixels": null,
+      "maxDurationMs": 3600000,
+      "variants": {}
+    }
+  },
+  "runtimeBudgets": {
+    "desktop": {
+      "maxConcurrentRequests": 4,
+      "maxUnpinnedRecords": 96,
+      "maxUnpinnedDecodedBytes": 134217728,
+      "maxTotalDecodedBytes": 402653184,
+      "maxQueuedPreloads": 32
+    },
+    "compact": {
+      "maxConcurrentRequests": 2,
+      "maxUnpinnedRecords": 64,
+      "maxUnpinnedDecodedBytes": 67108864,
+      "maxTotalDecodedBytes": 335544320,
+      "maxQueuedPreloads": 16
+    },
+    "maxAudioNodes": 4,
+    "maxShellMusicListeners": 1
+  }
+}

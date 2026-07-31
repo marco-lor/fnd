@@ -1,0 +1,961 @@
+// file: ./frontend/src/components/bazaar/Bazaar.js
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { collection, onSnapshot, query, where, or, and } from "../../performance/firestore";
+import { db } from '../firebaseConfig';
+import { useAuth, useAuthSession } from '../../AuthContext';
+import ComparisonPanel from './elements/comparisonComponent';
+import { acquireItem } from './elements/acquireItem';
+import PurchaseConfirmModal from './elements/PurchaseConfirmModal';
+import FiltersSection from './elements/FiltersSection';
+import { SPECIAL_PARAM_SCHEMA_IDS } from '../common/paramMetadata';
+import { useShellLayout } from '../common/shellLayout';
+import { FiShoppingBag } from 'react-icons/fi';
+import { canPrefetchModules } from '../common/lazyLoading';
+import { getSchema } from '../../data/configRepository';
+import {
+  AddAccessorioOverlay,
+  AddArmaturaOverlay,
+  AddConsumabileOverlay,
+  AddWeaponOverlay,
+  BAZAAR_EDITOR_DESCRIPTORS,
+} from './lazyBazaarEditors';
+import { useResources } from '../../data/userData/userDataHooks';
+import { createUserOperationId } from '../../data/userData/userDataCommands';
+import { isUserDataCommandStageResolved } from '../../data/userData/userDataCommandRouting';
+import MediaImage, { hasMediaAsset } from '../common/MediaImage';
+import { normalizeCatalogItemMedia } from './catalogItemMedia';
+
+function ItemCard({ item, onPurchase, onHoverItem, onLockToggle, isLocked, purchasing, purchaseDisabled, userGold }) {
+  const [imageError, setImageError] = useState(false);
+  const title = item.General?.Nome || 'Oggetto Sconosciuto';
+  const { media: itemMedia, fallbackSrc: imageUrl } = normalizeCatalogItemMedia(item);
+  const hasImage = hasMediaAsset(itemMedia, {
+    fallbackSrc: imageUrl,
+    variant: 'card',
+  });
+  const slot = item.General?.Slot || '-';
+  const tipo = item.Specific?.Tipo || '-';
+  const hands = item.Specific?.Hands != null ? item.Specific.Hands : '-';
+  const rawPrice = item?.General?.prezzo ?? 0;
+  const price = typeof rawPrice === 'number' ? rawPrice : parseInt(rawPrice, 10) || 0;
+  const affordable = (userGold ?? 0) >= price;
+
+  useEffect(() => {
+     setImageError(false);
+     if (!hasImage) {
+        setImageError(true);
+     }
+  }, [hasImage, imageUrl]);
+
+  return (
+    <motion.div
+      className={`group relative flex h-full min-h-[18rem] cursor-pointer flex-col overflow-hidden rounded-2xl border bg-gray-800/80 p-3 shadow-lg backdrop-blur-sm transition-colors
+        ${isLocked ? 'border-2 border-blue-500 shadow-blue-500/10' : 'border border-gray-700/60'}
+        ${!affordable && price > 0 ? 'opacity-60 grayscale-[35%] hover:opacity-75' : 'hover:bg-gray-700/90 hover:border-gray-500/70'}
+      `}
+      data-testid={`bazaar-item-card-${item.id}`}
+      whileHover={{ scale: 1.02 }}
+      onMouseEnter={() => onHoverItem(item)}
+      onMouseLeave={() => onHoverItem(null)}
+      onClick={onLockToggle}
+    >
+      <div className="relative mb-3 aspect-[4/3] overflow-hidden rounded-xl border border-gray-700/70 bg-gray-900/70">
+        {hasImage && !imageError ? (
+          <MediaImage
+            media={itemMedia}
+            src={imageUrl}
+            variant="card"
+            alt={title}
+            width={640}
+            height={480}
+            sizes="(max-width: 640px) 100vw, 320px"
+            className="h-full w-full object-cover"
+            onError={() => {
+              console.warn(`Failed to load image in ItemCard: ${imageUrl || 'media manifest'}`);
+              setImageError(true);
+            }}
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-gray-700/80 text-4xl font-bold text-white/70">
+            {title?.charAt(0)?.toUpperCase() || '?'}
+          </div>
+        )}
+        {price > 0 && (
+          <span className={`absolute right-2 top-2 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold shadow-sm
+            ${affordable ? 'bg-emerald-600/85 border-emerald-400/50 text-white' : 'bg-rose-700/85 border-rose-400/50 text-white'}
+          `} title={affordable ? 'Puoi permettertelo' : 'Oro insufficiente'}>
+            {price}
+          </span>
+        )}
+        {isLocked && (
+          <span className="absolute left-2 top-2 inline-flex rounded-full border border-blue-300/50 bg-blue-600/75 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white">
+            Locked
+          </span>
+        )}
+      </div>
+
+      <div className="flex flex-1 flex-col">
+        <div className="mb-3">
+          <h2 className="truncate text-base font-bold text-white" title={title}>{title}</h2>
+          <p className="mt-1 text-xs leading-relaxed text-gray-300">
+            Slot: {slot}
+          </p>
+          <p className="text-xs leading-relaxed text-gray-300">
+            Tipo: {tipo}
+          </p>
+          <p className="text-xs leading-relaxed text-gray-300">
+            Hands: {hands}
+          </p>
+        </div>
+
+        <div className="mt-auto">
+          {price > 0 && (
+            <p className={`mb-2 text-xs font-medium ${affordable ? 'text-emerald-300' : 'text-rose-300'}`}>
+              {affordable ? 'Disponibile' : 'Oro insufficiente'}
+            </p>
+          )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!purchasing && !purchaseDisabled && affordable) onPurchase(item);
+            }}
+            disabled={purchasing || purchaseDisabled || (!affordable && price > 0)}
+            className={`w-full rounded-xl px-3 py-2 text-sm font-medium transition-colors
+              ${purchasing || purchaseDisabled ? 'bg-gray-500 cursor-not-allowed opacity-60 text-white'
+                : !affordable && price > 0 ? 'bg-gray-700/60 text-gray-300 cursor-not-allowed border border-gray-600'
+                : 'bg-[rgba(25,50,128,0.7)] text-white hover:bg-[rgba(35,60,148,0.85)]'}
+            `}
+            title={purchasing ? 'Acquisto in corso...' : (purchaseDisabled ? 'Dati utente in caricamento' : (!affordable && price > 0 ? 'Oro insufficiente' : 'Acquista'))}
+          >
+            {purchasing ? '...' : (purchaseDisabled ? 'Unavailable' : (!affordable && price > 0 ? 'No Gold' : 'Acquire'))}
+          </button>
+        </div>
+      </div>
+
+      {!affordable && price > 0 && (
+        <div className="pointer-events-none absolute inset-0 rounded-2xl border border-rose-600/20" />
+      )}
+    </motion.div>
+  );
+}
+
+function BazaarDetailPlaceholder() {
+  return (
+    <div
+      className="flex h-full min-h-[22rem] flex-col items-center justify-center rounded-l-lg border-l border-gray-700 bg-gray-900/95 px-6 py-8 text-center"
+      data-testid="bazaar-detail-placeholder"
+    >
+      <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full border border-dashed border-slate-500/60 bg-slate-800/70 text-slate-300">
+        <FiShoppingBag className="text-3xl" />
+      </div>
+      <h3 className="text-lg font-semibold text-white">Item Detail</h3>
+      <p className="mt-2 max-w-xs text-sm leading-relaxed text-slate-400">
+        Hover an item to inspect it. Click a tile to pin its details while you browse the Bazaar.
+      </p>
+    </div>
+  );
+}
+
+const BAZAAR_FILTERS_STORAGE_KEY = 'bazaar.filters';
+const EMPTY_BAZAAR_ITEMS = Object.freeze([]);
+
+const normalizeFilterArray = (value) => {
+  if (!Array.isArray(value)) {
+    return ['All'];
+  }
+
+  const normalized = Array.from(
+    new Set(
+      value
+        .filter((entry) => entry != null)
+        .map((entry) => String(entry).trim())
+        .filter(Boolean)
+    )
+  );
+
+  if (normalized.length === 0 || normalized.includes('All')) {
+    return ['All'];
+  }
+
+  return normalized;
+};
+
+const createDefaultBazaarFilters = () => ({
+  searchTerm: '',
+  selectedSlot: ['All'],
+  selectedHands: ['All'],
+  selectedTipo: ['All'],
+  selectedItemType: ['All'],
+  selectedSpecialParams: ['All'],
+  selectedCombatParams: ['All'],
+  selectedBaseParams: ['All'],
+  onlyAffordable: false,
+});
+
+const isMeaningfulSpecialValue = (value) => {
+  if (Array.isArray(value)) {
+    return value.some(isMeaningfulSpecialValue);
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.values(value).some(isMeaningfulSpecialValue);
+  }
+
+  if (typeof value === 'number') {
+    return !Number.isNaN(value);
+  }
+
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  return value != null && String(value).trim() !== '';
+};
+
+const getAvailableSpecialKeys = (item) => Object.entries(item?.Parametri?.Special || {})
+  .filter(([, value]) => isMeaningfulSpecialValue(value))
+  .map(([key]) => key);
+
+const loadBazaarFilters = () => {
+  const defaultFilters = createDefaultBazaarFilters();
+
+  try {
+    const savedFilters = localStorage.getItem(BAZAAR_FILTERS_STORAGE_KEY);
+    if (!savedFilters) {
+      return defaultFilters;
+    }
+
+    const parsedFilters = JSON.parse(savedFilters);
+    return {
+      searchTerm: typeof parsedFilters?.searchTerm === 'string' ? parsedFilters.searchTerm : defaultFilters.searchTerm,
+      selectedSlot: normalizeFilterArray(parsedFilters?.selectedSlot),
+      selectedHands: normalizeFilterArray(parsedFilters?.selectedHands),
+      selectedTipo: normalizeFilterArray(parsedFilters?.selectedTipo),
+      selectedItemType: normalizeFilterArray(parsedFilters?.selectedItemType),
+      selectedSpecialParams: normalizeFilterArray(parsedFilters?.selectedSpecialParams),
+      selectedCombatParams: normalizeFilterArray(parsedFilters?.selectedCombatParams),
+      selectedBaseParams: normalizeFilterArray(parsedFilters?.selectedBaseParams),
+      onlyAffordable: parsedFilters?.onlyAffordable === true,
+    };
+  } catch (error) {
+    console.error('Failed to load Bazaar filters:', error);
+    return defaultFilters;
+  }
+};
+
+
+export default function Bazaar() {
+  const { topInset } = useShellLayout();
+  const { user, userData } = useAuth();
+  const { repositoryAccessGeneration = 0 } = useAuthSession();
+  const normalizedRole = userData?.role || 'unknown';
+  const catalogScopeKey = `${user?.uid || 'anonymous'}:${repositoryAccessGeneration}:${normalizedRole}`;
+  const catalogScopeRef = useRef(catalogScopeKey);
+  catalogScopeRef.current = catalogScopeKey;
+  const [catalogState, setCatalogState] = useState({ scopeKey: null, items: [] });
+  const items = catalogState.scopeKey === catalogScopeKey
+    ? catalogState.items
+    : EMPTY_BAZAAR_ITEMS;
+  const [savedFilters] = useState(() => loadBazaarFilters());
+  const [searchTerm, setSearchTerm] = useState(savedFilters.searchTerm);
+  const [selectedSlot, setSelectedSlot] = useState(savedFilters.selectedSlot);
+  const [selectedHands, setSelectedHands] = useState(savedFilters.selectedHands);
+  const [selectedTipo, setSelectedTipo] = useState(savedFilters.selectedTipo);
+  const [selectedItemType, setSelectedItemType] = useState(savedFilters.selectedItemType);
+  const [selectedSpecialParams, setSelectedSpecialParams] = useState(savedFilters.selectedSpecialParams);
+  const [selectedCombatParams, setSelectedCombatParams] = useState(savedFilters.selectedCombatParams);
+  const [selectedBaseParams, setSelectedBaseParams] = useState(savedFilters.selectedBaseParams);
+  const [hoveredItem, setHoveredItem] = useState(null);
+  const [lockedItem, setLockedItem] = useState(null);
+  const [onlyAffordable, setOnlyAffordable] = useState(savedFilters.onlyAffordable);
+  const [specialSchemaKeys, setSpecialSchemaKeys] = useState([]);
+
+  const [showOverlay, setShowOverlay] = useState(false);
+  const [showArmaturaOverlay, setShowArmaturaOverlay] = useState(false);
+  const [showAccessorioOverlay, setShowAccessorioOverlay] = useState(false);
+  const [showConsumabileOverlay, setShowConsumabileOverlay] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [confirmationMessage, setConfirmationMessage] = useState("");
+  const {
+    data: resources,
+    stage: resourcesStage,
+    status: resourcesStatus,
+  } = useResources(user?.uid);
+  const resourcesReady = resourcesStatus === 'fresh'
+    && resources !== null
+    && isUserDataCommandStageResolved(resourcesStage);
+  const userGold = resourcesReady ? (resources?.stats?.gold ?? 0) : 0;
+  const [purchasingItemId, setPurchasingItemId] = useState(null);
+  const [pendingPurchaseItem, setPendingPurchaseItem] = useState(null);
+  const [pendingPurchaseRetryKey, setPendingPurchaseRetryKey] = useState(null);
+  const [pendingPurchaseScopeKey, setPendingPurchaseScopeKey] = useState(null);
+  const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
+  const isDM = userData?.role === 'dm'; // DMs can see all items regardless of custom visibility
+  const prefetchEditor = (kind) => {
+    if (!isAdmin || !canPrefetchModules()) return;
+    BAZAAR_EDITOR_DESCRIPTORS[kind]?.preload().catch(() => {});
+  };
+
+  // Catalog data and every action derived from it belong to one exact auth and
+  // access scope. Mask the previous scope during the render that observes a
+  // UID/role generation change, then clear its transient UI state.
+  useEffect(() => {
+    setCatalogState({ scopeKey: catalogScopeKey, items: [] });
+    setHoveredItem(null);
+    setLockedItem(null);
+    setPendingPurchaseItem(null);
+    setPendingPurchaseRetryKey(null);
+    setPendingPurchaseScopeKey(null);
+    setPurchasingItemId(null);
+    setShowOverlay(false);
+    setShowArmaturaOverlay(false);
+    setShowAccessorioOverlay(false);
+    setShowConsumabileOverlay(false);
+  }, [catalogScopeKey]);
+
+  // Listen to items respecting visibility
+  useEffect(() => {
+    if (!user) return;
+    const subscriptionScopeKey = catalogScopeKey;
+    const publishItems = (nextItems) => {
+      if (catalogScopeRef.current !== subscriptionScopeKey) return;
+      setCatalogState({ scopeKey: subscriptionScopeKey, items: nextItems });
+    };
+
+    const itemsRef = collection(db, 'items');
+
+    // If the user is a DM they can see ALL items (except schema docs) without visibility filtering
+    // Otherwise apply existing visibility rules: 'all' OR ('custom' AND allowed_users contains user)
+    const buildUnsubscribe = () => {
+      if (isDM) {
+        return onSnapshot(
+          itemsRef,
+          (snapshot) => {
+            const allItems = [];
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              if (data.item_type && data.General && data.Specific && data.Parametri && !doc.id.startsWith('schema_')) {
+                allItems.push({ id: doc.id, ...data });
+              }
+            });
+            publishItems(allItems);
+          },
+          (error) => {
+            console.error('Error listening to items collection (DM view):', error);
+            publishItems([]);
+          }
+        );
+      } else {
+        const q = query(
+          itemsRef,
+            or(
+              where('visibility', '==', 'all'),
+              and(
+                where('visibility', '==', 'custom'),
+                where('allowed_users', 'array-contains', user.uid)
+              )
+            )
+        );
+        return onSnapshot(
+          q,
+          (snapshot) => {
+            const filteredItems = [];
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              if (data.item_type && data.General && data.Specific && data.Parametri && !doc.id.startsWith('schema_')) {
+                filteredItems.push({ id: doc.id, ...data });
+              }
+            });
+            publishItems(filteredItems);
+          },
+          (error) => {
+            console.error('Error listening to items collection:', error);
+            publishItems([]);
+          }
+        );
+      }
+    };
+
+    const unsubscribe = buildUnsubscribe();
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    };
+  }, [catalogScopeKey, isDM, user]);
+
+  // A pending confirmation is valid only while its exact catalog record stays
+  // in the current authorized query. Refresh the payload when the catalog
+  // changes and close it immediately if visibility or existence is lost.
+  useEffect(() => {
+    if (!pendingPurchaseItem || pendingPurchaseScopeKey !== catalogScopeKey) return;
+    const currentItem = items.find((item) => item.id === pendingPurchaseItem.id);
+    if (!currentItem) {
+      setPendingPurchaseItem(null);
+      setPendingPurchaseRetryKey(null);
+      setPendingPurchaseScopeKey(null);
+      return;
+    }
+    if (currentItem !== pendingPurchaseItem) setPendingPurchaseItem(currentItem);
+  }, [catalogScopeKey, items, pendingPurchaseItem, pendingPurchaseScopeKey]);
+
+  useEffect(() => {
+    const currentLockedItemId = lockedItem?.id;
+    if (currentLockedItemId) {
+      const newVersionOfLockedItem = items.find(item => item.id === currentLockedItemId);
+      if (newVersionOfLockedItem) {
+        if (JSON.stringify(newVersionOfLockedItem) !== JSON.stringify(lockedItem)) {
+          setLockedItem(newVersionOfLockedItem);
+        }
+      } else {
+        setLockedItem(null);
+        if (hoveredItem && hoveredItem.id === currentLockedItemId) {
+          setHoveredItem(null);
+        }
+      }
+    }
+  }, [items, lockedItem, hoveredItem]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    (async () => {
+      try {
+        const schemas = await Promise.all(SPECIAL_PARAM_SCHEMA_IDS.map((id) => getSchema(id)));
+        if (!isMounted) {
+          return;
+        }
+
+        const keys = new Set();
+        schemas.forEach((schema) => {
+          Object.keys(schema?.Parametri?.Special || {}).forEach((key) => keys.add(key));
+        });
+
+        setSpecialSchemaKeys(Array.from(keys).sort());
+      } catch (error) {
+        console.warn('Failed to load special parameter schema keys:', error);
+        if (isMounted) {
+          setSpecialSchemaKeys([]);
+        }
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        BAZAAR_FILTERS_STORAGE_KEY,
+        JSON.stringify({
+          searchTerm,
+          selectedSlot,
+          selectedHands,
+          selectedTipo,
+          selectedItemType,
+          selectedSpecialParams,
+          selectedCombatParams,
+          selectedBaseParams,
+          onlyAffordable,
+        })
+      );
+    } catch (error) {
+      console.error('Failed to save Bazaar filters:', error);
+    }
+  }, [
+    searchTerm,
+    selectedSlot,
+    selectedHands,
+    selectedTipo,
+    selectedItemType,
+    selectedSpecialParams,
+    selectedCombatParams,
+    selectedBaseParams,
+    onlyAffordable,
+  ]);
+
+  const slots = ['All', ...Array.from(new Set(items.map(item => item.General?.Slot).filter(Boolean)))];
+  const hands = ['All', ...Array.from(new Set(items.map(item => item.Specific?.Hands).filter(h => h != null))).sort((a, b) => a - b).map(String)];
+  const tipos = ['All', ...Array.from(new Set(items.map(item => item.Specific?.Tipo).filter(Boolean)))];
+  const itemTypes = ['All', ...Array.from(new Set(items.map(item => item.item_type).filter(Boolean)))];
+  const populatedSpecialKeys = new Set(items.flatMap((item) => getAvailableSpecialKeys(item)));
+  const orderedSpecialParams = specialSchemaKeys
+    .filter((key) => populatedSpecialKeys.has(key));
+  const extraSpecialParams = Array.from(populatedSpecialKeys)
+    .filter((key) => !specialSchemaKeys.includes(key))
+    .sort((a, b) => a.localeCompare(b));
+  const specialParams = ['All', ...orderedSpecialParams, ...extraSpecialParams];
+  const combatParams = ['All', ...Array.from(new Set(items.flatMap(item => 
+    item.Parametri?.Combattimento ? Object.keys(item.Parametri.Combattimento) : []
+  )))];
+  
+  const baseParams = ['All', ...Array.from(new Set(items.flatMap(item => 
+    item.Parametri?.Base ? Object.keys(item.Parametri.Base) : []
+  )))];
+
+  // Generic toggle utility and specific handlers (restored after refactor)
+  const toggleFilter = (currentFilters, setFilters, value) => {
+    if (value === 'All') {
+      setFilters(['All']);
+    } else {
+      const filtersWithoutAll = currentFilters.filter(f => f !== 'All');
+      if (filtersWithoutAll.includes(value)) {
+        const newFilters = filtersWithoutAll.filter(v => v !== value);
+        setFilters(newFilters.length === 0 ? ['All'] : newFilters);
+      } else {
+        setFilters([...filtersWithoutAll, value]);
+      }
+    }
+  };
+
+  const handleToggleSlot = (slot) => toggleFilter(selectedSlot, setSelectedSlot, slot);
+  const handleToggleHands = (hand) => toggleFilter(selectedHands, setSelectedHands, hand);
+  const handleToggleTipo = (tipo) => toggleFilter(selectedTipo, setSelectedTipo, tipo);
+  const handleToggleItemType = (itemType) => toggleFilter(selectedItemType, setSelectedItemType, itemType);
+  const handleToggleSpecialParam = (param) => toggleFilter(selectedSpecialParams, setSelectedSpecialParams, param);
+  const handleToggleCombatParam = (param) => toggleFilter(selectedCombatParams, setSelectedCombatParams, param);
+  const handleToggleBaseParam = (param) => toggleFilter(selectedBaseParams, setSelectedBaseParams, param);
+  const handleSearchChange = (e) => setSearchTerm(e.target.value);
+
+  const handleResetFilters = useCallback(() => {
+    const defaultFilters = createDefaultBazaarFilters();
+
+    setSelectedSlot(defaultFilters.selectedSlot);
+    setSelectedHands(defaultFilters.selectedHands);
+    setSelectedTipo(defaultFilters.selectedTipo);
+    setSelectedItemType(defaultFilters.selectedItemType);
+    setSelectedSpecialParams(defaultFilters.selectedSpecialParams);
+    setSelectedCombatParams(defaultFilters.selectedCombatParams);
+    setSelectedBaseParams(defaultFilters.selectedBaseParams);
+    setSearchTerm(defaultFilters.searchTerm);
+    setOnlyAffordable(defaultFilters.onlyAffordable);
+
+    try {
+      localStorage.removeItem(BAZAAR_FILTERS_STORAGE_KEY);
+    } catch (error) {
+      console.error('Failed to clear Bazaar filters:', error);
+    }
+  }, []);
+
+  const handleHoverItem = (item) => {
+    if (!lockedItem) {
+      setHoveredItem(item);
+    }
+  };
+
+  const handleLockToggle = (itemToToggle) => {
+    if (lockedItem && lockedItem.id === itemToToggle.id) {
+      setLockedItem(null);
+      setHoveredItem(itemToToggle);
+    } else {
+      setLockedItem(itemToToggle);
+      setHoveredItem(null);
+    }
+  };
+
+  const filteredItems = items.filter((item) => {
+    const matchesSearch = searchTerm.trim() === '' ||
+      (item.General?.Nome && item.General.Nome.toLowerCase().includes(searchTerm.toLowerCase()));
+
+    const matchesSlot = selectedSlot.includes('All') || selectedSlot.includes(item.General?.Slot);
+    const matchesHands = selectedHands.includes('All') || selectedHands.includes(String(item.Specific?.Hands));
+    const matchesTipo = selectedTipo.includes('All') || selectedTipo.includes(item.Specific?.Tipo);
+    const matchesItemType = selectedItemType.includes('All') || selectedItemType.includes(item.item_type);
+    const matchesSpecialParams = selectedSpecialParams.includes('All') || selectedSpecialParams.some((param) => isMeaningfulSpecialValue(item.Parametri?.Special?.[param]));
+    const rawPrice = item?.General?.prezzo ?? 0;
+    const price = typeof rawPrice === 'number' ? rawPrice : parseInt(rawPrice, 10) || 0;
+    const matchesAffordable = !onlyAffordable || price <= userGold;
+    return matchesSearch && matchesSlot && matchesHands && matchesTipo && matchesItemType && matchesSpecialParams && matchesAffordable;
+  }).sort((a, b) => {
+    // Debug: Log when sorting is triggered
+    const shouldSortCombat = !selectedCombatParams.includes('All') && selectedCombatParams.length > 0;
+    const shouldSortBase = !selectedBaseParams.includes('All') && selectedBaseParams.length > 0;
+    const shouldSort = shouldSortCombat || shouldSortBase;
+    
+    if (shouldSort) {
+      console.log('Attempting to sort by params - Combat:', selectedCombatParams, 'Base:', selectedBaseParams);
+    }
+    
+    // If parameters are selected for sorting, sort by their contribution at level 1
+    if (shouldSort) {
+      let scoreA = 0;
+      let scoreB = 0;
+      
+      // Add combat parameter scores
+      if (shouldSortCombat) {
+        selectedCombatParams.forEach(param => {
+          let valueA = 0;
+          let valueB = 0;
+          
+          if (a.Parametri?.Combattimento?.[param]) {
+            const paramDataA = a.Parametri.Combattimento[param];
+            valueA = paramDataA?.['1'] || paramDataA?.[1] || 0;
+          }
+          
+          if (b.Parametri?.Combattimento?.[param]) {
+            const paramDataB = b.Parametri.Combattimento[param];
+            valueB = paramDataB?.['1'] || paramDataB?.[1] || 0;
+          }
+          
+          valueA = typeof valueA === 'number' ? valueA : (parseFloat(valueA) || 0);
+          valueB = typeof valueB === 'number' ? valueB : (parseFloat(valueB) || 0);
+          
+          scoreA += valueA;
+          scoreB += valueB;
+        });
+      }
+      
+      // Add base parameter scores
+      if (shouldSortBase) {
+        selectedBaseParams.forEach(param => {
+          let valueA = 0;
+          let valueB = 0;
+          
+          if (a.Parametri?.Base?.[param]) {
+            const paramDataA = a.Parametri.Base[param];
+            valueA = paramDataA?.['1'] || paramDataA?.[1] || 0;
+          }
+          
+          if (b.Parametri?.Base?.[param]) {
+            const paramDataB = b.Parametri.Base[param];
+            valueB = paramDataB?.['1'] || paramDataB?.[1] || 0;
+          }
+          
+          valueA = typeof valueA === 'number' ? valueA : (parseFloat(valueA) || 0);
+          valueB = typeof valueB === 'number' ? valueB : (parseFloat(valueB) || 0);
+          
+          scoreA += valueA;
+          scoreB += valueB;
+        });
+      }
+      
+      // Debug logging (remove after testing)
+      if (scoreA !== scoreB) {
+        console.log(`Sorting: ${a.General?.Nome || 'Unknown'} (${scoreA}) vs ${b.General?.Nome || 'Unknown'} (${scoreB})`);
+      }
+      
+      // Sort by highest score first (descending)
+      if (scoreB !== scoreA) {
+        return scoreB - scoreA;
+      }
+    }
+    
+    // Default sort by name if no combat params selected or scores are equal
+    const nameA = (a.General?.Nome || 'Oggetto Sconosciuto').toLowerCase();
+    const nameB = (b.General?.Nome || 'Oggetto Sconosciuto').toLowerCase();
+    return nameA.localeCompare(nameB);
+  });
+
+  const displayConfirmation = useCallback((message, type = "success") => {
+    setConfirmationMessage(message);
+    setShowConfirmation(true);
+    setTimeout(() => {
+      setShowConfirmation(false);
+    }, 2500);
+  }, []);
+
+  const startPurchaseFlow = (item) => {
+    if (!user || !resourcesReady) {
+      displayConfirmation('Devi essere loggato per acquistare.', 'error');
+      return;
+    }
+  // Stacking allowed: no early return if already owned
+    const gold = userGold;
+    const rawPrice = item?.General?.prezzo;
+    const price = typeof rawPrice === 'number' ? rawPrice : parseInt(rawPrice, 10) || 0;
+    if (price > gold) {
+      displayConfirmation(`Oro insufficiente: ${gold} / ${price}`, 'error');
+      return;
+    }
+    setPendingPurchaseItem(item);
+    setPendingPurchaseRetryKey(`${user.uid}:${createUserOperationId('purchase-flow')}`);
+    setPendingPurchaseScopeKey(catalogScopeKey);
+  };
+
+  const confirmPurchase = async () => {
+    const item = items.find((candidate) => candidate.id === pendingPurchaseItem?.id);
+    const actionScopeKey = catalogScopeKey;
+    if (
+      !item
+      || !user
+      || !resourcesReady
+      || pendingPurchaseScopeKey !== catalogScopeKey
+      || !pendingPurchaseRetryKey?.startsWith(`${user.uid}:`)
+    ) {
+      setPendingPurchaseItem(null);
+      setPendingPurchaseRetryKey(null);
+      setPendingPurchaseScopeKey(null);
+      return;
+    }
+    const price = typeof item?.General?.prezzo === 'number' ? item.General.prezzo : parseInt(item?.General?.prezzo, 10) || 0;
+    const name = item.General?.Nome || 'Oggetto';
+  // Stacking allowed: skip already-owned guard
+    const gold = userGold;
+    if (price > gold) {
+      displayConfirmation(`Oro insufficiente: ${gold} / ${price}`, 'error');
+      return;
+    }
+    let preservePendingPurchase = false;
+    try {
+      setPurchasingItemId(item.id);
+      const res = await acquireItem(
+        user.uid,
+        item,
+        undefined,
+        resourcesStage,
+        pendingPurchaseRetryKey
+      );
+      if (catalogScopeRef.current !== actionScopeKey) return;
+      if (res?.error) {
+        preservePendingPurchase = res.retryable === true;
+        displayConfirmation(`Errore: ${res.error}`, 'error');
+      } else if (res?.insufficient) {
+        displayConfirmation(`Oro insufficiente: ${res.gold} / ${res.price}`, 'error');
+      } else if (res?.success) {
+        if (res.newQty && res.newQty > 1) {
+          displayConfirmation(`Acquisto completato: ora possiedi ${res.newQty}x "${name}". Oro rimanente: ${res.newGold}`);
+        } else {
+          displayConfirmation(`Acquisto completato: "${name}". Oro rimanente: ${res.newGold}`);
+        }
+      } else {
+        displayConfirmation('Risposta inattesa dalla transazione.', 'error');
+      }
+    } catch (e) {
+      if (catalogScopeRef.current === actionScopeKey) {
+        displayConfirmation(`Errore durante l'acquisto: ${e.message}`, 'error');
+      }
+    } finally {
+      if (catalogScopeRef.current !== actionScopeKey) return;
+      setPurchasingItemId(null);
+      if (!preservePendingPurchase) {
+        setPendingPurchaseItem(null);
+        setPendingPurchaseRetryKey(null);
+        setPendingPurchaseScopeKey(null);
+      }
+    }
+  };
+  const handleAddWeaponClick = () => {
+    setShowOverlay(true);
+  };
+  const handleAddArmaturaClick = () => {
+    setShowArmaturaOverlay(true);
+  };
+  const handleAddAccessorioClick = () => {
+    setShowAccessorioOverlay(true);
+  };
+  const handleAddConsumabileClick = () => {
+    setShowConsumabileOverlay(true);
+  };
+
+  const panelItem = lockedItem || hoveredItem;
+  const stickyTop = topInset + 24;
+  const comparisonPanelHeight = `calc(100vh - ${stickyTop + 24}px)`;
+  const layoutColumnsClassName = 'xl:grid-cols-[18rem_minmax(0,1fr)_minmax(20rem,28vw)]';
+
+  return (
+    <div className="relative w-full min-h-screen flex flex-col">
+      <div className={`relative z-10 grid flex-grow items-start gap-6 px-4 py-4 md:px-6 md:py-6 ${layoutColumnsClassName}`}>
+        <FiltersSection
+          slots={slots}
+          hands={hands}
+          tipos={tipos}
+          itemTypes={itemTypes}
+          specialParams={specialParams}
+          combatParams={combatParams}
+          baseParams={baseParams}
+          selectedSlot={selectedSlot}
+          selectedHands={selectedHands}
+          selectedTipo={selectedTipo}
+          selectedItemType={selectedItemType}
+          selectedSpecialParams={selectedSpecialParams}
+          selectedCombatParams={selectedCombatParams}
+          selectedBaseParams={selectedBaseParams}
+          onToggleSlot={handleToggleSlot}
+          onToggleHands={handleToggleHands}
+          onToggleTipo={handleToggleTipo}
+          onToggleItemType={handleToggleItemType}
+          onToggleSpecialParam={handleToggleSpecialParam}
+          onToggleCombatParam={handleToggleCombatParam}
+          onToggleBaseParam={handleToggleBaseParam}
+          onlyAffordable={onlyAffordable}
+          setOnlyAffordable={setOnlyAffordable}
+          onResetFilters={handleResetFilters}
+          stickyTop={stickyTop}
+        />
+        <div className="min-w-0 rounded-2xl border border-gray-700/40 bg-slate-950/20 p-4 shadow-xl backdrop-blur-sm md:p-6">
+          {isAdmin && (
+            <div className="mb-4">
+              <div className="flex flex-wrap gap-2">                <button
+                  onClick={handleAddWeaponClick}
+                  onMouseEnter={() => prefetchEditor('weapon')}
+                  onFocus={() => prefetchEditor('weapon')}
+                  className="px-3 py-1.5 text-sm bg-green-700 text-white rounded hover:bg-green-600 transition-colors"
+                >
+                  {lockedItem && lockedItem.item_type === "weapon" ? "Modifica Arma" : "+ Arma"}
+                </button>
+                <button 
+                  onClick={handleAddArmaturaClick}
+                  onMouseEnter={() => prefetchEditor('armatura')}
+                  onFocus={() => prefetchEditor('armatura')}
+                  className="px-3 py-1.5 text-sm bg-blue-700 text-white rounded hover:bg-blue-600 transition-colors"
+                > 
+                  {lockedItem && lockedItem.item_type === "armatura" ? "Modifica Armatura" : "+ Armatura"}
+                </button>
+                <button 
+                  onClick={handleAddAccessorioClick}
+                  onMouseEnter={() => prefetchEditor('accessorio')}
+                  onFocus={() => prefetchEditor('accessorio')}
+                  className="px-3 py-1.5 text-sm bg-purple-700 text-white rounded hover:bg-purple-600 transition-colors"
+                > 
+                  {lockedItem && lockedItem.item_type === "accessorio" ? "Modifica Accessorio" : "+ Accessorio"}
+                </button>
+                <button
+                  onClick={handleAddConsumabileClick}
+                  onMouseEnter={() => prefetchEditor('consumabile')}
+                  onFocus={() => prefetchEditor('consumabile')}
+                  className="px-3 py-1.5 text-sm bg-yellow-700 text-white rounded hover:bg-yellow-600 transition-colors"
+                >
+                  {lockedItem && lockedItem.item_type === "consumabile" ? "Modifica Consumabile" : "+ Consumabile"}
+                </button>
+                <button onClick={() => displayConfirmation("Funzionalità Munizione in arrivo!", "info")} className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded hover:bg-gray-500 transition-colors"> + Munizione </button>
+              </div>
+            </div>
+          )}
+
+          <div className="mb-4">            <input
+              type="text"
+              value={searchTerm}
+              onChange={handleSearchChange}
+              placeholder="Cerca per Nome..."
+              className="w-full border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-gray-800 text-white placeholder-gray-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 xl:auto-rows-fr">
+            {filteredItems.length > 0 ? (
+              filteredItems.map((item) => (
+                <ItemCard
+                  key={item.id}
+                  item={item}
+                  onPurchase={startPurchaseFlow}
+                  onHoverItem={handleHoverItem}
+                  onLockToggle={() => handleLockToggle(item)}
+                  isLocked={lockedItem && lockedItem.id === item.id}
+                  purchasing={purchasingItemId === item.id}
+                  purchaseDisabled={!resourcesReady}
+                  userGold={userGold}
+                />
+              ))
+            ) : (
+              <p className="col-span-full mt-8 text-center text-gray-400">Nessun oggetto trovato corrispondente ai filtri.</p>
+            )}
+          </div>
+        </div>
+
+        <div
+          className="min-w-0 xl:sticky xl:self-start"
+          data-testid="bazaar-comparison-panel"
+          style={{
+            '--bazaar-comparison-panel-height': comparisonPanelHeight,
+            top: `${stickyTop}px`,
+          }}
+        >
+          <div className="overflow-hidden rounded-2xl shadow-2xl">
+            <div className="xl:h-[var(--bazaar-comparison-panel-height)]">
+              {panelItem ? (
+                <ComparisonPanel
+                  item={panelItem}
+                  showMessage={displayConfirmation}
+                  key={`comparisonPanel-${panelItem.id}`}
+                />
+              ) : (
+                <BazaarDetailPlaceholder />
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {showOverlay && (
+        <AddWeaponOverlay
+          onClose={(success) => {
+            setShowOverlay(false);
+          }}
+          showMessage={displayConfirmation}
+          initialData={lockedItem || null}
+          editMode={!!lockedItem}
+        />
+      )}      {showArmaturaOverlay && (
+        <AddArmaturaOverlay
+          onClose={(success) => {
+            setShowArmaturaOverlay(false);
+          }}
+          showMessage={displayConfirmation}
+          initialData={lockedItem && lockedItem.item_type === "armatura" ? lockedItem : null}
+          editMode={!!(lockedItem && lockedItem.item_type === "armatura")}
+        />
+      )}
+
+      {showAccessorioOverlay && (
+        <AddAccessorioOverlay
+          onClose={(success) => {
+            setShowAccessorioOverlay(false);
+          }}
+          showMessage={displayConfirmation}
+          initialData={lockedItem && lockedItem.item_type === "accessorio" ? lockedItem : null}
+          editMode={!!(lockedItem && lockedItem.item_type === "accessorio")}
+        />
+      )}
+
+      {showConsumabileOverlay && (
+        <AddConsumabileOverlay
+          onClose={(success) => {
+            setShowConsumabileOverlay(false);
+          }}
+          showMessage={displayConfirmation}
+          initialData={lockedItem && lockedItem.item_type === "consumabile" ? lockedItem : null}
+          editMode={!!(lockedItem && lockedItem.item_type === "consumabile")}
+        />
+      )}
+
+      <AnimatePresence>
+        {showConfirmation && (
+          <motion.div
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50, transition: { duration: 0.2 } }}
+            transition={{ type: "spring", stiffness: 200, damping: 20 }}
+            className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[10000]"
+          >
+            <div className={`text-white px-6 py-3 rounded-lg shadow-xl text-center ${confirmationMessage.toLowerCase().includes("error") || confirmationMessage.toLowerCase().includes("errore") ? 'bg-gradient-to-r from-red-500 to-red-700' : 'bg-gradient-to-r from-green-500 to-green-700'}`}>
+              {confirmationMessage}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {/* Purchase Confirmation Modal */}
+      {pendingPurchaseItem
+        && pendingPurchaseScopeKey === catalogScopeKey
+        && items.some((item) => item.id === pendingPurchaseItem.id)
+        && resourcesReady
+        && pendingPurchaseRetryKey?.startsWith(`${user?.uid}:`) && (
+        <PurchaseConfirmModal
+          item={pendingPurchaseItem}
+            userGold={userGold}
+          onConfirm={confirmPurchase}
+          onClose={() => {
+            if (!purchasingItemId) {
+              setPendingPurchaseItem(null);
+              setPendingPurchaseRetryKey(null);
+              setPendingPurchaseScopeKey(null);
+            }
+          }}
+          isProcessing={!!purchasingItemId}
+        />
+      )}
+    </div>
+  );
+}

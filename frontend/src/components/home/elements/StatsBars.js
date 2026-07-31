@@ -1,0 +1,784 @@
+// file: ./frontend/src/components/home/elements/StatsBars.js
+import React, { useEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { useAuthSession } from '../../../AuthContext';
+import { useResources } from '../../../data/userData/userDataHooks';
+import { updateResource } from '../../../data/userData/userDataCommands';
+import { legacyUpdateResource } from '../../../data/userData/legacyUserDataCommands';
+import {
+  isUserDataCommandStageResolved,
+  runVersionedUserDataCommand,
+} from '../../../data/userData/userDataCommandRouting';
+import { FaAngleRight, FaAngleLeft, FaAnglesRight, FaAnglesLeft, FaDroplet } from 'react-icons/fa6';
+import { FaRedo, FaBan } from 'react-icons/fa';
+import { GiHearts, GiMagicSwirl, GiShield } from 'react-icons/gi';
+
+const StatsBars = () => {
+  const { user, repositoryAccessGeneration = 0 } = useAuthSession();
+  const actionScopeKey = `${user?.uid || 'anonymous'}:${repositoryAccessGeneration}`;
+  const actionScopeRef = useRef(actionScopeKey);
+  actionScopeRef.current = actionScopeKey;
+  const {
+    data: userData,
+    stage: resourcesStage,
+    status: resourcesStatus,
+  } = useResources(user?.uid);
+  const mutationsReady = resourcesStatus === 'fresh'
+    && userData !== null
+    && isUserDataCommandStageResolved(resourcesStage);
+  const executeResourceMutation = (payload) => runVersionedUserDataCommand({
+    stage: mutationsReady ? resourcesStage : null,
+    legacy: () => legacyUpdateResource({ uid: user.uid, ...payload }),
+    authoritative: () => updateResource(payload),
+  });
+  // State for custom input modal
+  const [showCustomInput, setShowCustomInput] = useState(false);
+  const [customInputValue, setCustomInputValue] = useState('');
+  const [customAction, setCustomAction] = useState(null);
+  const [customFeedbackMessage, setCustomFeedbackMessage] = useState('');
+  const [customActionScopeKey, setCustomActionScopeKey] = useState(null);
+
+  // Refs for long-press intervals.
+  const hpIntervalRef = useRef(null);
+  const manaIntervalRef = useRef(null);
+  const essenzaIntervalRef = useRef(null);
+  const barrieraIntervalRef = useRef(null);
+  useEffect(() => () => {
+    [hpIntervalRef, manaIntervalRef, essenzaIntervalRef, barrieraIntervalRef].forEach((intervalRef) => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    });
+  }, [mutationsReady, user?.uid]);
+  // Activation overlay state for Barriera
+  const [showBarrieraActivate, setShowBarrieraActivate] = useState(false);
+  const [barrieraActionScopeKey, setBarrieraActionScopeKey] = useState(null);
+  const [barrieraActivateValue, setBarrieraActivateValue] = useState('');
+  // Turns for barriera duration
+  const [barrieraActivateTurns, setBarrieraActivateTurns] = useState('');
+
+  useEffect(() => {
+    setShowCustomInput(false);
+    setCustomActionScopeKey(null);
+    setCustomAction(null);
+    setCustomInputValue('');
+    setCustomFeedbackMessage('');
+    setShowBarrieraActivate(false);
+    setBarrieraActionScopeKey(null);
+    setBarrieraActivateValue('');
+    setBarrieraActivateTurns('');
+    [hpIntervalRef, manaIntervalRef, essenzaIntervalRef, barrieraIntervalRef].forEach((intervalRef) => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    });
+  }, [actionScopeKey]);
+
+  // --- HP adjustment functions ---
+  const handleResetHP = async () => {
+    if (user && userData?.stats) {
+      try {
+        await executeResourceMutation({ resource: 'hp', mode: 'set', value: userData.stats.hpTotal });
+      } catch (error) {
+        console.error("Error resetting HP:", error);
+      }
+    }
+  };
+
+  const handleDecrementHP = async () => {
+    if (user && userData?.stats) {
+      try {
+        await executeResourceMutation({ resource: 'hp', mode: 'delta', value: -1 });
+      } catch (error) {
+        console.error("Error decrementing HP:", error);
+      }
+    }
+  };
+
+  const handleIncrementHP = async () => {
+    if (user && userData?.stats) {
+      try {
+        await executeResourceMutation({ resource: 'hp', mode: 'delta', value: 1 });
+      } catch (error) {
+        console.error("Error incrementing HP:", error);
+      }
+    }
+  };
+
+  const handleDecrementHPStart = () => {
+    handleDecrementHP();
+    hpIntervalRef.current = setInterval(handleDecrementHP, 200);
+  };
+
+  const handleDecrementHPEnd = () => {
+    if (hpIntervalRef.current) {
+      clearInterval(hpIntervalRef.current);
+      hpIntervalRef.current = null;
+    }
+  };
+
+  const handleIncrementHPStart = () => {
+    handleIncrementHP();
+    hpIntervalRef.current = setInterval(handleIncrementHP, 200);
+  };
+
+  const handleIncrementHPEnd = () => {
+    if (hpIntervalRef.current) {
+      clearInterval(hpIntervalRef.current);
+      hpIntervalRef.current = null;
+    }
+  };
+
+  const openCustomInput = (action) => {
+    if (!mutationsReady) return;
+    setCustomAction(action);
+    setCustomInputValue('');
+    setCustomFeedbackMessage('');
+    setCustomActionScopeKey(actionScopeKey);
+    setShowCustomInput(true);
+  };
+
+  const closeCustomInput = () => {
+    setShowCustomInput(false);
+    setCustomActionScopeKey(null);
+    setCustomAction(null);
+    setCustomInputValue('');
+    setCustomFeedbackMessage('');
+  };
+
+  // Determine Italian prompt message for custom input
+  const promptMessage = customAction?.includes('decrement')
+    ? 'Inserisci il valore da sottrarre'
+    : 'Inserisci il valore da aggiungere';
+
+  // Helper to check if action is a decrement
+  const isDecrementAction = (action) => (
+    ['hp-decrement', 'mana-decrement', 'essenza-decrement', 'barriera-decrement'].includes(action)
+  );
+
+  const handleCustomSubmit = async () => {
+    const submissionScopeKey = actionScopeKey;
+    if (!mutationsReady || customActionScopeKey !== submissionScopeKey) return;
+    const delta = parseInt(customInputValue, 10);
+    if (!isNaN(delta) && user && userData?.stats) {
+      let resource, newValue, actualDelta = delta;
+      if (customAction === 'hp-decrement') {
+        resource = 'hp';
+        const current = userData.stats.hpCurrent || 0;
+        if (delta > current) {
+          actualDelta = current;
+          newValue = 0;
+        } else {
+          newValue = current - delta;
+        }
+      } else if (customAction === 'hp-increment') {
+        resource = 'hp';
+        newValue = (userData.stats.hpCurrent || 0) + delta;
+      } else if (customAction === 'mana-decrement') {
+        resource = 'mana';
+        const current = userData.stats.manaCurrent || 0;
+        if (delta > current) {
+          actualDelta = current;
+          newValue = 0;
+        } else {
+          newValue = current - delta;
+        }
+      } else if (customAction === 'mana-increment') {
+        resource = 'mana';
+        newValue = (userData.stats.manaCurrent || 0) + delta;
+      } else if (customAction === 'essenza-decrement') {
+        resource = 'essenza';
+        const current = userData.stats.essenzaCurrent || 0;
+        if (delta > current) {
+          actualDelta = current;
+          newValue = 0;
+        } else {
+          newValue = current - delta;
+        }
+      } else if (customAction === 'essenza-increment') {
+        resource = 'essenza';
+        newValue = (userData.stats.essenzaCurrent || 0) + delta;
+      } else if (customAction === 'barriera-decrement') {
+        resource = 'barriera';
+        const current = userData.stats.barrieraCurrent || 0;
+        if (delta > current) {
+          actualDelta = current;
+          newValue = 0;
+        } else {
+          newValue = current - delta;
+        }
+      } else if (customAction === 'barriera-increment') {
+        resource = 'barriera';
+        const current = userData.stats.barrieraCurrent || 0;
+        const total = userData.stats.barrieraTotal || 0;
+        if (total <= 0) return; // cannot increment if not active
+        newValue = current + delta;
+        if (newValue > total) newValue = total;
+      }
+      try {
+        await executeResourceMutation({ resource, mode: 'set', value: newValue });
+        if (actionScopeRef.current !== submissionScopeKey) return;
+        if (isDecrementAction(customAction) && actualDelta !== delta) {
+          const msg = `Solo ${actualDelta} punti sono stati sottratti; ${delta} superavano il valore attuale. Valore portato a 0.`;
+          setCustomFeedbackMessage(msg);
+          return;
+        }
+        closeCustomInput();
+      } catch (error) {
+        console.error(`Error custom ${customAction}:`, error);
+      }
+    }
+  };
+
+  // --- Mana adjustment functions ---
+  const handleResetMana = async () => {
+    if (user && userData?.stats) {
+      try {
+        await executeResourceMutation({ resource: 'mana', mode: 'set', value: userData.stats.manaTotal });
+      } catch (error) {
+        console.error("Error resetting Mana:", error);
+      }
+    }
+  };
+
+  const handleDecrementMana = async () => {
+    if (user && userData?.stats) {
+      try {
+        await executeResourceMutation({ resource: 'mana', mode: 'delta', value: -1 });
+      } catch (error) {
+        console.error("Error decrementing Mana:", error);
+      }
+    }
+  };
+
+  const handleIncrementMana = async () => {
+    if (user && userData?.stats) {
+      try {
+        await executeResourceMutation({ resource: 'mana', mode: 'delta', value: 1 });
+      } catch (error) {
+        console.error("Error incrementing Mana:", error);
+      }
+    }
+  };
+
+  const handleDecrementManaStart = () => {
+    handleDecrementMana();
+    manaIntervalRef.current = setInterval(handleDecrementMana, 200);
+  };
+
+  const handleDecrementManaEnd = () => {
+    if (manaIntervalRef.current) {
+      clearInterval(manaIntervalRef.current);
+      manaIntervalRef.current = null;
+    }
+  };
+
+  const handleIncrementManaStart = () => {
+    handleIncrementMana();
+    manaIntervalRef.current = setInterval(handleIncrementMana, 200);
+  };
+
+  const handleIncrementManaEnd = () => {
+    if (manaIntervalRef.current) {
+      clearInterval(manaIntervalRef.current);
+      manaIntervalRef.current = null;
+    }
+  };
+
+  // --- Essenza adjustment functions ---
+  const handleResetEssenza = async () => {
+    if (user && userData?.stats) {
+      try {
+        await executeResourceMutation({ resource: 'essenza', mode: 'set', value: userData.stats.essenzaTotal || 0 });
+      } catch (error) {
+        console.error("Error resetting Essenza:", error);
+      }
+    }
+  };
+
+  const handleDecrementEssenza = async () => {
+    if (user && userData?.stats) {
+      try {
+        await executeResourceMutation({ resource: 'essenza', mode: 'delta', value: -1 });
+      } catch (error) {
+        console.error("Error decrementing Essenza:", error);
+      }
+    }
+  };
+
+  const handleIncrementEssenza = async () => {
+    if (user && userData?.stats) {
+      try {
+        await executeResourceMutation({ resource: 'essenza', mode: 'delta', value: 1 });
+      } catch (error) {
+        console.error("Error incrementing Essenza:", error);
+      }
+    }
+  };
+
+  const handleDecrementEssenzaStart = () => {
+    handleDecrementEssenza();
+    essenzaIntervalRef.current = setInterval(handleDecrementEssenza, 200);
+  };
+
+  const handleDecrementEssenzaEnd = () => {
+    if (essenzaIntervalRef.current) {
+      clearInterval(essenzaIntervalRef.current);
+      essenzaIntervalRef.current = null;
+    }
+  };
+
+  const handleIncrementEssenzaStart = () => {
+    handleIncrementEssenza();
+    essenzaIntervalRef.current = setInterval(handleIncrementEssenza, 200);
+  };
+
+  const handleIncrementEssenzaEnd = () => {
+    if (essenzaIntervalRef.current) {
+      clearInterval(essenzaIntervalRef.current);
+      essenzaIntervalRef.current = null;
+    }
+  };
+
+  // Small reusable stat row
+  const StatRow = ({
+    label,
+    icon: Icon,
+    colorTrack,
+    colorFill,
+    colorFillInactive, // optional neutral color when value is 0 (for singleValue rows)
+    current,
+    total,
+    onReset,
+    onDecStart,
+    onDecEnd,
+    onIncStart,
+    onIncEnd,
+    onOpenDec,
+    onOpenInc,
+    singleValue = false,
+    onIconClick,
+    iconActive = false,
+    resetTitle,
+    resetIcon: ResetIcon = FaRedo,
+    resetClassName,
+    resetDisabled = false,
+    decDisabled = false,
+    incDisabled = false,
+    decDisabledTitle,
+    incDisabledTitle,
+  }) => {
+    const pct = total ? Math.max(0, (current / total) * 100) : (singleValue ? 100 : 0);
+    const overflowPct = total && current > total ? ((current - total) / total) * 100 : 0;
+    const fillClass = ( (singleValue || total === 0) && current === 0 && colorFillInactive) ? colorFillInactive : colorFill;
+    return (
+      <div className="flex items-center gap-2 w-full">
+        <div className="flex items-center gap-2 w-28">
+          {onIconClick ? (
+            <button
+              onClick={onIconClick}
+              className={`relative inline-flex items-center justify-center h-8 w-8 rounded-xl border transition-colors ${iconActive ? 'border-amber-400/70 bg-amber-500/20 text-amber-300' : 'border-slate-600/60 bg-slate-800/50 text-slate-300 hover:border-slate-400/70'} focus:outline-none focus:ring-2 focus:ring-amber-400/40`}
+              title={iconActive ? 'Barriera attiva - clic per reimpostare' : 'Attiva Barriera'}
+            >
+              <Icon className="w-4 h-4" />
+            </button>
+          ) : (
+            <div className="relative inline-flex items-center justify-center h-8 w-8 rounded-xl border border-slate-600/60 bg-slate-800/50 text-slate-300">
+              <Icon className="w-4 h-4" />
+            </div>
+          )}
+          <span className="text-sm font-medium text-slate-200">{label}</span>
+        </div>
+        <div className="flex items-center gap-1.5 flex-1">
+          <button
+            onClick={onReset}
+            disabled={resetDisabled}
+            className={`relative inline-flex items-center justify-center h-7 w-7 rounded-xl text-white shadow-sm transition-transform focus:outline-none focus:ring-2 disabled:opacity-40 disabled:cursor-not-allowed ${resetClassName || 'bg-gradient-to-br from-emerald-600 to-green-600 hover:scale-105 active:scale-95 focus:ring-emerald-400/40'}`}
+            title={resetTitle || `Reset ${label}`}
+          >
+            <ResetIcon className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onMouseDown={decDisabled ? undefined : onDecStart}
+            onMouseUp={decDisabled ? undefined : onDecEnd}
+            onMouseLeave={decDisabled ? undefined : onDecEnd}
+            onTouchStart={decDisabled ? undefined : onDecStart}
+            onTouchEnd={decDisabled ? undefined : onDecEnd}
+            disabled={decDisabled}
+            className={`inline-flex items-center justify-center h-7 w-7 rounded-xl border  ${decDisabled ? 'border-slate-700/50 bg-slate-800/30 text-slate-500 cursor-not-allowed' : 'border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white'}`}
+            title={decDisabled ? (decDisabledTitle || 'Non modificabile') : `-1 ${label}`}
+          >
+            <FaAngleLeft className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={decDisabled ? undefined : onOpenDec}
+            disabled={decDisabled}
+            className={`inline-flex items-center justify-center h-7 w-7 rounded-xl border ${decDisabled ? 'border-slate-700/50 bg-slate-800/30 text-slate-500 cursor-not-allowed' : 'border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white'}`}
+            title={decDisabled ? (decDisabledTitle || 'Non modificabile') : `Sottrai ${label} (valore custom)`}
+          >
+            <FaAnglesLeft className="w-3.5 h-3.5" />
+          </button>
+          <div className={`relative flex-1 h-5 rounded-lg ${colorTrack} overflow-visible border border-slate-600/50`}>
+            {/* fill */}
+            <div
+              style={{ width: `${Math.min(100, pct)}%` }}
+              className={`h-full rounded-md transition-colors duration-200 ${fillClass}`}
+            />
+            {/* overflow fill */}
+            {overflowPct > 0 && (
+              <div
+                style={{ width: `${overflowPct}%` }}
+                className="h-full bg-amber-400 rounded-r-md"
+              />
+            )}
+            {/* subtle stripes */}
+            <div className="pointer-events-none absolute inset-0 bg-[repeating-linear-gradient(45deg,rgba(255,255,255,0.06)_0px,rgba(255,255,255,0.06)_6px,transparent_6px,transparent_12px)] rounded-lg" />
+          </div>
+          <button
+            onClick={incDisabled ? undefined : onOpenInc}
+            disabled={incDisabled}
+            className={`inline-flex items-center justify-center h-7 w-7 rounded-xl border ${incDisabled ? 'border-slate-700/50 bg-slate-800/30 text-slate-500 cursor-not-allowed' : 'border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white'}`}
+            title={incDisabled ? (incDisabledTitle || 'Non modificabile') : `Aggiungi ${label} (valore custom)`}
+          >
+            <FaAnglesRight className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onMouseDown={incDisabled ? undefined : onIncStart}
+            onMouseUp={incDisabled ? undefined : onIncEnd}
+            onMouseLeave={incDisabled ? undefined : onIncEnd}
+            onTouchStart={incDisabled ? undefined : onIncStart}
+            onTouchEnd={incDisabled ? undefined : onIncEnd}
+            disabled={incDisabled}
+            className={`inline-flex items-center justify-center h-7 w-7 rounded-xl border ${incDisabled ? 'border-slate-700/50 bg-slate-800/30 text-slate-500 cursor-not-allowed' : 'border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70 hover:text-white'}`}
+            title={incDisabled ? (incDisabledTitle || 'Non modificabile') : `+1 ${label}`}
+          >
+            <FaAngleRight className="w-3.5 h-3.5" />
+          </button>
+          <span className="min-w-[72px] text-right text-sm text-slate-200">
+            {singleValue ? current : `${current}/${total}`}
+          </span>
+        </div>
+      </div>
+    );
+  };
+
+  // --- Barriera handlers (single value) ---
+  const handleResetBarriera = async () => {
+    if (!user) return;
+    try {
+      await executeResourceMutation({
+        resource: 'barriera',
+        mode: 'set',
+        value: 0,
+        totalValue: 0,
+        remainingTurns: 0,
+        totalTurns: 0,
+      });
+    } catch (e) {
+      console.error('Error resetting Barriera:', e);
+    }
+  };
+
+  const handleDecrementBarriera = async () => {
+    if (user && userData?.stats) {
+      let newVal = (userData.stats.barrieraCurrent || 0) - 1;
+      if (newVal < 0) newVal = 0;
+      try {
+        await executeResourceMutation({ resource: 'barriera', mode: 'set', value: newVal });
+      } catch (e) {
+        console.error('Error decrementing Barriera:', e);
+      }
+    }
+  };
+
+  const handleIncrementBarriera = async () => {
+    if (user && userData?.stats) {
+      const current = userData.stats.barrieraCurrent || 0;
+      const total = userData.stats.barrieraTotal || 0;
+      if (total <= 0 || current >= total) return; // cannot grow past total
+      const newVal = Math.min(total, current + 1);
+      try {
+        await executeResourceMutation({ resource: 'barriera', mode: 'set', value: newVal });
+      } catch (e) {
+        console.error('Error incrementing Barriera:', e);
+      }
+    }
+  };
+
+  const handleDecrementBarrieraStart = () => {
+    handleDecrementBarriera();
+    barrieraIntervalRef.current = setInterval(handleDecrementBarriera, 200);
+  };
+  const handleDecrementBarrieraEnd = () => {
+    if (barrieraIntervalRef.current) {
+      clearInterval(barrieraIntervalRef.current);
+      barrieraIntervalRef.current = null;
+    }
+  };
+  const handleIncrementBarrieraStart = () => {
+    handleIncrementBarriera();
+    barrieraIntervalRef.current = setInterval(handleIncrementBarriera, 200);
+  };
+  const handleIncrementBarrieraEnd = () => {
+    if (barrieraIntervalRef.current) {
+      clearInterval(barrieraIntervalRef.current);
+      barrieraIntervalRef.current = null;
+    }
+  };
+
+  // Activate Barriera (sets both current and total)
+  const handleActivateBarriera = async () => {
+    const submissionScopeKey = actionScopeKey;
+    const val = parseInt(barrieraActivateValue, 10);
+    const turns = parseInt(barrieraActivateTurns, 10);
+    if (
+      isNaN(val)
+      || val <= 0
+      || isNaN(turns)
+      || turns <= 0
+      || !user
+      || !mutationsReady
+      || barrieraActionScopeKey !== submissionScopeKey
+    ) return;
+    try {
+      await executeResourceMutation({
+        resource: 'barriera',
+        mode: 'set',
+        value: val,
+        totalValue: val,
+        totalTurns: turns,
+        remainingTurns: turns,
+      });
+      if (actionScopeRef.current !== submissionScopeKey) return;
+      setBarrieraActivateValue('');
+      setBarrieraActivateTurns('');
+      setShowBarrieraActivate(false);
+      setBarrieraActionScopeKey(null);
+    } catch (e) {
+      console.error('Error activating barriera', e);
+    }
+  };
+
+  const barrierCurrent = userData?.stats?.barrieraCurrent ?? userData?.stats?.barriera ?? 0;
+  const barrierTotal = userData?.stats?.barrieraTotal ?? userData?.stats?.barriera ?? 0;
+  // Turn effect data for barriera
+  const barrierTurnsTotal = userData?.active_turn_effect?.barriera?.totalTurns || 0;
+  const barrierTurnsRemaining = userData?.active_turn_effect?.barriera?.remainingTurns || 0;
+  const barrierActive = barrierTotal > 0; // active as long as a total is defined (>0)
+  const barrierDepleted = barrierActive && barrierCurrent === 0;
+  const barrierFull = barrierActive && barrierCurrent >= barrierTotal && !barrierDepleted;
+  const barrierIncDisabledTitle = !barrierActive ? 'Barriera non attiva' : (barrierDepleted ? 'Barriera terminata: ri-attiva con lo scudo' : (barrierFull ? 'Barriera al massimo' : ''));
+  const barrierDecDisabledTitle = !barrierActive ? 'Barriera non attiva' : (barrierDepleted ? 'Barriera terminata' : '');
+
+  return (
+    <div className="relative backdrop-blur bg-slate-900/70 border border-slate-700/50 rounded-2xl p-5 shadow-lg overflow-hidden">
+      {/* Decorative glows to match EquippedInventory */}
+      <div className="absolute -left-16 -top-16 w-52 h-52 bg-indigo-500/10 rounded-full blur-3xl" />
+      <div className="absolute -right-10 -bottom-24 w-64 h-64 bg-fuchsia-500/10 rounded-full blur-3xl" />
+
+      {/* Custom Input Modal (full-screen overlay retained via portal to avoid clipping) */}
+      {showCustomInput && customActionScopeKey === actionScopeKey && createPortal(
+        (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="w-full max-w-md bg-slate-900/90 border border-slate-700/70 rounded-2xl shadow-xl overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-700/60">
+                <h2 className="text-sm font-medium text-slate-200 tracking-wide">{promptMessage}</h2>
+              </div>
+              <div className="p-4">
+                {!customFeedbackMessage ? (
+                  <>
+                    <input
+                      type="number"
+                      value={customInputValue}
+                      onChange={(e) => setCustomInputValue(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && mutationsReady) handleCustomSubmit(); }}
+                      className="w-full p-2 rounded-lg bg-slate-800/80 text-slate-100 mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-500 border border-slate-600/60"
+                      placeholder="0"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button onClick={closeCustomInput} className="px-4 py-2 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70">Annulla</button>
+                  <button onClick={handleCustomSubmit} disabled={!mutationsReady} className="px-4 py-2 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow hover:opacity-95 disabled:opacity-40 disabled:cursor-not-allowed">OK</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-slate-200 mb-4">{customFeedbackMessage}</p>
+                    <div className="flex justify-end">
+                      <button onClick={closeCustomInput} className="px-4 py-2 rounded-xl bg-gradient-to-br from-sky-600 to-blue-600 text-white shadow hover:opacity-95">Chiudi</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        ),
+        document.body
+      )}
+
+      {/* Barriera Activation Overlay */}
+      {showBarrieraActivate && barrieraActionScopeKey === actionScopeKey && createPortal(
+        (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+            <div className="relative w-full max-w-md rounded-2xl border border-amber-500/30 bg-slate-900/95 shadow-2xl overflow-hidden">
+              <div className="absolute -inset-0.5 bg-gradient-to-br from-amber-500/10 via-transparent to-yellow-400/10 pointer-events-none" />
+              <div className="relative px-5 py-4 border-b border-slate-700/60 flex items-center gap-3">
+                <div className="h-9 w-9 rounded-xl flex items-center justify-center bg-amber-500/20 border border-amber-400/40 text-amber-300">
+                  <GiShield className="w-5 h-5" />
+                </div>
+                <h2 className="text-base font-semibold text-amber-200 tracking-wide">Attiva Barriera</h2>
+              </div>
+              <div className="relative p-5 space-y-4">
+                <p className="text-sm text-slate-300">Inserisci il valore totale della nuova barriera e la durata in turni.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-400 mb-1">Valore Barriera</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={barrieraActivateValue}
+                      onChange={(e) => setBarrieraActivateValue(e.target.value)}
+                      onKeyDown={(e)=>{ if(e.key === 'Enter' && mutationsReady) handleActivateBarriera(); }}
+                      className="w-full p-2 rounded-lg bg-slate-800/80 text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500 border border-slate-600/60"
+                      placeholder="0"
+                    />
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {[5,10,15,20].map(v => (
+                        <button key={v} onClick={()=> setBarrieraActivateValue(String(v))} className="px-2.5 py-1 text-xs rounded-lg bg-slate-800/60 border border-slate-600/60 text-slate-200 hover:border-amber-400/60 hover:text-amber-200 transition">{v}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-400 mb-1">Turni</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={barrieraActivateTurns}
+                      onChange={(e) => setBarrieraActivateTurns(e.target.value)}
+                      onKeyDown={(e)=>{ if(e.key === 'Enter' && mutationsReady) handleActivateBarriera(); }}
+                      className="w-full p-2 rounded-lg bg-slate-800/80 text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500 border border-slate-600/60"
+                      placeholder="0"
+                    />
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {[1,2,3,5].map(v => (
+                        <button key={v} onClick={()=> setBarrieraActivateTurns(String(v))} className="px-2.5 py-1 text-xs rounded-lg bg-slate-800/60 border border-slate-600/60 text-slate-200 hover:border-amber-400/60 hover:text-amber-200 transition">{v}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button onClick={()=>{ setShowBarrieraActivate(false); setBarrieraActionScopeKey(null); setBarrieraActivateValue(''); setBarrieraActivateTurns(''); }} className="px-4 py-2 rounded-xl border border-slate-600/60 bg-slate-800/60 text-slate-200 hover:border-slate-400/70">Annulla</button>
+                  <button onClick={handleActivateBarriera} disabled={!mutationsReady || !barrieraActivateValue || !barrieraActivateTurns} className="px-4 py-2 rounded-xl bg-gradient-to-br from-amber-500 to-yellow-500 text-slate-900 font-medium shadow disabled:opacity-40 disabled:cursor-not-allowed">Attiva</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ),
+        document.body
+      )}
+
+      <div className="relative flex flex-col gap-4">
+        <div className="space-y-4">
+          <StatRow
+            label="HP"
+            icon={GiHearts}
+            colorTrack="bg-red-900/30"
+            colorFill="bg-gradient-to-r from-red-500 to-rose-500"
+            current={userData?.stats?.hpCurrent || 0}
+            total={userData?.stats?.hpTotal || 0}
+            onReset={handleResetHP}
+            onDecStart={handleDecrementHPStart}
+            onDecEnd={handleDecrementHPEnd}
+            onIncStart={handleIncrementHPStart}
+            onIncEnd={handleIncrementHPEnd}
+            onOpenDec={() => openCustomInput('hp-decrement')}
+            onOpenInc={() => openCustomInput('hp-increment')}
+            resetDisabled={!mutationsReady}
+            decDisabled={!mutationsReady}
+            incDisabled={!mutationsReady}
+          />
+
+          <StatRow
+            label="Mana"
+            icon={GiMagicSwirl}
+            colorTrack="bg-indigo-900/30"
+            colorFill="bg-gradient-to-r from-indigo-600 to-fuchsia-600"
+            current={userData?.stats?.manaCurrent || 0}
+            total={userData?.stats?.manaTotal || 0}
+            onReset={handleResetMana}
+            onDecStart={handleDecrementManaStart}
+            onDecEnd={handleDecrementManaEnd}
+            onIncStart={handleIncrementManaStart}
+            onIncEnd={handleIncrementManaEnd}
+            onOpenDec={() => openCustomInput('mana-decrement')}
+            onOpenInc={() => openCustomInput('mana-increment')}
+            resetDisabled={!mutationsReady}
+            decDisabled={!mutationsReady}
+            incDisabled={!mutationsReady}
+          />
+
+          <StatRow
+            label="Essenza"
+            icon={FaDroplet}
+            colorTrack="bg-teal-900/30"
+            colorFill="bg-gradient-to-r from-teal-500 to-emerald-400"
+            current={userData?.stats?.essenzaCurrent || 0}
+            total={userData?.stats?.essenzaTotal || 0}
+            onReset={handleResetEssenza}
+            onDecStart={handleDecrementEssenzaStart}
+            onDecEnd={handleDecrementEssenzaEnd}
+            onIncStart={handleIncrementEssenzaStart}
+            onIncEnd={handleIncrementEssenzaEnd}
+            onOpenDec={() => openCustomInput('essenza-decrement')}
+            onOpenInc={() => openCustomInput('essenza-increment')}
+            resetDisabled={!mutationsReady}
+            decDisabled={!mutationsReady}
+            incDisabled={!mutationsReady}
+          />
+
+          <StatRow
+            label="Barriera"
+            icon={GiShield}
+            colorTrack="bg-amber-900/30"
+            colorFill="bg-gradient-to-r from-amber-500 to-yellow-500"
+            colorFillInactive="bg-slate-700/40"
+            current={barrierCurrent}
+            total={barrierTotal}
+            onReset={handleResetBarriera}
+            onDecStart={handleDecrementBarrieraStart}
+            onDecEnd={handleDecrementBarrieraEnd}
+            onIncStart={handleIncrementBarrieraStart}
+            onIncEnd={handleIncrementBarrieraEnd}
+            onOpenDec={() => openCustomInput('barriera-decrement')}
+            onOpenInc={() => openCustomInput('barriera-increment')}
+            onIconClick={mutationsReady ? () => { setBarrieraActionScopeKey(actionScopeKey); setShowBarrieraActivate(true); } : undefined}
+            iconActive={barrierActive}
+            resetTitle={barrierActive ? (barrierDepleted ? 'Rimuovi Barriera esaurita' : 'Termina Barriera') : 'Nessuna Barriera attiva'}
+            resetIcon={FaBan}
+            resetClassName={barrierActive ? 'bg-gradient-to-br from-rose-600 to-red-600 hover:scale-105 active:scale-95 focus:ring-red-400/40' : 'bg-slate-700/60'}
+            resetDisabled={!mutationsReady || !barrierActive}
+            decDisabled={!mutationsReady || barrierDepleted || !barrierActive}
+            incDisabled={!mutationsReady || barrierDepleted || !barrierActive || barrierFull}
+            incDisabledTitle={barrierIncDisabledTitle}
+            decDisabledTitle={barrierDecDisabledTitle}
+          />
+          {/* Thin turns bar under barrier when active and turns tracked */}
+          {barrierActive && barrierTurnsTotal > 0 && (
+            <div className="-mt-3 mb-2 px-[4.5rem]">{/* align under main bar content (approx padding to start of bar) */}
+              <div className="h-2 rounded-md bg-slate-700/40 overflow-hidden relative border border-slate-600/40">
+                <div
+                  className="h-full bg-gradient-to-r from-amber-400 via-yellow-400 to-yellow-300 transition-all duration-300"
+                  style={{ width: `${Math.min(100, (barrierTurnsRemaining / barrierTurnsTotal) * 100)}%` }}
+                />
+                <div className="absolute inset-0 text-[10px] leading-4 font-medium text-slate-900/90 flex items-center justify-center pointer-events-none select-none">
+                  <span className="px-1 rounded bg-amber-300/70 text-slate-900 tracking-wide">
+                    {barrierTurnsRemaining}/{barrierTurnsTotal} turni
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default StatsBars;

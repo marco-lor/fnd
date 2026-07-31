@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Local credentials and secrets
+backend/firestoreServiceAccountKey.json
+**/*ServiceAccountKey*.json
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Local Firestore exports/backups
+backend/firestore_backup_*.json
+!backend/firestore_backup_v2.schema.json
+backend/backups/
+
+# Frontend generated output and deploy cache
+frontend/build/
+frontend/.firebase/
+frontend/pglite-debug.log
+frontend/functions/pglite-debug.log
+frontend/performance-results/
+frontend/playwright/.auth/
+frontend/playwright-report/
+frontend/test-results/
+frontend/.perf-emulator-data/
+frontend/.firebase.performance.generated.json
+frontend/.perf-tools/
+frontend/firebase-debug.log
+frontend/firebase-debug.[1-9].log
+frontend/firestore-debug.log
+frontend/debug.log
+
+# Dependencies
+frontend/node_modules/
+frontend/functions/node_modules/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+security/fatin_test_public_resource_check/

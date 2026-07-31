@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "version": "fnd-performance-v2-task07-media",
+  "projectId": "demo-fnd-perf",
+  "documentCount": 7932,
+  "storageObjectCount": 136,
+  "canonicalHash": "122f99b9a93b23944e1ad5c85b57a714d5fa3476cd32630cd4ad103d6a455ba4",
+  "counts": {
+    "app_config": 1,
+    "users": 200,
+    "user_directory": 200,
+    "items": 1000,
+    "foes": 500,
+    "echi_npcs": 500,
+    "map_markers": 2000,
+    "encounters": 100,
+    "grigliata_backgrounds": 50,
+    "grigliata_gallery_folders": 2,
+    "grigliata_music_stream": 1,
+    "grigliata_tokens": 200,
+    "grigliata_token_placements": 200,
+    "grigliata_fog_memory_tiles": 1024,
+    "grigliata_music_tracks": 500
+  }
+}

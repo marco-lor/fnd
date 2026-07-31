@@ -1,0 +1,691 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { collection, getDocs, limit, onSnapshot, orderBy, query, startAfter } from '../../performance/firestore';
+import { FaDiceD20, FaTimes } from 'react-icons/fa';
+import DiceRoller from '../common/DiceRoller';
+import { getParamDisplayName } from '../common/paramMetadata';
+import { db } from '../firebaseConfig';
+import {
+  buildParameterRollConfig,
+  formatParameterFormula,
+  parseDiceFaces,
+  resolveAnimaDieLabel,
+} from './initiativeDice';
+
+const NORMAL_DICE_FACES = [4, 6, 8, 10, 12, 20, 100];
+const MAX_NORMAL_DICE_COUNT = 20;
+const DICE_ROLL_LOG_LIMIT = 20;
+
+const clampDiceCount = (value) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.min(MAX_NORMAL_DICE_COUNT, Math.max(1, parsed));
+};
+
+const parseDiceModifier = (value) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const buildParameterRows = (params = {}) => (
+  Object.entries(params || {})
+    .map(([name, stat]) => ({
+      name,
+      displayName: getParamDisplayName(name),
+      total: Number(stat?.Tot) || 0,
+    }))
+    .sort((left, right) => left.displayName.localeCompare(right.displayName))
+);
+
+const formatDiceFormula = (meta = {}) => {
+  if (!meta.count || !meta.faces) return '';
+  const modifier = Number(meta.modifier) || 0;
+  return `${meta.count}d${meta.faces}${modifier ? (modifier > 0 ? `+${modifier}` : `${modifier}`) : ''}`;
+};
+
+const formatRollTime = (createdAt) => (
+  createdAt?.toDate
+    ? createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : ''
+);
+
+function DiceRollEntries({ rolls, emptyText = 'No rolls', maxHeightClass = 'max-h-64' }) {
+  if (!rolls.length) {
+    return (
+      <p className="text-xs italic text-slate-500">{emptyText}</p>
+    );
+  }
+
+  return (
+    <ul className={`${maxHeightClass} space-y-1.5 overflow-y-auto pr-1 custom-scroll`}>
+      {rolls.map((roll) => {
+        const meta = roll.meta || {};
+        const formula = formatDiceFormula(meta);
+
+        return (
+          <li key={roll.id} className="rounded-xl bg-slate-900/80 px-2.5 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-bold text-amber-300">{roll.total}</span>
+              <span className="text-[10px] tabular-nums text-slate-500">{formatRollTime(roll.createdAt)}</span>
+            </div>
+            <div className="mt-0.5 truncate text-[11px] font-mono text-indigo-300" title={formula}>
+              {formula}
+            </div>
+            <div className="truncate text-[11px] text-slate-400" title={meta.description || ''}>
+              {meta.description || ''}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function SpaciousDiceRollEntries({ rolls }) {
+  if (!rolls.length) {
+    return (
+      <p className="rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-5 text-sm italic text-slate-500">
+        No rolls found for this user.
+      </p>
+    );
+  }
+
+  return (
+    <ul className="space-y-3">
+      {rolls.map((roll) => {
+        const meta = roll.meta || {};
+        const formula = formatDiceFormula(meta);
+        const rolledValues = Array.isArray(meta.rolls) ? meta.rolls.join(', ') : '';
+
+        return (
+          <li key={roll.id} className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 shadow-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-2xl font-bold text-amber-300">{roll.total}</p>
+                <p className="mt-1 truncate font-mono text-sm text-indigo-300" title={formula}>{formula}</p>
+              </div>
+              <span className="shrink-0 tabular-nums text-xs text-slate-500">{formatRollTime(roll.createdAt)}</span>
+            </div>
+            {meta.description && (
+              <p className="mt-3 text-sm text-slate-300">{meta.description}</p>
+            )}
+            {rolledValues && (
+              <p className="mt-2 text-xs uppercase tracking-[0.14em] text-slate-500">Rolls {rolledValues}</p>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+const getUserLabel = (rollUser) => (
+  rollUser?.characterId || rollUser?.email || rollUser?.id || 'Unknown user'
+);
+
+function usePagedDiceRollHistory({ userId, enabled, pageSize }) {
+  const [rolls, setRolls] = useState([]);
+  const [lastCursor, setLastCursor] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [hasMore, setHasMore] = useState(false);
+  const requestIdRef = useRef(0);
+
+  const reset = useCallback(() => {
+    requestIdRef.current += 1;
+    setRolls([]);
+    setLastCursor(null);
+    setLoading(false);
+    setError(null);
+    setHasMore(false);
+  }, []);
+
+  const fetchPage = useCallback(async ({ append = false, cursor = null } = {}) => {
+    if (!enabled || !userId) {
+      reset();
+      return;
+    }
+
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    setLoading(true);
+    setError(null);
+    if (!append) {
+      setLastCursor(null);
+      setHasMore(false);
+    }
+
+    try {
+      const constraints = [orderBy('createdAt', 'desc')];
+      if (cursor) {
+        constraints.push(startAfter(cursor));
+      }
+      constraints.push(limit(pageSize));
+
+      const snapshot = await getDocs(query(
+        collection(db, 'users', userId, 'diceRolls'),
+        ...constraints
+      ));
+
+      if (requestIdRef.current !== requestId) return;
+
+      const snapshotDocs = snapshot.docs || [];
+      const nextRolls = snapshotDocs.map((snapshotDoc) => ({
+        id: snapshotDoc.id,
+        ...snapshotDoc.data(),
+      }));
+
+      setRolls((currentRolls) => (append ? [...currentRolls, ...nextRolls] : nextRolls));
+      setLastCursor(snapshotDocs.length ? snapshotDocs[snapshotDocs.length - 1] : null);
+      setHasMore(snapshotDocs.length === pageSize);
+    } catch (loadError) {
+      if (requestIdRef.current !== requestId) return;
+      console.warn('Failed to load Grigliata DM dice logs:', loadError);
+      setError(loadError);
+      if (!append) {
+        setLastCursor(null);
+        setHasMore(false);
+      }
+    } finally {
+      if (requestIdRef.current === requestId) {
+        setLoading(false);
+      }
+    }
+  }, [enabled, pageSize, reset, userId]);
+
+  const loadFirstPage = useCallback(() => (
+    fetchPage({ append: false, cursor: null })
+  ), [fetchPage]);
+
+  const loadMore = useCallback(() => {
+    if (!hasMore || loading || !lastCursor) return undefined;
+    return fetchPage({ append: true, cursor: lastCursor });
+  }, [fetchPage, hasMore, lastCursor, loading]);
+
+  useEffect(() => {
+    if (!enabled || !userId) {
+      reset();
+      return;
+    }
+
+    fetchPage({ append: false, cursor: null });
+  }, [enabled, fetchPage, reset, userId]);
+
+  return {
+    rolls,
+    loading,
+    error,
+    hasMore,
+    loadFirstPage,
+    loadMore,
+    reset,
+  };
+}
+
+function DmDiceLogsOverlay({
+  isOpen,
+  users,
+  selectedUserId,
+  rolls,
+  loading,
+  error,
+  hasMore,
+  onSelectUser,
+  onLoadMore,
+  onClose,
+}) {
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  const selectedUser = users.find((rollUser) => rollUser.id === selectedUserId) || null;
+  const selectedLabel = getUserLabel(selectedUser);
+
+  if (!users.length) {
+    return (
+      <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-950/85 px-4 py-6 backdrop-blur-sm">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="grigliata-dm-dice-log-title"
+          className="w-full max-w-3xl rounded-3xl border border-slate-700 bg-slate-950 p-5 shadow-2xl"
+        >
+          <div className="flex items-center justify-between gap-4">
+            <h2 id="grigliata-dm-dice-log-title" className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-300">
+              DM Dice Roll Logs
+            </h2>
+            <button
+              type="button"
+              aria-label="Close DM dice logs"
+              onClick={onClose}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-200 transition-colors hover:border-amber-300/60 hover:bg-slate-800"
+            >
+              <FaTimes className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </div>
+          <p className="mt-5 rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-5 text-sm italic text-slate-500">
+            No users available.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-950/85 px-4 py-6 backdrop-blur-sm">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="grigliata-dm-dice-log-title"
+        className="flex h-[min(760px,calc(100vh-3rem))] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-700 bg-slate-950 shadow-2xl"
+      >
+        <div className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-800 px-5 py-4">
+          <div>
+            <h2 id="grigliata-dm-dice-log-title" className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-300">
+              DM Dice Roll Logs
+            </h2>
+            <p className="mt-1 text-xs text-slate-500">Select a user to inspect their dice history.</p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close DM dice logs"
+            onClick={onClose}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-200 transition-colors hover:border-amber-300/60 hover:bg-slate-800"
+          >
+            <FaTimes className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[15rem_minmax(0,1fr)]">
+          <aside className="min-h-0 border-b border-slate-800 bg-slate-950/90 p-3 md:border-b-0 md:border-r">
+            <div className="max-h-48 space-y-2 overflow-y-auto pr-1 custom-scroll md:max-h-none">
+              {users.map((rollUser) => {
+                const label = getUserLabel(rollUser);
+                const isSelected = rollUser.id === selectedUserId;
+
+                return (
+                  <button
+                    key={rollUser.id}
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => onSelectUser(rollUser.id)}
+                    className={`w-full rounded-xl border px-3 py-2 text-left transition-colors ${
+                      isSelected
+                        ? 'border-amber-300/60 bg-amber-400/10 text-amber-100'
+                        : 'border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-600 hover:bg-slate-800'
+                    }`}
+                  >
+                    <span className="block truncate text-sm font-semibold" title={label}>{label}</span>
+                    {rollUser.email && rollUser.email !== label && (
+                      <span className="mt-0.5 block truncate text-[11px] text-slate-500" title={rollUser.email}>{rollUser.email}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
+
+          <section className="flex min-h-0 flex-col bg-slate-900/30">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 px-5 py-4">
+              <div className="min-w-0">
+                <h3 className="truncate text-lg font-semibold text-slate-100" title={selectedLabel}>{selectedLabel}</h3>
+                <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-500">{rolls.length} loaded rolls</p>
+              </div>
+              {loading && (
+                <span className="shrink-0 rounded-full border border-indigo-300/30 bg-indigo-400/10 px-3 py-1 text-xs font-semibold text-indigo-200">
+                  Loading
+                </span>
+              )}
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-5 custom-scroll">
+              {error ? (
+                <p className="rounded-2xl border border-amber-300/30 bg-amber-400/10 px-4 py-5 text-sm text-amber-200">
+                  Dice rolls unavailable.
+                </p>
+              ) : (
+                <SpaciousDiceRollEntries rolls={rolls} />
+              )}
+            </div>
+
+            <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-800 px-5 py-4">
+              <p className="text-xs text-slate-500">
+                {hasMore ? 'Older rolls are available.' : 'End of available history.'}
+              </p>
+              {hasMore && (
+                <button
+                  type="button"
+                  onClick={onLoadMore}
+                  disabled={loading}
+                  className="inline-flex items-center justify-center rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-200 transition-colors hover:border-amber-300/60 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Load more
+                </button>
+              )}
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function GrigliataDicePanel({ currentUserId, userData, isManager, loadDiceMetadata }) {
+  const [dadiAnimaByLevel, setDadiAnimaByLevel] = useState([]);
+  const [normalDiceCount, setNormalDiceCount] = useState(1);
+  const [normalDiceModifier, setNormalDiceModifier] = useState(0);
+  const [roller, setRoller] = useState(null);
+  const [currentUserRolls, setCurrentUserRolls] = useState([]);
+  const [currentUserRollsError, setCurrentUserRollsError] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [isDmLogsOpen, setIsDmLogsOpen] = useState(false);
+  const [selectedLogUserId, setSelectedLogUserId] = useState('');
+
+  useEffect(() => {
+    let isActive = true;
+
+    Promise.resolve(loadDiceMetadata?.())
+      .then((nextDadiAnimaByLevel) => {
+        if (isActive) setDadiAnimaByLevel(nextDadiAnimaByLevel || []);
+      })
+      .catch((error) => {
+        console.warn('Failed to load Grigliata dice metadata:', error);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [loadDiceMetadata]);
+
+  useEffect(() => {
+    if (!currentUserId) {
+      setCurrentUserRolls([]);
+      setCurrentUserRollsError(null);
+      return undefined;
+    }
+
+    const rollsQuery = query(
+      collection(db, 'users', currentUserId, 'diceRolls'),
+      orderBy('createdAt', 'desc'),
+      limit(DICE_ROLL_LOG_LIMIT)
+    );
+
+    return onSnapshot(rollsQuery, (snapshot) => {
+      const nextRolls = snapshot.docs.map((snapshotDoc) => ({
+        id: snapshotDoc.id,
+        ...snapshotDoc.data(),
+      }));
+      setCurrentUserRolls(nextRolls);
+      setCurrentUserRollsError(null);
+    }, (error) => {
+      console.warn('Failed to load current Grigliata dice rolls:', error);
+      setCurrentUserRolls([]);
+      setCurrentUserRollsError(error);
+    });
+  }, [currentUserId]);
+
+  useEffect(() => {
+    if (!isManager) {
+      setUsers([]);
+      return undefined;
+    }
+
+    return onSnapshot(collection(db, 'users'), (snapshot) => {
+      const nextUsers = snapshot.docs
+        .map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() }))
+        .sort((left, right) => (
+          (left.characterId || left.email || left.id).localeCompare(right.characterId || right.email || right.id)
+        ));
+      setUsers(nextUsers);
+    }, (error) => {
+      console.warn('Failed to load users for Grigliata dice logs:', error);
+      setUsers([]);
+    });
+  }, [isManager]);
+
+  useEffect(() => {
+    if (!isManager) {
+      setIsDmLogsOpen(false);
+      setSelectedLogUserId('');
+      return;
+    }
+
+    if (!users.length) {
+      setSelectedLogUserId('');
+      return;
+    }
+
+    setSelectedLogUserId((currentSelection) => {
+      if (currentSelection && users.some((rollUser) => rollUser.id === currentSelection)) {
+        return currentSelection;
+      }
+
+      if (currentUserId && users.some((rollUser) => rollUser.id === currentUserId)) {
+        return currentUserId;
+      }
+
+      return users[0].id;
+    });
+  }, [currentUserId, isManager, users]);
+
+  const dmLogHistory = usePagedDiceRollHistory({
+    userId: selectedLogUserId,
+    enabled: isManager && isDmLogsOpen && !!selectedLogUserId,
+    pageSize: DICE_ROLL_LOG_LIMIT,
+  });
+
+  const currentLevel = Number(userData?.stats?.level) || 0;
+  const animaDieLabel = resolveAnimaDieLabel(dadiAnimaByLevel, currentLevel);
+  const animaFaces = parseDiceFaces(animaDieLabel);
+  const baseRows = useMemo(
+    () => buildParameterRows(userData?.Parametri?.Base),
+    [userData?.Parametri?.Base]
+  );
+  const combatRows = useMemo(
+    () => buildParameterRows(userData?.Parametri?.Combattimento),
+    [userData?.Parametri?.Combattimento]
+  );
+
+  const handleRollParameter = (row) => {
+    const rollConfig = buildParameterRollConfig({
+      parameterName: row.name,
+      parameterTotal: row.total,
+      dieLabel: animaDieLabel,
+    });
+    if (rollConfig) setRoller(rollConfig);
+  };
+
+  const handleRollNormalDice = (faces) => {
+    const count = clampDiceCount(normalDiceCount);
+    const modifier = parseDiceModifier(normalDiceModifier);
+    setNormalDiceCount(count);
+    setNormalDiceModifier(modifier);
+    setRoller({
+      faces,
+      count,
+      modifier,
+      description: `Normal dice (${formatDiceFormula({ count, faces, modifier })})`,
+    });
+  };
+
+  const panelGridRowsClassName = isManager
+    ? 'xl:grid-rows-[auto_minmax(0,1fr)_minmax(8rem,0.45fr)_auto]'
+    : 'xl:grid-rows-[auto_minmax(0,1fr)_minmax(8rem,0.45fr)]';
+
+  const renderParameterGroup = (title, rows) => (
+    <section className="flex min-h-0 flex-col rounded-xl border border-slate-700 bg-slate-950/75 p-2.5 shadow-2xl backdrop-blur-sm">
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <h3 className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-300">{title}</h3>
+        <span className="rounded-full border border-indigo-300/30 bg-indigo-400/10 px-1.5 py-0.5 text-[10px] font-medium text-indigo-200">
+          {animaDieLabel || 'No die'}
+        </span>
+      </div>
+      {!rows.length ? (
+        <p className="text-xs italic text-slate-500">No parameters available.</p>
+      ) : (
+        <div className="grid grid-cols-1 gap-2 xl:min-h-0 xl:overflow-y-auto xl:pr-1 custom-scroll">
+          {rows.map((row) => (
+            <button
+              key={row.name}
+              type="button"
+              onClick={() => handleRollParameter(row)}
+              disabled={!animaFaces}
+              aria-label={`Roll ${row.displayName}`}
+              className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-700 bg-slate-900/80 px-2.5 py-2 text-left transition-colors hover:border-indigo-300/50 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              <span className="min-w-0">
+                <span className="block truncate text-[13px] font-medium text-slate-100">{row.displayName}</span>
+                <span className="block truncate text-[10px] font-mono text-slate-500">{formatParameterFormula(animaDieLabel, row.total)}</span>
+              </span>
+              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-200 ring-1 ring-inset ring-indigo-400/25">
+                <FaDiceD20 className="h-3.5 w-3.5" aria-hidden="true" />
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+
+  return (
+    <div
+      data-testid="grigliata-dice-panel"
+      className={`flex flex-col gap-3 xl:grid xl:h-full xl:min-h-0 xl:overflow-hidden ${panelGridRowsClassName}`}
+    >
+      <section className="rounded-2xl border border-slate-700 bg-slate-950/75 p-3 shadow-2xl backdrop-blur-sm xl:shrink-0">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-300">Dice</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              {currentUserId ? `Roller for ${userData?.characterId || currentUserId}` : 'Roller'}
+            </p>
+          </div>
+          <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-amber-400 text-black shadow-lg">
+            <FaDiceD20 className="h-5 w-5" aria-hidden="true" />
+          </div>
+        </div>
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          <div>
+            <label htmlFor="grigliata-normal-dice-count" className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+              Dice count
+            </label>
+            <input
+              id="grigliata-normal-dice-count"
+              type="number"
+              min="1"
+              max={MAX_NORMAL_DICE_COUNT}
+              value={normalDiceCount}
+              onChange={(event) => setNormalDiceCount(clampDiceCount(event.target.value))}
+              className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-slate-100 outline-none transition-colors focus:border-amber-300"
+            />
+          </div>
+          <div>
+            <label htmlFor="grigliata-normal-dice-modifier" className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+              Dice modifier
+            </label>
+            <input
+              id="grigliata-normal-dice-modifier"
+              type="number"
+              value={normalDiceModifier}
+              onChange={(event) => setNormalDiceModifier(event.target.value)}
+              className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-slate-100 outline-none transition-colors focus:border-amber-300"
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {NORMAL_DICE_FACES.map((faces) => (
+            <button
+              key={faces}
+              type="button"
+              aria-label={`Roll d${faces}`}
+              onClick={() => handleRollNormalDice(faces)}
+              className="inline-flex items-center justify-center gap-1 rounded-xl border border-slate-700 bg-slate-900 px-2 py-2 text-xs font-semibold text-slate-200 transition-colors hover:border-amber-300/60 hover:bg-slate-800"
+            >
+              <FaDiceD20 className="h-3.5 w-3.5" aria-hidden="true" />
+              d{faces}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <div data-testid="grigliata-dice-parameter-grid" className="grid min-h-0 grid-cols-1 gap-3 md:grid-cols-2 xl:min-h-0">
+        {renderParameterGroup('Base', baseRows)}
+        {renderParameterGroup('Combat', combatRows)}
+      </div>
+
+      <section data-testid="grigliata-current-dice-history" className="flex flex-col rounded-2xl border border-slate-700 bg-slate-950/75 p-3 shadow-2xl backdrop-blur-sm xl:flex-1 xl:min-h-0">
+        <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
+          <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-300">Roll History</h3>
+          <span className="rounded-full border border-amber-300/30 bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold text-amber-200">
+            {currentUserRolls.length}
+          </span>
+        </div>
+        {currentUserRollsError ? (
+          <p className="text-xs italic text-amber-300">Roll history unavailable</p>
+        ) : (
+          <DiceRollEntries
+            rolls={currentUserRolls}
+            emptyText="No rolls yet."
+            maxHeightClass="max-h-64 xl:max-h-none xl:flex-1 xl:min-h-0"
+          />
+        )}
+      </section>
+
+      {isManager && (
+        <section className="rounded-2xl border border-slate-700 bg-slate-950/75 p-3 shadow-2xl backdrop-blur-sm xl:shrink-0">
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            onClick={() => setIsDmLogsOpen(true)}
+            className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2.5 text-left transition-colors hover:border-amber-300/60 hover:bg-slate-800"
+          >
+            <span>
+              <span className="block text-xs font-semibold uppercase tracking-[0.16em] text-slate-200">DM Dice Logs</span>
+              <span className="mt-0.5 block text-[11px] text-slate-500">{users.length} users available</span>
+            </span>
+            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-400 text-black shadow-lg">
+              <FaDiceD20 className="h-4 w-4" aria-hidden="true" />
+            </span>
+          </button>
+        </section>
+      )}
+
+      {isManager && (
+        <DmDiceLogsOverlay
+          isOpen={isDmLogsOpen}
+          users={users}
+          selectedUserId={selectedLogUserId}
+          rolls={dmLogHistory.rolls}
+          loading={dmLogHistory.loading}
+          error={dmLogHistory.error}
+          hasMore={dmLogHistory.hasMore}
+          onSelectUser={setSelectedLogUserId}
+          onLoadMore={dmLogHistory.loadMore}
+          onClose={() => setIsDmLogsOpen(false)}
+        />
+      )}
+
+      {roller && (
+        <DiceRoller
+          faces={roller.faces}
+          count={roller.count}
+          modifier={roller.modifier}
+          description={roller.description}
+          onComplete={() => setRoller(null)}
+        />
+      )}
+    </div>
+  );
+}

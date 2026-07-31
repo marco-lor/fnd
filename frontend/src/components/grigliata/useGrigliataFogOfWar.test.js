@@ -1,0 +1,413 @@
+import React from 'react';
+import { act, render, screen, waitFor } from '@testing-library/react';
+import useGrigliataFogOfWar, {
+  useGrigliataFogRasterMemory,
+} from './useGrigliataFogOfWar';
+import {
+  FOG_RASTER_MASK_ENCODING,
+  FOG_RASTER_PROFILE_ID,
+  encodeFogRasterMaskBase64,
+  createEmptyFogRasterMaskBytes,
+} from './fogRasterMemory';
+
+const mockBuildDocTarget = (...segments) => ({
+  kind: 'doc',
+  path: segments.join('/'),
+  id: segments[segments.length - 1],
+});
+
+let mockDocData = {};
+let mockCollectionData = {};
+
+jest.mock('../firebaseConfig', () => ({
+  db: {},
+}));
+
+jest.mock('firebase/firestore', () => ({
+  collection: jest.fn((db, path) => ({ kind: 'collection', path })),
+  doc: jest.fn((db, ...segments) => mockBuildDocTarget(...segments)),
+  query: jest.fn((base, ...constraints) => ({ kind: 'query', base, constraints })),
+  where: jest.fn((field, op, value) => ({ kind: 'where', field, op, value })),
+  onSnapshot: jest.fn((target, onNext) => {
+    if (target?.kind === 'query') {
+      const items = mockCollectionData[target.base.path] || [];
+      const filteredItems = target.constraints.reduce((currentItems, constraint) => (
+        constraint?.kind === 'where' && constraint.op === '=='
+          ? currentItems.filter((item) => item?.[constraint.field] === constraint.value)
+          : currentItems
+      ), items);
+      onNext({
+        docs: filteredItems.map((item) => ({
+          id: item.id,
+          data: () => {
+            const { id, ...rest } = item;
+            return rest;
+          },
+        })),
+      });
+    } else {
+      onNext({
+        id: target.id,
+        exists: () => !!mockDocData[target.path],
+        data: () => mockDocData[target.path] || {},
+      });
+    }
+
+    return jest.fn();
+  }),
+}));
+
+const HookProbe = ({ backgroundId = '', currentUserId = '', isManager = false }) => {
+  const { fogOfWar, isFogOfWarReady } = useGrigliataFogOfWar({
+    backgroundId,
+    currentUserId,
+    isManager,
+  });
+
+  return (
+    <div>
+      <div data-testid="ready">{String(isFogOfWarReady)}</div>
+      <div data-testid="doc-id">{fogOfWar?.id || ''}</div>
+      <div data-testid="owner">{fogOfWar?.ownerUid || ''}</div>
+      <div data-testid="cell-count">{String(fogOfWar?.exploredCells?.length || 0)}</div>
+      <div data-testid="memory-tile-count">{String(fogOfWar?.memoryTiles?.length || 0)}</div>
+    </div>
+  );
+};
+
+const RasterMemoryProbe = ({ backgroundId = '', ownerUid = '', enabled = true }) => {
+  const { memoryTiles, isRasterFogReady } = useGrigliataFogRasterMemory({
+    backgroundId,
+    ownerUid,
+    enabled,
+  });
+
+  return (
+    <div>
+      <div data-testid="raster-ready">{String(isRasterFogReady)}</div>
+      <div data-testid="raster-memory-tile-count">{String(memoryTiles.length)}</div>
+      <div data-testid="raster-memory-owner-uids">{memoryTiles.map((tile) => tile.ownerUid).join(',')}</div>
+    </div>
+  );
+};
+
+describe('useGrigliataFogOfWar', () => {
+  let firestore;
+
+  beforeEach(() => {
+    mockDocData = {};
+    mockCollectionData = {};
+    firestore = require('firebase/firestore');
+    firestore.collection.mockClear().mockImplementation((db, path) => ({ kind: 'collection', path }));
+    firestore.doc.mockClear().mockImplementation((db, ...segments) => mockBuildDocTarget(...segments));
+    firestore.query.mockClear().mockImplementation((base, ...constraints) => ({ kind: 'query', base, constraints }));
+    firestore.where.mockClear().mockImplementation((field, op, value) => ({ kind: 'where', field, op, value }));
+    firestore.onSnapshot.mockClear().mockImplementation((target, onNext) => {
+      if (target?.kind === 'query') {
+        const items = mockCollectionData[target.base.path] || [];
+        const filteredItems = target.constraints.reduce((currentItems, constraint) => (
+          constraint?.kind === 'where' && constraint.op === '=='
+            ? currentItems.filter((item) => item?.[constraint.field] === constraint.value)
+            : currentItems
+        ), items);
+        onNext({
+          docs: filteredItems.map((item) => ({
+            id: item.id,
+            data: () => {
+              const { id, ...rest } = item;
+              return rest;
+            },
+          })),
+        });
+      } else {
+        onNext({
+          id: target.id,
+          exists: () => !!mockDocData[target.path],
+          data: () => mockDocData[target.path] || {},
+        });
+      }
+
+      return jest.fn();
+    });
+  });
+
+  test('does not subscribe without a signed-in player and active background', () => {
+    render(<HookProbe backgroundId="map-1" currentUserId="" />);
+
+    expect(firestore.onSnapshot).not.toHaveBeenCalled();
+    expect(screen.getByTestId('ready')).toHaveTextContent('false');
+  });
+
+  test('does not subscribe for normal DM view', () => {
+    render(<HookProbe backgroundId="map-1" currentUserId="dm-1" isManager />);
+
+    expect(firestore.onSnapshot).not.toHaveBeenCalled();
+    expect(screen.getByTestId('ready')).toHaveTextContent('false');
+  });
+
+  test('subscribes only to the current player fog doc', async () => {
+    mockDocData['grigliata_fog_of_war/map-1__user-1'] = {
+      backgroundId: 'map-1',
+      ownerUid: 'user-1',
+      cellSizePx: 70,
+      exploredCells: ['1:0', '0:0'],
+      updatedBy: 'user-1',
+    };
+    mockDocData['grigliata_fog_of_war/map-1__user-2'] = {
+      backgroundId: 'map-1',
+      ownerUid: 'user-2',
+      cellSizePx: 70,
+      exploredCells: ['9:9'],
+      updatedBy: 'user-2',
+    };
+
+    render(<HookProbe backgroundId="map-1" currentUserId="user-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ready')).toHaveTextContent('true');
+    });
+    expect(firestore.onSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_fog_of_war/map-1__user-1' }),
+      expect.any(Function),
+      expect.any(Function)
+    );
+    expect(firestore.onSnapshot).not.toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_fog_of_war/map-1__user-2' }),
+      expect.any(Function),
+      expect.any(Function)
+    );
+    expect(screen.getByTestId('doc-id')).toHaveTextContent('map-1__user-1');
+    expect(screen.getByTestId('owner')).toHaveTextContent('user-1');
+    expect(screen.getByTestId('cell-count')).toHaveTextContent('2');
+  });
+
+  test('subscribes to current player raster memory tiles', async () => {
+    const maskBytes = createEmptyFogRasterMaskBytes();
+    maskBytes[0] = 1;
+    mockCollectionData.grigliata_fog_memory_tiles = [{
+      id: 'map-1__user-1__fog-raster-c8-s16-v1__0:0',
+      backgroundId: 'map-1',
+      ownerUid: 'user-1',
+      tileKey: '0:0',
+      tileCol: 0,
+      tileRow: 0,
+      rasterProfileId: FOG_RASTER_PROFILE_ID,
+      tileSizeCells: 8,
+      samplesPerCell: 16,
+      cellSizePx: 70,
+      offsetXPx: 0,
+      offsetYPx: 0,
+      maskEncoding: FOG_RASTER_MASK_ENCODING,
+      maskBase64: encodeFogRasterMaskBase64(maskBytes),
+      updatedBy: 'user-1',
+    }, {
+      id: 'map-1__user-2__fog-raster-c8-s16-v1__0:0',
+      backgroundId: 'map-1',
+      ownerUid: 'user-2',
+      tileKey: '0:0',
+      tileCol: 0,
+      tileRow: 0,
+      rasterProfileId: FOG_RASTER_PROFILE_ID,
+      tileSizeCells: 8,
+      samplesPerCell: 16,
+      cellSizePx: 70,
+      offsetXPx: 0,
+      offsetYPx: 0,
+      maskEncoding: FOG_RASTER_MASK_ENCODING,
+      maskBase64: encodeFogRasterMaskBase64(maskBytes),
+      updatedBy: 'user-2',
+    }];
+
+    render(<HookProbe backgroundId="map-1" currentUserId="user-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ready')).toHaveTextContent('true');
+    });
+    expect(firestore.collection).toHaveBeenCalledWith(expect.anything(), 'grigliata_fog_memory_tiles');
+    expect(firestore.where).toHaveBeenCalledWith('backgroundId', '==', 'map-1');
+    expect(firestore.where).toHaveBeenCalledWith('ownerUid', '==', 'user-1');
+    expect(firestore.where).toHaveBeenCalledWith('rasterProfileId', '==', FOG_RASTER_PROFILE_ID);
+    expect(screen.getByTestId('memory-tile-count')).toHaveTextContent('1');
+  });
+
+  test('raster-only loader subscribes only to the selected owner memory tiles', async () => {
+    const maskBytes = createEmptyFogRasterMaskBytes();
+    maskBytes[0] = 1;
+    mockCollectionData.grigliata_fog_memory_tiles = [{
+      id: 'map-1__user-2__fog-raster-c8-s16-v1__0:0',
+      backgroundId: 'map-1',
+      ownerUid: 'user-2',
+      tileKey: '0:0',
+      tileCol: 0,
+      tileRow: 0,
+      rasterProfileId: FOG_RASTER_PROFILE_ID,
+      tileSizeCells: 8,
+      samplesPerCell: 16,
+      cellSizePx: 70,
+      offsetXPx: 0,
+      offsetYPx: 0,
+      maskEncoding: FOG_RASTER_MASK_ENCODING,
+      maskBase64: encodeFogRasterMaskBase64(maskBytes),
+      updatedBy: 'user-2',
+    }, {
+      id: 'map-1__user-3__fog-raster-c8-s16-v1__0:0',
+      backgroundId: 'map-1',
+      ownerUid: 'user-3',
+      tileKey: '0:0',
+      tileCol: 0,
+      tileRow: 0,
+      rasterProfileId: FOG_RASTER_PROFILE_ID,
+      tileSizeCells: 8,
+      samplesPerCell: 16,
+      cellSizePx: 70,
+      offsetXPx: 0,
+      offsetYPx: 0,
+      maskEncoding: FOG_RASTER_MASK_ENCODING,
+      maskBase64: encodeFogRasterMaskBase64(maskBytes),
+      updatedBy: 'user-3',
+    }];
+
+    render(<RasterMemoryProbe backgroundId="map-1" ownerUid="user-2" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('raster-ready')).toHaveTextContent('true');
+    });
+    expect(firestore.collection).toHaveBeenCalledWith(expect.anything(), 'grigliata_fog_memory_tiles');
+    expect(firestore.where).toHaveBeenCalledWith('backgroundId', '==', 'map-1');
+    expect(firestore.where).toHaveBeenCalledWith('ownerUid', '==', 'user-2');
+    expect(firestore.where).toHaveBeenCalledWith('rasterProfileId', '==', FOG_RASTER_PROFILE_ID);
+    expect(firestore.onSnapshot).not.toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_fog_of_war/map-1__user-2' }),
+      expect.any(Function),
+      expect.any(Function)
+    );
+    expect(screen.getByTestId('raster-memory-tile-count')).toHaveTextContent('1');
+    expect(screen.getByTestId('raster-memory-owner-uids')).toHaveTextContent('user-2');
+  });
+
+  test('raster-only loader stays idle when preview loading is disabled', () => {
+    render(<RasterMemoryProbe backgroundId="map-1" ownerUid="user-2" enabled={false} />);
+
+    expect(firestore.onSnapshot).not.toHaveBeenCalled();
+    expect(screen.getByTestId('raster-ready')).toHaveTextContent('false');
+    expect(screen.getByTestId('raster-memory-tile-count')).toHaveTextContent('0');
+  });
+
+  test('normalizes malformed snapshots to null while becoming ready', async () => {
+    mockDocData['grigliata_fog_of_war/map-1__user-1'] = {
+      backgroundId: 'map-1',
+      ownerUid: 'user-1',
+      cellSizePx: 70,
+      exploredCells: ['not-a-cell'],
+      updatedBy: 'user-1',
+    };
+
+    render(<HookProbe backgroundId="map-1" currentUserId="user-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ready')).toHaveTextContent('true');
+    });
+    expect(screen.getByTestId('doc-id')).toHaveTextContent('');
+    expect(screen.getByTestId('cell-count')).toHaveTextContent('0');
+  });
+
+  test('ignores stale legacy and raster fog callbacks after switching maps', async () => {
+    const listeners = [];
+    const maskBytes = createEmptyFogRasterMaskBytes();
+    maskBytes[0] = 1;
+    firestore.onSnapshot.mockImplementation((target, onNext, onError) => {
+      const listener = { target, onNext, onError };
+      listeners.push(listener);
+      return jest.fn();
+    });
+
+    const buildLegacySnapshot = (backgroundId, exploredCells) => ({
+      id: `${backgroundId}__user-1`,
+      exists: () => true,
+      data: () => ({
+        backgroundId,
+        ownerUid: 'user-1',
+        cellSizePx: 70,
+        exploredCells,
+        updatedBy: 'user-1',
+      }),
+    });
+    const buildRasterSnapshot = (backgroundId) => ({
+      docs: [{
+        id: `${backgroundId}__user-1__fog-raster-c8-s16-v1__0:0`,
+        data: () => ({
+          backgroundId,
+          ownerUid: 'user-1',
+          tileKey: '0:0',
+          tileCol: 0,
+          tileRow: 0,
+          rasterProfileId: FOG_RASTER_PROFILE_ID,
+          tileSizeCells: 8,
+          samplesPerCell: 16,
+          cellSizePx: 70,
+          offsetXPx: 0,
+          offsetYPx: 0,
+          maskEncoding: FOG_RASTER_MASK_ENCODING,
+          maskBase64: encodeFogRasterMaskBase64(maskBytes),
+          updatedBy: 'user-1',
+        }),
+      }],
+    });
+    const findLegacyListener = (backgroundId) => listeners.find((listener) => (
+      listener.target?.path === `grigliata_fog_of_war/${backgroundId}__user-1`
+    ));
+    const findRasterListener = (backgroundId) => listeners.find((listener) => (
+      listener.target?.kind === 'query'
+      && listener.target.base?.path === 'grigliata_fog_memory_tiles'
+      && listener.target.constraints?.some((constraint) => (
+        constraint?.field === 'backgroundId'
+        && constraint.value === backgroundId
+      ))
+    ));
+
+    const { rerender } = render(
+      <HookProbe backgroundId={'map-1'} currentUserId={'user-1'} />
+    );
+    await waitFor(() => {
+      expect(findLegacyListener('map-1')).toBeDefined();
+      expect(findRasterListener('map-1')).toBeDefined();
+    });
+    const mapOneLegacyListener = findLegacyListener('map-1');
+    const mapOneRasterListener = findRasterListener('map-1');
+
+    act(() => {
+      mapOneLegacyListener.onNext(buildLegacySnapshot('map-1', ['0:0', '1:0']));
+      mapOneRasterListener.onNext(buildRasterSnapshot('map-1'));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('ready')).toHaveTextContent('true');
+      expect(screen.getByTestId('doc-id')).toHaveTextContent('map-1__user-1');
+      expect(screen.getByTestId('cell-count')).toHaveTextContent('2');
+    });
+
+    rerender(<HookProbe backgroundId={'map-2'} currentUserId={'user-1'} />);
+    await waitFor(() => {
+      expect(findLegacyListener('map-2')).toBeDefined();
+      expect(findRasterListener('map-2')).toBeDefined();
+    });
+    act(() => {
+      findLegacyListener('map-2').onNext(buildLegacySnapshot('map-2', ['4:5']));
+      findRasterListener('map-2').onNext(buildRasterSnapshot('map-2'));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('ready')).toHaveTextContent('true');
+      expect(screen.getByTestId('doc-id')).toHaveTextContent('map-2__user-1');
+      expect(screen.getByTestId('cell-count')).toHaveTextContent('1');
+      expect(screen.getByTestId('memory-tile-count')).toHaveTextContent('1');
+    });
+
+    act(() => {
+      mapOneLegacyListener.onNext(buildLegacySnapshot('map-1', ['8:8', '9:9']));
+      mapOneRasterListener.onNext(buildRasterSnapshot('map-1'));
+    });
+    expect(screen.getByTestId('ready')).toHaveTextContent('true');
+    expect(screen.getByTestId('doc-id')).toHaveTextContent('map-2__user-1');
+    expect(screen.getByTestId('cell-count')).toHaveTextContent('1');
+    expect(screen.getByTestId('memory-tile-count')).toHaveTextContent('1');
+  });
+});

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "viewport": { "width": 1440, "height": 900, "deviceScaleFactor": 1 },
+  "locale": "en-US",
+  "timezoneId": "Europe/Rome",
+  "scenarios": [
+    { "id": "login-cold", "route": "/", "role": "anonymous", "interaction": "toggle-password", "cache": "cold" },
+    { "id": "login-warm", "route": "/", "role": "anonymous", "interaction": "toggle-password", "cache": "warm" },
+    { "id": "character-creation", "route": "/character-creation", "role": "new-player", "interaction": "select-race" },
+    { "id": "home", "route": "/home", "role": "player", "interaction": "reversible-stat" },
+    { "id": "bazaar", "route": "/bazaar", "role": "player", "interaction": "filter-and-open" },
+    { "id": "tecniche-spell", "route": "/tecniche-spell", "role": "player", "interaction": "filter-and-open" },
+    { "id": "codex", "route": "/codex", "role": "player", "interaction": "category-and-search" },
+    { "id": "combat", "route": "/combat", "role": "player", "interaction": "select-large-encounter" },
+    { "id": "echi-di-viaggio", "route": "/echi-di-viaggio", "role": "player", "interaction": "hover-marker" },
+    { "id": "dm-dashboard", "route": "/dm-dashboard", "role": "dm", "interaction": "expand-player" },
+    { "id": "foes-hub", "route": "/foes-hub", "role": "dm", "interaction": "filter-and-select" },
+    { "id": "admin", "route": "/admin", "role": "webmaster", "interaction": "search-users" },
+    { "id": "grigliata-player", "route": "/grigliata", "role": "player", "interaction": "pan-zoom-select" },
+    { "id": "grigliata-manager", "route": "/grigliata", "role": "dm", "interaction": "pan-zoom-move-open-library" },
+    { "id": "grigliata-five-peer", "route": "/grigliata", "role": "five-peer", "interaction": "placement-convergence", "scheduledOnly": true }
+  ]
+}

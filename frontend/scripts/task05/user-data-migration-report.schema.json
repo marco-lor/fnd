@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fnd.local/schemas/task05-user-data-migration-report-v2.json",
+  "title": "FND Task 05 user-data migration dry-run report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "modelVersion",
+    "mode",
+    "operation",
+    "projectId",
+    "complete",
+    "generatedAt",
+    "planFingerprint",
+    "counts",
+    "subjects"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "modelVersion": { "const": 2 },
+    "mode": { "const": "dry-run" },
+    "operation": { "enum": ["stabilize", "backfill", "verify", "archive", "reverse"] },
+    "projectId": { "type": "string", "minLength": 1 },
+    "drain": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scope", "drainId", "closedAt", "rolloutStage", "scopeFingerprint"],
+          "properties": {
+            "scope": { "const": "global" },
+            "drainId": { "$ref": "#/$defs/drainId" },
+            "closedAt": { "$ref": "#/$defs/timestamp" },
+            "rolloutStage": { "$ref": "#/$defs/drainStage" },
+            "scopeFingerprint": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scope", "drainId", "closedAt", "rolloutStage", "scopeFingerprint", "subjectHash"],
+          "properties": {
+            "scope": { "const": "user" },
+            "drainId": { "$ref": "#/$defs/drainId" },
+            "closedAt": { "$ref": "#/$defs/timestamp" },
+            "rolloutStage": { "$ref": "#/$defs/drainStage" },
+            "scopeFingerprint": { "$ref": "#/$defs/sha256" },
+            "subjectHash": { "$ref": "#/$defs/sha256" }
+          }
+        }
+      ]
+    },
+    "preDrain": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scope", "rolloutStage", "scopeFingerprint"],
+          "properties": {
+            "scope": { "const": "global" },
+            "rolloutStage": { "const": "shadow-verify" },
+            "scopeFingerprint": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scope", "rolloutStage", "scopeFingerprint", "subjectHash"],
+          "properties": {
+            "scope": { "const": "user" },
+            "rolloutStage": { "const": "shadow-verify" },
+            "scopeFingerprint": { "$ref": "#/$defs/sha256" },
+            "subjectHash": { "$ref": "#/$defs/sha256" }
+          }
+        }
+      ]
+    },
+    "drainEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deletionConflicts", "deletionJobFingerprint", "codes"],
+      "properties": {
+        "deletionConflicts": { "$ref": "#/$defs/count" },
+        "deletionJobFingerprint": { "$ref": "#/$defs/sha256" },
+        "codes": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
+    },
+    "complete": { "type": "boolean" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "planFingerprint": { "$ref": "#/$defs/sha256" },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["users", "writesRequired", "unchanged", "errors", "warnings", "cleanupDocuments"],
+      "properties": {
+        "users": { "$ref": "#/$defs/count" },
+        "writesRequired": { "$ref": "#/$defs/count" },
+        "unchanged": { "$ref": "#/$defs/count" },
+        "errors": { "$ref": "#/$defs/count" },
+        "warnings": { "$ref": "#/$defs/count" },
+        "cleanupDocuments": { "$ref": "#/$defs/count" },
+        "deletionConflicts": { "$ref": "#/$defs/count" }
+      }
+    },
+    "subjects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "subjectHash",
+          "sourceHash",
+          "sourceVersionHash",
+          "targetHash",
+          "currentHash",
+          "cleanupFingerprint",
+          "counts",
+          "issues"
+        ],
+        "properties": {
+          "subjectHash": { "$ref": "#/$defs/sha256" },
+          "sourceHash": { "$ref": "#/$defs/sha256" },
+          "sourceVersionHash": { "$ref": "#/$defs/sha256" },
+          "legacyProjectionHash": { "$ref": "#/$defs/sha256" },
+          "targetHash": { "$ref": "#/$defs/sha256" },
+          "currentHash": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+          "cleanupFingerprint": { "$ref": "#/$defs/sha256" },
+          "counts": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["documents", "inventory", "spells", "tecniche", "reservations", "cleanupDocuments"],
+            "properties": {
+              "documents": { "$ref": "#/$defs/count" },
+              "inventory": { "$ref": "#/$defs/count" },
+              "spells": { "$ref": "#/$defs/count" },
+              "tecniche": { "$ref": "#/$defs/count" },
+              "reservations": { "$ref": "#/$defs/count" },
+              "cleanupDocuments": { "$ref": "#/$defs/count" }
+            }
+          },
+          "issues": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["errors", "warnings", "codes"],
+            "properties": {
+              "errors": { "$ref": "#/$defs/count" },
+              "warnings": { "$ref": "#/$defs/count" },
+              "codes": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "count": { "type": "integer", "minimum": 0 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "drainId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{7,99}$" },
+    "drainStage": {
+      "enum": ["shadow-verify", "dual-write", "new-read-dual-write", "new-only"]
+    },
+    "timestamp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seconds", "nanoseconds"],
+      "properties": {
+        "seconds": { "type": "integer" },
+        "nanoseconds": { "type": "integer", "minimum": 0, "maximum": 999999999 }
+      }
+    }
+  }
+}

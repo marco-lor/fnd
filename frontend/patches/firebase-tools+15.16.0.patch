@@ -1,0 +1,111 @@
+diff --git a/node_modules/firebase-tools/lib/emulator/storage/rules/runtime.js b/node_modules/firebase-tools/lib/emulator/storage/rules/runtime.js
+index 2b14fdc..634d5be 100644
+--- a/node_modules/firebase-tools/lib/emulator/storage/rules/runtime.js
++++ b/node_modules/firebase-tools/lib/emulator/storage/rules/runtime.js
+@@ -66,6 +66,7 @@ class StorageRulesRuntime {
+         this._requestCount = 0;
+         this._requests = {};
+         this._alive = false;
++        this._stdoutBuffer = "";
+     }
+     get alive() {
+         return this._alive;
+@@ -121,37 +122,46 @@ class StorageRulesRuntime {
+             }
+         });
+         this._childprocess.stdout?.on("data", (buf) => {
+-            const serializedRuntimeActionResponse = buf.toString("utf-8").trim();
+-            if (serializedRuntimeActionResponse !== "") {
+-                let rap;
+-                try {
+-                    rap = JSON.parse(serializedRuntimeActionResponse);
+-                }
+-                catch (err) {
+-                    emulatorLogger_1.EmulatorLogger.forEmulator(types_2.Emulators.STORAGE).log("INFO", serializedRuntimeActionResponse);
+-                    return;
+-                }
+-                const id = rap.id ?? rap.server_request_id;
+-                if (id === undefined) {
+-                    console.log(`Received no ID from server response ${serializedRuntimeActionResponse}`);
+-                    return;
+-                }
+-                const request = this._requests[id];
+-                if (rap.status !== "ok" && !("action" in rap)) {
+-                    console.warn(`[RULES] ${rap.status}: ${rap.message}`);
+-                    rap.errors.forEach(console.warn.bind(console));
+-                    return;
+-                }
+-                if (request) {
+-                    request.handler(rap);
+-                }
+-                else {
+-                    console.log(`No handler for event ${serializedRuntimeActionResponse}`);
+-                }
+-            }
++            this.handleRuntimeStdout(buf.toString("utf-8"));
+         });
+         return startPromise;
+     }
++    handleRuntimeStdout(chunk) {
++        this._stdoutBuffer += chunk;
++        const lines = this._stdoutBuffer.split("\n");
++        this._stdoutBuffer = lines.pop() ?? "";
++        for (const rawLine of lines) {
++            const line = rawLine.trim();
++            if (line === "") {
++                continue;
++            }
++            let rap;
++            try {
++                rap = JSON.parse(line);
++            }
++            catch (err) {
++                emulatorLogger_1.EmulatorLogger.forEmulator(types_2.Emulators.STORAGE).log("INFO", line);
++                continue;
++            }
++            const id = rap.id ?? rap.server_request_id;
++            if (id === undefined) {
++                console.log(`Received no ID from server response ${line}`);
++                continue;
++            }
++            const request = this._requests[id];
++            if (rap.status !== "ok" && !("action" in rap)) {
++                console.warn(`[RULES] ${rap.status}: ${rap.message}`);
++                rap.errors.forEach(console.warn.bind(console));
++                continue;
++            }
++            if (request) {
++                request.handler(rap);
++            }
++            else {
++                console.log(`No handler for event ${line}`);
++            }
++        }
++    }
+     stop() {
+         emulatorLogger_1.EmulatorLogger.forEmulator(types_2.Emulators.STORAGE).log("DEBUG", "Stopping rules runtime.");
+         return new Promise((resolve) => {
+@@ -181,16 +191,18 @@ class StorageRulesRuntime {
+             throw new error_1.FirebaseError("Attempted to send Cloud Storage rules request with stale id");
+         }
+         return new Promise((resolve) => {
+-            this._requests[runtimeActionRequest.id] = {
++            const requestId = runtimeActionRequest.id;
++            this._requests[requestId] = {
+                 request: runtimeActionRequest,
+-                handler: resolve,
++                handler: (rap) => {
++                    delete this._requests[requestId];
++                    resolve(rap);
++                },
+             };
+             const serializedRequest = JSON.stringify(runtimeActionRequest);
+             lock.acquire(synchonizationKey, (done) => {
+                 this._childprocess?.stdin?.write(serializedRequest + "\n");
+-                setTimeout(() => {
+-                    done();
+-                }, 15);
++                done();
+             });
+         });
+     }

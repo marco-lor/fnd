@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fnd.local/schemas/firestore-recursive-backup-v2.json",
+  "title": "FND recursive Firestore backup",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "schemaVersion",
+    "projectId",
+    "rootCollections",
+    "documents",
+    "generatedAt",
+    "canonicalHash",
+    "counts"
+  ],
+  "properties": {
+    "format": { "const": "fnd.firestore-recursive-backup" },
+    "schemaVersion": { "const": 2 },
+    "projectId": { "type": "string", "minLength": 1 },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "canonicalHash": { "$ref": "#/$defs/sha256" },
+    "rootCollections": { "type": "array", "items": { "$ref": "#/$defs/segment" }, "uniqueItems": true },
+    "documents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "fields", "createTime", "updateTime", "subcollections", "documentHash"],
+        "properties": {
+          "path": { "type": "string", "minLength": 3 },
+          "fields": { "$ref": "#/$defs/value" },
+          "createTime": { "type": ["string", "null"] },
+          "updateTime": { "type": ["string", "null"] },
+          "subcollections": { "type": "array", "items": { "$ref": "#/$defs/segment" }, "uniqueItems": true },
+          "documentHash": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rootCollections", "documents", "subcollections"],
+      "properties": {
+        "rootCollections": { "$ref": "#/$defs/count" },
+        "documents": { "$ref": "#/$defs/count" },
+        "subcollections": { "$ref": "#/$defs/count" }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "count": { "type": "integer", "minimum": 0 },
+    "segment": { "type": "string", "minLength": 1, "pattern": "^[^/]+$" },
+    "value": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["type"], "properties": { "type": { "const": "null" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "value"], "properties": { "type": { "enum": ["boolean", "integer", "double", "string", "bytes"] }, "value": {} } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "value", "nanosecond"], "properties": { "type": { "const": "timestamp" }, "value": { "type": "string" }, "nanosecond": { "type": "integer", "minimum": 0, "maximum": 999999999 } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "path"], "properties": { "type": { "const": "reference" }, "path": { "type": "string" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "latitude", "longitude"], "properties": { "type": { "const": "geopoint" }, "latitude": { "type": "number" }, "longitude": { "type": "number" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "value"], "properties": { "type": { "const": "array" }, "value": { "type": "array", "items": { "$ref": "#/$defs/value" } } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "value"], "properties": { "type": { "const": "map" }, "value": { "type": "object", "additionalProperties": { "$ref": "#/$defs/value" } } } }
+      ]
+    }
+  }
+}

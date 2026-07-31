@@ -1,0 +1,427 @@
+import { onAuthStateChanged } from "firebase/auth";
+import { doc, getDoc, updateDoc } from "../../performance/firestore";
+import { auth, db } from "../firebaseConfig";
+import {
+  deleteLegacyStoragePath,
+  uploadLegacyBlob,
+  uploadLegacyImage,
+} from "./legacyMediaStorage";
+import { tryPersistTask07PersonalMedia } from "../../data/media/personalMediaWriter";
+import { mutatePersonalContent } from "../../data/userData/userDataCommands";
+
+const COLLECTION_CONFIG = {
+  tecniche: {
+    imageFolder: "tecnicas",
+    videoFolder: "tecnicas/videos",
+    prefix: "tecnica",
+    sizeLimit: 900000,
+  },
+  spells: {
+    imageFolder: "spells",
+    videoFolder: "spells/videos",
+    prefix: "spell",
+    sizeLimit: 900000,
+  },
+};
+
+const PERSONAL_COMMAND_KINDS = Object.freeze({
+  spells: "spell",
+  tecniche: "tecnica",
+});
+
+const AUTH_WAIT_TIMEOUT_MS = 5000;
+const USER_DATA_TRANSPORT_FIELDS = new Set([
+  '_task05',
+  '_task05ContentId',
+  'media',
+  'mediaUpdatedAt',
+  'task07MediaRevision',
+  'task07VideoMediaRevision',
+  'videoMedia',
+  'videoMediaUpdatedAt',
+  'createdAt',
+  'displayName',
+  'id',
+  'legacyManaged',
+  'legacySourceHash',
+  'legacySourceUpdateTime',
+  'migration',
+  'modelVersion',
+  'name',
+  'normalizedName',
+  'revision',
+  'schemaVersion',
+  'updatedAt',
+  'updatedBy',
+]);
+
+const normalizeContentId = (value) => {
+  const candidate = typeof value === 'string' ? value.trim() : '';
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(candidate) ? candidate : null;
+};
+
+export const stripUserDataTransportFields = (value) => {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const stableContentId = normalizeContentId(source._task05ContentId);
+  // Generic names and timestamps can be legitimate legacy content. Only a
+  // normalized V2 entry carries this dedicated marker, so legacy editor saves
+  // retain their historical payload byte-for-byte.
+  if (!stableContentId) return { ...source };
+  const result = Object.fromEntries(
+    Object.entries(source).filter(([key]) => !USER_DATA_TRANSPORT_FIELDS.has(key))
+  );
+  return { ...result, id: stableContentId };
+};
+
+function sanitizeStorageName(value) {
+  const sanitized = String(value || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  return sanitized || "item";
+}
+
+function getCollectionConfig(collectionKey) {
+  const config = COLLECTION_CONFIG[collectionKey];
+
+  if (!config) {
+    throw new Error(`Unsupported collection key: ${collectionKey}`);
+  }
+
+  return config;
+}
+
+function extractStoragePathFromUrl(fileUrl) {
+  if (!fileUrl || !fileUrl.includes("/o/")) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(fileUrl.split("/o/")[1].split("?")[0]);
+  } catch (error) {
+    console.warn("Unable to extract storage path from URL:", fileUrl, error);
+    return null;
+  }
+}
+
+function createAuthenticationError() {
+  const error = new Error("You must be logged in to upload media. Please sign in again.");
+  error.code = "auth/not-authenticated";
+  return error;
+}
+
+async function waitForAuthenticatedUser(timeoutMs = AUTH_WAIT_TIMEOUT_MS) {
+  if (auth.currentUser) {
+    return auth.currentUser;
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timeoutId;
+    let unsubscribe = () => {};
+
+    unsubscribe = onAuthStateChanged(
+      auth,
+      (currentUser) => {
+        if (settled || !currentUser) {
+          return;
+        }
+
+        settled = true;
+        clearTimeout(timeoutId);
+        unsubscribe();
+        resolve(currentUser);
+      },
+      (error) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        clearTimeout(timeoutId);
+        unsubscribe();
+        reject(error);
+      }
+    );
+
+    timeoutId = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      unsubscribe();
+      reject(createAuthenticationError());
+    }, timeoutMs);
+  });
+}
+
+async function ensureStorageUploadAuth() {
+  const currentUser = await waitForAuthenticatedUser();
+
+  try {
+    await currentUser.getIdToken(true);
+  } catch (error) {
+    throw createAuthenticationError();
+  }
+
+  return currentUser;
+}
+
+async function deleteStoragePath(storagePath) {
+  if (!storagePath) {
+    return false;
+  }
+
+  try {
+    await deleteLegacyStoragePath(storagePath);
+    return true;
+  } catch (error) {
+    console.warn("Storage cleanup failed for path:", storagePath, error);
+    return false;
+  }
+}
+
+export async function deleteStorageFileByUrl(fileUrl) {
+  return deleteStoragePath(extractStoragePathFromUrl(fileUrl));
+}
+
+async function uploadFile(collectionKey, userId, itemName, suffix, file, folder) {
+  const config = getCollectionConfig(collectionKey);
+  const safeBase = `${config.prefix}_${userId}_${sanitizeStorageName(itemName)}_${Date.now()}`;
+  const storagePath = `${folder}/${safeBase}_${suffix}`;
+  await ensureStorageUploadAuth();
+
+  const uploaded = file?.type?.startsWith("image/")
+    ? await uploadLegacyImage(storagePath, file)
+    : await uploadLegacyBlob(storagePath, file);
+
+  return {
+    downloadUrl: uploaded.downloadUrl,
+    storagePath: uploaded.storagePath || storagePath,
+  };
+}
+
+async function loadUserCollection(userId, collectionKey) {
+  const userRef = doc(db, "users", userId);
+  const userSnap = await getDoc(userRef);
+
+  if (!userSnap.exists()) {
+    throw new Error("User not found");
+  }
+
+  return {
+    userRef,
+    userData: userSnap.data(),
+    collection: { ...(userSnap.data()?.[collectionKey] || {}) },
+  };
+}
+
+async function persistOwnedEntry({
+  userId,
+  collectionKey,
+  originalName,
+  entryData,
+  originalEntity = entryData,
+  imageFile = null,
+  videoFile = null,
+  removeImage = false,
+  removeVideo = false,
+  signal = null,
+}) {
+  const cleanEntryData = stripUserDataTransportFields(entryData);
+  const trimmedName = cleanEntryData?.Nome?.trim();
+
+  if (!trimmedName) {
+    throw new Error("Nome is required");
+  }
+
+  const config = getCollectionConfig(collectionKey);
+  const { userRef, collection } = await loadUserCollection(userId, collectionKey);
+  const previousEntry = collection[originalName] || {};
+  const nextEntry = {
+    ...cleanEntryData,
+    Nome: trimmedName,
+  };
+
+  const task07Entry = { ...nextEntry };
+  if (!removeImage && previousEntry.image_url && !task07Entry.image_url) {
+    task07Entry.image_url = previousEntry.image_url;
+  }
+  if (!removeVideo && previousEntry.video_url && !task07Entry.video_url) {
+    task07Entry.video_url = previousEntry.video_url;
+  }
+  const task07Result = await tryPersistTask07PersonalMedia({
+    userId,
+    collectionKey,
+    originalEntity,
+    entryData: task07Entry,
+    imageFile,
+    videoFile,
+    removeImage,
+    removeVideo,
+    signal,
+  });
+  if (task07Result) {
+    const outcomeNeedsAttention = task07Result.outcomes?.some((outcome) => (
+      outcome?.status === "attached-result-unknown"
+      || outcome?.status === "attach-acknowledgement-unknown"
+    ));
+    if (!outcomeNeedsAttention) {
+      await Promise.allSettled([
+        removeImage
+          ? deleteStorageFileByUrl(previousEntry.image_url)
+          : Promise.resolve(false),
+        removeVideo
+          ? deleteStorageFileByUrl(previousEntry.video_url)
+          : Promise.resolve(false),
+      ]);
+    }
+    return {
+      ...task07Result,
+      data: task07Entry,
+    };
+  }
+
+  let uploadedImagePath = null;
+  let uploadedVideoPath = null;
+  let oldImageUrlToDelete = null;
+  let oldVideoUrlToDelete = null;
+
+  try {
+    if (imageFile) {
+      const { downloadUrl, storagePath } = await uploadFile(
+        collectionKey,
+        userId,
+        trimmedName,
+        "image",
+        imageFile,
+        config.imageFolder
+      );
+      nextEntry.image_url = downloadUrl;
+      uploadedImagePath = storagePath;
+
+      if (previousEntry.image_url && previousEntry.image_url !== downloadUrl) {
+        oldImageUrlToDelete = previousEntry.image_url;
+      }
+    } else if (removeImage) {
+      delete nextEntry.image_url;
+      if (previousEntry.image_url) {
+        oldImageUrlToDelete = previousEntry.image_url;
+      }
+    } else if (previousEntry.image_url) {
+      nextEntry.image_url = previousEntry.image_url;
+    }
+
+    if (videoFile) {
+      const { downloadUrl, storagePath } = await uploadFile(
+        collectionKey,
+        userId,
+        trimmedName,
+        "video",
+        videoFile,
+        config.videoFolder
+      );
+      nextEntry.video_url = downloadUrl;
+      uploadedVideoPath = storagePath;
+
+      if (previousEntry.video_url && previousEntry.video_url !== downloadUrl) {
+        oldVideoUrlToDelete = previousEntry.video_url;
+      }
+    } else if (removeVideo) {
+      delete nextEntry.video_url;
+      if (previousEntry.video_url) {
+        oldVideoUrlToDelete = previousEntry.video_url;
+      }
+    } else if (previousEntry.video_url) {
+      nextEntry.video_url = previousEntry.video_url;
+    }
+
+    if (trimmedName !== originalName) {
+      delete collection[originalName];
+    }
+
+    collection[trimmedName] = nextEntry;
+
+    if (config.sizeLimit && JSON.stringify(collection).length > config.sizeLimit) {
+      const sizeError = new Error("Data too large. Try using a smaller image or video.");
+      sizeError.code = "data-too-large";
+      throw sizeError;
+    }
+
+    await updateDoc(userRef, { [collectionKey]: collection });
+
+    await Promise.allSettled([
+      deleteStorageFileByUrl(oldImageUrlToDelete),
+      deleteStorageFileByUrl(oldVideoUrlToDelete),
+    ]);
+
+    return { name: trimmedName, data: nextEntry };
+  } catch (error) {
+    await Promise.allSettled([
+      deleteStoragePath(uploadedImagePath),
+      deleteStoragePath(uploadedVideoPath),
+    ]);
+    throw error;
+  }
+}
+
+async function deleteOwnedEntry({ userId, collectionKey, itemName, itemData }) {
+  const contentId = normalizeContentId(itemData?._task05ContentId);
+  const commandKind = PERSONAL_COMMAND_KINDS[collectionKey];
+  if (contentId && commandKind) {
+    await mutatePersonalContent({
+      userId,
+      kind: commandKind,
+      action: "delete",
+      contentId,
+      retryKey: [
+        "task07-personal-delete",
+        collectionKey,
+        userId,
+        contentId,
+        Number(itemData?.task07MediaRevision) || 0,
+        Number(itemData?.task07VideoMediaRevision) || 0,
+      ].join(":"),
+    });
+    await Promise.allSettled([
+      deleteStorageFileByUrl(itemData?.image_url),
+      deleteStorageFileByUrl(itemData?.video_url),
+    ]);
+    return true;
+  }
+
+  const { userRef, collection } = await loadUserCollection(userId, collectionKey);
+  const currentEntry = itemData || collection[itemName] || null;
+
+  if (!(itemName in collection)) {
+    return false;
+  }
+
+  delete collection[itemName];
+  await updateDoc(userRef, { [collectionKey]: collection });
+
+  await Promise.allSettled([
+    deleteStorageFileByUrl(currentEntry?.image_url),
+    deleteStorageFileByUrl(currentEntry?.video_url),
+  ]);
+
+  return true;
+}
+
+export async function saveTecnicaForUser(options) {
+  return persistOwnedEntry({ ...options, collectionKey: "tecniche" });
+}
+
+export async function saveSpellForUser(options) {
+  return persistOwnedEntry({ ...options, collectionKey: "spells" });
+}
+
+export async function deleteTecnicaForUser(options) {
+  return deleteOwnedEntry({ ...options, collectionKey: "tecniche" });
+}
+
+export async function deleteSpellForUser(options) {
+  return deleteOwnedEntry({ ...options, collectionKey: "spells" });
+}
