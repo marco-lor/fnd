@@ -494,8 +494,7 @@ const MediaImage = ({
     };
   }, [
     activated,
-    asset.assetKey,
-    asset.candidates,
+    asset,
     fallbackStartIndex,
     width,
   ]);

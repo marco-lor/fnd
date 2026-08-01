@@ -288,9 +288,9 @@ test('completion lock blocks sanctioned migration writes and live unfenced rever
     /blocked by the server-owned user-data completion lock/
   );
   assert.throws(() => assertMigrationSafeTarget({
-    projectId: 'production-project',
+    projectId: 'fatin-test',
     allowLiveProject: true,
-    confirmProject: 'production-project',
+    confirmProject: 'fatin-test',
     execute: true,
     operation: 'reverse',
     drain: null,

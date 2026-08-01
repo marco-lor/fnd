@@ -6,7 +6,7 @@ const {
   withForcedEnvironment,
 } = require('./forced-release-environment');
 
-test('Hosting builds force performance and user-data rollout switches closed', () => {
+test('Hosting builds force the reviewed fixed-stage V2 test profile', () => {
   const environment = withForcedEnvironment({
     PATH: 'preserved',
     REACT_APP_FND_PERF: '1',
@@ -21,6 +21,9 @@ test('Hosting builds force performance and user-data rollout switches closed', (
     )),
     HOSTING_COMPATIBILITY_ENVIRONMENT
   );
+  assert.equal(environment.REACT_APP_FND_PERF, '0');
+  assert.equal(environment.REACT_APP_FND_USER_DATA_ROLLOUT_CONFIG, '0');
+  assert.equal(environment.REACT_APP_FND_USER_DATA_STAGE, 'new-read-dual-write');
 });
 
 test('forced keys are normalized case-insensitively for Windows child processes', () => {

@@ -10,6 +10,16 @@ export const TASK07_STAGING_CACHE_CONTROL = 'private, no-store';
 let activeTask07Uploads = 0;
 const pendingTask07Uploads = [];
 
+const createTask07UploadRelease = (dispatchQueue) => {
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    activeTask07Uploads = Math.max(0, activeTask07Uploads - 1);
+    dispatchQueue();
+  };
+};
+
 const dispatchTask07UploadQueue = () => {
   while (
     activeTask07Uploads < TASK07_MEDIA_UPLOAD_CONCURRENCY
@@ -22,13 +32,7 @@ const dispatchTask07UploadQueue = () => {
       continue;
     }
     activeTask07Uploads += 1;
-    let released = false;
-    entry.resolve(() => {
-      if (released) return;
-      released = true;
-      activeTask07Uploads = Math.max(0, activeTask07Uploads - 1);
-      dispatchTask07UploadQueue();
-    });
+    entry.resolve(createTask07UploadRelease(dispatchTask07UploadQueue));
   }
 };
 

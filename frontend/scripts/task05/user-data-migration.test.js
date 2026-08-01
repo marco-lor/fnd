@@ -146,6 +146,14 @@ test('CLI defaults to dry-run and requires explicit project and approvals', () =
   const parsed = parseArguments(['--project', 'demo-fnd-perf']);
   assert.equal(parsed.execute, false);
   assert.equal(parsed.operation, 'backfill');
+  assert.equal(parsed.authMode, 'admin');
+  assert.equal(parseArguments([
+    '--project', 'demo-fnd-perf', '--auth', 'firebase-cli',
+  ]).authMode, 'firebase-cli');
+  assert.throws(
+    () => parseArguments(['--project', 'demo-fnd-perf', '--auth', 'unknown']),
+    /--auth must be exactly/
+  );
   assert.throws(
     () => parseArguments(['--project', 'demo-fnd-perf', '--operation', 'verify', '--execute']),
     /always read-only/
@@ -221,42 +229,42 @@ test('target safety fails closed for live and mismatched project state', () => {
     }),
     /does not match/
   );
-  assert.deepEqual(
-    assertSafeTarget({projectId: 'fatins', allowLiveProject: true, confirmProject: 'fatins'}, {}),
-    {live: true, emulatorHost: null, projectId: 'fatins'}
+  assert.throws(
+    () => assertSafeTarget({projectId: 'fatins', allowLiveProject: true, confirmProject: 'fatins'}, {}),
+    /accepts only live project fatin-test/
   );
   assert.throws(() => assertSafeTarget({
-    projectId: 'fatins',
+    projectId: 'fatin-test',
     allowLiveProject: true,
-    confirmProject: 'fatins',
+    confirmProject: 'fatin-test',
     operation: 'backfill',
     execute: true,
     drain: null,
   }, {}), /Live backfill execution requires an exact matching/);
   assert.deepEqual(assertSafeTarget({
-    projectId: 'fatins',
+    projectId: 'fatin-test',
     allowLiveProject: true,
-    confirmProject: 'fatins',
+    confirmProject: 'fatin-test',
     operation: 'backfill',
     execute: true,
     drain: {scope: 'global', drainId: 'global-drain-01'},
-  }, {}), {live: true, emulatorHost: null, projectId: 'fatins'});
+  }, {}), {live: true, emulatorHost: null, projectId: 'fatin-test'});
   assert.throws(() => assertSafeTarget({
-    projectId: 'fatins',
+    projectId: 'fatin-test',
     allowLiveProject: true,
-    confirmProject: 'fatins',
+    confirmProject: 'fatin-test',
     operation: 'stabilize',
     execute: true,
     preDrain: null,
   }, {}), /Live stabilization requires/);
   assert.deepEqual(assertSafeTarget({
-    projectId: 'fatins',
+    projectId: 'fatin-test',
     allowLiveProject: true,
-    confirmProject: 'fatins',
+    confirmProject: 'fatin-test',
     operation: 'stabilize',
     execute: true,
     preDrain: {scope: 'global'},
-  }, {}), {live: true, emulatorHost: null, projectId: 'fatins'});
+  }, {}), {live: true, emulatorHost: null, projectId: 'fatin-test'});
   assert.deepEqual(assertSafeTarget({
     projectId: 'demo-fnd-perf',
     allowLiveProject: false,
