@@ -221,7 +221,13 @@ export const normalizeV2InventoryDocument = (document) => {
   if (!isRecord(data)) throw new TypeError(`Inventory document ${document.id} must be an object.`);
   const snapshot = data.currentSnapshot || data.acquisitionSnapshot || data.item || EMPTY_OBJECT;
   const compatibleSnapshot = isRecord(snapshot) ? snapshot : EMPTY_OBJECT;
-  const catalogItemId = data.catalogItemId || compatibleSnapshot.id || document.id;
+  // Only the explicit V2 field proves a catalog relationship. Custom Varie
+  // documents deliberately store null even when their display snapshot has an
+  // ID, so the display fallback must never become a catalog read reference.
+  const catalogItemId = typeof data.catalogItemId === 'string' && data.catalogItemId.trim()
+    ? data.catalogItemId.trim()
+    : null;
+  const displayItemId = catalogItemId || compatibleSnapshot.id || document.id;
   return Object.freeze({
     ...compatibleSnapshot,
     ...(isRecord(data.media) ? { media: data.media } : {}),
@@ -231,7 +237,7 @@ export const normalizeV2InventoryDocument = (document) => {
     ...(data.mediaUpdatedAt !== undefined
       ? { mediaUpdatedAt: data.mediaUpdatedAt }
       : {}),
-    id: catalogItemId,
+    id: displayItemId,
     qty: Number(data.quantity) > 0 ? Number(data.quantity) : compatibleSnapshot.qty,
     _instance: {
       ...copyRecord(compatibleSnapshot._instance),

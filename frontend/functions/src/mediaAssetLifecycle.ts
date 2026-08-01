@@ -18,15 +18,14 @@ import {
   scanTask07MediaTargetReferences,
   task07MediaTargetMayReferenceAsset,
   task07MediaReferencePath,
-  task07MediaTargetSlotAssetId,
-  task07MediaTargetSlotReferencesAsset,
   task07MediaTargetFields,
 } from "./mediaAssetLifecycleCore";
 import {task07ProcessMediaUpload} from "./mediaAssetProcessor";
 import {
   attachTask07ReadyAssetTransaction,
-  task07FoeCanonicalMediaStateFromTarget,
+  task07CommonTechniqueRetirementPatch,
   task07FoeCanonicalRetirementPatch,
+  task07MediaTargetState,
   Task07TargetAdapterError,
   validateTask07MediaTarget,
 } from "./mediaTargetAdapters";
@@ -129,18 +128,9 @@ const requireAssetId = (value: unknown): string => {
 
 const mediaBindingFromTarget = (
   data: admin.firestore.DocumentData | undefined,
-  plan: Pick<MediaUploadPlan, "kind" | "targetKind">
-): {assetId: string | null; revision: number; conflict: boolean} => {
-  const fields = task07MediaTargetFields(plan);
-  if (plan.targetKind === "foe" && fields.slot === "media") {
-    return task07FoeCanonicalMediaStateFromTarget(data);
-  }
-  return {
-    assetId: task07MediaTargetSlotAssetId(data, fields.slot),
-    revision: Number(data?.[fields.revisionField]) || 0,
-    conflict: false,
-  };
-};
+  plan: MediaUploadPlan
+): {assetId: string | null; revision: number; conflict: boolean} =>
+  task07MediaTargetState(data, plan);
 
 const publicUploadPlan = (plan: MediaUploadPlan) => ({
   schemaVersion: MEDIA_SCHEMA_VERSION,
@@ -330,11 +320,11 @@ export const task07GetMediaStatus = onCall(
       const target = await admin.firestore()
         .doc(task07MediaReferencePath(authorizedPlan))
         .get();
-      attached = task07MediaTargetSlotReferencesAsset(
+      const targetState = task07MediaTargetState(
         target.data(),
-        task07MediaTargetFields(authorizedPlan).slot,
-        assetId
+        authorizedPlan
       );
+      attached = !targetState.conflict && targetState.assetId === assetId;
     }
     const state = storedState === "attached" && !attached ?
       "reference-missing" :
@@ -463,6 +453,13 @@ export const task07RetireMediaAsset = onCall(
           revision: targetBinding.revision,
           timestamp: now,
         }) :
+        plan.targetKind === "common-technique" ?
+          task07CommonTechniqueRetirementPatch({
+            current: target.data() || {},
+            plan,
+            revision: targetBinding.revision,
+            timestamp: now,
+          }) :
         {
           [targetFields.mediaField]: FieldValue.delete(),
           [targetFields.revisionField]: targetBinding.revision + 1,
@@ -483,7 +480,11 @@ export const task07RetireMediaAsset = onCall(
           targetUpdate.durationMs = FieldValue.delete();
         }
       }
-      transaction.update(targetRef, targetUpdate);
+      if (plan.targetKind === "common-technique") {
+        transaction.set(targetRef, targetUpdate, {merge: true});
+      } else {
+        transaction.update(targetRef, targetUpdate);
+      }
       transaction.update(ref, {
         state: "superseded",
         retention: {supersededAt: now, cleanupAfter},
@@ -679,11 +680,18 @@ const processCleanup = async (assetId: string): Promise<boolean> => {
       db.doc(task07MediaReferencePath(plan))
     );
     const referenceScan = scanTask07MediaTargetReferences(reference.data());
-    if (task07MediaTargetMayReferenceAsset(reference.data(), assetId)) {
+    const commonTargetState = plan.targetKind === "common-technique" ?
+      task07MediaTargetState(reference.data(), plan) :
+      null;
+    const mayReferenceAsset = commonTargetState ?
+      commonTargetState.conflict || commonTargetState.assetId === assetId :
+      task07MediaTargetMayReferenceAsset(reference.data(), assetId);
+    if (mayReferenceAsset) {
       const attempts = Number(queue.get("attempts") || 0) + 1;
       const deadLetter = attempts >= MEDIA_CLEANUP_MAX_AUTO_ATTEMPTS;
-      const malformed = Object.values(referenceScan)
-        .some((scan) => scan.malformed);
+      const malformed = commonTargetState ?
+        commonTargetState.conflict :
+        Object.values(referenceScan).some((scan) => scan.malformed);
       transaction.update(queueRef, {
         state: deadLetter ? "dead-letter" : "retry",
         attempts,
@@ -920,6 +928,10 @@ export const cleanupTask07RemovedBackgroundMedia = referenceRemovalTrigger(
 export const cleanupTask07RemovedTokenMedia = referenceRemovalTrigger(
   "grigliata_tokens/{entityId}",
   ({entityId}) => `grigliata_tokens/${entityId}`
+);
+export const cleanupTask07RemovedMusicTrackMedia = referenceRemovalTrigger(
+  "grigliata_music_tracks/{entityId}",
+  ({entityId}) => `grigliata_music_tracks/${entityId}`
 );
 
 const normalizeExpiredAsset = async (

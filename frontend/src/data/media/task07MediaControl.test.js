@@ -33,6 +33,7 @@ describe('Task 07 media rollout control', () => {
     { ...validControl(), schemaVersion: 2 },
     { ...validControl(), policyVersion: 2 },
     { ...validControl(), enabledUids: 'user-1' },
+    { ...validControl(), mode: 'pending' },
   ])('fails malformed or unknown configuration closed to legacy', (value) => {
     expect(normalizeTask07MediaControl(value)).toBe(LEGACY_TASK07_MEDIA_CONTROL);
   });
@@ -59,20 +60,25 @@ describe('Task 07 media rollout control', () => {
     })).toBe('legacy');
   });
 
-  test('treats document read failure as legacy', async () => {
-    getTask07MediaControlDocument.mockRejectedValue(new Error('denied'));
+  test('propagates document read failures so readers can stay non-fetching', async () => {
+    const error = new Error('denied');
+    getTask07MediaControlDocument.mockRejectedValue(error);
     await expect(loadTask07MediaMode({
       purpose: 'avatar',
       role: 'player',
       uid: 'user-1',
-    })).resolves.toBe('legacy');
+    })).rejects.toBe(error);
   });
 
   test('keeps read and write transitions explicit', () => {
     expect(task07ModeReadsDerivatives('shadow')).toBe(false);
     expect(task07ModeReadsDerivatives('derivative-read')).toBe(true);
     expect(task07ModeReadsDerivatives('v1-write')).toBe(true);
+    expect(task07ModeReadsDerivatives('canonical-only')).toBe(true);
     expect(task07ModeWritesV1('derivative-read')).toBe(false);
     expect(task07ModeWritesV1('v1-write')).toBe(true);
+    expect(task07ModeWritesV1('canonical-only')).toBe(true);
+    expect(normalizeTask07MediaControl(validControl('canonical-only')).mode)
+      .toBe('canonical-only');
   });
 });

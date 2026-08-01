@@ -1,7 +1,5 @@
 // file: ./frontend/src/components/dmDashboard/DMDashboard.js
 import React, { useState, useEffect } from "react";
-import { db } from "../firebaseConfig";
-import { collection, doc, updateDoc, increment, onSnapshot } from "../../performance/firestore";
 import { useAuth } from "../../AuthContext";
 import { useNavigate } from "react-router-dom";
 import { library } from "@fortawesome/fontawesome-svg-core";
@@ -17,6 +15,8 @@ import {
 import {
   runWithDurableOperationIntent,
 } from "../../data/functions/backendOperationIntentStore";
+import { updateProgression } from "../../data/userData/userDataCommands";
+import { useManagerUserData } from "../../data/userData/managerUserData";
 
 // Add icons to library
 library.add(faLock, faLockOpen);
@@ -25,10 +25,14 @@ const levelUpAll = getCallable("levelUpAll");
 const levelUpUser = getCallable("levelUpUser");
 
 const DMDashboard = () => {
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const { user, userData } = useAuth();
+  const {
+    users,
+    loading,
+    error: userDataError,
+  } = useManagerUserData(userData?.role === "dm");
+  const [actionError, setError] = useState(null);
+  const error = actionError || userDataError?.message || null;
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
@@ -40,36 +44,15 @@ const DMDashboard = () => {
     locks: true,
   });
 
-  // Realtime subscription to users collection once DM status is confirmed.
-  // This removes the need for manual refreshes after operations (level ups, token changes, etc.).
-  // If performance becomes an issue with many users, consider adding query constraints
-  // or switching to individual doc listeners based on a selected subset.
   useEffect(() => {
     if (!userData) return; // Still loading user data
 
     if (userData.role !== "dm") {
       console.log("Access denied: User is not a DM");
       navigate("/home");
-      return;
+      return undefined;
     }
-
-    setLoading(true);
-    const usersRef = collection(db, "users");
-    const unsubscribe = onSnapshot(
-      usersRef,
-      (snapshot) => {
-        const usersData = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setUsers(usersData);
-        setLoading(false);
-      },
-      (err) => {
-        console.error("Realtime users listener error:", err);
-        setError("Failed to subscribe to users updates.");
-        setLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
+    return undefined;
   }, [userData, navigate]);
 
   // Ensure player selection state stays in sync with the current users list.
@@ -191,9 +174,25 @@ const DMDashboard = () => {
     try {
       setBusy(true);
       setToast(null);
-      const userRef = doc(db, "users", targetUserId);
-      await updateDoc(userRef, {
-        "stats.combatTokensAvailable": increment(amount),
+      setError(null);
+      const targetUser = users.find((entry) => entry.id === targetUserId);
+      if (!targetUser) {
+        throw new Error("The selected user is no longer available.");
+      }
+      const current = Number(targetUser?.stats?.combatTokensAvailable) || 0;
+      const next = current + amount;
+      await updateProgression({
+        userId: targetUserId,
+        patch: {
+          stats: { combatTokensAvailable: next },
+        },
+        retryKey: [
+          "dm-combat-tokens",
+          targetUserId,
+          current,
+          amount,
+          next,
+        ].join(":"),
       });
       setToast(`${amount > 0 ? "Added" : "Removed"} ${Math.abs(amount)} combat token${Math.abs(amount) === 1 ? "" : "s"}.`);
   // Realtime listener will update UI automatically
@@ -308,7 +307,7 @@ const DMDashboard = () => {
                   <span className="mx-2 h-5 w-px bg-slate-700/70" />
                   {users.map((user) => {
                     const isSelected = selectedUserIds.includes(user.id);
-                    const label = user.characterId || user.email;
+                    const label = user.characterId || user.label || user.email;
                     return (
                       <button
                         key={user.id}
@@ -333,7 +332,6 @@ const DMDashboard = () => {
                   users={users.filter((u) => selectedUserIds.includes(u.id))}
                   loading={loading}
                   error={error}
-                  setUsers={setUsers}
                   variant="card"
                   onLevelUpOne={handleLevelUpOne}
                   onAddTokens={handleAddCombatTokens}

@@ -93,7 +93,7 @@ describe('Firebase callable registry', () => {
       await registry.getCallable(logicalKey)({probe: true});
     }
 
-    expect(entries).toHaveLength(40);
+    expect(entries).toHaveLength(44);
     expect(getFunctions).toHaveBeenCalledTimes(
       callableManifest.supportedRegions.length
     );
@@ -119,6 +119,7 @@ describe('Firebase callable registry', () => {
     expect(callableManifest.callables.spendCharacterPointV2.region)
       .toBe('europe-west8');
     [
+      'task07ResolveCharacterMedia',
       'task07PrepareMediaUpload',
       'task07GetMediaStatus',
       'task07AttachMediaAsset',

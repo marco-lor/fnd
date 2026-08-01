@@ -10,6 +10,7 @@ const MediaVideo = ({
   compatibilityMode = 'auto',
   fallback = null,
   media,
+  mediaPurpose = '',
   onError,
   onLoadedData,
   preload = 'metadata',
@@ -24,6 +25,7 @@ const MediaVideo = ({
     compatibilityMode,
     fallbackSrc: src,
     kind: 'video',
+    purpose: mediaPurpose,
     variant: 'original',
   });
 

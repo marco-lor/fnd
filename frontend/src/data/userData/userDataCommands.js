@@ -4,9 +4,11 @@ import {
 } from '../functions/callableRegistry';
 
 const USER_DATA_CALLABLES = Object.freeze({
+  spendCharacterPointV2: getCallable('spendCharacterPointV2'),
   task05PurchaseItem: getCallable('task05PurchaseItem'),
   task05AdjustGold: getCallable('task05AdjustGold'),
   task05UpdateResource: getCallable('task05UpdateResource'),
+  task05UpdateGrigliataCharacterResources: getCallable('task05UpdateGrigliataCharacterResources'),
   task05UpdateProgression: getCallable('task05UpdateProgression'),
   task05MutateInventory: getCallable('task05MutateInventory'),
   task05SetEquipment: getCallable('task05SetEquipment'),
@@ -15,6 +17,9 @@ const USER_DATA_CALLABLES = Object.freeze({
   task05UpdateProfileContent: getCallable('task05UpdateProfileContent'),
   task05PrepareConsumable: getCallable('task05PrepareConsumable'),
   task05CommitConsumable: getCallable('task05CommitConsumable'),
+  task05CharacterCreation: getCallable('task05CharacterCreation'),
+  task05ConsumeTurnEffects: getCallable('task05ConsumeTurnEffects'),
+  task05ListAdminUsers: getCallable('task05ListAdminUsers'),
 });
 // Retry IDs are retained only when the caller supplies a key for one logical
 // action. Deriving this key from a payload would merge distinct, intentional
@@ -67,15 +72,53 @@ const requireRetryKey = (retryKey) => {
   return retryKey;
 };
 
-const callWithOperation = async ({ name, prefix, payload, operationId, retryKey }) => {
+const requireRetryScope = (retryScope) => {
+  if (typeof retryScope !== 'string' || retryScope.length === 0 || retryScope.length > 512) {
+    throw new TypeError('Task 05 retryScope must be a non-empty string of at most 512 characters.');
+  }
+  return retryScope;
+};
+
+const releaseOtherRetainedOperations = (retryScope, activeCacheKey) => {
+  if (!retryScope) return;
+  retainedOperationIds.forEach((entry, cacheKey) => {
+    if (cacheKey !== activeCacheKey && entry.retryScope === retryScope) {
+      retainedOperationIds.delete(cacheKey);
+    }
+  });
+};
+
+const callWithOperation = async ({
+  name,
+  prefix,
+  payload,
+  operationId,
+  retryKey,
+  retryScope,
+}) => {
   const explicitOperationId = operationId ? requireOperationId(operationId) : null;
   const cacheKey = !explicitOperationId && retryKey
     ? `${name}:${requireRetryKey(retryKey)}`
     : null;
+  const resolvedRetryScope = cacheKey && retryScope
+    ? `${name}:${requireRetryScope(retryScope)}`
+    : null;
+  if (cacheKey && resolvedRetryScope) {
+    releaseOtherRetainedOperations(resolvedRetryScope, cacheKey);
+  }
+  const retainedEntry = cacheKey ? retainedOperationIds.get(cacheKey) : null;
+  if (retainedEntry && retainedEntry.retryScope !== resolvedRetryScope) {
+    retainedOperationIds.delete(cacheKey);
+  }
   const resolvedOperationId = explicitOperationId
-    || (cacheKey ? retainedOperationIds.get(cacheKey) : null)
+    || (cacheKey ? retainedOperationIds.get(cacheKey)?.operationId : null)
     || createUserOperationId(prefix);
-  if (cacheKey) retainedOperationIds.set(cacheKey, resolvedOperationId);
+  if (cacheKey) {
+    retainedOperationIds.set(cacheKey, {
+      operationId: resolvedOperationId,
+      retryScope: resolvedRetryScope,
+    });
+  }
   try {
     const result = await call(name, {
       ...payload,
@@ -90,6 +133,22 @@ const callWithOperation = async ({ name, prefix, payload, operationId, retryKey 
     throw error;
   }
 };
+
+export const getAdminUsersPage = ({ cursor, limit = 100 } = {}) => call(
+  'task05ListAdminUsers',
+  {
+    ...(cursor ? { cursor } : {}),
+    limit,
+  }
+);
+
+export const spendCharacterPoint = ({ statName, statType, change, operationId, retryKey }) => callWithOperation({
+  name: 'spendCharacterPointV2',
+  prefix: 'spend-character-point',
+  payload: { statName, statType, change },
+  operationId,
+  retryKey,
+});
 
 export const purchaseItem = ({ itemId, operationId, retryKey }) => callWithOperation({
   name: 'task05PurchaseItem',
@@ -107,10 +166,19 @@ export const adjustGold = ({ userId, delta, operationId, retryKey }) => callWith
   retryKey,
 });
 
-export const updateResource = ({ userId, resource, mode, value, operationId, retryKey, ...options }) => callWithOperation({
+export const updateResource = ({ userId, resource, mode, value, operationId, retryKey, retryScope, ...options }) => callWithOperation({
   name: 'task05UpdateResource',
   prefix: 'resource',
   payload: { ...options, ...(userId ? { userId } : {}), resource, mode, value },
+  operationId,
+  retryKey,
+  retryScope,
+});
+
+export const updateGrigliataCharacterResources = ({ operationId, retryKey, ...payload }) => callWithOperation({
+  name: 'task05UpdateGrigliataCharacterResources',
+  prefix: 'grigliata-character-resources',
+  payload,
   operationId,
   retryKey,
 });
@@ -147,12 +215,13 @@ export const mutatePersonalContent = ({ operationId, retryKey, ...payload }) => 
   retryKey,
 });
 
-export const updateUserSettings = ({ operationId, retryKey, ...payload }) => callWithOperation({
+export const updateUserSettings = ({ operationId, retryKey, retryScope, ...payload }) => callWithOperation({
   name: 'task05UpdateSettings',
   prefix: 'settings',
   payload,
   operationId,
   retryKey,
+  retryScope,
 });
 
 export const updateProfileContent = ({ operationId, retryKey, ...payload }) => callWithOperation({
@@ -177,6 +246,23 @@ export const commitConsumable = ({ operationId, retryKey, ...payload }) => callW
   payload,
   operationId,
   retryKey,
+});
+
+export const updateCharacterCreation = ({ operationId, retryKey, ...payload }) => callWithOperation({
+  name: 'task05CharacterCreation',
+  prefix: 'character-creation',
+  payload,
+  operationId,
+  retryKey,
+});
+
+export const consumeTurnEffects = ({ operationId, retryKey, retryScope, ...payload }) => callWithOperation({
+  name: 'task05ConsumeTurnEffects',
+  prefix: 'turn-effects',
+  payload,
+  operationId,
+  retryKey,
+  retryScope,
 });
 
 export const __resetUserDataCommandsForTests = () => {

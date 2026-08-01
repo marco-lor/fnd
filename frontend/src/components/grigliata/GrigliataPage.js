@@ -6,8 +6,6 @@ import { FiImage, FiMap, FiMusic, FiSun } from 'react-icons/fi';
 import { GiCrackedHelm } from 'react-icons/gi';
 import {
   addDoc,
-  arrayRemove,
-  arrayUnion,
   collection,
   deleteDoc,
   deleteField,
@@ -45,6 +43,7 @@ import {
 } from '../../data/functions/backendOperationIntentStore';
 import { isTask07MediaV1WriteEnabled } from '../../data/media/mediaFeatureFlags';
 import useTask07MediaOperationOwner from '../../data/media/useTask07MediaOperationOwner';
+import useTask07MediaReadMode from '../../data/media/useTask07MediaReadMode';
 import {
   buildGrigliataLightingSummary,
   GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION,
@@ -233,6 +232,15 @@ import {
 } from './fogVisibilityFiltering';
 import { useShellLayout } from '../common/shellLayout';
 import { getVarie } from '../../data/configRepository';
+import { USER_DATA_DOMAINS } from '../../data/userData/domainSchema';
+import { subscribeUserDomain } from '../../data/userData/userDataRepository';
+import {
+  consumeTurnEffects,
+  updateGrigliataCharacterResources,
+  updateResource,
+  updateUserSettings,
+} from '../../data/userData/userDataCommands';
+import { spawnGrigliataFoeToken } from '../../data/grigliata/foeTokenSpawn';
 import {
   canPrefetchModules,
   createModuleLoader,
@@ -379,6 +387,9 @@ const buildMusicPlaybackSessionTrack = (track = {}, session = {}) => ({
   id: track?.id || session?.trackId || session?.id || '',
   name: track?.name || session?.trackName || '',
   audioUrl: track?.audioUrl || session?.audioUrl || '',
+  media: track?.media || session?.media || null,
+  mediaAssetId: track?.media?.assetId || track?.mediaAssetId
+    || session?.media?.assetId || session?.mediaAssetId || '',
   durationMs: Number.isFinite(Number(track?.durationMs))
     ? Number(track.durationMs)
     : Number(session?.durationMs || 0),
@@ -394,6 +405,28 @@ const GRIGLIATA_HIDDEN_BACKGROUND_IDS_FIELD = 'grigliata_hidden_background_ids';
 const GRIGLIATA_HIDDEN_TOKEN_IDS_BY_BACKGROUND_FIELD = 'grigliata_hidden_token_ids_by_background';
 const GRIGLIATA_SHARE_INTERACTIONS_FIELD = 'grigliata_share_interactions';
 
+const grigliataTimestampIdentity = (value) => {
+  if (!value) return '';
+  if (typeof value.toMillis === 'function') return String(value.toMillis());
+  if (Number.isFinite(value.seconds)) {
+    return `${value.seconds}:${Number.isFinite(value.nanoseconds) ? value.nanoseconds : 0}`;
+  }
+  return '';
+};
+
+const grigliataPlacementVersionIdentity = (placement = {}) => {
+  const timestamp = grigliataTimestampIdentity(placement.updatedAt);
+  if (timestamp) return `updated-${timestamp}`;
+  return [
+    placement.col,
+    placement.row,
+    placement.sizeSquares,
+    placement.isVisibleToPlayers === false ? 'hidden' : 'visible',
+    placement.isDead === true ? 'dead' : 'alive',
+    normalizeTurnCounter(placement.turnCounter, 0),
+  ].join(':');
+};
+
 const clampNumber = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const normalizeSceneLightingSettings = (scene = {}) => {
@@ -407,7 +440,6 @@ const normalizeSceneLightingSettings = (scene = {}) => {
 
 const deleteGrigliataCustomTokenCallable = getCallable('deleteGrigliataCustomToken');
 const spawnGrigliataCustomTokenInstanceCallable = getCallable('spawnGrigliataCustomTokenInstance');
-const spawnGrigliataFoeTokenCallable = getCallable('spawnGrigliataFoeToken');
 const updateGrigliataCustomTokenTemplateCallable = getCallable('updateGrigliataCustomTokenTemplate');
 
 const buildFogBrushQueueKey = ({
@@ -425,26 +457,6 @@ const buildFogBrushQueueKey = ({
   offsetYPx,
   ownerUids,
 ]);
-
-const buildHiddenPlacementSettingsPayload = ({
-  backgroundId,
-  tokenId,
-  isHidden,
-  includeLegacyBackgroundFallback = false,
-}) => ({
-  settings: {
-    [GRIGLIATA_HIDDEN_TOKEN_IDS_BY_BACKGROUND_FIELD]: {
-      [backgroundId]: isHidden
-        ? arrayUnion(tokenId)
-        : arrayRemove(tokenId),
-    },
-    ...(includeLegacyBackgroundFallback ? {
-      [GRIGLIATA_HIDDEN_BACKGROUND_IDS_FIELD]: isHidden
-        ? arrayUnion(backgroundId)
-        : arrayRemove(backgroundId),
-    } : {}),
-  },
-});
 
 const isLegacyHiddenPlacementToken = ({ tokenId, ownerUid }) => tokenId === ownerUid;
 const isPermissionDeniedError = (error) => (
@@ -544,6 +556,40 @@ const buildEmptySelectedExternalTokenState = () => ({
   userDataError: '',
   tokenProfileError: '',
 });
+const readUserDomainOnce = (uid, domain) => new Promise((resolve, reject) => {
+  let unsubscribe = null;
+  let unsubscribeWhenReady = false;
+  let settled = false;
+  const stop = () => {
+    if (unsubscribe) {
+      unsubscribe();
+    } else {
+      unsubscribeWhenReady = true;
+    }
+  };
+  try {
+    unsubscribe = subscribeUserDomain(uid, domain, {
+      next: (value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+        stop();
+      },
+      error: (error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+        stop();
+      },
+    });
+    if (unsubscribeWhenReady) {
+      unsubscribe?.();
+    }
+  } catch (error) {
+    settled = true;
+    reject(error);
+  }
+});
 const buildCharacterResourceValues = (stats = {}) => {
   const hpTotal = normalizeNonNegativeNumericValue(stats?.hpTotal, 0);
   const manaTotal = normalizeNonNegativeNumericValue(stats?.manaTotal, 0);
@@ -620,6 +666,8 @@ export default function GrigliataPage() {
 
   const { user, userData, loading } = useAuth();
   const task07MediaOperationOwner = useTask07MediaOperationOwner();
+  const musicMediaMode = useTask07MediaReadMode({ purpose: 'music' });
+  const canonicalOnlyMusic = musicMediaMode === 'canonical-only';
   const customTokenCreateTargetRef = useRef(null);
   const customTokenReplacementTargetRef = useRef(null);
   const { topInset } = useShellLayout();
@@ -1012,7 +1060,6 @@ export default function GrigliataPage() {
     currentUserId,
     isManager,
     ownedTrayTokensById,
-    buildHiddenPlacementSettingsPayload,
     isLegacyHiddenPlacementToken,
     isCustomTokenInstance,
     deleteCustomToken: deleteCustomTokenWithCandidateReceipt,
@@ -1211,26 +1258,62 @@ export default function GrigliataPage() {
     };
 
     if (tokenType === 'character' && nextSelectionState.ownerUid) {
-      unsubscribes.push(onSnapshot(
-        doc(db, 'users', nextSelectionState.ownerUid),
-        (snapshot) => {
-          updateSelectedExternalTokenState((currentState) => ({
-            ...currentState,
-            userData: snapshot.exists() ? snapshot.data() : null,
-            isUserDataReady: true,
-            userDataError: '',
-          }));
-        },
-        (error) => {
-          console.error('Failed to subscribe to selected Grigliata character user data:', error);
-          updateSelectedExternalTokenState((currentState) => ({
-            ...currentState,
-            userData: null,
-            isUserDataReady: false,
-            userDataError: 'Unable to load the current character sheet values.',
-          }));
+      const selectedDomains = {
+        profile: null,
+        resources: null,
+      };
+      const selectedDomainReady = {
+        profile: false,
+        resources: false,
+      };
+      const selectedDomainErrors = {
+        profile: '',
+        resources: '',
+      };
+      const publishSelectedUserData = () => {
+        const isReady = selectedDomainReady.profile && selectedDomainReady.resources;
+        const userDataError = selectedDomainErrors.profile || selectedDomainErrors.resources;
+        const hasUserData = !!(selectedDomains.profile || selectedDomains.resources);
+        updateSelectedExternalTokenState((currentState) => ({
+          ...currentState,
+          userData: hasUserData ? {
+            ...(selectedDomains.profile || {}),
+            ...(selectedDomains.resources || {}),
+            stats: {
+              ...(selectedDomains.profile?.stats || {}),
+              ...(selectedDomains.resources?.stats || {}),
+            },
+          } : null,
+          isUserDataReady: isReady && !userDataError,
+          userDataError,
+        }));
+      };
+      const subscribeSelectedDomain = (domain, stateKey) => subscribeUserDomain(
+        nextSelectionState.ownerUid,
+        domain,
+        {
+          next: (value) => {
+            selectedDomains[stateKey] = value;
+            selectedDomainReady[stateKey] = true;
+            selectedDomainErrors[stateKey] = '';
+            publishSelectedUserData();
+          },
+          error: (error) => {
+            console.error(
+              `Failed to subscribe to selected Grigliata character ${stateKey}:`,
+              error
+            );
+            selectedDomainReady[stateKey] = false;
+            selectedDomainErrors[stateKey] =
+              'Unable to load the current character sheet values.';
+            publishSelectedUserData();
+          },
         }
-      ));
+      );
+      unsubscribes.push(
+        subscribeSelectedDomain(USER_DATA_DOMAINS.PROFILE, 'profile'),
+        subscribeSelectedDomain(USER_DATA_DOMAINS.RESOURCES, 'resources')
+      );
     }
 
     if (tokenType === 'character' || tokenType === 'custom') {
@@ -2179,8 +2262,12 @@ export default function GrigliataPage() {
     activeDrawColorAutosaveRef.current = saveRequest;
 
     try {
-      await updateDoc(doc(db, 'users', currentUserId), {
-        'settings.grigliata_draw_color': saveRequest.colorKey,
+      await updateUserSettings({
+        patch: {
+          settings: { grigliata_draw_color: saveRequest.colorKey },
+        },
+        retryKey: `grigliata-draw-color:${currentUserId}:${saveRequest.requestId}`,
+        retryScope: `grigliata-draw-color:${currentUserId}`,
       });
     } catch (error) {
       console.error('Failed to save Grigliata draw color preference:', error);
@@ -2312,8 +2399,12 @@ export default function GrigliataPage() {
   const persistInteractionSharingPreference = useCallback(async (nextIsEnabled) => {
     if (!currentUserId) return;
 
-    await updateDoc(doc(db, 'users', currentUserId), {
-      [`settings.${GRIGLIATA_SHARE_INTERACTIONS_FIELD}`]: nextIsEnabled,
+    await updateUserSettings({
+      patch: {
+        settings: { [GRIGLIATA_SHARE_INTERACTIONS_FIELD]: nextIsEnabled },
+      },
+      retryKey: `grigliata-sharing:${currentUserId}:${nextIsEnabled ? 'on' : 'off'}`,
+      retryScope: `grigliata-sharing:${currentUserId}`,
     });
   }, [currentUserId]);
 
@@ -2324,8 +2415,12 @@ export default function GrigliataPage() {
     setIsMusicMutePending(true);
 
     try {
-      await updateDoc(doc(db, 'users', currentUserId), {
-        [`settings.${GRIGLIATA_MUSIC_MUTED_FIELD}`]: !isMusicMuted,
+      await updateUserSettings({
+        patch: {
+          settings: { [GRIGLIATA_MUSIC_MUTED_FIELD]: !isMusicMuted },
+        },
+        retryKey: `grigliata-mute:${currentUserId}:${isMusicMuted ? 'off' : 'on'}`,
+        retryScope: `grigliata-mute:${currentUserId}`,
       });
     } catch (error) {
       console.error('Failed to update Grigliata music mute preference:', error);
@@ -2508,6 +2603,7 @@ export default function GrigliataPage() {
     if (!backgroundId) return 0;
 
     let deletedCount = 0;
+    let lastPlacementDoc = null;
     const background = backgrounds.find((candidate) => candidate?.id === backgroundId) || null;
     const hasActiveTurnOrderCursor = !!(
       background?.turnOrderActive
@@ -2518,37 +2614,49 @@ export default function GrigliataPage() {
       await clearTurnOrderActiveState(backgroundId);
     }
 
-    await runPaginatedWriteBatch({
-      collectionName: 'grigliata_token_placements',
-      baseConstraints: [
+    while (true) {
+      const snapshot = await getDocs(query(
+        collection(db, 'grigliata_token_placements'),
         where('backgroundId', '==', backgroundId),
-        limit(PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE),
-      ],
-      pageSize: PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE,
-      applyDocument: ({ batch, docSnap }) => {
+        orderBy(documentId()),
+        ...(lastPlacementDoc ? [startAfter(lastPlacementDoc)] : []),
+        limit(PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE)
+      ));
+      if (!snapshot || snapshot.empty) break;
+
+      const pageDocs = snapshot.docs;
+      lastPlacementDoc = pageDocs[pageDocs.length - 1] || null;
+      const pageDeleteCounts = await Promise.all(pageDocs.map(async (docSnap) => {
         const placement = docSnap.data() || {};
-        const ownerUid = placement?.ownerUid;
-        const tokenId = typeof placement?.tokenId === 'string' && placement.tokenId
+        const ownerUid = typeof placement.ownerUid === 'string' ? placement.ownerUid : '';
+        const tokenId = typeof placement.tokenId === 'string' && placement.tokenId
           ? placement.tokenId
           : ownerUid;
-        batch.delete(docSnap.ref);
-        if (typeof ownerUid === 'string' && ownerUid && typeof tokenId === 'string' && tokenId) {
-          batch.set(
-            doc(db, 'users', ownerUid),
-            buildHiddenPlacementSettingsPayload({
-              backgroundId,
-              tokenId,
-              isHidden: false,
-              includeLegacyBackgroundFallback: isLegacyHiddenPlacementToken({ tokenId, ownerUid }),
-            }),
-            { merge: true }
-          );
+        if (!ownerUid || !tokenId) {
+          await deleteDoc(docSnap.ref);
+          return 1;
         }
-        deletedCount += 1;
+        const retryScope = `grigliata-placement:${ownerUid}:${backgroundId}:${tokenId}`;
+        await updateUserSettings({
+          userId: ownerUid,
+          hiddenPlacement: {
+            backgroundId,
+            tokenId,
+            isHidden: false,
+            includeLegacyFallback: isLegacyHiddenPlacementToken({ tokenId, ownerUid }),
+            placementMutation: {
+              action: 'delete',
+              deleteFoeTokenProfile: false,
+            },
+          },
+          retryKey: `${retryScope}:${grigliataPlacementVersionIdentity(placement)}:delete:placement`,
+          retryScope,
+        });
         return 1;
-      },
-      useCursor: false,
-    });
+      }));
+      deletedCount += pageDeleteCounts.reduce((total, count) => total + count, 0);
+      if (pageDocs.length < PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE) break;
+    }
 
     return deletedCount;
   };
@@ -2783,6 +2891,61 @@ export default function GrigliataPage() {
 
     try {
       const { durationMs } = await readAudioFileMetadata(file);
+      const musicWriter = await import(
+        /* webpackChunkName: "feature-task07-media" */
+        '../../data/media/musicTrackMediaWriter'
+      );
+      const writerEnabled = await musicWriter.isTask07MusicTrackWriterEnabled({
+        actorUid: currentUserId,
+        role,
+        file,
+      });
+      if (writerEnabled) {
+        const adapter = await import(
+          /* webpackChunkName: "feature-task07-media" */
+          '../../data/media/mediaConsumerAdapter'
+        );
+        const trackRef = doc(collection(db, GRIGLIATA_MUSIC_TRACK_COLLECTION));
+        const lease = task07MediaOperationOwner.start(
+          'Music upload was replaced.'
+        );
+        try {
+          const outcome = await musicWriter.runTask07MusicTrackWriter({
+            actorUid: currentUserId,
+            role,
+            trackId: trackRef.id,
+            file,
+            currentTrack: null,
+            signal: lease.signal,
+            prepareEntity: () => setDoc(trackRef, {
+              name: trackName || 'Untitled Track',
+              fileName: file.name || '',
+              audioUrl: '',
+              audioPath: '',
+              contentType: file.type || '',
+              sizeBytes: file.size || 0,
+              durationMs,
+              musicFolderId: getWritableMusicFolderId(selectedMusicFolderId),
+              musicFolderAssignedAt: null,
+              musicFolderAssignedBy: '',
+              createdAt: serverTimestamp(),
+              createdBy: currentUserId,
+              updatedAt: serverTimestamp(),
+              updatedBy: currentUserId,
+            }),
+            rollbackPreparedEntity: () => deleteDoc(trackRef),
+          });
+          return {
+            ...outcome,
+            attentionMessage: adapter.task07ConsumerNeedsAttention(outcome)
+              ? adapter.describeTask07ConsumerOutcome(outcome, 'Music track')
+              : '',
+          };
+        } finally {
+          lease.release();
+        }
+      }
+
       const { downloadUrl: audioUrl } = await uploadLegacyBlob(storagePath, file);
       uploadedPath = storagePath;
 
@@ -2816,7 +2979,12 @@ export default function GrigliataPage() {
 
       throw error;
     }
-  }, [currentUserId, selectedMusicFolderId]);
+  }, [
+    currentUserId,
+    role,
+    selectedMusicFolderId,
+    task07MediaOperationOwner,
+  ]);
 
   const handleUploadMusicTrackFiles = useCallback(async (files) => {
     if (!isManager || !currentUserId) return;
@@ -2840,11 +3008,15 @@ export default function GrigliataPage() {
 
     setIsMusicUploading(true);
     try {
+      let firstAttentionMessage = '';
       for (const [fileIndex, file] of selectedFiles.entries()) {
-        await uploadMusicTrackFile(file, fileIndex);
+        const outcome = await uploadMusicTrackFile(file, fileIndex);
+        if (!firstAttentionMessage && outcome?.attentionMessage) {
+          firstAttentionMessage = outcome.attentionMessage;
+        }
       }
 
-      setMusicUploadError('');
+      setMusicUploadError(firstAttentionMessage);
     } catch {
       // uploadMusicTrackFile already surfaced the file-specific error and cleanup.
     } finally {
@@ -2871,9 +3043,15 @@ export default function GrigliataPage() {
         startedAtMs: Date.now(),
         updatedAt: serverTimestamp(),
         updatedBy: currentUserId,
+        canonicalOnly: canonicalOnlyMusic,
       })),
     });
-  }, [currentUserId, persistMusicPlaybackSession, runMusicPlaybackAction]);
+  }, [
+    canonicalOnlyMusic,
+    currentUserId,
+    persistMusicPlaybackSession,
+    runMusicPlaybackAction,
+  ]);
 
   const handlePlayMusicTrack = useCallback(async (track) => {
     await handleStartMusicTrack(track, { loop: false });
@@ -2898,9 +3076,16 @@ export default function GrigliataPage() {
         loop: activeSession.loop === true,
         updatedAt: serverTimestamp(),
         updatedBy: currentUserId,
+        canonicalOnly: canonicalOnlyMusic,
       })),
     });
-  }, [currentUserId, musicPlaybackSessionsByTrackId, persistMusicPlaybackSession, runMusicPlaybackAction]);
+  }, [
+    canonicalOnlyMusic,
+    currentUserId,
+    musicPlaybackSessionsByTrackId,
+    persistMusicPlaybackSession,
+    runMusicPlaybackAction,
+  ]);
 
   const handleResumeMusicTrack = useCallback(async (track, playbackSession = null) => {
     const activeSession = playbackSession || musicPlaybackSessionsByTrackId.get(track?.id || '');
@@ -2919,9 +3104,16 @@ export default function GrigliataPage() {
         startedAtMs: Date.now(),
         updatedAt: serverTimestamp(),
         updatedBy: currentUserId,
+        canonicalOnly: canonicalOnlyMusic,
       })),
     });
-  }, [currentUserId, musicPlaybackSessionsByTrackId, persistMusicPlaybackSession, runMusicPlaybackAction]);
+  }, [
+    canonicalOnlyMusic,
+    currentUserId,
+    musicPlaybackSessionsByTrackId,
+    persistMusicPlaybackSession,
+    runMusicPlaybackAction,
+  ]);
 
   const handleSeekMusicTrack = useCallback(async (track, playbackSession = null, nextOffsetMs = 0) => {
     const activeSession = playbackSession || musicPlaybackSessionsByTrackId.get(track?.id || '');
@@ -2944,9 +3136,16 @@ export default function GrigliataPage() {
         startedAtMs: nextStatus === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING ? Date.now() : 0,
         updatedAt: serverTimestamp(),
         updatedBy: currentUserId,
+        canonicalOnly: canonicalOnlyMusic,
       })),
     });
-  }, [currentUserId, musicPlaybackSessionsByTrackId, persistMusicPlaybackSession, runMusicPlaybackAction]);
+  }, [
+    canonicalOnlyMusic,
+    currentUserId,
+    musicPlaybackSessionsByTrackId,
+    persistMusicPlaybackSession,
+    runMusicPlaybackAction,
+  ]);
 
   const handleStopMusicTrack = useCallback(async (track, playbackSession = null) => {
     const targetTrackId = playbackSession?.trackId || track?.id || '';
@@ -2981,6 +3180,7 @@ export default function GrigliataPage() {
           volume: getCurrentSharedMusicVolume(),
           updatedAt: serverTimestamp(),
           updatedBy: currentUserId,
+          canonicalOnly: canonicalOnlyMusic,
         }));
       }
 
@@ -2993,6 +3193,7 @@ export default function GrigliataPage() {
     }
   }, [
     clearMusicVolumeWriteTimer,
+    canonicalOnlyMusic,
     currentUserId,
     getCurrentSharedMusicVolume,
     isManager,
@@ -3706,25 +3907,24 @@ export default function GrigliataPage() {
     setSavingSelectedTokenDetailsId(tokenId);
     try {
       if (tokenType === 'character') {
-        await Promise.all([
-          updateDoc(doc(db, 'users', ownerUid || tokenId), {
-            'stats.hpCurrent': normalizeCurrentResourceValue(hpCurrent, 0),
-            'stats.manaCurrent': normalizeCurrentResourceValue(manaCurrent, 0),
-            'stats.barrieraCurrent': normalizeCurrentResourceValue(shieldCurrent, 0),
-          }),
-          setDoc(doc(db, 'grigliata_tokens', tokenId), {
-            ownerUid: ownerUid || tokenId,
+        await updateGrigliataCharacterResources({
+          userId: ownerUid || tokenId,
+          backgroundId: activeBackgroundId,
+          tokenId,
+          resources: {
+            hpCurrent: normalizeCurrentResourceValue(hpCurrent, 0),
+            manaCurrent: normalizeCurrentResourceValue(manaCurrent, 0),
+            barrieraCurrent: normalizeCurrentResourceValue(shieldCurrent, 0),
+          },
+          tokenPatch: {
             characterId: characterId || '',
             label: label || 'Character',
             imageUrl: imageUrl || '',
             imagePath: imagePath || '',
-            tokenType: 'character',
-            imageSource: 'profile',
             notes: normalizeTokenNotesValue(notes),
-            updatedAt: serverTimestamp(),
-            updatedBy: currentUserId,
-          }, { merge: true }),
-        ]);
+          },
+          retryKey: `grigliata-character:${activeBackgroundId}:${tokenId}`,
+        });
 
         return true;
       }
@@ -4363,8 +4563,7 @@ export default function GrigliataPage() {
       return userData;
     }
 
-    const userSnapshot = await getDoc(doc(db, 'users', ownerUid));
-    return userSnapshot.exists() ? userSnapshot.data() : null;
+    return readUserDomainOnce(ownerUid, USER_DATA_DOMAINS.RESOURCES);
   }, [currentUserId, userData]);
 
   const buildCharacterShieldTurnEffect = useCallback((sourceUserData, turnCounter) => {
@@ -4401,10 +4600,14 @@ export default function GrigliataPage() {
 
     const nextTurnCounter = normalizeTurnCounter(placementContext.turnCounter, 0) + 1;
     let nextTurnEffects = normalizeTurnEffects(placementContext.turnEffects);
+    const hadShieldTurnEffect = !!getTurnEffectByKind(
+      nextTurnEffects,
+      TURN_EFFECT_KIND_SHIELD
+    );
 
     if (
       boardToken.tokenType === 'character'
-      && !getTurnEffectByKind(nextTurnEffects, TURN_EFFECT_KIND_SHIELD)
+      && !hadShieldTurnEffect
     ) {
       const sourceUserData = await getCharacterTurnEffectSource(placementContext.ownerUid);
       const shieldTurnEffect = buildCharacterShieldTurnEffect(sourceUserData, nextTurnCounter);
@@ -4424,8 +4627,8 @@ export default function GrigliataPage() {
       nextTurnCounter,
       nextTurnEffects: reconciledTurnEffects.turnEffects,
       expiredTurnEffects: reconciledTurnEffects.expiredEffects,
-      activeShieldEffect: getTurnEffectByKind(reconciledTurnEffects.turnEffects, TURN_EFFECT_KIND_SHIELD),
       expiredShieldEffect: getTurnEffectByKind(reconciledTurnEffects.expiredEffects, TURN_EFFECT_KIND_SHIELD),
+      shouldConsumeCharacterTurnEffects: boardToken.tokenType === 'character' && hadShieldTurnEffect,
     };
   }, [
     boardTokensById,
@@ -4474,9 +4677,31 @@ export default function GrigliataPage() {
       placementContext,
       nextTurnCounter,
       nextTurnEffects,
-      activeShieldEffect,
       expiredShieldEffect,
+      shouldConsumeCharacterTurnEffects,
     } = progressState;
+
+    if (shouldConsumeCharacterTurnEffects) {
+      await consumeTurnEffects({
+        userId: placementContext.ownerUid,
+        grigliataTransition: {
+          backgroundId: targetBackgroundId,
+          tokenId: entry.tokenId,
+          expectedPreviousActiveTokenId: targetCursor?.tokenId || '',
+          expectedTurnCounter: nextTurnCounter,
+          preserveStartedAt,
+        },
+        retryKey: [
+          `grigliata-turn:${targetBackgroundId}:${entry.tokenId}`,
+          grigliataTimestampIdentity(targetCursor?.startedAt) ||
+            grigliataTimestampIdentity(placementContext.turnOrderJoinedAt) || 'legacy-session',
+          nextTurnCounter,
+        ].join(':'),
+        retryScope: `grigliata-turn:${targetBackgroundId}:${entry.tokenId}`,
+      });
+      return;
+    }
+
     const batch = writeBatch(db);
 
     batch.set(doc(db, 'grigliata_backgrounds', targetBackgroundId), {
@@ -4506,31 +4731,7 @@ export default function GrigliataPage() {
       { merge: true }
     );
 
-    if (boardToken.tokenType === 'character') {
-      if (activeShieldEffect) {
-        batch.set(doc(db, 'users', placementContext.ownerUid), {
-          active_turn_effect: {
-            barriera: {
-              totalTurns: activeShieldEffect.totalTurns,
-              remainingTurns: activeShieldEffect.remainingTurns,
-            },
-          },
-        }, { merge: true });
-      } else if (expiredShieldEffect) {
-        batch.set(doc(db, 'users', placementContext.ownerUid), {
-          stats: {
-            barrieraCurrent: 0,
-            barrieraTotal: 0,
-          },
-          active_turn_effect: {
-            barriera: {
-              totalTurns: 0,
-              remainingTurns: 0,
-            },
-          },
-        }, { merge: true });
-      }
-    } else if (boardToken.tokenType === 'custom' && expiredShieldEffect) {
+    if (boardToken.tokenType === 'custom' && expiredShieldEffect) {
       batch.set(doc(db, 'grigliata_tokens', entry.tokenId), {
         stats: {
           shieldCurrent: 0,
@@ -4643,6 +4844,7 @@ export default function GrigliataPage() {
           hasShieldTurnEffect,
           ownerUid: placement.ownerUid,
           placementId: placement.id || buildPlacementDocId(targetBackgroundId, resolvedTokenId),
+          turnOrderJoinedAt: placement?.turnOrderJoinedAt || null,
           col: Number.isFinite(placement?.col) ? placement.col : 0,
           row: Number.isFinite(placement?.row) ? placement.row : 0,
           isVisibleToPlayers: placement?.isVisibleToPlayers !== false,
@@ -4651,12 +4853,6 @@ export default function GrigliataPage() {
         };
       })
       .filter(Boolean);
-    const characterOwnerUidsToClearShieldTimers = [...new Set(
-      targetPlacements
-        .filter(({ tokenType }) => tokenType === 'character')
-        .map(({ ownerUid }) => ownerUid)
-        .filter(Boolean)
-    )];
     const characterOwnerUidsToClearShieldStats = new Set(
       targetPlacements
         .filter(({ tokenType, hasShieldTurnEffect }) => tokenType === 'character' && hasShieldTurnEffect)
@@ -4696,32 +4892,22 @@ export default function GrigliataPage() {
         await batch.commit();
       }
 
-      for (let index = 0; index < characterOwnerUidsToClearShieldTimers.length; index += FIRESTORE_BATCH_SIZE) {
-        const batch = writeBatch(db);
-
-        characterOwnerUidsToClearShieldTimers
-          .slice(index, index + FIRESTORE_BATCH_SIZE)
-          .forEach((ownerUid) => {
-            batch.set(doc(db, 'users', ownerUid), {
-              ...(characterOwnerUidsToClearShieldStats.has(ownerUid)
-                ? {
-                    stats: {
-                      barrieraCurrent: 0,
-                      barrieraTotal: 0,
-                    },
-                  }
-                : {}),
-              active_turn_effect: {
-                barriera: {
-                  totalTurns: 0,
-                  remainingTurns: 0,
-                },
-              },
-            }, { merge: true });
-          });
-
-        await batch.commit();
-      }
+      await Promise.all([...characterOwnerUidsToClearShieldStats].map((ownerUid) => updateResource({
+        userId: ownerUid,
+        resource: 'barriera',
+        mode: 'set',
+        value: 0,
+        totalValue: 0,
+        remainingTurns: 0,
+        totalTurns: 0,
+        retryKey: [
+          `grigliata-reset-shield:${targetBackgroundId}:${ownerUid}`,
+          grigliataTimestampIdentity(
+            targetPlacements.find((placement) => placement.ownerUid === ownerUid)?.turnOrderJoinedAt
+          ) || 'legacy-session',
+        ].join(':'),
+        retryScope: `grigliata-reset-shield:${targetBackgroundId}:${ownerUid}`,
+      })));
 
       for (let index = 0; index < customTokenIdsToClearShieldStats.length; index += FIRESTORE_BATCH_SIZE) {
         const batch = writeBatch(db);
@@ -4831,13 +5017,13 @@ export default function GrigliataPage() {
     if (!isOwnedByCurrentUser) {
       if (!isManager || !ownerUid) return null;
 
-      const [userSnapshot, loadedDiceMetadata] = await Promise.all([
-        getDoc(doc(db, 'users', ownerUid)),
+      const [progression, loadedDiceMetadata] = await Promise.all([
+        readUserDomainOnce(ownerUid, USER_DATA_DOMAINS.PROGRESSION),
         loadDiceMetadata(),
       ]);
-      if (!userSnapshot.exists()) return null;
+      if (!progression) return null;
 
-      characterData = userSnapshot.data();
+      characterData = progression;
       nextDadiAnimaByLevel = loadedDiceMetadata;
     } else {
       nextDadiAnimaByLevel = await loadDiceMetadata();
@@ -6350,7 +6536,8 @@ export default function GrigliataPage() {
       const snapped = snapBoardPointToGrid(worldPoint, grid, 'center');
 
       try {
-        await spawnGrigliataFoeTokenCallable({
+        await spawnGrigliataFoeToken({
+          actorUid: currentUserId,
           foeId,
           backgroundId: activeBackgroundId,
           col: snapped.col,
@@ -7117,6 +7304,7 @@ export default function GrigliataPage() {
 
                 {isManager && activeSidebarTab === 'music' && (
                   <MusicLibraryPanel
+                    mediaMode={musicMediaMode}
                     tracks={musicTracks}
                     musicFolders={musicFolders}
                     selectedFolderId={selectedMusicFolderId}

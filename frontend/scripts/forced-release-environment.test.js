@@ -23,7 +23,7 @@ test('Hosting builds force the reviewed fixed-stage V2 test profile', () => {
   );
   assert.equal(environment.REACT_APP_FND_PERF, '0');
   assert.equal(environment.REACT_APP_FND_USER_DATA_ROLLOUT_CONFIG, '0');
-  assert.equal(environment.REACT_APP_FND_USER_DATA_STAGE, 'new-read-dual-write');
+  assert.equal(environment.REACT_APP_FND_USER_DATA_STAGE, 'new-only');
 });
 
 test('forced keys are normalized case-insensitively for Windows child processes', () => {

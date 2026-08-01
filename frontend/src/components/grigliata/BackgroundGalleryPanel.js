@@ -13,6 +13,7 @@ import {
 } from './galleryFolders';
 import MediaImage, { hasMediaAsset } from '../common/MediaImage';
 import MediaVideo, { resolveMediaVideoAsset } from '../common/MediaVideo';
+import useTask07MediaReadMode from '../../data/media/useTask07MediaReadMode';
 
 const GALLERY_ACTION_BASE_CLASS_NAME = 'inline-flex h-9 w-9 items-center justify-center rounded-md border transition-colors disabled:cursor-not-allowed disabled:opacity-60';
 const GALLERY_ACTION_ICON_CLASS_NAME = 'h-4 w-4';
@@ -84,6 +85,8 @@ export default function BackgroundGalleryPanel({
   const [isOrganizerOpen, setIsOrganizerOpen] = useState(false);
   const [folderMenuBackgroundId, setFolderMenuBackgroundId] = useState('');
   const [previewBackground, setPreviewBackground] = useState(null);
+  const mapMediaMode = useTask07MediaReadMode({ purpose: 'map' });
+  const mapVideoMode = useTask07MediaReadMode({ purpose: 'map-video' });
   const uploadFileInputRef = useRef(null);
   const folderOptions = useMemo(() => (
     buildGalleryFolderOptions(galleryFolders)
@@ -138,6 +141,8 @@ export default function BackgroundGalleryPanel({
           {isPreviewVideo ? (
             <MediaVideo
               media={previewBackground}
+              mediaPurpose="map-video"
+              compatibilityMode={mapVideoMode}
               src={previewBackground.imageUrl || ''}
               aria-label={`${previewBackgroundName} preview`}
               className="max-h-full max-w-full rounded-lg object-contain"
@@ -149,6 +154,8 @@ export default function BackgroundGalleryPanel({
           ) : (
             <MediaImage
               media={previewBackground}
+              mediaPurpose="map"
+              compatibilityMode={mapMediaMode}
               src={previewBackground.imageUrl || ''}
               variant="board"
               alt={`${previewBackgroundName} preview`}
@@ -248,11 +255,13 @@ export default function BackgroundGalleryPanel({
                   : background;
                 const thumbnailVariant = isVideo ? 'poster' : 'thumbnail';
                 const thumbnailAvailable = hasMediaAsset(thumbnailMedia, {
+                  compatibilityMode: isVideo ? mapVideoMode : mapMediaMode,
+                  fallbackSrc: isVideo ? '' : (background.imageUrl || ''),
                   variant: thumbnailVariant,
                 });
                 const previewAvailable = isVideo
                   ? resolveMediaVideoAsset(background, {
-                    compatibilityMode: 'derivative-read',
+                    compatibilityMode: mapVideoMode,
                     fallbackSrc: background.imageUrl || '',
                   }).candidates.length > 0
                   : thumbnailAvailable;
@@ -305,6 +314,8 @@ export default function BackgroundGalleryPanel({
                           {(isVideo || thumbnailAvailable) && (
                             <MediaImage
                               media={thumbnailMedia}
+                              mediaPurpose={isVideo ? "map-video" : "map"}
+                              compatibilityMode={isVideo ? mapVideoMode : mapMediaMode}
                               src={isVideo ? '' : background.imageUrl || ''}
                               variant={thumbnailVariant}
                               alt={backgroundName}

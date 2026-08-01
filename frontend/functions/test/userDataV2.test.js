@@ -4,7 +4,11 @@ const {
   RESOURCE_FIELDS,
   USER_ITEM_MAX_BYTES,
   applyConsumableCap,
+  buildAdminUserListItem,
+  canListPrivateUserLabels,
+  normalizeAdminUserListPagination,
   applyResourceMutation,
+  consumeActiveTurnEffects,
   buildConsumableRollPlan,
   buildLegacyContentProjection,
   buildLegacyDomainProjection,
@@ -25,6 +29,7 @@ const {
   isOperationExpired,
   materializeLegacyContentIdentities,
   materializeLegacyInventoryIdentities,
+  normalizeResourceTotalValue,
   operationReceiptId,
   operationRequestHash,
   parseCatalogPrice,
@@ -368,6 +373,10 @@ test('resource derivations retain direct-control semantics and consumable caps',
   assert.equal(applyResourceMutation(5, 'delta', -9), -4);
   assert.equal(applyResourceMutation(5, 'set', 100), 100);
   assert.equal(applyResourceMutation(5, 'set', 'bad'), null);
+  assert.equal(normalizeResourceTotalValue(0), 0);
+  assert.equal(normalizeResourceTotalValue('12'), 12);
+  assert.equal(normalizeResourceTotalValue(-1), null);
+  assert.equal(normalizeResourceTotalValue('bad'), null);
   assert.equal(applyConsumableCap(8, 7, 10), 10);
   assert.equal(applyConsumableCap(8, 7, 0), 15);
 });
@@ -1064,4 +1073,65 @@ test('profile shell budget projection excludes large compatibility aggregates', 
   assert.equal(shell.inventory, undefined);
   assert.equal(shell.spells, undefined);
   assert.equal(evaluateDocumentBudget(shell, 16 * 1024).accepted, true);
+});
+
+test('admin user-list pagination is bounded and cursor-safe', () => {
+  assert.deepEqual(normalizeAdminUserListPagination(undefined), {
+    cursor: null,
+    limit: 100,
+  });
+  assert.deepEqual(normalizeAdminUserListPagination({
+    cursor: 'user-1',
+    limit: 50,
+  }), {
+    cursor: 'user-1',
+    limit: 50,
+  });
+  assert.throws(() => normalizeAdminUserListPagination({limit: 101}), /limit/);
+  assert.throws(() => normalizeAdminUserListPagination({cursor: 'users/a'}), /cursor/);
+});
+
+test('private admin labels require webmaster and expose only reviewed shell fields', () => {
+  assert.equal(canListPrivateUserLabels('webmaster'), true);
+  assert.equal(canListPrivateUserLabels('dm'), false);
+  assert.equal(canListPrivateUserLabels('player'), false);
+  const projected = buildAdminUserListItem('user-1', {
+    characterId: 'Hero',
+    username: 'hero',
+    email: 'hero@example.com',
+    role: 'PLAYER',
+    inventory: ['secret aggregate'],
+    passwordHash: 'never expose',
+  });
+  assert.deepEqual(projected, {
+    id: 'user-1',
+    characterId: 'Hero',
+    username: 'hero',
+    email: 'hero@example.com',
+    role: 'player',
+  });
+});
+
+test('turn-effect consumption decrements every timed effect and expires barrier state', () => {
+  assert.deepEqual(consumeActiveTurnEffects({
+    barriera: {remainingTurns: 1, totalTurns: 3, label: 'ward'},
+    poison: {remainingTurns: 2, totalTurns: 4},
+    passive: {label: 'always'},
+  }), {
+    changed: true,
+    effects: {
+      barriera: {remainingTurns: 0, totalTurns: 0, label: 'ward'},
+      poison: {remainingTurns: 1, totalTurns: 4},
+      passive: {label: 'always'},
+    },
+    barrierExpired: true,
+  });
+});
+
+test('turn-effect consumption preserves untimed effects and reports a no-op', () => {
+  assert.deepEqual(consumeActiveTurnEffects({passive: {label: 'always'}}), {
+    changed: false,
+    effects: {passive: {label: 'always'}},
+    barrierExpired: false,
+  });
 });

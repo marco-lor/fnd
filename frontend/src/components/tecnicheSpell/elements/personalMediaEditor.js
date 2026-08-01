@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom";
 import { saveSpellForUser, saveTecnicaForUser } from "../../common/userOwnedMedia";
 import useObjectUrl from "../../common/useObjectUrl";
+import MediaImage from "../../common/MediaImage";
+import MediaVideo from "../../common/MediaVideo";
 import useTask07MediaOperationOwner from "../../../data/media/useTask07MediaOperationOwner";
 
 const MEDIA_CONFIG = {
@@ -19,8 +21,18 @@ const MEDIA_CONFIG = {
   },
 };
 
-function MediaPreview({ kind, previewUrl, onClear }) {
-  if (!previewUrl) {
+function MediaPreview({
+  kind,
+  previewUrl,
+  localPreview,
+  media,
+  mediaPurpose,
+  onClear,
+}) {
+  const hasCanonicalMedia = kind === "Image"
+    ? Boolean(media?.media)
+    : Boolean(media?.videoMedia);
+  if (!previewUrl && !hasCanonicalMedia) {
     return (
       <div className="mt-2 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">
         No {kind}
@@ -31,15 +43,25 @@ function MediaPreview({ kind, previewUrl, onClear }) {
   return (
     <div className="mt-2 relative max-w-xs">
       {kind === "Image" ? (
-        <img
-          src={previewUrl}
+        <MediaImage
+          compatibilityMode={localPreview ? "legacy" : "auto"}
+          media={localPreview ? { imageUrl: previewUrl } : media}
+          mediaPurpose={localPreview ? "" : mediaPurpose}
+          src={previewUrl || ""}
+          variant="thumbnail"
+          loading="eager"
           alt="Preview"
           className="w-24 h-24 object-cover rounded border border-gray-600"
         />
       ) : (
-        <video
-          src={previewUrl}
+        <MediaVideo
+          compatibilityMode={localPreview ? "legacy" : "auto"}
+          media={localPreview ? { video_url: previewUrl } : media}
+          mediaPurpose={localPreview ? "" : mediaPurpose}
+          src={previewUrl || ""}
           controls
+          preload="metadata"
+          aria-label="Video preview"
           className="w-full max-h-48 rounded border border-gray-600"
         />
       )}
@@ -206,7 +228,14 @@ export default function PersonalMediaEditor({
                   onChange={(event) => updatePreview(event, "image")}
                   className="w-full text-sm text-white file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
                 />
-                <MediaPreview kind="Image" previewUrl={resolvedImagePreviewUrl} onClear={clearImage} />
+                <MediaPreview
+                  kind="Image"
+                  previewUrl={resolvedImagePreviewUrl}
+                  localPreview={Boolean(imageObjectUrl)}
+                  media={imageRemoved ? null : itemData}
+                  mediaPurpose={itemType === "spell" ? "spell" : "technique"}
+                  onClear={clearImage}
+                />
               </div>
 
               <div>
@@ -217,7 +246,14 @@ export default function PersonalMediaEditor({
                   onChange={(event) => updatePreview(event, "video")}
                   className="w-full text-sm text-white file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
                 />
-                <MediaPreview kind="Video" previewUrl={resolvedVideoPreviewUrl} onClear={clearVideo} />
+                <MediaPreview
+                  kind="Video"
+                  previewUrl={resolvedVideoPreviewUrl}
+                  localPreview={Boolean(videoObjectUrl)}
+                  media={videoRemoved ? null : itemData}
+                  mediaPurpose={itemType === "spell" ? "spell-video" : "technique-video"}
+                  onClear={clearVideo}
+                />
                 <p className="text-gray-400 text-xs mt-1">Consigliato: video breve (&lt;30s) e di dimensioni ridotte.</p>
               </div>
             </div>

@@ -2,7 +2,6 @@ import { act } from 'react';
 import { fireEvent, screen } from '@testing-library/react';
 import consumeConsumable, { __resetConsumableOperationsForTests } from './useConsumable';
 import { commitConsumable, prepareConsumable } from '../../../data/userData/userDataCommands';
-import { doc, getDoc, updateDoc } from '../../../performance/firestore';
 
 jest.mock('../../../data/userData/userDataCommands', () => ({
   commitConsumable: jest.fn(),
@@ -12,23 +11,14 @@ jest.mock('../../../data/userData/userDataCommands', () => ({
   prepareConsumable: jest.fn(),
 }));
 
-jest.mock('../../../performance/firestore', () => ({
-  doc: jest.fn((_db, ...segments) => ({ path: segments.join('/') })),
-  getDoc: jest.fn(),
-  updateDoc: jest.fn(),
-}));
-
-jest.mock('../../firebaseConfig', () => ({ db: {} }));
-jest.mock('../../../data/configRepository', () => ({ getVarie: jest.fn() }));
 jest.mock('../../common/diceLogger', () => jest.fn(() => Promise.resolve()));
 
-describe('rollout-aware consumable flow', () => {
+describe('canonical consumable flow', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     __resetConsumableOperationsForTests();
-    doc.mockImplementation((_db, ...segments) => ({ path: segments.join('/') }));
     commitConsumable.mockResolvedValue({ success: true });
-    updateDoc.mockResolvedValue(undefined);
+    prepareConsumable.mockResolvedValue({ preparationId: 'preparation-1', rolls: [] });
   });
 
   afterEach(() => {
@@ -36,34 +26,23 @@ describe('rollout-aware consumable flow', () => {
     document.body.innerHTML = '';
   });
 
-  test('legacy-read consumes against the aggregate without invoking Task 05 callables', async () => {
-    getDoc.mockResolvedValue({
-      exists: () => true,
-      data: () => ({
-        inventory: [{ id: 'potion', type: 'consumabile', qty: 2 }],
-        equipped: { beltC1: { id: 'potion', qty: 2 } },
-        stats: {},
-      }),
-    });
-
+  test('uses Task 05 callables even if an obsolete rollout-stage property is supplied', async () => {
     await consumeConsumable({
       user: { uid: 'user-1' },
-      userData: { stats: { level: 1 } },
-      item: { id: 'potion', type: 'consumabile' },
-      slotKey: 'beltC1',
+      item: { _task05: { inventoryId: 'inventory-1' } },
       mode: null,
       stage: 'legacy-read',
     });
 
-    expect(updateDoc).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'users/user-1' }),
-      expect.objectContaining({
-        inventory: [{ id: 'potion', type: 'consumabile', qty: 1 }],
-        'equipped.beltC1.qty': 1,
-      })
-    );
-    expect(prepareConsumable).not.toHaveBeenCalled();
-    expect(commitConsumable).not.toHaveBeenCalled();
+    expect(prepareConsumable).toHaveBeenCalledWith({
+      inventoryId: 'inventory-1',
+      resource: null,
+      retryKey: 'user-1:inventory-1:none:prepare',
+    });
+    expect(commitConsumable).toHaveBeenCalledWith({
+      preparationId: 'preparation-1',
+      retryKey: 'user-1:inventory-1:none:commit',
+    });
   });
 
   test('activated rolled consumption renders outside AuthProvider and commits the authoritative preparation', async () => {
@@ -80,7 +59,6 @@ describe('rollout-aware consumable flow', () => {
         user: { uid: 'user-1' },
         item: { _task05: { inventoryId: 'inventory-1' } },
         mode: 'hp',
-        stage: 'dual-write',
       });
       await Promise.resolve();
       await Promise.resolve();
@@ -106,7 +84,6 @@ describe('rollout-aware consumable flow', () => {
       preparationId: 'preparation-1',
       retryKey: 'user-1:inventory-1:hp:commit',
     });
-    expect(updateDoc).not.toHaveBeenCalled();
   });
 
   test('reuses a successful preparation after an ambiguous commit failure', async () => {
@@ -122,7 +99,6 @@ describe('rollout-aware consumable flow', () => {
       user: { uid: 'user-1' },
       item: { _task05: { inventoryId: 'inventory-1' } },
       mode: null,
-      stage: 'dual-write',
     };
 
     await expect(consumeConsumable(input)).rejects.toBe(unavailable);

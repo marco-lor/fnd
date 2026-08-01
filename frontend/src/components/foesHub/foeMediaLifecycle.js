@@ -187,11 +187,32 @@ export const shouldClientDeleteFoeMainStorageObject = (foe) => (
 const hasTask07DuplicateState = (foe) => {
   const root = isRecord(foe) ? foe : {};
   const general = isRecord(root.General) ? root.General : {};
-  return [root, general].some((container) => (
-    isRecord(container.media)
-    || isRecord(container.videoMedia)
-    || String(container.imagePath || '').trim().startsWith('media_assets/')
-  ));
+  const nested = [
+    ...(Array.isArray(root.tecniche) ? root.tecniche : []),
+    ...(Array.isArray(root.spells) ? root.spells : []),
+  ];
+  return [root, general, ...nested].some((container) => {
+    if (!isRecord(container)) return false;
+    if (
+      (hasOwn(container, 'media') && container.media != null)
+      || (hasOwn(container, 'videoMedia') && container.videoMedia != null)
+    ) return true;
+    return [
+      'imagePath',
+      'imageUrl',
+      'image_url',
+      'url',
+      'downloadUrl',
+      'videoPath',
+      'videoUrl',
+      'video_url',
+    ].some((field) => {
+      const value = container[field];
+      return typeof value === 'string'
+        ? Boolean(value.trim())
+        : value != null;
+    });
+  });
 };
 
 export const shouldUseDurableFoeDuplication = (

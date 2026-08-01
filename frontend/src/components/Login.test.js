@@ -2,7 +2,7 @@ import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import Login from "./Login";
 import { signInWithEmailAndPassword } from "firebase/auth";
-import { getDoc, setDoc } from "../performance/firestore";
+import { updateCharacterCreation } from "../data/userData/userDataCommands";
 
 const mockNavigate = jest.fn();
 let mockSessionState;
@@ -23,6 +23,10 @@ jest.mock("firebase/auth", () => ({
   signInWithEmailAndPassword: jest.fn(),
   createUserWithEmailAndPassword: jest.fn(),
   fetchSignInMethodsForEmail: jest.fn(),
+}));
+
+jest.mock("../data/userData/userDataCommands", () => ({
+  updateCharacterCreation: jest.fn(() => Promise.resolve()),
 }));
 
 jest.mock("../performance/firestore", () => ({
@@ -47,7 +51,7 @@ const submitLogin = () => {
 describe("Login shared profile flow", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    setDoc.mockResolvedValue(undefined);
+    updateCharacterCreation.mockResolvedValue(undefined);
     mockSessionState = { user: null, authStatus: "anonymous" };
     mockProfileState = { userData: null, profileStatus: "idle" };
     signInWithEmailAndPassword.mockResolvedValue({
@@ -64,7 +68,6 @@ describe("Login shared profile flow", () => {
 
     await waitFor(() => expect(signInWithEmailAndPassword).toHaveBeenCalledTimes(1));
     expect(mockNavigate).not.toHaveBeenCalled();
-    expect(getDoc).not.toHaveBeenCalled();
 
     mockSessionState = {
       user: { uid: "user-1", email: "hero@example.com" },
@@ -77,7 +80,6 @@ describe("Login shared profile flow", () => {
     view.rerender(<Login />);
 
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith(destination));
-    expect(getDoc).not.toHaveBeenCalled();
   });
 
   test("creates a missing profile once and waits for its live snapshot", async () => {
@@ -91,15 +93,14 @@ describe("Login shared profile flow", () => {
     };
     mockProfileState = { userData: null, profileStatus: "missing" };
     view.rerender(<Login />);
-    await waitFor(() => expect(setDoc).toHaveBeenCalledTimes(1));
-    expect(setDoc.mock.calls[0][1]).toEqual(expect.objectContaining({
-      email: "hero@example.com",
-      role: "player",
-      flags: { characterCreationDone: false },
-    }));
+    await waitFor(() => expect(updateCharacterCreation).toHaveBeenCalledTimes(1));
+    expect(updateCharacterCreation).toHaveBeenCalledWith({
+      action: "initialize",
+      retryKey: "login-profile-initialize:user-1",
+    });
 
     view.rerender(<Login />);
-    expect(setDoc).toHaveBeenCalledTimes(1);
+    expect(updateCharacterCreation).toHaveBeenCalledTimes(1);
 
     mockProfileState = {
       userData: { flags: { characterCreationDone: false } },
@@ -125,7 +126,6 @@ describe("Login shared profile flow", () => {
     view.rerender(<Login />);
 
     expect(mockNavigate).not.toHaveBeenCalled();
-    expect(getDoc).not.toHaveBeenCalled();
   });
 
   test("restores login after the authoritative profile subscription fails", async () => {
@@ -144,6 +144,5 @@ describe("Login shared profile flow", () => {
     const submitButton = screen.getByPlaceholderText("Email address").closest("form").querySelector("button[type='submit']");
     expect(submitButton).not.toBeDisabled();
     expect(mockNavigate).not.toHaveBeenCalled();
-    expect(getDoc).not.toHaveBeenCalled();
   });
 });

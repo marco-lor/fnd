@@ -5,8 +5,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {canonicalHash} = require('./user-data-model');
+const {
+  createFirebaseCliAdcFile,
+} = require('../firebase-cli-admin-credential');
 
 const CUTOVER_SCHEMA_VERSION = 1;
+const AUTH_MODES = new Set(['admin', 'firebase-cli']);
+const TEST_PROJECT_ID = 'fatin-test';
 const MIGRATION_REPORT_SCHEMA_VERSION = 2;
 const MODEL_VERSION = 2;
 const CONFIG_PATH = 'app_config/user_data_v2';
@@ -84,6 +89,7 @@ const printHelp = () => console.log([
   'Usage:',
   '  node scripts/task05/user-data-cutover.js --project <project>',
   '    --action open|seal|complete|abort --scope global|user --drain-id <id>',
+  '    [--auth admin|firebase-cli]',
   '    [--drain-user <uid>] [--verification-report <path>]',
   '    [--approve-verification-fingerprint <sha256>] [--report <path>]',
   '    [--execute --approve-fingerprint <sha256> --result <path>]',
@@ -96,12 +102,15 @@ const printHelp = () => console.log([
   '  - Complete locks sanctioned migration writes, reruns verification, then removes the drain.',
   '  - Abort from sealed state restores the frozen state; a second abort removes the drain.',
   '  - Reports contain subject hashes only. A raw user ID is never written to a report.',
+  '  - Firebase CLI auth uses a short-lived temporary ADC file and deletes it on exit.',
+  '  - Live operation is hard-locked to the isolated fatin-test project.',
 ].join('\n'));
 
 const parseArguments = (args = []) => {
   const options = {
     action: '',
     allowLiveProject: false,
+    authMode: 'admin',
     approveFingerprint: '',
     approveVerificationFingerprint: '',
     confirmProject: '',
@@ -123,6 +132,7 @@ const parseArguments = (args = []) => {
     else if (argument === '--allow-live-project') options.allowLiveProject = true;
     else if ([
       '--action',
+      '--auth',
       '--approve-fingerprint',
       '--approve-report-fingerprint',
       '--approve-verification-fingerprint',
@@ -139,6 +149,7 @@ const parseArguments = (args = []) => {
       if (!value || value.startsWith('--')) throw new Error(`Missing value for ${argument}.`);
       index += 1;
       if (argument === '--action') options.action = value;
+      if (argument === '--auth') options.authMode = value;
       if (argument === '--approve-fingerprint') options.approveFingerprint = value;
       if (argument === '--approve-report-fingerprint' || argument === '--approve-verification-fingerprint') {
         options.approveVerificationFingerprint = value;
@@ -156,6 +167,7 @@ const parseArguments = (args = []) => {
 
   if (options.help) return options;
   if (!options.projectId) throw new Error('Explicit --project is required.');
+  if (!AUTH_MODES.has(options.authMode)) throw new Error('--auth must be exactly admin or firebase-cli.');
   if (!ACTIONS.has(options.action)) throw new Error('--action must be exactly open, seal, complete, or abort.');
   if (!SCOPES.has(options.scope)) throw new Error('--scope must be exactly global or user.');
   if (!DRAIN_ID_PATTERN.test(options.drainId)) {
@@ -215,6 +227,9 @@ const assertSafeTarget = (options, env = process.env) => {
     throw new Error(
       'Live Firestore access is refused without --allow-live-project and an exact --confirm-project value.'
     );
+  }
+  if (options.projectId !== TEST_PROJECT_ID) {
+    throw new Error(`This isolated cutover tool accepts only live project ${TEST_PROJECT_ID}.`);
   }
   return {live: true, emulatorHost: null, projectId: options.projectId};
 };
@@ -983,6 +998,7 @@ const runFreshMigrationVerification = (options, {env = process.env} = {}) => {
   const argumentsList = [
     path.join(__dirname, 'user-data-migration.js'),
     '--project', options.projectId,
+    '--auth', options.authMode,
     '--operation', 'verify',
     '--report', reportPath,
     '--drain-scope', options.scope,
@@ -1010,11 +1026,24 @@ const runFreshMigrationVerification = (options, {env = process.env} = {}) => {
   }
 };
 
-const createAdminBackend = (projectId) => {
+const createAdminBackend = async (projectId, authMode = 'admin') => {
   // Deliberately lazy: parsing and safe-target checks run before Admin SDK is loaded.
   const {deleteApp, initializeApp} = require('firebase-admin/app');
   const {FieldValue, getFirestore} = require('firebase-admin/firestore');
-  const app = initializeApp({projectId}, `task05-cutover-${process.pid}-${Date.now()}`);
+  const previousAdcPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  const temporaryAdc = authMode === 'firebase-cli'
+    ? await createFirebaseCliAdcFile({projectId})
+    : null;
+  if (temporaryAdc) process.env.GOOGLE_APPLICATION_CREDENTIALS = temporaryAdc.filePath;
+  let app;
+  try {
+    app = initializeApp({projectId}, `task05-cutover-${process.pid}-${Date.now()}`);
+  } catch (error) {
+    if (previousAdcPath === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    else process.env.GOOGLE_APPLICATION_CREDENTIALS = previousAdcPath;
+    temporaryAdc?.cleanup();
+    throw error;
+  }
   const firestore = getFirestore(app);
   const configReference = firestore.doc(CONFIG_PATH);
 
@@ -1056,7 +1085,15 @@ const createAdminBackend = (projectId) => {
   };
 
   return {
-    close: () => deleteApp(app),
+    close: async () => {
+      try {
+        await deleteApp(app);
+      } finally {
+        if (previousAdcPath === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+        else process.env.GOOGLE_APPLICATION_CREDENTIALS = previousAdcPath;
+        temporaryAdc?.cleanup();
+      }
+    },
     readState,
     acquireCompletionLock: async ({approvedFingerprint, approvedReport, request}) => firestore.runTransaction(
       async (transaction) => {
@@ -1194,7 +1231,7 @@ const runCutover = async (options, {
   const approvedReport = options.execute
     ? readJson(options.reportPath, 'Approved cutover plan')
     : null;
-  const backend = backendFactory(options.projectId);
+  const backend = await backendFactory(options.projectId, options.authMode);
   try {
     const state = await backend.readState(options.drainId);
     const request = {

@@ -39,6 +39,18 @@
       "sources": [{ "file": "components/bazaar/Bazaar.js", "occurrence": 2 }]
     },
     {
+      "id": "home-inventory-catalog-item-document",
+      "kind": "document",
+      "queryKey": "catalog.item.subscribe.v1",
+      "ownerTask": "Task 05 / Task 07",
+      "currentScope": "One item document for each proven _task05.catalogItemId displayed by Home inventory and equipment",
+      "targetOrdering": [],
+      "cursor": { "version": 1, "status": "none", "fields": [] },
+      "realtimePolicy": "Actor-scoped and ref-counted by catalog item ID across Inventory and EquippedInventory; closes after the last consumer",
+      "activation": "active",
+      "sources": [{ "file": "data/catalogItemRepository.js", "occurrence": 1 }]
+    },
+    {
       "id": "bazaar-editor-techniques-current",
       "kind": "collection",
       "queryKey": "bazaar.techniques.subscribe.v1",
@@ -69,30 +81,6 @@
       ]
     },
     {
-      "id": "bazaar-comparison-user-document",
-      "kind": "document",
-      "queryKey": "bazaar.user-comparison.subscribe.v1",
-      "ownerTask": "Task 09",
-      "currentScope": "Current user's full profile document while comparing equipment",
-      "targetOrdering": [],
-      "cursor": { "version": 1, "status": "none", "fields": [] },
-      "realtimePolicy": "Visible comparison only",
-      "activation": "active",
-      "sources": [{ "file": "components/bazaar/elements/comparisonComponent.js", "occurrence": 1 }]
-    },
-    {
-      "id": "character-creation-user-document",
-      "kind": "document",
-      "queryKey": "character.user-points.subscribe.v1",
-      "ownerTask": "Task 08",
-      "currentScope": "Current user's profile during point distribution",
-      "targetOrdering": [],
-      "cursor": { "version": 1, "status": "none", "fields": [] },
-      "realtimePolicy": "Mounted character-creation step only",
-      "activation": "active",
-      "sources": [{ "file": "components/characterCreation/elements/PointsDistribution.js", "occurrence": 1 }]
-    },
-    {
       "id": "combat-add-foes-current",
       "kind": "collection",
       "queryKey": "combat.foes.subscribe.v1",
@@ -103,18 +91,6 @@
       "realtimePolicy": "Target active overlay first 50-row page",
       "activation": "deferred",
       "sources": [{ "file": "components/combatTool/elements/AddFoesOverlay.js", "occurrence": 1 }]
-    },
-    {
-      "id": "combat-creator-users-current",
-      "kind": "collection",
-      "queryKey": "combat.users.eligible.subscribe.v1",
-      "ownerTask": "Task 14",
-      "currentScope": "Users whose role is player, players, or webmaster; unbounded",
-      "targetOrdering": [{ "field": "normalizedLabel", "direction": "ASCENDING" }, { "field": "__name__", "direction": "ASCENDING" }],
-      "cursor": { "version": 1, "status": "deferred", "fields": ["normalizedLabel", "__name__"] },
-      "realtimePolicy": "Target first role-filtered directory page",
-      "activation": "deferred",
-      "sources": [{ "file": "components/combatTool/elements/EncounterCreator.js", "occurrence": 1 }]
     },
     {
       "id": "combat-participants-current",
@@ -151,18 +127,6 @@
       "realtimePolicy": "Visible linked encounter only",
       "activation": "active",
       "sources": [{ "file": "components/combatTool/elements/EncounterDetails.js", "occurrence": 3 }]
-    },
-    {
-      "id": "combat-participant-foe-documents",
-      "kind": "document",
-      "queryKey": "combat.participant-foe.subscribe.v1",
-      "ownerTask": "Task 14",
-      "currentScope": "One source foe document per linked encounter participant",
-      "targetOrdering": [],
-      "cursor": { "version": 1, "status": "none", "fields": [] },
-      "realtimePolicy": "Visible linked encounter only",
-      "activation": "active",
-      "sources": [{ "file": "components/combatTool/elements/EncounterDetails.js", "occurrence": 4 }]
     },
     {
       "id": "combat-logs-current",
@@ -211,18 +175,6 @@
       "realtimePolicy": "Target first role-filtered 25-row page",
       "activation": "deferred",
       "sources": [{ "file": "components/combatTool/elements/EncounterSidebarList.js", "occurrence": 3 }]
-    },
-    {
-      "id": "dm-users-current",
-      "kind": "collection",
-      "queryKey": "dm.users.subscribe.v1",
-      "ownerTask": "Task 11",
-      "currentScope": "Complete users source collection; unbounded",
-      "targetOrdering": [{ "field": "normalizedLabel", "direction": "ASCENDING" }, { "field": "__name__", "direction": "ASCENDING" }],
-      "cursor": { "version": 1, "status": "deferred", "fields": ["normalizedLabel", "__name__"] },
-      "realtimePolicy": "Target first 50-row private-directory page",
-      "activation": "deferred",
-      "sources": [{ "file": "components/dmDashboard/DMDashboard.js", "occurrence": 1 }]
     },
     {
       "id": "dm-dice-history-current",
@@ -333,18 +285,6 @@
       "sources": [{ "file": "components/grigliata/GrigliataDicePanel.js", "occurrence": 1 }]
     },
     {
-      "id": "grigliata-dice-users-current",
-      "kind": "collection",
-      "queryKey": "grigliata.dice-users.subscribe.v1",
-      "ownerTask": "Task 16",
-      "currentScope": "Complete users collection for DM dice target labels",
-      "targetOrdering": [{ "field": "normalizedLabel", "direction": "ASCENDING" }, { "field": "__name__", "direction": "ASCENDING" }],
-      "cursor": { "version": 1, "status": "deferred", "fields": ["normalizedLabel", "__name__"] },
-      "realtimePolicy": "Open dice panel, target private-directory page",
-      "activation": "deferred",
-      "sources": [{ "file": "components/grigliata/GrigliataDicePanel.js", "occurrence": 2 }]
-    },
-    {
       "id": "grigliata-selected-user-document",
       "kind": "document",
       "queryKey": "grigliata.selected-user.subscribe.v1",
@@ -355,18 +295,6 @@
       "realtimePolicy": "Selected token only",
       "activation": "active",
       "sources": [{ "file": "components/grigliata/GrigliataPage.js", "occurrence": 1 }]
-    },
-    {
-      "id": "grigliata-selected-token-document",
-      "kind": "document",
-      "queryKey": "grigliata.selected-token.subscribe.v1",
-      "ownerTask": "Task 16",
-      "currentScope": "Selected external token profile document",
-      "targetOrdering": [],
-      "cursor": { "version": 1, "status": "none", "fields": [] },
-      "realtimePolicy": "Selected token only",
-      "activation": "active",
-      "sources": [{ "file": "components/grigliata/GrigliataPage.js", "occurrence": 2 }]
     },
     {
       "id": "grigliata-fog-memory-tiles",
@@ -631,20 +559,6 @@
       "realtimePolicy": "Active scene only",
       "activation": "exception",
       "sources": [{ "file": "components/grigliata/useGrigliataWallRuntimeState.js", "occurrence": 1 }]
-    },
-    {
-      "id": "home-user-documents-current",
-      "kind": "document",
-      "queryKey": "home.user-sections.subscribe.v1",
-      "ownerTask": "Task 08",
-      "currentScope": "Current user's full profile in four independently mounted home sections",
-      "targetOrdering": [],
-      "cursor": { "version": 1, "status": "none", "fields": [] },
-      "realtimePolicy": "Legacy parameter-table listener only; resources, equipment, and inventory use Task 05 repositories",
-      "activation": "deferred",
-      "sources": [
-        { "file": "components/home/elements/paramTables.js", "occurrence": 1 }
-      ]
     },
     {
       "id": "task05-user-domain-collections",

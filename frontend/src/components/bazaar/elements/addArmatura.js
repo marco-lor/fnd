@@ -1,19 +1,22 @@
 // file: ./frontend/src/components/bazaar/elements/addArmatura.js
 import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { db } from '../../firebaseConfig';
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from "../../../performance/firestore";
+import { doc, getDoc, setDoc, updateDoc } from "../../../performance/firestore";
 import {
     createLegacyStorageCleanup,
-    deleteLegacyStoragePath,
-    uploadLegacyBlob,
+
     uploadLegacyImage,
 } from "../../common/legacyMediaStorage";
 import useObjectUrl from "../../common/useObjectUrl";
+import MediaImage from "../../common/MediaImage";
 import { deleteDoc } from "../../../performance/firestore";
 import useTask07MediaOperationOwner from "../../../data/media/useTask07MediaOperationOwner";
+import { persistCanonicalInventoryItem } from "../../../data/media/privateInventoryMediaWriter";
+import { createUserOperationId } from "../../../data/userData/userDataCommands";
 import {
     isTask07CatalogItemWriterEnabled,
     runTask07CatalogItemWriter,
+    withTask07CatalogLegacyImageField,
 } from "../../../data/media/catalogItemMediaWriter";
 import {
     describeTask07ConsumerOutcome,
@@ -21,6 +24,12 @@ import {
 } from "../../../data/media/mediaConsumerAdapter";
 import { AuthContext } from '../../../AuthContext';
 import { computeValue } from '../../common/computeFormula';
+import {
+    usePersonalSpells,
+    usePersonalTechniques,
+    useProgression,
+} from '../../../data/userData/userDataHooks';
+import { getUserDirectoryPage } from '../../../data/userDirectoryRepository';
 import { AddSpellButton } from '../../dmDashboard/elements/buttons/addSpell';
 import { SpellOverlay } from '../../common/SpellOverlay';
 import { WeaponOverlay } from '../../common/WeaponOverlay';
@@ -40,11 +49,16 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
         Parametri: { Base: {}, Combattimento: {}, Special: {} }
     });
     const [imageFile, setImageFile] = useState(null);
-    const imagePreviewUrl = useObjectUrl(imageFile) || armaturaFormData.General?.image_url || null;
+    const imageObjectUrl = useObjectUrl(imageFile);
+    const imagePreviewUrl = imageObjectUrl || armaturaFormData.General?.image_url || null;
     const [isLoading, setIsLoading] = useState(false);
     const [isSchemaLoading, setIsSchemaLoading] = useState(true);
 
-    const { user, role } = useContext(AuthContext);
+    const { user, userData } = useContext(AuthContext);
+    const role = userData?.role;
+    const { data: progression } = useProgression(user?.uid);
+    const { data: personalSpells } = usePersonalSpells(user?.uid);
+    const { data: personalTechniques } = usePersonalTechniques(user?.uid);
     const task07MediaOperationOwner = useTask07MediaOperationOwner();
     const [userParams, setUserParams] = useState({ Base: {}, Combattimento: {} });
     const [userName, setUserName] = useState("");
@@ -84,8 +98,12 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
     useEffect(() => {
         const fetchUsers = async () => {
             try {
-                const snap = await getDocs(collection(db, 'users'));
-                const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                const page = await getUserDirectoryPage();
+                const list = (page?.items || []).map((entry) => ({
+                    id: entry.id,
+                    characterId: entry.label,
+                    role: entry.role,
+                }));
                 setUsers(list);
             } catch (err) {
                 console.error('Error fetching users:', err);
@@ -260,24 +278,21 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
         if (!user) return;
         const fetchData = async () => {
             try {
-                const userDocRef = doc(db, 'users', user.uid);
-                const userSnap = await getDoc(userDocRef);
-                if (userSnap.exists()) {
-                    const uData = userSnap.data();
-                    setUserParams(uData.Parametri || { Base: {}, Combattimento: {} });
-                    setUserName(uData.characterId || uData.email || "Unknown User");
-                }
+                setUserParams(progression?.Parametri || { Base: {}, Combattimento: {} });
+                setUserName(userData?.characterId || user.email || "Unknown User");
 
                 const spellSchemaData = await getSchema('schema_spell');
                 if (spellSchemaData) setSpellSchema(spellSchemaData);
                 else console.error("Spell schema not found!");
 
                 const commonSpells = await getCommonSpells() || {};
-                const userSpells = userSnap.exists() ? userSnap.data().spells || {} : {};
+                const userSpellNames = Object.entries(personalSpells || {}).map(([key, value]) => (
+                    value?.name || value?.Nome || key
+                ));
 
                 const initialSpellNamesFromData = initialData?.General?.spells ? Object.keys(initialData.General.spells) : [];
                 const currentCustomSpellNames = customSpells.map(cs => cs.spellData.Nome.trim());
-                setSpellsList([...new Set([...Object.keys(commonSpells), ...Object.keys(userSpells), ...initialSpellNamesFromData, ...currentCustomSpellNames])].sort());
+                setSpellsList([...new Set([...Object.keys(commonSpells), ...userSpellNames, ...initialSpellNamesFromData, ...currentCustomSpellNames])].sort());
 
                 let commonTecniche = {};
                 try {
@@ -285,16 +300,18 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                 } catch (error) {
                     console.error("Error fetching common tecniche:", error);
                 }
-                const userTecniche = userSnap.exists() ? userSnap.data().tecniche || {} : {};
+                const userTechniqueNames = Object.entries(personalTechniques || {}).map(([key, value]) => (
+                    value?.name || value?.Nome || key
+                ));
                 const initialTecNamesFromData = initialData?.General?.ridCostoTecSingola ? Object.keys(initialData.General.ridCostoTecSingola) : [];
-                setTecnicheList([...new Set([...Object.keys(commonTecniche), ...Object.keys(userTecniche), ...initialTecNamesFromData])].sort());
+                setTecnicheList([...new Set([...Object.keys(commonTecniche), ...userTechniqueNames, ...initialTecNamesFromData])].sort());
 
             } catch (error) {
                 console.error('Error fetching initial data for overlay:', error);
             }
         };
         fetchData();
-    }, [user, initialData?.id, initialData?.General?.ridCostoTecSingola, initialData?.General?.spells, customSpells, showMessage]);
+    }, [customSpells, initialData?.General?.ridCostoTecSingola, initialData?.General?.spells, personalSpells, personalTechniques, progression, user, userData?.characterId]);
 
     const handleSpellCreate = useCallback((result) => {
         console.log("Spell Create/Edit Result:", result);
@@ -418,11 +435,15 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                 file: imageFile,
                 inventoryEditMode,
             });
+            if (customSpells.some((entry) => entry?.imageFile || entry?.videoFile)) {
+                throw new Error("Embedded spell media has no canonical Task 07 slot yet. Remove those files before saving.");
+            }
+
             let finalArmaturaData = JSON.parse(JSON.stringify(armaturaFormData));
 
             // Handle image upload
             let newImageUrl = editMode ? (initialData?.General?.image_url ?? null) : null;
-            if (imageFile && !task07V1Write) {
+            if (imageFile && !task07V1Write && !inventoryEditMode) {
                 const armaturaImgFileName = `armatura_${docId}_${Date.now()}_${imageFile.name}`;
                 newImageUrl = (await uploadLegacyImage('items/' + armaturaImgFileName, imageFile)).downloadUrl;
                 if (!inventoryEditMode && editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
@@ -432,7 +453,11 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                 newImageUrl = null;
                 deferredStorageCleanup.addUrl(initialData.General.image_url);
             }
-            finalArmaturaData.General.image_url = newImageUrl;
+            finalArmaturaData = withTask07CatalogLegacyImageField(finalArmaturaData, {
+                editMode,
+                imageUrl: newImageUrl,
+                task07V1Write,
+            });
 
             // Handle custom spells
             let finalSpells = {};
@@ -442,14 +467,6 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                 
                 let spellImageUrlToSave = createdSpellData.image_url || '';
                 let spellVideoUrlToSave = createdSpellData.video_url || '';
-                
-                if (customSpell.imageFile) {
-                    spellImageUrlToSave = (await uploadLegacyImage(`spell_images/${Date.now()}_${customSpell.imageFile.name}`, customSpell.imageFile)).downloadUrl;
-                }
-                
-                if (customSpell.videoFile) {
-                    spellVideoUrlToSave = (await uploadLegacyBlob(`spell_videos/${Date.now()}_${customSpell.videoFile.name}`, customSpell.videoFile)).downloadUrl;
-                }
                 
                 // Queue old files for cleanup only after the catalog document commits.
                 if (editMode && initialData?.General?.spells?.[spellNameKey] && typeof initialData.General.spells[spellNameKey] === 'object') {
@@ -516,59 +533,48 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                  delete finalArmaturaData.Parametri;            }            // Set item type to "armatura"
             finalArmaturaData.item_type = "armatura";
 
-            if (inventoryEditMode && inventoryUserId && (inventoryItemId || initialData?.id)) {
-                try {
-                    const targetUserRef = doc(db, 'users', inventoryUserId);
-                    const userSnap = await getDoc(targetUserRef);
-                    const currentData = userSnap.exists() ? userSnap.data() : {};
-                    const invArr = Array.isArray(currentData.inventory) ? currentData.inventory : [];
-                    const targetId = inventoryItemId || docId;
-                    let userImageDeleted = false;
-                    const nextInv = invArr.map((entry, idx) => {
-                        if (Number.isInteger(inventoryItemIndex)) {
-                            if (idx !== inventoryItemIndex) return entry;
-                            const current = entry;
-                            const qty = typeof current?.qty === 'number' ? current.qty : 1;
-                            if (current?.user_image_custom && current?.user_image_url) {
-                                if (imageFile || (!imagePreviewUrl && initialData?.General?.image_url)) {
-                                    userImageDeleted = current.user_image_url;
-                                }
-                            }
-                            const baseUpdated = { id: targetId, qty, ...finalArmaturaData };
-                            if (imageFile) return { ...baseUpdated, user_image_custom: true, user_image_url: newImageUrl };
-                            if (!imagePreviewUrl) { const { user_image_custom, user_image_url, ...rest } = baseUpdated; return rest; }
-                            return { ...baseUpdated, ...(current?.user_image_custom ? { user_image_custom: true, user_image_url: current.user_image_url } : {}) };
-                        }
-                        if (!entry) return entry;
-                        if (typeof entry === 'string') {
-                            if (entry === targetId) return { id: targetId, qty: 1, ...finalArmaturaData, ...(imageFile ? { user_image_custom: true, user_image_url: newImageUrl } : {}) };
-                            return entry;
-                        }
-                        const entryId = entry.id || entry.name || entry?.General?.Nome;
-                        if (entryId === targetId) {
-                            const qty = typeof entry.qty === 'number' ? entry.qty : 1;
-                            if (entry.user_image_custom && entry.user_image_url) {
-                                if (imageFile || (!imagePreviewUrl && initialData?.General?.image_url)) {
-                                    userImageDeleted = entry.user_image_url;
-                                }
-                            }
-                            const baseUpdated = { id: targetId, qty, ...finalArmaturaData };
-                            if (imageFile) return { ...baseUpdated, user_image_custom: true, user_image_url: newImageUrl };
-                            else if (!imagePreviewUrl) { const { user_image_custom, user_image_url, ...rest } = baseUpdated; return rest; }
-                            return { ...baseUpdated, ...(entry.user_image_custom ? { user_image_custom: true, user_image_url: entry.user_image_url } : {}) };
-                        }
-                        return entry;
-                    });
-                    await updateDoc(targetUserRef, { inventory: nextInv });
-                    if (userImageDeleted) {
-                        try { const oldPath = decodeURIComponent(userImageDeleted.split('/o/')[1].split('?')[0]); await deleteLegacyStoragePath(oldPath); } catch (e) { console.warn('Failed to delete previous user custom image:', e); }
-                    }
-                    if (showMessage) showMessage(`Armatura aggiornata nell'inventario utente.`, 'success');
-                } catch (e) {
-                    console.error('Failed updating user inventory:', e);
-                    if (showMessage) showMessage(`Errore aggiornando inventario utente: ${e.message}`, 'error');
-                    setIsLoading(false);
-                    return;
+            if (inventoryEditMode) {
+                const targetId = inventoryItemId
+                    || initialData?._task05?.inventoryId
+                    || initialData?._instance?.instanceId;
+                if (!inventoryUserId || !targetId) {
+                    throw new Error("Inventory edit requires a stable Task 05 inventory ID.");
+                }
+                const removeCanonicalImage = Boolean(
+                    !imageFile
+                    && !imagePreviewUrl
+                    && initialData?.media?.assetId
+                );
+                const inventorySnapshot = { ...finalArmaturaData };
+                if (imageFile || removeCanonicalImage) {
+                    inventorySnapshot.General = {
+                        ...inventorySnapshot.General,
+                        image_url: null,
+                    };
+                    inventorySnapshot.user_image_custom = false;
+                    inventorySnapshot.user_image_url = null;
+                }
+                const inventoryResult = await task07MediaOperationOwner.run((signal) => (
+                    persistCanonicalInventoryItem({
+                        userId: inventoryUserId,
+                        inventoryItemId: targetId,
+                        snapshot: inventorySnapshot,
+                        file: imageFile,
+                        removeImage: removeCanonicalImage,
+                        retryKey: [inventoryUserId, targetId, createUserOperationId('inventory-editor')].join(':'),
+                        signal,
+                    })
+                ));
+                if (!inventoryResult) {
+                    throw new Error("Canonical media is unavailable. The inventory item was not changed.");
+                }
+                if (task07ConsumerNeedsAttention(inventoryResult.outcome)) {
+                    if (showMessage) showMessage(
+                        describeTask07ConsumerOutcome(inventoryResult.outcome, "Armatura inventory image"),
+                        "warning"
+                    );
+                } else if (showMessage) {
+                    showMessage("Armatura aggiornato nell'inventario utente.", "success");
                 }
                 onClose(true);
             } else {
@@ -612,7 +618,7 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
 
         } catch (error) {
             console.error("Error saving armor:", error);
-            if (showMessage) showMessage("Errore nel salvataggio dell'armatura.", "error");
+            if (showMessage) showMessage(error?.message || "Errore nel salvataggio dell'armatura.", "error");
         } finally {
             setIsLoading(false);
         }
@@ -806,7 +812,16 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                         )}
                         <div className="w-24 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center bg-gray-700/50 overflow-hidden">
                             {(imagePreviewUrl) ? (
-                                <img src={imagePreviewUrl} alt="Preview" className="w-full h-full object-cover" />
+                                <MediaImage
+                                    compatibilityMode={imageObjectUrl ? "legacy" : "auto"}
+                                    media={imageObjectUrl ? { imageUrl: imageObjectUrl } : (initialData || armaturaFormData)}
+                                    mediaPurpose={imageObjectUrl ? "" : "item"}
+                                    src={imagePreviewUrl}
+                                    variant="thumbnail"
+                                    loading="eager"
+                                    alt="Preview"
+                                    className="w-full h-full object-cover"
+                                />
                             ) : (
                                 <span className="text-gray-500 text-xs text-center">Nessuna Immagine</span>
                             )}

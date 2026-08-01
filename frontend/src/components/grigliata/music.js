@@ -1,5 +1,6 @@
 import { timestampToMillis } from './boardUtils';
 import { withObjectUrl } from '../common/useObjectUrl';
+import { normalizePrivateAudioDescriptor } from '../common/privateMediaAssets';
 
 export const GRIGLIATA_MUSIC_TRACK_COLLECTION = 'grigliata_music_tracks';
 export const GRIGLIATA_MUSIC_PLAYBACK_COLLECTION = 'grigliata_music_playback';
@@ -27,6 +28,49 @@ const asFiniteNumber = (value, fallback = 0) => {
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0;
+const CANONICAL_MUSIC_ASSET_ID = /^m_[a-f0-9]{40}$/;
+
+const normalizeMusicAssetId = (value) => {
+  const result = isNonEmptyString(value) ? value.trim() : '';
+  return CANONICAL_MUSIC_ASSET_ID.test(result) ? result : '';
+};
+
+export const normalizeGrigliataMusicMedia = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const assetId = normalizeMusicAssetId(value.assetId);
+  const ownerUid = isNonEmptyString(value.ownerUid) ? value.ownerUid.trim() : '';
+  const generation = String(value.generation || '').trim();
+  const original = normalizePrivateAudioDescriptor(value.original);
+  const pathParts = original?.path?.split('/') || [];
+  if (
+    value.schemaVersion !== 1
+    || value.contractVersion !== 1
+    || value.kind !== 'music'
+    || value.state !== 'ready'
+    || value.audience !== 'signed-in'
+    || !assetId
+    || !ownerUid
+    || !/^[1-9][0-9]*$/.test(generation)
+    || !original
+    || pathParts.length !== 7
+    || pathParts[2] !== 'signed-in'
+    || pathParts[3] !== ownerUid
+    || pathParts[4] !== assetId
+    || pathParts[5] !== generation
+    || pathParts[6] !== 'original'
+  ) return null;
+  return {
+    schemaVersion: 1,
+    contractVersion: 1,
+    assetId,
+    kind: 'music',
+    state: 'ready',
+    generation,
+    audience: 'signed-in',
+    ownerUid,
+    original,
+  };
+};
 
 const resolvePlaybackStatus = (status) => (
   PLAYBACK_STATUS_SET.has(status)
@@ -54,6 +98,8 @@ export const EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE = {
   trackId: '',
   trackName: '',
   audioUrl: '',
+  mediaAssetId: '',
+  media: null,
   durationMs: 0,
   offsetMs: 0,
   volume: DEFAULT_GRIGLIATA_MUSIC_VOLUME,
@@ -69,6 +115,8 @@ export const EMPTY_GRIGLIATA_MUSIC_PLAYBACK_SESSION = {
   trackId: '',
   trackName: '',
   audioUrl: '',
+  mediaAssetId: '',
+  media: null,
   durationMs: 0,
   offsetMs: 0,
   loop: false,
@@ -83,23 +131,28 @@ export const createGrigliataMusicCommandId = () => (
   `music_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
 );
 
-export const normalizeGrigliataMusicTrack = (track) => ({
-  id: resolveTrackId(track),
-  name: isNonEmptyString(track?.name) ? track.name.trim() : '',
-  fileName: isNonEmptyString(track?.fileName) ? track.fileName.trim() : '',
-  audioUrl: isNonEmptyString(track?.audioUrl) ? track.audioUrl.trim() : '',
-  audioPath: isNonEmptyString(track?.audioPath) ? track.audioPath.trim() : '',
-  contentType: isNonEmptyString(track?.contentType) ? track.contentType.trim() : '',
-  sizeBytes: Math.max(0, Math.round(asFiniteNumber(track?.sizeBytes, 0))),
-  durationMs: Math.max(0, Math.round(asFiniteNumber(track?.durationMs, 0))),
-  musicFolderId: isNonEmptyString(track?.musicFolderId) ? track.musicFolderId.trim() : '',
-  musicFolderAssignedAt: track?.musicFolderAssignedAt || null,
-  musicFolderAssignedBy: isNonEmptyString(track?.musicFolderAssignedBy) ? track.musicFolderAssignedBy.trim() : '',
-  createdAt: track?.createdAt || null,
-  createdBy: isNonEmptyString(track?.createdBy) ? track.createdBy.trim() : '',
-  updatedAt: track?.updatedAt || null,
-  updatedBy: isNonEmptyString(track?.updatedBy) ? track.updatedBy.trim() : '',
-});
+export const normalizeGrigliataMusicTrack = (track) => {
+  const media = normalizeGrigliataMusicMedia(track?.media);
+  return {
+    id: resolveTrackId(track),
+    name: isNonEmptyString(track?.name) ? track.name.trim() : '',
+    fileName: isNonEmptyString(track?.fileName) ? track.fileName.trim() : '',
+    audioUrl: isNonEmptyString(track?.audioUrl) ? track.audioUrl.trim() : '',
+    audioPath: isNonEmptyString(track?.audioPath) ? track.audioPath.trim() : '',
+    mediaAssetId: media?.assetId || normalizeMusicAssetId(track?.mediaAssetId),
+    media,
+    contentType: isNonEmptyString(track?.contentType) ? track.contentType.trim() : '',
+    sizeBytes: Math.max(0, Math.round(asFiniteNumber(track?.sizeBytes, 0))),
+    durationMs: Math.max(0, Math.round(asFiniteNumber(track?.durationMs, 0))),
+    musicFolderId: isNonEmptyString(track?.musicFolderId) ? track.musicFolderId.trim() : '',
+    musicFolderAssignedAt: track?.musicFolderAssignedAt || null,
+    musicFolderAssignedBy: isNonEmptyString(track?.musicFolderAssignedBy) ? track.musicFolderAssignedBy.trim() : '',
+    createdAt: track?.createdAt || null,
+    createdBy: isNonEmptyString(track?.createdBy) ? track.createdBy.trim() : '',
+    updatedAt: track?.updatedAt || null,
+    updatedBy: isNonEmptyString(track?.updatedBy) ? track.updatedBy.trim() : '',
+  };
+};
 
 export const sortGrigliataMusicTracks = (tracks) => (
   [...(tracks || [])]
@@ -119,6 +172,10 @@ export const normalizeGrigliataMusicPlaybackState = (state) => {
   const volume = normalizeGrigliataMusicVolume(state?.volume);
 
   return {
+    ...(() => {
+      const media = normalizeGrigliataMusicMedia(state?.media);
+      return {media, mediaAssetId: media?.assetId || normalizeMusicAssetId(state?.mediaAssetId)};
+    })(),
     status,
     trackId: isNonEmptyString(state?.trackId) ? state.trackId.trim() : '',
     trackName: isNonEmptyString(state?.trackName) ? state.trackName.trim() : '',
@@ -140,6 +197,10 @@ export const normalizeGrigliataMusicPlaybackSession = (session) => {
   const trackId = resolveTrackId(session);
 
   return {
+    ...(() => {
+      const media = normalizeGrigliataMusicMedia(session?.media);
+      return {media, mediaAssetId: media?.assetId || normalizeMusicAssetId(session?.mediaAssetId)};
+    })(),
     id: isNonEmptyString(session?.id) ? session.id.trim() : trackId,
     status,
     trackId,
@@ -163,7 +224,7 @@ export const sortGrigliataMusicPlaybackSessions = (sessions) => (
       session.status !== GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED
       && session.trackId
       && session.trackName
-      && session.audioUrl
+      && (session.audioUrl || session.mediaAssetId)
     ))
     .sort((left, right) => {
       const rightMillis = timestampToMillis(right.updatedAt || right.startedAt);
@@ -208,6 +269,7 @@ export const buildGrigliataMusicPlaybackSession = ({
   updatedAt = null,
   updatedBy = '',
   commandId = createGrigliataMusicCommandId(),
+  canonicalOnly = false,
 }) => {
   const resolvedStatus = resolvePlaybackStatus(status);
   const normalizedTrack = normalizeGrigliataMusicTrack(track);
@@ -216,6 +278,12 @@ export const buildGrigliataMusicPlaybackSession = ({
   const clampedOffsetMs = resolvedDurationMs > 0
     ? clamp(resolvedOffsetMs, 0, resolvedDurationMs)
     : resolvedOffsetMs;
+  const mediaAssetId = normalizedTrack.mediaAssetId;
+  if (resolvedStatus !== GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED
+    && canonicalOnly
+    && !mediaAssetId) {
+    throw new TypeError('Canonical music media is required for playback.');
+  }
 
   if (resolvedStatus === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED) {
     return {
@@ -233,7 +301,8 @@ export const buildGrigliataMusicPlaybackSession = ({
     status: resolvedStatus,
     trackId: normalizedTrack.id,
     trackName: normalizedTrack.name,
-    audioUrl: normalizedTrack.audioUrl,
+    audioUrl: canonicalOnly ? '' : normalizedTrack.audioUrl,
+    mediaAssetId,
     durationMs: resolvedDurationMs,
     offsetMs: clampedOffsetMs,
     loop: loop === true,
@@ -256,6 +325,7 @@ export const buildGrigliataMusicPlaybackState = ({
   updatedAt = null,
   updatedBy = '',
   commandId = createGrigliataMusicCommandId(),
+  canonicalOnly = false,
 }) => {
   const resolvedStatus = resolvePlaybackStatus(status);
   const normalizedTrack = normalizeGrigliataMusicTrack(track);
@@ -265,6 +335,12 @@ export const buildGrigliataMusicPlaybackState = ({
     ? clamp(resolvedOffsetMs, 0, resolvedDurationMs)
     : resolvedOffsetMs;
   const resolvedVolume = normalizeGrigliataMusicVolume(volume);
+  const mediaAssetId = normalizedTrack.mediaAssetId;
+  if (resolvedStatus !== GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED
+    && canonicalOnly
+    && !mediaAssetId) {
+    throw new TypeError('Canonical music media is required for playback.');
+  }
 
   if (resolvedStatus === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.STOPPED) {
     return {
@@ -280,7 +356,8 @@ export const buildGrigliataMusicPlaybackState = ({
     status: resolvedStatus,
     trackId: normalizedTrack.id,
     trackName: normalizedTrack.name,
-    audioUrl: normalizedTrack.audioUrl,
+    audioUrl: canonicalOnly ? '' : normalizedTrack.audioUrl,
+    mediaAssetId,
     durationMs: resolvedDurationMs,
     offsetMs: clampedOffsetMs,
     volume: resolvedVolume,

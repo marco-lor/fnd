@@ -68,7 +68,7 @@ test("level-up dispatches absent operation IDs to the HEAD-compatible path", () 
   assert.match(legacy, /collection\("level_events"\)\.doc\(\)/);
 });
 
-test("west1 foe alias uses legacy duplication while V2 owns Task 06", () => {
+test("west1 foe alias is no-media-only and transactionally binds Task 07", () => {
   const wrapper = readSource("duplicateFoeWithAssets.ts");
   const legacy = readSource("duplicateFoeWithAssetsLegacy.ts");
 
@@ -80,8 +80,27 @@ test("west1 foe alias uses legacy duplication while V2 owns Task 06", () => {
     wrapper,
     /export const duplicateFoeWithAssetsV2 = onCall<DuplicatePayload>\([\s\S]*?region: CANONICAL_REGION[\s\S]*?duplicateFoeHandler\([\s\S]*?true/
   );
+  assert.match(
+    wrapper,
+    /task07ControlHash[\s\S]*?task07Mode[\s\S]*?checkpointLegacySourcePresence/
+  );
+  assert.match(
+    wrapper,
+    /assessCanonicalOnlyFoeDuplication[\s\S]*?manifest = \[\]/
+  );
+  assert.match(
+    wrapper,
+    /currentTask07ControlHash[\s\S]*?foeDuplicationControlFenceMatches/
+  );
   assertNoTask06OperationState(legacy, "legacy foe-duplication handler");
   assert.match(legacy, /collection\("duplications"\)/);
-  assert.match(legacy, /"foes\/tecniche"/);
-  assert.match(legacy, /"foes\/spells"/);
+  assert.match(
+    legacy,
+    /runTransaction[\s\S]*?transaction\.getAll\([\s\S]*?task07ControlRef/
+  );
+  assert.match(legacy, /task07MediaModeForActor/);
+  assert.match(legacy, /task07ControlHash/);
+  assert.match(legacy, /foeHasPersistedMedia/);
+  assert.match(legacy, /Media-bearing foes require canonical Task 07 duplication/);
+  assert.doesNotMatch(legacy, /getStorage\(\)|\.copy\(|"foes\/tecniche"|"foes\/spells"/);
 });

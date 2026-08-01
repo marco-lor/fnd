@@ -1,29 +1,17 @@
 // file: ./frontend/src/components/characterCreation/CharacterCreation.js
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { db } from "../firebaseConfig";
-import {
-  doc,
-  getDoc,
-  setDoc,
-  updateDoc,
-} from "../../performance/firestore";
 import { useAuth } from "../../AuthContext";
 import GlobalAuroraBackground from "../backgrounds/GlobalAuroraBackground";
 import { uploadLegacyImage } from "../common/legacyMediaStorage";
 import useObjectUrl from "../common/useObjectUrl";
-import { getSchema, getVarie } from '../../data/configRepository';
 import { isTask07MediaV1WriteEnabled } from '../../data/media/mediaFeatureFlags';
 import { createTask07MediaOperationOwner } from '../../data/media/mediaOperationOwner';
 import {
   runCharacterCreationAvatarV1Write,
   task07ProfileRevision,
 } from './characterCreationAvatarMedia';
-import {
-  finalizeCharacterCreationMediaTarget,
-  prepareCharacterCreationMediaTarget,
-  rollbackCharacterCreationMediaTarget,
-} from '../../data/userData/userDataRepository';
+import { updateCharacterCreation } from '../../data/userData/userDataCommands';
 // Import the components for each step
 import RaceSelection from "./elements/RaceSelection";
 import AnimaShardSelection from "./elements/AnimaShardSelection";
@@ -59,7 +47,7 @@ function CharacterCreation() {
   
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, userData } = useAuth();
   const avatarOperationOwnerRef = useRef(null);
   const componentMountedRef = useRef(true);
   const pendingAvatarAttemptRef = useRef(null);
@@ -81,26 +69,12 @@ function CharacterCreation() {
   const totalSteps = 4; // Now we have 4 steps: Race, Anima, Points Distribution, Details
 
   // Check if character creation is already completed
-  const checkCharacterCreationStatus = useCallback(async () => {
-    if (user) {
-      try {
-        const userDocRef = doc(db, "users", user.uid);
-        const userDocSnap = await getDoc(userDocRef);
-        
-        if (userDocSnap.exists()) {
-          const userData = userDocSnap.data();
-          // If character creation is already done, redirect to home
-          if (userData.flags && userData.flags.characterCreationDone === true) {
-            console.log("Character creation already completed, redirecting to home");
-            navigate("/home");
-            return;
-          }
-        }
-      } catch (error) {
-        console.error("Error checking character creation status:", error);
-      }
+  const checkCharacterCreationStatus = useCallback(() => {
+    if (user && userData?.flags?.characterCreationDone === true) {
+      console.log("Character creation already completed, redirecting to home");
+      navigate("/home");
     }
-  }, [user, navigate]);
+  }, [user, userData?.flags?.characterCreationDone, navigate]);
 
   // If no user is logged in, navigate to login page
   useEffect(() => {
@@ -174,39 +148,10 @@ function CharacterCreation() {
     // Persist race selection on first step
     if (currentStep === 1) {
       try {
-        const userDocRef = doc(db, "users", user.uid);
-        await updateDoc(userDocRef, { race: selectedRace.id });
-        // Reset parameters using schema from utils/schema_pg
-        const schemaData = await getSchema('schema_pg');
-        const schemaParams = schemaData ? schemaData.Parametri : { Base: {}, Combattimento: {} };
-        await updateDoc(userDocRef, {
-          'Parametri.Base': schemaParams.Base,
-          'Parametri.Combattimento': schemaParams.Combattimento
-        });
-        // Fetch starting values and apply race bonuses for initial points
-        const varie = await getVarie();
-        if (!varie) throw new Error('Configuration for starting values not found');
-        const { starting_values: startingValues = {}, races_extra: racesExtra = {} } = varie;
-        const abilityStart = startingValues.abilityPoints || 0;
-        const tokenStart = startingValues.tokenPoints || 0;
-        const raceExtra = racesExtra[selectedRace.id] || {};
-        const extraAbility = raceExtra.extraAbilityCreation || 0;
-        const extraTokens = raceExtra.extraTokenCreation || 0;
-        const basePointsAvailable = abilityStart + extraAbility;
-        const combatTokensAvailable = tokenStart + extraTokens;
-        await updateDoc(userDocRef, {
-          'stats.basePointsAvailable': basePointsAvailable,
-          'stats.combatTokensAvailable': combatTokensAvailable
-        });
-        // Reset spent counters and negative count on race selection
-        await updateDoc(userDocRef, {
-          'stats.basePointsSpent': 0,
-          'stats.combatTokensSpent': 0,
-          'stats.negativeBaseStatCount': 0
-        });
-        // Initialize AltriParametri.Anima_1 to default before Anima Shard selection
-        await updateDoc(userDocRef, {
-          'AltriParametri.Anima_1': '---'
+        await updateCharacterCreation({
+          action: 'selectRace',
+          race: selectedRace.id,
+          retryKey: `character-race:${user.uid}:${selectedRace.id}`,
         });
       } catch (err) {
         setError("Failed to save race selection and reset parameters: " + err.message);
@@ -216,10 +161,10 @@ function CharacterCreation() {
     // Persist Anima shard inside AltriParametri on second step
     if (currentStep === 2) {
       try {
-        const userDocRef = doc(db, "users", user.uid);
-        // Update anima selection and reset spent counters in user document
-        await updateDoc(userDocRef, {
-          'AltriParametri.Anima_1': selectedAnima.name
+        await updateCharacterCreation({
+          action: 'selectAnima',
+          anima: selectedAnima.name,
+          retryKey: `character-anima:${user.uid}:${selectedAnima.name}`,
         });
       } catch (err) {
         setError("Failed to save Anima Shard selection and reset parameters: " + err.message);
@@ -263,68 +208,21 @@ function CharacterCreation() {
     let avatarLease = null;
 
     try {
-      const userDocRef = doc(db, "users", user.uid);
-      const userDocSnap = await getDoc(userDocRef);
-      const userData = userDocSnap.exists() ? userDocSnap.data() : null;
       const characterBaseData = {
         characterId: characterName.trim(),
-        // race: selectedRace.id, // Store the race name
-        // anima: selectedAnima.name, // Store the anima shard name
-        // animaLevelUpBonus: selectedAnima.levelUpBonus, // Store the level up bonus for future level-ups
-        'settings.lock_param_base': true,
-        'settings.lock_param_combat': true,
-      };
-
-      const buildCharacterInitialData = async ({
-        characterCreationDone,
-        specificData,
-      }) => {
-        const schemaData = await getSchema('schema_pg');
-        let characterInitialData = {};
-
-        if (schemaData) {
-          characterInitialData = JSON.parse(JSON.stringify(schemaData));
-          console.log("Using schema_pg for initial data.");
-        } else {
-          console.warn("schema_pg not found, creating user with minimal data.");
-          characterInitialData = {
-            Parametri: { Base: {}, Combattimento: {} },
-            stats: { level: 1, hpTotal: 10, hpCurrent: 10, manaTotal: 10, manaCurrent: 10, essenzaTotal: 0, essenzaCurrent: 0, basePointsAvailable: 4, basePointsSpent: 0, combatTokensAvailable: 50, combatTokensSpent: 0 },
-            inventory: [], tecniche: {}, spells: {}, conoscenze: {}, professioni: {}, lingue: {}, settings: { theme: 'dark', notifications: true }, flags: {},
-          };
-        }
-
-        characterInitialData = {
-          ...characterInitialData,
-          ...specificData,
-          email: user.email,
-          username: user.email ? user.email.split("@")[0] : `user_${user.uid.substring(0, 5)}`,
-          role: "player",
-          createdAt: new Date().toISOString(),
-        };
-        characterInitialData.Parametri = characterInitialData.Parametri || { Base: {}, Combattimento: {} };
-        characterInitialData.stats = {
-          ...(characterInitialData.stats || {}),
-          essenzaTotal: Number(characterInitialData.stats?.essenzaTotal) || 0,
-          essenzaCurrent: Number(characterInitialData.stats?.essenzaCurrent) || 0,
-        };
-        characterInitialData.flags = {
-          ...(characterInitialData.flags || {}),
-          characterCreationDone,
-        };
-        return characterInitialData;
       };
 
       const finalizeCharacterDocument = async () => {
-        await finalizeCharacterCreationMediaTarget(
-          user.uid,
-          characterBaseData
-        );
+        await updateCharacterCreation({
+          action: 'complete',
+          ...characterBaseData,
+          retryKey: `character-complete:${user.uid}:${characterBaseData.characterId}`,
+        });
       };
 
       const actorRole = typeof userData?.role === 'string'
         ? userData.role.trim().toLowerCase()
-        : userDocSnap.exists() ? '' : 'player';
+        : 'player';
       if (imageFile) {
         const owner = avatarOperationOwnerRef.current;
         if (!owner || owner.isDisposed()) {
@@ -365,30 +263,13 @@ function CharacterCreation() {
           uid: user.uid,
         };
 
-        const preparedTargetData = userDocSnap.exists()
-          ? null
-          : await buildCharacterInitialData({
-            characterCreationDone: false,
-            specificData: characterBaseData,
-          });
-        if (!avatarLease.isCurrent()) return;
-        let targetCreatedByAttempt = false;
         const prepareEntity = async () => {
-          if (!preparedTargetData) {
-            throw new Error(
-              "Character profile disappeared before avatar preparation."
-            );
-          }
-          const created = await prepareCharacterCreationMediaTarget(
-            user.uid,
-            preparedTargetData
-          );
-          targetCreatedByAttempt = targetCreatedByAttempt || created;
+          await updateCharacterCreation({
+            action: 'initialize',
+            retryKey: `character-profile-initialize:${user.uid}`,
+          });
         };
-        const rollbackPreparedEntity = async () => {
-          if (!targetCreatedByAttempt) return;
-          await rollbackCharacterCreationMediaTarget(user.uid);
-        };
+        const rollbackPreparedEntity = async () => {};
 
         const outcome = await runCharacterCreationAvatarV1Write({
           actorUid: user.uid,
@@ -437,64 +318,13 @@ function CharacterCreation() {
         }
       }
 
-      if (!userDocSnap.exists()) {
-        console.log("User document doesn't exist, creating new one.");
-        const schemaData = await getSchema('schema_pg');
-        let characterInitialData = {};
-
-        if (schemaData) {
-            characterInitialData = JSON.parse(JSON.stringify(schemaData));
-            console.log("Using schema_pg for initial data.");
-        } else {
-            console.warn("schema_pg not found, creating user with minimal data.");
-            // Fallback minimal data
-            characterInitialData = {
-                Parametri: { Base: {}, Combattimento: {} },
-            stats: { level: 1, hpTotal: 10, hpCurrent: 10, manaTotal: 10, manaCurrent: 10, essenzaTotal: 0, essenzaCurrent: 0, basePointsAvailable: 4, basePointsSpent: 0, combatTokensAvailable: 50, combatTokensSpent: 0 },
-                inventory: [], tecniche: {}, spells: {}, conoscenze: {}, professioni: {}, lingue: {}, settings: { theme: 'dark', notifications: true }, flags: {}
-            };
-        }
-
-        // Merge schema/fallback with specific character info
-        characterInitialData = {
-            ...characterInitialData,
-            ...characterUpdateData,
-            email: user.email,
-            username: user.email ? user.email.split("@")[0] : `user_${user.uid.substring(0, 5)}`,
-            role: "player",
-            createdAt: new Date().toISOString()
-        };
-
-        // Ensure essential structures
-        characterInitialData.Parametri = characterInitialData.Parametri || { Base: {}, Combattimento: {} };
-        characterInitialData.stats = {
-          ...(characterInitialData.stats || {}),
-          essenzaTotal: Number(characterInitialData.stats?.essenzaTotal) || 0,
-          essenzaCurrent: Number(characterInitialData.stats?.essenzaCurrent) || 0,
-        };
-        characterInitialData.flags = characterInitialData.flags || {};
-        characterInitialData.flags.characterCreationDone = true;
-
-        await setDoc(userDocRef, characterInitialData);
-        console.log("New user document created.");
-      } else {
-        // Ensure we have a flags object
-        if (!userData.flags) {
-          userData.flags = {};
-        }
-
-        // Update data structure
-        const updateData = { 
-          ...characterUpdateData,
-          flags: {
-            ...userData.flags,
-            characterCreationDone: true
-          }
-        };
-
-        await updateDoc(userDocRef, updateData);
-        console.log("User document updated.");
-      }
+      await updateCharacterCreation({
+        action: 'complete',
+        characterId: characterBaseData.characterId,
+        profile: Object.fromEntries(Object.entries(characterUpdateData)
+          .filter(([key]) => key === 'imageUrl' || key === 'imagePath')),
+        retryKey: `character-complete:${user.uid}:${characterBaseData.characterId}`,
+      });
 
       pendingAvatarAttemptRef.current = null;
       navigate("/home"); // Navigate on success

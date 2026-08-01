@@ -6,7 +6,9 @@ export const TASK07_MEDIA_MODES = Object.freeze([
   'shadow',
   'derivative-read',
   'v1-write',
+  'canonical-only',
 ]);
+export const TASK07_MEDIA_PENDING_MODE = 'pending';
 
 const TASK07_MEDIA_MODE_SET = new Set(TASK07_MEDIA_MODES);
 const MAX_ALLOWLIST_ENTRIES = 100;
@@ -85,12 +87,16 @@ export const task07MediaModeForActor = ({
 };
 
 export const loadTask07MediaMode = async (actor) => {
-  const control = await getTask07MediaControlDocument().catch(() => null);
+  const control = await getTask07MediaControlDocument();
   return task07MediaModeForActor({ ...actor, control });
 };
 
 export const task07ModeReadsDerivatives = (mode) => (
-  mode === 'derivative-read' || mode === 'v1-write'
+  mode === 'derivative-read'
+  || mode === 'v1-write'
+  || mode === 'canonical-only'
 );
 
-export const task07ModeWritesV1 = (mode) => mode === 'v1-write';
+export const task07ModeWritesV1 = (mode) => (
+  mode === 'v1-write' || mode === 'canonical-only'
+);

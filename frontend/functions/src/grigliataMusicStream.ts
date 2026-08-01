@@ -4,12 +4,14 @@ import {
   buildTask07MusicProjection,
   nextTask07MusicStreamWrite,
   TASK07_MUSIC_STREAM_QUERY_LIMIT,
+  task07MusicProjectionTrackIds,
 } from "./grigliataMusicStreamCore";
 import {normalizeTask07MediaControl} from "./task07MediaControl";
 
 const PLAYBACK_PATH = "grigliata_music_playback/current";
 const SESSION_COLLECTION = "grigliata_music_playback_sessions";
 const STREAM_PATH = "grigliata_music_stream/current";
+const TRACK_COLLECTION = "grigliata_music_tracks";
 
 const PROJECTION_OPTIONS = {
   region: "europe-west8",
@@ -52,13 +54,25 @@ Promise<ProjectionWriteResult> => {
     }
     const playbackSnapshot = await transaction.get(playbackRef);
     const sessionsSnapshot = await transaction.get(activeSessionsQuery);
+    const sessionSources = sessionsSnapshot.docs.map((snapshot) => ({
+      id: snapshot.id,
+      data: snapshot.data(),
+    }));
+    const trackIds = task07MusicProjectionTrackIds({
+      playback: playbackSnapshot.exists ? playbackSnapshot.data() : null,
+      sessions: sessionSources,
+    });
+    const trackSnapshots = await Promise.all(trackIds.map((trackId) =>
+      transaction.get(db.doc(`${TRACK_COLLECTION}/${trackId}`))
+    ));
     const streamSnapshot = await transaction.get(streamRef);
     const result = buildTask07MusicProjection({
+      controlMode: control.mode,
       playback: playbackSnapshot.exists ? playbackSnapshot.data() : null,
-      sessions: sessionsSnapshot.docs.map((snapshot) => ({
-        id: snapshot.id,
-        data: snapshot.data(),
-      })),
+      sessions: sessionSources,
+      tracks: trackSnapshots
+        .filter((snapshot) => snapshot.exists)
+        .map((snapshot) => ({id: snapshot.id, data: snapshot.data()})),
     });
     const next = nextTask07MusicStreamWrite(
       streamSnapshot.exists ? streamSnapshot.data() : null,
@@ -101,6 +115,14 @@ export const syncTask07MusicStreamFromSession = onDocumentWritten(
   {
     ...PROJECTION_OPTIONS,
     document: `${SESSION_COLLECTION}/{sessionId}`,
+  },
+  projectMusicStream
+);
+
+export const syncTask07MusicStreamFromTrack = onDocumentWritten(
+  {
+    ...PROJECTION_OPTIONS,
+    document: `${TRACK_COLLECTION}/{trackId}`,
   },
   projectMusicStream
 );

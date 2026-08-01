@@ -173,6 +173,11 @@
         "node \"$PROJECT_DIR/scripts/firebase-backend-release-guard.js\" functions",
         "npm --prefix \"$RESOURCE_DIR\" run lint",
         "npm --prefix \"$RESOURCE_DIR\" run build"
+      ],
+      "postdeploy": [
+        "node \"$PROJECT_DIR/scripts/callable-invoker-policy.js\" --project fatin-test --region europe-west8 --check",
+        "node \"$PROJECT_DIR/scripts/callable-invoker-policy.js\" --project fatin-test --region europe-west1 --check",
+        "node \"$PROJECT_DIR/scripts/callable-invoker-policy.js\" --project fatin-test --region us-central1 --check"
       ]
     }
   ],

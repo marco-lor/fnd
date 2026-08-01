@@ -36,6 +36,8 @@ import {
   LegacyFoeCopyStorageError,
 } from "./duplicateFoeStorage";
 import {
+  assessCanonicalOnlyFoeDuplication,
+  foeDuplicationControlFenceMatches,
   stripTask07MediaFromDuplicatedFoe,
 } from "./duplicateFoeWithAssetsCore";
 import {
@@ -70,7 +72,7 @@ import {
 import {
   buildTask07NewTargetAttachment,
 } from "./mediaTargetAdapters";
-import {task07MediaWritesV1ForActor} from "./task07MediaControl";
+import {task07MediaModeForActor} from "./task07MediaControl";
 
 type DuplicatePayload = {
   sourceFoeId?: string;
@@ -112,6 +114,8 @@ type DuplicateClaim = {
   retryOperationAfterCleanup: boolean;
   errorClass: string;
   cleanupCanComplete: boolean;
+  task07ControlHash: string;
+  task07Mode: string;
 };
 
 type OwnedCleanupInput = {
@@ -269,6 +273,10 @@ const checkpointLegacySourcePresence = async (input: {
   db: admin.firestore.Firestore;
   operationRef: admin.firestore.DocumentReference;
   sourceRef: admin.firestore.DocumentReference;
+  task07ConfigRef: admin.firestore.DocumentReference;
+  actorUid: string;
+  task07ControlHash: string;
+  task07Mode: string;
   requestHash: string;
   invocationId: string;
   manifest: ManifestEntry[];
@@ -310,10 +318,18 @@ const checkpointLegacySourcePresence = async (input: {
   ) as ManifestEntry[];
 
   await input.db.runTransaction(async (transaction) => {
-    const [operation, source] = await transaction.getAll(
+    const [operation, source, task07Config] = await transaction.getAll(
       input.operationRef,
-      input.sourceRef
+      input.sourceRef,
+      input.task07ConfigRef
     );
+    const currentTask07ControlHash = hashValue(task07Config.data() ?? {});
+    const currentTask07Mode = task07MediaModeForActor({
+      control: task07Config.data(),
+      purpose: "foe",
+      role: "dm",
+      uid: input.actorUid,
+    });
     const storedManifest = operation.exists ?
       storedManifestFromData(operation.get("assetManifest")) : null;
     if (!operation.exists ||
@@ -321,6 +337,14 @@ const checkpointLegacySourcePresence = async (input: {
       operation.get("status") !== "running" ||
       operation.get("phase") !== "copy-assets" ||
       operation.get("leaseOwner") !== input.invocationId ||
+      !foeDuplicationControlFenceMatches({
+        storedControlHash: operation.get("task07ControlHash"),
+        storedMode: operation.get("task07Mode"),
+        currentControlHash: currentTask07ControlHash,
+        currentMode: currentTask07Mode,
+      }) ||
+      operation.get("task07ControlHash") !== input.task07ControlHash ||
+      operation.get("task07Mode") !== input.task07Mode ||
       !source.exists ||
       operation.get("sourceHash") !== hashValue(source.data() ?? {}) ||
       !storedManifest ||
@@ -894,6 +918,16 @@ const duplicateFoeHandler = async (
     const task06Config = resolveTask06BackendConfig(
       configSnapshot.data()
     );
+    const task07ControlHash = hashValue(task07Config.data() ?? {});
+    const task07Mode = task07MediaModeForActor({
+      control: task07Config.data(),
+      purpose: "foe",
+      role: "dm",
+      uid: actorUid,
+    });
+    const task07WritesEnabled =
+      task07Mode === "v1-write" || task07Mode === "canonical-only";
+    const canonicalOnly = task07Mode === "canonical-only";
     if (operation.exists && (
       operation.get("actorUid") !== actorUid ||
       operation.get("kind") !== "duplicate-foe" ||
@@ -917,6 +951,8 @@ const duplicateFoeHandler = async (
         retryOperationAfterCleanup: false,
         errorClass: "",
         cleanupCanComplete: true,
+        task07ControlHash,
+        task07Mode,
       };
     }
     if (operation.exists && hasActiveDuplicateLease(operation)) {
@@ -972,8 +1008,19 @@ const duplicateFoeHandler = async (
         retryOperationAfterCleanup,
         errorClass,
         cleanupCanComplete,
+        task07ControlHash,
+        task07Mode,
       };
     };
+
+    if (operation.exists && !foeDuplicationControlFenceMatches({
+      storedControlHash: operation.get("task07ControlHash"),
+      storedMode: operation.get("task07Mode"),
+      currentControlHash: task07ControlHash,
+      currentMode: task07Mode,
+    })) {
+      return claimCleanup("task07-control-drift", false);
+    }
 
     if (operation.exists) {
       const status = asTrimmedString(operation.get("status"));
@@ -1005,12 +1052,6 @@ const duplicateFoeHandler = async (
       );
     }
 
-    const task07WritesEnabled = task07MediaWritesV1ForActor({
-      control: task07Config.data(),
-      purpose: "foe",
-      role: "dm",
-      uid: actorUid,
-    });
     if (operation.exists && Boolean(rawStoredClone) &&
       !task07WritesEnabled) {
       return claimCleanup("task07-disabled", false);
@@ -1053,9 +1094,6 @@ const duplicateFoeHandler = async (
         "Foe duplication target identity is invalid."
       );
     }
-    const manifest = operation.exists ?
-      storedManifest as ManifestEntry[] :
-      buildManifest(sourceData, receiptId);
     let clone: Task07FoeMediaClonePlan | null;
     try {
       clone = await loadFoeMediaClonePlan({
@@ -1081,6 +1119,32 @@ const duplicateFoeHandler = async (
         "failed-precondition",
         "Task 07 foe media writes are not enabled."
       );
+    }
+    if (canonicalOnly) {
+      const assessment = assessCanonicalOnlyFoeDuplication(
+        sourceData,
+        Boolean(clone)
+      );
+      if (!assessment.allowed) {
+        if (operation.exists) {
+          return claimCleanup(assessment.reason, false);
+        }
+        throw new HttpsError(
+          "failed-precondition",
+          assessment.reason === "nested-media-unsupported" ?
+            "Nested foe media must be migrated before canonical-only duplication." :
+            "Media-bearing foes require a valid attached canonical Task 07 asset."
+        );
+      }
+    }
+    let manifest = operation.exists ?
+      storedManifest as ManifestEntry[] :
+      buildManifest(sourceData, receiptId);
+    if (canonicalOnly) {
+      if (operation.exists && manifest.length > 0) {
+        return claimCleanup("legacy-manifest-forbidden", false);
+      }
+      manifest = [];
     }
     const cloneManifestRef = clone ?
       db.doc(`media_assets/${clone.destinationAssetId}`) : null;
@@ -1149,6 +1213,8 @@ const duplicateFoeHandler = async (
       transaction.update(operationRef, {
         schemaVersion: 2,
         canonicalMediaClone: clone,
+        task07ControlHash,
+        task07Mode,
         status: "running",
         phase: "copy-assets",
         retryable: false,
@@ -1168,6 +1234,8 @@ const duplicateFoeHandler = async (
         requestHash,
         sourceFoeId,
         sourceHash: hashValue(sourceData),
+        task07ControlHash,
+        task07Mode,
         newFoeId,
         assetManifest: manifest,
         canonicalMediaClone: clone,
@@ -1219,6 +1287,8 @@ const duplicateFoeHandler = async (
       retryOperationAfterCleanup: true,
       errorClass: "",
       cleanupCanComplete: true,
+      task07ControlHash,
+      task07Mode,
     };
   });
   if (claim.mode === "completed") {
@@ -1264,6 +1334,10 @@ const duplicateFoeHandler = async (
       db,
       operationRef,
       sourceRef,
+      task07ConfigRef,
+      actorUid,
+      task07ControlHash: claim.task07ControlHash,
+      task07Mode: claim.task07Mode,
       requestHash,
       invocationId,
       manifest: legacyManifest,
@@ -1288,8 +1362,21 @@ const duplicateFoeHandler = async (
       const clone = claim.clone;
       const result = canonicalResult;
       await db.runTransaction(async (transaction) => {
-        const operation = await transaction.get(operationRef);
-        const sourceSnapshot = await transaction.get(sourceRef);
+        const [operation, sourceSnapshot, task07Config] =
+          await transaction.getAll(
+            operationRef,
+            sourceRef,
+            task07ConfigRef
+          );
+        const currentTask07ControlHash = hashValue(
+          task07Config.data() ?? {}
+        );
+        const currentTask07Mode = task07MediaModeForActor({
+          control: task07Config.data(),
+          purpose: "foe",
+          role: "dm",
+          uid: actorUid,
+        });
         if (!sourceSnapshot.exists) {
           throw new HttpsError(
             "aborted",
@@ -1314,6 +1401,14 @@ const duplicateFoeHandler = async (
           operation.get("status") !== "running" ||
           operation.get("phase") !== "copy-assets" ||
           operation.get("leaseOwner") !== invocationId ||
+          !foeDuplicationControlFenceMatches({
+            storedControlHash: operation.get("task07ControlHash"),
+            storedMode: operation.get("task07Mode"),
+            currentControlHash: currentTask07ControlHash,
+            currentMode: currentTask07Mode,
+          }) ||
+          operation.get("task07ControlHash") !== claim.task07ControlHash ||
+          operation.get("task07Mode") !== claim.task07Mode ||
           operation.get("sourceHash") !==
             hashValue(sourceSnapshot.data()) ||
           !task07FoeMediaClonePlansMatch(
@@ -1477,8 +1572,19 @@ const duplicateFoeHandler = async (
   let finalizedReplay = false;
   try {
     finalizedReplay = await db.runTransaction(async (transaction) => {
-      const operation = await transaction.get(operationRef);
-      const sourceSnapshot = await transaction.get(sourceRef);
+      const [operation, sourceSnapshot, task07Config] =
+        await transaction.getAll(
+          operationRef,
+          sourceRef,
+          task07ConfigRef
+        );
+      const currentTask07ControlHash = hashValue(task07Config.data() ?? {});
+      const currentTask07Mode = task07MediaModeForActor({
+        control: task07Config.data(),
+        purpose: "foe",
+        role: "dm",
+        uid: actorUid,
+      });
       if (
         operation.exists &&
         operation.get("requestHash") === requestHash &&
@@ -1491,6 +1597,14 @@ const duplicateFoeHandler = async (
         operation.get("phase") !==
           (claim.clone ? "commit" : "copy-assets") ||
         operation.get("leaseOwner") !== invocationId ||
+        !foeDuplicationControlFenceMatches({
+          storedControlHash: operation.get("task07ControlHash"),
+          storedMode: operation.get("task07Mode"),
+          currentControlHash: currentTask07ControlHash,
+          currentMode: currentTask07Mode,
+        }) ||
+        operation.get("task07ControlHash") !== claim.task07ControlHash ||
+        operation.get("task07Mode") !== claim.task07Mode ||
         !sourceSnapshot.exists ||
         operation.get("sourceHash") !== hashValue(sourceSnapshot.data())
       ) {

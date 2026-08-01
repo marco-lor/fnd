@@ -16,6 +16,7 @@ import {
   parseTask07StagingPath,
 } from "./mediaContracts";
 import {
+  isAuthorizedTask07LegacyMapBackfill,
   processTask07MediaSource,
   task07ProcessorClaimDecision,
   task07ProcessorFailureCleanupPaths,
@@ -34,6 +35,8 @@ const PROCESSOR_OPTIONS = {
   timeoutSeconds: 540,
   retry: true,
 };
+
+const BACKFILL_RECEIPT_COLLECTION = "task07_media_backfill_receipts";
 
 const assetRef = (
   db: admin.firestore.Firestore,
@@ -86,7 +89,8 @@ const readSourceWithHardCap = async (input: {
 
 type ClaimIntentResult =
   {status: "ack" | "terminal"} |
-  {status: "claimed"; attempt: number; plan: MediaUploadPlan};
+  {status: "claimed"; attempt: number; plan: MediaUploadPlan;
+    legacyMapBackfill: boolean};
 
 const claimIntent = async (input: {
   db: admin.firestore.Firestore;
@@ -105,6 +109,24 @@ const claimIntent = async (input: {
       plan.sourcePath !== input.sourcePath) {
       return {status: "terminal"};
     }
+    const marker = snapshot.get("legacyBackfill");
+    const markerRecord = marker && typeof marker === "object" &&
+      !Array.isArray(marker) ?
+      marker as Record<string, unknown> :
+      null;
+    const receiptId = typeof markerRecord?.receiptId === "string" ?
+      markerRecord.receiptId :
+      "";
+    const receipt = /^r_[a-f0-9]{40}$/.test(receiptId) ?
+      await transaction.get(input.db.doc(
+        `${BACKFILL_RECEIPT_COLLECTION}/${receiptId}`
+      )) :
+      null;
+    const legacyMapBackfill = isAuthorizedTask07LegacyMapBackfill({
+      plan,
+      marker,
+      receipt: receipt?.data(),
+    });
     const state = String(snapshot.get("state") || "");
     const expiresAtMs = timestampMillis(snapshot.get("retention.cleanupAfter"));
     const activeGeneration = String(
@@ -173,7 +195,7 @@ const claimIntent = async (input: {
       },
       updatedAt: now,
     });
-    return {status: "claimed", attempt, plan};
+    return {status: "claimed", attempt, plan, legacyMapBackfill};
   });
 };
 
@@ -183,7 +205,7 @@ type StoredGeneratedDescriptor = Omit<Task07GeneratedObject, "buffer"> & {
   cacheControl: string;
 };
 
-const uploadGeneratedSet = async (input: {
+export const uploadTask07GeneratedSet = async (input: {
   assetId: string;
   eventId: string;
   objects: Task07GeneratedObject[];
@@ -401,13 +423,14 @@ export const task07ProcessMediaUpload = onObjectFinalized(
         sourceGeneration,
         source,
         transformer: createTask07DefaultMediaTransformer(),
+        legacyMapBackfill: claimed.legacyMapBackfill,
       });
       const eventId = event.id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 96);
       temporaryPaths.push(...result.objects.map(
         ({path}) => `${path}.tmp-${eventId}`
       ));
       finalPaths.push(...result.objects.map(({path}) => path));
-      const promoted = await uploadGeneratedSet({
+      const promoted = await uploadTask07GeneratedSet({
         assetId: claimed.plan.assetId,
         eventId,
         objects: result.objects,

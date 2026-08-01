@@ -4,13 +4,19 @@
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const {createRequire} = require('node:module');
 const path = require('node:path');
 const {pipeline} = require('node:stream/promises');
 const mediaPolicy = require('../../functions/src/mediaPolicy.json');
+const {
+  createFirebaseCliAdcFile,
+} = require('../firebase-cli-admin-credential');
 
 const DEMO_PROJECT_ID = 'demo-fnd-perf';
-const REPORT_SCHEMA_VERSION = 2;
-const PLAN_VERSION = 2;
+const LIVE_TEST_PROJECT_ID = 'fatin-test';
+const LIVE_TEST_BUCKET = 'fatin-test.firebasestorage.app';
+const REPORT_SCHEMA_VERSION = 4;
+const PLAN_VERSION = 4;
 const RECEIPT_COLLECTION = 'task07_media_backfill_receipts';
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 50;
@@ -18,12 +24,14 @@ const DEFAULT_MAX_PAGES = 20;
 const MAX_MAX_PAGES = 100;
 const MIGRATION_CONCURRENCY = 1;
 const DEFAULT_POLL_TIMEOUT_MS = 10 * 60 * 1000;
+const MAX_PLACEMENT_REFERENCES = 500;
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 const OPERATIONS = new Set(['backfill', 'verify', 'rollback']);
+const AUTH_MODES = new Set(['admin', 'firebase-cli']);
 const SUPPORTED_KINDS = new Set([
-  'avatar', 'item', 'npc', 'foe',
+  'avatar', 'item', 'npc', 'foe', 'token',
   'technique', 'technique-video', 'spell', 'spell-video',
-  'map', 'map-video',
+  'map', 'map-video', 'music',
 ]);
 const SOURCE_KEYS = Object.freeze([
   'avatars',
@@ -31,11 +39,26 @@ const SOURCE_KEYS = Object.freeze([
   'inventory-items',
   'npcs',
   'foes',
+  'custom-token-templates',
+  'foe-tokens',
+  'common-technique-art',
+  'common-technique-video',
   'technique-art',
   'technique-video',
   'spell-art',
   'spell-video',
   'backgrounds',
+  'music-tracks',
+]);
+const SOURCE_KEY_SET = new Set(SOURCE_KEYS);
+const GLOBAL_FALLBACK_OWNER_SOURCES = new Set([
+  'catalog-items',
+  'npcs',
+  'foes',
+  'common-technique-art',
+  'common-technique-video',
+  'backgrounds',
+  'music-tracks',
 ]);
 const TARGET_COMPATIBILITY_FIELDS = Object.freeze([
   'media',
@@ -48,6 +71,8 @@ const TARGET_COMPATIBILITY_FIELDS = Object.freeze([
   'assetType',
   'durationMs',
   'videoMedia',
+  'audioPath',
+  'audioUrl',
 ]);
 const DEFAULT_RESULTS_DIRECTORY = path.resolve(
   __dirname,
@@ -55,6 +80,13 @@ const DEFAULT_RESULTS_DIRECTORY = path.resolve(
   '..',
   'performance-results'
 );
+const requireFromFunctions = createRequire(path.resolve(
+  __dirname,
+  '..',
+  '..',
+  'functions',
+  'package.json'
+));
 
 const asString = (value) => typeof value === 'string' ? value.trim() : '';
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
@@ -76,6 +108,79 @@ const canonicalHash = (value) => crypto.createHash('sha256')
   .digest('hex');
 
 const POLICY_HASH = canonicalHash(mediaPolicy);
+const LEGACY_MAP_RECOVERY_ERROR_CODES = new Set([
+  'source-image-decode-failed',
+  'source-dimension-budget-exceeded',
+]);
+
+const buildLegacyMapBackfillMarker = (entry, binding, plan) => (
+  entry.kind === 'map' && entry.sourceKey === 'backgrounds' ? {
+    schemaVersion: 1,
+    kind: 'legacy-map-backfill',
+    reportSchemaVersion: REPORT_SCHEMA_VERSION,
+    planVersion: PLAN_VERSION,
+    policyVersion: mediaPolicy.policyVersion,
+    policyHash: POLICY_HASH,
+    receiptId: entry.receiptId,
+    subjectHash: entry.subjectHash,
+    approvedPlanFingerprint: binding.planFingerprint,
+    assetId: entry.assetId,
+    requestHash: plan.requestHash,
+    ownerUid: entry.ownerUid,
+    entityId: entry.entityId,
+    targetPath: entry.targetPath,
+    sourcePath: entry.sourcePath,
+    sourceGeneration: entry.sourceGeneration,
+    sourceFingerprint: entry.sourceFingerprint,
+  } : null
+);
+
+const legacyMapRecoveryIssue = ({
+  receipt,
+  manifest,
+  cleanup,
+  marker,
+  plan,
+}) => {
+  if (!marker) return 'legacy-map-marker-required';
+  const existingReceiptMarker = receipt.legacyBackfill;
+  const existingManifestMarker = manifest.legacyBackfill;
+  if (receipt.state !== 'intent') return 'receipt-not-intent';
+  if (receipt.sourceGeneration !== undefined &&
+    receipt.sourceGeneration !== marker.sourceGeneration) {
+    return 'receipt-source-generation-mismatch';
+  }
+  if (existingReceiptMarker !== undefined &&
+    canonicalHash(existingReceiptMarker) !== canonicalHash(marker)) {
+    return 'receipt-marker-mismatch';
+  }
+  const recoveryAttempts = receipt.legacyMapRecoveryAttempts ?? 0;
+  if (recoveryAttempts !== 0) return 'recovery-already-attempted';
+  if (manifest.state !== 'deleted') return 'manifest-not-deleted';
+  if (!LEGACY_MAP_RECOVERY_ERROR_CODES.has(asString(manifest.error?.code)) ||
+    manifest.error?.retryable !== false) {
+    return 'manifest-error-not-recoverable';
+  }
+  if (manifest.assetId !== marker.assetId ||
+    manifest.requestHash !== plan.requestHash ||
+    manifest.actorUid !== marker.ownerUid ||
+    canonicalHash(manifest.plan) !== canonicalHash(plan) ||
+    manifest.attachment !== null ||
+    manifest.generated !== undefined ||
+    manifest.source !== undefined) {
+    return 'manifest-binding-mismatch';
+  }
+  if (existingManifestMarker !== undefined &&
+    canonicalHash(existingManifestMarker) !== canonicalHash(marker)) {
+    return 'manifest-marker-mismatch';
+  }
+  if (cleanup.state !== 'complete' ||
+    cleanup.assetId !== marker.assetId ||
+    cleanup.reason !== manifest.error.code) {
+    return 'cleanup-not-complete';
+  }
+  return null;
+};
 
 const defaultResultPath = (operation, suffix) => path.join(
   DEFAULT_RESULTS_DIRECTORY,
@@ -130,7 +235,7 @@ const isCanonicalTask07Path = (value) => {
   return (
     /^media_assets\/v1\/(?:signed-in|owner-manager|dm-only)\/[^/]+\/m_[a-f0-9]{40}\/[1-9][0-9]*\/(?:original|thumbnail|thumbnail2x|card|card2x|gallery|gallery2x|poster|poster2x)$/
       .test(storagePath) ||
-    /^media\/v1\/(?:avatar|item|npc|foe|technique|technique-video|spell|spell-video|map|map-video)\/[^/]+\/m_[a-f0-9]{40}\//
+    /^media\/v1\/(?:avatar|item|npc|foe|token|technique|technique-video|spell|spell-video|map|map-video|music)\/[^/]+\/m_[a-f0-9]{40}\//
       .test(storagePath)
   );
 };
@@ -143,7 +248,7 @@ const collectMediaPaths = (value) => {
   const result = new Set();
   const visit = (entry, key = '') => {
     if (typeof entry === 'string') {
-      if (/^(?:imagePath|imageUrl|image_url|posterPath|posterUrl|videoUrl|video_url|storagePath|path|url)$/i
+      if (/^(?:imagePath|imageUrl|image_url|posterPath|posterUrl|videoUrl|video_url|audioPath|audioUrl|storagePath|path|url)$/i
         .test(key)) {
         const storagePath = storagePathFromValue(entry);
         if (storagePath) result.add(storagePath);
@@ -193,6 +298,13 @@ const legacyPathsForKind = (data, kind) => {
       videoMedia: data?.videoMedia,
     });
   }
+  if (kind === 'music') {
+    return collectMediaPaths({
+      audioPath: data?.audioPath,
+      audioUrl: data?.audioUrl,
+      media: data?.media,
+    });
+  }
   return collectMediaPaths({
     image_url: data?.image_url,
     imagePath: data?.imagePath,
@@ -212,7 +324,8 @@ const inferOwnerFromPath = (storagePath, kind) => {
     return parts[2] || '';
   }
   if (kind === 'foe' && parts[0] === 'foes') {
-    return parts[1] === 'copies' ? parts[2] || '' : parts[1] || '';
+    // Only personal copies encode an owner. Global foe filenames do not.
+    return parts[1] === 'copies' ? parts[2] || '' : '';
   }
   if (parts[0] === 'users') return parts[1] || '';
   return '';
@@ -262,7 +375,13 @@ const referenceScopeFor = (record) => record.kind === 'item' ?
   ) :
   null;
 
-const targetKindFor = (kind, referenceScope) => {
+const commonTechniqueForRecord = (record) => (
+  record?.commonTechnique === true ||
+  ['common-technique-art', 'common-technique-video']
+    .includes(asString(record?.sourceKey))
+);
+
+const targetKindFor = (kind, referenceScope, commonTechnique = false) => {
   if (kind === 'avatar') return 'profile';
   if (kind === 'item') {
     return referenceScope === 'global-catalog' ?
@@ -271,17 +390,25 @@ const targetKindFor = (kind, referenceScope) => {
   }
   if (kind === 'npc') return 'npc';
   if (kind === 'foe') return 'foe';
+  if (kind === 'token') return 'grigliata-token';
   if (kind === 'technique' || kind === 'technique-video') {
-    return 'user-technique';
+    return commonTechnique ? 'common-technique' : 'user-technique';
   }
   if (kind === 'spell' || kind === 'spell-video') return 'user-spell';
   if (kind === 'map' || kind === 'map-video') {
     return 'grigliata-background';
   }
+  if (kind === 'music') return 'grigliata-music-track';
   return '';
 };
 
-const targetPathFor = (kind, ownerUid, entityId, referenceScope) => {
+const targetPathFor = (
+  kind,
+  ownerUid,
+  entityId,
+  referenceScope,
+  commonTechnique = false
+) => {
   if (kind === 'avatar') return `users/${ownerUid}`;
   if (kind === 'item' && referenceScope === 'global-catalog') {
     return `items/${entityId}`;
@@ -291,7 +418,9 @@ const targetPathFor = (kind, ownerUid, entityId, referenceScope) => {
   }
   if (kind === 'npc') return `echi_npcs/${entityId}`;
   if (kind === 'foe') return `foes/${entityId}`;
+  if (kind === 'token') return `grigliata_tokens/${entityId}`;
   if (kind === 'technique' || kind === 'technique-video') {
+    if (commonTechnique) return 'utils/tecniche_common';
     return `users/${ownerUid}/tecniche/${entityId}`;
   }
   if (kind === 'spell' || kind === 'spell-video') {
@@ -300,11 +429,13 @@ const targetPathFor = (kind, ownerUid, entityId, referenceScope) => {
   if (kind === 'map' || kind === 'map-video') {
     return `grigliata_backgrounds/${entityId}`;
   }
+  if (kind === 'music') return `grigliata_music_tracks/${entityId}`;
   return '';
 };
 
-const audienceFor = (kind, referenceScope) => {
+const audienceFor = (kind, referenceScope, commonTechnique = false) => {
   if (kind === 'foe') return 'dm-only';
+  if (commonTechnique) return 'signed-in';
   if ((kind === 'item' && referenceScope === 'user-inventory') ||
     ['technique', 'technique-video', 'spell', 'spell-video'].includes(kind)) {
     return 'owner-manager';
@@ -319,9 +450,12 @@ const roleAuthorizes = (kind, referenceScope, role) => {
     return ['dm', 'webmaster'].includes(role);
   }
   if (kind === 'npc') return ['dm', 'webmaster'].includes(role);
+  if (kind === 'token') return true;
   if (['technique', 'technique-video', 'spell', 'spell-video']
     .includes(kind)) return true;
-  if (['foe', 'map', 'map-video'].includes(kind)) return role === 'dm';
+  if (['foe', 'map', 'map-video', 'music'].includes(kind)) {
+    return ['dm', 'webmaster'].includes(role);
+  }
   return false;
 };
 
@@ -368,10 +502,68 @@ const targetMediaFingerprint = (data, kind) => canonicalHash({
     null,
 });
 
+const sourceKeyForRecord = (record) => {
+  const explicit = asString(record?.sourceKey);
+  if (SOURCE_KEY_SET.has(explicit)) return explicit;
+  if (record?.kind === 'avatar') return 'avatars';
+  if (record?.kind === 'item') {
+    return referenceScopeFor(record) === 'global-catalog' ?
+      'catalog-items' :
+      'inventory-items';
+  }
+  if (record?.kind === 'npc') return 'npcs';
+  if (record?.kind === 'foe') return 'foes';
+  if (record?.kind === 'token' && record?.tokenMigrationClass === 'custom') {
+    return 'custom-token-templates';
+  }
+  if (record?.kind === 'token' && record?.tokenMigrationClass === 'foe') {
+    return 'foe-tokens';
+  }
+  if (record?.kind === 'technique' && record?.commonTechnique === true) {
+    return 'common-technique-art';
+  }
+  if (record?.kind === 'technique-video' &&
+    record?.commonTechnique === true) {
+    return 'common-technique-video';
+  }
+  if (record?.kind === 'technique') return 'technique-art';
+  if (record?.kind === 'technique-video') return 'technique-video';
+  if (record?.kind === 'spell') return 'spell-art';
+  if (record?.kind === 'spell-video') return 'spell-video';
+  if (['map', 'map-video'].includes(record?.kind)) return 'backgrounds';
+  if (record?.kind === 'music') return 'music-tracks';
+  return '';
+};
+
+const sourceKeyForReceipt = (receipt) => sourceKeyForRecord({
+  sourceKey: receipt?.sourceKey,
+  kind: receipt?.kind,
+  referenceScope: receipt?.referenceScope,
+});
+
+const generalImageUrlProof = (data, kind) => {
+  if (kind !== 'item') return null;
+  const general = isRecord(data?.General) ? data.General : {};
+  const descriptor = hasOwn(general, 'image_url') ?
+    {exists: true, value: general.image_url} :
+    {exists: false};
+  return {
+    exists: descriptor.exists,
+    valueHash: canonicalHash(descriptor),
+  };
+};
+
+const exactSourceKeys = (values) => (
+  Array.isArray(values) &&
+  values.length === SOURCE_KEYS.length &&
+  SOURCE_KEYS.every((sourceKey, index) => values[index] === sourceKey)
+);
+
 const buildServerPlanProjection = (input) => {
   const operationId = `task07-backfill-${canonicalHash({
     projectId: input.projectId,
     kind: input.kind,
+    commonTechnique: input.commonTechnique === true,
     targetPath: input.targetPath,
     sourceFingerprint: input.sourceFingerprint,
     policyHash: POLICY_HASH,
@@ -383,8 +575,16 @@ const buildServerPlanProjection = (input) => {
   return {
     assetId,
     operationId,
-    targetKind: targetKindFor(input.kind, input.referenceScope),
-    audienceScope: audienceFor(input.kind, input.referenceScope),
+    targetKind: targetKindFor(
+      input.kind,
+      input.referenceScope,
+      input.commonTechnique
+    ),
+    audienceScope: audienceFor(
+      input.kind,
+      input.referenceScope,
+      input.commonTechnique
+    ),
     sourcePath: `media_uploads/${input.ownerUid}/${assetId}/source`,
   };
 };
@@ -398,11 +598,16 @@ const planFingerprintCore = (report) => ({
   policyHash: report.policyHash,
   operation: report.operation,
   projectId: report.projectId,
+  storageBucket: report.storageBucket,
+  sourceKeys: report.sourceKeys,
+  catalogOwnerUid: report.catalogOwnerUid,
+  expectedCandidates: report.expectedCandidates,
   mode: report.mode,
   complete: report.complete,
   scan: report.scan,
   counts: report.counts,
   entries: report.entries,
+  excluded: report.excluded,
 });
 
 const computePlanFingerprint = (report) => canonicalHash(
@@ -412,14 +617,21 @@ const computePlanFingerprint = (report) => canonicalHash(
 const finalizeReport = ({
   operation,
   projectId,
+  storageBucket = `${projectId}.appspot.com`,
+  sourceKeys = SOURCE_KEYS,
+  catalogOwnerUid = '',
+  expectedCandidates = null,
   complete,
   scan,
   entries,
+  excluded = [],
   records = 0,
 }) => {
   const counts = {
     records,
     candidates: entries.length,
+    excluded: excluded.length,
+    discovered: entries.length + excluded.length,
     executable: entries.filter(({status}) => (
       ['ready', 'rollback-ready'].includes(status)
     )).length,
@@ -437,11 +649,16 @@ const finalizeReport = ({
     policyHash: POLICY_HASH,
     operation,
     projectId,
+    storageBucket,
+    sourceKeys: [...sourceKeys],
+    catalogOwnerUid,
+    expectedCandidates,
     mode: 'dry-run',
     complete: Boolean(complete),
     scan,
     counts,
     entries,
+    excluded,
   };
   return {...report, planFingerprint: computePlanFingerprint(report)};
 };
@@ -450,29 +667,52 @@ const buildLegacyMediaBackfillPlan = async (
   records,
   {
     projectId = DEMO_PROJECT_ID,
+    storageBucket = `${projectId}.appspot.com`,
+    sourceKeys = SOURCE_KEYS,
+    catalogOwnerUid = '',
+    expectedCandidates = null,
     readSourceObject = async () => null,
     readOwner = async () => null,
     scan = {complete: true, pageSize: DEFAULT_PAGE_SIZE, maxPages: 1},
   } = {}
 ) => {
   const entries = [];
+  const excluded = [];
   const seen = new Set();
   const ownerCache = new Map();
   for (const record of records) {
     const kind = asString(record.kind);
+    const sourceKey = sourceKeyForRecord(record);
+    const commonTechnique = commonTechniqueForRecord(record);
     const entityId = asString(record.entityId);
-    if (!SUPPORTED_KINDS.has(kind) || !entityId) continue;
+    if (!SUPPORTED_KINDS.has(kind) || !SOURCE_KEY_SET.has(sourceKey) ||
+      !sourceKeys.includes(sourceKey) || !entityId) continue;
     const data = isRecord(record.data) ? record.data : {};
     const referenceScope = referenceScopeFor(record);
     const candidatePaths = legacyPathsForKind(data, kind)
       .filter((sourcePath) => !isCanonicalTask07Path(sourcePath));
     for (const sourcePath of candidatePaths) {
-      const ownerUid = asString(record.ownerUid) ||
+      const explicitOwnerUid = asString(record.ownerUid);
+      const inferredOwnerUid = commonTechnique ||
+        sourceKey === 'music-tracks' ?
+        '' :
         inferOwnerFromPath(sourcePath, kind);
+      const mayUseFallback = GLOBAL_FALLBACK_OWNER_SOURCES.has(sourceKey);
+      const ownerUid = explicitOwnerUid || inferredOwnerUid ||
+        (mayUseFallback ? asString(catalogOwnerUid) : '');
+      const ownerResolution = explicitOwnerUid ? 'explicit' :
+        inferredOwnerUid ? 'legacy-path' :
+          ownerUid ? 'verified-global-fallback' : 'missing';
       const targetPath = asString(record.targetPath) ||
-        targetPathFor(kind, ownerUid, entityId, referenceScope);
+        targetPathFor(
+          kind,
+          ownerUid,
+          entityId,
+          referenceScope,
+          commonTechnique
+        );
       const dedupeKey = [
-        kind, referenceScope, targetPath, sourcePath,
+        kind, referenceScope, targetPath, entityId, sourcePath,
       ].join('\u0000');
       if (seen.has(dedupeKey)) continue;
       seen.add(dedupeKey);
@@ -480,6 +720,45 @@ const buildLegacyMediaBackfillPlan = async (
         sourcePath,
         await readSourceObject(sourcePath, record)
       );
+      const placementReferenceCount = Number(record.placementReferenceCount);
+      const placementReferenceHash = asString(record.placementReferenceHash);
+      const sourceFoeProof = isRecord(record.sourceFoeProof) ?
+        record.sourceFoeProof :
+        null;
+      const sourceFoeFingerprint = sourceFoeProof ?
+        canonicalHash(sourceFoeProof) :
+        '';
+      if (sourceKey === 'foe-tokens' && placementReferenceCount === 0) {
+        const exclusionCore = {
+          schemaVersion: 1,
+          reason: 'unplaced-foe-token-root',
+          sourceKey,
+          kind,
+          entityId,
+          ownerUid: asString(record.ownerUid),
+          targetPath: asString(record.targetPath),
+          targetVersion: asString(record.targetVersion),
+          targetFingerprint: targetMediaFingerprint(data, kind),
+          placementReferenceCount,
+          placementReferenceHash,
+          sourceFoeProof,
+          sourceFoeFingerprint,
+          sourcePath,
+          sourceExists: source.exists,
+          sourceContentType: source.contentType,
+          sourceBytes: source.bytes,
+          sourceGeneration: source.generation,
+          sourceChecksum: source.checksum,
+          sourceFingerprint: sourceObjectFingerprint(source),
+        };
+        const exclusionHash = canonicalHash(exclusionCore);
+        excluded.push({
+          exclusionId: `x_${exclusionHash.slice(0, 40)}`,
+          ...exclusionCore,
+          exclusionHash,
+        });
+        continue;
+      }
       if (!ownerCache.has(ownerUid)) {
         ownerCache.set(ownerUid, ownerUid ? await readOwner(ownerUid) : null);
       }
@@ -487,6 +766,25 @@ const buildLegacyMediaBackfillPlan = async (
       const role = asString(owner?.role).toLowerCase();
       const issues = [];
       const contract = mediaPolicy.purposes[kind];
+      if (sourceKey === 'foe-tokens' && (
+        !Number.isSafeInteger(placementReferenceCount) ||
+        placementReferenceCount < 1 ||
+        !/^[a-f0-9]{64}$/.test(placementReferenceHash)
+      )) {
+        issues.push(issue('placement-reference-proof-missing'));
+      }
+      if (sourceKey === 'foe-tokens' && (
+        sourceFoeProof?.scanned !== true ||
+        typeof sourceFoeProof?.exists !== 'boolean' ||
+        sourceFoeProof?.referencePath !==
+          `foes/${asString(data.foeSourceId)}` ||
+        !/^[a-f0-9]{64}$/.test(asString(
+          sourceFoeProof?.dataFingerprint
+        )) ||
+        !/^[a-f0-9]{64}$/.test(sourceFoeFingerprint)
+      )) {
+        issues.push(issue('source-foe-proof-missing'));
+      }
       if (!ownerUid) issues.push(issue('missing-owner'));
       if (ownerUid && (!owner?.exists || owner?.deletionState === 'pending')) {
         issues.push(issue('owner-not-active'));
@@ -494,6 +792,10 @@ const buildLegacyMediaBackfillPlan = async (
       if (ownerUid && owner?.exists &&
         !roleAuthorizes(kind, referenceScope, role)) {
         issues.push(issue('owner-role-not-authorized'));
+      }
+      if (ownerResolution === 'verified-global-fallback' &&
+        role !== 'webmaster') {
+        issues.push(issue('fallback-owner-not-webmaster'));
       }
       if (!targetPath) issues.push(issue('unsupported-target'));
       if (data.deletionState === 'pending' ||
@@ -503,7 +805,8 @@ const buildLegacyMediaBackfillPlan = async (
       }
       if (['map', 'map-video'].includes(kind)) {
         const expectedAssetType = kind === 'map-video' ? 'video' : 'image';
-        if (data.assetType !== expectedAssetType) {
+        const declaredAssetType = asString(data.assetType).toLowerCase();
+        if (declaredAssetType && declaredAssetType !== expectedAssetType) {
           issues.push(issue('target-media-purpose-invalid'));
         }
       }
@@ -532,6 +835,7 @@ const buildLegacyMediaBackfillPlan = async (
         buildServerPlanProjection({
           projectId,
           kind,
+          commonTechnique,
           referenceScope,
           ownerUid,
           targetPath,
@@ -548,6 +852,7 @@ const buildLegacyMediaBackfillPlan = async (
         projectId,
         policyHash: POLICY_HASH,
         kind,
+        commonTechnique,
         referenceScope,
         ownerUid,
         entityId,
@@ -558,13 +863,25 @@ const buildLegacyMediaBackfillPlan = async (
         expectedRevision: expectedRevisionFromData(data, kind),
         previousAssetId: previousAssetIdFromData(data, kind),
         sourceFingerprint,
+        sourceKey,
+        ownerResolution,
+        placementReferenceCount: sourceKey === 'foe-tokens' ?
+          placementReferenceCount : null,
+        placementReferenceHash: sourceKey === 'foe-tokens' ?
+          placementReferenceHash : null,
+        sourceFoeFingerprint: sourceKey === 'foe-tokens' ?
+          sourceFoeFingerprint : null,
+        legacyGeneralImageUrlProof: generalImageUrlProof(data, kind),
       });
       entries.push({
         receiptId: `r_${subjectHash.slice(0, 40)}`,
         subjectHash,
         kind,
+        sourceKey,
+        commonTechnique,
         referenceScope,
         ownerUid,
+        ownerResolution,
         entityId,
         targetPath,
         targetVersion: asString(record.targetVersion),
@@ -578,6 +895,14 @@ const buildLegacyMediaBackfillPlan = async (
         sourceGeneration: source.generation,
         sourceChecksum: source.checksum,
         sourceFingerprint,
+        placementReferenceCount: sourceKey === 'foe-tokens' ?
+          placementReferenceCount : null,
+        placementReferenceHash: sourceKey === 'foe-tokens' ?
+          placementReferenceHash : null,
+        sourceFoeProof: sourceKey === 'foe-tokens' ? sourceFoeProof : null,
+        sourceFoeFingerprint: sourceKey === 'foe-tokens' ?
+          sourceFoeFingerprint : null,
+        legacyGeneralImageUrlProof: generalImageUrlProof(data, kind),
         assetId: serverPlan.assetId,
         operationId: serverPlan.operationId,
         stagingPath: serverPlan.sourcePath,
@@ -590,18 +915,31 @@ const buildLegacyMediaBackfillPlan = async (
   }
   const pathsByTarget = new Map();
   entries.forEach((entry) => {
-    const targetSlotKey = `${entry.targetPath}\u0000${entry.targetSlot}`;
+    const targetSlotKey = [
+      entry.targetPath,
+      entry.entityId,
+      entry.targetSlot,
+    ].join('\u0000');
     if (!pathsByTarget.has(targetSlotKey)) {
       pathsByTarget.set(targetSlotKey, new Set());
     }
     pathsByTarget.get(targetSlotKey).add(entry.sourcePath);
   });
   entries.forEach((entry) => {
-    const targetSlotKey = `${entry.targetPath}\u0000${entry.targetSlot}`;
+    const targetSlotKey = [
+      entry.targetPath,
+      entry.entityId,
+      entry.targetSlot,
+    ].join('\u0000');
     if (pathsByTarget.get(targetSlotKey).size <= 1) return;
     entry.issues.push(issue('ambiguous-legacy-media-reference'));
     entry.status = 'blocked';
   });
+  excluded.sort((left, right) => (
+    left.targetPath.localeCompare(right.targetPath) ||
+    left.sourcePath.localeCompare(right.sourcePath) ||
+    left.exclusionId.localeCompare(right.exclusionId)
+  ));
   entries.sort((left, right) => (
     left.targetPath.localeCompare(right.targetPath) ||
     left.sourcePath.localeCompare(right.sourcePath) ||
@@ -610,9 +948,14 @@ const buildLegacyMediaBackfillPlan = async (
   return finalizeReport({
     operation: 'backfill',
     projectId,
+    storageBucket,
+    sourceKeys,
+    catalogOwnerUid,
+    expectedCandidates,
     complete: scan.complete,
     scan,
     entries,
+    excluded,
     records: records.length,
   });
 };
@@ -666,9 +1009,10 @@ const loadLegacyMediaRecords = async (
   {
     pageSize = DEFAULT_PAGE_SIZE,
     maxPages = DEFAULT_MAX_PAGES,
+    sourceKeys = SOURCE_KEYS,
   } = {}
 ) => loadPaged({
-  sourceKeys: SOURCE_KEYS,
+  sourceKeys,
   readPage: backend.readLegacyPage,
   pageSize,
   maxPages,
@@ -678,6 +1022,10 @@ const buildReceiptOperationPlan = async ({
   backend,
   operation,
   projectId = DEMO_PROJECT_ID,
+  storageBucket = `${projectId}.appspot.com`,
+  sourceKeys = SOURCE_KEYS,
+  catalogOwnerUid = '',
+  expectedCandidates = null,
   pageSize = DEFAULT_PAGE_SIZE,
   maxPages = DEFAULT_MAX_PAGES,
 }) => {
@@ -691,16 +1039,43 @@ const buildReceiptOperationPlan = async ({
     maxPages,
   });
   const entries = [];
-  for (const receipt of loaded.records) {
+  const receipts = exactSourceKeys(sourceKeys) ?
+    loaded.records :
+    loaded.records.filter((receipt) => (
+      sourceKeys.includes(sourceKeyForReceipt(receipt))
+    ));
+  for (const receipt of receipts) {
     const receiptId = asString(receipt.receiptId || receipt.id);
+    const sourceKey = sourceKeyForReceipt(receipt);
     const inspection = await backend.inspectReceipt(receipt);
     const issues = [];
     if (receipt.schemaVersion !== REPORT_SCHEMA_VERSION ||
       receipt.planVersion !== PLAN_VERSION ||
       receipt.policyVersion !== mediaPolicy.policyVersion ||
       receipt.policyHash !== POLICY_HASH ||
+      !SOURCE_KEY_SET.has(sourceKey) ||
+      !sourceKeys.includes(sourceKey) ||
+      !asString(receipt.sourcePath) ||
+      !/^[a-f0-9]{64}$/.test(asString(receipt.sourceFingerprint)) ||
+      typeof receipt.commonTechnique !== 'boolean' ||
+      !asString(receipt.entityId) ||
+      (receipt.commonTechnique === true &&
+        receipt.targetPath !== 'utils/tecniche_common') ||
       !['media', 'videoMedia'].includes(receipt.targetSlot) ||
-      !/^[a-f0-9]{64}$/.test(asString(receipt.subjectHash))) {
+      !/^[a-f0-9]{64}$/.test(asString(receipt.subjectHash)) ||
+      (sourceKey === 'foe-tokens' && (
+        !Number.isSafeInteger(receipt.placementReferenceCount) ||
+        receipt.placementReferenceCount < 1 ||
+        !/^[a-f0-9]{64}$/.test(asString(
+          receipt.placementReferenceHash
+        )) ||
+        receipt.sourceFoeProof?.scanned !== true ||
+        typeof receipt.sourceFoeProof?.exists !== 'boolean' ||
+        !/^foes\/[^/]+$/.test(asString(
+          receipt.sourceFoeProof?.referencePath
+        )) ||
+        !/^[a-f0-9]{64}$/.test(asString(receipt.sourceFoeFingerprint))
+      ))) {
       issues.push(issue('receipt-contract-mismatch'));
     }
     const attached = receipt.state === 'attached';
@@ -710,13 +1085,34 @@ const buildReceiptOperationPlan = async ({
       inspection.manifestState !== 'attached' ||
       inspection.targetAssetId !== receipt.assetId ||
       Number(inspection.targetRevision) !== Number(receipt.attachedRevision) ||
-      inspection.generatedObjectsPresent !== true
+      inspection.generatedObjectsPresent !== true ||
+      inspection.legacySourceUnchanged !== true ||
+      inspection.legacyGeneralImageUrlUnchanged !== true ||
+      (sourceKey === 'foe-tokens' && (
+        inspection.placementReferenceCount !==
+          receipt.placementReferenceCount ||
+        inspection.placementReferenceHash !== receipt.placementReferenceHash ||
+        inspection.sourceFoeFingerprint !== receipt.sourceFoeFingerprint
+      )) ||
+      (receipt.kind === 'item' && (
+        inspection.itemOriginalGenerated !== true ||
+        inspection.itemCardGenerated !== true ||
+        inspection.itemCard2xGenerated !== true
+      ))
     )) {
       issues.push(issue('attached-receipt-drift'));
     }
     if (rolledBack && (
       inspection.targetAssetId !== (receipt.previousAssetId || null) ||
-      !['cleanup-pending', 'deleted'].includes(inspection.manifestState)
+      !['cleanup-pending', 'deleted'].includes(inspection.manifestState) ||
+      inspection.legacySourceUnchanged !== true ||
+      inspection.legacyGeneralImageUrlUnchanged !== true ||
+      (sourceKey === 'foe-tokens' && (
+        inspection.placementReferenceCount !==
+          receipt.placementReferenceCount ||
+        inspection.placementReferenceHash !== receipt.placementReferenceHash ||
+        inspection.sourceFoeFingerprint !== receipt.sourceFoeFingerprint
+      ))
     )) {
       issues.push(issue('rolled-back-receipt-drift'));
     }
@@ -730,7 +1126,11 @@ const buildReceiptOperationPlan = async ({
     }
     entries.push({
       receiptId,
+      sourceKey,
       subjectHash: asString(receipt.subjectHash),
+      kind: asString(receipt.kind),
+      entityId: asString(receipt.entityId),
+      commonTechnique: receipt.commonTechnique === true,
       assetId: asString(receipt.assetId),
       previousAssetId: asString(receipt.previousAssetId) || null,
       targetPath: asString(receipt.targetPath),
@@ -738,6 +1138,21 @@ const buildReceiptOperationPlan = async ({
         'videoMedia' :
         'media',
       receiptState: asString(receipt.state),
+      proofs: {
+        generatedObjectsPresent: inspection.generatedObjectsPresent === true,
+        legacySourceUnchanged: inspection.legacySourceUnchanged === true,
+        legacyGeneralImageUrlUnchanged:
+          inspection.legacyGeneralImageUrlUnchanged === true,
+        itemOriginalGenerated: inspection.itemOriginalGenerated === true,
+        itemCardGenerated: inspection.itemCardGenerated === true,
+        itemCard2xGenerated: inspection.itemCard2xGenerated === true,
+        placementReferenceCount: sourceKey === 'foe-tokens' ?
+          inspection.placementReferenceCount : null,
+        placementReferenceHash: sourceKey === 'foe-tokens' ?
+          asString(inspection.placementReferenceHash) : null,
+        sourceFoeFingerprint: sourceKey === 'foe-tokens' ?
+          asString(inspection.sourceFoeFingerprint) : null,
+      },
       inspectionHash,
       status,
       issues,
@@ -747,10 +1162,14 @@ const buildReceiptOperationPlan = async ({
   return finalizeReport({
     operation,
     projectId,
+    storageBucket,
+    sourceKeys,
+    catalogOwnerUid,
+    expectedCandidates,
     complete: loaded.scan.complete,
     scan: loaded.scan,
     entries,
-    records: loaded.records.length,
+    records: receipts.length,
   });
 };
 
@@ -758,13 +1177,25 @@ const buildMigrationPlan = async ({
   backend,
   operation,
   projectId,
+  storageBucket,
+  sourceKeys = SOURCE_KEYS,
+  catalogOwnerUid = '',
+  expectedCandidates = null,
   pageSize,
   maxPages,
 }) => {
   if (operation === 'backfill') {
-    const loaded = await loadLegacyMediaRecords(backend, {pageSize, maxPages});
+    const loaded = await loadLegacyMediaRecords(backend, {
+      pageSize,
+      maxPages,
+      sourceKeys,
+    });
     return buildLegacyMediaBackfillPlan(loaded.records, {
       projectId,
+      storageBucket,
+      sourceKeys,
+      catalogOwnerUid,
+      expectedCandidates,
       scan: loaded.scan,
       readSourceObject: backend.readSourceObject,
       readOwner: backend.readOwner,
@@ -774,6 +1205,10 @@ const buildMigrationPlan = async ({
     backend,
     operation,
     projectId,
+    storageBucket,
+    sourceKeys,
+    catalogOwnerUid,
+    expectedCandidates,
     pageSize,
     maxPages,
   });
@@ -787,10 +1222,26 @@ const parsePositiveInteger = (value, name, maximum) => {
   return parsed;
 };
 
+const parseNonNegativeInteger = (value, name, maximum = 1000000) => {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > maximum) {
+    throw new TypeError(`${name} must be an integer from 0 to ${maximum}.`);
+  }
+  return parsed;
+};
+
 const parseOptions = (argv = []) => {
   const options = {
     operation: 'backfill',
     projectId: '',
+    authMode: 'admin',
+    allowLiveProject: false,
+    confirmProject: '',
+    sourceKeys: [],
+    sourcesExplicit: false,
+    catalogOwnerUid: '',
+    confirmCatalogOwnerUid: '',
+    expectedCandidates: null,
     execute: false,
     approveFingerprint: '',
     reportPath: '',
@@ -809,11 +1260,19 @@ const parseOptions = (argv = []) => {
       options.execute = true;
     } else if (argument === '--resume') options.resume = true;
     else if (argument === '--json') options.json = true;
-    else if (argument === '--write' || argument === '--allow-live-read') {
+    else if (argument === '--allow-live-project') {
+      options.allowLiveProject = true;
+    } else if (argument === '--write' || argument === '--allow-live-read') {
       throw new TypeError(`${argument} is not supported by Task 07 backfill.`);
     } else if ([
       '--operation',
       '--project',
+      '--auth',
+      '--confirm-project',
+      '--source',
+      '--catalog-owner-uid',
+      '--confirm-catalog-owner-uid',
+      '--expected-candidates',
       '--approve-fingerprint',
       '--report',
       '--checkpoint',
@@ -828,6 +1287,24 @@ const parseOptions = (argv = []) => {
       index += 1;
       if (argument === '--operation') options.operation = value;
       if (argument === '--project') options.projectId = value;
+      if (argument === '--auth') options.authMode = value;
+      if (argument === '--confirm-project') options.confirmProject = value;
+      if (argument === '--source') {
+        options.sourceKeys.push(value);
+        options.sourcesExplicit = true;
+      }
+      if (argument === '--catalog-owner-uid') {
+        options.catalogOwnerUid = value;
+      }
+      if (argument === '--confirm-catalog-owner-uid') {
+        options.confirmCatalogOwnerUid = value;
+      }
+      if (argument === '--expected-candidates') {
+        options.expectedCandidates = parseNonNegativeInteger(
+          value,
+          '--expected-candidates'
+        );
+      }
       if (argument === '--approve-fingerprint') {
         options.approveFingerprint = value;
       }
@@ -869,6 +1346,21 @@ const parseOptions = (argv = []) => {
   if (!OPERATIONS.has(options.operation)) {
     throw new TypeError(`Unsupported operation: ${options.operation}`);
   }
+  if (!AUTH_MODES.has(options.authMode)) {
+    throw new TypeError('--auth must be exactly admin or firebase-cli.');
+  }
+  if (options.sourceKeys.some((sourceKey) => !SOURCE_KEY_SET.has(sourceKey))) {
+    throw new TypeError(
+      `--source must be one of: ${SOURCE_KEYS.join(', ')}.`
+    );
+  }
+  const requestedSources = new Set(options.sourceKeys);
+  if (requestedSources.size !== options.sourceKeys.length) {
+    throw new TypeError('Each --source may be specified only once.');
+  }
+  options.sourceKeys = options.sourcesExplicit ?
+    SOURCE_KEYS.filter((sourceKey) => requestedSources.has(sourceKey)) :
+    [...SOURCE_KEYS];
   if (options.operation === 'verify' && options.execute) {
     throw new TypeError('Verification is always read-only.');
   }
@@ -879,6 +1371,11 @@ const parseOptions = (argv = []) => {
     !/^[a-f0-9]{64}$/.test(options.approveFingerprint)) {
     throw new TypeError(
       'Execution requires an exact --approve-fingerprint.'
+    );
+  }
+  if (options.execute && options.expectedCandidates === null) {
+    throw new TypeError(
+      'Execution requires the reviewed --expected-candidates count.'
     );
   }
   options.reportPath ||= defaultResultPath(options.operation, 'plan');
@@ -902,9 +1399,10 @@ const parseLoopbackEmulatorHost = (value) => {
 };
 
 const assertSafeTarget = (options, env = process.env) => {
-  if (options.projectId !== DEMO_PROJECT_ID) {
+  if (![DEMO_PROJECT_ID, LIVE_TEST_PROJECT_ID].includes(options.projectId)) {
     throw new TypeError(
-      `Task 07 media backfill only permits ${DEMO_PROJECT_ID}.`
+      `Task 07 media backfill permits only ${DEMO_PROJECT_ID} or ` +
+      `${LIVE_TEST_PROJECT_ID}; production is always refused.`
     );
   }
   for (const variable of ['GCLOUD_PROJECT', 'GOOGLE_CLOUD_PROJECT']) {
@@ -914,30 +1412,132 @@ const assertSafeTarget = (options, env = process.env) => {
       );
     }
   }
-  if (!parseLoopbackEmulatorHost(env.FIRESTORE_EMULATOR_HOST)) {
+  const firestoreEmulator = parseLoopbackEmulatorHost(
+    env.FIRESTORE_EMULATOR_HOST
+  );
+  const storageEmulator = parseLoopbackEmulatorHost(
+    env.FIREBASE_STORAGE_EMULATOR_HOST
+  );
+  const functionsEmulator = parseLoopbackEmulatorHost(
+    env.FUNCTIONS_EMULATOR_HOST
+  );
+  if (options.projectId === LIVE_TEST_PROJECT_ID) {
+    if (env.FIRESTORE_EMULATOR_HOST ||
+      env.FIREBASE_STORAGE_EMULATOR_HOST ||
+      env.FUNCTIONS_EMULATOR_HOST) {
+      throw new TypeError(
+        'Live fatin-test migration refuses all emulator host variables.'
+      );
+    }
+    if (!options.allowLiveProject ||
+      options.confirmProject !== LIVE_TEST_PROJECT_ID) {
+      throw new TypeError(
+        'Live fatin-test access requires --allow-live-project and exact ' +
+        '--confirm-project fatin-test.'
+      );
+    }
+    if (options.authMode !== 'firebase-cli') {
+      throw new TypeError(
+        'Live fatin-test access requires --auth firebase-cli.'
+      );
+    }
+    if (!options.sourcesExplicit || !exactSourceKeys(options.sourceKeys)) {
+      throw new TypeError(
+        'Live fatin-test access requires every supported source as an ' +
+        'explicit repeated --source.'
+      );
+    }
+    if (!/^[A-Za-z0-9._:@-]{1,128}$/.test(options.catalogOwnerUid) ||
+      options.confirmCatalogOwnerUid !== options.catalogOwnerUid) {
+      throw new TypeError(
+        'Live fatin-test access requires --catalog-owner-uid and exact ' +
+        '--confirm-catalog-owner-uid.'
+      );
+    }
+    return {
+      projectId: options.projectId,
+      storageBucket: LIVE_TEST_BUCKET,
+      live: true,
+      concurrency: MIGRATION_CONCURRENCY,
+    };
+  }
+  if (!firestoreEmulator) {
     throw new TypeError(
       'Task 07 media backfill requires a loopback Firestore emulator.'
     );
   }
-  if (!parseLoopbackEmulatorHost(env.FIREBASE_STORAGE_EMULATOR_HOST)) {
+  if (!storageEmulator) {
     throw new TypeError(
       'Task 07 media backfill requires a loopback Storage emulator.'
     );
   }
   if (options.execute && options.operation === 'backfill' &&
-    !parseLoopbackEmulatorHost(env.FUNCTIONS_EMULATOR_HOST)) {
+    !functionsEmulator) {
     throw new TypeError(
       'Task 07 backfill execution requires a loopback Functions emulator.'
     );
   }
   return {
     projectId: options.projectId,
+    storageBucket: `${options.projectId}.appspot.com`,
     live: false,
     concurrency: MIGRATION_CONCURRENCY,
   };
 };
 
 const assertReadOnlyTarget = assertSafeTarget;
+
+const expectedStorageBucket = (projectId) => (
+  projectId === LIVE_TEST_PROJECT_ID ?
+    LIVE_TEST_BUCKET :
+    `${projectId}.appspot.com`
+);
+
+const assertCandidateCountBinding = (report, expectedCandidates, {
+  required = false,
+} = {}) => {
+  if (expectedCandidates === null || expectedCandidates === undefined) {
+    if (required) {
+      throw new Error('The reviewed --expected-candidates binding is required.');
+    }
+    return report;
+  }
+  if (report.expectedCandidates !== expectedCandidates ||
+    report.counts?.candidates !== expectedCandidates ||
+    report.entries?.length !== expectedCandidates) {
+    throw new Error(
+      `Task 07 candidate count changed: expected ${expectedCandidates}, ` +
+      `found ${report.counts?.candidates ?? 'unknown'}. Re-plan.`
+    );
+  }
+  return report;
+};
+
+const validFoeTokenExclusion = (entry) => {
+  if (!isRecord(entry)) return false;
+  const {exclusionId, exclusionHash, ...core} = entry;
+  return entry.schemaVersion === 1 &&
+    entry.reason === 'unplaced-foe-token-root' &&
+    entry.sourceKey === 'foe-tokens' &&
+    entry.kind === 'token' &&
+    asString(entry.entityId) !== '' &&
+    asString(entry.targetPath) === `grigliata_tokens/${entry.entityId}` &&
+    asString(entry.targetVersion) !== '' &&
+    entry.placementReferenceCount === 0 &&
+    /^[a-f0-9]{64}$/.test(asString(entry.placementReferenceHash)) &&
+    entry.sourceFoeProof?.scanned === true &&
+    typeof entry.sourceFoeProof?.exists === 'boolean' &&
+    /^foes\/[^/]+$/.test(asString(entry.sourceFoeProof?.referencePath)) &&
+    /^[a-f0-9]{64}$/.test(asString(
+      entry.sourceFoeProof?.dataFingerprint
+    )) &&
+    /^[a-f0-9]{64}$/.test(asString(entry.sourceFoeFingerprint)) &&
+    /^[a-f0-9]{64}$/.test(asString(entry.sourceFingerprint)) &&
+    typeof entry.sourceExists === 'boolean' &&
+    /^[a-f0-9]{64}$/.test(asString(exclusionHash)) &&
+    exclusionId === `x_${exclusionHash.slice(0, 40)}` &&
+    canonicalHash(core) === exclusionHash;
+};
 
 const assertApprovedReport = (report, options) => {
   if (!isRecord(report) ||
@@ -947,6 +1547,12 @@ const assertApprovedReport = (report, options) => {
     report.policyHash !== POLICY_HASH ||
     report.operation !== options.operation ||
     report.projectId !== options.projectId ||
+    report.storageBucket !== expectedStorageBucket(options.projectId) ||
+    !Array.isArray(report.sourceKeys) ||
+    !Array.isArray(options.sourceKeys) ||
+    canonicalHash(report.sourceKeys) !== canonicalHash(options.sourceKeys) ||
+    report.catalogOwnerUid !== options.catalogOwnerUid ||
+    report.expectedCandidates !== options.expectedCandidates ||
     report.mode !== 'dry-run' ||
     report.complete !== true ||
     report.scan?.complete !== true ||
@@ -961,10 +1567,33 @@ const assertApprovedReport = (report, options) => {
     report.scan.truncatedSources.length !== 0 ||
     report.counts?.errors !== 0 ||
     !Array.isArray(report.entries) ||
+    !Array.isArray(report.excluded) ||
+    report.counts?.candidates !== report.entries.length ||
+    report.counts?.excluded !== report.excluded.length ||
+    report.counts?.discovered !==
+      report.entries.length + report.excluded.length ||
+    !report.excluded.every(validFoeTokenExclusion) ||
     report.planFingerprint !== computePlanFingerprint(report)) {
     throw new Error(
       'Execution requires the exact completed, error-free Task 07 plan.'
     );
+  }
+  assertCandidateCountBinding(report, options.expectedCandidates, {
+    required: true,
+  });
+  if (options.projectId === LIVE_TEST_PROJECT_ID && (
+    !exactSourceKeys(report.sourceKeys) ||
+    report.storageBucket !== LIVE_TEST_BUCKET ||
+    report.entries.some((entry) => (
+      !SOURCE_KEY_SET.has(entry.sourceKey) ||
+      (entry.ownerResolution === 'verified-global-fallback' &&
+        entry.ownerUid !== options.catalogOwnerUid)
+    )) ||
+    report.excluded.some((entry) => (
+      entry.sourceKey !== 'foe-tokens'
+    ))
+  )) {
+    throw new Error('The live Task 07 plan escaped its all-source binding.');
   }
   if (options.approveFingerprint !== report.planFingerprint) {
     throw new Error(
@@ -1020,6 +1649,14 @@ const executeMigrationPlan = async ({
   if (report.entries.some(({status}) => !allowedStatus.has(status))) {
     throw new Error('Task 07 execution is blocked by non-executable entries.');
   }
+  const sourceFoeReceiptByTarget = new Map();
+  report.entries.filter(({sourceKey}) => sourceKey === 'foes')
+    .forEach(({targetPath, receiptId}) => {
+      sourceFoeReceiptByTarget.set(
+        targetPath,
+        sourceFoeReceiptByTarget.has(targetPath) ? null : receiptId
+      );
+    });
   let startIndex = 0;
   let processed = 0;
   if (options.resumeCheckpoint) {
@@ -1060,6 +1697,10 @@ const executeMigrationPlan = async ({
       result = await backend.applyBackfillEntry(entry, {
         planFingerprint: report.planFingerprint,
         pollTimeoutMs: options.pollTimeoutMs,
+        sourceFoeBackfillReceiptId: entry.sourceKey === 'foe-tokens' ?
+          sourceFoeReceiptByTarget.get(
+            asString(entry.sourceFoeProof?.referencePath)
+          ) || null : null,
       });
     } else if (entry.status === 'already-rolled-back') {
       result = {verified: true, idempotent: true};
@@ -1182,6 +1823,33 @@ const recordFromSnapshot = (sourceKey, snapshot) => {
       data,
     };
   }
+  if (['custom-token-templates', 'foe-tokens'].includes(sourceKey)) {
+    const tokenMigrationClass = sourceKey === 'foe-tokens' ? 'foe' : 'custom';
+    return {
+      kind: 'token',
+      sourceKey,
+      tokenMigrationClass,
+      ownerUid: asString(data.ownerUid),
+      entityId: snapshot.id,
+      targetPath: snapshot.ref.path,
+      targetVersion: snapshotVersion(snapshot),
+      data: {
+        ownerUid: data.ownerUid,
+        tokenType: data.tokenType,
+        foeSourceId: data.foeSourceId,
+        customTokenRole: data.customTokenRole,
+        customTemplateId: data.customTemplateId,
+        image_url: data.image_url,
+        imagePath: data.imagePath,
+        imageUrl: data.imageUrl,
+        media: data.media,
+        task07MediaRevision: data.task07MediaRevision,
+        deletionState: data.deletionState,
+        pendingDeletion: data.pendingDeletion,
+        deleted: data.deleted,
+      },
+    };
+  }
   if (['technique-art', 'technique-video'].includes(sourceKey)) {
     const video = sourceKey === 'technique-video';
     return {
@@ -1253,7 +1921,51 @@ const recordFromSnapshot = (sourceKey, snapshot) => {
       data,
     };
   }
+  if (sourceKey === 'music-tracks') {
+    return {
+      kind: 'music',
+      sourceKey,
+      ownerUid: asString(data.createdBy) ||
+        asString(data.updatedBy),
+      entityId: snapshot.id,
+      targetPath: snapshot.ref.path,
+      targetVersion: snapshotVersion(snapshot),
+      data: {
+        ownerUid: data.ownerUid,
+        createdBy: data.createdBy,
+        updatedBy: data.updatedBy,
+        audioPath: data.audioPath,
+        audioUrl: data.audioUrl,
+        media: data.media,
+        task07MediaRevision: data.task07MediaRevision,
+        deletionState: data.deletionState,
+        pendingDeletion: data.pendingDeletion,
+        deleted: data.deleted,
+      },
+    };
+  }
   throw new Error(`Unknown legacy media source: ${sourceKey}`);
+};
+
+const commonTechniqueRecord = ({
+  sourceKey,
+  entityId,
+  data,
+  targetVersion,
+}) => {
+  const video = sourceKey === 'common-technique-video';
+  return {
+    kind: video ? 'technique-video' : 'technique',
+    sourceKey,
+    commonTechnique: true,
+    ownerUid: asString(data.ownerUid) ||
+      asString(data.createdBy) ||
+      asString(data.updatedBy),
+    entityId,
+    targetPath: 'utils/tecniche_common',
+    targetVersion,
+    data,
+  };
 };
 
 const compatibilityFieldsForKind = (kind) => (
@@ -1271,11 +1983,80 @@ const captureCompatibilityFields = (data, kind) => Object.fromEntries(
   ])
 );
 
+const approvedSourceFoeBackfillMatches = ({
+  currentData,
+  expectedProof,
+  receipt,
+  manifest,
+  sourceReceiptId,
+  planFingerprint,
+}) => {
+  if (!isRecord(currentData) || !isRecord(expectedProof) ||
+    !isRecord(receipt) || !isRecord(manifest) ||
+    !/^r_[a-f0-9]{40}$/.test(asString(sourceReceiptId)) ||
+    expectedProof.exists !== true ||
+    !/^foes\/[^/]+$/.test(asString(expectedProof.referencePath)) ||
+    !/^[a-f0-9]{64}$/.test(asString(expectedProof.dataFingerprint)) ||
+    receipt.receiptId !== sourceReceiptId ||
+    receipt.schemaVersion !== REPORT_SCHEMA_VERSION ||
+    receipt.planVersion !== PLAN_VERSION ||
+    receipt.policyVersion !== mediaPolicy.policyVersion ||
+    receipt.policyHash !== POLICY_HASH ||
+    receipt.approvedPlanFingerprint !== planFingerprint ||
+    receipt.state !== 'attached' ||
+    receipt.sourceKey !== 'foes' || receipt.kind !== 'foe' ||
+    receipt.commonTechnique !== false ||
+    receipt.targetPath !== expectedProof.referencePath ||
+    receipt.previousAssetId !== null ||
+    !/^m_[a-f0-9]{40}$/.test(asString(receipt.assetId)) ||
+    !Number.isSafeInteger(receipt.attachedRevision) ||
+    receipt.attachedRevision < 1 ||
+    currentData.media?.assetId !== receipt.assetId ||
+    currentData.task07MediaRevision !== receipt.attachedRevision ||
+    manifest.assetId !== receipt.assetId ||
+    manifest.state !== 'attached' ||
+    manifest.attachment?.referencePath !== expectedProof.referencePath ||
+    manifest.attachment?.targetSlot !== 'media' ||
+    manifest.plan?.kind !== 'foe' ||
+    manifest.plan?.entityId !== receipt.entityId) return false;
+  const beforeFields = receipt.beforeFields;
+  const expectedFields = compatibilityFieldsForKind('foe').sort();
+  if (!isRecord(beforeFields) ||
+    Object.keys(beforeFields).sort().join(',') !== expectedFields.join(',')) {
+    return false;
+  }
+  const reconstructed = {...currentData};
+  delete reconstructed.media;
+  delete reconstructed.task07MediaRevision;
+  delete reconstructed.mediaUpdatedAt;
+  for (const field of expectedFields) {
+    const descriptor = beforeFields[field];
+    if (!isRecord(descriptor) || typeof descriptor.exists !== 'boolean') {
+      return false;
+    }
+    if (descriptor.exists === true) {
+      if (!hasOwn(descriptor, 'value')) return false;
+      reconstructed[field] = descriptor.value;
+    } else {
+      delete reconstructed[field];
+    }
+  }
+  return canonicalHash(reconstructed) === expectedProof.dataFingerprint;
+};
+
 const exactAttachedAssetId = (data, targetSlot = 'media') => (
   /^m_[a-f0-9]{40}$/.test(asString(data?.[targetSlot]?.assetId)) ?
     asString(data[targetSlot].assetId) :
     null
 );
+
+const targetDataForBinding = (data, binding) => {
+  const root = isRecord(data) ? data : {};
+  if (binding?.commonTechnique !== true &&
+    binding?.targetKind !== 'common-technique') return root;
+  const entityId = asString(binding?.entityId);
+  return entityId && isRecord(root[entityId]) ? root[entityId] : {};
+};
 
 const revisionFieldForSlot = (targetSlot) => (
   targetSlot === 'videoMedia' ?
@@ -1313,21 +2094,157 @@ const loadCompiledTask07Contracts = () => {
   };
 };
 
-const createAdminBackend = (projectId) => {
-  const {deleteApp, initializeApp} = require('firebase-admin/app');
+const loadTask07AdminSdk = () => ({
+  app: requireFromFunctions('firebase-admin/app'),
+  auth: requireFromFunctions('firebase-admin/auth'),
+  firestore: requireFromFunctions('firebase-admin/firestore'),
+  storage: requireFromFunctions('firebase-admin/storage'),
+});
+
+const createAdminBackend = async (input, legacyAuthMode = 'admin') => {
+  const backendOptions = typeof input === 'string' ? {
+    projectId: input,
+    storageBucket: expectedStorageBucket(input),
+    authMode: legacyAuthMode,
+  } : input;
+  const projectId = backendOptions.projectId;
+  const storageBucket = backendOptions.storageBucket ||
+    expectedStorageBucket(projectId);
+  const authMode = backendOptions.authMode || 'admin';
+  const adminSdk = loadTask07AdminSdk();
+  const {deleteApp, initializeApp} = adminSdk.app;
+  const {getAuth} = adminSdk.auth;
   const {
     FieldPath,
     FieldValue,
     Timestamp,
     getFirestore,
-  } = require('firebase-admin/firestore');
-  const {getStorage} = require('firebase-admin/storage');
-  const app = initializeApp({
-    projectId,
-    storageBucket: `${projectId}.appspot.com`,
-  }, `task07-media-backfill-${process.pid}-${Date.now()}`);
+  } = adminSdk.firestore;
+  const {getStorage} = adminSdk.storage;
+  const previousAdcPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  const temporaryAdc = authMode === 'firebase-cli' ?
+    await createFirebaseCliAdcFile({projectId}) :
+    null;
+  if (temporaryAdc) {
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = temporaryAdc.filePath;
+  }
+  let app;
+  try {
+    app = initializeApp({
+      projectId,
+      storageBucket,
+    }, `task07-media-backfill-${process.pid}-${Date.now()}`);
+  } catch (error) {
+    if (previousAdcPath === undefined) {
+      delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    } else {
+      process.env.GOOGLE_APPLICATION_CREDENTIALS = previousAdcPath;
+    }
+    temporaryAdc?.cleanup();
+    throw error;
+  }
   const db = getFirestore(app);
   const bucket = getStorage(app).bucket();
+  const firebaseAuth = getAuth(app);
+  let placementIndexPromise = null;
+
+  const sourceFoeProof = (foeSourceId, snapshot = null) => ({
+    scanned: true,
+    referencePath: foeSourceId ? `foes/${foeSourceId}` : '',
+    exists: snapshot?.exists === true,
+    version: snapshot?.exists === true ? snapshotVersion(snapshot) : '',
+    dataFingerprint: canonicalHash(
+      snapshot?.exists === true ? snapshot.data() || {} : null
+    ),
+  });
+
+  const loadPlacementIndex = async () => {
+    if (placementIndexPromise) return placementIndexPromise;
+    placementIndexPromise = (async () => {
+      const snapshot = await db.collection('grigliata_token_placements')
+        .orderBy(FieldPath.documentId())
+        .limit(MAX_PLACEMENT_REFERENCES + 1)
+        .get();
+      if (snapshot.docs.length > MAX_PLACEMENT_REFERENCES) {
+        throw new Error(
+          `Placement proof exceeds the reviewed bound of ` +
+          `${MAX_PLACEMENT_REFERENCES}.`
+        );
+      }
+      const byTokenId = new Map();
+      for (const document of snapshot.docs) {
+        const data = document.data() || {};
+        const explicitTokenId = asString(data.tokenId);
+        const backgroundId = asString(data.backgroundId);
+        const prefix = backgroundId ? `${backgroundId}__` : '';
+        const inferredTokenId = prefix && document.id.startsWith(prefix) ?
+          document.id.slice(prefix.length) :
+          '';
+        if (explicitTokenId && inferredTokenId &&
+          explicitTokenId !== inferredTokenId) {
+          throw new Error(
+            `Placement ${document.ref.path} has conflicting token identity.`
+          );
+        }
+        const tokenId = explicitTokenId || inferredTokenId;
+        if (!tokenId) continue;
+        if (!byTokenId.has(tokenId)) byTokenId.set(tokenId, []);
+        byTokenId.get(tokenId).push({
+          placementId: document.id,
+          backgroundId,
+          tokenId,
+        });
+      }
+      for (const references of byTokenId.values()) {
+        references.sort((left, right) => (
+          left.placementId.localeCompare(right.placementId)
+        ));
+      }
+      return byTokenId;
+    })();
+    return placementIndexPromise;
+  };
+
+  const placementProofQuery = () => (
+    db.collection('grigliata_token_placements')
+      .orderBy(FieldPath.documentId())
+      .limit(MAX_PLACEMENT_REFERENCES + 1)
+  );
+
+  const placementProofForDocuments = (documents, expectedTokenId) => {
+    if (documents.length > MAX_PLACEMENT_REFERENCES) {
+      throw new Error(
+        `Placement proof exceeds the reviewed bound of ` +
+        `${MAX_PLACEMENT_REFERENCES}.`
+      );
+    }
+    const references = [];
+    for (const document of documents) {
+      const data = document.data() || {};
+      const explicitTokenId = asString(data.tokenId);
+      const backgroundId = asString(data.backgroundId);
+      const prefix = backgroundId ? `${backgroundId}__` : '';
+      const inferredTokenId = prefix && document.id.startsWith(prefix) ?
+        document.id.slice(prefix.length) :
+        '';
+      if (explicitTokenId && inferredTokenId &&
+        explicitTokenId !== inferredTokenId) {
+        throw new Error(
+          `Placement ${document.ref.path} has conflicting token identity.`
+        );
+      }
+      const tokenId = explicitTokenId || inferredTokenId;
+      if (tokenId !== expectedTokenId) continue;
+      references.push({placementId: document.id, backgroundId, tokenId});
+    }
+    references.sort((left, right) => (
+      left.placementId.localeCompare(right.placementId)
+    ));
+    return {
+      count: references.length,
+      hash: canonicalHash(references),
+    };
+  };
 
   const collectionForSource = (sourceKey) => {
     if (sourceKey === 'avatars') return db.collection('users');
@@ -1335,6 +2252,9 @@ const createAdminBackend = (projectId) => {
     if (sourceKey === 'inventory-items') return db.collectionGroup('inventory');
     if (sourceKey === 'npcs') return db.collection('echi_npcs');
     if (sourceKey === 'foes') return db.collection('foes');
+    if (['custom-token-templates', 'foe-tokens'].includes(sourceKey)) {
+      return db.collection('grigliata_tokens');
+    }
     if (['technique-art', 'technique-video'].includes(sourceKey)) {
       return db.collectionGroup('tecniche');
     }
@@ -1344,20 +2264,84 @@ const createAdminBackend = (projectId) => {
     if (sourceKey === 'backgrounds') {
       return db.collection('grigliata_backgrounds');
     }
+    if (sourceKey === 'music-tracks') {
+      return db.collection('grigliata_music_tracks');
+    }
     throw new Error(`Unknown legacy media source: ${sourceKey}`);
   };
 
   const readLegacyPage = async (sourceKey, cursor, pageSize) => {
+    if (['common-technique-art', 'common-technique-video']
+      .includes(sourceKey)) {
+      const snapshot = await db.doc('utils/tecniche_common').get();
+      const data = snapshot.data() || {};
+      const keys = Object.keys(data)
+        .filter((key) => isRecord(data[key]))
+        .sort((left, right) => left.localeCompare(right));
+      const start = cursor ?
+        keys.findIndex((key) => key.localeCompare(cursor) > 0) :
+        0;
+      const startIndex = start < 0 ? keys.length : start;
+      const pageKeys = keys.slice(startIndex, startIndex + pageSize);
+      return {
+        records: pageKeys.map((entityId) => commonTechniqueRecord({
+          sourceKey,
+          entityId,
+          data: data[entityId],
+          targetVersion: snapshotVersion(snapshot),
+        })),
+        cursor: pageKeys.at(-1) || null,
+        hasMore: startIndex + pageKeys.length < keys.length,
+      };
+    }
     let query = collectionForSource(sourceKey)
       .orderBy(FieldPath.documentId())
       .limit(pageSize + 1);
     if (cursor) query = query.startAfter(cursor);
     const snapshot = await query.get();
     const page = snapshot.docs.slice(0, pageSize);
+    const documents = page
+        .filter((document) => {
+          if (!['custom-token-templates', 'foe-tokens'].includes(sourceKey)) {
+            return true;
+          }
+          const data = document.data() || {};
+          if (sourceKey === 'foe-tokens') return data.tokenType === 'foe';
+          return data.tokenType === 'custom' &&
+            data.customTokenRole !== 'instance' &&
+            asString(data.customTemplateId) === document.id;
+        });
+    let records = documents.map((document) => (
+      recordFromSnapshot(sourceKey, document)
+    ));
+    if (sourceKey === 'foe-tokens') {
+      const placementIndex = await loadPlacementIndex();
+      const foeSourceIds = [...new Set(documents
+        .map((document) => asString(document.get('foeSourceId')))
+        .filter(Boolean))];
+      const sourceSnapshots = foeSourceIds.length ?
+        await db.getAll(...foeSourceIds.map((foeId) => db.doc(`foes/${foeId}`))) :
+        [];
+      const sourcesById = new Map(
+        sourceSnapshots.map((source) => [source.id, source])
+      );
+      records = records.map((record, index) => {
+        const document = documents[index];
+        const foeSourceId = asString(document.get('foeSourceId'));
+        const references = placementIndex.get(document.id) || [];
+        return {
+          ...record,
+          placementReferenceCount: references.length,
+          placementReferenceHash: canonicalHash(references),
+          sourceFoeProof: sourceFoeProof(
+            foeSourceId,
+            sourcesById.get(foeSourceId) || null
+          ),
+        };
+      });
+    }
     return {
-      records: page.map((document) => (
-        recordFromSnapshot(sourceKey, document)
-      )),
+      records,
       cursor: page.at(-1) || null,
       hasMore: snapshot.docs.length > pageSize,
     };
@@ -1393,6 +2377,26 @@ const createAdminBackend = (projectId) => {
     };
   };
 
+  const verifyCatalogOwner = async (ownerUid) => {
+    const [owner, account] = await Promise.all([
+      readOwner(ownerUid),
+      firebaseAuth.getUser(ownerUid),
+    ]);
+    if (!owner.exists || owner.deletionState === 'pending' ||
+      owner.role !== 'webmaster' || account.disabled === true ||
+      account.uid !== ownerUid) {
+      throw new Error(
+        'The confirmed catalog fallback owner is not an active cloned ' +
+        'webmaster in both Firestore and Firebase Authentication.'
+      );
+    }
+    return {
+      uid: ownerUid,
+      role: owner.role,
+      authEnabled: true,
+    };
+  };
+
   const readReceiptPage = async (_sourceKey, cursor, pageSize) => {
     let query = db.collection(RECEIPT_COLLECTION)
       .orderBy(FieldPath.documentId())
@@ -1410,24 +2414,46 @@ const createAdminBackend = (projectId) => {
     };
   };
 
-  const generatedObjectsPresent = async (manifest) => {
-    if (!manifest.exists) return false;
+  const generatedObjectPresent = async (descriptor) => {
+    if (!isRecord(descriptor) || !asString(descriptor.path) ||
+      !asString(descriptor.generation)) return false;
+    try {
+      const [metadata] = await bucket.file(descriptor.path).getMetadata();
+      return String(metadata.generation || '') ===
+        String(descriptor.generation || '');
+    } catch {
+      return false;
+    }
+  };
+
+  const inspectGeneratedObjects = async (manifest, kind) => {
+    if (!manifest.exists) return {
+      generatedObjectsPresent: false,
+      itemOriginalGenerated: kind !== 'item',
+      itemCardGenerated: kind !== 'item',
+      itemCard2xGenerated: kind !== 'item',
+    };
     const generated = manifest.get('generated');
     const descriptors = [
       generated?.original,
       ...Object.values(generated?.variants || {}),
     ].filter((descriptor) => isRecord(descriptor));
-    if (!descriptors.length) return false;
-    for (const descriptor of descriptors) {
-      try {
-        const [metadata] = await bucket.file(descriptor.path).getMetadata();
-        if (String(metadata.generation || '') !==
-          String(descriptor.generation || '')) return false;
-      } catch {
-        return false;
-      }
-    }
-    return true;
+    const presence = await Promise.all(
+      descriptors.map(generatedObjectPresent)
+    );
+    const originalPresent = await generatedObjectPresent(generated?.original);
+    const itemOriginalGenerated = kind !== 'item' || originalPresent;
+    const itemCardGenerated = kind !== 'item' ||
+      await generatedObjectPresent(generated?.variants?.card);
+    const itemCard2xGenerated = kind !== 'item' ||
+      await generatedObjectPresent(generated?.variants?.card2x);
+    return {
+      generatedObjectsPresent: originalPresent && descriptors.length > 0 &&
+        presence.every(Boolean),
+      itemOriginalGenerated,
+      itemCardGenerated,
+      itemCard2xGenerated,
+    };
   };
 
   const inspectReceipt = async (receipt) => {
@@ -1438,11 +2464,76 @@ const createAdminBackend = (projectId) => {
       db.doc(receipt.targetPath),
       db.doc(`media_assets/${receipt.assetId}`)
     );
+    const generatedProof = await inspectGeneratedObjects(
+      manifest,
+      asString(receipt.kind)
+    );
+    const currentSource = normalizeSourceObject(
+      asString(receipt.sourcePath),
+      await readSourceObject(asString(receipt.sourcePath))
+    );
+    const targetData = targetDataForBinding(target.data(), receipt);
+    const currentGeneralProof = generalImageUrlProof(
+      targetData,
+      asString(receipt.kind)
+    );
+    let placementProof = null;
+    let currentSourceFoeProof = null;
+    let currentSourceFoeFingerprint = null;
+    if (sourceKeyForReceipt(receipt) === 'foe-tokens') {
+      const sourceFoePath = asString(receipt.sourceFoeProof?.referencePath);
+      const validSourceFoePath = /^foes\/[^/]+$/.test(sourceFoePath);
+      const placementSnapshot = await placementProofQuery().get();
+      placementProof = placementProofForDocuments(
+        placementSnapshot.docs,
+        asString(receipt.entityId)
+      );
+      if (validSourceFoePath) {
+        const sourceFoeSnapshot = await db.doc(sourceFoePath).get();
+        currentSourceFoeProof = sourceFoeProof(
+          sourceFoePath.split('/').at(-1),
+          sourceFoeSnapshot
+        );
+        currentSourceFoeFingerprint = canonicalHash(currentSourceFoeProof);
+        const sourceReceiptId = asString(
+          receipt.sourceFoeBackfillReceiptId
+        );
+        if (currentSourceFoeFingerprint !== receipt.sourceFoeFingerprint &&
+          /^r_[a-f0-9]{40}$/.test(sourceReceiptId)) {
+          const sourceReceipt = await db.doc(
+            `${RECEIPT_COLLECTION}/${sourceReceiptId}`
+          ).get();
+          const sourceAssetId = asString(sourceReceipt.get('assetId'));
+          const sourceManifest = /^m_[a-f0-9]{40}$/.test(sourceAssetId) ?
+            await db.doc(`media_assets/${sourceAssetId}`).get() : null;
+          if (sourceManifest && approvedSourceFoeBackfillMatches({
+            currentData: sourceFoeSnapshot.data() || {},
+            expectedProof: receipt.sourceFoeProof,
+            receipt: sourceReceipt.data() || {},
+            manifest: sourceManifest.data() || {},
+            sourceReceiptId,
+            planFingerprint: receipt.approvedPlanFingerprint,
+          })) {
+            currentSourceFoeFingerprint = receipt.sourceFoeFingerprint;
+          }
+        }
+      }
+    }
     return {
       manifestState: asString(manifest.get('state')),
-      targetAssetId: exactAttachedAssetId(target.data(), targetSlot) || null,
-      targetRevision: Number(target.get(revisionFieldForSlot(targetSlot))) || 0,
-      generatedObjectsPresent: await generatedObjectsPresent(manifest),
+      targetAssetId: exactAttachedAssetId(targetData, targetSlot) || null,
+      targetRevision:
+        Number(targetData[revisionFieldForSlot(targetSlot)]) || 0,
+      ...generatedProof,
+      legacySourceUnchanged:
+        sourceObjectFingerprint(currentSource) === receipt.sourceFingerprint,
+      legacyGeneralImageUrlUnchanged:
+        canonicalHash(currentGeneralProof) ===
+          canonicalHash(receipt.legacyGeneralImageUrlProof ?? null),
+      placementReferenceCount: placementProof?.count ?? null,
+      placementReferenceHash: placementProof?.hash ?? null,
+      sourceFoeFingerprint: currentSourceFoeProof ?
+        currentSourceFoeFingerprint : null,
     };
   };
 
@@ -1463,6 +2554,7 @@ const createAdminBackend = (projectId) => {
       actorUid: entry.ownerUid,
       ownerUid: entry.ownerUid,
       entityId: entry.entityId,
+      commonTechnique: entry.commonTechnique,
       referenceScope: entry.referenceScope,
       previousAssetId: entry.previousAssetId,
       operationId: entry.operationId,
@@ -1473,6 +2565,7 @@ const createAdminBackend = (projectId) => {
     if (plan.assetId !== entry.assetId ||
       plan.sourcePath !== entry.stagingPath ||
       plan.targetKind !== entry.targetKind ||
+      plan.commonTechnique !== entry.commonTechnique ||
       plan.audienceScope !== entry.audienceScope ||
       compiled.core.task07MediaReferencePath(plan) !== entry.targetPath) {
       throw new Error('Approved entry no longer matches server contracts.');
@@ -1480,16 +2573,36 @@ const createAdminBackend = (projectId) => {
     return plan;
   };
 
-  const assertReceiptBinding = (receipt, entry) => {
+  const assertReceiptBinding = (receipt, entry, binding) => {
     if (!receipt.exists) return;
     if (receipt.get('schemaVersion') !== REPORT_SCHEMA_VERSION ||
       receipt.get('planVersion') !== PLAN_VERSION ||
       receipt.get('policyVersion') !== mediaPolicy.policyVersion ||
       receipt.get('policyHash') !== POLICY_HASH ||
+      receipt.get('approvedPlanFingerprint') !== binding.planFingerprint ||
       receipt.get('subjectHash') !== entry.subjectHash ||
       receipt.get('assetId') !== entry.assetId ||
       receipt.get('targetPath') !== entry.targetPath ||
-      receipt.get('targetSlot') !== entry.targetSlot) {
+      receipt.get('targetSlot') !== entry.targetSlot ||
+      receipt.get('sourceKey') !== entry.sourceKey ||
+      receipt.get('entityId') !== entry.entityId ||
+      receipt.get('commonTechnique') !== entry.commonTechnique ||
+      receipt.get('ownerUid') !== entry.ownerUid ||
+      receipt.get('sourcePath') !== entry.sourcePath ||
+      (receipt.get('sourceGeneration') !== undefined &&
+        receipt.get('sourceGeneration') !== entry.sourceGeneration) ||
+      receipt.get('sourceFingerprint') !== entry.sourceFingerprint ||
+      receipt.get('placementReferenceCount') !==
+        entry.placementReferenceCount ||
+      receipt.get('placementReferenceHash') !== entry.placementReferenceHash ||
+      receipt.get('sourceFoeFingerprint') !== entry.sourceFoeFingerprint ||
+      (entry.sourceKey === 'foe-tokens' &&
+        receipt.get('sourceFoeBackfillReceiptId') !==
+          (binding.sourceFoeBackfillReceiptId || null)) ||
+      canonicalHash(receipt.get('sourceFoeProof') ?? null) !==
+        canonicalHash(entry.sourceFoeProof ?? null) ||
+      canonicalHash(receipt.get('legacyGeneralImageUrlProof') ?? null) !==
+        canonicalHash(entry.legacyGeneralImageUrlProof ?? null)) {
       throw new Error('Existing Task 07 receipt has a different binding.');
     }
   };
@@ -1497,35 +2610,113 @@ const createAdminBackend = (projectId) => {
   const createIntentAndReceipt = async (entry, binding, compiled, plan) => {
     const receiptRef = db.doc(`${RECEIPT_COLLECTION}/${entry.receiptId}`);
     const manifestRef = db.doc(`media_assets/${entry.assetId}`);
+    const cleanupRef = db.doc(`media_asset_cleanup/${entry.assetId}`);
     const targetRef = db.doc(entry.targetPath);
     const ownerRef = db.doc(`users/${entry.ownerUid}`);
+    const legacyBackfill = buildLegacyMapBackfillMarker(
+      entry,
+      binding,
+      plan
+    );
     await db.runTransaction(async (transaction) => {
-      const [receipt, manifest, target, owner] = await transaction.getAll(
+      let currentPlacementProof = null;
+      let currentSourceFoeProof = null;
+      let currentSourceFoeSnapshot = null;
+      let sourceFoeBackfillReceipt = null;
+      let sourceFoeBackfillManifest = null;
+      if (entry.sourceKey === 'foe-tokens') {
+        const placementSnapshot = await transaction.get(placementProofQuery());
+        currentPlacementProof = placementProofForDocuments(
+          placementSnapshot.docs,
+          entry.entityId
+        );
+        currentSourceFoeSnapshot = await transaction.get(
+          db.doc(entry.sourceFoeProof.referencePath)
+        );
+        currentSourceFoeProof = sourceFoeProof(
+          entry.sourceFoeProof.referencePath.split('/').at(-1),
+          currentSourceFoeSnapshot
+        );
+        const sourceReceiptId = asString(
+          binding.sourceFoeBackfillReceiptId
+        );
+        if (/^r_[a-f0-9]{40}$/.test(sourceReceiptId)) {
+          sourceFoeBackfillReceipt = await transaction.get(
+            db.doc(`${RECEIPT_COLLECTION}/${sourceReceiptId}`)
+          );
+          const sourceAssetId = asString(
+            sourceFoeBackfillReceipt.get('assetId')
+          );
+          if (/^m_[a-f0-9]{40}$/.test(sourceAssetId)) {
+            sourceFoeBackfillManifest = await transaction.get(
+              db.doc(`media_assets/${sourceAssetId}`)
+            );
+          }
+        }
+      }
+      const [receipt, manifest, target, owner, cleanup] =
+        await transaction.getAll(
         receiptRef,
         manifestRef,
         targetRef,
-        ownerRef
+        ownerRef,
+        cleanupRef
       );
-      assertReceiptBinding(receipt, entry);
-      if (receipt.exists) {
+      assertReceiptBinding(receipt, entry, binding);
+      const directSourceFoeMatch = currentSourceFoeProof &&
+        canonicalHash(currentSourceFoeProof) === entry.sourceFoeFingerprint;
+      const approvedSourceFoeMatch = entry.sourceKey === 'foe-tokens' &&
+        !directSourceFoeMatch && currentSourceFoeSnapshot?.exists === true &&
+        sourceFoeBackfillReceipt?.exists === true &&
+        sourceFoeBackfillManifest?.exists === true &&
+        approvedSourceFoeBackfillMatches({
+          currentData: currentSourceFoeSnapshot.data() || {},
+          expectedProof: entry.sourceFoeProof,
+          receipt: sourceFoeBackfillReceipt.data() || {},
+          manifest: sourceFoeBackfillManifest.data() || {},
+          sourceReceiptId: binding.sourceFoeBackfillReceiptId,
+          planFingerprint: binding.planFingerprint,
+        });
+      if (entry.sourceKey === 'foe-tokens' && (
+        currentPlacementProof.count !== entry.placementReferenceCount ||
+        currentPlacementProof.hash !== entry.placementReferenceHash ||
+        (!directSourceFoeMatch && !approvedSourceFoeMatch)
+      )) {
+        throw new Error(
+          'Foe-token placement or source relationship changed. Re-plan.'
+        );
+      }
+      const recoveryCandidate = receipt.exists && manifest.exists &&
+        manifest.get('state') === 'deleted';
+      if (receipt.exists && !recoveryCandidate) {
         if (!manifest.exists) {
           throw new Error('Receipt exists without its Task 07 manifest.');
         }
         return;
       }
+      const targetData = targetDataForBinding(target.data(), entry);
       if (!target.exists ||
-        targetMediaFingerprint(target.data() || {}, entry.kind) !==
+        targetMediaFingerprint(targetData, entry.kind) !==
           entry.targetFingerprint) {
         throw new Error('Media target changed after planning. Re-plan.');
       }
       if (target.get('deletionState') === 'pending' ||
         target.get('pendingDeletion') === true ||
-        target.get('deleted') === true) {
+        target.get('deleted') === true ||
+        targetData.deletionState === 'pending' ||
+        targetData.pendingDeletion === true ||
+        targetData.deleted === true) {
         throw new Error('Media target is no longer available.');
       }
-      if (!legacyPathsForKind(target.data() || {}, entry.kind)
+      if (!legacyPathsForKind(targetData, entry.kind)
         .includes(entry.sourcePath)) {
         throw new Error('Legacy media reference changed after planning.');
+      }
+      if (canonicalHash(generalImageUrlProof(
+        targetData,
+        entry.kind
+      )) !== canonicalHash(entry.legacyGeneralImageUrlProof ?? null)) {
+        throw new Error('Legacy General.image_url changed after planning.');
       }
       const ownerRole = asString(owner.get('role')).toLowerCase();
       if (!owner.exists || owner.get('deletionState') === 'pending' ||
@@ -1538,7 +2729,7 @@ const createAdminBackend = (projectId) => {
         })) {
         throw new Error('Media owner is no longer active and authorized.');
       }
-      if (exactAttachedAssetId(target.data(), entry.targetSlot) !==
+      if (exactAttachedAssetId(targetData, entry.targetSlot) !==
         entry.previousAssetId) {
         throw new Error('Previous media reference changed after planning.');
       }
@@ -1552,34 +2743,61 @@ const createAdminBackend = (projectId) => {
       const cleanupAfter = Timestamp.fromMillis(
         Date.now() + mediaPolicy.retention.unattachedHours * 60 * 60 * 1000
       );
-      if (!manifest.exists) {
-        transaction.create(manifestRef, {
-          schemaVersion: compiled.contracts.MEDIA_SCHEMA_VERSION,
-          policyVersion: compiled.contracts.MEDIA_CONTRACT_VERSION,
-          assetId: plan.assetId,
-          generation: null,
-          state: 'intent',
-          purpose: plan.kind,
-          audience: plan.audienceScope,
-          ownerUid: plan.ownerUid,
-          actorUid: plan.actorUid,
-          targetKind: plan.targetKind,
-          targetId: plan.entityId,
-          previousAssetId: plan.previousAssetId,
-          requestHash: plan.requestHash,
+      const manifestData = {
+        schemaVersion: compiled.contracts.MEDIA_SCHEMA_VERSION,
+        policyVersion: compiled.contracts.MEDIA_CONTRACT_VERSION,
+        assetId: plan.assetId,
+        generation: null,
+        state: 'intent',
+        purpose: plan.kind,
+        audience: plan.audienceScope,
+        ownerUid: plan.ownerUid,
+        actorUid: plan.actorUid,
+        targetKind: plan.targetKind,
+        targetId: plan.entityId,
+        previousAssetId: plan.previousAssetId,
+        requestHash: plan.requestHash,
+        plan,
+        source: {
+          path: plan.sourcePath,
+          mime: plan.sourceContentType,
+          bytes: plan.sourceBytes,
+        },
+        variants: {},
+        attachment: null,
+        retention: {cleanupAfter},
+        error: {code: null, retryable: false, attempts: 0},
+        ...(legacyBackfill ? {legacyBackfill} : {}),
+        createdAt: now,
+        updatedAt: now,
+      };
+      if (recoveryCandidate) {
+        const recoveryIssue = legacyMapRecoveryIssue({
+          receipt: receipt.data() || {},
+          manifest: manifest.data() || {},
+          cleanup: cleanup.data() || {},
+          marker: legacyBackfill,
           plan,
-          source: {
-            path: plan.sourcePath,
-            mime: plan.sourceContentType,
-            bytes: plan.sourceBytes,
-          },
-          variants: {},
-          attachment: null,
-          retention: {cleanupAfter},
-          error: {code: null, retryable: false, attempts: 0},
-          createdAt: now,
+        });
+        if (recoveryIssue) {
+          throw new Error(
+            `Legacy map recovery refused: ${recoveryIssue}.`
+          );
+        }
+        transaction.set(manifestRef, manifestData, {merge: false});
+        transaction.delete(cleanupRef);
+        transaction.update(receiptRef, {
+          legacyBackfill,
+          legacyMapRecoveryAttempts: 1,
+          sourceGeneration: entry.sourceGeneration,
           updatedAt: now,
         });
+        return;
+      }
+      if (!manifest.exists) {
+        transaction.create(manifestRef, manifestData);
+      } else if (legacyBackfill) {
+        transaction.update(manifestRef, {legacyBackfill, updatedAt: now});
       }
       transaction.create(receiptRef, {
         schemaVersion: REPORT_SCHEMA_VERSION,
@@ -1594,9 +2812,28 @@ const createAdminBackend = (projectId) => {
         targetPath: entry.targetPath,
         targetSlot: entry.targetSlot,
         kind: entry.kind,
+        sourceKey: entry.sourceKey,
+        entityId: entry.entityId,
+        commonTechnique: entry.commonTechnique,
+        referenceScope: entry.referenceScope,
+        ownerUid: entry.ownerUid,
+        ownerResolution: entry.ownerResolution,
+        sourcePath: entry.sourcePath,
+        sourceGeneration: entry.sourceGeneration,
         sourceFingerprint: entry.sourceFingerprint,
-        beforeFields: captureCompatibilityFields(target.data() || {}, entry.kind),
+        placementReferenceCount: entry.placementReferenceCount,
+        placementReferenceHash: entry.placementReferenceHash,
+        sourceFoeProof: entry.sourceFoeProof,
+        sourceFoeFingerprint: entry.sourceFoeFingerprint,
+        sourceFoeBackfillReceiptId: entry.sourceKey === 'foe-tokens' ?
+          binding.sourceFoeBackfillReceiptId || null : null,
+        legacyGeneralImageUrlProof: entry.legacyGeneralImageUrlProof,
+        beforeFields: captureCompatibilityFields(targetData, entry.kind),
         state: 'intent',
+        ...(legacyBackfill ? {
+          legacyBackfill,
+          legacyMapRecoveryAttempts: 0,
+        } : {}),
         createdAt: now,
         updatedAt: now,
       });
@@ -1654,7 +2891,7 @@ const createAdminBackend = (projectId) => {
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    throw new Error('Task 07 processor timed out in the local emulator.');
+    throw new Error('Task 07 processor timed out before producing derivatives.');
   };
 
   const applyBackfillEntry = async (entry, binding) => {
@@ -1679,12 +2916,13 @@ const createAdminBackend = (projectId) => {
         db.doc(`media_assets/${entry.assetId}`),
         db.doc(entry.targetPath)
       );
-      assertReceiptBinding(receipt, entry);
+      assertReceiptBinding(receipt, entry, binding);
       if (receipt.get('state') === 'attached') return;
+      const targetData = targetDataForBinding(target.data(), entry);
       if (manifest.get('state') !== 'attached' ||
         attached.targetSlot !== entry.targetSlot ||
-        exactAttachedAssetId(target.data(), entry.targetSlot) !== entry.assetId ||
-        Number(target.get(revisionFieldForSlot(entry.targetSlot))) !==
+        exactAttachedAssetId(targetData, entry.targetSlot) !== entry.assetId ||
+        Number(targetData[revisionFieldForSlot(entry.targetSlot)]) !==
           attached.revision) {
         throw new Error('Post-attach receipt verification failed.');
       }
@@ -1700,7 +2938,14 @@ const createAdminBackend = (projectId) => {
       verified: receipt.state === 'attached' &&
         inspection.manifestState === 'attached' &&
         inspection.targetAssetId === entry.assetId &&
-        inspection.generatedObjectsPresent === true,
+        inspection.generatedObjectsPresent === true &&
+        inspection.legacySourceUnchanged === true &&
+        inspection.legacyGeneralImageUrlUnchanged === true &&
+        (entry.kind !== 'item' || (
+          inspection.itemOriginalGenerated === true &&
+          inspection.itemCardGenerated === true &&
+          inspection.itemCard2xGenerated === true
+        )),
       idempotent: attached.attached === false,
     };
   };
@@ -1716,6 +2961,21 @@ const createAdminBackend = (projectId) => {
         FieldValue.delete();
     });
     return patch;
+  };
+
+  const restoreFieldsIntoData = (current, beforeFields) => {
+    const restored = {...(isRecord(current) ? current : {})};
+    Object.entries(beforeFields || {}).forEach(([field, descriptor]) => {
+      if (!TARGET_COMPATIBILITY_FIELDS.includes(field)) {
+        throw new Error('Rollback receipt contains an unsupported target field.');
+      }
+      if (descriptor?.exists === true) {
+        restored[field] = descriptor.value;
+      } else {
+        delete restored[field];
+      }
+    });
+    return restored;
   };
 
   const rollbackEntry = async (entry) => {
@@ -1741,20 +3001,36 @@ const createAdminBackend = (projectId) => {
       );
       const [receipt, manifest, target, previous] = snapshots;
       if (receipt.get('state') === 'rolled-back') return;
+      const targetData = targetDataForBinding(target.data(), entry);
       if (receipt.get('state') !== 'attached' ||
+        receipt.get('entityId') !== entry.entityId ||
+        receipt.get('commonTechnique') !== entry.commonTechnique ||
         manifest.get('state') !== 'attached' ||
-        exactAttachedAssetId(target.data(), entry.targetSlot) !== entry.assetId) {
+        exactAttachedAssetId(targetData, entry.targetSlot) !== entry.assetId) {
         throw new Error('Rollback preconditions no longer match.');
       }
       const now = Timestamp.now();
       const revisionField = revisionFieldForSlot(entry.targetSlot);
       const updatedAtField = updatedAtFieldForSlot(entry.targetSlot);
-      const revision = (Number(target.get(revisionField)) || 0) + 1;
-      transaction.update(targetRef, {
-        ...restoreFieldPatch(receipt.get('beforeFields')),
-        [revisionField]: revision,
-        [updatedAtField]: now,
-      });
+      const revision = (Number(targetData[revisionField]) || 0) + 1;
+      if (entry.commonTechnique) {
+        transaction.set(targetRef, {
+          [entry.entityId]: {
+            ...restoreFieldsIntoData(
+              targetData,
+              receipt.get('beforeFields')
+            ),
+            [revisionField]: revision,
+            [updatedAtField]: now,
+          },
+        }, {merge: true});
+      } else {
+        transaction.update(targetRef, {
+          ...restoreFieldPatch(receipt.get('beforeFields')),
+          [revisionField]: revision,
+          [updatedAtField]: now,
+        });
+      }
       transaction.update(manifestRef, {
         state: 'cleanup-pending',
         attachment: null,
@@ -1802,7 +3078,9 @@ const createAdminBackend = (projectId) => {
     return {
       verified: receiptAfter.state === 'rolled-back' &&
         after.targetAssetId === (entry.previousAssetId || null) &&
-        ['cleanup-pending', 'deleted'].includes(after.manifestState),
+        ['cleanup-pending', 'deleted'].includes(after.manifestState) &&
+        after.legacySourceUnchanged === true &&
+        after.legacyGeneralImageUrlUnchanged === true,
       idempotent: receiptBefore.get('state') === 'rolled-back',
     };
   };
@@ -1811,11 +3089,23 @@ const createAdminBackend = (projectId) => {
     readLegacyPage,
     readSourceObject,
     readOwner,
+    verifyCatalogOwner,
     readReceiptPage,
     inspectReceipt,
     applyBackfillEntry,
     rollbackEntry,
-    close: async () => deleteApp(app),
+    close: async () => {
+      try {
+        await deleteApp(app);
+      } finally {
+        if (previousAdcPath === undefined) {
+          delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+        } else {
+          process.env.GOOGLE_APPLICATION_CREDENTIALS = previousAdcPath;
+        }
+        temporaryAdc?.cleanup();
+      }
+    },
   };
 };
 
@@ -1831,10 +3121,22 @@ const printHelp = () => console.log([
   '    --approve-fingerprint <sha256> --report <reviewed-plan>',
   '    [--checkpoint <path>] [--resume]',
   '',
+  '  node scripts/task07/media-derivative-backfill.js --project fatin-test',
+  '    --auth firebase-cli --allow-live-project --confirm-project fatin-test',
+  '    --catalog-owner-uid <verified-webmaster-uid>',
+  '    --confirm-catalog-owner-uid <same-uid>',
+  ...SOURCE_KEYS.map((sourceKey) => `    --source ${sourceKey}`),
+  '    [--expected-candidates <reviewed-count>]',
+  '    [--operation backfill|verify|rollback] [--report <path>]',
+  '',
   'Safety:',
   '  - Planning and verification are read-only and are the default.',
-  '  - Firebase access is restricted to demo-fnd-perf loopback emulators.',
-  '  - Backfill execution also requires the loopback Functions emulator.',
+  '  - Production projects are always refused.',
+  '  - Emulator behavior remains restricted to demo-fnd-perf loopback hosts.',
+  '  - Live access is hard-locked to fatin-test and its exact Storage bucket.',
+  '  - Live access requires Firebase CLI temporary ADC and every source.',
+  '  - The confirmed webmaster is only a fallback for ownerless global media.',
+  '  - Demo backfill execution also requires the loopback Functions emulator.',
   '  - Writes are serial and require the exact reviewed plan fingerprint.',
   '  - Checkpoints and emulator receipts make interrupted work resumable.',
 ].join('\n'));
@@ -1846,21 +3148,36 @@ const main = async (argv = process.argv.slice(2)) => {
     return;
   }
   const target = assertSafeTarget(options);
-  const backend = createAdminBackend(options.projectId);
+  const backend = await createAdminBackend({
+    projectId: options.projectId,
+    storageBucket: target.storageBucket,
+    authMode: options.authMode,
+  });
   try {
+    if (target.live) {
+      await backend.verifyCatalogOwner(options.catalogOwnerUid);
+    }
     if (!options.execute) {
       const report = await buildMigrationPlan({
         backend,
         operation: options.operation,
         projectId: options.projectId,
+        storageBucket: target.storageBucket,
+        sourceKeys: options.sourceKeys,
+        catalogOwnerUid: options.catalogOwnerUid,
+        expectedCandidates: options.expectedCandidates,
         pageSize: options.pageSize,
         maxPages: options.maxPages,
       });
+      assertCandidateCountBinding(report, options.expectedCandidates);
       writeJsonAtomic(options.reportPath, report);
       const output = options.json ? report : {
         mode: 'dry-run',
         operation: options.operation,
         projectId: options.projectId,
+        storageBucket: report.storageBucket,
+        sourceKeys: report.sourceKeys,
+        expectedCandidates: report.expectedCandidates,
         live: target.live,
         complete: report.complete,
         counts: report.counts,
@@ -1919,17 +3236,23 @@ module.exports = {
   DEFAULT_MAX_PAGES,
   DEFAULT_PAGE_SIZE,
   DEMO_PROJECT_ID,
+  LIVE_TEST_BUCKET,
+  LIVE_TEST_PROJECT_ID,
   MAX_MAX_PAGES,
   MAX_PAGE_SIZE,
   MIGRATION_CONCURRENCY,
   PLAN_VERSION,
   POLICY_HASH,
   REPORT_SCHEMA_VERSION,
+  SOURCE_KEYS,
   assertApprovedReport,
+  approvedSourceFoeBackfillMatches,
+  assertCandidateCountBinding,
   assertCheckpoint,
   assertReadOnlyTarget,
   assertSafeTarget,
   buildLegacyMediaBackfillPlan,
+  buildLegacyMapBackfillMarker,
   buildMigrationPlan,
   buildReceiptOperationPlan,
   canonicalHash,
@@ -1937,9 +3260,14 @@ module.exports = {
   computePlanFingerprint,
   createAdminBackend,
   executeMigrationPlan,
+  exactSourceKeys,
+  expectedStorageBucket,
+  generalImageUrlProof,
   isCanonicalTask07Path,
   loadLegacyMediaRecords,
   loadPaged,
+  loadTask07AdminSdk,
+  legacyMapRecoveryIssue,
   parseOptions,
   stagingActionForManifest,
   storagePathFromValue,

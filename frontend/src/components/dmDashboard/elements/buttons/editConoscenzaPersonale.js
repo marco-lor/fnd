@@ -1,42 +1,46 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
-import { db } from '../../../firebaseConfig';
-import { doc, getDoc, updateDoc } from '../../../../performance/firestore';
+import { persistProfileContentMap } from '../../../../data/userData/managerProfileContent';
 
-export function EditConoscenzaPersonaleOverlay({ userId, conoscenzaName, onClose }) {
+export function EditConoscenzaPersonaleOverlay({
+  userId,
+  userLabel,
+  currentMap,
+  conoscenzaName,
+  onClose,
+}) {
   const [livello, setLivello] = useState('Base');
-  const [userName, setUserName] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    const fetchData = async () => {
-      // Fetch current livello and user name
-      const userRef = doc(db, 'users', userId);
-      const snap = await getDoc(userRef);
-      if (snap.exists()) {
-        const data = snap.data();
-        setUserName(data.characterId || data.email || '');
-        const current = data.conoscenze?.[conoscenzaName]?.livello;
-        if (current) setLivello(current);
-      }
-    };
-    fetchData();
-  }, [userId, conoscenzaName]);
+    const current = currentMap?.[conoscenzaName];
+    setLivello(current?.livello || 'Base');
+  }, [conoscenzaName, currentMap]);
 
   const handleSave = async () => {
-    const userRef = doc(db, 'users', userId);
-    const snap = await getDoc(userRef);
-    if (snap.exists()) {
-      const data = snap.data();
-      const updated = { ...(data.conoscenze || {}) };
-      if (updated[conoscenzaName]) {
-        // update only livello
-        updated[conoscenzaName] = { ...updated[conoscenzaName], livello };
-      }
-      await updateDoc(userRef, { conoscenze: updated });
-      onClose(true);
-    } else {
-      alert('User not found');
+    const current = currentMap?.[conoscenzaName];
+    if (!current || typeof current !== 'object') {
+      alert('Conoscenza non trovata o aggiornata altrove. Riapri il pannello.');
       onClose(false);
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await persistProfileContentMap({
+        userId,
+        field: 'conoscenze',
+        currentMap,
+        action: 'upsert',
+        name: conoscenzaName,
+        value: { ...current, livello },
+      });
+      onClose(true);
+    } catch (error) {
+      console.error('Error updating conoscenza:', error);
+      alert(error.message || 'Errore durante la modifica della conoscenza');
+      onClose(false);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -44,13 +48,13 @@ export function EditConoscenzaPersonaleOverlay({ userId, conoscenzaName, onClose
     <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-[9999]">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-sm">
         <h2 className="text-xl text-white mb-2">Modifica Livello Conoscenza</h2>
-        <p className="text-gray-300 mb-4">Giocatore: <span className="font-semibold">{userName}</span></p>
+        <p className="text-gray-300 mb-4">Giocatore: <span className="font-semibold">{userLabel || 'Unknown User'}</span></p>
         <p className="text-white mb-2">Conoscenza: <span className="font-semibold">{conoscenzaName}</span></p>
         <div className="mb-4">
           <label className="block text-white mb-1">Livello</label>
           <select
             value={livello}
-            onChange={(e) => setLivello(e.target.value)}
+            onChange={(event) => setLivello(event.target.value)}
             className="w-full p-2 rounded bg-gray-700 text-white"
           >
             <option value="Base">Base</option>
@@ -61,6 +65,7 @@ export function EditConoscenzaPersonaleOverlay({ userId, conoscenzaName, onClose
           <button
             type="button"
             onClick={() => onClose(false)}
+            disabled={isSaving}
             className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
           >
             Annulla
@@ -68,9 +73,10 @@ export function EditConoscenzaPersonaleOverlay({ userId, conoscenzaName, onClose
           <button
             type="button"
             onClick={handleSave}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            disabled={isSaving}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
           >
-            Salva
+            {isSaving ? 'Salvataggio...' : 'Salva'}
           </button>
         </div>
       </div>

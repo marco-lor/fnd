@@ -34,7 +34,7 @@ import {expireBarriera as legacyExpireBarriera} from "./expireBarriera";
 import {cleanupGrigliataMusicTrack} from "./cleanupGrigliataMusicTrack";
 import {deleteGrigliataCustomToken} from "./deleteGrigliataCustomToken";
 import {spawnGrigliataCustomTokenInstance} from "./spawnGrigliataCustomTokenInstance";
-import {spawnGrigliataFoeToken} from "./spawnGrigliataFoeToken";
+import {spawnGrigliataFoeToken} from "./spawnGrigliataFoeTokenV2";
 import {updateGrigliataCustomTokenTemplate} from "./updateGrigliataCustomTokenTemplate";
 import {clientFirebaseConfig} from "./clientFirebaseConfig";
 import {
@@ -51,7 +51,10 @@ import {
 } from "./backendOperations";
 import {
   task05AdjustGold,
+  task05CharacterCreation,
   task05CommitConsumable,
+  task05ConsumeTurnEffects,
+  task05ListAdminUsers,
   task05UpdateGrigliataCharacterResources,
   task05MutateInventory,
   task05MutatePersonalContent,
@@ -75,6 +78,7 @@ import {
   cleanupTask07RemovedCatalogItemMedia,
   cleanupTask07RemovedFoeMedia,
   cleanupTask07RemovedInventoryMedia,
+  cleanupTask07RemovedMusicTrackMedia,
   cleanupTask07RemovedNpcMedia,
   cleanupTask07RemovedSpellMedia,
   cleanupTask07RemovedTechniqueMedia,
@@ -90,10 +94,12 @@ import {
   task07RetryMediaCleanup,
 } from "./mediaAssetLifecycle";
 import {task07ProcessMediaUpload} from "./mediaAssetProcessor";
+import {task07ResolveCharacterMedia} from "./grigliataCharacterMedia";
 import {
   syncTask07MusicStreamFromControl,
   syncTask07MusicStreamFromPlayback,
   syncTask07MusicStreamFromSession,
+  syncTask07MusicStreamFromTrack,
 } from "./grigliataMusicStream";
 import {usesDemoConsolidatedOwner} from "./demoConsolidatedOwner";
 import {
@@ -152,7 +158,10 @@ export {
   resumeBackendOperation,
   runBackendOperationWorker,
   task05AdjustGold,
+  task05CharacterCreation,
   task05CommitConsumable,
+  task05ConsumeTurnEffects,
+  task05ListAdminUsers,
   task05UpdateGrigliataCharacterResources,
   task05MutateInventory,
   task05MutatePersonalContent,
@@ -172,6 +181,7 @@ export {
   cleanupTask07RemovedCatalogItemMedia,
   cleanupTask07RemovedFoeMedia,
   cleanupTask07RemovedInventoryMedia,
+  cleanupTask07RemovedMusicTrackMedia,
   cleanupTask07RemovedNpcMedia,
   cleanupTask07RemovedSpellMedia,
   cleanupTask07RemovedTechniqueMedia,
@@ -184,6 +194,7 @@ export {
   task07GetMediaStatus,
   task07PrepareMediaUpload,
   task07ProcessMediaUpload,
+  task07ResolveCharacterMedia,
   task07RetireMediaAsset,
   task07RetryMediaCleanup,
   task07PrepareFoeMediaRetirement,
@@ -193,4 +204,5 @@ export {
   syncTask07MusicStreamFromControl,
   syncTask07MusicStreamFromPlayback,
   syncTask07MusicStreamFromSession,
+  syncTask07MusicStreamFromTrack,
 };

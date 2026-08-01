@@ -1,13 +1,17 @@
 import {
   __configurePrivateMediaAssetsForTests,
   __resetPrivateMediaAssetsForTests,
+  acquirePrivateAudioAsset,
   acquirePrivateMediaAsset,
   acquirePrivateVideoAsset,
   getPrivateMediaAssetCacheSnapshot,
+  getPrivateAudioAssetKey,
   getPrivateMediaAssetKey,
   getPrivateVideoAssetKey,
+  normalizePrivateAudioDescriptor,
   normalizePrivateMediaDescriptor,
   normalizePrivateVideoDescriptor,
+  PRIVATE_AUDIO_CONTENT_TYPES,
   PRIVATE_MEDIA_MAX_ACTIVE_FETCHES,
   PRIVATE_MEDIA_MAX_CACHE_BYTES,
   PRIVATE_MEDIA_MAX_DECODED_BYTES,
@@ -242,6 +246,51 @@ describe('privateMediaAssets', () => {
     })).toBeNull();
 
     const lease = acquirePrivateVideoAsset(value);
+    await expect(lease.promise).resolves.toEqual(expect.objectContaining({
+      url: expect.stringMatching(/^blob:private-/),
+    }));
+    expect(runtime.getBlob).toHaveBeenCalledWith({ path: value.path }, value.bytes);
+    expect(getPrivateMediaAssetCacheSnapshot().cachedDecodedBytes).toBe(0);
+    lease.release();
+  });
+
+  test('normalizes and acquires canonical audio originals through the bounded cache', async () => {
+    const value = descriptor('audio', 4, {
+      path: `media_assets/v1/signed-in/user/${canonicalAssetId('audio')}/${canonicalGeneration('audio')}/original`,
+      contentType: 'audio/mpeg',
+      width: undefined,
+      height: undefined,
+    });
+    const runtime = createRuntime({
+      maxDecodedBytes: 1,
+      getBlobImplementation: async () => new Blob(['data'], { type: 'audio/mpeg' }),
+    });
+
+    expect(PRIVATE_AUDIO_CONTENT_TYPES).toEqual([
+      'audio/mpeg',
+      'audio/mp4',
+      'audio/aac',
+      'audio/ogg',
+      'audio/wav',
+      'audio/x-wav',
+    ]);
+    expect(normalizePrivateMediaDescriptor(value)).toBeNull();
+    expect(normalizePrivateVideoDescriptor(value)).toBeNull();
+    expect(normalizePrivateAudioDescriptor(value)).toEqual({
+      ...value,
+      width: null,
+      height: null,
+    });
+    expect(getPrivateAudioAssetKey(value)).toBe(JSON.stringify([
+      value.path,
+      value.generation,
+    ]));
+    expect(normalizePrivateAudioDescriptor({
+      ...value,
+      path: value.path.replace('/original', '/thumbnail'),
+    })).toBeNull();
+
+    const lease = acquirePrivateAudioAsset(value);
     await expect(lease.promise).resolves.toEqual(expect.objectContaining({
       url: expect.stringMatching(/^blob:private-/),
     }));

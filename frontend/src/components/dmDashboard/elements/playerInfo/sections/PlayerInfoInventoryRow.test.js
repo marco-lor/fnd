@@ -17,7 +17,13 @@ test('passes the aggregated Varie quantity through the overlay totalQty contract
       variant="card"
       users={[{
         id: 'user-1',
-        inventory: [{ id: 'rope', type: 'varie', name: 'Corda', qty: 3 }],
+        inventory: [{
+          id: 'rope',
+          type: 'varie',
+          name: 'Corda',
+          qty: 3,
+          _task05: { inventoryId: 'varie-rope-1', catalogItemId: 'rope' },
+        }],
         stats: { gold: 0 },
       }]}
       catalog={{}}

@@ -5,7 +5,7 @@ const test = require("node:test");
 
 const frontendRoot = path.resolve(__dirname, "..", "..");
 
-test("foe retirement receipts and cleanup work are private and indexed", () => {
+test("foe retirement receipts and cleanup work use TTL without retired composite indexes", () => {
   const rules = fs.readFileSync(
     path.join(frontendRoot, "firestore.rules"),
     "utf8"
@@ -23,11 +23,14 @@ test("foe retirement receipts and cleanup work are private and indexed", () => {
     ["task07_foe_media_operations", "status"],
     ["task07_foe_media_cleanup", "state"],
   ]) {
-    assert.ok(indexes.indexes.some((entry) => (
+    assert.equal(indexes.indexes.some((entry) => (
       entry.collectionGroup === collectionGroup &&
+      entry.fields?.length === 2 &&
       entry.fields[0].fieldPath === stateField &&
-      entry.fields[1].fieldPath === "cleanupAfter"
-    )));
+      entry.fields[0].order === "ASCENDING" &&
+      entry.fields[1].fieldPath === "cleanupAfter" &&
+      entry.fields[1].order === "ASCENDING"
+    )), false);
     assert.ok(indexes.fieldOverrides.some((entry) => (
       entry.collectionGroup === collectionGroup &&
       entry.fieldPath === "expiresAt" && entry.ttl === true
@@ -49,6 +52,23 @@ test("foe operation uploads are immutable, server-owned, and carved out", () => 
     /match \/foes\/\{firstSegment\}\/\{remaining=\*\*\}[\s\S]*?allow create, update, delete: if isDM\(\)[\s\S]*?firstSegment != 'task07-operations'/
   );
   assert.match(rules, /request\.resource\.metadata == upload\.metadata/);
+});
+
+test("foe retirement callables enforce the active manager boundary", () => {
+  const source = fs.readFileSync(
+    path.join(frontendRoot, "functions", "src", "foeMediaRetirement.ts"),
+    "utf8"
+  );
+  assert.match(source, /const actorIsActiveManager/);
+  assert.match(
+    source,
+    /\["dm", "webmaster"\]\.includes\([\s\S]*?actor\.get\("role"\)/
+  );
+  assert.equal(
+    (source.match(/actorIsActiveManager\(actor\)/g) || []).length,
+    2
+  );
+  assert.doesNotMatch(source, /actorIsActiveDm|Only active DMs may/);
 });
 
 test("legacy cleanup reclaims leases and retains unfenced generations", () => {

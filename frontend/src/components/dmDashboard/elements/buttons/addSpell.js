@@ -36,10 +36,14 @@ export function AddSpellButton({ onClick }) {
 /* ------------------------------------------------------------------ */
 /*  B. Overlay wrapper (decoupled saving logic)                       */
 /* ------------------------------------------------------------------ */
-export function AddSpellOverlay({ userId, onClose, savePath = null }) {
+export function AddSpellOverlay({
+  userId,
+  userLabel,
+  onClose,
+  savePath = null,
+}) {
   const task07MediaOperationOwner = useTask07MediaOperationOwner();
   const [schema,   setSchema]   = useState(null);
-  const [userName, setUserName] = useState("");
 
   /* fetch schema + user only once */
   useEffect(() => {
@@ -47,12 +51,9 @@ export function AddSpellOverlay({ userId, onClose, savePath = null }) {
       try {
         const schemaData = await getSchema('schema_spell');
         if (schemaData) setSchema(schemaData);
-        const userSnap   = await getDoc(doc(db, "users", userId));
-        if (userSnap.exists())
-          setUserName(userSnap.data().characterId || userSnap.data().email || "Unknown User");
       } catch (err) { console.error("Fetch error:", err); }
     })();
-  }, [userId]);
+  }, []);
 
   /* callback from SpellOverlay */
   const handleOverlayClose = async (result) => {
@@ -133,7 +134,7 @@ export function AddSpellOverlay({ userId, onClose, savePath = null }) {
       <SpellOverlay
         mode="add"
         schema={schema}
-        userName={userName}
+        userName={userLabel || 'Unknown User'}
         onClose={handleOverlayClose}
       />
     )

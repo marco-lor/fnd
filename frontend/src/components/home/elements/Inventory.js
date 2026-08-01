@@ -4,12 +4,19 @@ import { FiPackage, FiSearch, FiTrash2, FiPlus, FiMinus } from 'react-icons/fi';
 import { FaCoins } from 'react-icons/fa';
 import { LazyItemDetailsModal as ItemDetailsModal } from './lazyHomeFeatures';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
+import useTask07MediaOperationOwner from '../../../data/media/useTask07MediaOperationOwner';
+import { tryPersistTask07VarieMedia } from '../../../data/media/privateInventoryMediaWriter';
 import {
-	deleteLegacyStoragePath,
-	uploadLegacyImage,
-} from '../../common/legacyMediaStorage';
+	describeTask07ConsumerOutcome,
+	task07ConsumerNeedsAttention,
+} from '../../../data/media/mediaConsumerAdapter';
 import MediaImage, { hasMediaAsset } from '../../common/MediaImage';
 import useObjectUrl from '../../common/useObjectUrl';
+import useCatalogItemsById from '../../../data/useCatalogItemsById';
+import {
+	collectInventoryCatalogItemIds,
+	resolveInventoryCatalogMediaList,
+} from '../../../data/inventoryCatalogProjection';
 import {
 	useEquipment,
 	useInventory,
@@ -21,14 +28,6 @@ import {
 	isDefinitiveUserDataCommandError,
 	mutateInventory,
 } from '../../../data/userData/userDataCommands';
-import {
-	legacyAdjustGold,
-	legacyMutateInventory,
-} from '../../../data/userData/legacyUserDataCommands';
-import {
- isUserDataCommandStageResolved,
- runVersionedUserDataCommand,
-} from '../../../data/userData/userDataCommandRouting';
 import { resolveEquippedInventoryIds } from './equipmentInventoryProjection';
 
 const inventoryDocumentId = (entry, index) => (
@@ -38,8 +37,11 @@ const inventoryDocumentId = (entry, index) => (
 	|| `item-${index}`
 );
 
-export const buildInventoryView = (inventory, equipment) => {
-	const inv = Array.isArray(inventory) ? inventory : [];
+export const buildInventoryView = (inventory, equipment, catalogItemsById = {}) => {
+	const inv = resolveInventoryCatalogMediaList(
+		Array.isArray(inventory) ? inventory : [],
+		catalogItemsById
+	);
 	const equippedValues = Object.values(equipment?.slots || equipment?.equipped || {}).filter(Boolean);
 	const equippedInventoryIds = resolveEquippedInventoryIds({
 		inventory: inv,
@@ -115,47 +117,41 @@ export const buildInventoryView = (inventory, equipment) => {
 // Shows a searchable, grouped list of items in user's inventory
 const Inventory = () => {
 	const { user, repositoryAccessGeneration = 0 } = useAuthSession();
+	const task07MediaOperationOwner = useTask07MediaOperationOwner();
 	const actionScopeKey = `${user?.uid || 'anonymous'}:${repositoryAccessGeneration}`;
 	const actionScopeRef = useRef(actionScopeKey);
 	actionScopeRef.current = actionScopeKey;
 	const {
 		data: inventory,
-		stage: inventoryStage,
 		status: inventoryStatus,
 	} = useInventory(user?.uid);
+	const catalogItemIds = useMemo(
+		() => collectInventoryCatalogItemIds(inventory),
+		[inventory]
+	);
+	const { itemsById: catalogItemsById } = useCatalogItemsById(catalogItemIds);
 	const { data: equipment } = useEquipment(user?.uid);
 	const {
 		data: resources,
-		stage: resourcesStage,
 		status: resourcesStatus,
 	} = useResources(user?.uid);
 	const resourcesCommandsReady = resourcesStatus === 'fresh'
-		&& resources !== null
-		&& isUserDataCommandStageResolved(resourcesStage);
+		&& resources !== null;
 	const inventoryCommandsReady = inventoryStatus === 'fresh'
-		&& inventory !== null
-		&& isUserDataCommandStageResolved(inventoryStage);
-	const executeInventoryMutation = (payload, legacyOptions = {}, retryKey = null) => runVersionedUserDataCommand({
-		stage: inventoryCommandsReady ? inventoryStage : null,
-		legacy: () => legacyMutateInventory({ uid: user.uid, ...payload, ...legacyOptions }),
-		authoritative: () => mutateInventory({
-			userId: user.uid,
-			...payload,
-			...(retryKey ? { retryKey } : {}),
-		}),
+		&& inventory !== null;
+	const executeInventoryMutation = (payload, retryKey = null) => mutateInventory({
+		userId: user.uid,
+		...payload,
+		...(retryKey ? { retryKey } : {}),
 	});
-	const executeGoldAdjustment = (delta, retryKey = null) => runVersionedUserDataCommand({
-		stage: resourcesCommandsReady ? resourcesStage : null,
-		legacy: () => legacyAdjustGold({ uid: user.uid, delta }),
-		authoritative: () => adjustGold({
-			userId: user.uid,
-			delta,
-			...(retryKey ? { retryKey } : {}),
-		}),
+	const executeGoldAdjustment = (delta, retryKey = null) => adjustGold({
+		userId: user.uid,
+		delta,
+		...(retryKey ? { retryKey } : {}),
 	});
 	const { items } = useMemo(
-		() => buildInventoryView(inventory, equipment),
-		[inventory, equipment]
+		() => buildInventoryView(inventory, equipment, catalogItemsById),
+		[inventory, equipment, catalogItemsById]
 	);
 	const [q, setQ] = useState('');
 	const [previewItem, setPreviewItem] = useState(null);
@@ -182,7 +178,7 @@ const Inventory = () => {
 	const [vQty, setVQty] = useState('1');
 	const [vBusy, setVBusy] = useState(false);
 	const [vImageFile, setVImageFile] = useState(null);
-	const [vUploadedImage, setVUploadedImage] = useState(null);
+	const [vError, setVError] = useState(null);
 	const vImagePreviewUrl = useObjectUrl(vImageFile);
 
 	useEffect(() => {
@@ -203,7 +199,7 @@ const Inventory = () => {
 		setVQty('1');
 		setVBusy(false);
 		setVImageFile(null);
-		setVUploadedImage(null);
+		setVError(null);
 	}, [actionScopeKey]);
 
 	const closeGoldOverlay = () => {
@@ -222,7 +218,7 @@ const Inventory = () => {
 		setVDesc('');
 		setVQty('1');
 		setVImageFile(null);
-		setVUploadedImage(null);
+		setVError(null);
 	};
 
 
@@ -242,12 +238,12 @@ const Inventory = () => {
 					action: 'setQuantity',
 					inventoryId: instance.inventoryId,
 					quantity: instance.quantity - 1,
-				}, { legacyIndex: instance.legacyIndex });
+				});
 			} else {
-				await executeInventoryMutation(
-					{ action: 'remove', inventoryId: instance.inventoryId },
-					{ legacyIndex: instance.legacyIndex }
-				);
+				await executeInventoryMutation({
+					action: 'remove',
+					inventoryId: instance.inventoryId,
+				});
 			}
 		} catch (err) {
 			console.error('Error removing item from inventory', err);
@@ -295,59 +291,55 @@ const Inventory = () => {
 			|| !submissionRetryKey
 		) return;
 		const name = (vName || '').trim();
-		const qtyNum = Math.max(1, Math.abs(parseInt(vQty, 10) || 1));
-		if (!name) return; // require a name
-		let uploadedImage = vUploadedImage;
+		const qtyNum = Math.max(1, Math.min(9999, Math.abs(parseInt(vQty, 10) || 1)));
+		if (!name) return;
+		const snapshot = {
+			name,
+			description: (vDesc || '').trim(),
+			type: 'varie',
+			item_type: 'varie',
+		};
 		try {
 			setVBusy(true);
-			if (vImageFile && !uploadedImage) {
-				try {
-					const safe = name.replace(/[^a-zA-Z0-9]/g, '_');
-					const fileName = `varie_${user.uid}_${safe}_${Date.now()}_${vImageFile.name}`;
-					const storagePath = 'items/' + fileName;
-					const { downloadUrl } = await uploadLegacyImage(storagePath, vImageFile);
-					uploadedImage = { downloadUrl, storagePath };
-					if (actionScopeRef.current !== submissionScopeKey) {
-						await deleteLegacyStoragePath(storagePath).catch((cleanupError) => {
-							console.error('Failed to clean up abandoned varie image', cleanupError);
-						});
-						return;
-					}
-					setVUploadedImage(uploadedImage);
-				} catch (e) {
-					console.error('Failed to upload varie image', e);
+			setVError(null);
+			if (vImageFile) {
+				const task07Result = await task07MediaOperationOwner.run((signal) => (
+					tryPersistTask07VarieMedia({
+						userId: user.uid,
+						snapshot,
+						quantity: qtyNum,
+						file: vImageFile,
+						signal,
+					})
+				));
+				if (!task07Result) {
+					const mediaError = new Error('Canonical media is unavailable. Nothing was saved.');
+					mediaError.code = 'task07-canonical-required';
+					throw mediaError;
 				}
+				if (task07ConsumerNeedsAttention(task07Result.outcome)) {
+					alert(describeTask07ConsumerOutcome(task07Result.outcome, 'Inventory image'));
+				}
+			} else {
+				await executeInventoryMutation({
+					action: 'createVarie',
+					quantity: qtyNum,
+					snapshot,
+				}, submissionRetryKey);
 			}
-			if (actionScopeRef.current !== submissionScopeKey) return;
-
-			await executeInventoryMutation({
-				action: 'createVarie',
-				quantity: qtyNum,
-				snapshot: {
-					name,
-					description: (vDesc || '').trim(),
-					type: 'varie',
-					...(uploadedImage?.downloadUrl ? { image_url: uploadedImage.downloadUrl } : {}),
-				},
-			}, {}, submissionRetryKey);
 			if (actionScopeRef.current !== submissionScopeKey) return;
 
 			resetVarieDraft();
 		} catch (err) {
 			console.error('Error adding custom varie item', err);
-			if (isDefinitiveUserDataCommandError(err)) {
-				if (uploadedImage?.storagePath) {
-					await deleteLegacyStoragePath(uploadedImage.storagePath).catch((cleanupError) => {
-						console.error('Failed to clean up unused varie image', cleanupError);
-					});
-				}
-				if (actionScopeRef.current === submissionScopeKey) resetVarieDraft();
+			if (actionScopeRef.current === submissionScopeKey) {
+				setVError(err?.message || 'Impossibile aggiungere l\'oggetto.');
+				if (isDefinitiveUserDataCommandError(err)) resetVarieDraft();
 			}
 		} finally {
 			if (actionScopeRef.current === submissionScopeKey) setVBusy(false);
 		}
 	};
-
 	const openVarieOverlay = () => {
 		if (!user || !inventoryCommandsReady) return;
 		setVarieActionScopeKey(actionScopeKey);
@@ -672,7 +664,7 @@ const Inventory = () => {
 										const f = e.target.files && e.target.files[0] ? e.target.files[0] : null;
 										setVImageFile(f);
 									}}
-									disabled={vBusy || !!vUploadedImage}
+									disabled={vBusy}
 										className="text-xs text-slate-300"
 									/>
 									{vImagePreviewUrl && (
@@ -680,13 +672,14 @@ const Inventory = () => {
 											<div className="h-10 w-10 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/50">
 												<img src={vImagePreviewUrl} alt="Preview" className="h-full w-full object-cover" />
 											</div>
-											<button type="button" disabled={vBusy || !!vUploadedImage} onClick={() => {
+											<button type="button" disabled={vBusy} onClick={() => {
 												setVImageFile(null);
 											}} className="text-[11px] text-slate-300 border border-slate-600/60 rounded px-2 py-1 hover:bg-slate-700/40 disabled:opacity-50">Rimuovi</button>
 										</div>
 									)}
 								</div>
 							</div>
+							{vError && <div className="text-xs text-red-400">{vError}</div>}
 							<div>
 								<label className="block text-xs text-slate-300 mb-1">Quantità</label>
 								<input type="number" min="1" value={vQty} onChange={(e) => setVQty(e.target.value)} className="w-28 rounded-md bg-slate-900/60 border border-slate-600/60 px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-slate-400" />

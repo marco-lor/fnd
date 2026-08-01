@@ -31,6 +31,7 @@ const reviewedStorageAdapters = new Set([
   path.normalize('components/common/legacyMediaStorage.js'),
   path.normalize('components/common/privateMediaAssets.js'),
   path.normalize('components/common/userOwnedMedia.js'),
+  path.normalize('data/media/foeMediaRetirement.js'),
   path.normalize('data/media/mediaUpload.js'),
 ]);
 

@@ -1,6 +1,7 @@
 // Dedicated script for handling the "Avanza" (advance turn) button logic.
 // Extracted from EncounterDetails to keep component lean.
 import { collection, addDoc, doc, runTransaction, serverTimestamp } from "../../../../performance/firestore";
+import { consumeTurnEffects } from '../../../../data/userData/userDataCommands';
 
 /**
  * Advance the encounter turn order.
@@ -25,6 +26,7 @@ export const advanceTurn = async ({ isDM, turnState, encounter, db, participants
         const encRef = doc(db, "encounters", encounter.id);
         let nextState = null;
         let rebuiltInfo = null; // {order:[], round:number}
+        let finishingEffectRequest = null;
         await runTransaction(db, async (tx) => {
             const snap = await tx.get(encRef);
             const data = snap.data() || {};
@@ -33,44 +35,16 @@ export const advanceTurn = async ({ isDM, turnState, encounter, db, participants
             const cleanOrderExisting = t.order.filter((k) => participantsMap[k]);
             if (cleanOrderExisting.length === 0) throw new Error("empty");
 
-            // -------------------------------------------------------------
-            // Decrement active turn effects for finishing participant
-            // -------------------------------------------------------------
-            try {
-                const currentIndex = t.index ?? 0;
-                const finishingKey = cleanOrderExisting[currentIndex];
-                const finishingParticipant = participantsMap[finishingKey];
-                const isFoe = finishingParticipant?.type === "foe";
-                const userUid = !isFoe ? (finishingParticipant?.uid || finishingKey) : null;
-                if (userUid) {
-                    const userRef = doc(db, "users", userUid);
-                    const userSnap = await tx.get(userRef);
-                    if (userSnap.exists()) {
-                        const uData = userSnap.data() || {};
-                        const effects = uData.active_turn_effect;
-                        if (effects && typeof effects === "object") {
-                            let changed = false;
-                            const updated = {};
-                            for (const [ek, ev] of Object.entries(effects)) {
-                                if (ev && typeof ev === "object") {
-                                    const curr = typeof ev.remainingTurns === "number" ? ev.remainingTurns : null;
-                                    if (curr != null) {
-                                        const newVal = Math.max(0, curr - 1);
-                                        updated[ek] = { ...ev, remainingTurns: newVal };
-                                        if (newVal !== curr) changed = true;
-                                    } else {
-                                        updated[ek] = ev;
-                                    }
-                                } else {
-                                    updated[ek] = ev;
-                                }
-                            }
-                            if (changed) tx.set(userRef, { active_turn_effect: updated }, { merge: true });
-                        }
-                    }
-                }
-            } catch (effectErr) {
-                console.warn("Failed to decrement active_turn_effect", effectErr);
+            const currentIndex = t.index ?? 0;
+            const finishingKey = cleanOrderExisting[currentIndex];
+            const finishingParticipant = participantsMap[finishingKey];
+            const isFoe = finishingParticipant?.type === "foe";
+            const userUid = !isFoe ? (finishingParticipant?.uid || finishingKey) : null;
+            if (userUid) {
+                finishingEffectRequest = {
+                    userId: userUid,
+                    retryKey: `encounter-turn:${encounter.id}:${t.round ?? 1}:${currentIndex}:${finishingKey}`,
+                };
             }
 
             let idx = (t.index ?? 0) + 1;
@@ -99,6 +73,15 @@ export const advanceTurn = async ({ isDM, turnState, encounter, db, participants
             };
             tx.set(encRef, { turn: nextState }, { merge: true });
         });
+
+        if (finishingEffectRequest) {
+            try {
+                await consumeTurnEffects(finishingEffectRequest);
+            } catch (effectErr) {
+                // Effect consumption remains best-effort, matching the legacy transaction behavior.
+                console.warn("Failed to decrement active_turn_effect", effectErr);
+            }
+        }
 
         if (nextState) {
             // If we rebuilt, log that first

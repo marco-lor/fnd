@@ -1,17 +1,16 @@
 // frontend/src/components/dmDashboard/elements/LockSettingsTable.js
 import React, { useEffect, useState } from 'react';
-import { auth, db } from '../../firebaseConfig';
-import { doc, updateDoc, writeBatch } from '../../../performance/firestore';
+import { auth } from '../../firebaseConfig';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faLock, faLockOpen } from '@fortawesome/free-solid-svg-icons';
 import { getCallable } from '../../../data/functions/callableRegistry';
 import {
   callBackendOperationAndWait,
-  TASK06_LOCAL_CANDIDATE,
 } from '../../../data/functions/backendOperationClient';
 import {
   runWithDurableOperationIntent,
 } from '../../../data/functions/backendOperationIntentStore';
+import { updateUserSettings } from '../../../data/userData/userDataCommands';
 
 const setAllParameterLocks = getCallable('setAllParameterLocks');
 
@@ -49,8 +48,21 @@ const LockSettingsTable = React.memo(function LockSettingsTable({ users, canEdit
     const cur = !!lockMap?.[userId]?.[fieldKey];
     try {
       setPending((s) => new Set([...s, userId]));
-      const ref = doc(db, 'users', userId);
-      await updateDoc(ref, { [`settings.${field}`]: !cur });
+      const user = users.find((entry) => entry.id === userId);
+      if (!user) throw new Error('The selected user is no longer available.');
+      const currentSettings = user?.settings && typeof user.settings === 'object'
+        ? user.settings
+        : {};
+      await updateUserSettings({
+        userId,
+        patch: {
+          settings: {
+            ...currentSettings,
+            [field]: !cur,
+          },
+        },
+        retryKey: ['dm-setting-lock', userId, field, cur, !cur].join(':'),
+      });
       setLockMap((m) => ({
         ...m,
         [userId]: { ...(m[userId] || {}), [fieldKey]: !cur },
@@ -73,29 +85,16 @@ const LockSettingsTable = React.memo(function LockSettingsTable({ users, canEdit
     const field = fieldKey === 'base' ? 'lock_param_base' : 'lock_param_combat';
     try {
       setBusyAll(true);
-      if (TASK06_LOCAL_CANDIDATE) {
-        await runWithDurableOperationIntent({
-          actorUid: auth.currentUser?.uid,
-          kind: 'set-parameter-locks',
-          intent: { field, value: target },
-          invoke: (operationId) => callBackendOperationAndWait(
-            setAllParameterLocks,
-            { field, value: target },
-            { operationId }
-          ),
-        });
-      } else {
-        const batch = writeBatch(db);
-        users.forEach((u) => {
-          const cur = !!lockMap?.[u.id]?.[fieldKey];
-          if (cur !== target) {
-            const ref = doc(db, 'users', u.id);
-            const field = fieldKey === 'base' ? 'lock_param_base' : 'lock_param_combat';
-            batch.update(ref, { [`settings.${field}`]: target });
-          }
-        });
-        await batch.commit();
-      }
+      await runWithDurableOperationIntent({
+        actorUid: auth.currentUser?.uid,
+        kind: 'set-parameter-locks',
+        intent: { field, value: target },
+        invoke: (operationId) => callBackendOperationAndWait(
+          setAllParameterLocks,
+          { field, value: target },
+          { operationId }
+        ),
+      });
       setLockMap((m) => {
         const next = { ...m };
         users.forEach((u) => {

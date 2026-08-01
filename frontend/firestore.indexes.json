@@ -105,34 +105,6 @@
           "order": "DESCENDING"
         }
       ]
-    },
-    {
-      "collectionGroup": "task07_foe_media_operations",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "status",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "cleanupAfter",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "task07_foe_media_cleanup",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "state",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "cleanupAfter",
-          "order": "ASCENDING"
-        }
-      ]
     }
   ],
   "fieldOverrides": [

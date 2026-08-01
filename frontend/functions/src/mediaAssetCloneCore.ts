@@ -44,6 +44,20 @@ export interface Task07FoeMediaClonePlan {
   entries: Task07CanonicalCloneEntry[];
 }
 
+export interface Task07FoeTokenMediaRegenerationPlan {
+  schemaVersion: 1;
+  sourceAssetId: string;
+  sourceFoeId: string;
+  sourceReferencePath: string;
+  sourceManifestFingerprint: string;
+  sourceGeneration: string;
+  sourceOriginal: StoredTask07MediaObject;
+  destinationTokenId: string;
+  destinationReferencePath: string;
+  mediaOperationId: string;
+  destinationPlan: MediaUploadPlan;
+}
+
 export class Task07MediaClonePlanError extends Error {
   readonly code:
     "canonical-reference-invalid" |
@@ -271,4 +285,65 @@ export const buildTask07FoeMediaClonePlan = (input: {
 export const task07FoeMediaClonePlansMatch = (
   first: unknown,
   second: Task07FoeMediaClonePlan | null
+): boolean => hashValue(first) === hashValue(second);
+
+export const buildTask07FoeTokenMediaRegenerationPlan = (input: {
+  actorUid: string;
+  backendReceiptId: string;
+  destinationTokenId: string;
+  sourceFoeId: string;
+  source: Record<string, unknown>;
+  sourceManifest: Record<string, unknown> | null;
+}): Task07FoeTokenMediaRegenerationPlan | null => {
+  // Reuse the exact source descriptor/manifest/attachment validation from
+  // canonical foe duplication. The synthetic foe destination is never
+  // persisted; only its verified source family is projected below.
+  const validatedSource = buildTask07FoeMediaClonePlan({
+    actorUid: input.actorUid,
+    backendReceiptId: input.backendReceiptId,
+    destinationFoeId: input.destinationTokenId,
+    sourceFoeId: input.sourceFoeId,
+    source: input.source,
+    sourceManifest: input.sourceManifest,
+  });
+  if (!validatedSource) return null;
+  const sourceOriginal = validatedSource.entries.find(
+    ({role}) => role === "original"
+  )?.source;
+  if (!sourceOriginal) {
+    throw new Task07MediaClonePlanError(
+      "source-manifest-invalid",
+      "Attached foe canonical original is missing."
+    );
+  }
+  const mediaOperationId =
+    `spawn-foe-token-media:${input.backendReceiptId}`;
+  const destinationPlan = buildTask07MediaUploadPlan({
+    actorUid: input.actorUid,
+    ownerUid: input.actorUid,
+    entityId: input.destinationTokenId,
+    previousAssetId: null,
+    operationId: mediaOperationId,
+    kind: "token",
+    sourceContentType: sourceOriginal.contentType,
+    sourceBytes: sourceOriginal.bytes,
+  });
+  return {
+    schemaVersion: 1,
+    sourceAssetId: validatedSource.sourceAssetId,
+    sourceFoeId: input.sourceFoeId,
+    sourceReferencePath: validatedSource.sourceReferencePath,
+    sourceManifestFingerprint: validatedSource.sourceManifestFingerprint,
+    sourceGeneration: validatedSource.sourceGeneration,
+    sourceOriginal,
+    destinationTokenId: input.destinationTokenId,
+    destinationReferencePath: task07MediaReferencePath(destinationPlan),
+    mediaOperationId,
+    destinationPlan,
+  };
+};
+
+export const task07FoeTokenMediaRegenerationPlansMatch = (
+  first: unknown,
+  second: Task07FoeTokenMediaRegenerationPlan | null
 ): boolean => hashValue(first) === hashValue(second);

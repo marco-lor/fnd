@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { faEdit, faTrash, faPlus, faMinus, faCoins } from "@fortawesome/free-solid-svg-icons";
-import { collection, getDocs, doc, getDoc, updateDoc } from "../../../performance/firestore";
+import { collection, getDocs } from "../../../performance/firestore";
 import { MdKeyboardDoubleArrowDown, MdKeyboardDoubleArrowUp } from "react-icons/md";
 
 import { db } from "../../firebaseConfig";
@@ -41,6 +41,8 @@ import PlayerInfoProfessioniRow from "./playerInfo/sections/PlayerInfoProfession
 import PlayerInfoLingueRow from "./playerInfo/sections/PlayerInfoLingueRow";
 import PlayerInfoInventoryRow from "./playerInfo/sections/PlayerInfoInventoryRow";
 import PlayerInfoDiceRollsRow from "./playerInfo/sections/PlayerInfoDiceRollsRow";
+import { adjustGold, updateResource } from "../../../data/userData/userDataCommands";
+import { buildManagerResourceTotalOptions } from "../../../data/userData/managerResourceCommands";
 
 library.add(faEdit, faTrash, faPlus, faMinus, faCoins);
 
@@ -48,7 +50,6 @@ const PlayerInfo = ({
   users,
   loading,
   error,
-  setUsers,
   variant = "table",
   onLevelUpOne,
   onAddTokens,
@@ -94,15 +95,7 @@ const PlayerInfo = ({
   const [goldOverlay, setGoldOverlay] = useState(null);
   const [cardExpanded, setCardExpanded] = useState({});
 
-  const refreshUserData = useCallback(async () => {
-    try {
-      const snapshot = await getDocs(collection(db, "users"));
-      const usersData = snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() }));
-      setUsers(usersData);
-    } catch (err) {
-      console.error("Error refreshing users:", err);
-    }
-  }, [setUsers]);
+  const refreshUserData = useCallback(() => Promise.resolve(), []);
 
   const fetchItemsCatalog = useCallback(async () => {
     try {
@@ -151,17 +144,22 @@ const PlayerInfo = ({
     if (!userId || Number.isNaN(amount) || amount === 0) return;
     try {
       setGoldUpdating((prev) => ({ ...prev, [userId]: true }));
-      const userDocRef = doc(db, "users", userId);
-      const userDocSnap = await getDoc(userDocRef);
-      let currentGold = 0;
-      if (userDocSnap.exists()) {
-        const data = userDocSnap.data();
-        const existing = data?.stats?.gold;
-        currentGold = typeof existing === "number" ? existing : parseInt(existing, 10) || 0;
-      }
+      const currentUser = users.find((entry) => entry.id === userId);
+      if (!currentUser) throw new Error("The selected user is no longer available.");
+      const currentGold = Number(currentUser?.stats?.gold) || 0;
       const delta = direction > 0 ? amount : -amount;
       const nextGold = currentGold + delta;
-      await updateDoc(userDocRef, { "stats.gold": nextGold });
+      await adjustGold({
+        userId,
+        delta,
+        retryKey: [
+          "dm-gold",
+          userId,
+          currentGold,
+          delta,
+          nextGold,
+        ].join(":"),
+      });
       setGoldAdjustments((prev) => ({ ...prev, [userId]: "" }));
       setGoldOverlay(null);
       await refreshUserData();
@@ -262,14 +260,18 @@ const PlayerInfo = ({
     if (!inventoryData) {
       for (const entry of inventoryArray) {
         if (!entry || typeof entry !== "object") continue;
-        const entryId = entry.id || entry.name || entry?.General?.Nome;
+        const entryId = entry?._task05?.inventoryId || entry?._instance?.instanceId;
         if (entryId === itemId) {
           inventoryData = entry;
           break;
         }
       }
     }
-    const baseDoc = itemsDocs[itemId];
+    const catalogItemId = inventoryData?._task05?.catalogItemId
+      || inventoryData?._instance?.catalogItemId
+      || inventoryData?.id
+      || null;
+    const baseDoc = catalogItemId ? itemsDocs[catalogItemId] : null;
     const initial = inventoryData || baseDoc;
     if (!initial) {
       console.warn("No data found for inventory item id:", itemId);
@@ -325,13 +327,18 @@ const PlayerInfo = ({
 
   const adjustVitalDelta = async (userId, vital, delta) => {
     if (!canEditVitals) return;
-    const fields = vitalFieldMap[vital];
     const u = users.find((x) => x.id === userId);
     if (!u) return;
     const cur = Number(u?.stats?.[`${vital}Current`]) || 0;
     const newVal = Math.max(0, cur + delta);
     try {
-      await updateDoc(doc(db, "users", userId), { [fields.current]: newVal });
+      await updateResource({
+        userId,
+        resource: vital,
+        mode: "set",
+        value: newVal,
+        retryKey: ["dm-vital-delta", userId, vital, cur, delta, newVal].join(":"),
+      });
     } catch (e) {
       console.error("adjustVitalDelta failed", e);
     }
@@ -339,12 +346,17 @@ const PlayerInfo = ({
 
   const resetVital = async (userId, vital) => {
     if (!canEditVitals) return;
-    const fields = vitalFieldMap[vital];
     const u = users.find((x) => x.id === userId);
     if (!u) return;
     const tot = Number(u?.stats?.[`${vital}Total`]) || 0;
     try {
-      await updateDoc(doc(db, "users", userId), { [fields.current]: tot });
+      await updateResource({
+        userId,
+        resource: vital,
+        mode: "set",
+        value: tot,
+        retryKey: ["dm-vital-reset", userId, vital, tot].join(":"),
+      });
     } catch (e) {
       console.error("resetVital failed", e);
     }
@@ -358,7 +370,14 @@ const PlayerInfo = ({
     const n = promptInteger(`Set ${vitalFieldMap[vital].label} current value`, cur);
     if (n === null) return;
     try {
-      await updateDoc(doc(db, "users", userId), { [vitalFieldMap[vital].current]: Math.max(0, n) });
+      const nextCurrent = Math.max(0, n);
+      await updateResource({
+        userId,
+        resource: vital,
+        mode: "set",
+        value: nextCurrent,
+        retryKey: ["dm-vital-current", userId, vital, cur, nextCurrent].join(":"),
+      });
     } catch (e) {
       console.error("setVitalCurrent failed", e);
     }
@@ -372,12 +391,28 @@ const PlayerInfo = ({
     const n = promptInteger(`Set ${vitalFieldMap[vital].label} total value`, tot);
     if (n === null) return;
     const cur = Number(u?.stats?.[`${vital}Current`]) || 0;
-    const updates = { [vitalFieldMap[vital].total]: Math.max(0, n) };
-    if (cur > n && window.confirm("Current value exceeds new total. Clamp current to new total?")) {
-      updates[vitalFieldMap[vital].current] = Math.max(0, n);
-    }
+    const nextTotal = Math.max(0, n);
+    const nextCurrent = cur > nextTotal
+      && window.confirm("Current value exceeds new total. Clamp current to new total?")
+      ? nextTotal
+      : cur;
     try {
-      await updateDoc(doc(db, "users", userId), updates);
+      await updateResource({
+        userId,
+        resource: vital,
+        mode: "set",
+        value: nextCurrent,
+        totalValue: nextTotal,
+        ...buildManagerResourceTotalOptions(u, vital),
+        retryKey: [
+          "dm-vital-total",
+          userId,
+          vital,
+          cur,
+          nextCurrent,
+          nextTotal,
+        ].join(":"),
+      });
     } catch (e) {
       console.error("setVitalTotal failed", e);
     }
@@ -396,6 +431,14 @@ const PlayerInfo = ({
 
   const iconEditClass = "text-blue-400 hover:text-blue-300 transition transform hover:scale-110 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded";
   const iconDeleteClass = "text-red-500 hover:text-red-400 transition transform hover:scale-110 focus:outline-none focus:ring-1 focus:ring-red-600 rounded";
+  const selectedManagerUser = selectedUserId
+    ? users.find((entry) => entry.id === selectedUserId)
+    : null;
+  const selectedUserLabel = selectedManagerUser?.displayName
+    || selectedManagerUser?.characterId
+    || selectedManagerUser?.label
+    || selectedManagerUser?.email
+    || "Unknown User";
   const sleekButtonClass = "w-36 px-2 py-1 bg-gradient-to-r from-blue-800 to-indigo-900 hover:from-blue-700 hover:to-indigo-800 text-white text-xs font-medium rounded-md transition-all duration-150 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 shadow-sm";
 
   const activeGoldUser = goldOverlay ? users.find((user) => user.id === goldOverlay.userId) : null;
@@ -733,6 +776,7 @@ const PlayerInfo = ({
       {showTecnicaOverlay && selectedUserId && (
         <AddTecnicaPersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
           onClose={(ok) => {
             setShowTecnicaOverlay(false);
             setSelectedUserId(null);
@@ -743,6 +787,7 @@ const PlayerInfo = ({
       {showEditTecnicaOverlay && selectedUserId && selectedTecnica && (
         <EditTecnicaPersonale
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
           tecnicaName={selectedTecnica.name}
           tecnicaData={selectedTecnica.data}
           onClose={(ok) => {
@@ -756,6 +801,7 @@ const PlayerInfo = ({
       {showDeleteTecnicaOverlay && selectedUserId && selectedTecnica && (
         <DelTecnicaPersonale
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
           tecnicaName={selectedTecnica.name}
           tecnicaData={selectedTecnica.data}
           onClose={(ok) => {
@@ -770,6 +816,7 @@ const PlayerInfo = ({
       {showSpellOverlay && selectedUserId && (
         <AddSpellOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
           onClose={(ok) => {
             setShowSpellOverlay(false);
             setSelectedUserId(null);
@@ -780,6 +827,7 @@ const PlayerInfo = ({
       {showEditSpellOverlay && selectedUserId && selectedSpell && (
         <EditSpellOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
           spellName={selectedSpell.name}
           spellData={selectedSpell.data}
           onClose={(ok) => {
@@ -793,6 +841,7 @@ const PlayerInfo = ({
       {showDeleteSpellOverlay && selectedUserId && selectedSpell && (
         <DelSpellOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
           spellName={selectedSpell.name}
           spellData={selectedSpell.data}
           onClose={(ok) => {
@@ -807,6 +856,8 @@ const PlayerInfo = ({
       {showLinguaOverlay && selectedUserId && (
         <AddLinguaPersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
+          currentMap={selectedManagerUser?.lingue}
           onClose={(ok) => {
             setShowLinguaOverlay(false);
             setSelectedUserId(null);
@@ -817,6 +868,8 @@ const PlayerInfo = ({
       {showDeleteLinguaOverlay && selectedUserId && selectedLingua && (
         <DelLinguaPersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
+          currentMap={selectedManagerUser?.lingue}
           linguaName={selectedLingua}
           onClose={(ok) => {
             setShowDeleteLinguaOverlay(false);
@@ -830,6 +883,8 @@ const PlayerInfo = ({
       {showConoscenzaOverlay && selectedUserId && (
         <AddConoscenzaPersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
+          currentMap={selectedManagerUser?.conoscenze}
           onClose={(ok) => {
             setShowConoscenzaOverlay(false);
             setSelectedUserId(null);
@@ -840,6 +895,8 @@ const PlayerInfo = ({
       {showDeleteConoscenzaOverlay && selectedUserId && selectedConoscenza && (
         <DelConoscenzaPersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
+          currentMap={selectedManagerUser?.conoscenze}
           conoscenzaName={selectedConoscenza}
           onClose={(ok) => {
             setShowDeleteConoscenzaOverlay(false);
@@ -852,6 +909,8 @@ const PlayerInfo = ({
       {showEditConoscenzaOverlay && selectedUserId && selectedConoscenza && (
         <EditConoscenzaPersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
+          currentMap={selectedManagerUser?.conoscenze}
           conoscenzaName={selectedConoscenza}
           onClose={(ok) => {
             setShowEditConoscenzaOverlay(false);
@@ -865,6 +924,8 @@ const PlayerInfo = ({
       {showProfessioneOverlay && selectedUserId && (
         <AddProfessionePersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
+          currentMap={selectedManagerUser?.professioni}
           onClose={(ok) => {
             setShowProfessioneOverlay(false);
             setSelectedUserId(null);
@@ -875,6 +936,8 @@ const PlayerInfo = ({
       {showDeleteProfessioneOverlay && selectedUserId && selectedProfessione && (
         <DelProfessionePersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
+          currentMap={selectedManagerUser?.professioni}
           professioneName={selectedProfessione}
           onClose={(ok) => {
             setShowDeleteProfessioneOverlay(false);
@@ -887,6 +950,8 @@ const PlayerInfo = ({
       {showEditProfessioneOverlay && selectedUserId && selectedProfessione && (
         <EditProfessionePersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
+          currentMap={selectedManagerUser?.professioni}
           professioneName={selectedProfessione}
           onClose={(ok) => {
             setShowEditProfessioneOverlay(false);

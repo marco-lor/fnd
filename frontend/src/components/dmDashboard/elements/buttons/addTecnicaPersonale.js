@@ -1,11 +1,11 @@
 // file: ./frontend/src/components/dmDashboard/elements/buttons/addTecnicaPersonale.js
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { db } from '../../../firebaseConfig';
-import { doc, getDoc } from "../../../../performance/firestore";
 import { getSchema } from '../../../../data/configRepository';
 import { saveTecnicaForUser } from '../../../common/userOwnedMedia';
 import useObjectUrl from '../../../common/useObjectUrl';
+import MediaImage from '../../../common/MediaImage';
+import MediaVideo from '../../../common/MediaVideo';
 import useTask07MediaOperationOwner from '../../../../data/media/useTask07MediaOperationOwner';
 
 // --- Style definition moved here ---
@@ -29,13 +29,16 @@ export function AddTecnicaButton({ onClick }) {
 
 
 // --- Existing Overlay Component (unchanged logic) ---
-export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
+export function AddTecnicaPersonaleOverlay({
+  userId,
+  userLabel,
+  onClose,
+}) {
   const task07MediaOperationOwner = useTask07MediaOperationOwner();
   const [schema, setSchema] = useState(null);
   const [tecnicaFormData, setTecnicaFormData] = useState({});
   const [imageFile, setImageFile] = useState(null);
   const [videoFile, setVideoFile] = useState(null);
-  const [userName, setUserName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const imagePreviewUrl = useObjectUrl(imageFile);
   const videoPreviewUrl = useObjectUrl(videoFile);
@@ -62,21 +65,13 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
           console.error("Schema not found at /utils/schema_tecnica");
         }
 
-        // Fetch user data to display the name
-        const userDocRef = doc(db, "users", userId);
-        const userDocSnap = await getDoc(userDocRef);
-
-        if (userDocSnap.exists()) {
-          const userData = userDocSnap.data();
-          setUserName(userData.characterId || userData.email || "Unknown User");
-        }
       } catch (error) {
         console.error("Error fetching data:", error);
       }
     };
 
     fetchData();
-  }, [userId]);
+  }, []);
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
@@ -134,7 +129,7 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
     <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-[9999]">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-4/5 max-w-2xl">
         <h2 className="text-xl text-white mb-1">Add Tecnica Personale</h2>
-        <p className="text-gray-300 mb-4">Per il giocatore: {userName}</p>
+        <p className="text-gray-300 mb-4">Per il giocatore: {userLabel || 'Unknown User'}</p>
         <form onSubmit={(e) => { e.preventDefault(); handleSaveTecnica(); }}>
           {schema ? (
             <div>
@@ -199,7 +194,15 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
                     className="w-full text-white"
                   />
                   {imagePreviewUrl && (
-                    <img src={imagePreviewUrl} alt="Preview" className="mt-2 w-24 h-auto rounded" />
+                    <MediaImage
+                      compatibilityMode="legacy"
+                      media={{ imageUrl: imagePreviewUrl }}
+                      src={imagePreviewUrl}
+                      variant="thumbnail"
+                      loading="eager"
+                      alt="Preview"
+                      className="mt-2 w-24 h-auto rounded"
+                    />
                   )}
                 </div>
 
@@ -212,10 +215,13 @@ export function AddTecnicaPersonaleOverlay({ userId, onClose }) {
                     className="w-full text-white"
                   />
                   {videoPreviewUrl && (
-                    <video
+                    <MediaVideo
+                      compatibilityMode="legacy"
+                      media={{ video_url: videoPreviewUrl }}
                       src={videoPreviewUrl}
                       controls
                       className="mt-2 w-full max-h-48 rounded"
+                      aria-label="Technique video preview"
                     />
                   )}
                   <p className="text-gray-400 text-sm mt-1">

@@ -19,6 +19,9 @@ const TASK07_IMAGE_ALIAS_FIELDS = [
   "image_url",
   "url",
   "downloadUrl",
+  "videoPath",
+  "videoUrl",
+  "video_url",
 ] as const;
 
 const isPlainRecord = (value: unknown): value is UnknownRecord => {
@@ -27,6 +30,70 @@ const isPlainRecord = (value: unknown): value is UnknownRecord => {
     Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+};
+
+const hasOwn = (value: UnknownRecord, field: string): boolean =>
+  Object.prototype.hasOwnProperty.call(value, field);
+
+const containerHasPersistedMedia = (value: unknown): boolean => {
+  if (!isPlainRecord(value)) return false;
+  if (["media", "videoMedia"].some((field) => (
+    hasOwn(value, field) && value[field] !== null && value[field] !== undefined
+  ))) return true;
+  return TASK07_IMAGE_ALIAS_FIELDS.some((field) => {
+    const candidate = value[field];
+    if (typeof candidate === "string") return Boolean(candidate.trim());
+    return candidate !== null && candidate !== undefined;
+  });
+};
+
+const nestedFoeMediaContainers = (source: UnknownRecord): unknown[] => [
+  ...(Array.isArray(source.tecniche) ? source.tecniche : []),
+  ...(Array.isArray(source.spells) ? source.spells : []),
+];
+
+export const foeHasNestedPersistedMedia = (
+  source: UnknownRecord
+): boolean => nestedFoeMediaContainers(source).some(containerHasPersistedMedia);
+
+export const foeHasPersistedMedia = (source: UnknownRecord): boolean => (
+  containerHasPersistedMedia(source) ||
+  containerHasPersistedMedia(source.General) ||
+  foeHasNestedPersistedMedia(source)
+);
+
+export const assessCanonicalOnlyFoeDuplication = (
+  source: UnknownRecord,
+  hasCanonicalClone: boolean
+): {allowed: true; reason: null} | {
+  allowed: false;
+  reason: "canonical-media-required" | "nested-media-unsupported";
+} => {
+  if (foeHasNestedPersistedMedia(source)) {
+    return {allowed: false, reason: "nested-media-unsupported"};
+  }
+  if (foeHasPersistedMedia(source) && !hasCanonicalClone) {
+    return {allowed: false, reason: "canonical-media-required"};
+  }
+  return {allowed: true, reason: null};
+};
+
+export const foeDuplicationControlFenceMatches = (input: {
+  storedControlHash: unknown;
+  storedMode: unknown;
+  currentControlHash: unknown;
+  currentMode: unknown;
+}): boolean => {
+  const storedControlHash = String(input.storedControlHash || "").trim();
+  const storedMode = String(input.storedMode || "").trim();
+  const currentControlHash = String(input.currentControlHash || "").trim();
+  const currentMode = String(input.currentMode || "").trim();
+  return Boolean(
+    storedControlHash &&
+    storedMode &&
+    storedControlHash === currentControlHash &&
+    storedMode === currentMode
+  );
 };
 
 /**

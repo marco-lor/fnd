@@ -171,7 +171,8 @@ const FIXTURES = {
 };
 
 const MUSIC_STREAM_FIXTURE = {
-  schemaVersion: 1,
+  schemaVersion: 2,
+  controlMode: 'canonical-only',
   revision: 1,
   volume: 0.65,
   sessions: [],
@@ -189,14 +190,14 @@ const FOE_OPERATION_FIXTURE = (() => {
   const path = [
     'foes',
     'task07-operations',
-    USERS.dm.uid,
+    USERS.webmaster.uid,
     receiptId,
     foeId,
     slot,
     fileName,
   ].join('/');
   const metadata = {
-    task07ActorUid: USERS.dm.uid,
+    task07ActorUid: USERS.webmaster.uid,
     task07AssetId: FIXTURES.dmOnly.assetId,
     task07Bytes: '8',
     task07Digest: digest,
@@ -216,7 +217,7 @@ const FOE_OPERATION_FIXTURE = (() => {
     },
     receipt: {
       schemaVersion: 1,
-      actorUid: USERS.dm.uid,
+      actorUid: USERS.webmaster.uid,
       operationId,
       assetId: FIXTURES.dmOnly.assetId,
       foeId,
@@ -409,6 +410,169 @@ test('music stream remains server-owned for every privileged client role', async
     await assertFails(setDoc(stream, MUSIC_STREAM_FIXTURE));
     await assertFails(updateDoc(stream, {volume: 0.2}));
     await assertFails(deleteDoc(stream));
+  }
+});
+
+test('canonical-only music writes bind tracks and cannot introduce legacy URLs', async () => {
+  const trackId = 'task07-music-track';
+  const newTrackId = 'task07-music-new';
+  const legacyTrackId = 'task07-music-legacy';
+  const mediaAssetId = assetId('9');
+  const timestamp = new Date('2026-08-01T00:00:00.000Z');
+  const baseTrack = {
+    name: 'Canonical track',
+    fileName: 'canonical.mp3',
+    audioUrl: 'https://legacy.example/canonical.mp3',
+    audioPath: 'grigliata/music/task07-dm/canonical.mp3',
+    contentType: 'audio/mpeg',
+    sizeBytes: 4096,
+    durationMs: 120000,
+    createdAt: timestamp,
+    createdBy: USERS.dm.uid,
+    updatedAt: timestamp,
+    updatedBy: USERS.dm.uid,
+  };
+  const media = {
+    schemaVersion: 1,
+    contractVersion: 1,
+    assetId: mediaAssetId,
+    kind: 'music',
+    state: 'ready',
+    generation: '7',
+    audience: 'signed-in',
+    ownerUid: USERS.dm.uid,
+    original: {
+      path: `media_assets/v1/signed-in/${USERS.dm.uid}/${mediaAssetId}/7/original`,
+      contentType: 'audio/mpeg',
+      bytes: 4096,
+      durationMs: 120000,
+      width: 0,
+      height: 0,
+      generation: '9',
+    },
+  };
+  await environment.withSecurityRulesDisabled(async (context) => {
+    const firestore = context.firestore();
+    await setDoc(doc(firestore, 'utils/task07_media'), {
+      schemaVersion: 1,
+      policyVersion: 1,
+      mode: 'canonical-only',
+      enabledPurposes: ['*'],
+      enabledRoles: ['*'],
+      enabledUids: ['*'],
+    });
+    await setDoc(doc(firestore, `grigliata_music_tracks/${trackId}`), {
+      ...baseTrack,
+      media,
+      task07MediaRevision: 1,
+      mediaUpdatedAt: timestamp,
+    });
+  });
+
+  const dm = environment.authenticatedContext(USERS.dm.uid).firestore();
+  const track = doc(dm, `grigliata_music_tracks/${trackId}`);
+  const newTrack = doc(dm, `grigliata_music_tracks/${newTrackId}`);
+  const legacyTrack = doc(dm, `grigliata_music_tracks/${legacyTrackId}`);
+  try {
+    await assertSucceeds(updateDoc(track, {musicFolderId: 'combat'}));
+    await assertFails(updateDoc(track, {
+      audioUrl: 'https://legacy.example/replacement.mp3',
+    }));
+    await assertSucceeds(setDoc(newTrack, {
+      ...baseTrack,
+      name: 'New canonical source',
+      audioUrl: '',
+      audioPath: '',
+    }));
+    await assertFails(setDoc(legacyTrack, {
+      ...baseTrack,
+      name: 'Forbidden legacy source',
+    }));
+
+    const canonicalSession = {
+      status: 'paused',
+      trackId,
+      trackName: 'Canonical track',
+      audioUrl: '',
+      mediaAssetId,
+      durationMs: 120000,
+      offsetMs: 2000,
+      loop: false,
+      startedAt: null,
+      startedAtMs: 0,
+      commandId: 'music_rules_canonical',
+      updatedAt: timestamp,
+      updatedBy: USERS.dm.uid,
+    };
+    const session = doc(dm, `grigliata_music_playback_sessions/${trackId}`);
+    await assertSucceeds(setDoc(session, canonicalSession));
+    await assertFails(setDoc(session, {
+      ...canonicalSession,
+      audioUrl: 'https://legacy.example/canonical.mp3',
+      mediaAssetId: '',
+    }));
+    await assertFails(setDoc(session, {
+      ...canonicalSession,
+      mediaAssetId: assetId('8'),
+    }));
+
+    const playback = doc(dm, 'grigliata_music_playback/current');
+    await assertSucceeds(setDoc(playback, {
+      status: 'paused',
+      trackId,
+      trackName: 'Canonical track',
+      audioUrl: '',
+      mediaAssetId,
+      durationMs: 120000,
+      offsetMs: 2000,
+      volume: 0.65,
+      startedAt: null,
+      commandId: 'music_rules_state',
+      updatedAt: timestamp,
+      updatedBy: USERS.dm.uid,
+    }));
+    await assertFails(setDoc(playback, {
+      status: 'playing',
+      trackId,
+      trackName: 'Canonical track',
+      audioUrl: 'https://legacy.example/canonical.mp3',
+      mediaAssetId: '',
+      durationMs: 120000,
+      offsetMs: 2000,
+      volume: 0.65,
+      startedAt: timestamp,
+      commandId: 'music_rules_legacy_state',
+      updatedAt: timestamp,
+      updatedBy: USERS.dm.uid,
+    }));
+    await assertSucceeds(setDoc(playback, {
+      status: 'stopped',
+      trackId: '',
+      trackName: '',
+      audioUrl: '',
+      mediaAssetId: '',
+      durationMs: 0,
+      offsetMs: 0,
+      volume: 0.65,
+      startedAt: null,
+      commandId: 'music_rules_stopped',
+      updatedAt: timestamp,
+      updatedBy: USERS.dm.uid,
+    }));
+  } finally {
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const firestore = context.firestore();
+      for (const pathName of [
+        `grigliata_music_playback_sessions/${trackId}`,
+        'grigliata_music_playback/current',
+        `grigliata_music_tracks/${trackId}`,
+        `grigliata_music_tracks/${newTrackId}`,
+        `grigliata_music_tracks/${legacyTrackId}`,
+        'utils/task07_media',
+      ]) {
+        await deleteDoc(doc(firestore, pathName));
+      }
+    });
   }
 });
 
@@ -683,7 +847,14 @@ test('staging rejects wrong bytes, MIME, disposition, and custom metadata', asyn
 test('foe operation paths are receipt-bound, immutable, and server-deletable', async () => {
   const dm = environment.authenticatedContext(USERS.dm.uid).storage();
   const peer = environment.authenticatedContext(USERS.peer.uid).storage();
-  const target = ref(dm, FOE_OPERATION_FIXTURE.path);
+  const webmaster = environment.authenticatedContext(USERS.webmaster.uid).storage();
+  const target = ref(webmaster, FOE_OPERATION_FIXTURE.path);
+  await assertFails(uploadString(
+    ref(dm, FOE_OPERATION_FIXTURE.path),
+    '12345678',
+    'raw',
+    FOE_OPERATION_FIXTURE.uploadMetadata
+  ));
   await assertFails(uploadString(
     ref(peer, FOE_OPERATION_FIXTURE.path),
     '12345678',
@@ -691,7 +862,7 @@ test('foe operation paths are receipt-bound, immutable, and server-deletable', a
     FOE_OPERATION_FIXTURE.uploadMetadata
   ));
   await assertFails(uploadString(
-    ref(dm, `${FOE_OPERATION_FIXTURE.path}/bypass.png`),
+    ref(webmaster, `${FOE_OPERATION_FIXTURE.path}/bypass.png`),
     '12345678',
     'raw',
     FOE_OPERATION_FIXTURE.uploadMetadata
@@ -763,7 +934,7 @@ test('generated paths are read-only and enforce signed-in audiences', async () =
   await assertFails(getMetadata(ref(owner, pathOf(FIXTURES.dmOnly))));
   await assertFails(getMetadata(ref(peer, pathOf(FIXTURES.dmOnly))));
   await assertSucceeds(getMetadata(ref(dm, pathOf(FIXTURES.dmOnly))));
-  await assertFails(getMetadata(ref(webmaster, pathOf(FIXTURES.dmOnly))));
+  await assertSucceeds(getMetadata(ref(webmaster, pathOf(FIXTURES.dmOnly))));
 
   await assertFails(uploadString(
     ref(owner, pathOf(FIXTURES.signedIn)),

@@ -1,14 +1,20 @@
 // file: frontend/src/components/dmDashboard/elements/editTecnicaPersonale.js
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { db } from '../../../firebaseConfig';
-import { doc, getDoc } from "../../../../performance/firestore";
 import { getSchema } from '../../../../data/configRepository';
 import { saveTecnicaForUser } from '../../../common/userOwnedMedia';
 import useObjectUrl from '../../../common/useObjectUrl';
+import MediaImage from '../../../common/MediaImage';
+import MediaVideo from '../../../common/MediaVideo';
 import useTask07MediaOperationOwner from '../../../../data/media/useTask07MediaOperationOwner';
 
-export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose }) {
+export function EditTecnicaPersonale({
+  userId,
+  userLabel,
+  tecnicaName,
+  tecnicaData,
+  onClose,
+}) {
   const task07MediaOperationOwner = useTask07MediaOperationOwner();
   const [schema, setSchema] = useState(null);
   const [tecnicaFormData, setTecnicaFormData] = useState({});
@@ -18,12 +24,17 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
   const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
   const [imageRemoved, setImageRemoved] = useState(false);
   const [videoRemoved, setVideoRemoved] = useState(false);
-  const [userName, setUserName] = useState("");
   const [showConfirmation, setShowConfirmation] = useState(false);
   const imageObjectUrl = useObjectUrl(imageFile);
   const videoObjectUrl = useObjectUrl(videoFile);
   const resolvedImagePreviewUrl = imageObjectUrl || imagePreviewUrl;
   const resolvedVideoPreviewUrl = videoObjectUrl || videoPreviewUrl;
+  const hasImagePreview = !imageRemoved && Boolean(
+    resolvedImagePreviewUrl || tecnicaData?.media
+  );
+  const hasVideoPreview = !videoRemoved && Boolean(
+    resolvedVideoPreviewUrl || tecnicaData?.videoMedia
+  );
 
   useEffect(() => {
     const fetchData = async () => {
@@ -56,21 +67,13 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
           console.error("Schema not found at /utils/schema_tecnica");
         }
 
-        // Fetch user data to display the name
-        const userDocRef = doc(db, "users", userId);
-        const userDocSnap = await getDoc(userDocRef);
-
-        if (userDocSnap.exists()) {
-          const userData = userDocSnap.data();
-          setUserName(userData.characterId || userData.email || "Unknown User");
-        }
       } catch (error) {
         console.error("Error fetching data:", error);
       }
     };
 
     fetchData();
-  }, [userId, tecnicaName, tecnicaData]);
+  }, [tecnicaName, tecnicaData]);
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
@@ -140,7 +143,7 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
     <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-[9999]">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-4/5 max-w-2xl">
         <h2 className="text-xl text-white mb-1">Modifica Tecnica Personale</h2>
-        <p className="text-gray-300 mb-4">Per il giocatore: {userName}</p>
+        <p className="text-gray-300 mb-4">Per il giocatore: {userLabel || 'Unknown User'}</p>
 
         {showConfirmation ? (
           <div className="text-white">
@@ -224,9 +227,18 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
                       onChange={handleImageChange}
                       className="w-full text-white"
                     />
-                    {resolvedImagePreviewUrl && (
+                    {hasImagePreview && (
                       <div className="mt-2 relative w-24 h-24">
-                        <img src={resolvedImagePreviewUrl} alt="Preview" className="w-full h-full object-cover rounded" />
+                        <MediaImage
+                          compatibilityMode={imageObjectUrl ? "legacy" : "auto"}
+                          media={imageObjectUrl ? { imageUrl: imageObjectUrl } : tecnicaData}
+                          mediaPurpose={imageObjectUrl ? "" : "technique"}
+                          src={resolvedImagePreviewUrl || ""}
+                          variant="thumbnail"
+                          loading="eager"
+                          alt="Preview"
+                          className="w-full h-full object-cover rounded"
+                        />
                         <button
                           type="button"
                           onClick={clearImage}
@@ -236,7 +248,7 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
                         </button>
                       </div>
                     )}
-                    {!resolvedImagePreviewUrl && (
+                    {!hasImagePreview && (
                       <div className="mt-2 w-24 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">
                         No Image
                       </div>
@@ -251,12 +263,17 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
                       onChange={handleVideoChange}
                       className="w-full text-white"
                     />
-                    {resolvedVideoPreviewUrl && (
+                    {hasVideoPreview && (
                       <div className="mt-2 relative">
-                        <video
-                          src={resolvedVideoPreviewUrl}
+                        <MediaVideo
+                          compatibilityMode={videoObjectUrl ? "legacy" : "auto"}
+                          media={videoObjectUrl ? { video_url: videoObjectUrl } : tecnicaData}
+                          mediaPurpose={videoObjectUrl ? "" : "technique-video"}
+                          src={resolvedVideoPreviewUrl || ""}
                           controls
                           className="w-full max-h-48 rounded"
+                          preload="metadata"
+                          aria-label="Technique video preview"
                         />
                         <button
                           type="button"
@@ -267,7 +284,7 @@ export function EditTecnicaPersonale({ userId, tecnicaName, tecnicaData, onClose
                         </button>
                       </div>
                     )}
-                    {!resolvedVideoPreviewUrl && (
+                    {!hasVideoPreview && (
                       <div className="mt-2 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">
                         No Video
                       </div>

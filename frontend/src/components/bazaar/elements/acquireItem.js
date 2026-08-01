@@ -5,8 +5,6 @@ import {
   isDefinitiveUserDataCommandError,
   purchaseItem,
 } from '../../../data/userData/userDataCommands';
-import { legacyPurchaseItem } from '../../../data/userData/legacyUserDataCommands';
-import { runVersionedUserDataCommand } from '../../../data/userData/userDataCommandRouting';
 
 /**
  * Attempts to purchase an item for a user.
@@ -22,7 +20,7 @@ import { runVersionedUserDataCommand } from '../../../data/userData/userDataComm
  * @param {object} item Item object (must contain id and General.prezzo)
  * @returns {Promise<{success?:boolean, alreadyOwned?:boolean, insufficient?:boolean, newGold?:number, price:number, gold:number, error?:string}>}
  */
-export async function acquireItem(userId, item, operationId, stage, retryKey) {
+export async function acquireItem(userId, item, operationId, retryKey) {
   if (!userId) return { error: 'Utente non valido.', price: 0, gold: 0 };
   if (!item || !item.id) return { error: 'Oggetto non valido.', price: 0, gold: 0 };
 
@@ -31,14 +29,10 @@ export async function acquireItem(userId, item, operationId, stage, retryKey) {
   if (price < 0) return { error: 'Prezzo non valido.', price: 0, gold: 0 };
 
   try {
-    return await runVersionedUserDataCommand({
-      stage,
-      legacy: () => legacyPurchaseItem({ uid: userId, item }),
-      authoritative: () => purchaseItem({
-        itemId: item.id,
-        ...(operationId ? { operationId } : {}),
-        ...(retryKey ? { retryKey } : {}),
-      }),
+    return await purchaseItem({
+      itemId: item.id,
+      ...(operationId ? { operationId } : {}),
+      ...(retryKey ? { retryKey } : {}),
     });
   } catch (e) {
     console.error('Errore comando acquisto:', e);

@@ -1,9 +1,8 @@
 // ./buttons/addLinguaPersonale.js
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { db } from '../../../firebaseConfig';
-import { doc, getDoc, updateDoc } from "../../../../performance/firestore";
 import { getCodex } from '../../../../data/codexRepository';
+import { persistProfileContentMap } from '../../../../data/userData/managerProfileContent';
 
 // --- Style definition ---
 const sleekButtonStyle = "w-36 px-2 py-1 bg-gradient-to-r from-blue-800 to-indigo-900 hover:from-blue-700 hover:to-indigo-800 text-white text-xs font-medium rounded-md transition-all duration-150 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 shadow-sm";
@@ -24,12 +23,16 @@ const AddLinguaPersonale = ({ onClick }) => {
 };
 
 // --- New Overlay Component ---
-export function AddLinguaPersonaleOverlay({ userId, onClose }) {
+export function AddLinguaPersonaleOverlay({
+  userId,
+  userLabel,
+  currentMap,
+  onClose,
+}) {
   const [codexLingue, setCodexLingue] = useState({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedLingua, setSelectedLingua] = useState(null);
-  const [userName, setUserName] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
@@ -48,15 +51,6 @@ export function AddLinguaPersonaleOverlay({ userId, onClose }) {
           setError("Documento Codex non trovato");
         }
 
-        // Fetch user data to display the name
-        const userDocRef = doc(db, "users", userId);
-        const userDocSnap = await getDoc(userDocRef);
-
-        if (userDocSnap.exists()) {
-          const userData = userDocSnap.data();
-          setUserName(userData.characterId || userData.email || "Unknown User");
-        }
-
         setIsLoading(false);
       } catch (error) {
         console.error("Error fetching data:", error);
@@ -66,7 +60,7 @@ export function AddLinguaPersonaleOverlay({ userId, onClose }) {
     };
 
     fetchData();
-  }, [userId]);
+  }, []);
 
   const handleSaveLingua = async () => {
     if (!selectedLingua) {
@@ -77,22 +71,15 @@ export function AddLinguaPersonaleOverlay({ userId, onClose }) {
       // Get the lingua details from codex
       const linguaData = codexLingue[selectedLingua];
       
-      // Update the user's lingue field
-      const userRef = doc(db, "users", userId);
-      const userDoc = await getDoc(userRef);
-
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        const updatedLingue = { ...(userData.lingue || {}) };
-
-        // Add or update the selected lingua
-        updatedLingue[selectedLingua] = linguaData;
-
-        await updateDoc(userRef, { lingue: updatedLingue });
-        onClose(true);
-      } else {
-        alert("User not found");
-      }
+      await persistProfileContentMap({
+        userId,
+        field: 'lingue',
+        currentMap,
+        action: 'upsert',
+        name: selectedLingua,
+        value: linguaData,
+      });
+      onClose(true);
     } catch (error) {
       console.error("Error saving lingua:", error);
       alert("Error saving lingua");
@@ -108,7 +95,7 @@ export function AddLinguaPersonaleOverlay({ userId, onClose }) {
     <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-[9999]">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-4/5 max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
         <h2 className="text-xl text-white mb-1">Aggiungi Lingua</h2>
-        <p className="text-gray-300 mb-4">Per il giocatore: {userName}</p>
+        <p className="text-gray-300 mb-4">Per il giocatore: {userLabel || 'Unknown User'}</p>
         
         {isLoading ? (
           <div className="text-center py-8 text-white">Caricamento lingue dal Codex...</div>

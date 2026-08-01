@@ -2,13 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { db } from "../../firebaseConfig";
 import {
     collection,
-    onSnapshot,
-    query,
     serverTimestamp,
-    where,
     writeBatch,
     doc,
 } from "../../../performance/firestore";
+import { subscribeUserDirectoryFirstPage } from '../../../data/userDirectoryRepository';
 import { Button, Section, TextInput, Chip } from "./ui";
 
 const normalize = (s) => (s || "").trim().toLowerCase();
@@ -22,23 +20,26 @@ const EncounterCreator = ({ isDM, currentUid, collapseControl }) => {
     const [creating, setCreating] = useState(false);
 
     useEffect(() => {
-        if (!isDM) return; // Fetch list only for DM UI
-        const usersCol = collection(db, "users");
-        const qUsers = query(usersCol, where("role", "in", ["player", "players", "webmaster"]));
-        const unsub = onSnapshot(qUsers, (snap) => {
-            const list = [];
-            snap.forEach((d) => {
-                const data = d.data();
-                const authUid = data?.uid || d.id;
-                list.push({
-                    uid: authUid,
-                    characterId: data.characterId || "",
-                    email: data.email || "",
-                });
-            });
-            setAssignableUsers(list);
+        if (!isDM) {
+            setAssignableUsers([]);
+            return undefined;
+        }
+        const unsub = subscribeUserDirectoryFirstPage({
+            next: ({ items = [] } = {}) => {
+                setAssignableUsers(items
+                    .filter(({ role }) => role === 'player' || role === 'webmaster')
+                    .map((entry) => ({
+                        uid: entry.id,
+                        characterId: entry.characterId || '',
+                        email: '',
+                    })));
+            },
+            error: (error) => {
+                console.error('Failed to subscribe to the user directory', error);
+                setAssignableUsers([]);
+            },
         });
-        return () => unsub();
+        return () => unsub?.();
     }, [isDM]);
 
     const byCharId = useMemo(() => {

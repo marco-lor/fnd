@@ -1,12 +1,11 @@
 import {CallableRequest, HttpsError} from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
-import {getStorage} from "firebase-admin/storage";
-import {randomUUID} from "crypto";
 import {
-  task07CanonicalFoeMediaAssetId,
-  Task07MediaClonePlanError,
-} from "./mediaAssetCloneCore";
+  foeHasPersistedMedia,
+} from "./duplicateFoeWithAssetsCore";
+import {task07MediaModeForActor} from "./task07MediaControl";
+import {hashValue} from "./userDataV2";
 
 export type LegacyDuplicatePayload = {
   sourceFoeId?: string;
@@ -14,40 +13,36 @@ export type LegacyDuplicatePayload = {
   idempotencyKey?: string;
 };
 
-type CopyResult = {path: string; url: string};
+type UnknownRecord = Record<string, unknown>;
 
-const safeName = (value: string, max = 60): string =>
-  (value || "")
-    .toString()
-    .normalize("NFKD")
-    .replace(/[^A-Za-z0-9_-]+/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, max) || "foe";
+const asRecord = (value: unknown): UnknownRecord => (
+  value && typeof value === "object" && !Array.isArray(value) ?
+    value as UnknownRecord :
+    {}
+);
 
-const guessExt = (contentType?: string, sourcePath?: string): string => {
-  const normalizedContentType = (contentType || "").toLowerCase();
-  if (normalizedContentType.includes("jpeg")) return "jpg";
-  if (normalizedContentType.includes("png")) return "png";
-  if (normalizedContentType.includes("webp")) return "webp";
-  if (normalizedContentType.includes("gif")) return "gif";
-  if (normalizedContentType.includes("svg")) return "svg";
-  if (sourcePath && sourcePath.includes(".")) {
-    const match = sourcePath.match(/\.([A-Za-z0-9]+)$/);
-    if (match) return match[1].toLowerCase();
-  }
-  return "bin";
-};
-
-const nowTag = (): string =>
-  `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+const duplicatedEntries = (value: unknown): UnknownRecord[] => (
+  Array.isArray(value) ? value : []
+).map((raw) => {
+  const entry = asRecord(raw);
+  return {
+    name: entry.name || "",
+    description: entry.description || "",
+    danni: entry.danni || "",
+    effetti: entry.effetti || "",
+    imageUrl: "",
+    imagePath: "",
+  };
+});
 
 /**
  * Compatibility implementation for the original europe-west1 callable.
  *
- * It intentionally retains the historical duplication receipt collection and
- * asset layout. It does not consult Task-06 config or write Task-06 operation
- * documents.
+ * This endpoint is intentionally limited to foes with no persisted media. Any
+ * media-bearing source must use the resumable V2 callable, which owns canonical
+ * Task 07 cloning and recovery. Reading Task 07 control in the same Firestore
+ * transaction as the target write prevents a control change from being hidden
+ * behind a legacy Storage side effect.
  */
 export const duplicateFoeWithAssetsLegacyHandler = async (
   req: CallableRequest<LegacyDuplicatePayload>
@@ -74,253 +69,124 @@ export const duplicateFoeWithAssetsLegacyHandler = async (
   }
 
   const db = admin.firestore();
-  const requesterSnap = await db.doc(`users/${ctx.uid}`).get();
-  if (requesterSnap.get("role") !== "dm") {
-    throw new HttpsError(
-      "permission-denied",
-      "Only DMs can duplicate foes."
-    );
-  }
+  const requesterRef = db.doc("users/" + ctx.uid);
+  const sourceRef = db.doc("foes/" + sourceFoeId);
+  const task07ControlRef = db.doc("utils/task07_media");
+  const newDocRef = db.collection("foes").doc();
+  const idemDocRef = idempotencyKey && typeof idempotencyKey === "string" ?
+    db.collection("duplications").doc(idempotencyKey) :
+    null;
 
-  let idemDocRef: FirebaseFirestore.DocumentReference | null = null;
-  if (idempotencyKey && typeof idempotencyKey === "string") {
-    idemDocRef = db.collection("duplications").doc(idempotencyKey);
-    const existing = await idemDocRef.get();
-    if (existing.exists) {
-      const data = existing.data();
-      if (data && data.result) {
-        logger.info("Idempotent duplicate hit", {idempotencyKey});
-        return data.result;
+  const outcome = await db.runTransaction(async (transaction) => {
+    const snapshots = await transaction.getAll(
+      requesterRef,
+      sourceRef,
+      task07ControlRef,
+      ...(idemDocRef ? [idemDocRef] : [])
+    );
+    const requester = snapshots[0];
+    const sourceSnapshot = snapshots[1];
+    const task07Control = snapshots[2];
+    const existingReceipt = idemDocRef ? snapshots[3] : null;
+
+    if (requester.get("role") !== "dm") {
+      throw new HttpsError(
+        "permission-denied",
+        "Only DMs can duplicate foes."
+      );
+    }
+    if (existingReceipt?.exists) {
+      const existingResult = existingReceipt.get("result");
+      if (existingResult && typeof existingResult === "object") {
+        return {
+          replayed: true,
+          result: existingResult as Record<string, unknown>,
+        };
       }
     }
-  }
+    if (!sourceSnapshot.exists) {
+      throw new HttpsError("not-found", "Source foe not found");
+    }
 
-  const sourceRef = db.collection("foes").doc(sourceFoeId);
-  const sourceSnapshot = await sourceRef.get();
-  if (!sourceSnapshot.exists) {
-    throw new HttpsError("not-found", "Source foe not found");
-  }
-  const source = sourceSnapshot.data() || {};
-  try {
-    if (task07CanonicalFoeMediaAssetId(source)) {
+    const source = asRecord(sourceSnapshot.data());
+    if (foeHasPersistedMedia(source)) {
       throw new HttpsError(
         "failed-precondition",
-        "Canonical foe media requires the resumable duplication callable."
+        "Media-bearing foes require canonical Task 07 duplication."
       );
     }
-  } catch (error) {
-    if (error instanceof HttpsError) throw error;
-    if (error instanceof Task07MediaClonePlanError) {
-      throw new HttpsError("failed-precondition", error.message);
-    }
-    throw error;
-  }
-  const bucket = getStorage().bucket();
 
-  const copyFile = async (
-    sourcePath: string,
-    destinationFolder: string,
-    baseName: string
-  ): Promise<CopyResult> => {
-    if (!sourcePath) return {path: "", url: ""};
-    const sourceFile = bucket.file(sourcePath);
-    const [exists] = await sourceFile.exists();
-    if (!exists) return {path: "", url: ""};
-    const [sourceMetadata] = await sourceFile.getMetadata();
-    const extension = guessExt(
-      sourceMetadata?.contentType,
-      sourcePath
-    );
-    const destinationName =
-      `${baseName}_${nowTag()}.${extension}`;
-    const destinationPath =
-      `${destinationFolder}/${destinationName}`;
-    const destinationFile = bucket.file(destinationPath);
-    await sourceFile.copy(destinationFile);
-    const [destinationMetadata] = await destinationFile.getMetadata();
-    let token = destinationMetadata?.metadata
-      ?.firebaseStorageDownloadTokens as string | undefined;
-    if (!token) token = randomUUID();
-    const newMetadata = {
-      ...(sourceMetadata?.contentType
-        ? {contentType: sourceMetadata.contentType}
-        : {}),
-      cacheControl: "private, max-age=31536000, immutable",
-      metadata: {
-        ...(destinationMetadata?.metadata || {}),
-        firebaseStorageDownloadTokens: token,
+    const task07Mode = task07MediaModeForActor({
+      control: task07Control.data(),
+      purpose: "foe",
+      role: "dm",
+      uid: ctx.uid,
+    });
+    const task07ControlHash = hashValue(task07Control.data() ?? {});
+    const sourceStats = asRecord(source.stats);
+    const hpTotal = Number(sourceStats.hpTotal || 0);
+    const manaTotal = Number(sourceStats.manaTotal || 0);
+    const newTecniche = duplicatedEntries(source.tecniche);
+    const newSpells = duplicatedEntries(source.spells);
+    const payload: Record<string, unknown> = {
+      name: newFoeName.trim(),
+      category: source.category || "",
+      rank: source.rank || "",
+      notes: source.notes || "",
+      dadoAnima: source.dadoAnima || "",
+      Parametri: source.Parametri || {},
+      stats: {
+        ...sourceStats,
+        hpCurrent: hpTotal,
+        manaCurrent: manaTotal,
+      },
+      imageUrl: "",
+      imagePath: "",
+      tecniche: newTecniche,
+      spells: newSpells,
+      created_at: admin.firestore.FieldValue.serverTimestamp(),
+      updated_at: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    const result = {
+      newFoeId: newDocRef.id,
+      assets: {
+        main: {path: "", url: ""},
+        spells: newSpells.map((spell) => ({
+          name: spell.name,
+          path: "",
+          url: "",
+        })),
+        tecniche: newTecniche.map((tecnica) => ({
+          name: tecnica.name,
+          path: "",
+          url: "",
+        })),
       },
     };
-    try {
-      await destinationFile.setMetadata(newMetadata);
-    } catch (error) {
-      logger.warn("setMetadata failed", {
-        destPath: destinationPath,
-        error: (error as Error).message,
-      });
-    }
-    const url =
-      `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/` +
-      `${encodeURIComponent(destinationPath)}?alt=media&token=${token}`;
-    return {path: destinationPath, url};
-  };
 
-  const getSourcePath = (item: unknown): string => {
-    const record = (
-      item && typeof item === "object"
-        ? item
-        : {}
-    ) as Record<string, unknown>;
-    const path = (record.imagePath || "").toString();
-    if (!path || path.includes("://")) return "";
-    return path;
-  };
-
-  const mainSourcePath = getSourcePath(source);
-  const mainCopy = mainSourcePath
-    ? await copyFile(
-      mainSourcePath,
-      "foes",
-      safeName(newFoeName)
-    )
-    : {path: "", url: ""};
-
-  const tecniche = Array.isArray(source?.tecniche)
-    ? source.tecniche
-    : [];
-  const newTecniche: Array<Record<string, unknown>> = [];
-  for (let index = 0; index < tecniche.length; index += 1) {
-    const tecnica = tecniche[index] || {};
-    const tecnicaSource = getSourcePath(tecnica);
-    let imagePath = "";
-    let imageUrl = "";
-    if (tecnicaSource) {
-      const copied = await copyFile(
-        tecnicaSource,
-        "foes/tecniche",
-        safeName(tecnica?.name || "tecnica")
-      );
-      imagePath = copied.path;
-      imageUrl = copied.url;
-    }
-    newTecniche.push({
-      name: tecnica?.name || "",
-      description: tecnica?.description || "",
-      danni: tecnica?.danni || "",
-      effetti: tecnica?.effetti || "",
-      imageUrl,
-      imagePath,
-    });
-  }
-
-  const spells = Array.isArray(source?.spells)
-    ? source.spells
-    : [];
-  const newSpells: Array<Record<string, unknown>> = [];
-  for (let index = 0; index < spells.length; index += 1) {
-    const spell = spells[index] || {};
-    const spellSource = getSourcePath(spell);
-    let imagePath = "";
-    let imageUrl = "";
-    if (spellSource) {
-      const copied = await copyFile(
-        spellSource,
-        "foes/spells",
-        safeName(spell?.name || "spell")
-      );
-      imagePath = copied.path;
-      imageUrl = copied.url;
-    }
-    newSpells.push({
-      name: spell?.name || "",
-      description: spell?.description || "",
-      danni: spell?.danni || "",
-      effetti: spell?.effetti || "",
-      imageUrl,
-      imagePath,
-    });
-  }
-
-  const hpTotal = Number(source?.stats?.hpTotal || 0);
-  const manaTotal = Number(source?.stats?.manaTotal || 0);
-  const payload: Record<string, unknown> = {
-    name: newFoeName.trim(),
-    category: source?.category || "",
-    rank: source?.rank || "",
-    notes: source?.notes || "",
-    dadoAnima: source?.dadoAnima || "",
-    Parametri: source?.Parametri || {},
-    stats: {
-      ...(source?.stats || {}),
-      hpCurrent: hpTotal,
-      manaCurrent: manaTotal,
-    },
-    imageUrl: mainCopy.url || "",
-    imagePath: mainCopy.path || "",
-    tecniche: newTecniche,
-    spells: newSpells,
-    created_at: admin.firestore.FieldValue.serverTimestamp(),
-    updated_at: admin.firestore.FieldValue.serverTimestamp(),
-  };
-
-  const newDocRef = db.collection("foes").doc();
-  const batch = db.batch();
-  batch.set(newDocRef, payload);
-  if (idemDocRef) {
-    batch.set(
-      idemDocRef,
-      {
+    transaction.create(newDocRef, payload);
+    if (idemDocRef) {
+      transaction.set(idemDocRef, {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         actor: ctx.uid,
         sourceFoeId,
+        sourceHash: hashValue(source),
+        task07ControlHash,
+        task07Mode,
         newFoeId: newDocRef.id,
-        result: {
-          newFoeId: newDocRef.id,
-          assets: {
-            main: {
-              path: payload.imagePath,
-              url: payload.imageUrl,
-            },
-            spells: newSpells.map((spell) => ({
-              name: spell.name,
-              path: spell.imagePath || "",
-              url: spell.imageUrl || "",
-            })),
-            tecniche: newTecniche.map((tecnica) => ({
-              name: tecnica.name,
-              path: tecnica.imagePath || "",
-              url: tecnica.imageUrl || "",
-            })),
-          },
-        },
-      },
-      {merge: true}
-    );
-  }
-
-  await batch.commit();
-  const result = {
-    newFoeId: newDocRef.id,
-    assets: {
-      main: {
-        path: payload.imagePath,
-        url: payload.imageUrl,
-      },
-      spells: newSpells.map((spell) => ({
-        name: spell.name,
-        path: spell.imagePath || "",
-        url: spell.imageUrl || "",
-      })),
-      tecniche: newTecniche.map((tecnica) => ({
-        name: tecnica.name,
-        path: tecnica.imagePath || "",
-        url: tecnica.imageUrl || "",
-      })),
-    },
-  };
-  logger.info("Foe duplicated", {
-    sourceFoeId,
-    newFoeId: newDocRef.id,
+        result,
+      }, {merge: true});
+    }
+    return {replayed: false, result};
   });
-  return result;
+
+  logger.info(
+    outcome.replayed ? "Idempotent duplicate hit" : "Foe duplicated",
+    {
+      sourceFoeId,
+      newFoeId: outcome.result.newFoeId,
+      legacyNoMediaOnly: true,
+    }
+  );
+  return outcome.result;
 };

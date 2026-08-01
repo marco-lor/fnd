@@ -108,6 +108,30 @@
       "owner": "user-data-v2",
       "compatibilityAliasOf": null
     },
+    "task05CharacterCreation": {
+      "functionId": "task05CharacterCreation",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task05ConsumeTurnEffects": {
+      "functionId": "task05ConsumeTurnEffects",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task05ListAdminUsers": {
+      "functionId": "task05ListAdminUsers",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task07ResolveCharacterMedia": {
+      "functionId": "task07ResolveCharacterMedia",
+      "region": "europe-west8",
+      "owner": "media-lifecycle",
+      "compatibilityAliasOf": null
+    },
     "task07PrepareMediaUpload": {
       "functionId": "task07PrepareMediaUpload",
       "region": "europe-west8",

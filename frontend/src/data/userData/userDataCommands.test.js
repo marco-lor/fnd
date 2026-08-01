@@ -1,7 +1,12 @@
 import {
   __resetUserDataCommandsForTests,
+  consumeTurnEffects,
   createUserOperationId,
+  getAdminUsersPage,
   purchaseItem,
+  spendCharacterPoint,
+  updateCharacterCreation,
+  updateGrigliataCharacterResources,
   updateResource,
 } from './userDataCommands';
 import {
@@ -40,6 +45,33 @@ describe('Task 05 user commands', () => {
 
     expect(getFunctions).toHaveBeenCalledWith({}, 'europe-west8');
     expect(connectFunctionsEmulator).not.toHaveBeenCalled();
+  });
+
+  test('routes private admin labels through the paginated V2 callable', async () => {
+    await getAdminUsersPage({cursor: 'user-1', limit: 50});
+
+    expect(httpsCallable).toHaveBeenCalledWith(expect.anything(), 'task05ListAdminUsers');
+    expect(mockCallable).toHaveBeenCalledWith({
+      cursor: 'user-1',
+      limit: 50,
+    });
+  });
+
+  test('routes point spending through the manifest-backed V2 callable', async () => {
+    await spendCharacterPoint({
+      statName: 'Forza',
+      statType: 'Base',
+      change: 1,
+      operationId: 'point-fixed',
+    });
+
+    expect(httpsCallable).toHaveBeenCalledWith(expect.anything(), 'spendCharacterPointV2');
+    expect(mockCallable).toHaveBeenCalledWith({
+      statName: 'Forza',
+      statType: 'Base',
+      change: 1,
+      operationId: 'point-fixed',
+    });
   });
 
   test('sends only the catalog item ID and idempotency key for purchases', async () => {
@@ -89,6 +121,125 @@ describe('Task 05 user commands', () => {
       totalTurns: 3,
       remainingTurns: 3,
     });
+  });
+
+  test('routes Grigliata character resources and the reviewed token patch atomically', async () => {
+    await updateGrigliataCharacterResources({
+      userId: 'player-1',
+      backgroundId: 'map-1',
+      tokenId: 'player-1',
+      resources: {
+        hpCurrent: 8,
+        manaCurrent: 5,
+        barrieraCurrent: 2,
+      },
+      tokenPatch: {
+        characterId: 'Boros',
+        notes: 'Guarding the gate',
+      },
+      operationId: 'grigliata-fixed',
+    });
+
+    expect(httpsCallable).toHaveBeenCalledWith(
+      expect.anything(),
+      'task05UpdateGrigliataCharacterResources'
+    );
+    expect(mockCallable).toHaveBeenCalledWith({
+      userId: 'player-1',
+      backgroundId: 'map-1',
+      tokenId: 'player-1',
+      resources: { hpCurrent: 8, manaCurrent: 5, barrieraCurrent: 2 },
+      tokenPatch: { characterId: 'Boros', notes: 'Guarding the gate' },
+      operationId: 'grigliata-fixed',
+    });
+  });
+
+  test('routes character creation actions through one idempotent V2 endpoint', async () => {
+    await updateCharacterCreation({
+      action: 'selectRace',
+      race: 'elf',
+      operationId: 'character-fixed',
+    });
+
+    expect(httpsCallable).toHaveBeenCalledWith(expect.anything(), 'task05CharacterCreation');
+    expect(mockCallable).toHaveBeenCalledWith({
+      action: 'selectRace',
+      race: 'elf',
+      operationId: 'character-fixed',
+    });
+  });
+
+  test('routes DM turn-effect consumption with explicit target identity', async () => {
+    await consumeTurnEffects({
+      userId: 'player-1',
+      operationId: 'effects-fixed',
+    });
+
+    expect(httpsCallable).toHaveBeenCalledWith(expect.anything(), 'task05ConsumeTurnEffects');
+    expect(mockCallable).toHaveBeenCalledWith({
+      userId: 'player-1',
+      operationId: 'effects-fixed',
+    });
+  });
+
+  test('retains the atomic Grigliata turn operation ID across an ambiguous failure', async () => {
+    const unavailable = Object.assign(new Error('offline'), { code: 'functions/unavailable' });
+    mockCallable
+      .mockRejectedValueOnce(unavailable)
+      .mockResolvedValueOnce({ data: { success: true } });
+    const request = {
+      userId: 'player-1',
+      grigliataTransition: {
+        backgroundId: 'map-1',
+        tokenId: 'player-1',
+        expectedPreviousActiveTokenId: 'player-2',
+        expectedTurnCounter: 3,
+        preserveStartedAt: true,
+      },
+      retryKey: 'grigliata-turn:map-1:player-1:3',
+      retryScope: 'grigliata-turn:map-1:player-1',
+    };
+
+    await expect(consumeTurnEffects(request)).rejects.toBe(unavailable);
+    const firstPayload = mockCallable.mock.calls[0][0];
+    await expect(consumeTurnEffects(request)).resolves.toEqual({ success: true });
+    const secondPayload = mockCallable.mock.calls[1][0];
+
+    expect(secondPayload.operationId).toBe(firstPayload.operationId);
+    expect(secondPayload.grigliataTransition).toEqual(request.grigliataTransition);
+  });
+
+  test('does not reuse a retained operation after the transition scope advances', async () => {
+    const unavailable = Object.assign(new Error('offline'), { code: 'functions/unavailable' });
+    mockCallable
+      .mockRejectedValueOnce(unavailable)
+      .mockResolvedValue({ data: { success: true } });
+    const buildRequest = (turnCounter) => ({
+      userId: 'player-1',
+      grigliataTransition: {
+        backgroundId: 'map-1',
+        tokenId: 'player-1',
+        expectedPreviousActiveTokenId: 'player-2',
+        expectedTurnCounter: turnCounter,
+        preserveStartedAt: true,
+      },
+      retryKey: `grigliata-turn:map-1:player-1:session-1:${turnCounter}`,
+      retryScope: 'grigliata-turn:map-1:player-1',
+    });
+    const ambiguousRequest = buildRequest(3);
+
+    await expect(consumeTurnEffects(ambiguousRequest)).rejects.toBe(unavailable);
+    const ambiguousOperationId = mockCallable.mock.calls[0][0].operationId;
+
+    await expect(consumeTurnEffects(buildRequest(4))).resolves.toEqual({ success: true });
+    const advancedOperationId = mockCallable.mock.calls[1][0].operationId;
+
+    await expect(consumeTurnEffects(ambiguousRequest)).resolves.toEqual({ success: true });
+    const laterOperationId = mockCallable.mock.calls[2][0].operationId;
+
+    expect(advancedOperationId).not.toBe(ambiguousOperationId);
+    expect(laterOperationId).not.toBe(ambiguousOperationId);
+    expect(mockCallable.mock.calls.every(([payload]) => payload.retryScope === undefined)).toBe(true);
   });
 
   test('generates IDs accepted by the shared server contract', () => {

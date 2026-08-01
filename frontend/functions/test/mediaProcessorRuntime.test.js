@@ -30,6 +30,7 @@ test("pinned sharp and ffmpeg stack creates image and video derivatives", {
     buffer: image,
     kind: "avatar",
     declaredContentType: "image/png",
+    maxInputPixels: 16_000_000,
   });
   assert.equal(imageSource.width, 120);
   assert.equal(imageSource.height, 80);
@@ -38,6 +39,7 @@ test("pinned sharp and ffmpeg stack creates image and video derivatives", {
     kind: "avatar",
     source: imageSource,
     variant: "thumbnail",
+    maxInputPixels: 16_000_000,
   });
   assert.deepEqual(
     {width: thumbnail.width, height: thumbnail.height},
@@ -64,6 +66,7 @@ test("pinned sharp and ffmpeg stack creates image and video derivatives", {
       buffer: video,
       kind: "map-video",
       declaredContentType: "video/mp4",
+      maxInputPixels: 2_073_600,
     });
     assert.equal(videoSource.width, 320);
     assert.equal(videoSource.height, 180);
@@ -73,6 +76,7 @@ test("pinned sharp and ffmpeg stack creates image and video derivatives", {
       kind: "map-video",
       source: videoSource,
       variant: "poster",
+      maxInputPixels: 2_073_600,
     });
     assert.deepEqual(
       {width: poster.width, height: poster.height},

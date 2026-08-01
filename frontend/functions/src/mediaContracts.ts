@@ -1,8 +1,22 @@
 import {createHash} from "crypto";
 import mediaPolicy from "./mediaPolicy.json";
 
+const canonicalizePolicy = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(canonicalizePolicy);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(
+    value as Record<string, unknown>
+  )
+    .filter(([, entry]) => entry !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => [key, canonicalizePolicy(entry)]));
+};
+
 export const MEDIA_SCHEMA_VERSION = 1;
 export const MEDIA_CONTRACT_VERSION = mediaPolicy.policyVersion;
+export const MEDIA_POLICY_HASH = createHash("sha256")
+  .update(JSON.stringify(canonicalizePolicy(mediaPolicy)))
+  .digest("hex");
 export const MEDIA_UPLOAD_ROOT = "media_uploads";
 export const MEDIA_ROOT = `media_assets/v${MEDIA_SCHEMA_VERSION}`;
 export const MEDIA_PRIVATE_CACHE_CONTROL = mediaPolicy.privateCacheControl;

@@ -20,8 +20,9 @@ import {
 
 export type Task07MediaTargetKind =
   "profile" | "user-inventory" | "catalog-item" | "npc" | "foe" |
-  "user-technique" | "user-spell" |
-  "grigliata-token" | "grigliata-background";
+  "user-technique" | "common-technique" | "user-spell" |
+  "grigliata-token" | "grigliata-background" |
+  "grigliata-music-track";
 
 export type Task07MediaTargetSlot = "media" | "videoMedia";
 
@@ -53,6 +54,7 @@ export interface MediaUploadPlan {
   ownerUid: string;
   ownerKey: string;
   entityId: string;
+  commonTechnique?: boolean;
   referenceScope: ItemMediaReferenceScope | null;
   audienceScope: MediaAudienceScope;
   previousAssetId: string | null;
@@ -103,7 +105,8 @@ const hash = (value: unknown): string =>
 
 const targetKindFor = (
   kind: MediaKind,
-  referenceScope: ItemMediaReferenceScope | null
+  referenceScope: ItemMediaReferenceScope | null,
+  commonTechnique: boolean
 ): Task07MediaTargetKind | null => {
   switch (kind) {
   case "avatar": return "profile";
@@ -115,11 +118,14 @@ const targetKindFor = (
   case "npc": return "npc";
   case "foe": return "foe";
   case "technique":
-  case "technique-video": return "user-technique";
+  case "technique-video": return commonTechnique ?
+    "common-technique" :
+    "user-technique";
   case "spell":
   case "spell-video": return "user-spell";
   case "map":
   case "map-video": return "grigliata-background";
+  case "music": return "grigliata-music-track";
   default: return null;
   }
 };
@@ -149,6 +155,7 @@ export const buildTask07MediaUploadPlan = (input: {
   actorUid: unknown;
   ownerUid: unknown;
   entityId: unknown;
+  commonTechnique?: unknown;
   referenceScope?: unknown;
   previousAssetId?: unknown;
   operationId: unknown;
@@ -159,6 +166,8 @@ export const buildTask07MediaUploadPlan = (input: {
   const actorUid = typeof input.actorUid === "string" ? input.actorUid.trim() : "";
   const ownerUid = typeof input.ownerUid === "string" ? input.ownerUid.trim() : "";
   const entityId = typeof input.entityId === "string" ? input.entityId.trim() : "";
+  const commonTechnique = input.commonTechnique === true;
+  const commonTechniqueSpecified = input.commonTechnique !== undefined;
   const operationId = validateMediaOperationId(input.operationId);
   const kind = asMediaKind(input.kind);
   const sourceContentType = normalizeMediaContentType(input.sourceContentType);
@@ -176,6 +185,9 @@ export const buildTask07MediaUploadPlan = (input: {
     !isSafeMediaSegment(actorUid) ||
     !isSafeMediaSegment(ownerUid) ||
     !isSafeMediaSegment(entityId) ||
+    (input.commonTechnique !== undefined &&
+      typeof input.commonTechnique !== "boolean") ||
+    (commonTechnique && !["technique", "technique-video"].includes(kind || "")) ||
     !operationId ||
     (usesScope && !referenceScope) ||
     (!usesScope && input.referenceScope !== undefined &&
@@ -195,7 +207,7 @@ export const buildTask07MediaUploadPlan = (input: {
   if (sourceBytes > contract.source.maxBytes) {
     throw new TypeError(`${kind} media exceeds the source byte budget.`);
   }
-  const targetKind = targetKindFor(kind, referenceScope);
+  const targetKind = targetKindFor(kind, referenceScope, commonTechnique);
   if (!targetKind) {
     throw new TypeError(`No Task 07 target adapter is registered for ${kind}.`);
   }
@@ -217,8 +229,11 @@ export const buildTask07MediaUploadPlan = (input: {
     ownerUid,
     ownerKey: ownerUid,
     entityId,
+    ...(commonTechniqueSpecified ? {commonTechnique} : {}),
     referenceScope,
-    audienceScope: resolveMediaAudienceScope(kind, referenceScope),
+    audienceScope: commonTechnique ?
+      "signed-in" as const :
+      resolveMediaAudienceScope(kind, referenceScope),
     previousAssetId,
     operationId,
     sourceContentType,
@@ -250,7 +265,8 @@ export const isTask07MediaRequestAuthorized = (input: {
   case "npc": return isOwner && manager;
   case "foe":
   case "map":
-  case "map-video": return isOwner && input.actorRole === "dm";
+  case "map-video":
+  case "music": return isOwner && manager;
   case "technique":
   case "technique-video":
   case "spell":
@@ -277,7 +293,8 @@ export const isTask07MediaRetirementAuthorized = (input: {
   case "npc": return manager;
   case "foe":
   case "map":
-  case "map-video": return input.actorRole === "dm";
+  case "map-video":
+  case "music": return manager;
   case "token": return isOwner || input.actorRole === "dm";
   case "technique":
   case "technique-video":
@@ -350,6 +367,7 @@ export const task07MediaReferencePath = (input: {
   kind: MediaKind;
   ownerUid: string;
   entityId: string;
+  commonTechnique?: boolean;
   referenceScope: ItemMediaReferenceScope | null;
 }): string => {
   switch (input.kind) {
@@ -367,6 +385,7 @@ export const task07MediaReferencePath = (input: {
   case "foe": return `foes/${input.entityId}`;
   case "technique":
   case "technique-video":
+    if (input.commonTechnique === true) return "utils/tecniche_common";
     return `users/${input.ownerUid}/tecniche/${input.entityId}`;
   case "spell":
   case "spell-video":
@@ -374,6 +393,8 @@ export const task07MediaReferencePath = (input: {
   case "map":
   case "map-video":
     return `grigliata_backgrounds/${input.entityId}`;
+  case "music":
+    return `grigliata_music_tracks/${input.entityId}`;
   default:
     break;
   }
@@ -387,6 +408,8 @@ export const isTask07MediaPlanReferenceCompatible = (
   if (!first || !second ||
     first.kind !== second.kind ||
     first.targetKind !== second.targetKind ||
+    first.entityId !== second.entityId ||
+    (first.commonTechnique === true) !== (second.commonTechnique === true) ||
     first.referenceScope !== second.referenceScope) return false;
   try {
     return task07MediaReferencePath(first) === task07MediaReferencePath(second);
@@ -515,6 +538,7 @@ export const asStoredTask07MediaUploadPlan = (
       actorUid: plan.actorUid,
       ownerUid: plan.ownerUid,
       entityId: plan.entityId,
+      commonTechnique: plan.commonTechnique,
       referenceScope: plan.referenceScope,
       previousAssetId: plan.previousAssetId,
       operationId: plan.operationId,

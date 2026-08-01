@@ -150,6 +150,11 @@ test('parseArguments defaults to dry-run and requires exact user scope', () => {
     '--drain-user', USER_ID,
   ]);
   assert.equal(options.execute, false);
+  assert.equal(options.authMode, 'admin');
+  assert.equal(parseArguments([
+    '--project', PROJECT_ID, '--auth', 'firebase-cli', '--action', 'open',
+    '--scope', 'global', '--drain-id', DRAIN_ID,
+  ]).authMode, 'firebase-cli');
   assert.match(options.reportPath, /performance-results/);
   assert.throws(() => parseArguments([
     '--project', PROJECT_ID,
@@ -158,6 +163,10 @@ test('parseArguments defaults to dry-run and requires exact user scope', () => {
     '--drain-id', DRAIN_ID,
     '--drain-user', USER_ID,
   ]), /only valid with --scope user/);
+  assert.throws(() => parseArguments([
+    '--project', PROJECT_ID, '--auth', 'unknown', '--action', 'open',
+    '--scope', 'global', '--drain-id', DRAIN_ID,
+  ]), /--auth must be exactly/);
 });
 
 test('seal parsing requires both a verification report and its exact approval', () => {
@@ -192,6 +201,14 @@ test('safe target accepts only loopback demo emulators without live confirmation
     {projectId: PROJECT_ID, allowLiveProject: false, confirmProject: ''},
     {FIRESTORE_EMULATOR_HOST: '192.168.1.2:8080'}
   ), /Non-loopback/);
+  assert.throws(() => assertSafeTarget(
+    {
+      projectId: 'some-other-live-project',
+      allowLiveProject: true,
+      confirmProject: 'some-other-live-project',
+    },
+    {}
+  ), /accepts only live project fatin-test/);
 });
 
 test('open deterministically plans A to F without exposing a raw user ID', () => {

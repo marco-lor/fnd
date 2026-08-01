@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FaTimes } from 'react-icons/fa';
-import { useAuth } from '../../../AuthContext';
+import { useAuthSession } from '../../../AuthContext';
 import { computeValue } from '../../common/computeFormula';
-import { db } from '../../firebaseConfig';
-import { deleteLegacyStoragePath } from '../../common/legacyMediaStorage';
-import { doc, getDoc, updateDoc } from '../../../performance/firestore';
+import { useEquipment, useProgression } from '../../../data/userData/userDataHooks';
+import { mutateInventory } from '../../../data/userData/userDataCommands';
 import { FiTrash2 } from 'react-icons/fi';
+import MediaImage, { hasMediaAsset } from '../../common/MediaImage';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
 
 // Utility: safely get nested value by path
@@ -150,7 +150,9 @@ const SpellsList = ({ spells }) => {
 };
 
 const ItemDetailsModal = ({ item, onClose }) => {
-  const { user, userData } = useAuth();
+  const { user } = useAuthSession();
+  const { data: progression } = useProgression(user?.uid);
+  const { data: equipment } = useEquipment(user?.uid);
   const facts = useItemFacts(item);
   // Ensure we only portal on client
   const [mounted, setMounted] = useState(false);
@@ -158,12 +160,12 @@ const ItemDetailsModal = ({ item, onClose }) => {
   // Determine default level based on user level and thresholds 1,4,7,10 (floor to nearest)
   const defaultLevel = useMemo(() => {
     const thresholds = [1, 4, 7, 10];
-    const userLevel = Number(userData?.stats?.level || 1);
+    const userLevel = Number(progression?.stats?.level || 1);
     for (let i = thresholds.length - 1; i >= 0; i--) {
       if (userLevel >= thresholds[i]) return String(thresholds[i]);
     }
     return '1';
-  }, [userData?.stats?.level]);
+  }, [progression?.stats?.level]);
   const [level, setLevel] = useState(defaultLevel);
   const [busy, setBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -171,84 +173,41 @@ const ItemDetailsModal = ({ item, onClose }) => {
   useEffect(() => {
     setLevel(defaultLevel);
   }, [defaultLevel]);
-  // Compute if this item is equipped based on userData.equipped (unconditional hook)
+  // Compute if this exact canonical inventory instance is equipped.
   useEffect(() => {
-    try {
-      const eq = userData?.equipped || {};
-      const targetId = item ? (item.id || item.name || item?.General?.Nome) : undefined;
-      let cnt = 0;
-      Object.values(eq).forEach((val) => {
-        if (!val) return;
-        const id = typeof val === 'string' ? val : (val.id || val.name || val?.General?.Nome);
-        if (id && targetId && id === targetId) cnt += 1;
-      });
-      setEquippedCount(cnt);
-    } catch {}
-  }, [userData?.equipped, item]);
+    const inventoryId = item?._task05?.inventoryId || item?._instance?.instanceId;
+    const slots = equipment?.slots || {};
+    setEquippedCount(inventoryId
+      ? Object.values(slots).filter((value) => value === inventoryId).length
+      : 0);
+  }, [equipment?.slots, item]);
 
   if (!facts) return null;
   const { name, type, slot, img, price, effect, specific, params, spells } = facts;
+  const hasItemImage = Boolean(img || hasMediaAsset(item, {
+    fallbackSrc: img,
+    variant: 'card',
+  }));
 
   const removeOne = async () => {
     try {
-      // The user document id matches the authenticated user's uid.
-      const userId = user?.uid;
-      if (!userId) return;
+      if (!user?.uid) return;
+      const inventoryId = item?._task05?.inventoryId || item?._instance?.instanceId;
+      if (!inventoryId) throw new Error('Inventory item is missing its stable V2 ID.');
       setBusy(true);
-      const ref = doc(db, 'users', userId);
-      const snap = await getDoc(ref);
-      if (!snap.exists()) return;
-      const data = snap.data() || {};
-      const inv = Array.isArray(data.inventory) ? [...data.inventory] : [];
-  const targetId = item?.id || item?.name || name;
-  const targetIndex = typeof item?.__invIndex === 'number' ? item.__invIndex : undefined;
-      let removed = false;
-      let deletedImageUrl = null;
-      const deriveId = (e, i) => {
-        if (!e) return `item-${i}`;
-        if (typeof e === 'string') return e;
-        return e.id || e.name || e?.General?.Nome || `item-${i}`;
-      };
-      const next = [];
-      for (let i = 0; i < inv.length; i++) {
-        const entry = inv[i];
-        if (removed) { next.push(entry); continue; }
-        // If a specific instance index is known, match on that first
-        if (typeof targetIndex === 'number') {
-          if (i !== targetIndex) { next.push(entry); continue; }
-        } else {
-          const id = deriveId(entry, i);
-          if (id !== targetId) { next.push(entry); continue; }
+      const quantity = Number(item?.qty) || 1;
+      await mutateInventory(quantity > 1
+        ? {
+          action: 'setQuantity',
+          inventoryId,
+          quantity: quantity - 1,
+          retryKey: `inventory-modal-remove-one:${user.uid}:${inventoryId}`,
         }
-        if (typeof entry === 'object' && entry && typeof entry.qty === 'number') {
-          const newQty = Math.max(0, (entry.qty || 0) - 1);
-          if (newQty > 0) {
-            next.push({ ...entry, qty: newQty });
-          } else {
-            if ((entry.type || '').toLowerCase() === 'varie' && entry.image_url) {
-              deletedImageUrl = entry.image_url;
-            }
-            // fully removed; do not push
-          }
-        } else {
-          // string or object without qty -> remove single occurrence
-          if (typeof entry === 'object' && (entry.type || '').toLowerCase() === 'varie' && entry.image_url) {
-            deletedImageUrl = entry.image_url;
-          }
-        }
-        removed = true;
-      }
-      if (!removed) return;
-      await updateDoc(ref, { inventory: next });
-      // If we deleted the last Varie with an image, clean up storage
-      if (deletedImageUrl) {
-        try {
-          const path = decodeURIComponent(deletedImageUrl.split('/o/')[1].split('?')[0]);
-          await deleteLegacyStoragePath(path);
-        } catch (e) {
-          console.warn('Failed to delete varie image from storage (modal)', e);
-        }
-      }
+        : {
+          action: 'remove',
+          inventoryId,
+          retryKey: `inventory-modal-remove-one:${user.uid}:${inventoryId}`,
+        });
       onClose && onClose();
     } catch (e) {
       console.error('Failed to remove item', e);
@@ -281,8 +240,18 @@ const ItemDetailsModal = ({ item, onClose }) => {
           <div className="px-5 -mt-16">
             <div className="rounded-2xl border border-slate-700/60 bg-slate-800/60 p-4 flex gap-4">
               <div className="h-24 w-24 rounded-xl overflow-hidden border border-slate-700/60 bg-slate-900/60 flex items-center justify-center">
-                {img ? (
-                  <img src={img} alt={name} className="h-full w-full object-cover" />
+                {hasItemImage ? (
+                  <MediaImage
+                    media={item}
+                    mediaPurpose="item"
+                    src={img || ''}
+                    variant="card"
+                    alt={name}
+                    width={96}
+                    height={96}
+                    sizes="96px"
+                    className="h-full w-full object-cover"
+                  />
                 ) : (
                   <div className="text-[10px] text-slate-500">no image</div>
                 )}
@@ -343,7 +312,7 @@ const ItemDetailsModal = ({ item, onClose }) => {
 
         <div className="px-5 py-4 space-y-4">
           <SpecificBlock type={type} specific={specific} />
-          <ParametriGrid params={params} level={level} userParams={userData?.Parametri} />
+          <ParametriGrid params={params} level={level} userParams={progression?.Parametri} />
           <SpellsList spells={spells} />
         </div>
       </div>

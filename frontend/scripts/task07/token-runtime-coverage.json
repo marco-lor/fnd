@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "characterTokensResolveUserCanonical": true,
+  "customInstancesResolveTemplateCanonical": true,
+  "foeTokensPreferOwnCanonical": true,
+  "placementsResolveTokenCanonical": true,
+  "foeNestedLegacyMediaCanonicalOnly": "non-rendering"
+}

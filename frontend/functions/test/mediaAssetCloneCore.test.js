@@ -6,12 +6,15 @@ const {
 } = require("../lib/mediaAssetLifecycleCore");
 const {
   buildGeneratedMediaStoragePlan,
+  MEDIA_CONTRACTS,
   MEDIA_CONTRACT_VERSION,
   MEDIA_SCHEMA_VERSION,
 } = require("../lib/mediaContracts");
 const {
   buildTask07FoeMediaClonePlan,
+  buildTask07FoeTokenMediaRegenerationPlan,
   task07CanonicalFoeMediaAssetId,
+  task07FoeTokenMediaRegenerationPlansMatch,
 } = require("../lib/mediaAssetCloneCore");
 const {
   task07MediaValueFromReadyManifest,
@@ -190,4 +193,55 @@ test("conflicting, detached, and unsupported foe media fail closed", () => {
   const staleManifestIdentity = sourceFixture();
   staleManifestIdentity.manifest.targetId = "foe-other";
   assert.throws(() => buildClone(staleManifestIdentity), /invalid or incompatible/);
+});
+
+test("foe-token spawn regenerates a token-owned signed-in media family", () => {
+  const fixture = sourceFixture();
+  const input = {
+    actorUid: "dm-destination",
+    backendReceiptId: "c".repeat(48),
+    destinationTokenId: "spawned-foe-token",
+    sourceFoeId: "foe-source",
+    source: fixture.source,
+    sourceManifest: fixture.manifest,
+  };
+  const first = buildTask07FoeTokenMediaRegenerationPlan(input);
+  const replay = buildTask07FoeTokenMediaRegenerationPlan(input);
+
+  assert.ok(first);
+  assert.deepEqual(first, replay);
+  assert.equal(first.sourceAssetId, fixture.sourcePlan.assetId);
+  assert.equal(
+    first.sourceOriginal.path,
+    fixture.manifest.generated.original.path
+  );
+  assert.equal(first.destinationPlan.kind, "token");
+  assert.equal(first.destinationPlan.audienceScope, "signed-in");
+  assert.equal(first.destinationPlan.ownerUid, "dm-destination");
+  assert.equal(first.destinationPlan.entityId, "spawned-foe-token");
+  assert.equal(
+    first.destinationReferencePath,
+    "grigliata_tokens/spawned-foe-token"
+  );
+  assert.notEqual(first.destinationPlan.assetId, fixture.sourcePlan.assetId);
+  assert.equal(MEDIA_CONTRACTS.foe.variants.thumbnail.fit, "cover");
+  assert.equal(MEDIA_CONTRACTS.token.variants.thumbnail.fit, "inside");
+  assert.equal(task07FoeTokenMediaRegenerationPlansMatch(first, replay), true);
+  assert.equal(task07FoeTokenMediaRegenerationPlansMatch(
+    first,
+    {...replay, sourceGeneration: "stale"}
+  ), false);
+});
+
+test("foe-token regeneration inherits canonical source fail-closed checks", () => {
+  const fixture = sourceFixture();
+  fixture.manifest.attachment.referencePath = "foes/different-source";
+  assert.throws(() => buildTask07FoeTokenMediaRegenerationPlan({
+    actorUid: "dm-destination",
+    backendReceiptId: "d".repeat(48),
+    destinationTokenId: "spawned-foe-token",
+    sourceFoeId: "foe-source",
+    source: fixture.source,
+    sourceManifest: fixture.manifest,
+  }), /different target/);
 });

@@ -65,6 +65,10 @@ import {
   normalizeNarrationPlacements,
 } from './narrationScene';
 import { resolveTask07CustomTokenMediaProjection } from './customTokenMedia';
+import { resolveTask07CharacterCanonicalMedia } from './characterTokenMedia';
+import {
+  resolveTask07BoardTokenCanonicalMedia,
+} from './tokenMediaProjection';
 
 const LIVE_INTERACTION_CLOCK_INTERVAL_MS = 15 * 1000;
 export const GRIGLIATA_SHARED_CHARACTER_PROFILE_QUERY_CHUNK_SIZE = 30;
@@ -149,6 +153,7 @@ export default function useGrigliataPageData({
   const [foeLibrary, setFoeLibrary] = useState([]);
   const [tokenProfiles, setTokenProfiles] = useState([]);
   const [sharedCharacterProfilesById, setSharedCharacterProfilesById] = useState({});
+  const [characterCanonicalMediaByTokenId, setCharacterCanonicalMediaByTokenId] = useState({});
   const [activePlacementState, setActivePlacementState] = useState({
     backgroundId: '',
     status: 'idle',
@@ -187,6 +192,7 @@ export default function useGrigliataPageData({
       setFoeLibrary([]);
       setTokenProfiles([]);
       setSharedCharacterProfilesById({});
+      setCharacterCanonicalMediaByTokenId({});
       setPagePresenceSnapshots([]);
       setGalleryFolders([]);
       setMusicFolders([]);
@@ -903,23 +909,17 @@ export default function useGrigliataPageData({
 
   const sharedCharacterProfileIdsKey = useMemo(() => JSON.stringify(
     [...new Set(activePlacements
-      .map((placement) => {
-        const tokenId = typeof placement?.tokenId === 'string'
+      .map((placement) => (
+        typeof placement?.tokenId === 'string'
           ? placement.tokenId.trim()
-          : '';
-        const ownerUid = typeof placement?.ownerUid === 'string'
-          ? placement.ownerUid.trim()
-          : '';
-        return (
-          tokenId
-          && tokenId === ownerUid
-          && tokenId !== currentUserId
-        ) ? tokenId : '';
-      })
+          : ''
+      ))
+      .filter((tokenId) => tokenId && tokenId !== currentUserId)
       .filter(Boolean))]
       .sort()
-      // Keep listener fan-out hard-bounded. Placements beyond this cap retain
-      // their map-local legacy image/initial fallback instead of adding reads.
+      // Query every peer placement ID and let tokenType == character prove the
+      // readable result set. Character token IDs are not required to equal the
+      // owner UID. Listener fan-out remains hard-bounded.
       .slice(0, GRIGLIATA_SHARED_CHARACTER_PROFILE_MAX_IDS)
   ), [activePlacements, currentUserId]);
 
@@ -995,6 +995,37 @@ export default function useGrigliataPageData({
       unsubscribes.forEach((unsubscribe) => unsubscribe());
     };
   }, [currentUserId, sharedCharacterProfileIdsKey]);
+
+  const characterCanonicalTokenIdsKey = useMemo(() => JSON.stringify(
+    Object.keys(sharedCharacterProfilesById).sort()
+  ), [sharedCharacterProfilesById]);
+
+  useEffect(() => {
+    const tokenIds = JSON.parse(characterCanonicalTokenIdsKey);
+    if (!currentUserId || !tokenIds.length) {
+      setCharacterCanonicalMediaByTokenId({});
+      return undefined;
+    }
+
+    let active = true;
+    setCharacterCanonicalMediaByTokenId({});
+    resolveTask07CharacterCanonicalMedia(tokenIds)
+      .then((mediaByTokenId) => {
+        if (active) setCharacterCanonicalMediaByTokenId(mediaByTokenId);
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.error(
+          'Failed to resolve shared Grigliata character canonical media:',
+          error
+        );
+        setCharacterCanonicalMediaByTokenId({});
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [characterCanonicalTokenIdsKey, currentUserId]);
 
   const normalizedTokenProfiles = useMemo(
     () => [
@@ -1168,21 +1199,42 @@ export default function useGrigliataPageData({
             profilesByTokenId: tokenProfilesByTokenId,
           })
           : null;
+        const characterMedia = tokenType === 'character'
+          ? (
+            isCurrentUserCharacter
+              ? currentMedia
+              : characterCanonicalMediaByTokenId[placement.tokenId] || null
+          )
+          : null;
+        const projectedMedia = resolveTask07BoardTokenCanonicalMedia({
+          tokenType,
+          profile,
+          foeSource,
+          customTokenProjection,
+          characterMedia,
+        });
+        const profileImageUrl = typeof profile?.imageUrl === 'string'
+          ? profile.imageUrl.trim()
+          : '';
+        const foeSourceImageUrl = typeof foeSource?.imageUrl === 'string'
+          ? foeSource.imageUrl.trim()
+          : '';
+        const profileImagePath = typeof profile?.imagePath === 'string'
+          ? profile.imagePath.trim()
+          : '';
+        const foeSourceImagePath = typeof foeSource?.imagePath === 'string'
+          ? foeSource.imagePath.trim()
+          : '';
         const projectedImageUrl = isCurrentUserCharacter && currentMedia
           ? currentImageUrl
-          : (foeSource
-            ? (typeof foeSource?.imageUrl === 'string' ? foeSource.imageUrl.trim() : '')
-            : (placementImageUrl || customTokenProjection?.imageUrl || profile?.imageUrl || ''));
+          : (tokenType === 'foe'
+            ? (profileImageUrl || foeSourceImageUrl || placementImageUrl)
+            : (placementImageUrl || customTokenProjection?.imageUrl || profileImageUrl));
         const projectedImagePath = isCurrentUserCharacter && currentMedia
           ? currentImagePath
-          : (foeSource
-            ? (typeof foeSource?.imagePath === 'string' ? foeSource.imagePath.trim() : '')
-            : (customTokenProjection?.imagePath || profile?.imagePath || ''));
-        const projectedMedia = isCurrentUserCharacter && currentMedia
-          ? currentMedia
-          : (foeSource
-            ? getEntityMedia(foeSource)
-            : (customTokenProjection?.media || getEntityMedia(profile)));
+          : (tokenType === 'foe'
+            ? (profileImagePath || foeSourceImagePath)
+            : (customTokenProjection?.imagePath || profileImagePath));
 
         return {
           ...(profile || {}),
@@ -1230,6 +1282,7 @@ export default function useGrigliataPageData({
       }),
     [
       currentCharacterId,
+      characterCanonicalMediaByTokenId,
       currentMedia,
       currentImagePath,
       currentImageUrl,

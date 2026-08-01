@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { GiSpellBook, GiMagicSwirl } from "react-icons/gi";
 import { FaPen } from "react-icons/fa";
-import { doc, updateDoc, getFirestore } from "../../../performance/firestore";
 import { getVarie } from '../../../data/configRepository';
+import { updateResource } from '../../../data/userData/userDataCommands';
+import MediaImage, { hasMediaAsset } from '../../common/MediaImage';
+import MediaVideo from '../../common/MediaVideo';
 
 const SpellCard = ({ spellName, spell, userData, onEdit }) => {
   const [isHovered, setIsHovered] = useState(false);
@@ -18,8 +20,14 @@ const SpellCard = ({ spellName, spell, userData, onEdit }) => {
   const cardRef = useRef(null);
   const overlayRef = useRef(null);
   const dismissTimeoutRef = useRef(null);
-  const hasImage = spell.image_url && spell.image_url.trim() !== "";
-  const db = getFirestore();
+  const legacyImageUrl = typeof spell.image_url === 'string'
+    ? spell.image_url.trim()
+    : '';
+  const legacyVideoUrl = typeof spell.video_url === 'string'
+    ? spell.video_url.trim()
+    : '';
+  const hasImage = Boolean(legacyImageUrl || hasMediaAsset(spell));
+  const hasVideo = Boolean(legacyVideoUrl || spell?.videoMedia);
   const azione = spell.Azione || spell.azione || "";
 
   // Fetch shared dadiAnimaByLevel data when the component mounts.
@@ -33,7 +41,7 @@ const SpellCard = ({ spellName, spell, userData, onEdit }) => {
       }
     };
     fetchDadiAnima();
-  }, [db]);
+  }, []);
 
   // --- Mana validation logic with special reduction (ridCostoSpell) ---
   const extractOriginalCost = () => {
@@ -193,9 +201,13 @@ const SpellCard = ({ spellName, spell, userData, onEdit }) => {
   const confirmUseSpell = async () => {
     if (!hasSufficientMana) return;
     try {
-      const userRef = doc(db, "users", userData.uid);
-      const newManaValue = currentMana - manaCost;
-      await updateDoc(userRef, { "stats.manaCurrent": newManaValue });
+      if (!userData?.uid) throw new Error('Authenticated user data is not ready.');
+      await updateResource({
+        resource: 'mana',
+        mode: 'delta',
+        value: -manaCost,
+        retryKey: `spell-use:${userData.uid}:${spellName}`,
+      });
       setSuccessMessage(
         `Incantesimo ${spell.Nome || spellName} lanciato! (-${manaCost} PM)`
       );
@@ -339,10 +351,13 @@ const SpellCard = ({ spellName, spell, userData, onEdit }) => {
       {/* Base card with image or icon */}
       <div className="relative h-full w-full overflow-hidden rounded-md">
         {hasImage ? (
-          <img
-            src={spell.image_url}
+          <MediaImage
+            media={spell}
+            mediaPurpose="spell"
+            src={legacyImageUrl}
             alt={spell.Nome || spellName}
             className="w-full h-full object-cover"
+            variant="card"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gray-800">
@@ -383,13 +398,16 @@ const SpellCard = ({ spellName, spell, userData, onEdit }) => {
           className={getOverlayClasses()}
           style={getOverlayStyle()}
         >
-          {spell.video_url && (
+          {hasVideo && (
             <div className="absolute inset-0 z-0">
-              <video
-                src={spell.video_url}
+              <MediaVideo
+                media={spell}
+                mediaPurpose="spell-video"
+                src={legacyVideoUrl}
                 autoPlay
                 muted
                 loop
+                playsInline
                 className="w-full h-full object-cover opacity-50"
               />
               <div className="absolute inset-0 bg-black/40"></div>

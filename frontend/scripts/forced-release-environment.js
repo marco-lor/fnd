@@ -2,7 +2,7 @@ const HOSTING_COMPATIBILITY_ENVIRONMENT = Object.freeze({
   GENERATE_SOURCEMAP: 'false',
   REACT_APP_FND_PERF: '0',
   REACT_APP_FND_USER_DATA_ROLLOUT_CONFIG: '0',
-  REACT_APP_FND_USER_DATA_STAGE: 'new-read-dual-write',
+  REACT_APP_FND_USER_DATA_STAGE: 'new-only',
 });
 
 const withForcedEnvironment = (

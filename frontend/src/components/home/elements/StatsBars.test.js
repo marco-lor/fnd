@@ -2,17 +2,11 @@ import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { useAuthSession } from '../../../AuthContext';
 import { useResources } from '../../../data/userData/userDataHooks';
-import { isUserDataCommandStageResolved } from '../../../data/userData/userDataCommandRouting';
 import StatsBars from './StatsBars';
 
 jest.mock('../../../AuthContext', () => ({ useAuthSession: jest.fn() }));
 jest.mock('../../../data/userData/userDataHooks', () => ({ useResources: jest.fn() }));
 jest.mock('../../../data/userData/userDataCommands', () => ({ updateResource: jest.fn() }));
-jest.mock('../../../data/userData/legacyUserDataCommands', () => ({ legacyUpdateResource: jest.fn() }));
-jest.mock('../../../data/userData/userDataCommandRouting', () => ({
-  isUserDataCommandStageResolved: jest.fn(() => true),
-  runVersionedUserDataCommand: jest.fn(),
-}));
 
 const readyResources = {
   data: {
@@ -28,12 +22,10 @@ const readyResources = {
     },
   },
   status: 'fresh',
-  stage: 'legacy-read',
 };
 
 describe('StatsBars auth-scoped overlays', () => {
   beforeEach(() => {
-    isUserDataCommandStageResolved.mockReturnValue(true);
     useAuthSession.mockReturnValue({
       user: { uid: 'user-1' },
       repositoryAccessGeneration: 0,

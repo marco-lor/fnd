@@ -155,6 +155,7 @@ const NpcTile = ({
           {hasMediaAsset(npc, { variant: 'thumbnail' }) ? (
             <MediaImage
               media={npc}
+              mediaPurpose="npc"
               src={npc?.imageUrl || ''}
               variant="thumbnail"
               alt={nome}
@@ -223,6 +224,7 @@ const NpcHoverPortal = ({
                     >
                       <MediaImage
                         media={npc}
+                        mediaPurpose="npc"
                         src={npc?.imageUrl || ''}
                         variant="thumbnail"
                         alt={`${getNpcNome(npc)} portrait`}
@@ -337,6 +339,7 @@ const NpcImageZoomModal = ({ imageData, onClose }) => {
             </button>
             <MediaImage
               media={imageData.npc}
+              mediaPurpose="npc"
               src={imageData.npc?.imageUrl || ''}
               variant="full"
               alt={imageData.nome ? `${imageData.nome} portrait zoomed` : 'NPC portrait zoomed'}

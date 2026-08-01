@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { FiArrowDown, FiArrowLeft, FiArrowRight, FiArrowUp, FiMove, FiX } from 'react-icons/fi';
 import MediaImage, { hasMediaAsset } from '../common/MediaImage';
+import useTask07MediaReadMode from '../../data/media/useTask07MediaReadMode';
 import { isVideoBackground } from './boardUtils';
 import {
   buildBackgroundMap,
@@ -48,14 +49,19 @@ const buildVideoPosterMedia = (manifest) => {
   };
 };
 
-const buildNarrationThumbnail = (background) => {
+const buildNarrationThumbnail = (
+  background,
+  { mapMediaMode, mapVideoMode },
+) => {
   const manifest = getBackgroundMediaManifest(background);
   const isVideo = isVideoGalleryBackground(background, manifest);
   const media = isVideo ? buildVideoPosterMedia(manifest) : background;
   const src = isVideo ? '' : (background?.imageUrl || '');
   const variant = isVideo ? 'poster' : 'thumbnail';
+  const compatibilityMode = isVideo ? mapVideoMode : mapMediaMode;
   return {
-    available: hasMediaAsset(media, { fallbackSrc: src, variant }),
+    available: hasMediaAsset(media, { compatibilityMode, fallbackSrc: src, variant }),
+    compatibilityMode,
     media,
     src,
     variant,
@@ -89,12 +95,17 @@ export default function NarrationPlacementPicker({
   const backgroundName = background?.name || 'Untitled Map';
   const backgroundsById = useMemo(() => buildBackgroundMap(backgrounds), [backgrounds]);
   const previewBounds = useMemo(() => buildNarrationPlacementBounds(placements), [placements]);
+  const mapMediaMode = useTask07MediaReadMode({ purpose: 'map' });
+  const mapVideoMode = useTask07MediaReadMode({ purpose: 'map-video' });
 
   if (!isOpen || !background) {
     return null;
   }
 
-  const selectedBackgroundThumbnail = buildNarrationThumbnail(background);
+  const selectedBackgroundThumbnail = buildNarrationThumbnail(background, {
+    mapMediaMode,
+    mapVideoMode,
+  });
   const handleSelectSide = (side) => {
     onSelectPlacement?.({
       mode: NARRATION_PLACEMENT_MODE_MAGNETIC,
@@ -159,7 +170,10 @@ export default function NarrationPlacementPicker({
             {placements.map((placement) => {
               const placementBackground = backgroundsById.get(placement.backgroundId) || null;
               const previewStyle = getPreviewStyle(placement, previewBounds);
-              const placementThumbnail = buildNarrationThumbnail(placementBackground);
+              const placementThumbnail = buildNarrationThumbnail(placementBackground, {
+                mapMediaMode,
+                mapVideoMode,
+              });
 
               return (
                 <div
@@ -170,6 +184,8 @@ export default function NarrationPlacementPicker({
                   {placementThumbnail.available && (
                     <MediaImage
                       media={placementThumbnail.media}
+                      mediaPurpose={placementThumbnail.variant === "poster" ? "map-video" : "map"}
+                      compatibilityMode={placementThumbnail.compatibilityMode}
                       src={placementThumbnail.src}
                       variant={placementThumbnail.variant}
                       alt=""
@@ -186,6 +202,8 @@ export default function NarrationPlacementPicker({
               {selectedBackgroundThumbnail.available && (
                 <MediaImage
                   media={selectedBackgroundThumbnail.media}
+                  mediaPurpose={selectedBackgroundThumbnail.variant === "poster" ? "map-video" : "map"}
+                  compatibilityMode={selectedBackgroundThumbnail.compatibilityMode}
                   src={selectedBackgroundThumbnail.src}
                   variant={selectedBackgroundThumbnail.variant}
                   alt=""

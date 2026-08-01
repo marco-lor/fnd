@@ -33,6 +33,7 @@ const INDEX_EXPORTS = [
   "syncTask07MusicStreamFromControl",
   "syncTask07MusicStreamFromPlayback",
   "syncTask07MusicStreamFromSession",
+  "syncTask07MusicStreamFromTrack",
 ];
 
 test("existing Function IDs retain registered endpoints", () => {
@@ -53,6 +54,9 @@ test("existing Function IDs retain registered endpoints", () => {
   );
   assert.ok(
     functions.syncTask07MusicStreamFromSession.__endpoint.eventTrigger
+  );
+  assert.ok(
+    functions.syncTask07MusicStreamFromTrack.__endpoint.eventTrigger
   );
 });
 

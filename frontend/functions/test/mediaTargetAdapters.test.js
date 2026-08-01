@@ -7,8 +7,10 @@ const {
 const {
   assertTask07TargetDocumentBudget,
   buildTask07NewTargetAttachment,
+  task07CommonTechniqueRetirementPatch,
   task07FoeCanonicalMediaStateFromTarget,
   task07FoeCanonicalRetirementPatch,
+  task07MediaTargetState,
   task07TargetAttachmentPatch,
   validateTask07MediaTarget,
 } = require("../lib/mediaTargetAdapters");
@@ -18,6 +20,7 @@ const buildPlan = ({
   entityId = "entity-1",
   operationId,
   referenceScope,
+  commonTechnique = false,
 }) => buildTask07MediaUploadPlan({
   actorUid: "owner-a",
   ownerUid: "owner-a",
@@ -26,6 +29,7 @@ const buildPlan = ({
   kind,
   sourceContentType: kind.endsWith("-video") ? "video/mp4" : "image/png",
   sourceBytes: 1024,
+  ...(commonTechnique ? {commonTechnique: true} : {}),
   ...(referenceScope ? {referenceScope} : {}),
 });
 
@@ -144,6 +148,100 @@ test("personal art and video attachment patches use independent CAS slots", () =
     task07VideoMediaRevision: 5,
     videoMediaUpdatedAt: timestamp,
   });
+});
+
+test("common technique patches preserve legacy fields and sibling entries", () => {
+  const art = buildPlan({
+    kind: "technique",
+    entityId: "tecnica-a",
+    operationId: "common_technique_art_1234",
+    commonTechnique: true,
+  });
+  const video = buildPlan({
+    kind: "technique-video",
+    entityId: "tecnica-a",
+    operationId: "common_technique_video_1234",
+    commonTechnique: true,
+  });
+  const timestamp = {marker: "timestamp"};
+  const current = {
+    "tecnica-a": {
+      label: "Tecnica A",
+      image_url: "legacy/tecnica-a.png",
+      video_url: "legacy/tecnica-a.mp4",
+      videoMedia: {assetId: video.assetId},
+      task07VideoMediaRevision: 2,
+    },
+    "tecnica-b": {label: "Tecnica B", image_url: "legacy/b.png"},
+  };
+  const media = {assetId: art.assetId, original: {path: "canonical/art"}};
+  const patch = task07TargetAttachmentPatch({
+    current,
+    media,
+    plan: art,
+    revision: 3,
+    timestamp,
+  });
+
+  assert.deepEqual(patch, {
+    "tecnica-a": {
+      ...current["tecnica-a"],
+      media,
+      task07MediaRevision: 3,
+      mediaUpdatedAt: timestamp,
+    },
+  });
+  assert.equal(Object.hasOwn(patch, "tecnica-b"), false);
+  assert.deepEqual(task07MediaTargetState({...current, ...patch}, art), {
+    assetId: art.assetId,
+    revision: 3,
+    conflict: false,
+  });
+  assert.deepEqual(task07MediaTargetState({...current, ...patch}, video), {
+    assetId: video.assetId,
+    revision: 2,
+    conflict: false,
+  });
+
+  const retired = task07CommonTechniqueRetirementPatch({
+    current: {...current, ...patch},
+    plan: art,
+    revision: 3,
+    timestamp,
+  });
+  assert.equal(Object.hasOwn(retired["tecnica-a"], "media"), false);
+  assert.equal(retired["tecnica-a"].image_url, "legacy/tecnica-a.png");
+  assert.equal(retired["tecnica-a"].video_url, "legacy/tecnica-a.mp4");
+  assert.equal(retired["tecnica-a"].videoMedia.assetId, video.assetId);
+  assert.equal(retired["tecnica-a"].task07MediaRevision, 4);
+  assert.equal(Object.hasOwn(retired, "tecnica-b"), false);
+});
+
+test("common technique validation binds an exact nested entry in utils", () => {
+  const plan = buildPlan({
+    kind: "technique",
+    entityId: "tecnica-a",
+    operationId: "common_technique_target_1234",
+    commonTechnique: true,
+  });
+  assert.doesNotThrow(() => validateTask07MediaTarget({
+    plan,
+    target: targetSnapshot("utils/tecniche_common", {
+      "tecnica-a": {image_url: "legacy/a.png"},
+    }),
+  }));
+  assert.throws(() => validateTask07MediaTarget({
+    plan,
+    target: targetSnapshot("utils/tecniche_common", {
+      "tecnica-b": {image_url: "legacy/b.png"},
+    }),
+  }), /missing/);
+  assert.throws(() => validateTask07MediaTarget({
+    plan,
+    target: targetSnapshot("utils/other", {
+      "tecnica-a": {image_url: "legacy/a.png"},
+    }),
+  }), /identity/);
 });
 
 test("authoritative attachments retain noncanonical legacy rollback references", () => {
@@ -603,8 +701,73 @@ test("target validation rejects wrong global paths, token owners, and map purpos
   }), /Background media purpose/);
   assert.doesNotThrow(() => validateTask07MediaTarget({
     plan: map,
+    target: targetSnapshot("grigliata_backgrounds/map-1"),
+  }));
+  assert.doesNotThrow(() => validateTask07MediaTarget({
+    plan: map,
     target: targetSnapshot("grigliata_backgrounds/map-1", {assetType: "image"}),
   }));
+});
+
+test("music targets bind the global track and refresh canonical audio metadata", () => {
+  const music = buildTask07MediaUploadPlan({
+    actorUid: "owner-a",
+    ownerUid: "owner-a",
+    entityId: "track-1",
+    operationId: "music_target_123456",
+    kind: "music",
+    sourceContentType: "audio/mpeg",
+    sourceBytes: 1024,
+  });
+  assert.doesNotThrow(() => validateTask07MediaTarget({
+    plan: music,
+    target: targetSnapshot("grigliata_music_tracks/track-1", {
+      contentType: "audio/mpeg",
+    }),
+  }));
+  assert.throws(() => validateTask07MediaTarget({
+    plan: music,
+    target: targetSnapshot("grigliata_music_tracks/track-1", {
+      contentType: "audio/ogg",
+    }),
+  }), /Music track media purpose/);
+  assert.throws(() => validateTask07MediaTarget({
+    plan: music,
+    target: targetSnapshot("grigliata_music_tracks/track-2", {
+      contentType: "audio/mpeg",
+    }),
+  }), /target identity/);
+
+  const timestamp = {marker: "timestamp"};
+  const media = {
+    assetId: music.assetId,
+    original: {
+      path: `media_assets/v1/signed-in/owner-a/${music.assetId}/7/original`,
+      contentType: "audio/mpeg",
+      bytes: 4096,
+      durationMs: 12345,
+    },
+  };
+  assert.deepEqual(task07TargetAttachmentPatch({
+    current: {
+      audioPath: "grigliata/music/owner-a/legacy.mp3",
+      audioUrl: "https://legacy.example/track.mp3",
+      contentType: "audio/mpeg",
+      sizeBytes: 1024,
+      durationMs: 12000,
+    },
+    media,
+    plan: music,
+    revision: 2,
+    timestamp,
+  }), {
+    media,
+    task07MediaRevision: 2,
+    mediaUpdatedAt: timestamp,
+    contentType: "audio/mpeg",
+    sizeBytes: 4096,
+    durationMs: 12345,
+  });
 });
 
 test("Task 07 personal attachments preserve Task 05 document budgets", () => {

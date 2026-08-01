@@ -5,6 +5,10 @@ import DiceRoller from '../common/DiceRoller';
 import { getParamDisplayName } from '../common/paramMetadata';
 import { db } from '../firebaseConfig';
 import {
+  subscribeUserDirectoryFirstPage,
+  USER_DIRECTORY_PAGE_SIZE,
+} from '../../data/userDirectoryRepository';
+import {
   buildParameterRollConfig,
   formatParameterFormula,
   parseDiceFaces,
@@ -119,7 +123,7 @@ function SpaciousDiceRollEntries({ rolls }) {
 }
 
 const getUserLabel = (rollUser) => (
-  rollUser?.characterId || rollUser?.email || rollUser?.id || 'Unknown user'
+  rollUser?.characterId || rollUser?.label || rollUser?.email || rollUser?.id || 'Unknown user'
 );
 
 function usePagedDiceRollHistory({ userId, enabled, pageSize }) {
@@ -229,6 +233,7 @@ function DmDiceLogsOverlay({
   loading,
   error,
   hasMore,
+  directoryHasMore,
   onSelectUser,
   onLoadMore,
   onClose,
@@ -335,6 +340,11 @@ function DmDiceLogsOverlay({
                 );
               })}
             </div>
+            {directoryHasMore && (
+              <p className="mt-3 rounded-xl border border-amber-300/30 bg-amber-400/10 px-3 py-2 text-[11px] text-amber-200">
+                Only the first {USER_DIRECTORY_PAGE_SIZE} users are shown in this panel.
+              </p>
+            )}
           </aside>
 
           <section className="flex min-h-0 flex-col bg-slate-900/30">
@@ -390,6 +400,7 @@ export default function GrigliataDicePanel({ currentUserId, userData, isManager,
   const [currentUserRolls, setCurrentUserRolls] = useState([]);
   const [currentUserRollsError, setCurrentUserRollsError] = useState(null);
   const [users, setUsers] = useState([]);
+  const [userDirectoryHasMore, setUserDirectoryHasMore] = useState(false);
   const [isDmLogsOpen, setIsDmLogsOpen] = useState(false);
   const [selectedLogUserId, setSelectedLogUserId] = useState('');
 
@@ -439,19 +450,23 @@ export default function GrigliataDicePanel({ currentUserId, userData, isManager,
   useEffect(() => {
     if (!isManager) {
       setUsers([]);
+      setUserDirectoryHasMore(false);
       return undefined;
     }
 
-    return onSnapshot(collection(db, 'users'), (snapshot) => {
-      const nextUsers = snapshot.docs
-        .map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() }))
-        .sort((left, right) => (
-          (left.characterId || left.email || left.id).localeCompare(right.characterId || right.email || right.id)
+    return subscribeUserDirectoryFirstPage({
+      next: ({ items = [] } = {}) => {
+        const nextUsers = [...items].sort((left, right) => (
+          getUserLabel(left).localeCompare(getUserLabel(right))
         ));
-      setUsers(nextUsers);
-    }, (error) => {
-      console.warn('Failed to load users for Grigliata dice logs:', error);
-      setUsers([]);
+        setUsers(nextUsers);
+        setUserDirectoryHasMore(items.length >= USER_DIRECTORY_PAGE_SIZE);
+      },
+      error: (error) => {
+        console.warn('Failed to load users for Grigliata dice logs:', error);
+        setUsers([]);
+        setUserDirectoryHasMore(false);
+      },
     });
   }, [isManager]);
 
@@ -671,6 +686,7 @@ export default function GrigliataDicePanel({ currentUserId, userData, isManager,
           loading={dmLogHistory.loading}
           error={dmLogHistory.error}
           hasMore={dmLogHistory.hasMore}
+          directoryHasMore={userDirectoryHasMore}
           onSelectUser={setSelectedLogUserId}
           onLoadMore={dmLogHistory.loadMore}
           onClose={() => setIsDmLogsOpen(false)}

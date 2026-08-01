@@ -1,6 +1,5 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { deleteObject, ref as storageRef } from 'firebase/storage';
 import { useAuthSession } from '../../../AuthContext';
 import {
   useEquipment,
@@ -13,12 +12,14 @@ import {
   isDefinitiveUserDataCommandError,
   mutateInventory,
 } from '../../../data/userData/userDataCommands';
+import useTask07MediaOperationOwner from '../../../data/media/useTask07MediaOperationOwner';
+import { tryPersistTask07VarieMedia } from '../../../data/media/privateInventoryMediaWriter';
 import {
-  isUserDataCommandStageResolved,
-  runVersionedUserDataCommand,
-} from '../../../data/userData/userDataCommandRouting';
-import { uploadCacheableImage } from '../../common/imageStorage';
-import Inventory from './Inventory';
+  describeTask07ConsumerOutcome,
+  task07ConsumerNeedsAttention,
+} from '../../../data/media/mediaConsumerAdapter';
+import useCatalogItemsById from '../../../data/useCatalogItemsById';
+import Inventory, { buildInventoryView } from './Inventory';
 
 jest.mock('../../../AuthContext', () => ({ useAuthSession: jest.fn() }));
 jest.mock('../../../data/userData/userDataHooks', () => ({
@@ -32,20 +33,21 @@ jest.mock('../../../data/userData/userDataCommands', () => ({
   isDefinitiveUserDataCommandError: jest.fn(),
   mutateInventory: jest.fn(),
 }));
-jest.mock('../../../data/userData/legacyUserDataCommands', () => ({
-  legacyAdjustGold: jest.fn(),
-  legacyMutateInventory: jest.fn(),
+jest.mock('../../../data/media/useTask07MediaOperationOwner', () => ({
+  __esModule: true,
+  default: jest.fn(),
 }));
-jest.mock('../../../data/userData/userDataCommandRouting', () => ({
-  isUserDataCommandStageResolved: jest.fn(() => true),
-  runVersionedUserDataCommand: jest.fn(),
+jest.mock('../../../data/media/privateInventoryMediaWriter', () => ({
+  tryPersistTask07VarieMedia: jest.fn(),
 }));
-jest.mock('../../firebaseStorage', () => ({ storage: {} }));
-jest.mock('firebase/storage', () => ({
-  deleteObject: jest.fn(),
-  ref: jest.fn((_storage, path) => ({ path })),
+jest.mock('../../../data/media/mediaConsumerAdapter', () => ({
+  describeTask07ConsumerOutcome: jest.fn(),
+  task07ConsumerNeedsAttention: jest.fn(),
 }));
-jest.mock('../../common/imageStorage', () => ({ uploadCacheableImage: jest.fn() }));
+jest.mock('../../../data/useCatalogItemsById', () => ({
+  __esModule: true,
+  default: jest.fn(),
+}));
 jest.mock('./lazyHomeFeatures', () => ({
   LazyItemDetailsModal: jest.fn(() => null),
 }));
@@ -60,14 +62,29 @@ const readyInventory = {
     _instance: { instanceId: 'rope-1' },
   }],
   status: 'fresh',
-  stage: 'legacy-read',
+};
+
+const openVarieDraft = () => {
+  fireEvent.click(screen.getByTitle('Aggiungi oggetto Varie'));
+  fireEvent.change(screen.getByPlaceholderText('Es. Corda di canapa'), {
+    target: { value: 'Lanterna' },
+  });
+};
+
+const submitVarieDraft = () => {
+  fireEvent.click(screen.getAllByRole('button', { name: 'Aggiungi' }).at(-1));
 };
 
 describe('Inventory command safety', () => {
   let consoleError;
+  let operationRun;
 
   beforeEach(() => {
+    jest.clearAllMocks();
     consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+    operationRun = jest.fn((operation) => operation({ aborted: false }));
+    useTask07MediaOperationOwner.mockReturnValue({ run: operationRun });
+    useCatalogItemsById.mockReturnValue({ itemsById: {}, status: 'fresh', error: null });
     useAuthSession.mockReturnValue({
       user: { uid: 'user-1' },
       repositoryAccessGeneration: 0,
@@ -77,25 +94,27 @@ describe('Inventory command safety', () => {
     useResources.mockReturnValue({
       data: { stats: { gold: 100 } },
       status: 'fresh',
-      stage: 'legacy-read',
     });
     createUserOperationId.mockImplementation((prefix) => `${prefix}-fixed`);
-    isUserDataCommandStageResolved.mockReturnValue(true);
     isDefinitiveUserDataCommandError.mockImplementation((error) => (
       error?.code === 'functions/invalid-argument'
     ));
-    runVersionedUserDataCommand.mockImplementation(({ authoritative }) => authoritative());
-    uploadCacheableImage.mockResolvedValue({ downloadUrl: 'https://example.test/rope.png' });
-    storageRef.mockImplementation((_storage, path) => ({ path }));
-    deleteObject.mockResolvedValue(undefined);
+    adjustGold.mockResolvedValue({ success: true });
+    mutateInventory.mockResolvedValue({ success: true });
+    tryPersistTask07VarieMedia.mockResolvedValue({
+      inventoryId: 'varie-1',
+      outcome: { state: 'complete' },
+    });
+    task07ConsumerNeedsAttention.mockReturnValue(false);
+    describeTask07ConsumerOutcome.mockReturnValue('Inventory image requires attention.');
     if (!URL.createObjectURL) URL.createObjectURL = jest.fn(() => 'blob:preview');
     if (!URL.revokeObjectURL) URL.revokeObjectURL = jest.fn();
   });
 
   afterEach(() => consoleError.mockRestore());
 
-  test('keeps the Varie creator gated while the inventory rollout stage is unresolved', () => {
-    useInventory.mockReturnValue({ ...readyInventory, status: 'loading', stage: null });
+  test('keeps the Varie creator gated while canonical inventory is loading', () => {
+    useInventory.mockReturnValue({ ...readyInventory, status: 'loading' });
 
     render(<Inventory />);
 
@@ -103,7 +122,7 @@ describe('Inventory command safety', () => {
     expect(openButton).toBeDisabled();
     fireEvent.click(openButton);
     expect(screen.queryByText('Aggiungi oggetto "Varie"')).not.toBeInTheDocument();
-    expect(uploadCacheableImage).not.toHaveBeenCalled();
+    expect(tryPersistTask07VarieMedia).not.toHaveBeenCalled();
   });
 
   test('reuses one logical retry key for an ambiguous gold adjustment', async () => {
@@ -118,7 +137,6 @@ describe('Inventory command safety', () => {
     await waitFor(() => expect(adjustGold).toHaveBeenCalledTimes(1));
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Conferma' })).not.toBeDisabled());
-
     fireEvent.click(screen.getByRole('button', { name: 'Conferma' }));
     await waitFor(() => expect(adjustGold).toHaveBeenCalledTimes(2));
 
@@ -127,48 +145,69 @@ describe('Inventory command safety', () => {
     await waitFor(() => expect(screen.queryByPlaceholderText('Es. 10')).not.toBeInTheDocument());
   });
 
-  test('uploads a Varie image once and reuses it with one retry key after an ambiguous result', async () => {
+  test('reuses one logical retry key for a Varie item without media', async () => {
     mutateInventory
       .mockRejectedValueOnce(Object.assign(new Error('timeout'), { code: 'functions/unavailable' }))
       .mockResolvedValueOnce({ success: true });
-    const { container } = render(<Inventory />);
+    render(<Inventory />);
+    openVarieDraft();
 
-    fireEvent.click(screen.getByTitle('Aggiungi oggetto Varie'));
-    fireEvent.change(screen.getByPlaceholderText('Es. Corda di canapa'), { target: { value: 'Lanterna' } });
-    const file = new File(['image'], 'lamp.png', { type: 'image/png' });
-    fireEvent.change(container.querySelector('input[type="file"]'), { target: { files: [file] } });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Aggiungi' }).at(-1));
+    submitVarieDraft();
     await waitFor(() => expect(mutateInventory).toHaveBeenCalledTimes(1));
-
     await waitFor(() => expect(
       screen.getAllByRole('button', { name: 'Aggiungi' }).at(-1)
     ).not.toBeDisabled());
-
-    fireEvent.click(screen.getAllByRole('button', { name: 'Aggiungi' }).at(-1));
+    submitVarieDraft();
     await waitFor(() => expect(mutateInventory).toHaveBeenCalledTimes(2));
 
-    expect(uploadCacheableImage).toHaveBeenCalledTimes(1);
     expect(mutateInventory.mock.calls[0][0].retryKey).toBe('user-1:0:varie-flow-fixed');
     expect(mutateInventory.mock.calls[1][0].retryKey).toBe('user-1:0:varie-flow-fixed');
-    expect(mutateInventory.mock.calls[1][0].snapshot.image_url).toBe('https://example.test/rope.png');
+    expect(tryPersistTask07VarieMedia).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByText('Aggiungi oggetto "Varie"')).not.toBeInTheDocument());
   });
 
-  test('deletes an uploaded Varie image after a definitive downstream rejection', async () => {
-    mutateInventory.mockRejectedValueOnce(Object.assign(
-      new Error('invalid item'),
-      { code: 'functions/invalid-argument' }
-    ));
+  test('creates a Varie item with media through one canonical Task 07 operation', async () => {
     const { container } = render(<Inventory />);
-
-    fireEvent.click(screen.getByTitle('Aggiungi oggetto Varie'));
-    fireEvent.change(screen.getByPlaceholderText('Es. Corda di canapa'), { target: { value: 'Lanterna' } });
+    openVarieDraft();
+    fireEvent.change(screen.getByPlaceholderText('Dettagli opzionali'), {
+      target: { value: 'Luce schermata' },
+    });
+    fireEvent.change(container.querySelector('input[type="number"]'), { target: { value: '3' } });
     const file = new File(['image'], 'lamp.png', { type: 'image/png' });
     fireEvent.change(container.querySelector('input[type="file"]'), { target: { files: [file] } });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Aggiungi' }).at(-1));
 
-    await waitFor(() => expect(deleteObject).toHaveBeenCalledWith({ path: expect.stringContaining('items/varie_user-1_') }));
-    expect(screen.queryByText('Aggiungi oggetto "Varie"')).not.toBeInTheDocument();
+    submitVarieDraft();
+    await waitFor(() => expect(tryPersistTask07VarieMedia).toHaveBeenCalledTimes(1));
+
+    expect(operationRun).toHaveBeenCalledTimes(1);
+    expect(tryPersistTask07VarieMedia).toHaveBeenCalledWith({
+      userId: 'user-1',
+      snapshot: {
+        name: 'Lanterna',
+        description: 'Luce schermata',
+        type: 'varie',
+        item_type: 'varie',
+      },
+      quantity: 3,
+      file,
+      signal: { aborted: false },
+    });
+    expect(mutateInventory).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByText('Aggiungi oggetto "Varie"')).not.toBeInTheDocument());
+  });
+
+  test('fails closed and keeps the Varie draft when canonical media is unavailable', async () => {
+    tryPersistTask07VarieMedia.mockResolvedValueOnce(null);
+    const { container } = render(<Inventory />);
+    openVarieDraft();
+    const file = new File(['image'], 'lamp.png', { type: 'image/png' });
+    fireEvent.change(container.querySelector('input[type="file"]'), { target: { files: [file] } });
+
+    submitVarieDraft();
+
+    expect(await screen.findByText('Canonical media is unavailable. Nothing was saved.')).toBeInTheDocument();
+    expect(screen.getByText('Aggiungi oggetto "Varie"')).toBeInTheDocument();
+    expect(mutateInventory).not.toHaveBeenCalled();
   });
 
   test('closes the Varie draft immediately on a UID/access-generation change', () => {
@@ -184,5 +223,26 @@ describe('Inventory command safety', () => {
 
     expect(screen.queryByText('Aggiungi oggetto "Varie"')).not.toBeInTheDocument();
     expect(mutateInventory).not.toHaveBeenCalled();
+    expect(tryPersistTask07VarieMedia).not.toHaveBeenCalled();
   });
-});
+
+  test('joins canonical-only Bazaar media into a purchased display entity in memory', () => {
+    const catalogMedia = { assetId: `m_${'a'.repeat(40)}` };
+    const purchased = {
+      id: 'sword-1',
+      General: { Nome: 'Spada' },
+      item_type: 'weapon',
+      _task05: {
+        inventoryId: 'purchase-receipt-1',
+        catalogItemId: 'sword-1',
+      },
+    };
+
+    const view = buildInventoryView([purchased], { slots: {} }, {
+      'sword-1': { id: 'sword-1', media: catalogMedia, task07MediaRevision: 4 },
+    });
+
+    expect(view.items[0].doc.media).toBe(catalogMedia);
+    expect(view.items[0].doc.task07MediaRevision).toBe(4);
+    expect(purchased).not.toHaveProperty('media');
+  });});

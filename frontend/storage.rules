@@ -122,7 +122,7 @@ service firebase.storage {
         )
         || (
           manifest.kind == 'foe'
-          && isDM()
+          && isCatalogManager()
         )
         || (
           manifest.kind == 'item'
@@ -347,7 +347,7 @@ service firebase.storage {
       ).data;
       let upload = receipt.uploadsBySlot[slot];
       return resource == null
-        && isDM()
+        && isCatalogManager()
         && request.auth.uid == actorUid
         && receipt.schemaVersion == 1
         && receipt.status == 'pending'
@@ -378,7 +378,7 @@ service firebase.storage {
         )
         || (
           audience == 'dm-only'
-          && isDM()
+          && isCatalogManager()
         );
     }
 
@@ -535,7 +535,7 @@ service firebase.storage {
     }
 
     match /foes/task07-operations/{actorUid}/{receiptId}/{foeId}/{slot}/{fileName} {
-      allow read: if isDM();
+      allow read: if isCatalogManager();
       allow create: if task07FoeOperationCreateMatches(
         actorUid,
         receiptId,

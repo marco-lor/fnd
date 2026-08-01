@@ -339,7 +339,17 @@ describe('foe media lifecycle ownership', () => {
     })).toBe(true);
     expect(shouldUseDurableFoeDuplication({
       imagePath: 'foes/main/legacy.png',
-    })).toBe(false);
+    })).toBe(true);
+    expect(shouldUseDurableFoeDuplication({
+      tecniche: [{imageUrl: 'https://legacy.example/technique.png'}],
+    })).toBe(true);
+    expect(shouldUseDurableFoeDuplication({
+      spells: [{media: {}}],
+    })).toBe(true);
+    expect(shouldUseDurableFoeDuplication({
+      General: {videoUrl: 'https://legacy.example/video.mp4'},
+    })).toBe(true);
+    expect(shouldUseDurableFoeDuplication({name: 'No media'})).toBe(false);
     expect(shouldUseDurableFoeDuplication({}, { force: true })).toBe(true);
   });
 

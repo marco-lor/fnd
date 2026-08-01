@@ -97,10 +97,12 @@ const requireUid = (request: CallableRequest<unknown>): string => {
   return uid;
 };
 
-const actorIsActiveDm = (
+const actorIsActiveManager = (
   actor: admin.firestore.DocumentSnapshot
 ): boolean => actor.exists &&
-  asTrimmedString(actor.get("role")).toLowerCase() === "dm" &&
+  ["dm", "webmaster"].includes(
+    asTrimmedString(actor.get("role")).toLowerCase()
+  ) &&
   actor.get("deletionState") !== "pending";
 
 const requireAssetId = (value: unknown): string => {
@@ -277,8 +279,11 @@ export const task07PrepareFoeMediaRetirement = onCall(
       const manifestRef = db.doc(`media_assets/${assetId}`);
       const actorRef = db.doc(`users/${actorUid}`);
       const [actor, manifest] = await transaction.getAll(actorRef, manifestRef);
-      if (!actorIsActiveDm(actor)) {
-        fail("permission-denied", "Only active DMs may retire foe media.");
+      if (!actorIsActiveManager(actor)) {
+        fail(
+          "permission-denied",
+          "Only active DMs or webmasters may retire foe media."
+        );
       }
       const plan = asStoredTask07MediaUploadPlan(manifest.get("plan"));
       if (!manifest.exists || !plan || plan.kind !== "foe" ||
@@ -465,8 +470,11 @@ export const task07CommitFoeMediaRetirement = onCall(
         foeRef,
         manifestRef
       );
-      if (!actorIsActiveDm(actor)) {
-        fail("permission-denied", "Only active DMs may retire foe media.");
+      if (!actorIsActiveManager(actor)) {
+        fail(
+          "permission-denied",
+          "Only active DMs or webmasters may retire foe media."
+        );
       }
       const current = foe.data() || {};
       if (!foe.exists || hashValue(current) !== receipt.get("targetHash")) {

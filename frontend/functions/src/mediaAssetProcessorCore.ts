@@ -4,6 +4,7 @@ import {
   InspectedMediaObject,
   MEDIA_CONTRACTS,
   MEDIA_CONTRACT_VERSION,
+  MEDIA_POLICY_HASH,
   MEDIA_PRIVATE_CACHE_CONTROL,
   MEDIA_PROCESSING_MAX_AUTO_ATTEMPTS,
   MEDIA_STAGING_CACHE_CONTROL,
@@ -25,6 +26,92 @@ export interface Task07ProcessorPlan {
   sourceBytes: number;
 }
 
+export const LEGACY_MAP_BACKFILL_MAX_WIDTH = 9600;
+export const LEGACY_MAP_BACKFILL_MAX_HEIGHT = 9600;
+export const LEGACY_MAP_BACKFILL_MAX_PIXELS = 92_160_000;
+
+const LEGACY_MAP_BACKFILL_MARKER_KEYS = [
+  "approvedPlanFingerprint", "assetId", "entityId", "kind", "ownerUid",
+  "planVersion", "policyHash", "policyVersion", "receiptId",
+  "reportSchemaVersion", "requestHash", "schemaVersion",
+  "sourceFingerprint", "sourceGeneration", "sourcePath", "subjectHash",
+  "targetPath",
+] as const;
+
+const recordValue = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === "object" && !Array.isArray(value) ?
+    value as Record<string, unknown> :
+    null;
+
+const exactKeys = (
+  value: Record<string, unknown>,
+  expected: readonly string[]
+): boolean => Object.keys(value).sort().join(",") ===
+  [...expected].sort().join(",");
+
+const sha256Value = (value: unknown): value is string =>
+  typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+
+export const isAuthorizedTask07LegacyMapBackfill = (input: {
+  plan: {
+    assetId: string;
+    kind: MediaKind;
+    ownerUid: string;
+    entityId: string;
+    requestHash: string;
+  };
+  marker: unknown;
+  receipt: unknown;
+}): boolean => {
+  const marker = recordValue(input.marker);
+  const receipt = recordValue(input.receipt);
+  const receiptMarker = recordValue(receipt?.legacyBackfill);
+  if (input.plan.kind !== "map" || !marker || !receipt ||
+    !receiptMarker ||
+    !exactKeys(marker, LEGACY_MAP_BACKFILL_MARKER_KEYS) ||
+    !exactKeys(receiptMarker, LEGACY_MAP_BACKFILL_MARKER_KEYS) ||
+    LEGACY_MAP_BACKFILL_MARKER_KEYS.some(
+      (key) => receiptMarker[key] !== marker[key]
+    )) return false;
+  const recoveryAttempts = receipt.legacyMapRecoveryAttempts;
+  return marker.schemaVersion === 1 &&
+    marker.kind === "legacy-map-backfill" &&
+    marker.reportSchemaVersion === 4 &&
+    marker.planVersion === 4 &&
+    marker.policyVersion === MEDIA_CONTRACT_VERSION &&
+    marker.policyHash === MEDIA_POLICY_HASH &&
+    marker.assetId === input.plan.assetId &&
+    marker.ownerUid === input.plan.ownerUid &&
+    marker.entityId === input.plan.entityId &&
+    marker.requestHash === input.plan.requestHash &&
+    marker.targetPath === `grigliata_backgrounds/${input.plan.entityId}` &&
+    /^r_[a-f0-9]{40}$/.test(String(marker.receiptId || "")) &&
+    sha256Value(marker.subjectHash) &&
+    sha256Value(marker.approvedPlanFingerprint) &&
+    sha256Value(marker.sourceFingerprint) &&
+    typeof marker.sourcePath === "string" && marker.sourcePath.length > 0 &&
+    /^[1-9][0-9]*$/.test(String(marker.sourceGeneration || "")) &&
+    receipt.state === "intent" &&
+    receipt.sourceKey === "backgrounds" &&
+    receipt.kind === "map" &&
+    receipt.receiptId === marker.receiptId &&
+    receipt.schemaVersion === marker.reportSchemaVersion &&
+    receipt.planVersion === marker.planVersion &&
+    receipt.policyVersion === marker.policyVersion &&
+    receipt.policyHash === marker.policyHash &&
+    receipt.subjectHash === marker.subjectHash &&
+    receipt.approvedPlanFingerprint === marker.approvedPlanFingerprint &&
+    receipt.assetId === marker.assetId &&
+    receipt.ownerUid === marker.ownerUid &&
+    receipt.entityId === marker.entityId &&
+    receipt.targetPath === marker.targetPath &&
+    receipt.sourcePath === marker.sourcePath &&
+    receipt.sourceGeneration === marker.sourceGeneration &&
+    receipt.sourceFingerprint === marker.sourceFingerprint &&
+    Number.isSafeInteger(recoveryAttempts) &&
+    Number(recoveryAttempts) >= 0 && Number(recoveryAttempts) <= 1;
+};
+
 export interface Task07DecodedSource {
   contentType: string;
   width: number;
@@ -45,12 +132,14 @@ export interface Task07MediaTransformer {
     buffer: Buffer;
     kind: MediaKind;
     declaredContentType: string;
+    maxInputPixels: number;
   }): Promise<Task07DecodedSource>;
   createVariant(input: {
     buffer: Buffer;
     kind: MediaKind;
     source: Task07DecodedSource;
     variant: MediaVariantName;
+    maxInputPixels: number;
   }): Promise<Task07VariantOutput>;
 }
 
@@ -208,10 +297,24 @@ const checksum = (buffer: Buffer): string =>
 const positiveInteger = (value: unknown): value is number =>
   Number.isSafeInteger(value) && Number(value) > 0;
 
+export const task07SourceDimensionBudget = (
+  kind: MediaKind,
+  legacyMapBackfill = false
+): {
+  maxWidth: number | null;
+  maxHeight: number | null;
+  maxPixels: number | null;
+} => legacyMapBackfill && kind === "map" ? {
+  maxWidth: LEGACY_MAP_BACKFILL_MAX_WIDTH,
+  maxHeight: LEGACY_MAP_BACKFILL_MAX_HEIGHT,
+  maxPixels: LEGACY_MAP_BACKFILL_MAX_PIXELS,
+} : MEDIA_CONTRACTS[kind].source;
+
 const validateSource = (
   plan: Task07ProcessorPlan,
   buffer: Buffer,
-  decoded: Task07DecodedSource
+  decoded: Task07DecodedSource,
+  dimensionBudget: ReturnType<typeof task07SourceDimensionBudget>
 ): void => {
   const contract = MEDIA_CONTRACTS[plan.kind].source;
   const actualType = normalizeMediaContentType(decoded.contentType);
@@ -228,12 +331,12 @@ const validateSource = (
     if (!positiveInteger(decoded.width) || !positiveInteger(decoded.height)) {
       throw new Task07ProcessorError("source-dimensions-invalid");
     }
-    if ((contract.maxWidth !== null &&
-        decoded.width > contract.maxWidth) ||
-      (contract.maxHeight !== null &&
-        decoded.height > contract.maxHeight) ||
-      (contract.maxPixels !== null &&
-        decoded.width * decoded.height > contract.maxPixels)) {
+    if ((dimensionBudget.maxWidth !== null &&
+        decoded.width > dimensionBudget.maxWidth) ||
+      (dimensionBudget.maxHeight !== null &&
+        decoded.height > dimensionBudget.maxHeight) ||
+      (dimensionBudget.maxPixels !== null &&
+        decoded.width * decoded.height > dimensionBudget.maxPixels)) {
       throw new Task07ProcessorError("source-dimension-budget-exceeded");
     }
   }
@@ -266,13 +369,20 @@ export const processTask07MediaSource = async (input: {
   sourceGeneration: string;
   source: Buffer;
   transformer: Task07MediaTransformer;
+  legacyMapBackfill?: boolean;
 }): Promise<Task07ProcessingResult> => {
+  const dimensionBudget = task07SourceDimensionBudget(
+    input.plan.kind,
+    input.legacyMapBackfill === true
+  );
+  const maxInputPixels = dimensionBudget.maxPixels || 1;
   const decoded = await input.transformer.inspectSource({
     buffer: input.source,
     kind: input.plan.kind,
     declaredContentType: input.plan.sourceContentType,
+    maxInputPixels,
   });
-  validateSource(input.plan, input.source, decoded);
+  validateSource(input.plan, input.source, decoded, dimensionBudget);
   const generated = buildGeneratedMediaStoragePlan({
     kind: input.plan.kind,
     audienceScope: input.plan.audienceScope,
@@ -308,6 +418,7 @@ export const processTask07MediaSource = async (input: {
       kind: input.plan.kind,
       source: decoded,
       variant,
+      maxInputPixels,
     });
     const expected = plannedMediaVariantDimensions(decoded, contract);
     if (!expected ||
