@@ -50,6 +50,7 @@ function verifyHardenedBuild() {
     filePath.endsWith(".map")
     || path.basename(filePath) === "asset-manifest.json"
   ));
+  const misplacedCommonJsModules = files.filter((filePath) => filePath.endsWith(".cjs"));
 
   const sourceMappingReferences = textFiles.filter((filePath) => (
     fs.readFileSync(filePath, "utf8").includes("sourceMappingURL")
@@ -60,13 +61,21 @@ function verifyHardenedBuild() {
     googleApiKeyPattern.test(fs.readFileSync(filePath, "utf8"))
   ));
 
-  if (forbiddenFiles.length || sourceMappingReferences.length || leakedApiKeyFiles.length) {
-    console.error("Production build contains public debug artifacts or API key material.");
+  if (
+    forbiddenFiles.length
+    || misplacedCommonJsModules.length
+    || sourceMappingReferences.length
+    || leakedApiKeyFiles.length
+  ) {
+    console.error("Production build contains public debug artifacts, misplaced modules, or API key material.");
     for (const filePath of forbiddenFiles) {
       console.error(` - ${path.relative(projectRoot, filePath)}`);
     }
     for (const filePath of sourceMappingReferences) {
       console.error(` - ${path.relative(projectRoot, filePath)} contains sourceMappingURL`);
+    }
+    for (const filePath of misplacedCommonJsModules) {
+      console.error(` - ${path.relative(projectRoot, filePath)} was emitted as a static asset instead of bundled JavaScript`);
     }
     for (const filePath of leakedApiKeyFiles) {
       console.error(` - ${path.relative(projectRoot, filePath)} contains a Google API key pattern`);

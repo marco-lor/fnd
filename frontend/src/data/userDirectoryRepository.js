@@ -24,7 +24,7 @@ const {
   buildUserDirectoryQuery,
   USER_DIRECTORY_PAGE_SIZE,
   USER_DIRECTORY_QUERY_KEYS,
-} = require('./userDirectoryQueryFactory.cjs');
+} = require('./userDirectoryQueryFactory.js');
 
 export { USER_DIRECTORY_PAGE_SIZE, USER_DIRECTORY_QUERY_KEYS };
 
