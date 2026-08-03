@@ -6,6 +6,7 @@ import { library } from "@fortawesome/fontawesome-svg-core";
 import { faLock, faLockOpen } from "@fortawesome/free-solid-svg-icons";
 import PlayerInfo from "./elements/playerInfo";
 import LockSettingsTable from "./elements/LockSettingsTable";
+import ManagerActionDialog, { parseIntegerInput } from "./elements/ManagerActionDialog";
 import { useShellLayout } from "../common/shellLayout";
 import { getCallable } from "../../data/functions/callableRegistry";
 import {
@@ -37,6 +38,9 @@ const DMDashboard = () => {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
   const [selectedUserIds, setSelectedUserIds] = useState([]);
+  const [actionDialog, setActionDialog] = useState(null);
+  const [actionDialogValue, setActionDialogValue] = useState("1");
+  const [actionDialogError, setActionDialogError] = useState(null);
   const { topInset } = useShellLayout();
   // Collapsible sections state
   const [sectionsOpen, setSectionsOpen] = useState({
@@ -88,12 +92,9 @@ const DMDashboard = () => {
     </div>
   );
 
-  const handleLevelUpAll = async () => {
+  const executeLevelUpAll = async () => {
     if (userData.role !== "dm") {
       setError("Permission denied: Only DMs can level up players");
-      return;
-    }
-    if (!window.confirm("Are you sure you want to increase the level of all players by 1?")) {
       return;
     }
     try {
@@ -131,12 +132,9 @@ const DMDashboard = () => {
     }
   };
 
-  const handleLevelUpOne = async (targetUserId) => {
+  const executeLevelUpOne = async (targetUserId) => {
     if (userData.role !== "dm") {
       setError("Permission denied: Only DMs can level up players");
-      return;
-    }
-    if (!window.confirm("Confirm level up for this player?")) {
       return;
     }
     try {
@@ -155,20 +153,9 @@ const DMDashboard = () => {
   };
 
   // Add combat tokens to a specific user
-  const handleAddCombatTokens = async (targetUserId) => {
+  const executeCombatTokenUpdate = async (targetUserId, amount) => {
     if (userData.role !== "dm") {
       setError("Permission denied: Only DMs can modify tokens");
-      return;
-    }
-    const input = window.prompt("How many combat tokens to add? (use negative to remove)", "1");
-    if (input === null) return; // cancelled
-    const amount = parseInt(input, 10);
-    if (Number.isNaN(amount) || !Number.isFinite(amount)) {
-      setError("Invalid number.");
-      return;
-    }
-    if (amount === 0) return;
-    if (amount < 0 && !window.confirm(`Remove ${Math.abs(amount)} tokens from this player?`)) {
       return;
     }
     try {
@@ -204,6 +191,75 @@ const DMDashboard = () => {
       setTimeout(() => setToast(null), 3000);
     }
   };
+
+  const openActionDialog = (kind, targetUserId = null) => {
+    setActionDialogError(null);
+    setActionDialogValue("1");
+    setActionDialog({ kind, targetUserId });
+  };
+
+  const closeActionDialog = () => {
+    if (busy) return;
+    setActionDialog(null);
+    setActionDialogError(null);
+  };
+
+  const handleLevelUpAll = () => openActionDialog("level-up-all");
+  const handleLevelUpOne = (targetUserId) => openActionDialog("level-up-one", targetUserId);
+  const handleAddCombatTokens = (targetUserId) => openActionDialog("combat-tokens", targetUserId);
+
+  const confirmActionDialog = async () => {
+    if (!actionDialog || busy) return;
+    const pendingAction = actionDialog;
+    if (pendingAction.kind === "combat-tokens") {
+      const amount = parseIntegerInput(actionDialogValue);
+      if (amount === null) {
+        setActionDialogError("Enter a valid whole number.");
+        return;
+      }
+      if (amount === 0) {
+        setActionDialogError("Enter a value other than zero.");
+        return;
+      }
+      setActionDialog(null);
+      await executeCombatTokenUpdate(pendingAction.targetUserId, amount);
+      return;
+    }
+
+    setActionDialog(null);
+    if (pendingAction.kind === "level-up-all") {
+      await executeLevelUpAll();
+    } else if (pendingAction.kind === "level-up-one") {
+      await executeLevelUpOne(pendingAction.targetUserId);
+    }
+  };
+
+  const actionTarget = actionDialog?.targetUserId
+    ? users.find((entry) => entry.id === actionDialog.targetUserId)
+    : null;
+  const actionTargetLabel = actionTarget?.characterId
+    || actionTarget?.label
+    || actionTarget?.email
+    || "this player";
+  const actionDialogCopy = actionDialog?.kind === "level-up-all"
+    ? {
+        title: "Level up all players?",
+        description: "This increases every player's level by 1.",
+        confirmLabel: "Level Up All",
+        confirmTone: "danger",
+      }
+    : actionDialog?.kind === "level-up-one"
+      ? {
+          title: `Level up ${actionTargetLabel}?`,
+          description: "This increases this player's level by 1.",
+          confirmLabel: "Level Up",
+        }
+      : {
+          title: `Adjust tokens for ${actionTargetLabel}`,
+          description: "Use a positive number to add combat tokens or a negative number to remove them.",
+          inputLabel: "Combat token change",
+          confirmLabel: "Apply",
+        };
 
   // Note: lock toggles handled in LockSettingsTable to avoid whole-page re-renders
 
@@ -349,6 +405,23 @@ const DMDashboard = () => {
 
         {renderLockSettingsTable()}
       </div>
+      <ManagerActionDialog
+        visible={!!actionDialog}
+        title={actionDialogCopy.title}
+        description={actionDialogCopy.description}
+        inputLabel={actionDialogCopy.inputLabel}
+        value={actionDialogValue}
+        onChange={(value) => {
+          setActionDialogValue(value);
+          setActionDialogError(null);
+        }}
+        error={actionDialogError}
+        busy={busy}
+        confirmLabel={actionDialogCopy.confirmLabel}
+        confirmTone={actionDialogCopy.confirmTone}
+        onClose={closeActionDialog}
+        onConfirm={confirmActionDialog}
+      />
     </div>
   );
 };

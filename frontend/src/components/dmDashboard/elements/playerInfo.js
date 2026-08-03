@@ -43,6 +43,7 @@ import PlayerInfoInventoryRow from "./playerInfo/sections/PlayerInfoInventoryRow
 import PlayerInfoDiceRollsRow from "./playerInfo/sections/PlayerInfoDiceRollsRow";
 import { adjustGold, updateResource } from "../../../data/userData/userDataCommands";
 import { buildManagerResourceTotalOptions } from "../../../data/userData/managerResourceCommands";
+import ManagerActionDialog, { parseIntegerInput } from "./ManagerActionDialog";
 
 library.add(faEdit, faTrash, faPlus, faMinus, faCoins);
 
@@ -94,6 +95,9 @@ const PlayerInfo = ({
   const [goldUpdating, setGoldUpdating] = useState({});
   const [goldOverlay, setGoldOverlay] = useState(null);
   const [cardExpanded, setCardExpanded] = useState({});
+  const [vitalDialog, setVitalDialog] = useState(null);
+  const [vitalDialogError, setVitalDialogError] = useState(null);
+  const [vitalDialogBusy, setVitalDialogBusy] = useState(false);
 
   const refreshUserData = useCallback(() => Promise.resolve(), []);
 
@@ -317,14 +321,6 @@ const PlayerInfo = ({
     essenza: { current: "stats.essenzaCurrent", total: "stats.essenzaTotal", label: "Essenza" },
   };
 
-  const promptInteger = (message, defaultVal) => {
-    const input = window.prompt(message, defaultVal != null ? String(defaultVal) : "");
-    if (input === null) return null; // cancelled
-    const n = parseInt(input, 10);
-    if (Number.isNaN(n) || !Number.isFinite(n)) return null;
-    return n;
-  };
-
   const adjustVitalDelta = async (userId, vital, delta) => {
     if (!canEditVitals) return;
     const u = users.find((x) => x.id === userId);
@@ -362,67 +358,93 @@ const PlayerInfo = ({
     }
   };
 
-  const setVitalCurrent = async (userId, vital) => {
+  const openVitalDialog = (userId, vital, kind) => {
     if (!canEditVitals) return;
     const u = users.find((x) => x.id === userId);
     if (!u) return;
     const cur = Number(u?.stats?.[`${vital}Current`]) || 0;
-    const n = promptInteger(`Set ${vitalFieldMap[vital].label} current value`, cur);
-    if (n === null) return;
-    try {
-      const nextCurrent = Math.max(0, n);
-      await updateResource({
-        userId,
-        resource: vital,
-        mode: "set",
-        value: nextCurrent,
-        retryKey: ["dm-vital-current", userId, vital, cur, nextCurrent].join(":"),
-      });
-    } catch (e) {
-      console.error("setVitalCurrent failed", e);
-    }
+    const total = Number(u?.stats?.[`${vital}Total`]) || 0;
+    setVitalDialogError(null);
+    setVitalDialog({
+      userId,
+      vital,
+      kind,
+      value: String(kind === "total" ? total : kind === "delta" ? 0 : cur),
+      clampCurrent: true,
+    });
   };
 
-  const setVitalTotal = async (userId, vital) => {
-    if (!canEditVitals) return;
-    const u = users.find((x) => x.id === userId);
-    if (!u) return;
-    const tot = Number(u?.stats?.[`${vital}Total`]) || 0;
-    const n = promptInteger(`Set ${vitalFieldMap[vital].label} total value`, tot);
-    if (n === null) return;
-    const cur = Number(u?.stats?.[`${vital}Current`]) || 0;
-    const nextTotal = Math.max(0, n);
-    const nextCurrent = cur > nextTotal
-      && window.confirm("Current value exceeds new total. Clamp current to new total?")
-      ? nextTotal
-      : cur;
-    try {
-      await updateResource({
-        userId,
-        resource: vital,
-        mode: "set",
-        value: nextCurrent,
-        totalValue: nextTotal,
-        ...buildManagerResourceTotalOptions(u, vital),
-        retryKey: [
-          "dm-vital-total",
-          userId,
-          vital,
-          cur,
-          nextCurrent,
-          nextTotal,
-        ].join(":"),
-      });
-    } catch (e) {
-      console.error("setVitalTotal failed", e);
-    }
+  const closeVitalDialog = () => {
+    if (vitalDialogBusy) return;
+    setVitalDialog(null);
+    setVitalDialogError(null);
   };
 
-  const customDeltaPrompt = async (userId, vital) => {
-    if (!canEditVitals) return;
-    const delta = promptInteger(`Enter ${vitalFieldMap[vital].label} delta (use negative to subtract)`, "0");
-    if (delta === null || delta === 0) return;
-    await adjustVitalDelta(userId, vital, delta);
+  const confirmVitalDialog = async () => {
+    if (!vitalDialog || vitalDialogBusy) return;
+    const n = parseIntegerInput(vitalDialog.value);
+    if (n === null) {
+      setVitalDialogError("Enter a valid whole number.");
+      return;
+    }
+    if (vitalDialog.kind === "delta" && n === 0) {
+      setVitalDialogError("Enter a value other than zero.");
+      return;
+    }
+    const u = users.find((x) => x.id === vitalDialog.userId);
+    if (!u) {
+      setVitalDialogError("The selected user is no longer available.");
+      return;
+    }
+    const cur = Number(u?.stats?.[`${vitalDialog.vital}Current`]) || 0;
+    try {
+      setVitalDialogBusy(true);
+      setVitalDialogError(null);
+      if (vitalDialog.kind === "current") {
+        const nextCurrent = Math.max(0, n);
+        await updateResource({
+          userId: vitalDialog.userId,
+          resource: vitalDialog.vital,
+          mode: "set",
+          value: nextCurrent,
+          retryKey: ["dm-vital-current", vitalDialog.userId, vitalDialog.vital, cur, nextCurrent].join(":"),
+        });
+      } else if (vitalDialog.kind === "total") {
+        const nextTotal = Math.max(0, n);
+        const nextCurrent = cur > nextTotal && vitalDialog.clampCurrent ? nextTotal : cur;
+        await updateResource({
+          userId: vitalDialog.userId,
+          resource: vitalDialog.vital,
+          mode: "set",
+          value: nextCurrent,
+          totalValue: nextTotal,
+          ...buildManagerResourceTotalOptions(u, vitalDialog.vital),
+          retryKey: [
+            "dm-vital-total",
+            vitalDialog.userId,
+            vitalDialog.vital,
+            cur,
+            nextCurrent,
+            nextTotal,
+          ].join(":"),
+        });
+      } else {
+        const nextCurrent = Math.max(0, cur + n);
+        await updateResource({
+          userId: vitalDialog.userId,
+          resource: vitalDialog.vital,
+          mode: "set",
+          value: nextCurrent,
+          retryKey: ["dm-vital-delta", vitalDialog.userId, vitalDialog.vital, cur, n, nextCurrent].join(":"),
+        });
+      }
+      setVitalDialog(null);
+    } catch (e) {
+      console.error("Vital update failed", e);
+      setVitalDialogError("Failed to update this vital. See console.");
+    } finally {
+      setVitalDialogBusy(false);
+    }
   };
 
   if (loading) return <div className="text-white mt-4">Loading user data...</div>;
@@ -497,7 +519,7 @@ const PlayerInfo = ({
                   <div className="flex items-center gap-2">
                     <span className="tabular-nums text-slate-100">{cur}</span>
                     <button
-                      onClick={() => setVitalCurrent(user.id, key)}
+                      onClick={() => openVitalDialog(user.id, key, "current")}
                       className="rounded bg-slate-800 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-200 hover:bg-slate-700"
                       title="Set current"
                     >
@@ -512,13 +534,13 @@ const PlayerInfo = ({
                   <div className="flex items-center gap-1">
                     <button onClick={() => adjustVitalDelta(user.id, key, -1)} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700">-</button>
                     <button onClick={() => adjustVitalDelta(user.id, key, 1)} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700">+</button>
-                    <button onClick={() => customDeltaPrompt(user.id, key)} className="px-2 py-1 rounded bg-indigo-900/70 hover:bg-indigo-800">Δ</button>
+                    <button onClick={() => openVitalDialog(user.id, key, "delta")} className="px-2 py-1 rounded bg-indigo-900/70 hover:bg-indigo-800">Δ</button>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span className="text-slate-300">/</span>
                     <span className="tabular-nums text-slate-100">{tot}</span>
                     <button
-                      onClick={() => setVitalTotal(user.id, key)}
+                      onClick={() => openVitalDialog(user.id, key, "total")}
                       className="rounded bg-cyan-900/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-50 hover:bg-cyan-800"
                       title="Set total"
                     >
@@ -772,6 +794,55 @@ const PlayerInfo = ({
         onChange={handleGoldOverlayValueChange}
         onConfirm={confirmGoldOverlay}
       />}
+
+      {vitalDialog && (() => {
+        const activeUser = users.find((entry) => entry.id === vitalDialog.userId);
+        const current = Number(activeUser?.stats?.[`${vitalDialog.vital}Current`]) || 0;
+        const parsedValue = parseIntegerInput(vitalDialog.value);
+        const nextTotal = parsedValue === null ? null : Math.max(0, parsedValue);
+        const showClamp = vitalDialog.kind === "total" && nextTotal !== null && current > nextTotal;
+        const vitalLabel = vitalFieldMap[vitalDialog.vital].label;
+        const userLabel = activeUser?.characterId || activeUser?.label || activeUser?.email || "this player";
+        const actionLabel = vitalDialog.kind === "current"
+          ? "current value"
+          : vitalDialog.kind === "total"
+            ? "maximum"
+            : "change";
+        return (
+          <ManagerActionDialog
+            visible
+            title={`Set ${vitalLabel} ${actionLabel}`}
+            description={`${userLabel} · current ${current} / ${Number(activeUser?.stats?.[`${vitalDialog.vital}Total`]) || 0}`}
+            inputLabel={`${vitalLabel} ${actionLabel}`}
+            value={vitalDialog.value}
+            onChange={(value) => {
+              setVitalDialog((previous) => ({ ...previous, value }));
+              setVitalDialogError(null);
+            }}
+            error={vitalDialogError}
+            busy={vitalDialogBusy}
+            confirmLabel="Apply"
+            onClose={closeVitalDialog}
+            onConfirm={confirmVitalDialog}
+          >
+            {showClamp && (
+              <label className="mt-3 flex items-start gap-2 text-xs text-amber-200">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={vitalDialog.clampCurrent}
+                  onChange={(event) => setVitalDialog((previous) => ({
+                    ...previous,
+                    clampCurrent: event.target.checked,
+                  }))}
+                  disabled={vitalDialogBusy}
+                />
+                Reduce the current value to the new maximum
+              </label>
+            )}
+          </ManagerActionDialog>
+        );
+      })()}
 
       {showTecnicaOverlay && selectedUserId && (
         <AddTecnicaPersonaleOverlay
