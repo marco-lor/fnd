@@ -50,14 +50,10 @@ const LockSettingsTable = React.memo(function LockSettingsTable({ users, canEdit
       setPending((s) => new Set([...s, userId]));
       const user = users.find((entry) => entry.id === userId);
       if (!user) throw new Error('The selected user is no longer available.');
-      const currentSettings = user?.settings && typeof user.settings === 'object'
-        ? user.settings
-        : {};
       await updateUserSettings({
         userId,
         patch: {
           settings: {
-            ...currentSettings,
             [field]: !cur,
           },
         },
@@ -175,6 +171,8 @@ const LockSettingsTable = React.memo(function LockSettingsTable({ users, canEdit
                   onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleOne(user.id, 'base'); }}
                   disabled={!canEdit || pending.has(user.id)}
                   className="focus:outline-none"
+                  aria-label={`${lockMap?.[user.id]?.base ? 'Unlock' : 'Lock'} base parameters for ${user.characterId || user.email || 'Unknown User'}`}
+                  title={`${lockMap?.[user.id]?.base ? 'Unlock' : 'Lock'} base parameters for ${user.characterId || user.email || 'Unknown User'}`}
                 >
                   <FontAwesomeIcon
                     icon={lockMap?.[user.id]?.base ? faLock : faLockOpen}
@@ -211,6 +209,8 @@ const LockSettingsTable = React.memo(function LockSettingsTable({ users, canEdit
                   onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleOne(user.id, 'combat'); }}
                   disabled={!canEdit || pending.has(user.id)}
                   className="focus:outline-none"
+                  aria-label={`${lockMap?.[user.id]?.combat ? 'Unlock' : 'Lock'} combat parameters for ${user.characterId || user.email || 'Unknown User'}`}
+                  title={`${lockMap?.[user.id]?.combat ? 'Unlock' : 'Lock'} combat parameters for ${user.characterId || user.email || 'Unknown User'}`}
                 >
                   <FontAwesomeIcon
                     icon={lockMap?.[user.id]?.combat ? faLock : faLockOpen}

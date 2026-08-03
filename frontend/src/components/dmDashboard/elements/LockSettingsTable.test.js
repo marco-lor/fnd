@@ -50,7 +50,7 @@ describe('LockSettingsTable Task05 commands', () => {
     ));
   });
 
-  test('a single toggle sends the complete canonical settings map', async () => {
+  test('a single toggle sends only the requested parameter lock', async () => {
     render(<LockSettingsTable users={users} canEdit />);
     const row = screen.getByText('Lock Parametri Base').closest('tr');
     fireEvent.click(within(row).getAllByRole('button')[1]);
@@ -60,9 +60,7 @@ describe('LockSettingsTable Task05 commands', () => {
       userId: 'player-1',
       patch: {
         settings: {
-          keep_me: true,
           lock_param_base: true,
-          lock_param_combat: false,
         },
       },
       retryKey: expect.any(String),

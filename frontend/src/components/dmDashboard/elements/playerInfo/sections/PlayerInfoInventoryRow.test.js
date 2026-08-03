@@ -17,6 +17,7 @@ test('passes the aggregated Varie quantity through the overlay totalQty contract
       variant="card"
       users={[{
         id: 'user-1',
+        characterId: 'Aria',
         inventory: [{
           id: 'rope',
           type: 'varie',
@@ -40,7 +41,7 @@ test('passes the aggregated Varie quantity through the overlay totalQty contract
 
   await waitFor(() => expect(DelVarieItemUnitsOverlay).toHaveBeenCalled());
   expect(DelVarieItemUnitsOverlay).toHaveBeenLastCalledWith(
-    expect.objectContaining({ totalQty: 3 }),
+    expect.objectContaining({ totalQty: 3, userLabel: 'Aria' }),
     expect.anything()
   );
   expect(DelVarieItemUnitsOverlay.mock.calls.at(-1)[0]).not.toHaveProperty('quantity');

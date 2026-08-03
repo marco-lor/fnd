@@ -7,7 +7,7 @@ import {
 } from '../../../../data/userData/userDataCommands';
 import { stableInventoryId } from '../../../../data/media/privateInventoryMediaWriter';
 
-export default function DelVarieItemUnitsOverlay({ userId, varieItemId, displayName, totalQty, onClose }) {
+export default function DelVarieItemUnitsOverlay({ userId, userLabel, varieItemId, displayName, totalQty, onClose }) {
   const [qtyToDelete, setQtyToDelete] = useState(1);
   const [useAll, setUseAll] = useState(false);
   const [confirmInput, setConfirmInput] = useState('');
@@ -51,7 +51,7 @@ export default function DelVarieItemUnitsOverlay({ userId, varieItemId, displayN
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-md">
         <h2 className="text-xl text-white mb-2">Rimuovi Unita Varie</h2>
-        <p className="text-gray-300 mb-2">Giocatore: <span className="font-semibold">{userId}</span></p>
+        <p className="text-gray-300 mb-2">Giocatore: <span className="font-semibold">{userLabel || userId}</span></p>
         <p className="text-gray-300 mb-4">Oggetto: <span className="font-semibold">{displayName}</span> (Qty totale: {safeTotalQty})</p>
         <label className="block text-sm text-gray-300 mb-1">Numero di unita da rimuovere</label>
         <div className="flex items-center mb-4 gap-3">

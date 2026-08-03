@@ -97,6 +97,35 @@ type Transaction = admin.firestore.Transaction;
 type Firestore = admin.firestore.Firestore;
 type UserSnapshot = admin.firestore.DocumentSnapshot;
 
+const SETTINGS_PARAMETER_LOCK_FIELDS = new Set([
+  "lock_param_base",
+  "lock_param_combat",
+]);
+
+export const classifyUpdateSettingsPatch = (patch: UnknownRecord): {
+  hasLocks: boolean;
+  hasPreferences: boolean;
+} => {
+  const rootLockFields = new Set(["parameterLocks", "paramLocks"]);
+  const requestedFields = Object.keys(patch);
+  const hasSettingsPatch = Object.prototype.hasOwnProperty.call(
+    patch,
+    "settings"
+  );
+  const settingsFields = Object.keys(asRecord(patch.settings));
+  const hasLocks = requestedFields.some((key) => rootLockFields.has(key)) ||
+    settingsFields.some((key) => SETTINGS_PARAMETER_LOCK_FIELDS.has(key));
+  const hasPreferences = requestedFields.some(
+    (key) => key !== "settings" && !rootLockFields.has(key)
+  ) || (
+    hasSettingsPatch && (
+      settingsFields.length === 0 ||
+      settingsFields.some((key) => !SETTINGS_PARAMETER_LOCK_FIELDS.has(key))
+    )
+  );
+  return {hasLocks, hasPreferences};
+};
+
 interface BaseCommand {
   operationId: string;
   userId?: string;
@@ -2374,10 +2403,7 @@ export const task05UpdateSettings = onCall(
         context.actorUid,
         context.targetUid
       );
-      const lockFields = new Set(["parameterLocks", "paramLocks"]);
-      const requestedFields = Object.keys(patch);
-      const hasLocks = requestedFields.some((key) => lockFields.has(key));
-      const hasPreferences = requestedFields.some((key) => !lockFields.has(key));
+      const {hasLocks, hasPreferences} = classifyUpdateSettingsPatch(patch);
       if (hiddenPlacement) {
         if (
           hiddenPlacement.includeLegacyFallback &&

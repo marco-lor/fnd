@@ -7,7 +7,7 @@ import {
 } from '../../../../data/userData/userDataCommands';
 import { stableInventoryId } from '../../../../data/media/privateInventoryMediaWriter';
 
-export function DelInventoryItemOverlay({ userId, inventoryItemId, displayName, onClose }) {
+export function DelInventoryItemOverlay({ userId, userLabel, inventoryItemId, displayName, onClose }) {
   const [confirmInput, setConfirmInput] = useState('');
   const [busy, setBusy] = useState(false);
   const retryKeyRef = useRef(null);
@@ -43,7 +43,7 @@ export function DelInventoryItemOverlay({ userId, inventoryItemId, displayName, 
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-md">
         <h2 className="text-xl text-white mb-2">Elimina Oggetto Inventario</h2>
-        <p className="text-gray-300 mb-4">Giocatore: <span className="font-semibold">{userId}</span></p>
+        <p className="text-gray-300 mb-4">Giocatore: <span className="font-semibold">{userLabel || userId}</span></p>
         <div className="bg-red-900 bg-opacity-25 border border-red-700 rounded p-4 mb-4"><p className="text-white">Per eliminare <span className="font-semibold">{displayName}</span>, digita <span className="font-mono font-bold">DELETE</span> qui sotto:</p></div>
         <input type="text" value={confirmInput} onChange={(event) => setConfirmInput(event.target.value)} placeholder="Scrivi DELETE per confermare" className="w-full px-3 py-2 mb-4 rounded bg-gray-700 text-white focus:outline-none" />
         <div className="flex justify-end space-x-2">

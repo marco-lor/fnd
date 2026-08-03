@@ -98,6 +98,7 @@ const PlayerInfoInventoryRow = ({
 
     const gold = typeof user?.stats?.gold === "number" ? user.stats.gold : parseInt(user?.stats?.gold, 10) || 0;
     const goldBusy = !!goldUpdating[user.id];
+    const userLabel = user.characterId || user.label || user.displayName || user.email || user.id;
 
     return (
       <div className="align-top">
@@ -177,6 +178,7 @@ const PlayerInfoInventoryRow = ({
                             inventoryItemId: item.id,
                             invIndex: isVarie ? null : item.invIndex,
                             displayName,
+                            userLabel,
                             isVarie,
                           })
                         }
@@ -194,6 +196,7 @@ const PlayerInfoInventoryRow = ({
                             varieItemId: item.id,
                             displayName,
                             qty: item.qty || 1,
+                            userLabel,
                           })
                         }
                       >
@@ -244,6 +247,7 @@ const PlayerInfoInventoryRow = ({
           inventoryItemId={deleteTarget.inventoryItemId}
           userInventoryIndex={deleteTarget.invIndex}
           displayName={deleteTarget.displayName}
+          userLabel={deleteTarget.userLabel}
           onClose={() => setDeleteTarget(null)}
           onSuccess={() => setDeleteTarget(null)}
         />
@@ -254,6 +258,7 @@ const PlayerInfoInventoryRow = ({
           varieItemId={deleteVarieTarget.varieItemId}
           displayName={deleteVarieTarget.displayName}
           totalQty={deleteVarieTarget.qty}
+          userLabel={deleteVarieTarget.userLabel}
           onClose={() => setDeleteVarieTarget(null)}
           onSuccess={() => setDeleteVarieTarget(null)}
         />
