@@ -11,7 +11,6 @@ import { useShellLayout } from "../common/shellLayout";
 import { getCallable } from "../../data/functions/callableRegistry";
 import {
   callBackendOperationAndWait,
-  TASK06_LOCAL_CANDIDATE,
 } from "../../data/functions/backendOperationClient";
 import {
   runWithDurableOperationIntent,
@@ -112,26 +111,17 @@ const DMDashboard = () => {
       setBusy(true);
       setToast(null);
       setError(null);
-      let updatedCount = 0;
-      if (TASK06_LOCAL_CANDIDATE) {
-        const operation = await runWithDurableOperationIntent({
-          actorUid: user?.uid,
-          kind: "level-up-all",
-          intent: { scope: "all-users" },
-          invoke: (operationId) => callBackendOperationAndWait(
-            levelUpAll,
-            {},
-            { operationId }
-          ),
-        });
-        updatedCount = Number(operation?.progress?.succeeded) || 0;
-      } else {
-        const response = await levelUpAll({ idempotencyKey: `${Date.now()}` });
-        const updated = response?.data?.updated;
-        updatedCount = Array.isArray(updated)
-          ? updated.filter((result) => result?.toLevel).length
-          : 0;
-      }
+      const operation = await runWithDurableOperationIntent({
+        actorUid: user?.uid,
+        kind: "level-up-all",
+        intent: { scope: "all-users" },
+        invoke: (operationId) => callBackendOperationAndWait(
+          levelUpAll,
+          {},
+          { operationId }
+        ),
+      });
+      const updatedCount = Number(operation?.progress?.succeeded) || 0;
       setToast(`Level up done. Updated ${updatedCount} players.`);
   // Realtime listener will update UI automatically
     } catch (e) {
@@ -151,7 +141,16 @@ const DMDashboard = () => {
     try {
       setBusy(true);
       setToast(null);
-      await levelUpUser({ userId: targetUserId });
+      setError(null);
+      await runWithDurableOperationIntent({
+        actorUid: user?.uid,
+        kind: "level-up-user",
+        intent: { userId: targetUserId },
+        invoke: (operationId) => levelUpUser({
+          userId: targetUserId,
+          operationId,
+        }),
+      });
       setToast(`Level up done for user.`);
   // Realtime listener will update UI automatically
     } catch (e) {
