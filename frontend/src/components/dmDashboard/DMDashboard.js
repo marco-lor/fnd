@@ -1,5 +1,5 @@
 // file: ./frontend/src/components/dmDashboard/DMDashboard.js
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "../../AuthContext";
 import { useNavigate } from "react-router-dom";
 import { library } from "@fortawesome/fontawesome-svg-core";
@@ -18,6 +18,7 @@ import {
 } from "../../data/functions/backendOperationIntentStore";
 import { updateProgression } from "../../data/userData/userDataCommands";
 import { useManagerUserData } from "../../data/userData/managerUserData";
+import { reconcileManagerUserSelection } from "./managerSelection";
 
 // Add icons to library
 library.add(faLock, faLockOpen);
@@ -41,6 +42,8 @@ const DMDashboard = () => {
   const [actionDialog, setActionDialog] = useState(null);
   const [actionDialogValue, setActionDialogValue] = useState("1");
   const [actionDialogError, setActionDialogError] = useState(null);
+  const knownUserIdsRef = useRef([]);
+  const hasLoadedUsersRef = useRef(false);
   const { topInset } = useShellLayout();
   // Collapsible sections state
   const [sectionsOpen, setSectionsOpen] = useState({
@@ -64,13 +67,21 @@ const DMDashboard = () => {
   useEffect(() => {
     if (!users.length) {
       setSelectedUserIds([]);
+      knownUserIdsRef.current = [];
+      hasLoadedUsersRef.current = false;
       return;
     }
-    setSelectedUserIds((prev) => {
-      const stillValid = prev.filter((id) => users.some((u) => u.id === id));
-      const withNew = Array.from(new Set([...stillValid, ...users.map((u) => u.id)]));
-      return withNew;
-    });
+    const currentUserIds = users.map((entry) => entry.id);
+    const previousUserIds = knownUserIdsRef.current;
+    const isInitialLoad = !hasLoadedUsersRef.current;
+    setSelectedUserIds((selectedIds) => reconcileManagerUserSelection({
+      selectedUserIds: selectedIds,
+      currentUserIds,
+      previousUserIds,
+      isInitialLoad,
+    }));
+    knownUserIdsRef.current = currentUserIds;
+    hasLoadedUsersRef.current = true;
   }, [users]);
 
   const toggleUserSelection = (userId) => {
