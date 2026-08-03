@@ -52,7 +52,7 @@ const SpellsEditor = ({ value = [], onChange }) => {
                   <div className="block">
                     <div className="text-[11px] text-slate-300 mb-1">Image</div>
                     <div className="flex items-center gap-2">
-                      <input type="file" accept="image/*" onChange={(e) => {
+                      <input key={it.imageFile ? `file-${it.imageFile.name}-${it.imageFile.lastModified}` : `empty-${it.removeImage ? 'remove' : 'keep'}-${it.imageUrl || ''}`} type="file" accept="image/*" onChange={(e) => {
                         const f = e.target.files?.[0] || null;
                         setItem(idx, { imageFile: f || null, removeImage: !f && !it.imageUrl });
                       }} className="block text-sm text-slate-200 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-600/80 file:text-white hover:file:bg-indigo-600" />

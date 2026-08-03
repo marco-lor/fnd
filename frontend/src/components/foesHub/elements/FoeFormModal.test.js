@@ -66,6 +66,32 @@ const renderModal = (initial, props = {}) => {
 };
 
 describe('FoeFormModal media lifecycle', () => {
+  test('preserves dirty form values when a save error rerenders the open modal', () => {
+    const onCancel = jest.fn();
+    const onSave = jest.fn();
+    const renderView = (initial, error = '') => (
+      <FoeFormModal
+        open
+        initial={initial}
+        onCancel={onCancel}
+        onSave={onSave}
+        schema={{}}
+        error={error}
+      />
+    );
+    const view = render(renderView(baseFoe()));
+
+    fireEvent.change(screen.getByRole('textbox', {name: 'Name'}), {
+      target: {value: 'Unsaved audit foe'},
+    });
+    view.rerender(renderView(baseFoe(), 'Save failed.'));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Save failed.');
+    expect(screen.getByRole('textbox', {name: 'Name'})).toHaveValue(
+      'Unsaved audit foe'
+    );
+  });
+
   test.each([
     ['root', baseFoe({media: canonicalMedia})],
     ['General', baseFoe({General: {media: canonicalMedia}})],
@@ -110,6 +136,31 @@ describe('FoeFormModal media lifecycle', () => {
       'data-media-asset',
       ''
     );
+  });
+
+  test('clears a removed local file so the same file can be selected again', async () => {
+    renderModal(baseFoe({name: 'New foe'}));
+    const input = document.querySelector('input[type="file"]');
+    const file = new File(['image'], 'same.png', {type: 'image/png'});
+    fireEvent.change(input, {target: {files: [file]}});
+    Object.defineProperty(input, 'value', {
+      configurable: true,
+      value: 'C:\\fakepath\\same.png',
+      writable: true,
+    });
+
+    fireEvent.click(screen.getByRole('button', {name: 'Remove image'}));
+
+    expect(input.value).toBe('');
+    expect(screen.queryByRole('button', {name: 'Undo remove'}))
+      .not.toBeInTheDocument();
+    fireEvent.change(input, {target: {files: [file]}});
+    await waitFor(() => {
+      expect(screen.getByAltText('preview')).toHaveAttribute(
+        'data-preview-src',
+        'blob:local-preview'
+      );
+    });
   });
 
   test('undo restores the persisted preview and busy failures stay in the modal', () => {
