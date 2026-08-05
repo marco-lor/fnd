@@ -5826,6 +5826,63 @@ describe('GrigliataBoard', () => {
     expect(screen.getByTestId('turn-order-context-action-user-1')).toHaveTextContent('Remove from turn order');
   });
 
+  test('adds and removes a selected token from turn order without requiring a right click', async () => {
+    const onJoinTurnOrder = jest.fn(() => Promise.resolve());
+    const onLeaveTurnOrder = jest.fn(() => Promise.resolve());
+    const token = {
+      id: 'user-1',
+      tokenId: 'user-1',
+      ownerUid: 'current-user',
+      label: 'Ilya',
+      tokenType: 'character',
+      imageUrl: '',
+      placed: true,
+      col: 1,
+      row: 1,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+      isInTurnOrder: false,
+    };
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          tokens: [token],
+          onJoinTurnOrder,
+          onLeaveTurnOrder,
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /add ilya to turn order/i }));
+
+    expect(screen.getByTestId('turn-order-join-overlay')).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('turn-order-join-initiative-input'), {
+      target: { value: '14' },
+    });
+    fireEvent.click(screen.getByTestId('turn-order-join-confirm'));
+    await waitFor(() => expect(onJoinTurnOrder).toHaveBeenCalledWith('user-1', 14));
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          tokens: [{ ...token, isInTurnOrder: true, turnOrderInitiative: 14 }],
+          onJoinTurnOrder,
+          onLeaveTurnOrder,
+        })}
+      />
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /remove ilya from turn order/i }));
+    await waitFor(() => expect(onLeaveTurnOrder).toHaveBeenCalledWith('user-1'));
+  });
+
   test('keeps multi-digit initiative input after the initial focus selection frame', async () => {
     jest.useFakeTimers();
     const onJoinTurnOrder = jest.fn(() => Promise.resolve());

@@ -603,6 +603,13 @@ export const buildSelectedTokenActionState = ({
       ...normalizeTokenVisionSettings(selectedToken),
     }
     : null;
+  const turnOrderToken = selectedToken?.canMove
+    ? {
+      tokenId: selectedToken.tokenId,
+      label: selectedToken.label || 'token',
+      isInTurnOrder: selectedToken.isInTurnOrder === true,
+    }
+    : null;
   const tokenLayerStepState = selectedToken && isManager
     ? buildTokenLayerStepState({
       tokens: allTokens,
@@ -621,7 +628,8 @@ export const buildSelectedTokenActionState = ({
   const standardActionCount = (isManager ? 2 : 0)
     + (statusToken ? 1 : 0)
     + (sizeToken ? 1 : 0)
-    + (visionToken ? 1 : 0);
+    + (visionToken ? 1 : 0)
+    + (turnOrderToken ? 1 : 0);
   const layerActionCount = layerToken ? 2 : 0;
   const actionCount = standardActionCount + layerActionCount;
   if (actionCount < 1) {
@@ -656,6 +664,7 @@ export const buildSelectedTokenActionState = ({
     statusToken,
     sizeToken,
     visionToken,
+    turnOrderToken,
     layerToken,
     nextIsVisibleToPlayers: allSelectedTokensHidden,
     nextIsDead: !allSelectedTokensDead,

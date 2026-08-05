@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import GrigliataPage from './GrigliataPage';
 import { placementMutationIntentIdentity } from './useGrigliataPlacementActions';
 import { useAuth } from '../../AuthContext';
+import { useUserSettings } from '../../data/userData/userDataHooks';
 import { useShellLayout } from '../common/shellLayout';
 import {
   GRIGLIATA_LIVE_INTERACTION_STALE_MS,
@@ -27,6 +28,9 @@ const mockTask05UpdateSettingsCallable = jest.fn(() => Promise.resolve({ data: {
 const mockTask05UpdateResourceCallable = jest.fn(() => Promise.resolve({ data: { success: true } }));
 const mockTask05ConsumeTurnEffectsCallable = jest.fn(() => Promise.resolve({ data: { success: true } }));
 const mockTask05UpdateGrigliataCharacterResourcesCallable = jest.fn(() => Promise.resolve({ data: { success: true } }));
+const mockTask07ResolveCharacterMediaCallable = jest.fn(() => Promise.resolve({
+  data: { schemaVersion: 1, entries: [] },
+}));
 const mockLogGrigliataFogDebug = jest.fn();
 const mockRunWithDurableOperationIntent = jest.fn(({
   kind,
@@ -84,6 +88,9 @@ function mockResolveGrigliataCallable(functionName) {
   }
   if (functionName === 'task05UpdateGrigliataCharacterResources') {
     return mockTask05UpdateGrigliataCharacterResourcesCallable;
+  }
+  if (functionName === 'task07ResolveCharacterMedia') {
+    return mockTask07ResolveCharacterMediaCallable;
   }
   return jest.fn();
 }
@@ -281,6 +288,10 @@ const mockRunFirestoreTransaction = (callback, completionPromise = Promise.resol
 jest.mock('../../AuthContext', () => ({
   useAuth: jest.fn(),
   useOptionalAuth: jest.fn(() => null),
+}));
+
+jest.mock('../../data/userData/userDataHooks', () => ({
+  useUserSettings: jest.fn(),
 }));
 
 jest.mock('../../data/media/useTask07MediaReadMode', () => ({
@@ -1125,6 +1136,7 @@ describe('GrigliataPage', () => {
       },
       loading: false,
     });
+    useUserSettings.mockReturnValue({ data: null });
     useShellLayout.mockReturnValue({
       topInset: 0,
     });
@@ -1213,6 +1225,9 @@ describe('GrigliataPage', () => {
     mockTask05UpdateResourceCallable.mockClear().mockResolvedValue({ data: { success: true } });
     mockTask05ConsumeTurnEffectsCallable.mockClear().mockResolvedValue({ data: { success: true } });
     mockTask05UpdateGrigliataCharacterResourcesCallable.mockClear().mockResolvedValue({ data: { success: true } });
+    mockTask07ResolveCharacterMediaCallable.mockClear().mockResolvedValue({
+      data: { schemaVersion: 1, entries: [] },
+    });
   });
 
   afterEach(() => {
@@ -4946,15 +4961,19 @@ describe('GrigliataPage', () => {
           });
         });
 
-  test('projects canonical-only user media and syncs the exact profile-global manifest', async () => {
+  test('projects canonical-only user media without copying the manifest into the token profile', async () => {
     const assetId = `m_${'a'.repeat(40)}`;
-    const thumbnailPath = `media_assets/v1/signed-in/user/${assetId}/1/thumbnail`;
-    const originalPath = `media_assets/v1/signed-in/user/${assetId}/1/original`;
+    const thumbnailPath = `media_assets/v1/signed-in/user-1/${assetId}/1/thumbnail`;
+    const originalPath = `media_assets/v1/signed-in/user-1/${assetId}/1/original`;
     const media = {
+      schemaVersion: 1,
+      contractVersion: 1,
       assetId,
       kind: 'avatar',
-      schemaVersion: 1,
       state: 'ready',
+      generation: '1',
+      audience: 'signed-in',
+      ownerUid: 'user-1',
       original: {
         path: originalPath,
         generation: '1',
@@ -5011,47 +5030,180 @@ describe('GrigliataPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('board-token-media-paths')).toHaveTextContent(thumbnailPath);
       expect(container.querySelector('img[src="blob:task07-media-test"]')).not.toBeNull();
-      expect(firestore.setDoc).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'grigliata_tokens/user-1' }),
-        expect.objectContaining({
-          imageUrl: '',
-          imagePath: originalPath,
-          media,
-          tokenType: 'character',
-        }),
-        { merge: true }
-      );
     });
+
+    const profileSyncCall = firestore.setDoc.mock.calls.find(([target]) => (
+      target?.path === 'grigliata_tokens/user-1'
+    ));
+    expect(profileSyncCall).toBeDefined();
+    expect(profileSyncCall[1]).toEqual(expect.objectContaining({
+      imageUrl: '',
+      imagePath: originalPath,
+      tokenType: 'character',
+    }));
+    expect(profileSyncCall[1]).not.toHaveProperty('media');
+  });
+
+  test('does not sync a token profile solely because the canonical avatar manifest differs', async () => {
+    const assetId = `m_${'b'.repeat(40)}`;
+    const originalPath = `media_assets/v1/signed-in/user-1/${assetId}/1/original`;
+    const thumbnailPath = `media_assets/v1/signed-in/user-1/${assetId}/1/thumbnail`;
+    const media = {
+      schemaVersion: 1,
+      contractVersion: 1,
+      assetId,
+      kind: 'avatar',
+      state: 'ready',
+      generation: '1',
+      audience: 'signed-in',
+      ownerUid: 'user-1',
+      original: {
+        path: originalPath,
+        generation: '1',
+        bytes: 4,
+        contentType: 'image/png',
+        width: 512,
+        height: 512,
+      },
+      variants: {
+        thumbnail: {
+          path: thumbnailPath,
+          generation: '1',
+          bytes: 4,
+          contentType: 'image/webp',
+          width: 96,
+          height: 96,
+        },
+      },
+    };
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'player',
+        characterId: 'Aldor',
+        imageUrl: '',
+        imagePath: originalPath,
+        media,
+        settings: {
+          grigliata_draw_color: 'ion-cyan',
+          grigliata_share_interactions: false,
+        },
+      },
+      loading: false,
+    });
+    setCollectionData('grigliata_tokens', [{
+      id: 'user-1',
+      ownerUid: 'user-1',
+      characterId: 'Aldor',
+      label: 'Aldor',
+      imageUrl: '',
+      imagePath: originalPath,
+      tokenType: 'character',
+      imageSource: 'profile',
+      updatedAt: { seconds: 1 },
+      updatedBy: 'user-1',
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Aldor')).toBeInTheDocument();
+    });
+    expect(firestore.setDoc.mock.calls.filter(([target]) => (
+      target?.path === 'grigliata_tokens/user-1'
+    ))).toHaveLength(0);
+  });
+
+  test('does not retry the same rejected token profile sync after equivalent snapshots', async () => {
+    const legacyProfile = {
+      id: 'user-1',
+      ownerUid: 'user-1',
+      characterId: '',
+      label: 'Legacy Token',
+      imageUrl: '',
+      imagePath: '',
+      tokenType: 'character',
+      imageSource: 'profile',
+      updatedAt: { seconds: 1 },
+      updatedBy: 'user-1',
+    };
+    setCollectionData('grigliata_tokens', [legacyProfile]);
+    firestore.setDoc.mockImplementation((target) => (
+      target?.path === 'grigliata_tokens/user-1'
+        ? Promise.reject(Object.assign(new Error('denied'), { code: 'permission-denied' }))
+        : Promise.resolve()
+    ));
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(firestore.setDoc.mock.calls.filter(([target]) => (
+        target?.path === 'grigliata_tokens/user-1'
+      ))).toHaveLength(1);
+    });
+
+    await act(async () => {
+      setCollectionData('grigliata_tokens', [{ ...legacyProfile }]);
+      await Promise.resolve();
+    });
+
+    expect(firestore.setDoc.mock.calls.filter(([target]) => (
+      target?.path === 'grigliata_tokens/user-1'
+    ))).toHaveLength(1);
+    consoleErrorSpy.mockRestore();
   });
 
   test('reads canonical media from a visible peer character profile without copying it into placement state', async () => {
     const assetId = `m_${'d'.repeat(40)}`;
     const thumbnailPath = `media_assets/v1/signed-in/user-2/${assetId}/1/thumbnail`;
+    const originalPath = `media_assets/v1/signed-in/user-2/${assetId}/1/original`;
+    const media = {
+      schemaVersion: 1,
+      contractVersion: 1,
+      assetId,
+      kind: 'avatar',
+      state: 'ready',
+      generation: '1',
+      audience: 'signed-in',
+      ownerUid: 'user-2',
+      original: {
+        path: originalPath,
+        generation: '1',
+        bytes: 4,
+        contentType: 'image/png',
+        width: 512,
+        height: 512,
+      },
+      variants: {
+        thumbnail: {
+          path: thumbnailPath,
+          generation: '4',
+          bytes: 4,
+          contentType: 'image/webp',
+          width: 96,
+          height: 96,
+        },
+      },
+    };
+    mockTask07ResolveCharacterMediaCallable.mockResolvedValueOnce({
+      data: {
+        schemaVersion: 1,
+        entries: [{ tokenId: 'user-2', media }],
+      },
+    });
     setCollectionData('grigliata_tokens', [{
       id: 'user-2',
       ownerUid: 'user-2',
       characterId: 'Bran',
       label: 'Bran',
       imageUrl: '',
-      imagePath: `media_assets/v1/signed-in/user-2/${assetId}/1/original`,
+      imagePath: originalPath,
       tokenType: 'character',
       imageSource: 'profile',
-      media: {
-        assetId,
-        kind: 'avatar',
-        schemaVersion: 1,
-        state: 'ready',
-        variants: {
-          thumbnail: {
-            path: thumbnailPath,
-            generation: '4',
-            bytes: 4,
-            contentType: 'image/webp',
-            width: 96,
-            height: 96,
-          },
-        },
-      },
       updatedAt: { seconds: 1 },
       updatedBy: 'user-2',
     }]);
@@ -5088,6 +5240,9 @@ describe('GrigliataPage', () => {
           ));
       })).toBe(true);
       expect(screen.getByTestId('board-token-media-paths')).toHaveTextContent(thumbnailPath);
+    });
+    expect(mockTask07ResolveCharacterMediaCallable).toHaveBeenCalledWith({
+      tokenIds: ['user-2'],
     });
     expect(firestore.setDoc.mock.calls.some(([target, payload]) => (
       target?.path === 'grigliata_token_placements/map-1__user-2'
@@ -5163,11 +5318,24 @@ describe('GrigliataPage', () => {
     setManagerAuth();
     const sourceAssetId = `m_${'b'.repeat(40)}`;
     const sourceThumbnailPath = `media_assets/v1/owner-manager/user/${sourceAssetId}/3/thumbnail`;
+    const sourceOriginalPath = `media_assets/v1/owner-manager/user/${sourceAssetId}/3/original`;
     const sourceMedia = {
+      schemaVersion: 1,
+      contractVersion: 1,
       assetId: sourceAssetId,
       kind: 'foe',
-      schemaVersion: 1,
       state: 'ready',
+      generation: '3',
+      audience: 'owner-manager',
+      ownerUid: 'user',
+      original: {
+        path: sourceOriginalPath,
+        generation: '3',
+        bytes: 8,
+        contentType: 'image/png',
+        width: 512,
+        height: 512,
+      },
       variants: {
         thumbnail: {
           path: sourceThumbnailPath,
@@ -6457,7 +6625,7 @@ describe('GrigliataPage', () => {
     render(<GrigliataPage />);
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /drop custom token template/i }));
+      fireEvent.click(screen.getByRole('button', { name: /place wolf on active map/i }));
       fireEvent.click(screen.getByRole('button', { name: /drop custom token template/i }));
     });
 
@@ -6615,11 +6783,16 @@ describe('GrigliataPage', () => {
 
   test('spawns a foe token when a foes hub library payload is dropped onto the board', async () => {
     setManagerAuth();
+    setCollectionData('foes', [{
+      id: 'foe-1',
+      name: 'Test One',
+      stats: { hpTotal: 60, manaTotal: 20 },
+    }]);
 
     render(<GrigliataPage />);
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /drop foe library token/i }));
+      fireEvent.click(screen.getByRole('button', { name: /place test one on active map/i }));
     });
 
     await waitFor(() => {
@@ -6825,6 +6998,56 @@ describe('GrigliataPage', () => {
     ));
 
     expect(issuedClientDelete).toBe(false);
+  });
+
+  test('uses the durable custom-token cleanup flow after the V2 new-only cutover', async () => {
+    useUserSettings.mockReturnValue({
+      data: null,
+      stage: 'new-only',
+    });
+    setCollectionData('grigliata_tokens', [{
+      id: 'custom-instance-1',
+      ownerUid: 'user-1',
+      tokenType: 'custom',
+      customTokenRole: 'instance',
+      customTemplateId: 'token-2',
+      imageSource: 'uploaded',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      imagePath: 'grigliata/tokens/user-1/wolf.png',
+      stats: { hpTotal: 12, hpCurrent: 9, manaTotal: 4, manaCurrent: 4, shieldTotal: 2, shieldCurrent: 2 },
+    }]);
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__custom-instance-1',
+      backgroundId: 'map-1',
+      tokenId: 'custom-instance-1',
+      ownerUid: 'user-1',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /delete custom token placement/i }));
+    });
+
+    await waitFor(() => {
+      expect(mockRunWithDurableOperationIntent).toHaveBeenCalledWith(expect.objectContaining({
+        actorUid: 'user-1',
+        kind: 'delete-custom-token',
+        intent: { tokenId: 'custom-instance-1' },
+      }));
+      expect(mockDeleteGrigliataCustomTokenCallable).toHaveBeenCalledWith({
+        tokenId: 'custom-instance-1',
+        operationId: expect.stringMatching(/^delete-custom-token-/),
+      });
+    });
   });
 
   test('deletes a foe token profile even when the local token cache has not loaded it yet', async () => {
@@ -7702,6 +7925,35 @@ describe('GrigliataPage', () => {
     });
   });
 
+  test('uses rollout-aware V2 settings instead of a stale legacy preference', async () => {
+    useUserSettings.mockReturnValue({
+      data: {
+        settings: {
+          grigliata_draw_color: 'nova-teal',
+          grigliata_share_interactions: true,
+          grigliata_music_muted: true,
+        },
+      },
+    });
+
+    render(<GrigliataPage />);
+
+    const unmuteButton = await screen.findByRole('button', { name: /^unmute music$/i });
+    expect(screen.getByTestId('board-sharing-state')).toHaveTextContent('true');
+    expect(screen.getByTestId('board-draw-color')).toHaveTextContent('nova-teal');
+
+    await act(async () => {
+      fireEvent.click(unmuteButton);
+    });
+
+    await waitFor(() => {
+      expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledWith(expect.objectContaining({
+        patch: { settings: { grigliata_music_muted: false } },
+        operationId: expect.any(String),
+      }));
+    });
+  });
+
   test('shows an error when the current user music mute preference cannot be updated', async () => {
     const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     mockTask05UpdateSettingsCallable.mockRejectedValueOnce(new Error('write failed'));
@@ -7997,6 +8249,7 @@ describe('GrigliataPage', () => {
         })
       );
     });
+    expect(firestore.setDoc.mock.calls[firestore.setDoc.mock.calls.length - 1][1]).not.toHaveProperty('media');
     firestore.setDoc.mockClear();
 
     await act(async () => {
@@ -8020,6 +8273,7 @@ describe('GrigliataPage', () => {
         })
       );
     });
+    expect(firestore.setDoc.mock.calls[firestore.setDoc.mock.calls.length - 1][1]).not.toHaveProperty('media');
     firestore.setDoc.mockClear();
 
     await act(async () => {
@@ -8043,6 +8297,7 @@ describe('GrigliataPage', () => {
         })
       );
     });
+    expect(firestore.setDoc.mock.calls[firestore.setDoc.mock.calls.length - 1][1]).not.toHaveProperty('media');
     firestore.setDoc.mockClear();
 
     act(() => {
@@ -8100,6 +8355,7 @@ describe('GrigliataPage', () => {
         })
       );
     });
+    expect(firestore.setDoc.mock.calls[firestore.setDoc.mock.calls.length - 1][1]).not.toHaveProperty('media');
     firestore.setDoc.mockClear();
 
     act(() => {

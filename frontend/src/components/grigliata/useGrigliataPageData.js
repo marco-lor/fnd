@@ -152,6 +152,7 @@ export default function useGrigliataPageData({
   const [boardStateReadySubscriptionKey, setBoardStateReadySubscriptionKey] = useState('');
   const [foeLibrary, setFoeLibrary] = useState([]);
   const [tokenProfiles, setTokenProfiles] = useState([]);
+  const [tokenProfilesReadyUserId, setTokenProfilesReadyUserId] = useState('');
   const [sharedCharacterProfilesById, setSharedCharacterProfilesById] = useState({});
   const [characterCanonicalMediaByTokenId, setCharacterCanonicalMediaByTokenId] = useState({});
   const [activePlacementState, setActivePlacementState] = useState({
@@ -191,6 +192,7 @@ export default function useGrigliataPageData({
       setBoardStateReadySubscriptionKey('');
       setFoeLibrary([]);
       setTokenProfiles([]);
+      setTokenProfilesReadyUserId('');
       setSharedCharacterProfilesById({});
       setCharacterCanonicalMediaByTokenId({});
       setPagePresenceSnapshots([]);
@@ -222,8 +224,10 @@ export default function useGrigliataPageData({
           ...docSnap.data(),
         }));
         setTokenProfiles(nextTokens);
+        setTokenProfilesReadyUserId(currentUserId);
       },
       (error) => {
+        setTokenProfilesReadyUserId('');
         console.error('Failed to load Grigliata token profiles:', error);
       }
     );
@@ -1504,6 +1508,7 @@ export default function useGrigliataPageData({
     isBoardStateReady,
     isCurrentUserTokenHiddenOnActiveMap,
     isGridVisible,
+    isTokenProfilesReady: !!currentUserId && tokenProfilesReadyUserId === currentUserId,
     isTurnOrderEnabled,
     isTurnOrderStarted,
     activeTurnEntry,

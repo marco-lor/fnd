@@ -72,7 +72,7 @@ describe('MyTokenTray', () => {
       }],
     });
 
-    expect(screen.getByText('Drag and drop tokens onto the active map to place or reposition them.')).toBeInTheDocument();
+    expect(screen.getByText('Drag and drop tokens onto the active map, or use Place on map.')).toBeInTheDocument();
     expect(screen.getByText('1 active instance in Sunken Ruins')).toBeInTheDocument();
     expect(screen.queryByText(/Your main character token stays pinned first/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Drag this portrait onto the active map/i)).not.toBeInTheDocument();
@@ -235,6 +235,47 @@ describe('MyTokenTray', () => {
     expect(dataTransfer.effectAllowed).toBe('copyMove');
     expect(onDragStart).toHaveBeenCalledTimes(1);
     expect(onDragEnd).toHaveBeenCalledTimes(1);
+  });
+
+  test('offers keyboard-accessible placement for tray tokens and foes', () => {
+    const onPlaceToken = jest.fn();
+    renderTray({
+      isManager: true,
+      currentUserId: 'user-1',
+      customTokens: [{
+        tokenId: 'token-2',
+        ownerUid: 'user-1',
+        tokenType: 'custom',
+        label: 'Wolf',
+        imageUrl: 'https://example.com/wolf.png',
+      }],
+      foeLibrary: [{
+        id: 'foe-1',
+        name: 'Test One',
+        stats: { hpTotal: 60, manaTotal: 20 },
+      }],
+      onPlaceToken,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Place Aldor on active map' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Place Wolf on active map' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Place Test One on active map' }));
+
+    expect(onPlaceToken).toHaveBeenNthCalledWith(1, {
+      type: 'grigliata-token',
+      tokenId: 'user-1',
+      ownerUid: 'user-1',
+    });
+    expect(onPlaceToken).toHaveBeenNthCalledWith(2, {
+      type: 'grigliata-token',
+      tokenId: 'token-2',
+      ownerUid: 'user-1',
+    });
+    expect(onPlaceToken).toHaveBeenNthCalledWith(3, {
+      type: FOE_LIBRARY_DRAG_TYPE,
+      foeId: 'foe-1',
+      ownerUid: 'user-1',
+    });
   });
 
   test('prevents drag start when the tray token cannot be dragged', () => {

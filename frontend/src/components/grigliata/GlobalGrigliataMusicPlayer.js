@@ -8,6 +8,7 @@ import {
 import { withAsyncResourceOwner } from '../../performance/runtime';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
+import { useUserSettings } from '../../data/userData/userDataHooks';
 import {
   loadTask07MediaMode,
   task07ModeReadsDerivatives,
@@ -460,6 +461,7 @@ export default function GlobalGrigliataMusicPlayer({
   subscribeToMusicStream = subscribeToGrigliataMusicStream,
 }) {
   const { user, userData } = useAuth();
+  const { data: userSettingsDomain } = useUserSettings();
   const audioRefs = useRef(new Map());
   const audioLeaseRefs = useRef(new Map());
   const audioRefCallbacks = useRef(new Map());
@@ -477,7 +479,8 @@ export default function GlobalGrigliataMusicPlayer({
   const [projectedStreamReady, setProjectedStreamReady] = useState(false);
   const [blockedPlaybackSessionIds, setBlockedPlaybackSessionIds] = useState([]);
   const [endedPlaybackSessionKeys, setEndedPlaybackSessionKeys] = useState([]);
-  const isMusicMuted = userData?.settings?.[GRIGLIATA_MUSIC_MUTED_FIELD] === true;
+  const userSettings = userSettingsDomain?.settings || userData?.settings || {};
+  const isMusicMuted = userSettings[GRIGLIATA_MUSIC_MUTED_FIELD] === true;
   const userRole = typeof userData?.role === 'string' ? userData.role : '';
 
   useEffect(() => {

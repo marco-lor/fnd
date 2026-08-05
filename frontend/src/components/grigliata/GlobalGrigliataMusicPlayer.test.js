@@ -13,10 +13,12 @@ import GlobalGrigliataMusicPlayer, {
   task07MusicStreamsMatch,
 } from './GlobalGrigliataMusicPlayer';
 import { useAuth } from '../../AuthContext';
+import { useUserSettings } from '../../data/userData/userDataHooks';
 import * as firestoreRuntime from '../../performance/firestore';
 import * as performanceRuntime from '../../performance/runtime';
 
 jest.mock('../../AuthContext', () => ({ useAuth: jest.fn() }));
+jest.mock('../../data/userData/userDataHooks', () => ({ useUserSettings: jest.fn() }));
 jest.mock('../firebaseConfig', () => ({ db: { name: 'test-db' } }));
 jest.mock('../../performance/firestore', () => ({
   collection: jest.fn(),
@@ -126,6 +128,7 @@ describe('GlobalGrigliataMusicPlayer', () => {
     });
     authState = { user: { uid: 'user-1' }, userData: { settings: {} } };
     useAuth.mockImplementation(() => authState);
+    useUserSettings.mockReturnValue({ data: null });
     unsubscribe = jest.fn();
     streamHandlers = null;
     subscribeToMusicStream = jest.fn((onMusicStream, onError) => {
@@ -363,6 +366,18 @@ describe('GlobalGrigliataMusicPlayer', () => {
     expect(container.querySelectorAll('audio')).toHaveLength(0);
     expect(playSpy).not.toHaveBeenCalled();
     expect(subscribeToMusicStream).toHaveBeenCalledTimes(1);
+  });
+
+  test('honors rollout-aware V2 mute settings when the legacy profile is stale', async () => {
+    useUserSettings.mockReturnValue({
+      data: { settings: { grigliata_music_muted: true } },
+    });
+    const { container } = render(candidatePlayer());
+
+    await emitStream(makeStream([makeSession('v2-muted')]));
+
+    expect(container.querySelectorAll('audio')).toHaveLength(0);
+    expect(playSpy).not.toHaveBeenCalled();
   });
 
   test('renders and plays up to four preload-none sessions with authoritative offsets and loop state', async () => {

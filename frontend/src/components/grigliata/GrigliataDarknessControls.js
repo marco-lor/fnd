@@ -134,26 +134,32 @@ export function GrigliataSelectedDarknessPanel({
 
   useEffect(() => {
     setDraftLabel(darkness?.label || '');
+  }, [darkness?.id, darkness?.label]);
+
+  useEffect(() => {
     setDraftRadiusSquares(pxToSquares(darkness?.radiusPx, grid));
+  }, [darkness?.id, darkness?.radiusPx, grid]);
+
+  useEffect(() => {
     setDraftIntensity(normalizeIntensity(darkness?.intensity));
-  }, [darkness, grid]);
+  }, [darkness?.id, darkness?.intensity]);
 
   if (!darkness) {
     return null;
   }
 
-  const commitRadius = (value) => {
-    const radiusSquares = normalizeRadiusSquares(value);
-    setDraftRadiusSquares(radiusSquares);
-    onUpdateDarkness?.(darkness.id, {
-      radiusPx: radiusSquares * cellSizePx,
-    });
-  };
+  const buildDraftPatch = (overrides = {}) => ({
+    label: draftLabel.trim() || 'Darkness',
+    radiusPx: normalizeRadiusSquares(draftRadiusSquares) * cellSizePx,
+    intensity: normalizeIntensity(draftIntensity),
+    ...overrides,
+  });
 
-  const commitIntensity = (value) => {
-    const intensity = normalizeIntensity(value);
-    setDraftIntensity(intensity);
-    onUpdateDarkness?.(darkness.id, { intensity });
+  const commitDrafts = () => onUpdateDarkness?.(darkness.id, buildDraftPatch());
+
+  const handlePanelBlur = (event) => {
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+    commitDrafts();
   };
 
   return (
@@ -163,6 +169,7 @@ export function GrigliataSelectedDarknessPanel({
       style={style}
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
+      onBlur={handlePanelBlur}
     >
       <div className="mb-3 flex items-center justify-between gap-3 border-b border-slate-800 pb-2">
         <div>
@@ -173,7 +180,10 @@ export function GrigliataSelectedDarknessPanel({
           <button
             type="button"
             aria-label="Close darkness editor"
-            onClick={onRequestClose}
+            onClick={() => {
+              commitDrafts();
+              onRequestClose();
+            }}
             className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-slate-500 hover:text-slate-100"
           >
             Close
@@ -190,7 +200,9 @@ export function GrigliataSelectedDarknessPanel({
             value={draftLabel}
             disabled={isPending}
             onChange={(event) => setDraftLabel(event.target.value)}
-            onBlur={() => onUpdateDarkness?.(darkness.id, { label: draftLabel.trim() || 'Darkness' })}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commitDrafts();
+            }}
             className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-semibold text-slate-100 outline-none focus:border-violet-300 disabled:cursor-not-allowed disabled:opacity-60"
           />
         </label>
@@ -201,7 +213,7 @@ export function GrigliataSelectedDarknessPanel({
             type="checkbox"
             checked={darkness.enabled !== false}
             disabled={isPending}
-            onChange={(event) => onUpdateDarkness?.(darkness.id, { enabled: event.target.checked })}
+            onChange={(event) => onUpdateDarkness?.(darkness.id, buildDraftPatch({ enabled: event.target.checked }))}
             className="h-4 w-4 accent-violet-300"
           />
         </label>
@@ -216,7 +228,9 @@ export function GrigliataSelectedDarknessPanel({
             value={draftRadiusSquares}
             disabled={isPending}
             onChange={(event) => setDraftRadiusSquares(event.target.value)}
-            onBlur={() => commitRadius(draftRadiusSquares)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commitDrafts();
+            }}
             className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-center text-sm font-semibold text-slate-100 outline-none focus:border-violet-300 disabled:cursor-not-allowed disabled:opacity-60"
           />
         </label>
@@ -232,7 +246,9 @@ export function GrigliataSelectedDarknessPanel({
             value={draftIntensity}
             disabled={isPending}
             onChange={(event) => setDraftIntensity(event.target.value)}
-            onBlur={() => commitIntensity(draftIntensity)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commitDrafts();
+            }}
             className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-center text-sm font-semibold text-slate-100 outline-none focus:border-violet-300 disabled:cursor-not-allowed disabled:opacity-60"
           />
         </label>
@@ -240,7 +256,7 @@ export function GrigliataSelectedDarknessPanel({
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
-            onClick={() => onDuplicateDarkness?.(darkness.id)}
+            onClick={() => onDuplicateDarkness?.(darkness.id, buildDraftPatch())}
             disabled={isPending}
             className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
           >

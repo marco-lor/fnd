@@ -5279,6 +5279,29 @@ export default function GrigliataBoard({
     return true;
   }, []);
 
+  const handleTurnOrderTokenAction = useCallback(async (token) => {
+    if (!token?.tokenId || !token?.canMove) {
+      return false;
+    }
+
+    const tokenId = token.tokenId;
+    setTurnOrderContextMenu(null);
+
+    if (token.isInTurnOrder) {
+      await Promise.resolve(onLeaveTurnOrder?.(tokenId));
+      return true;
+    }
+
+    const baseInitiative = Number.isInteger(token.turnOrderInitiative)
+      ? token.turnOrderInitiative
+      : 0;
+    setTurnOrderJoinPrompt({
+      tokenId,
+      draft: String(baseInitiative),
+    });
+    return true;
+  }, [onLeaveTurnOrder]);
+
   const handleSelectLightSource = useCallback((lightId) => {
     const nextLightId = lightId || '';
     setSelectedLightId(nextLightId);
@@ -7164,23 +7187,7 @@ export default function GrigliataBoard({
                   type="button"
                   data-testid={`turn-order-context-action-${activeTurnOrderContextToken.tokenId}`}
                   disabled={turnOrderActionTokenId === activeTurnOrderContextToken.tokenId}
-                  onClick={async () => {
-                    const tokenId = activeTurnOrderContextToken.tokenId;
-                    setTurnOrderContextMenu(null);
-
-                    if (activeTurnOrderContextToken.isInTurnOrder) {
-                      await Promise.resolve(onLeaveTurnOrder?.(tokenId));
-                      return;
-                    }
-
-                    const baseInitiative = Number.isInteger(activeTurnOrderContextToken.turnOrderInitiative)
-                      ? activeTurnOrderContextToken.turnOrderInitiative
-                      : 0;
-                    setTurnOrderJoinPrompt({
-                      tokenId,
-                      draft: String(baseInitiative),
-                    });
-                  }}
+                  onClick={() => handleTurnOrderTokenAction(activeTurnOrderContextToken)}
                   className="flex w-full items-center justify-between rounded-[0.95rem] px-3 py-2 text-left text-sm font-medium text-slate-100 transition-colors duration-150 hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <span>
@@ -7371,6 +7378,14 @@ export default function GrigliataBoard({
           onSetSelectedTokenVision={onSetSelectedTokenVision}
           isTokenLayerActionPending={isTokenLayerActionPending}
           onMoveTokenLayer={onMoveTokenLayer}
+          isTurnOrderActionPending={!!(
+            visibleSelectedTokenActionState?.turnOrderToken?.tokenId
+            && turnOrderActionTokenId === visibleSelectedTokenActionState.turnOrderToken.tokenId
+          )}
+          onRequestSelectedTokenTurnOrderAction={(turnOrderToken) => {
+            const token = tokenItemsById.get(turnOrderToken?.tokenId);
+            return handleTurnOrderTokenAction(token);
+          }}
         />
 
         {visibleSelectedAoEFigureActionState && (

@@ -158,11 +158,49 @@ describe('GrigliataSelectedDarknessPanel', () => {
     fireEvent.click(within(panel).getByRole('button', { name: /duplicate darkness/i }));
     fireEvent.click(within(panel).getByRole('button', { name: /delete darkness/i }));
 
-    expect(onUpdateDarkness).toHaveBeenCalledWith('darkness-1', { label: 'Blackout' });
-    expect(onUpdateDarkness).toHaveBeenCalledWith('darkness-1', { enabled: false });
-    expect(onUpdateDarkness).toHaveBeenCalledWith('darkness-1', { radiusPx: 350 });
-    expect(onUpdateDarkness).toHaveBeenCalledWith('darkness-1', { intensity: 0.4 });
-    expect(onDuplicateDarkness).toHaveBeenCalledWith('darkness-1');
+    expect(onUpdateDarkness).toHaveBeenCalledWith('darkness-1', expect.objectContaining({ label: 'Blackout' }));
+    expect(onUpdateDarkness).toHaveBeenCalledWith('darkness-1', expect.objectContaining({ enabled: false }));
+    expect(onUpdateDarkness).toHaveBeenCalledWith('darkness-1', expect.objectContaining({ radiusPx: 350 }));
+    expect(onUpdateDarkness).toHaveBeenCalledWith('darkness-1', expect.objectContaining({ intensity: 0.4 }));
+    expect(onDuplicateDarkness).toHaveBeenCalledWith('darkness-1', expect.objectContaining({
+      label: 'Blackout',
+      radiusPx: 350,
+      intensity: 0.4,
+    }));
     expect(onDeleteDarkness).toHaveBeenCalledWith('darkness-1');
+  });
+
+  test('commits a dirty name together with the next enabled action before pending state disables controls', () => {
+    const onUpdateDarkness = jest.fn();
+
+    function PendingHarness() {
+      const [isPending, setIsPending] = React.useState(false);
+      return (
+        <GrigliataSelectedDarknessPanel
+          darkness={darkness}
+          grid={grid}
+          isPending={isPending}
+          onUpdateDarkness={(darknessId, patch) => {
+            onUpdateDarkness(darknessId, patch);
+            setIsPending(true);
+          }}
+        />
+      );
+    }
+
+    render(<PendingHarness />);
+
+    const panel = screen.getByTestId('selected-darkness-panel');
+    const nameInput = within(panel).getByLabelText(/darkness name/i);
+    const enabledCheckbox = within(panel).getByRole('checkbox', { name: /darkness enabled/i });
+    fireEvent.change(nameInput, { target: { value: 'Blackout' } });
+    fireEvent.blur(nameInput, { relatedTarget: enabledCheckbox });
+    fireEvent.click(enabledCheckbox);
+
+    expect(onUpdateDarkness).toHaveBeenCalledTimes(1);
+    expect(onUpdateDarkness).toHaveBeenCalledWith('darkness-1', expect.objectContaining({
+      label: 'Blackout',
+      enabled: false,
+    }));
   });
 });

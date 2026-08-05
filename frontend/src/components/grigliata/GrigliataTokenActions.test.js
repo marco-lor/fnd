@@ -67,6 +67,31 @@ describe('GrigliataTokenActions', () => {
     expect(screen.getByRole('button', { name: /edit vision for aldor/i })).toBeInTheDocument();
   });
 
+  test('offers an accessible turn-order action for a selected token', () => {
+    const onRequestSelectedTokenTurnOrderAction = jest.fn();
+    render(
+      <GrigliataTokenActions
+        actionState={buildActionState({
+          turnOrderToken: {
+            tokenId: 'token-1',
+            label: 'Aldor',
+            isInTurnOrder: false,
+          },
+        })}
+        viewportSize={{ width: 1000, height: 700 }}
+        onRequestSelectedTokenTurnOrderAction={onRequestSelectedTokenTurnOrderAction}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /add aldor to turn order/i }));
+
+    expect(onRequestSelectedTokenTurnOrderAction).toHaveBeenCalledWith({
+      tokenId: 'token-1',
+      label: 'Aldor',
+      isInTurnOrder: false,
+    });
+  });
+
   test('does not show vision editing when the action state has no DM vision token', () => {
     render(
       <GrigliataTokenActions
