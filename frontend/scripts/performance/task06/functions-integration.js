@@ -32,6 +32,8 @@ const TASK06_EMULATOR_PORTS = Object.freeze([
   9099,
   9150,
   9199,
+  9299,
+  9499,
 ]);
 const TASK06_INTEGRATION_TEST =
   'scripts/performance/task06/run-integration-tests.js';

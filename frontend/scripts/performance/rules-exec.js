@@ -20,6 +20,12 @@ const task07RulesPath = path.join(
   'tests',
   'task07-media-rules.test.js'
 );
+const task06RulesPath = path.join(
+  frontendRoot,
+  'performance',
+  'tests',
+  'task06-rules.test.js'
+);
 const task07CallablesPath = path.join(
   frontendRoot,
   'performance',
@@ -44,12 +50,6 @@ const buildRulesExecCommands = ({ task07Only = false } = {}) => {
       'tests',
       'firestore-rules.test.js'
     )),
-    serialNodeTest(path.join(
-      frontendRoot,
-      'performance',
-      'tests',
-      'task06-rules.test.js'
-    )),
     serialNodeTest(task07RulesPath),
     serialNodeTest(task07CallablesPath),
     serialNodeTest(path.join(
@@ -64,6 +64,9 @@ const buildRulesExecCommands = ({ task07Only = false } = {}) => {
       'tests',
       'task05-callables.test.js'
     )),
+    // This suite clears the shared Firestore emulator during teardown, so it
+    // must remain after every suite that consumes the deterministic fixture.
+    serialNodeTest(task06RulesPath),
   ];
 };
 
@@ -104,6 +107,7 @@ if (require.main === module) {
 module.exports = {
   buildRulesExecCommands,
   runRulesExec,
+  task06RulesPath,
   task07CallablesPath,
   task07RulesPath,
 };
