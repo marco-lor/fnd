@@ -64,7 +64,8 @@ const TASK07_MEDIA_CONTROL = Object.freeze({
   enabledUids: ['*'],
 });
 const TASK07_EMPTY_MUSIC_STREAM = Object.freeze({
-  schemaVersion: 1,
+  schemaVersion: 2,
+  controlMode: 'derivative-read',
   volume: 0.65,
   sessions: [],
 });

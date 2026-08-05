@@ -429,3 +429,32 @@ test('checked-in Task 07 PR gate keeps heavy checks serial and schedules the bou
   assert.match(rulesJob, /node scripts\/performance\/rules-emulators\.js/);
   assert.doesNotMatch(rulesJob, /npx firebase|firebase emulators:exec/);
 });
+
+test('checked-in workflow provisions every dependency used by frontend and browser jobs', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const frontendStart = workflow.indexOf('  frontend-unit:');
+  const frontendEnd = workflow.indexOf('\n  functions-checks:', frontendStart);
+  const frontendJob = workflow.slice(frontendStart, frontendEnd);
+  assert.match(frontendJob, /frontend\/functions\/package-lock\.json/);
+  assert.match(
+    frontendJob,
+    /npm --prefix functions ci[\s\S]*npm --prefix functions run build[\s\S]*npm run perf:test/
+  );
+
+  const functionsStart = workflow.indexOf('  functions-checks:');
+  const functionsEnd = workflow.indexOf('\n  task07-pr-gate:', functionsStart);
+  const functionsJob = workflow.slice(functionsStart, functionsEnd);
+  assert.match(functionsJob, /frontend\/package-lock\.json/);
+  assert.match(
+    functionsJob,
+    /npm --prefix \.\. ci[\s\S]*- run: npm ci[\s\S]*- run: npm run lint/
+  );
+
+  const crossBrowserStart = workflow.indexOf('  cross-browser-readiness:');
+  const crossBrowserEnd = workflow.indexOf('\n  full-benchmark:', crossBrowserStart);
+  const crossBrowserJob = workflow.slice(crossBrowserStart, crossBrowserEnd);
+  assert.match(
+    crossBrowserJob,
+    /npx playwright install --with-deps chromium firefox webkit/
+  );
+});

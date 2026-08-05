@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
 const {
   buildDeterministicMediaObjects,
   buildDeterministicPng,
@@ -49,6 +50,23 @@ test('fixture generation is stable and contains the required scale', () => {
     ))?.data,
     TASK07_MEDIA_CONTROL
   );
+  const musicStream = firstDocuments.find(({ path: documentPath }) => (
+    documentPath === 'grigliata_music_stream/current'
+  ))?.data;
+  const expectedMusicProjection = {
+    schemaVersion: 2,
+    controlMode: 'derivative-read',
+    volume: 0.65,
+    sessions: [],
+  };
+  assert.deepEqual(musicStream, {
+    ...expectedMusicProjection,
+    revision: 1,
+    sourceHash: createHash('sha256')
+      .update(JSON.stringify(expectedMusicProjection))
+      .digest('hex'),
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  });
   const galleryFolderIds = new Set(firstDocuments
     .filter(({ path: documentPath }) => documentPath.startsWith('grigliata_gallery_folders/'))
     .map(({ path: documentPath }) => documentPath.split('/')[1]));
