@@ -74,6 +74,8 @@ test('Task 06 emulator invocation excludes hosting and application port 3000', (
   assert.equal(invocation.args.at(-1), TASK06_TEST_COMMAND);
   assert.equal(TASK06_EMULATOR_PORTS.includes(3000), false);
   assert.equal(TASK06_EMULATOR_PORTS.includes(5000), false);
+  assert.equal(TASK06_EMULATOR_PORTS.includes(9299), true);
+  assert.equal(TASK06_EMULATOR_PORTS.includes(9499), true);
 });
 
 test('Task 06 argument parser refuses unknown and live project arguments', () => {

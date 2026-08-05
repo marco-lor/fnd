@@ -1,4 +1,5 @@
 import * as admin from "firebase-admin";
+import {FieldValue} from "firebase-admin/firestore";
 import {onDocumentWritten} from "firebase-functions/v2/firestore";
 import {
   buildTask07MusicProjection,
@@ -81,7 +82,7 @@ Promise<ProjectionWriteResult> => {
     if (next) {
       transaction.set(streamRef, {
         ...next,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
     }
     return {
