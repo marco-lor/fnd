@@ -12,6 +12,7 @@ const {
   SECURITY_HEADERS,
   SERVER_ID,
   STATIC_CACHE_CONTROL,
+  classifyBuildEntry,
   createBuildSnapshot,
   createDeterministicBuildServer,
   parseSingleByteRange,
@@ -99,6 +100,55 @@ test('build snapshot requires index and precomputes deterministic representation
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
+});
+
+test('performance CSP admits owned emulator traffic without report-only policy noise', () => {
+  const policy = SECURITY_HEADERS['Content-Security-Policy-Report-Only'];
+
+  assert.match(policy, /style-src[^;]+https:\/\/fonts\.googleapis\.com/);
+  assert.match(policy, /font-src[^;]+https:\/\/fonts\.gstatic\.com/);
+  assert.match(policy, /img-src[^;]+http:\/\/127\.0\.0\.1:9199/);
+  assert.match(policy, /media-src[^;]+http:\/\/127\.0\.0\.1:9199/);
+  for (const port of [5001, 8080, 9099, 9199]) {
+    assert.match(policy, new RegExp(`connect-src[^;]+http://127\\.0\\.0\\.1:${port}`));
+  }
+  assert.match(policy, /connect-src[^;]+https:\/\/apis\.google\.com[^;]+https:\/\/www\.google\.com/);
+  assert.match(policy, /frame-src[^;]+http:\/\/127\.0\.0\.1:9099[^;]+https:\/\/www\.google\.com/);
+  assert.match(policy, /(?:^|; )report-to fnd-performance-csp(?:;|$)/);
+  assert.doesNotMatch(policy, /(?:^|; )frame-ancestors(?: |;|$)/);
+});
+
+test('build entry classification admits verified cloud files but rejects true symbolic links', () => {
+  const reparseEntry = {
+    name: 'cloud-backed.js',
+    isDirectory: () => false,
+    isFile: () => false,
+    isSymbolicLink: () => true,
+  };
+  const regularCloudFile = {
+    isDirectory: () => false,
+    isFile: () => true,
+    isSymbolicLink: () => false,
+  };
+  const actualSymbolicLink = {
+    isDirectory: () => false,
+    isFile: () => false,
+    isSymbolicLink: () => true,
+  };
+
+  assert.equal(classifyBuildEntry(
+    reparseEntry,
+    'C:\\performance\\cloud-backed.js',
+    { lstatSync: () => regularCloudFile }
+  ), 'file');
+  assert.throws(
+    () => classifyBuildEntry(
+      reparseEntry,
+      'C:\\performance\\linked.js',
+      { lstatSync: () => actualSymbolicLink }
+    ),
+    /refuses symbolic-link entry: cloud-backed\.js/
+  );
 });
 
 test('build snapshot fails before binding when index or precompression is invalid', async () => {

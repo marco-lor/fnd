@@ -634,6 +634,7 @@ const installDeterministicFontRoutes = async (context) => {
   await context.route(GOOGLE_FONT_URL, (route) => route.fulfill({
     status: 204,
     body: '',
+    contentType: 'text/css; charset=utf-8',
   }));
 };
 

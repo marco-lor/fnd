@@ -709,7 +709,11 @@ test('font routing keeps optional Google font requests deterministic and local',
 
   let fulfilled;
   await handler({ fulfill: async (options) => { fulfilled = options; } });
-  assert.deepEqual(fulfilled, { status: 204, body: '' });
+  assert.deepEqual(fulfilled, {
+    status: 204,
+    body: '',
+    contentType: 'text/css; charset=utf-8',
+  });
 });
 
 test('page draining navigates only an owned open page to about:blank', async () => {

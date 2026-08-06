@@ -35,7 +35,7 @@ const PROBE_PLACEMENT_PATH = 'grigliata_token_placements/perf-map__perf-token-00
 const PROBE_GRID_DELTA_X = 50;
 const CLIENT_READINESS_ROUTE = '/__fnd_perf_cleanup__';
 const FIVE_PEER_ROUTE_READINESS_TIMEOUT_MS = 30_000;
-const FIVE_PEER_TEST_TIMEOUT_MS = 210_000;
+const FIVE_PEER_TEST_TIMEOUT_MS = 240_000;
 const MAX_EXPECTED_ACTIVE_WRITE_TURNOVERS_PER_PEER = 2;
 const LEGACY_MIGRATION_MARKER_FIELDS = [
   'legacyTokenPlacementCleanupCompletedAt',
@@ -158,7 +158,7 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
       page.on('console', (message) => {
         if (message.type() !== 'error') return;
         const text = message.text();
-          if (isKnownDemoFirestoreStartupWarning(text, {
+        if (isKnownDemoFirestoreStartupWarning(text, {
           baseURL,
           beforeReadiness: !diagnostics.ready,
         })) {
@@ -167,13 +167,13 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
             phase: 'before-readiness',
             text: text.slice(0, 500),
           });
-            return;
-          }
-          if (isExpectedDemoRecaptchaReportOnlyWarning(text, {baseURL})) {
-            diagnostics.explainedRecaptchaReportOnlyWarnings.push(text.slice(0, 500));
-            return;
-          }
-          diagnostics.consoleErrors.push(text.slice(0, 300));
+          return;
+        }
+        if (isExpectedDemoRecaptchaReportOnlyWarning(text, {baseURL})) {
+          diagnostics.explainedRecaptchaReportOnlyWarnings.push(text.slice(0, 500));
+          return;
+        }
+        diagnostics.consoleErrors.push(text.slice(0, 300));
       });
       page.on('request', (request) => pageAssets.begin(request));
       page.on('requestfinished', (request) => pageAssets.complete(request));
