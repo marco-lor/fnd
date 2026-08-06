@@ -15,6 +15,9 @@ const {
   drainPageConnections,
   installDeterministicFontRoutes,
   isExpectedFirestoreLifecycleCancellation,
+  isExpectedFivePeerFirestoreWriteTurnover,
+  isExpectedDemoRecaptchaCancellation,
+  isExpectedDemoRecaptchaReportOnlyWarning,
   isExpectedTask07MediaDetachmentCancellation,
   isKnownDemoFirestoreStartupWarning,
   isRouteReadyInPage,
@@ -509,6 +512,66 @@ test('only intentional lifecycle aborts from the exact demo Firestore transport 
   assert.equal(isExpectedFirestoreLifecycleCancellation({ ...exact, firebaseProjectId: 'live-fnd' }), false);
 });
 
+test('only successful demo Write-channel turnover is explained during the five-peer probe', () => {
+  const exact = {
+    lifecyclePhase: 'route-active',
+    resourceType: 'fetch',
+    failure: 'net::ERR_ABORTED',
+    method: 'GET',
+    responseStatus: 200,
+    url: 'http://127.0.0.1:8080/google.firestore.v1.Firestore/Write/channel?database=projects%2Fdemo-fnd-perf%2Fdatabases%2F(default)&RID=rpc',
+  };
+  assert.equal(isExpectedFivePeerFirestoreWriteTurnover(exact), true);
+  assert.equal(isExpectedFivePeerFirestoreWriteTurnover({
+    ...exact,
+    url: exact.url.replace('/Write/', '/Listen/'),
+  }), false);
+  assert.equal(isExpectedFivePeerFirestoreWriteTurnover({
+    ...exact,
+    lifecyclePhase: 'route-cleanup',
+  }), false);
+  assert.equal(isExpectedFivePeerFirestoreWriteTurnover({ ...exact, responseStatus: 0 }), false);
+  assert.equal(isExpectedFivePeerFirestoreWriteTurnover({ ...exact, responseStatus: 500 }), false);
+  assert.equal(isExpectedFivePeerFirestoreWriteTurnover({ ...exact, method: 'POST' }), false);
+  assert.equal(isExpectedFivePeerFirestoreWriteTurnover({ ...exact, resourceType: 'xhr' }), false);
+  assert.equal(isExpectedFivePeerFirestoreWriteTurnover({ ...exact, failure: 'net::ERR_FAILED' }), false);
+  assert.equal(isExpectedFivePeerFirestoreWriteTurnover({
+    ...exact,
+    url: exact.url.replace('127.0.0.1:8080', 'firestore.googleapis.com'),
+  }), false);
+  assert.equal(isExpectedFivePeerFirestoreWriteTurnover({
+    ...exact,
+    url: exact.url.replace('demo-fnd-perf', 'demo-other'),
+  }), false);
+  assert.equal(isExpectedFivePeerFirestoreWriteTurnover({
+    ...exact,
+    firebaseProjectId: 'fatin-test',
+  }), false);
+
+  const continuation = {
+    ...exact,
+    responseStatus: undefined,
+    url: `${exact.url}&VER=8&SID=I4sZ0bMAEY4XeEvOj7Ks4Q%3D%3D&AID=5&CI=0&TYPE=xmlhttp&zx=9afmshv1j87t&t=1`,
+  };
+  assert.equal(isExpectedFivePeerFirestoreWriteTurnover(continuation), true);
+  for (const parameter of ['VER', 'RID', 'SID', 'AID', 'CI', 'TYPE', 'zx', 't']) {
+    const candidate = new URL(continuation.url);
+    candidate.searchParams.delete(parameter);
+    assert.equal(isExpectedFivePeerFirestoreWriteTurnover({
+      ...continuation,
+      url: candidate.href,
+    }), false, `missing ${parameter}`);
+  }
+  for (const [parameter, value] of [['foo', 'bar'], ['RID', 'other']]) {
+    const candidate = new URL(continuation.url);
+    candidate.searchParams.append(parameter, value);
+    assert.equal(isExpectedFivePeerFirestoreWriteTurnover({
+      ...continuation,
+      url: candidate.href,
+    }), false, `unexpected ${parameter}`);
+  }
+});
+
 test('only intentional Task 07 fixture-image detach aborts are explained', () => {
   const exact = {
     lifecyclePhase: 'auth-transition',
@@ -523,6 +586,111 @@ test('only intentional Task 07 fixture-image detach aborts are explained', () =>
   assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, url: exact.url.replace('127.0.0.1:9199', 'storage.googleapis.com') }), false);
   assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, url: exact.url.replace('image-013.png', 'other.png') }), false);
   assert.equal(isExpectedTask07MediaDetachmentCancellation({ ...exact, firebaseProjectId: 'live-fnd' }), false);
+});
+
+test('only loopback demo reCAPTCHA cleanup noise is explained', () => {
+  const cancellation = {
+    lifecyclePhase: 'auth-transition',
+    resourceType: 'fetch',
+    failure: 'net::ERR_ABORTED',
+    url: 'https://www.google.com/recaptcha/enterprise/clr?token=discarded',
+  };
+  assert.equal(isExpectedDemoRecaptchaCancellation(cancellation), true);
+  assert.equal(isExpectedDemoRecaptchaCancellation({
+    ...cancellation,
+    lifecyclePhase: 'auth-bootstrap',
+  }), true);
+  assert.equal(isExpectedDemoRecaptchaCancellation({
+    ...cancellation,
+    lifecyclePhase: 'connection-drain',
+  }), true);
+  assert.equal(isExpectedDemoRecaptchaCancellation({
+    ...cancellation,
+    lifecyclePhase: 'route-cleanup',
+  }), true);
+  assert.equal(isExpectedDemoRecaptchaCancellation({
+    ...cancellation,
+    lifecyclePhase: 'route-active',
+  }), true);
+  assert.equal(isExpectedDemoRecaptchaCancellation({
+    ...cancellation,
+    failure: 'net::ERR_FAILED',
+  }), false);
+  assert.equal(isExpectedDemoRecaptchaCancellation({
+    ...cancellation,
+    url: 'https://www.google.com/recaptcha/enterprise/reload',
+  }), false);
+  assert.equal(isExpectedDemoRecaptchaCancellation({
+    ...cancellation,
+    firebaseProjectId: 'fatin-test',
+  }), false);
+  assert.equal(isExpectedDemoRecaptchaCancellation({
+    ...cancellation,
+    resourceType: 'xhr',
+  }), false);
+  assert.equal(isExpectedDemoRecaptchaCancellation({
+    ...cancellation,
+    url: 'https://example.test/recaptcha/enterprise/clr',
+  }), false);
+  assert.equal(isExpectedDemoRecaptchaCancellation({
+    ...cancellation,
+    url: 'not a URL',
+  }), false);
+  const navigationScript = {
+    lifecyclePhase: 'route-navigation',
+    resourceType: 'script',
+    failure: 'net::ERR_ABORTED',
+    url: 'https://www.gstatic.com/recaptcha/releases/release_123/recaptcha__en.js',
+  };
+  assert.equal(isExpectedDemoRecaptchaCancellation(navigationScript), true);
+  assert.equal(isExpectedDemoRecaptchaCancellation({
+    ...navigationScript,
+    lifecyclePhase: 'route-active',
+  }), false);
+  assert.equal(isExpectedDemoRecaptchaCancellation({
+    ...navigationScript,
+    url: 'https://www.gstatic.com/recaptcha/releases/release_123/other.js',
+  }), false);
+  assert.equal(isExpectedDemoRecaptchaCancellation({
+    ...navigationScript,
+    url: 'https://www.google.com/recaptcha/releases/release_123/recaptcha__en.js',
+  }), false);
+
+  const warning = [
+    "Framing 'https://www.google.com/' violates the following report-only Content Security Policy directive: \"default-src 'self'\".",
+    "The violation has been logged, but no further action has been taken. Note that 'frame-src' was not explicitly set, so 'default-src' is used as a fallback.",
+  ].join(' ');
+  const warningOptions = {baseURL: 'http://127.0.0.1:5000'};
+  assert.equal(isExpectedDemoRecaptchaReportOnlyWarning(warning, warningOptions), true);
+  assert.equal(isExpectedDemoRecaptchaReportOnlyWarning(
+    warning,
+    {baseURL: 'https://fatin-test.web.app'}
+  ), false);
+  assert.equal(isExpectedDemoRecaptchaReportOnlyWarning(
+    warning.replace('report-only', 'enforced'),
+    warningOptions
+  ), false);
+  assert.equal(isExpectedDemoRecaptchaReportOnlyWarning(
+    warning,
+    {...warningOptions, firebaseProjectId: 'fatin-test'}
+  ), false);
+  assert.equal(isExpectedDemoRecaptchaReportOnlyWarning(
+    warning.replace('The violation has been logged, but no further action has been taken.', ''),
+    warningOptions
+  ), false);
+  assert.equal(isExpectedDemoRecaptchaReportOnlyWarning(
+    warning,
+    {baseURL: 'not a URL'}
+  ), false);
+});
+
+test('route measurements wire the strict demo reCAPTCHA report-only classifier', () => {
+  const routeSource = fs.readFileSync(
+    path.resolve(__dirname, 'routes.performance.js'),
+    'utf8'
+  );
+  assert.match(routeSource, /isExpectedDemoRecaptchaReportOnlyWarning\(text, \{baseURL\}\)/);
+  assert.match(routeSource, /explainedRecaptchaReportOnlyWarnings\.push\(text\.slice\(0, 500\)\)/);
 });
 
 test('font routing keeps optional Google font requests deterministic and local', async () => {

@@ -8,6 +8,8 @@ const {
   drainPageConnections,
   installBootstrap,
   installDeterministicFontRoutes,
+  isExpectedDemoRecaptchaCancellation,
+  isExpectedDemoRecaptchaReportOnlyWarning,
   navigateToCleanup,
   restoreScenarioState,
   runInteraction,
@@ -70,9 +72,17 @@ for (const scenario of scenarios) {
     const runLabel = iteration === 0 ? 'warmup' : `iteration ${iteration}`;
     test(`${scenario.id} ${runLabel}`, async ({ browser, baseURL }, testInfo) => {
       await restoreScenarioState(scenario.id);
-      const diagnostics = { consoleErrors: [], unhandledErrors: [], failedRequests: [], networkRecords: [] };
+      const diagnostics = {
+        consoleErrors: [],
+        explainedRecaptchaCancellations: [],
+        explainedRecaptchaReportOnlyWarnings: [],
+        unhandledErrors: [],
+        failedRequests: [],
+        networkRecords: [],
+      };
       let context;
       let page;
+      let lifecyclePhase = 'route-navigation';
       try {
         context = await browser.newContext({
           baseURL,
@@ -90,16 +100,36 @@ for (const scenario of scenarios) {
         page.on('request', (request) => pageAssets.begin(request));
         page.on('requestfinished', (request) => pageAssets.complete(request));
         page.on('console', (message) => {
-          if (message.type() === 'error') diagnostics.consoleErrors.push(message.text().slice(0, 300));
+          if (message.type() !== 'error') return;
+          const text = message.text();
+          if (isExpectedDemoRecaptchaReportOnlyWarning(text, {baseURL})) {
+            diagnostics.explainedRecaptchaReportOnlyWarnings.push(text.slice(0, 500));
+            return;
+          }
+          diagnostics.consoleErrors.push(text.slice(0, 300));
         });
         page.on('pageerror', (error) => diagnostics.unhandledErrors.push(error.message.slice(0, 300)));
         page.on('requestfailed', (request) => {
           pageAssets.complete(request);
-          diagnostics.failedRequests.push({
+          const failure = {
             resourceType: request.resourceType(),
             failure: request.failure()?.errorText || 'unknown',
-            path: new URL(request.url()).pathname,
-          });
+            path: (() => {
+              try { return new URL(request.url()).pathname; } catch { return '[invalid-url]'; }
+            })(),
+          };
+          if (isExpectedDemoRecaptchaCancellation({
+            ...failure,
+            lifecyclePhase,
+            url: request.url(),
+          })) {
+            diagnostics.explainedRecaptchaCancellations.push({
+              ...failure,
+              phase: lifecyclePhase,
+            });
+            return;
+          }
+          diagnostics.failedRequests.push(failure);
         });
         page.on('response', async (response) => {
           const request = response.request();
@@ -115,10 +145,13 @@ for (const scenario of scenarios) {
 
       await page.goto(scenario.route, { waitUntil: 'domcontentloaded' });
       await waitForReadiness(page);
+      lifecyclePhase = 'route-active';
       await expect(page).toHaveURL(new RegExp(`${scenario.route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
       if (scenario.cache === 'warm') {
+        lifecyclePhase = 'route-navigation';
         await page.reload({ waitUntil: 'domcontentloaded' });
         await waitForReadiness(page);
+        lifecyclePhase = 'route-active';
       }
       await waitForFinitePageAssets(pageAssets, scenario.id, 'before interaction');
       await runInteraction(page, scenario);
@@ -143,6 +176,7 @@ for (const scenario of scenarios) {
       expect(diagnostics.unhandledErrors, diagnostics.unhandledErrors.join('\n')).toHaveLength(0);
       expect(diagnostics.failedRequests, JSON.stringify(diagnostics.failedRequests)).toHaveLength(0);
 
+      lifecyclePhase = 'route-cleanup';
       await navigateToCleanup(page);
       await page.waitForFunction(({ route }) => (
         Object.entries(window.__FND_PERF__.snapshot().activeResources || {})
@@ -175,6 +209,10 @@ for (const scenario of scenarios) {
         resources: capture.resources,
         diagnostics: {
           consoleErrors: capture.diagnostics.consoleErrors,
+          explainedRecaptchaCancellations:
+            diagnostics.explainedRecaptchaCancellations,
+          explainedRecaptchaReportOnlyWarnings:
+            diagnostics.explainedRecaptchaReportOnlyWarnings,
           unhandledErrors: capture.diagnostics.unhandledErrors,
           failedRequests: capture.diagnostics.failedRequests,
         },

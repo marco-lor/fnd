@@ -1556,7 +1556,7 @@ describe('GrigliataPage', () => {
     expect(screen.getByTestId('board-active-viewers')).not.toHaveTextContent('Old Watcher');
   });
 
-  test('preloads the active battlemap, visible board tokens, and the tray portrait for players', async () => {
+  test('preloads the active battlemap and tray portrait without eagerly retaining every board token', async () => {
     mockFirestoreState.collections.grigliata_backgrounds = [
       {
         id: 'map-1',
@@ -1623,13 +1623,15 @@ describe('GrigliataPage', () => {
       expect(
         preloadImageAssets.mock.calls.some(([urls]) => (
           Array.isArray(urls)
-          && urls.length === 3
+          && urls.length === 2
           && urls.includes('https://example.com/map-1.png')
-          && urls.includes('https://example.com/orc-raider.png')
           && urls.includes('https://example.com/player-tray.png')
         ))
       ).toBe(true);
     });
+
+    expect(preloadImageAssets.mock.calls.flatMap(([urls]) => urls || []))
+      .not.toContain('https://example.com/orc-raider.png');
 
     expect(scheduleImageAssetPreload).not.toHaveBeenCalled();
   });
@@ -5250,7 +5252,7 @@ describe('GrigliataPage', () => {
     ))).toBe(false);
   });
 
-  test('caps visible peer character profile reads at two deterministic 30-id queries', async () => {
+  test('caps visible peer character profile reads at six deterministic 10-id queries', async () => {
     const peerIds = Array.from(
       { length: 61 },
       (_, index) => `user-peer-${String(index + 1).padStart(2, '0')}`
@@ -5267,7 +5269,38 @@ describe('GrigliataPage', () => {
       updatedAt: { seconds: 1 },
       updatedBy: peerId,
     })));
-    setCollectionData('grigliata_token_placements', peerIds.map((peerId, index) => ({
+    const customPlacement = {
+      id: 'map-1__custom-peer-token',
+      backgroundId: 'map-1',
+      tokenId: 'custom-peer-token',
+      ownerUid: 'custom-peer-owner',
+      label: 'Custom peer token',
+      imageUrl: '',
+      col: 0,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    };
+    const foePlacement = {
+      ...customPlacement,
+      id: 'map-1__foe-peer-token',
+      tokenId: 'foe-peer-token',
+      ownerUid: 'foe-peer-owner',
+      label: 'Foe peer token',
+    };
+    const whitespaceCollisionPlacement = {
+      ...customPlacement,
+      id: 'map-1__whitespace-peer-token',
+      tokenId: ' whitespace-peer-token ',
+      ownerUid: 'whitespace-peer-token',
+      label: 'Whitespace collision token',
+    };
+    setCollectionData('grigliata_token_placements', [
+      customPlacement,
+      foePlacement,
+      whitespaceCollisionPlacement,
+      ...peerIds.map((peerId, index) => ({
       id: `map-1__${peerId}`,
       backgroundId: 'map-1',
       tokenId: peerId,
@@ -5279,9 +5312,10 @@ describe('GrigliataPage', () => {
       isVisibleToPlayers: true,
       isDead: false,
       statuses: [],
-    })));
+      })),
+    ]);
 
-    render(<GrigliataPage />);
+    const { unmount } = render(<GrigliataPage />);
 
     let sharedProfileTargets = [];
     await waitFor(() => {
@@ -5294,7 +5328,7 @@ describe('GrigliataPage', () => {
             constraint.field === '__name__' && constraint.op === 'in'
           ))
         ));
-      expect(sharedProfileTargets).toHaveLength(2);
+      expect(sharedProfileTargets).toHaveLength(6);
     });
 
     const idChunks = sharedProfileTargets.map((target) => (
@@ -5302,9 +5336,12 @@ describe('GrigliataPage', () => {
         constraint.field === '__name__' && constraint.op === 'in'
       )).value
     ));
-    expect(idChunks.map((chunk) => chunk.length)).toEqual([30, 30]);
+    expect(idChunks.map((chunk) => chunk.length)).toEqual([10, 10, 10, 10, 10, 10]);
     expect(idChunks.flat()).toEqual(peerIds.slice(0, 60));
     expect(idChunks.flat()).not.toContain('user-peer-61');
+    expect(idChunks.flat()).not.toContain('custom-peer-token');
+    expect(idChunks.flat()).not.toContain('foe-peer-token');
+    expect(idChunks.flat()).not.toContain('whitespace-peer-token');
     sharedProfileTargets.forEach((target) => {
       expect(target.constraints).toContainEqual(expect.objectContaining({
         field: 'tokenType',
@@ -5312,6 +5349,22 @@ describe('GrigliataPage', () => {
         value: 'character',
       }));
     });
+
+    expect(mockFirestoreListeners.filter(({ target }) => (
+      target?.kind === 'query'
+      && target?.base?.path === 'grigliata_tokens'
+      && target.constraints?.some((constraint) => (
+        constraint.field === '__name__' && constraint.op === 'in'
+      ))
+    ))).toHaveLength(6);
+    unmount();
+    expect(mockFirestoreListeners.filter(({ target }) => (
+      target?.kind === 'query'
+      && target?.base?.path === 'grigliata_tokens'
+      && target.constraints?.some((constraint) => (
+        constraint.field === '__name__' && constraint.op === 'in'
+      ))
+    ))).toHaveLength(0);
   });
 
   test('projects the current canonical foe source into board and turn-order views', async () => {

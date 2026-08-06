@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { useReducedMotion } from 'framer-motion';
 import GrigliataBoard, {
   buildAoEFigureMeasurementDecorationLayout,
+  buildBoundedTokenMediaIdSet,
   buildZoomNormalizedOverlayMetrics,
   getAoEFigureMeasurementTextLines,
 } from './GrigliataBoard';
@@ -56,6 +57,43 @@ const createDeferred = () => {
 
   return { promise, resolve, reject };
 };
+
+test('bounds token media leases and prioritizes active, selected, then visible tokens', () => {
+  const tokens = [
+    {
+      tokenId: 'offscreen',
+      imageUrl: 'https://example.com/offscreen.png',
+      renderPosition: {x: 900, y: 900, size: 50},
+    },
+    {
+      tokenId: 'visible',
+      imageUrl: 'https://example.com/visible.png',
+      renderPosition: {x: 20, y: 20, size: 50},
+    },
+    {
+      tokenId: 'selected',
+      imageUrl: 'https://example.com/selected.png',
+      renderPosition: {x: 800, y: 800, size: 50},
+      isSelected: true,
+    },
+    {
+      tokenId: 'active',
+      imageUrl: 'https://example.com/active.png',
+      renderPosition: {x: 700, y: 700, size: 50},
+      isActiveTurn: true,
+    },
+  ];
+
+  const selectedIds = buildBoundedTokenMediaIdSet({
+    tokens,
+    viewport: {x: 0, y: 0, scale: 1},
+    stageSize: {width: 200, height: 200},
+    limit: 3,
+  });
+
+  expect([...selectedIds]).toEqual(['active', 'selected', 'visible']);
+  expect(selectedIds).not.toContain('offscreen');
+});
 
 jest.mock('framer-motion', () => {
   const actual = jest.requireActual('framer-motion');

@@ -129,6 +129,7 @@ const initializeFirebaseServices = (config, {
 
   if (
     production
+    && !performanceMode
     && appCheckSiteKey
     && !appCheckInitialized
   ) {

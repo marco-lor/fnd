@@ -1,6 +1,6 @@
 import {randomBytes} from "crypto";
 import * as admin from "firebase-admin";
-import {FieldValue, Timestamp} from "firebase-admin/firestore";
+import {FieldPath, FieldValue, Timestamp} from "firebase-admin/firestore";
 import {
   CallableRequest,
   FunctionsErrorCode,
@@ -446,18 +446,34 @@ export const task05ListAdminUsers = onCall(
       fail("permission-denied", "Only webmasters may list private user labels.");
     }
 
-    let query: admin.firestore.Query = db.collection("users")
-      .orderBy(admin.firestore.FieldPath.documentId())
-      .select("characterId", "username", "email", "role");
-    if (pagination.cursor) query = query.startAfter(pagination.cursor);
+    const directory = db.collection("user_directory");
+    let query: admin.firestore.Query = directory
+      .orderBy(FieldPath.documentId());
+    if (pagination.cursor) {
+      query = query.startAfter(directory.doc(pagination.cursor));
+    }
     const snapshot = await query.limit(pagination.limit + 1).get();
     const hasMore = snapshot.docs.length > pagination.limit;
     const pageDocs = snapshot.docs.slice(0, pagination.limit);
+    const userSnapshots = pageDocs.length > 0 ? await db.getAll(
+      ...pageDocs.map((document) => db.doc(`users/${document.id}`)),
+      {fieldMask: ["characterId", "username", "email", "role"]}
+    ) : [];
+    const usersById = new Map(
+      userSnapshots
+        .filter((document) => document.exists)
+        .map((document) => [document.id, document])
+    );
     return {
-      items: pageDocs.map((document) => buildAdminUserListItem(
-        document.id,
-        document.data()
-      )),
+      items: pageDocs
+        .map((document) => usersById.get(document.id))
+        .filter((document): document is admin.firestore.DocumentSnapshot =>
+          document !== undefined
+        )
+        .map((document) => buildAdminUserListItem(
+          document.id,
+          document.data()
+        )),
       cursor: hasMore && pageDocs.length > 0 ?
         pageDocs[pageDocs.length - 1].id : null,
       hasMore,

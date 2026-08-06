@@ -541,10 +541,10 @@
       "kind": "collection",
       "queryKey": "grigliata.character-profiles.visible.subscribe.v1",
       "ownerTask": "Task 07",
-      "currentScope": "At most 60 visible peer character profiles in two deterministic document-ID chunks",
+      "currentScope": "At most 60 visible peer character profiles in six deterministic document-ID chunks",
       "targetOrdering": [],
       "cursor": { "version": 1, "status": "bounded", "fields": ["__name__"] },
-      "realtimePolicy": "Mounted battle route only; at most two listeners and no unbounded fallback",
+      "realtimePolicy": "Mounted battle route only; at most six 10-ID listeners and no unbounded fallback",
       "activation": "active",
       "sources": [{ "file": "components/grigliata/useGrigliataPageData.js", "occurrence": 17 }]
     },

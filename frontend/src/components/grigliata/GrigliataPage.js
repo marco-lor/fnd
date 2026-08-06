@@ -467,6 +467,7 @@ const isPermissionDeniedError = (error) => (
   || error?.code === 'functions/permission-denied'
 );
 const SIDEBAR_TAB_LIST_CLASS_NAME = 'flex flex-wrap gap-2';
+const MAX_IMMEDIATE_IMAGE_PRELOADS = 12;
 const MAX_DEFERRED_GALLERY_IMAGE_PRELOADS = 6;
 const collectUniqueImageUrls = (urls) => [...new Set(
   (urls || []).map((url) => (typeof url === 'string' ? url.trim() : '')).filter(Boolean)
@@ -1796,9 +1797,7 @@ export default function GrigliataPage() {
     getBackgroundImageUrlForPreload(displayBackground),
     currentUserToken?.imageUrl,
     ...customUserTokens.map((token) => token?.imageUrl),
-    ...boardTokens.map((token) => token?.imageUrl),
-  ]), [
-    boardTokens,
+  ]).slice(0, MAX_IMMEDIATE_IMAGE_PRELOADS), [
     combatBackground,
     currentUserToken?.imageUrl,
     customUserTokens,

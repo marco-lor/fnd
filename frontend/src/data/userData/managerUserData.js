@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuthSession } from '../../AuthContext';
 import {
-  USER_DIRECTORY_PAGE_SIZE,
   getUserDirectoryPage,
-  subscribeUserDirectoryFirstPage,
+  subscribeUserDirectoryPage,
 } from '../userDirectoryRepository';
 import { USER_DATA_DOMAINS } from './domainSchema';
 import { subscribeUserDomain } from './userDataRepository';
@@ -18,6 +17,8 @@ const MANAGER_DOMAINS = Object.freeze([
   USER_DATA_DOMAINS.SPELLS,
   USER_DATA_DOMAINS.TECHNIQUES,
 ]);
+export const MANAGER_USER_PAGE_SIZE = 10;
+const MANAGER_USER_DIRECTORY_ROLE = 'player';
 
 const asRecord = (value) => (
   value && typeof value === 'object' && !Array.isArray(value) ? value : {}
@@ -74,30 +75,38 @@ export const composeManagerUser = (directoryEntry, domains = {}) => {
   });
 };
 
-const directoryCapacityError = () => new Error(
-  'DM Dashboard refuses a bounded '
-    + USER_DIRECTORY_PAGE_SIZE
-    + '-user directory page because more users may exist. '
-    + 'Add explicit pagination before continuing.'
-);
-
-export const useManagerUserData = (enabled = true) => {
+export const useManagerUserData = (enabled = true, {
+  cursor = null,
+  pageSize = MANAGER_USER_PAGE_SIZE,
+} = {}) => {
   const { repositoryAccessGeneration = 0 } = useAuthSession();
   const [state, setState] = useState({
     users: [],
     loading: Boolean(enabled),
     error: null,
+    hasMore: false,
+    nextCursor: null,
+    pageSize,
   });
 
   useEffect(() => {
     if (!enabled) {
-      setState({ users: [], loading: false, error: null });
+      setState({
+        users: [],
+        loading: false,
+        error: null,
+        hasMore: false,
+        nextCursor: null,
+        pageSize,
+      });
       return undefined;
     }
 
     let active = true;
     let directoryReady = false;
     let directoryEntries = [];
+    let directoryHasMore = false;
+    let directoryNextCursor = null;
     const userStates = new Map();
     const domainUnsubscribes = new Map();
     let directoryUnsubscribe = null;
@@ -116,6 +125,9 @@ export const useManagerUserData = (enabled = true) => {
         users,
         loading: !directoryReady || users.length !== directoryEntries.length,
         error: null,
+        hasMore: directoryHasMore,
+        nextCursor: directoryNextCursor,
+        pageSize,
       });
     };
 
@@ -154,36 +166,44 @@ export const useManagerUserData = (enabled = true) => {
       domainUnsubscribes.set(uid, unsubscribes);
     };
 
-    const applyDirectory = (items) => {
-      const nextEntries = Array.isArray(items) ? items : [];
-      if (nextEntries.length >= USER_DIRECTORY_PAGE_SIZE) {
-        fail(directoryCapacityError());
-        return false;
-      }
+    const applyDirectory = (result) => {
+      const nextEntries = Array.isArray(result?.items) ? result.items : [];
       const nextIds = new Set(nextEntries.map((entry) => entry.id));
       [...domainUnsubscribes.keys()]
         .filter((uid) => !nextIds.has(uid))
         .forEach(removeUser);
       directoryEntries = nextEntries;
+      directoryHasMore = result?.hasMore === true;
+      directoryNextCursor = directoryHasMore ? result?.cursor || null : null;
       directoryEntries.forEach((entry) => subscribeUser(entry.id));
       directoryReady = true;
       publish();
-      return true;
     };
 
-    setState({ users: [], loading: true, error: null });
+    setState({
+      users: [],
+      loading: true,
+      error: null,
+      hasMore: false,
+      nextCursor: null,
+      pageSize,
+    });
     (async () => {
       try {
-        const firstPage = await getUserDirectoryPage();
+        const page = await getUserDirectoryPage({
+          role: MANAGER_USER_DIRECTORY_ROLE,
+          cursor,
+          pageSize,
+        });
         if (!active) return;
-        if (firstPage.hasMore) {
-          fail(directoryCapacityError());
-          return;
-        }
-        if (!applyDirectory(firstPage.items)) return;
-        directoryUnsubscribe = subscribeUserDirectoryFirstPage({
-          next: (result) => applyDirectory(result?.items),
+        applyDirectory(page);
+        directoryUnsubscribe = subscribeUserDirectoryPage({
+          next: applyDirectory,
           error: fail,
+        }, {
+          role: MANAGER_USER_DIRECTORY_ROLE,
+          cursor,
+          pageSize,
         });
       } catch (error) {
         fail(error);
@@ -195,8 +215,7 @@ export const useManagerUserData = (enabled = true) => {
       directoryUnsubscribe?.();
       [...domainUnsubscribes.keys()].forEach(removeUser);
     };
-  }, [enabled, repositoryAccessGeneration]);
+  }, [cursor, enabled, pageSize, repositoryAccessGeneration]);
 
   return useMemo(() => state, [state]);
 };
-

@@ -113,8 +113,10 @@ describe("Firebase async bootstrap", () => {
   test("uses the static demo config and connects emulators in an ordinary performance build", async () => {
     const previousPerformanceMode = process.env.REACT_APP_FND_PERF;
     const previousProjectId = process.env.REACT_APP_FND_PERF_PROJECT_ID;
+    const previousAppCheckSiteKey = process.env.REACT_APP_RECAPTCHA_ENTERPRISE_SITE_KEY;
     process.env.REACT_APP_FND_PERF = "1";
     process.env.REACT_APP_FND_PERF_PROJECT_ID = "demo-fnd-perf";
+    process.env.REACT_APP_RECAPTCHA_ENTERPRISE_SITE_KEY = "production-site-key-must-not-run";
 
     try {
       const firebaseConfig = loadModule();
@@ -134,11 +136,28 @@ describe("Firebase async bootstrap", () => {
         experimentalAutoDetectLongPolling: false,
       });
       expect(settings).not.toHaveProperty("experimentalForceLongPolling");
+
+      firebaseConfig.__resetFirebaseForTests();
+      jest.clearAllMocks();
+      firebaseConfig.__initializeFirebaseServicesForTests(config, {
+        production: true,
+        appCheckSiteKey: "production-site-key-must-not-run",
+      });
+
+      expect(require("firebase/app-check").initializeAppCheck).not.toHaveBeenCalled();
+      expect(require("firebase/app-check").ReCaptchaEnterpriseProvider).not.toHaveBeenCalled();
+      expect(firestore.initializeFirestore).toHaveBeenCalledTimes(1);
+      expect(firestore.connectFirestoreEmulator).toHaveBeenCalledTimes(1);
     } finally {
       if (previousPerformanceMode === undefined) delete process.env.REACT_APP_FND_PERF;
       else process.env.REACT_APP_FND_PERF = previousPerformanceMode;
       if (previousProjectId === undefined) delete process.env.REACT_APP_FND_PERF_PROJECT_ID;
       else process.env.REACT_APP_FND_PERF_PROJECT_ID = previousProjectId;
+      if (previousAppCheckSiteKey === undefined) {
+        delete process.env.REACT_APP_RECAPTCHA_ENTERPRISE_SITE_KEY;
+      } else {
+        process.env.REACT_APP_RECAPTCHA_ENTERPRISE_SITE_KEY = previousAppCheckSiteKey;
+      }
     }
   });
 });

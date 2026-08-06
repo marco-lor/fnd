@@ -1,5 +1,11 @@
+import { renderHook, waitFor } from '@testing-library/react';
 import { USER_DATA_DOMAINS } from './domainSchema';
-import { composeManagerUser } from './managerUserData';
+import { composeManagerUser, useManagerUserData } from './managerUserData';
+import {
+  getUserDirectoryPage,
+  subscribeUserDirectoryPage,
+} from '../userDirectoryRepository';
+import { subscribeUserDomain } from './userDataRepository';
 
 jest.mock('../../AuthContext', () => ({
   useAuthSession: () => ({ repositoryAccessGeneration: 0 }),
@@ -8,7 +14,7 @@ jest.mock('../../AuthContext', () => ({
 jest.mock('../userDirectoryRepository', () => ({
   USER_DIRECTORY_PAGE_SIZE: 50,
   getUserDirectoryPage: jest.fn(),
-  subscribeUserDirectoryFirstPage: jest.fn(),
+  subscribeUserDirectoryPage: jest.fn(),
 }));
 
 jest.mock('./userDataRepository', () => ({
@@ -79,5 +85,67 @@ describe('composeManagerUser', () => {
     }));
     expect(user.spells.Luce._task05ContentId).toBe('spell-1');
     expect(user.tecniche.Parata._task05ContentId).toBe('tech-1');
+  });
+
+  test('keeps each manager page and its domain subscriptions explicitly bounded', async () => {
+    const cursor = {
+      version: 1,
+      queryKey: 'directory.users.by-role.player.page.v1',
+      sortValues: ['performance hero 1'],
+      documentId: 'player-1',
+    };
+    const nextCursor = {
+      version: 1,
+      queryKey: 'directory.users.by-role.player.page.v1',
+      sortValues: ['performance hero 10'],
+      documentId: 'player-10',
+    };
+    getUserDirectoryPage.mockResolvedValue({
+      items: [{
+        id: 'player-10',
+        role: 'player',
+        label: 'Performance Hero 10',
+        characterId: 'Performance Hero 10',
+      }],
+      cursor: nextCursor,
+      hasMore: true,
+    });
+    const unsubscribeDirectory = jest.fn();
+    subscribeUserDirectoryPage.mockReturnValue(unsubscribeDirectory);
+    const domainUnsubscribes = [];
+    subscribeUserDomain.mockImplementation((_uid, domain, observer) => {
+      const unsubscribe = jest.fn();
+      domainUnsubscribes.push(unsubscribe);
+      observer.next(domain === USER_DATA_DOMAINS.INVENTORY ? [] : {});
+      return unsubscribe;
+    });
+
+    const {result, unmount} = renderHook(() => useManagerUserData(true, {
+      cursor,
+      pageSize: 10,
+    }));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(getUserDirectoryPage).toHaveBeenCalledWith({
+      role: 'player',
+      cursor,
+      pageSize: 10,
+    });
+    expect(subscribeUserDirectoryPage).toHaveBeenCalledWith(
+      expect.objectContaining({next: expect.any(Function), error: expect.any(Function)}),
+      {role: 'player', cursor, pageSize: 10}
+    );
+    expect(subscribeUserDomain).toHaveBeenCalledTimes(8);
+    expect(result.current).toEqual(expect.objectContaining({
+      hasMore: true,
+      nextCursor,
+      pageSize: 10,
+    }));
+
+    unmount();
+    expect(unsubscribeDirectory).toHaveBeenCalledTimes(1);
+    domainUnsubscribes.forEach((unsubscribe) => {
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+    });
   });
 });

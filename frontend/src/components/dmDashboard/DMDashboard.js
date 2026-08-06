@@ -27,11 +27,18 @@ const levelUpUser = getCallable("levelUpUser");
 
 const DMDashboard = () => {
   const { user, userData } = useAuth();
+  const [directoryPageIndex, setDirectoryPageIndex] = useState(0);
+  const [directoryPageCursors, setDirectoryPageCursors] = useState([null]);
+  const directoryCursor = directoryPageCursors[directoryPageIndex] || null;
   const {
     users,
     loading,
     error: userDataError,
-  } = useManagerUserData(userData?.role === "dm");
+    hasMore = false,
+    nextCursor = null,
+  } = useManagerUserData(userData?.role === "dm", {
+    cursor: directoryCursor,
+  });
   const [actionError, setError] = useState(null);
   const error = actionError || userDataError?.message || null;
   const navigate = useNavigate();
@@ -87,6 +94,20 @@ const DMDashboard = () => {
     setSelectedUserIds((prev) =>
       prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
     );
+  };
+
+  const showPreviousDirectoryPage = () => {
+    setDirectoryPageIndex((current) => Math.max(0, current - 1));
+  };
+
+  const showNextDirectoryPage = () => {
+    if (!hasMore || !nextCursor) return;
+    setDirectoryPageCursors((current) => {
+      const next = current.slice(0, directoryPageIndex + 1);
+      next[directoryPageIndex + 1] = nextCursor;
+      return next;
+    });
+    setDirectoryPageIndex((current) => current + 1);
   };
 
   // Simple section header with show/hide control
@@ -357,6 +378,25 @@ const DMDashboard = () => {
             <>
               <div className="mb-4">
                 <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-2">Seleziona giocatori da mostrare</div>
+                <div className="mb-3 flex items-center gap-2" aria-label="Player directory pagination">
+                  <button
+                    type="button"
+                    onClick={showPreviousDirectoryPage}
+                    disabled={loading || directoryPageIndex === 0}
+                    className="rounded border border-slate-600 px-3 py-1 text-xs text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Previous players
+                  </button>
+                  <span className="text-xs text-slate-400">Page {directoryPageIndex + 1}</span>
+                  <button
+                    type="button"
+                    onClick={showNextDirectoryPage}
+                    disabled={loading || !hasMore || !nextCursor}
+                    className="rounded border border-slate-600 px-3 py-1 text-xs text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Next players
+                  </button>
+                </div>
                 <div className="flex flex-wrap gap-2 items-center">
                   <button
                     onClick={() => setSelectedUserIds(users.map((u) => u.id))}

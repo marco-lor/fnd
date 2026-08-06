@@ -13,6 +13,9 @@ const {
   createPageAssetTracker,
   installBootstrap,
   installDeterministicFontRoutes,
+  isExpectedDemoRecaptchaCancellation,
+  isExpectedDemoRecaptchaReportOnlyWarning,
+  isExpectedFivePeerFirestoreWriteTurnover,
   isExpectedFirestoreLifecycleCancellation,
   isKnownDemoFirestoreStartupWarning,
   navigateToCleanup,
@@ -33,6 +36,7 @@ const PROBE_GRID_DELTA_X = 50;
 const CLIENT_READINESS_ROUTE = '/__fnd_perf_cleanup__';
 const FIVE_PEER_ROUTE_READINESS_TIMEOUT_MS = 30_000;
 const FIVE_PEER_TEST_TIMEOUT_MS = 210_000;
+const MAX_EXPECTED_ACTIVE_WRITE_TURNOVERS_PER_PEER = 2;
 const LEGACY_MIGRATION_MARKER_FIELDS = [
   'legacyTokenPlacementCleanupCompletedAt',
   'legacyPlacementDeadStateCleanupCompletedAt',
@@ -140,17 +144,21 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
       const pageAssets = createPageAssetTracker();
       const diagnostics = {
         consoleErrors: [],
+        explainedRecaptchaCancellations: [],
+        explainedRecaptchaReportOnlyWarnings: [],
         explainedStartupWarnings: [],
+        explainedActiveWriteTurnovers: [],
         explainedCleanupTransportCancellations: [],
         unhandledErrors: [],
         failedRequests: [],
         cleanupStarted: false,
+        lifecyclePhase: 'route-navigation',
         ready: false,
       };
       page.on('console', (message) => {
         if (message.type() !== 'error') return;
         const text = message.text();
-        if (isKnownDemoFirestoreStartupWarning(text, {
+          if (isKnownDemoFirestoreStartupWarning(text, {
           baseURL,
           beforeReadiness: !diagnostics.ready,
         })) {
@@ -159,23 +167,45 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
             phase: 'before-readiness',
             text: text.slice(0, 500),
           });
-          return;
-        }
-        diagnostics.consoleErrors.push(text.slice(0, 300));
+            return;
+          }
+          if (isExpectedDemoRecaptchaReportOnlyWarning(text, {baseURL})) {
+            diagnostics.explainedRecaptchaReportOnlyWarnings.push(text.slice(0, 500));
+            return;
+          }
+          diagnostics.consoleErrors.push(text.slice(0, 300));
       });
       page.on('request', (request) => pageAssets.begin(request));
       page.on('requestfinished', (request) => pageAssets.complete(request));
+      const responseStatuses = new WeakMap();
+      page.on('response', (response) => {
+        responseStatuses.set(response.request(), response.status());
+      });
       page.on('pageerror', (error) => diagnostics.unhandledErrors.push(error.message.slice(0, 300)));
       page.on('requestfailed', (request) => {
         pageAssets.complete(request);
         const failure = {
           resourceType: request.resourceType(),
           failure: request.failure()?.errorText || 'unknown',
+          method: request.method(),
           path: new URL(request.url()).pathname,
         };
+        if (isExpectedFivePeerFirestoreWriteTurnover({
+          ...failure,
+          lifecyclePhase: diagnostics.lifecyclePhase,
+          responseStatus: responseStatuses.get(request),
+          url: request.url(),
+        })) {
+          diagnostics.explainedActiveWriteTurnovers.push({
+            ...failure,
+            phase: diagnostics.lifecyclePhase,
+            responseStatus: responseStatuses.get(request),
+          });
+          return;
+        }
         if (isExpectedFirestoreLifecycleCancellation({
           ...failure,
-          lifecyclePhase: diagnostics.cleanupStarted ? 'route-cleanup' : null,
+          lifecyclePhase: diagnostics.lifecyclePhase,
           url: request.url(),
         })) {
           diagnostics.explainedCleanupTransportCancellations.push({
@@ -184,11 +214,23 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
           });
           return;
         }
+        if (isExpectedDemoRecaptchaCancellation({
+          ...failure,
+          lifecyclePhase: diagnostics.lifecyclePhase,
+          url: request.url(),
+        })) {
+          diagnostics.explainedRecaptchaCancellations.push({
+            ...failure,
+            phase: diagnostics.lifecyclePhase,
+          });
+          return;
+        }
         diagnostics.failedRequests.push(failure);
       });
       pages.push({ page, role, diagnostics });
       try {
         await enterMeasuredGrigliataRoute(page);
+        diagnostics.lifecyclePhase = 'route-active';
       } catch (error) {
         throw new Error(`Five-peer readiness failed for ${role}: ${error.message}`, { cause: error });
       }
@@ -305,6 +347,10 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
       expect(diagnostics.consoleErrors, `${role}: ${diagnostics.consoleErrors.join('\n')}`).toHaveLength(0);
       expect(diagnostics.unhandledErrors, `${role}: ${diagnostics.unhandledErrors.join('\n')}`).toHaveLength(0);
       expect(diagnostics.failedRequests, `${role}: ${JSON.stringify(diagnostics.failedRequests)}`).toHaveLength(0);
+      expect(
+        diagnostics.explainedActiveWriteTurnovers.length,
+        `${role}: ${JSON.stringify(diagnostics.explainedActiveWriteTurnovers)}`
+      ).toBeLessThanOrEqual(MAX_EXPECTED_ACTIVE_WRITE_TURNOVERS_PER_PEER);
     }
     const explainedStartupWarnings = pages.flatMap(({ role, diagnostics }) => (
       diagnostics.explainedStartupWarnings.map((entry) => ({ role, ...entry }))
@@ -316,6 +362,7 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
     const cleanupSnapshots = [];
     for (const { diagnostics } of pages) {
       diagnostics.cleanupStarted = true;
+      diagnostics.lifecyclePhase = 'route-cleanup';
     }
     for (const { page, role } of pages) {
       await navigateToCleanup(page);

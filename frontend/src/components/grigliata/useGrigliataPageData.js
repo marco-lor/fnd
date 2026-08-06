@@ -71,9 +71,12 @@ import {
 } from './tokenMediaProjection';
 
 const LIVE_INTERACTION_CLOCK_INTERVAL_MS = 15 * 1000;
-export const GRIGLIATA_SHARED_CHARACTER_PROFILE_QUERY_CHUNK_SIZE = 30;
-export const GRIGLIATA_SHARED_CHARACTER_PROFILE_MAX_IDS = (
-  GRIGLIATA_SHARED_CHARACTER_PROFILE_QUERY_CHUNK_SIZE * 2);
+// A document-ID disjunction is expanded while Firestore evaluates the read
+// rule for every candidate. Ten IDs keeps that evaluation below the emulator
+// and production rules expression ceiling; the overall visible-peer bound is
+// intentionally independent so shrinking a safe chunk never drops coverage.
+export const GRIGLIATA_SHARED_CHARACTER_PROFILE_QUERY_CHUNK_SIZE = 10;
+export const GRIGLIATA_SHARED_CHARACTER_PROFILE_MAX_IDS = 60;
 const PAGE_PRESENCE_CLOCK_INTERVAL_MS = 15 * 1000;
 const resolveCustomTokenRole = (token = {}, tokenType = '') => {
   if (tokenType !== 'custom') {
@@ -915,15 +918,17 @@ export default function useGrigliataPageData({
     [...new Set(activePlacements
       .map((placement) => (
         typeof placement?.tokenId === 'string'
-          ? placement.tokenId.trim()
+          && typeof placement?.ownerUid === 'string'
+          && placement.tokenId === placement.ownerUid
+          ? placement.tokenId
           : ''
       ))
       .filter((tokenId) => tokenId && tokenId !== currentUserId)
       .filter(Boolean))]
       .sort()
-      // Query every peer placement ID and let tokenType == character prove the
-      // readable result set. Character token IDs are not required to equal the
-      // owner UID. Listener fan-out remains hard-bounded.
+      // Character profiles are the only token contract whose document ID is
+      // the owner UID. Excluding custom/foe placement IDs keeps every query
+      // within the signed-in character read boundary. Fan-out stays bounded.
       .slice(0, GRIGLIATA_SHARED_CHARACTER_PROFILE_MAX_IDS)
   ), [activePlacements, currentUserId]);
 

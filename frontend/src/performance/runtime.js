@@ -36,6 +36,7 @@ let originalWebChannelInternalSend = null;
 let originalWebChannelPublicSend = null;
 let firestoreWebChannelResponseCallbacks = new Map();
 let pendingWebChannelTimerTurn = null;
+let pendingFirestoreWatchdogReplacementTurn = null;
 
 const redactString = (value) => {
   const text = String(value ?? '').slice(0, 160);
@@ -170,6 +171,38 @@ const claimNewestFirestoreWebChannelTimer = () => {
     return true;
   }
   return false;
+};
+
+const recordFirestoreWatchdogReplacementTurn = () => {
+  const turn = {};
+  pendingFirestoreWatchdogReplacementTurn = turn;
+  const expire = () => {
+    if (pendingFirestoreWatchdogReplacementTurn === turn) {
+      pendingFirestoreWatchdogReplacementTurn = null;
+    }
+  };
+  if (typeof queueMicrotask === 'function') queueMicrotask(expire);
+  else Promise.resolve().then(expire);
+};
+
+const claimFirestoreWatchdogReplacement = (resource) => {
+  if (
+    !pendingFirestoreWatchdogReplacementTurn
+    || resource.closed
+    || resource.diagnostics?.callback !== FIRESTORE_WEBCHANNEL_CALLBACK_SOURCE
+    || resource.diagnostics?.delayMs !== 45_000
+  ) {
+    return false;
+  }
+  pendingFirestoreWatchdogReplacementTurn = null;
+  if (resource.ownerRoute !== 'firestore-transport') {
+    resource.ownerRoute = 'firestore-transport';
+  }
+  resource.diagnostics = {
+    ...(resource.diagnostics || {}),
+    attribution: 'firestore-webchannel-watchdog-replacement',
+  };
+  return true;
 };
 
 const wrapFirestoreWebChannelResponseCallback = (xhr) => {
@@ -479,7 +512,12 @@ export const installPerformanceRuntime = () => {
         { method },
         method
       );
-      const result = originalWebChannelInternalSend.call(this, url, method, ...args);
+      const result = isFirestoreWebChannel
+        ? withAsyncResourceOwner(
+          'firestore-transport',
+          () => originalWebChannelInternalSend.call(this, url, method, ...args)
+        )
+        : originalWebChannelInternalSend.call(this, url, method, ...args);
       if (isFirestoreWebChannel) {
         wrapFirestoreWebChannelResponseCallback(this.g);
         claimNewestFirestoreWebChannelTimer();
@@ -525,6 +563,9 @@ export const installPerformanceRuntime = () => {
         throw error;
       }
       timeouts.set(id, resource);
+      if (claimFirestoreWatchdogReplacement(resource)) {
+        return id;
+      }
       if (
         resource.ownerRoute !== 'firestore-transport'
         && resource.diagnostics?.callback === FIRESTORE_WEBCHANNEL_CALLBACK_SOURCE
@@ -535,9 +576,15 @@ export const installPerformanceRuntime = () => {
       return id;
     };
     window.clearTimeout = (id) => {
-      timeouts.get(id)?.close();
+      const resource = timeouts.get(id);
+      const isFirestoreWatchdog = resource?.ownerRoute === 'firestore-transport'
+        && resource.diagnostics?.callback === FIRESTORE_WEBCHANNEL_CALLBACK_SOURCE
+        && resource.diagnostics?.delayMs === 45_000;
+      resource?.close();
       timeouts.delete(id);
-      return originalTimers.clearTimeout(id);
+      const result = originalTimers.clearTimeout(id);
+      if (isFirestoreWatchdog) recordFirestoreWatchdogReplacementTurn();
+      return result;
     };
     window.setInterval = (callback, delay, ...args) => {
       const resource = registerAsyncResource('interval', undefined, {
@@ -634,6 +681,7 @@ export const teardownPerformanceRuntimeForTests = () => {
   asyncResourceOwnerOverride = null;
   asyncResourceOwnerLeases = [];
   pendingWebChannelTimerTurn = null;
+  pendingFirestoreWatchdogReplacementTurn = null;
   asyncResourceSequence = 0;
   routeState = null;
   if (originalXhrOpen && typeof XMLHttpRequest !== 'undefined') {
