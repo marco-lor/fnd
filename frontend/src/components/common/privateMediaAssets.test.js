@@ -324,6 +324,29 @@ describe('privateMediaAssets', () => {
     expect(runtime.revokeObjectURL).not.toHaveBeenCalled();
   });
 
+  test('restores the manifest MIME after Firebase bounds a Blob with slice', async () => {
+    const runtime = createRuntime({
+      getBlobImplementation: async () => new Blob(['data']),
+    });
+    const value = descriptor('bounded-blob-type', 4);
+    const lease = acquirePrivateMediaAsset(value);
+
+    await expect(lease.promise).resolves.toEqual(expect.objectContaining({
+      url: expect.stringMatching(/^blob:private-/),
+    }));
+    expect(runtime.getBlob).toHaveBeenCalledWith(
+      { path: value.path },
+      value.bytes
+    );
+    expect(runtime.createObjectURL.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        size: value.bytes,
+        type: value.contentType,
+      })
+    );
+    lease.release();
+  });
+
   test('rejects conflicting raster dimensions for the same immutable generation', async () => {
     const runtime = createRuntime();
     const value = descriptor('dimension-conflict', 4);

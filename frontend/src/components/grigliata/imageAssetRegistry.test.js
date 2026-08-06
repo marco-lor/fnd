@@ -135,6 +135,34 @@ describe('imageAssetRegistry', () => {
     expect(imageConstructorCallCount).toBe(1);
   });
 
+  test('binds timer fallbacks to the browser window receiver', () => {
+    const originalSetTimeout = window.setTimeout;
+    const originalClearTimeout = window.clearTimeout;
+    const timerReceivers = [];
+    window.requestIdleCallback = undefined;
+    window.cancelIdleCallback = undefined;
+    window.setTimeout = function setTimeoutWithRequiredReceiver() {
+      timerReceivers.push(this);
+      if (this !== window) throw new TypeError('Illegal invocation');
+      return 17;
+    };
+    window.clearTimeout = function clearTimeoutWithRequiredReceiver() {
+      timerReceivers.push(this);
+      if (this !== window) throw new TypeError('Illegal invocation');
+    };
+
+    try {
+      const cancelPreload = scheduleImageAssetPreload([
+        'https://example.com/window-bound-timer.png',
+      ]);
+      cancelPreload();
+      expect(timerReceivers).toEqual([window, window]);
+    } finally {
+      window.setTimeout = originalSetTimeout;
+      window.clearTimeout = originalClearTimeout;
+    }
+  });
+
   test('cancels timer-based deferred preloads before they start', () => {
     jest.useFakeTimers();
     window.requestIdleCallback = undefined;

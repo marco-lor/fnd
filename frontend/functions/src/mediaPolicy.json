@@ -287,9 +287,9 @@
       "audienceScope": "signed-in",
       "contentTypes": ["image/jpeg", "image/png", "image/webp"],
       "maxBytes": 15728640,
-      "maxWidth": 8192,
-      "maxHeight": 8192,
-      "maxPixels": 32000000,
+      "maxWidth": 9600,
+      "maxHeight": 9600,
+      "maxPixels": 92160000,
       "maxDurationMs": null,
       "variants": {
         "gallery": {

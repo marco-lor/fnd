@@ -475,6 +475,18 @@ const validateFetchedBlob = (blob, descriptor) => {
   }
 };
 
+const restoreBoundedBlobContentType = (blob, descriptor) => {
+  const blobType = typeof blob?.type === 'string'
+    ? blob.type.trim().toLowerCase()
+    : '';
+  if (blobType || typeof blob?.slice !== 'function') return blob;
+
+  // Firebase Storage bounds getBlob() with Blob.slice(), whose default type is
+  // empty. Restore the already-validated manifest type without removing the
+  // download-size bound or accepting a conflicting non-empty response type.
+  return blob.slice(0, blob.size, descriptor.contentType);
+};
+
 const getFailureBackoffMs = (failureCount) => (
   runtime.failureBackoffMs[Math.max(
     0,
@@ -504,9 +516,16 @@ const fetchRecord = async (record, epoch) => {
     if (epoch !== runtimeEpoch || records.get(record.key) !== record) return;
 
     const objectRef = storageApi.ref(storageApi.storage, record.descriptor.path);
-    const blob = await storageApi.getBlob(objectRef, record.descriptor.bytes);
+    const fetchedBlob = await storageApi.getBlob(
+      objectRef,
+      record.descriptor.bytes
+    );
     if (epoch !== runtimeEpoch || records.get(record.key) !== record) return;
 
+    const blob = restoreBoundedBlobContentType(
+      fetchedBlob,
+      record.descriptor
+    );
     validateFetchedBlob(blob, record.descriptor);
     reserveByteCapacity(blob.size, record.key);
     const decodedBytes = getDescriptorDecodedBytes(record.descriptor);

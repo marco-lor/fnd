@@ -221,7 +221,7 @@ test("legacy map backfill authorization is exact and server-receipt-bound", () =
   }), false);
 });
 
-test("only authorized legacy maps receive the bounded 9600 decode budget", async () => {
+test("map uploads use the bounded 9600 decode budget without expanding other media", async () => {
   const mapPlan = {
     ...plan,
     assetId: `m_${"d".repeat(40)}`,
@@ -253,13 +253,19 @@ test("only authorized legacy maps receive the bounded 9600 decode budget", async
       };
     },
   });
-  await assert.rejects(processTask07MediaSource({
+  const standardObserved = [];
+  const standardResult = await processTask07MediaSource({
     plan: mapPlan,
     sourceGeneration: "7",
     source,
-    transformer: oversizedTransformer(9600, 9600),
-  }), (error) => error instanceof Task07ProcessorError &&
-    error.code === "source-dimension-budget-exceeded");
+    transformer: oversizedTransformer(9600, 9600, standardObserved),
+  });
+  assert.equal(standardResult.original.width, 9600);
+  assert.equal(standardResult.original.height, 9600);
+  assert.ok(standardObserved.length >= 3);
+  assert.ok(standardObserved.every(({pixels}) => (
+    pixels === LEGACY_MAP_BACKFILL_MAX_PIXELS
+  )));
 
   const observed = [];
   const result = await processTask07MediaSource({

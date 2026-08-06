@@ -945,6 +945,88 @@ test('generated paths are read-only and enforce signed-in audiences', async () =
   await assertFails(deleteObject(ref(dm, pathOf(FIXTURES.dmOnly))));
 });
 
+test('map gallery and video poster derivatives are readable by signed-in users', async () => {
+  const createVariantFixture = ({asset, kind, variant}) => {
+    const manifest = makeManifest({
+      asset,
+      actorUid: USERS.dm.uid,
+      audience: 'signed-in',
+      entityId: `task07-${kind}-derivative`,
+      kind,
+      ownerUid: USERS.dm.uid,
+      state: 'attached',
+    });
+    const variantPath = manifest.generated.original.path.replace(
+      '/original',
+      `/${variant}`
+    );
+    manifest.plan.variants = {[variant]: variantPath};
+    manifest.generated.variants = {
+      [variant]: {
+        ...manifest.generated.original,
+        path: variantPath,
+        contentType: 'image/webp',
+        role: variant,
+      },
+    };
+    return manifest;
+  };
+  const manifests = [
+    createVariantFixture({
+      asset: assetId('e'),
+      kind: 'map',
+      variant: 'gallery',
+    }),
+    createVariantFixture({
+      asset: assetId('f'),
+      kind: 'map-video',
+      variant: 'poster',
+    }),
+  ];
+
+  await environment.withSecurityRulesDisabled(async (context) => {
+    const firestore = context.firestore();
+    const storage = context.storage();
+    for (const manifest of manifests) {
+      await setDoc(doc(firestore, `media_assets/${manifest.assetId}`), manifest);
+      const descriptor = Object.values(manifest.generated.variants)[0];
+      await uploadString(ref(storage, descriptor.path), '12345678', 'raw', {
+        contentType: descriptor.contentType,
+        cacheControl: PRIVATE_CACHE,
+        contentDisposition: 'inline',
+      });
+    }
+  });
+
+  try {
+    const anonymous = environment.unauthenticatedContext().storage();
+    const signedIn = [
+      USERS.owner,
+      USERS.peer,
+      USERS.dm,
+      USERS.webmaster,
+    ].map((user) => environment.authenticatedContext(user.uid).storage());
+
+    for (const manifest of manifests) {
+      const descriptor = Object.values(manifest.generated.variants)[0];
+      await assertFails(getMetadata(ref(anonymous, descriptor.path)));
+      for (const storage of signedIn) {
+        await assertSucceeds(getMetadata(ref(storage, descriptor.path)));
+      }
+    }
+  } finally {
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const firestore = context.firestore();
+      const storage = context.storage();
+      for (const manifest of manifests) {
+        const descriptor = Object.values(manifest.generated.variants)[0];
+        await deleteObject(ref(storage, descriptor.path)).catch(() => undefined);
+        await deleteDoc(doc(firestore, `media_assets/${manifest.assetId}`));
+      }
+    });
+  }
+});
+
 test('intent state and copied generated paths remain unreadable', async () => {
   const owner = environment.authenticatedContext(USERS.owner.uid).storage();
   const forgedPath = (

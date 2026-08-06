@@ -701,12 +701,23 @@ export function preloadImageAssets(srcs) {
 
 const getTimerApi = () => {
   if (
+    typeof window !== 'undefined'
+    && typeof window.setTimeout === 'function'
+    && typeof window.clearTimeout === 'function'
+  ) {
+    return {
+      setTimeout: window.setTimeout.bind(window),
+      clearTimeout: window.clearTimeout.bind(window),
+    };
+  }
+
+  if (
     typeof setTimeout === 'function'
     && typeof clearTimeout === 'function'
   ) {
     return {
-      setTimeout,
-      clearTimeout,
+      setTimeout: (...args) => setTimeout(...args),
+      clearTimeout: (...args) => clearTimeout(...args),
     };
   }
 
