@@ -1141,6 +1141,44 @@ const countChangedDocumentsForTarget = (snapshot, targetMetricKey) => (
     .reduce((sum, event) => sum + Number(event.value || 0), 0)
 );
 
+const collectChangedDocumentDeliveryTelemetryInPage = (targetMetricKey) => {
+  const snapshot = window.__FND_PERF__.snapshot();
+  const events = Array.isArray(snapshot.events) ? snapshot.events : [];
+  return {
+    changedDocumentsDelivered: events
+      .filter((event) => (
+        event.category === 'firestore'
+        && event.metric === 'changed-documents-delivered'
+        && event.tags?.target === targetMetricKey
+      ))
+      .reduce((sum, event) => sum + Number(event.value || 0), 0),
+    eventCount: events.length,
+  };
+};
+
+const readChangedDocumentDeliveryTelemetry = async (page, targetMetricKey) => (
+  page.evaluate(collectChangedDocumentDeliveryTelemetryInPage, targetMetricKey)
+);
+
+const collectRouteCleanupSummaryInPage = (route) => {
+  const snapshot = window.__FND_PERF__.snapshot();
+  const routePrefix = `${route}::`;
+  const onlyRouteEntries = (entries) => Object.fromEntries(
+    Object.entries(entries || {}).filter(([key]) => key.startsWith(routePrefix))
+  );
+  return {
+    activeListeners: onlyRouteEntries(snapshot.activeListeners),
+    activeResources: onlyRouteEntries(snapshot.activeResources),
+    media: {
+      activeSources: Number(snapshot.media?.activeSources || 0),
+    },
+  };
+};
+
+const readRouteCleanupSummary = async (page, route) => (
+  page.evaluate(collectRouteCleanupSummaryInPage, route)
+);
+
 const restoreScenarioState = async (scenarioId) => {
   if (!['home', 'grigliata-manager', 'grigliata-five-peer'].includes(scenarioId)) return;
   configureOwnedPerformanceEnvironment();
@@ -1188,7 +1226,9 @@ module.exports = {
   isRouteReadyInPage,
   locateDmDashboardPlayerCard,
   navigateToCleanup,
+  readChangedDocumentDeliveryTelemetry,
   readKonvaTokenPositions,
+  readRouteCleanupSummary,
   restoreScenarioState,
   runBrowserStaticAssetWarmupPass,
   runStaticAssetWarmupPass,

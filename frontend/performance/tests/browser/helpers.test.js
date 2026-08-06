@@ -23,7 +23,9 @@ const {
   isRouteReadyInPage,
   locateDmDashboardPlayerCard,
   navigateToCleanup,
+  readChangedDocumentDeliveryTelemetry,
   readKonvaTokenPositions,
+  readRouteCleanupSummary,
   runBrowserStaticAssetWarmupPass,
   runStaticAssetWarmupPass,
   scenarioRestorePatch,
@@ -510,6 +512,72 @@ test('only intentional lifecycle aborts from the exact demo Firestore transport 
   assert.equal(isExpectedFirestoreLifecycleCancellation({ ...exact, url: exact.url.replace('demo-fnd-perf', 'demo-other') }), false);
   assert.equal(isExpectedFirestoreLifecycleCancellation({ ...exact, url: exact.url.replace('/Listen/channel', '/Other/channel') }), false);
   assert.equal(isExpectedFirestoreLifecycleCancellation({ ...exact, firebaseProjectId: 'live-fnd' }), false);
+});
+
+test('reads compact changed-document telemetry without returning the event history', async () => {
+  const previousWindow = global.window;
+  global.window = {
+    __FND_PERF__: {
+      snapshot: () => ({
+        events: [
+          {
+            category: 'firestore',
+            metric: 'changed-documents-delivered',
+            value: 2,
+            tags: { target: GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY },
+          },
+          {
+            category: 'firestore',
+            metric: 'changed-documents-delivered',
+            value: 7,
+            tags: { target: 'unrelated-target' },
+          },
+        ],
+      }),
+    },
+  };
+  try {
+    const page = { evaluate: async (callback, argument) => callback(argument) };
+    assert.deepEqual(
+      await readChangedDocumentDeliveryTelemetry(
+        page,
+        GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY
+      ),
+      { changedDocumentsDelivered: 2, eventCount: 2 }
+    );
+  } finally {
+    global.window = previousWindow;
+  }
+});
+
+test('reads a compact route cleanup summary and omits unrelated route state', async () => {
+  const previousWindow = global.window;
+  global.window = {
+    __FND_PERF__: {
+      snapshot: () => ({
+        events: Array.from({ length: 10_000 }, (_, index) => ({ index })),
+        activeListeners: {
+          '/grigliata::placements': 0,
+          '/home::profile': 1,
+        },
+        activeResources: {
+          '/grigliata::timeout:probe': 0,
+          '/home::timeout:probe': 1,
+        },
+        media: { activeSources: 0, sources: Array.from({ length: 1_000 }) },
+      }),
+    },
+  };
+  try {
+    const page = { evaluate: async (callback, argument) => callback(argument) };
+    assert.deepEqual(await readRouteCleanupSummary(page, '/grigliata'), {
+      activeListeners: { '/grigliata::placements': 0 },
+      activeResources: { '/grigliata::timeout:probe': 0 },
+      media: { activeSources: 0 },
+    });
+  } finally {
+    global.window = previousWindow;
+  }
 });
 
 test('only successful demo Write-channel turnover is explained during the five-peer probe', () => {

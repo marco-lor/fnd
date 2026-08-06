@@ -9,7 +9,6 @@ const { test, expect } = require('./measured-test');
 const manifest = require('../../scenarios.json');
 const {
   GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,
-  countChangedDocumentsForTarget,
   createPageAssetTracker,
   installBootstrap,
   installDeterministicFontRoutes,
@@ -19,7 +18,9 @@ const {
   isExpectedFirestoreLifecycleCancellation,
   isKnownDemoFirestoreStartupWarning,
   navigateToCleanup,
+  readChangedDocumentDeliveryTelemetry,
   readKonvaTokenPositions,
+  readRouteCleanupSummary,
   storageStateForRole,
   waitForKonvaTokenMove,
   waitForReadiness,
@@ -43,10 +44,6 @@ const LEGACY_MIGRATION_MARKER_FIELDS = [
   'legacyPlacementVisibilityCleanupCompletedAt',
 ];
 const LEGACY_MIGRATION_MARKER_VALUE = '2026-01-01T00:00:00.000Z';
-
-const countChangedPlacementDocuments = (snapshot) => (
-  countChangedDocumentsForTarget(snapshot, GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY)
-);
 
 const enterMeasuredGrigliataRoute = async (page) => {
   await page.goto(CLIENT_READINESS_ROUTE, { waitUntil: 'domcontentloaded' });
@@ -97,7 +94,7 @@ const waitForRouteCleanup = async ({ page, role }) => {
     );
   }
 
-  return page.evaluate(() => window.__FND_PERF__.snapshot());
+  return readRouteCleanupSummary(page, scenario.route);
 };
 
 test('grigliata five-peer placement convergence', async ({ browser, baseURL }, testInfo) => {
@@ -257,8 +254,11 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
       deltaX,
       label,
     }) => {
-      const beforeCounts = await Promise.all(pages.map(async ({ page }) => (
-        countChangedPlacementDocuments(await page.evaluate(() => window.__FND_PERF__.snapshot()))
+      const beforeTelemetry = await Promise.all(pages.map(({ page }) => (
+        readChangedDocumentDeliveryTelemetry(
+          page,
+          GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY
+        )
       )));
       const startedAt = Date.now();
       await placement.update({ col, updatedAt });
@@ -272,11 +272,15 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
       const serverPlacement = (await placement.get()).data();
       expect(serverPlacement?.col, `${label}: server placement column`).toBe(col);
       expect(serverPlacement?.updatedAt, `${label}: server placement timestamp`).toBe(updatedAt);
-      const snapshots = await Promise.all(pages.map(({ page }) => (
-        page.evaluate(() => window.__FND_PERF__.snapshot())
+      const afterTelemetry = await Promise.all(pages.map(({ page }) => (
+        readChangedDocumentDeliveryTelemetry(
+          page,
+          GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY
+        )
       )));
-      const deliveriesByPeer = snapshots.map((snapshot, index) => (
-        countChangedPlacementDocuments(snapshot) - beforeCounts[index]
+      const deliveriesByPeer = afterTelemetry.map((telemetry, index) => (
+        telemetry.changedDocumentsDelivered
+        - beforeTelemetry[index].changedDocumentsDelivered
       ));
       deliveriesByPeer.forEach((delivered, index) => {
         expect(delivered, `${label}/${pages[index].role}: expected one probe placement delivery`).toBe(1);
@@ -290,7 +294,7 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
         deliveriesByPeer,
         durationMs,
         nextPositions: fromPositions.map(({ x, y }) => ({ x: x + deltaX, y })),
-        snapshots,
+        eventCounts: afterTelemetry.map(({ eventCount }) => eventCount),
       };
     };
 
@@ -423,8 +427,8 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
         'runtime.activeMediaAfterCleanup': activeMediaAfterCleanup,
         'firestore.changedDocumentsDelivered': pages.length,
       },
-      eventCount: finalMeasuredTransition.snapshots
-        .reduce((total, snapshot) => total + snapshot.events.length, 0),
+      eventCount: finalMeasuredTransition.eventCounts
+        .reduce((total, eventCount) => total + eventCount, 0),
       readiness: { 'shell-visible': true, 'data-ready': true, interactive: true },
       peerCount: pages.length,
       diagnostics: {
