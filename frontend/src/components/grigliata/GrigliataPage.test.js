@@ -2463,6 +2463,63 @@ describe('GrigliataPage', () => {
     ))).toBe(true);
   });
 
+  test('keeps the DM global-light control and battlemap aligned while render input lags', async () => {
+    setManagerAuth();
+    const baseMetadata = {
+      schemaVersion: 1,
+      backgroundId: 'map-1',
+      source: { type: 'manual', importedAt: null, importedBy: 'user-1' },
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [],
+      darknessSources: [],
+    };
+    setDocData('grigliata_background_lighting/map-1', baseMetadata);
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [],
+      darknessSources: [],
+    });
+
+    render(<GrigliataPage />);
+    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+
+    const globalLightToggle = await screen.findByRole('checkbox', { name: /global light/i });
+    expect(globalLightToggle).not.toBeChecked();
+    expect(screen.getByTestId('board-lighting-scene')).toHaveTextContent('0.6:false');
+
+    act(() => {
+      setDocData('grigliata_background_lighting/map-1', {
+        ...baseMetadata,
+        scene: { darkness: 0.6, globalLight: true },
+      });
+    });
+
+    await waitFor(() => {
+      expect(globalLightToggle).toBeChecked();
+      expect(screen.getByTestId('board-lighting-scene')).toHaveTextContent('0.6:true');
+    });
+
+    act(() => {
+      setDocData('grigliata_lighting_render_inputs/map-1', {
+        backgroundId: 'map-1',
+        scene: { darkness: 0.6, globalLight: true },
+        walls: [],
+        lights: [],
+        darknessSources: [],
+      });
+      setDocData('grigliata_background_lighting/map-1', baseMetadata);
+    });
+
+    await waitFor(() => {
+      expect(globalLightToggle).not.toBeChecked();
+      expect(screen.getByTestId('board-lighting-scene')).toHaveTextContent('0.6:false');
+    });
+  });
+
   test('passes editable light sources only to the DM board', async () => {
     setManagerAuth();
     setDocData('grigliata_background_lighting/map-1', {

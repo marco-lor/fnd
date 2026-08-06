@@ -912,23 +912,30 @@ export default function GrigliataPage() {
     isManager,
   });
   const dmPreviewLightingRenderInput = useMemo(() => {
-    if (lightingRenderInput) {
-      return lightingRenderInput;
+    if (isManager && lightingMetadata) {
+      try {
+        const authoringRenderInput = buildGrigliataLightingRenderInput(lightingMetadata, {
+          updatedAt: lightingMetadata.updatedAt || null,
+          updatedBy: lightingMetadata.updatedBy || '',
+        });
+
+        if (!lightingRenderInput) {
+          return authoringRenderInput;
+        }
+
+        // Scene controls read the raw authoring document. Override only those
+        // fields so the DM board cannot lag one toggle behind while retaining
+        // the latest sanitized walls, lights, and darkness sources.
+        return {
+          ...lightingRenderInput,
+          scene: authoringRenderInput.scene,
+        };
+      } catch (error) {
+        console.error('Failed to build DM lighting preview input:', error);
+      }
     }
 
-    if (!isManager || !lightingMetadata) {
-      return null;
-    }
-
-    try {
-      return buildGrigliataLightingRenderInput(lightingMetadata, {
-        updatedAt: lightingMetadata.updatedAt || null,
-        updatedBy: lightingMetadata.updatedBy || '',
-      });
-    } catch (error) {
-      console.error('Failed to build DM lighting preview input:', error);
-      return null;
-    }
+    return lightingRenderInput;
   }, [isManager, lightingMetadata, lightingRenderInput]);
   const effectiveLightingRenderInput = useMemo(() => buildEffectiveLightingRenderInput({
     lightingRenderInput: dmPreviewLightingRenderInput,
