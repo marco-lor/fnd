@@ -1062,7 +1062,7 @@ describe('GrigliataBoard', () => {
       backgroundId: 'map-1',
       scene: {
         darkness: 0.6,
-        globalLight: false,
+        globalLight: true,
       },
       walls: [{
         id: 'wall-1',
@@ -1517,7 +1517,7 @@ describe('GrigliataBoard', () => {
       backgroundId: 'map-1',
       scene: {
         darkness: 0.6,
-        globalLight: false,
+        globalLight: true,
       },
       walls: [],
       lights: [{
