@@ -205,8 +205,10 @@ describe('BackgroundGalleryPanel', () => {
     const setupButton = screen.getByRole('button', { name: 'Set up lighting for Iron Keep' });
 
     expect(configuredButton).toHaveAttribute('data-lighting-configured', 'true');
+    expect(configuredButton).toHaveAttribute('data-lighting-background-id', 'map-1');
     expect(configuredButton).toHaveClass('text-cyan-200');
     expect(setupButton).toHaveAttribute('data-lighting-configured', 'false');
+    expect(setupButton).toHaveAttribute('data-lighting-background-id', 'map-2');
     expect(setupButton).toHaveClass('text-slate-500');
     expect(screen.getByRole('button', { name: 'Set up lighting for Frost Hall' })).toBeInTheDocument();
 

@@ -1017,11 +1017,11 @@ const clickAndFlush = async (element) => {
 };
 
 const openDiceSidebar = () => clickAndFlush(screen.getByRole('tab', { name: /dice/i }));
-const openLightingSheetFor = async (backgroundId) => {
+const openLightingSheetFor = async (backgroundId, triggerElement = null) => {
   await clickAndFlush(screen.getByRole('tab', { name: /dm gallery/i }));
   const latestBackgroundGalleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
   await act(async () => {
-    latestBackgroundGalleryProps.onOpenLighting(backgroundId);
+    latestBackgroundGalleryProps.onOpenLighting(backgroundId, triggerElement);
     await Promise.resolve();
   });
 };
@@ -3754,7 +3754,9 @@ describe('GrigliataPage', () => {
     fireEvent.change(screen.getByLabelText(/dungeon alchemist json/i), {
       target: { files: [file] },
     });
+    const closingDialog = screen.getByRole('dialog', { name: 'Lighting — Sunken Ruins' });
     fireEvent.click(screen.getByRole('button', { name: /close lighting for sunken ruins/i }));
+    fireEvent.transitionEnd(closingDialog, { propertyName: 'transform' });
 
     await act(async () => {
       deferredText.resolve(lightingJson);
@@ -3832,10 +3834,27 @@ describe('GrigliataPage', () => {
       darknessSources: [],
     });
 
+    const lightingTrigger = document.createElement('button');
+    lightingTrigger.type = 'button';
+    document.body.appendChild(lightingTrigger);
+
     render(<GrigliataPage />);
-    await openLightingSheetFor('map-2');
+    await openLightingSheetFor('map-2', lightingTrigger);
 
     const dialog = await screen.findByRole('dialog', { name: 'Lighting — Iron Keep' });
+    const sidebar = screen.getByTestId('grigliata-sidebar');
+    const sidebarContent = screen.getByTestId('grigliata-sidebar-content');
+    const sheetHost = screen.getByTestId('grigliata-lighting-sheet-host');
+    const board = screen.getByTestId('grigliata-board');
+    expect(sidebar).toHaveClass('relative');
+    expect(sheetHost).toHaveClass('absolute', 'inset-0');
+    expect(sheetHost).toHaveStyle({ overflow: 'clip' });
+    expect(sidebar).toContainElement(sheetHost);
+    expect(sheetHost).toContainElement(dialog);
+    expect(sidebarContent).toHaveAttribute('aria-hidden', 'true');
+    expect(sidebarContent).toHaveClass('invisible', 'pointer-events-none');
+    expect(sidebar).not.toContainElement(board);
+    expect(board).not.toHaveAttribute('aria-hidden');
     expect(screen.getByTestId('board-background-name')).toHaveTextContent('Sunken Ruins');
     expect(within(dialog).getByRole('spinbutton', { name: 'Scene darkness' })).toHaveValue(0.35);
     expect(within(dialog).getByRole('button', { name: /debug overlay · active map only/i })).toBeDisabled();
@@ -3862,6 +3881,15 @@ describe('GrigliataPage', () => {
       expect.anything()
     );
     expect(screen.getByTestId('board-background-name')).toHaveTextContent('Sunken Ruins');
+
+    lightingTrigger.style.visibility = 'hidden';
+    setTimeout(() => {
+      lightingTrigger.style.visibility = 'visible';
+    }, 10);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close lighting for Iron Keep' }));
+    fireEvent.transitionEnd(dialog, { propertyName: 'transform' });
+    await waitFor(() => expect(lightingTrigger).toHaveFocus());
+    lightingTrigger.remove();
   });
 
   test('applies Dungeon Alchemist grid calibration to the active selected map', async () => {

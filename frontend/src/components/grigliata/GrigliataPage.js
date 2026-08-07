@@ -469,6 +469,23 @@ const isPermissionDeniedError = (error) => (
   || error?.code === 'functions/permission-denied'
 );
 const SIDEBAR_TAB_LIST_CLASS_NAME = 'flex flex-wrap gap-2';
+
+const findLightingTriggerElement = (backgroundId) => {
+  if (!backgroundId || typeof document === 'undefined') return null;
+
+  return Array.from(document.querySelectorAll('button[data-lighting-background-id]'))
+    .find((element) => element.dataset.lightingBackgroundId === backgroundId) || null;
+};
+
+const focusLightingTriggerWithoutScrolling = (element) => {
+  if (!element || typeof element.focus !== 'function') return;
+
+  try {
+    element.focus({ preventScroll: true });
+  } catch {
+    element.focus();
+  }
+};
 const MAX_IMMEDIATE_IMAGE_PRELOADS = 12;
 const MAX_DEFERRED_GALLERY_IMAGE_PRELOADS = 6;
 const collectUniqueImageUrls = (urls) => [...new Set(
@@ -7154,7 +7171,7 @@ export default function GrigliataPage() {
 
     lightingFileParseGenerationRef.current += 1;
     lightingSheetBackgroundIdRef.current = backgroundId;
-    lightingSheetTriggerRef.current = triggerElement;
+    lightingSheetTriggerRef.current = findLightingTriggerElement(backgroundId) || triggerElement;
     setSelectedBackgroundId(backgroundId);
     setLightingSheetBackgroundId(backgroundId);
     setLightingSelectedFile(null);
@@ -7166,6 +7183,8 @@ export default function GrigliataPage() {
   const handleCloseLighting = useCallback(() => {
     if (isImportingLighting) return;
 
+    const returnFocusElement = findLightingTriggerElement(lightingSheetBackgroundIdRef.current)
+      || lightingSheetTriggerRef.current;
     lightingFileParseGenerationRef.current += 1;
     lightingSheetBackgroundIdRef.current = '';
     setLightingSheetBackgroundId('');
@@ -7173,6 +7192,23 @@ export default function GrigliataPage() {
     setLightingImportDraft(null);
     setLightingImportError('');
     setIsLightingImportDraftDirty(false);
+
+    const restoreLightingTriggerFocus = (attempt = 0) => {
+      if (lightingSheetBackgroundIdRef.current || !returnFocusElement?.isConnected) return;
+
+      if (
+        typeof window.getComputedStyle === 'function'
+        && window.getComputedStyle(returnFocusElement).visibility === 'hidden'
+      ) {
+        if (attempt < 4) {
+          setTimeout(() => restoreLightingTriggerFocus(attempt + 1), 16);
+        }
+        return;
+      }
+
+      focusLightingTriggerWithoutScrolling(returnFocusElement);
+    };
+    setTimeout(restoreLightingTriggerFocus, 0);
   }, [isImportingLighting]);
 
   const handleOpenCalibration = useCallback((backgroundId) => {
@@ -7214,50 +7250,6 @@ export default function GrigliataPage() {
           onClose={() => setNarrationPlacementPromptBackground(null)}
           onSelectPlacement={(placementMode) => handleAddNarrationPlacement(narrationPlacementPromptBackground, placementMode)}
         />}
-
-        {isManager && lightingSheetBackground && (
-          <GrigliataLightingSheet
-            background={lightingSheetBackground}
-            hasLightingMetadata={!!lightingSheetMetadata || !!lightingSheetBackground.lightingSummary}
-            isLightingEnabled={lightingSheetBackground.lightingEnabled !== false}
-            isMetadataReady={isLightingSheetMetadataReady}
-            hasUnsavedChanges={isLightingImportDraftDirty}
-            isCloseDisabled={isImportingLighting}
-            returnFocusElement={lightingSheetTriggerRef.current}
-            onClose={handleCloseLighting}
-          >
-            <GrigliataLightingImportPanel
-              embedded
-              selectedBackground={lightingSheetBackground}
-              selectedFileName={lightingSelectedFile?.name || ''}
-              importError={lightingImportError}
-              importWarnings={lightingImportDraft?.importWarnings || null}
-              isImporting={isImportingLighting}
-              isApplyingCalibration={isApplyingLightingCalibration}
-              isLightingEnabled={lightingSheetBackground.lightingEnabled !== false}
-              isLightingEnabledPending={isLightingEnabledPending}
-              isFogOfWarEnabled={lightingSheetBackground.fogOfWarEnabled !== false}
-              isFogOfWarEnabledPending={isFogOfWarEnabledPending}
-              isFogResetPending={isFogResetPending}
-              isDebugOverlayVisible={isLightingDebugOverlayVisible}
-              isDebugOverlayDisabled={!isLightingSheetTargetActive}
-              hasLightingMetadata={!!lightingSheetMetadata || !!lightingSheetBackground.lightingSummary}
-              lightingMetadataDraft={lightingImportDraft}
-              lightingMetadata={lightingSheetMetadata}
-              sceneLighting={lightingSheetSceneLighting}
-              isSceneLightingPending={isSceneLightingMutationPending}
-              isSceneLightingDisabled={!canEditLightingSheetScene}
-              onLightingFileChange={handleLightingFileChange}
-              onImportLightingMetadata={handleImportLightingMetadata}
-              onApplyLightingCalibration={handleApplyLightingCalibration}
-              onToggleLightingEnabled={handleToggleLightingEnabled}
-              onToggleFogOfWarEnabled={handleToggleFogOfWarEnabled}
-              onResetFogOfWar={handleResetFogOfWar}
-              onToggleDebugOverlay={isLightingSheetTargetActive ? handleToggleLightingDebugOverlay : null}
-              onUpdateSceneLighting={canEditLightingSheetScene ? handleUpdateSceneLighting : null}
-            />
-          </GrigliataLightingSheet>
-        )}
 
         <div className="grid flex-1 min-h-0 gap-3 xl:grid-cols-[minmax(0,1fr)_22rem]">
           <div className={`min-w-0 xl:min-h-0 ${isTrayDragging ? 'rounded-3xl ring-2 ring-amber-400/20' : ''}`}>
@@ -7399,7 +7391,17 @@ export default function GrigliataPage() {
             </div>
           </div>
 
-          <aside className="flex flex-col gap-3 xl:h-full xl:min-h-0">
+          <aside
+            data-testid="grigliata-sidebar"
+            className="relative xl:h-full xl:min-h-0"
+          >
+            <div
+              data-testid="grigliata-sidebar-content"
+              aria-hidden={!!lightingSheetBackground}
+              className={`flex flex-col gap-3 xl:h-full xl:min-h-0 ${
+                lightingSheetBackground ? 'invisible pointer-events-none select-none' : ''
+              }`}
+            >
             {isManager && (
               <div
                 data-testid="grigliata-view-as-control"
@@ -7617,6 +7619,58 @@ export default function GrigliataPage() {
 
               </div>
             </div>
+            </div>
+
+            {isManager && lightingSheetBackground && (
+              <div
+                data-testid="grigliata-lighting-sheet-host"
+                className="absolute inset-0 z-20 rounded-2xl"
+                style={{ overflow: 'clip' }}
+              >
+                <GrigliataLightingSheet
+                  key={lightingSheetBackground.id}
+                  background={lightingSheetBackground}
+                  hasLightingMetadata={!!lightingSheetMetadata || !!lightingSheetBackground.lightingSummary}
+                  isLightingEnabled={lightingSheetBackground.lightingEnabled !== false}
+                  isMetadataReady={isLightingSheetMetadataReady}
+                  hasUnsavedChanges={isLightingImportDraftDirty}
+                  isCloseDisabled={isImportingLighting}
+                  returnFocusElement={lightingSheetTriggerRef.current}
+                  onClose={handleCloseLighting}
+                >
+                  <GrigliataLightingImportPanel
+                    embedded
+                    selectedBackground={lightingSheetBackground}
+                    selectedFileName={lightingSelectedFile?.name || ''}
+                    importError={lightingImportError}
+                    importWarnings={lightingImportDraft?.importWarnings || null}
+                    isImporting={isImportingLighting}
+                    isApplyingCalibration={isApplyingLightingCalibration}
+                    isLightingEnabled={lightingSheetBackground.lightingEnabled !== false}
+                    isLightingEnabledPending={isLightingEnabledPending}
+                    isFogOfWarEnabled={lightingSheetBackground.fogOfWarEnabled !== false}
+                    isFogOfWarEnabledPending={isFogOfWarEnabledPending}
+                    isFogResetPending={isFogResetPending}
+                    isDebugOverlayVisible={isLightingDebugOverlayVisible}
+                    isDebugOverlayDisabled={!isLightingSheetTargetActive}
+                    hasLightingMetadata={!!lightingSheetMetadata || !!lightingSheetBackground.lightingSummary}
+                    lightingMetadataDraft={lightingImportDraft}
+                    lightingMetadata={lightingSheetMetadata}
+                    sceneLighting={lightingSheetSceneLighting}
+                    isSceneLightingPending={isSceneLightingMutationPending}
+                    isSceneLightingDisabled={!canEditLightingSheetScene}
+                    onLightingFileChange={handleLightingFileChange}
+                    onImportLightingMetadata={handleImportLightingMetadata}
+                    onApplyLightingCalibration={handleApplyLightingCalibration}
+                    onToggleLightingEnabled={handleToggleLightingEnabled}
+                    onToggleFogOfWarEnabled={handleToggleFogOfWarEnabled}
+                    onResetFogOfWar={handleResetFogOfWar}
+                    onToggleDebugOverlay={isLightingSheetTargetActive ? handleToggleLightingDebugOverlay : null}
+                    onUpdateSceneLighting={canEditLightingSheetScene ? handleUpdateSceneLighting : null}
+                  />
+                </GrigliataLightingSheet>
+              </div>
+            )}
           </aside>
         </div>
       </div>

@@ -383,6 +383,7 @@ export default function BackgroundGalleryPanel({
                             ? `Open lighting for ${backgroundName}${background.lightingEnabled === false ? ' (currently disabled)' : ''}`
                             : `Set up lighting for ${backgroundName}`}
                           data-lighting-configured={hasLightingMetadata ? 'true' : 'false'}
+                          data-lighting-background-id={background.id}
                           onClick={(event) => {
                             onSelectBackground(background.id);
                             onOpenLighting?.(background.id, event.currentTarget);
