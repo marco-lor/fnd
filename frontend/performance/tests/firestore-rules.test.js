@@ -65,6 +65,50 @@ test('anonymous, player, DM, and webmaster rules match their intended boundaries
   await assertSucceeds(getDoc(doc(webmaster, 'users/perf-player')));
 });
 
+test('DM wall runtime cleanup can replace segments with a rule-safe empty map', async () => {
+  const backgroundId = 'rules-wall-runtime-cleanup';
+  const dm = environment.authenticatedContext('perf-dm').firestore();
+  const player = environment.authenticatedContext('perf-player').firestore();
+  const dmWallStateRef = doc(dm, 'grigliata_wall_state', backgroundId);
+  const playerWallStateRef = doc(player, 'grigliata_wall_state', backgroundId);
+
+  try {
+    await assertSucceeds(setDoc(dmWallStateRef, {
+      backgroundId,
+      segments: {
+        'wall-1': {
+          isOpen: true,
+          updatedAt: Timestamp.now(),
+          updatedBy: 'perf-dm',
+        },
+      },
+      updatedAt: Timestamp.now(),
+      updatedBy: 'perf-dm',
+    }));
+
+    await assertFails(setDoc(playerWallStateRef, {
+      backgroundId,
+      segments: {},
+      updatedAt: Timestamp.now(),
+      updatedBy: 'perf-player',
+    }, {merge: true}));
+
+    await assertSucceeds(setDoc(dmWallStateRef, {
+      backgroundId,
+      segments: {},
+      updatedAt: Timestamp.now(),
+      updatedBy: 'perf-dm',
+    }, {merge: true}));
+
+    const wallState = await assertSucceeds(getDoc(dmWallStateRef));
+    assert.deepEqual(wallState.data().segments, {});
+  } finally {
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await deleteDoc(doc(context.firestore(), 'grigliata_wall_state', backgroundId));
+    });
+  }
+});
+
 test('shared character profile queries stay authorized in six safe 10-id chunks', async () => {
   const characterIds = Array.from(
     {length: 60},

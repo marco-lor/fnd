@@ -3417,18 +3417,68 @@ describe('GrigliataPage', () => {
       );
     });
     await waitFor(() => {
+      expect(getTransactionSetCalls()).toEqual(expect.arrayContaining([
+        [
+          expect.objectContaining({ path: 'grigliata_wall_state/map-1' }),
+          expect.objectContaining({
+            backgroundId: 'map-1',
+            segments: {},
+            updatedBy: 'user-1',
+          }),
+          { merge: true },
+        ],
+      ]));
+    });
+  });
+
+  test('deletes a wall without creating optional runtime state when no wall state document exists', async () => {
+    setManagerAuth();
+    setDocData('grigliata_background_lighting/map-1', {
+      schemaVersion: 1,
+      backgroundId: 'map-1',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [{
+        id: 'wall-1',
+        label: 'Temporary Wall',
+        x1: 0,
+        y1: 0,
+        x2: 140,
+        y2: 0,
+        wallType: 'wall',
+        blocksSight: true,
+        blocksVision: true,
+        blocksLight: true,
+      }],
+      lights: [],
+    });
+
+    render(<GrigliataPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('board-wall-source-count')).toHaveTextContent('1');
+    });
+
+    firestore.setDoc.mockClear();
+    firestore.runTransaction.mockClear();
+    mockTransactionInstances.length = 0;
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /delete wall source/i }));
+    });
+
+    await waitFor(() => {
       expect(firestore.setDoc).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'grigliata_wall_state/map-1' }),
-        expect.objectContaining({
-          backgroundId: 'map-1',
-          segments: {
-            'wall-1': { __type: 'deleteField' },
-          },
-          updatedBy: 'user-1',
-        }),
+        expect.objectContaining({ path: 'grigliata_background_lighting/map-1' }),
+        expect.objectContaining({ walls: [] }),
         { merge: true }
       );
+      expect(firestore.runTransaction).toHaveBeenCalledTimes(1);
     });
+    expect(mockTransactionInstances).toHaveLength(1);
+    expect(mockTransactionInstances[0].get).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_wall_state/map-1' })
+    );
+    expect(mockTransactionInstances[0].set).not.toHaveBeenCalled();
+    expect(screen.queryByText(/unable to clear that wall source runtime state/i)).not.toBeInTheDocument();
   });
 
   test('lets the DM enable and disable computed scene lighting independently from debug overlay', async () => {

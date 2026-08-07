@@ -6418,19 +6418,33 @@ export default function GrigliataPage() {
     if (!didPersistWalls) return false;
 
     try {
-      const updatedAt = serverTimestamp();
-      await setDoc(
-        doc(db, GRIGLIATA_WALL_STATE_COLLECTION, activeBackgroundId),
-        {
-          backgroundId: activeBackgroundId,
-          segments: {
-            [wallId]: deleteField(),
+      const wallStateDocRef = doc(db, GRIGLIATA_WALL_STATE_COLLECTION, activeBackgroundId);
+      await runTransaction(db, async (transaction) => {
+        const wallStateSnapshot = await transaction.get(wallStateDocRef);
+        if (!wallStateSnapshot.exists()) return;
+
+        const currentSegments = wallStateSnapshot.data()?.segments;
+        if (
+          !currentSegments
+          || typeof currentSegments !== 'object'
+          || !Object.prototype.hasOwnProperty.call(currentSegments, wallId)
+        ) {
+          return;
+        }
+
+        const nextSegments = { ...currentSegments };
+        delete nextSegments[wallId];
+        transaction.set(
+          wallStateDocRef,
+          {
+            backgroundId: activeBackgroundId,
+            segments: nextSegments,
+            updatedAt: serverTimestamp(),
+            updatedBy: user.uid,
           },
-          updatedAt,
-          updatedBy: user.uid,
-        },
-        { merge: true }
-      );
+          { merge: true }
+        );
+      });
     } catch (error) {
       console.error('Failed to clear Grigliata wall runtime state:', error);
       setBoardError('Unable to clear that wall source runtime state right now.');
