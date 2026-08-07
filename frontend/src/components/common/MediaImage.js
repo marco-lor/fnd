@@ -381,6 +381,8 @@ const MediaImage = ({
     fallbackSrc: src,
     variant,
   }), [media, readerMode, src, variant]);
+  const assetRef = useRef(asset);
+  assetRef.current = asset;
   const eager = loading === 'eager' || fetchPriority === 'high';
   const [activatedAssetKey, setActivatedAssetKey] = useState('');
   const [resolvedSource, setResolvedSource] = useState(null);
@@ -431,7 +433,8 @@ const MediaImage = ({
   }, [asset.assetKey, asset.candidates.length, eager, rootMargin]);
 
   useEffect(() => {
-    if (!activated || !asset.candidates.length) {
+    const currentAsset = assetRef.current;
+    if (!activated || !currentAsset.candidates.length) {
       setLoaded(false);
       setResolvedSource(null);
       return undefined;
@@ -447,8 +450,8 @@ const MediaImage = ({
       let lastError = null;
       const measuredWidth = positiveNumber(imageRef.current?.getBoundingClientRect?.().width)
         || positiveNumber(width)
-        || asset.width;
-      const orderedCandidates = orderPrivateCandidatesForRenderedSize(asset, measuredWidth);
+        || currentAsset.width;
+      const orderedCandidates = orderPrivateCandidatesForRenderedSize(currentAsset, measuredWidth);
 
       for (
         let candidateIndex = fallbackStartIndex;
@@ -517,7 +520,7 @@ const MediaImage = ({
     };
   }, [
     activated,
-    asset,
+    asset.assetKey,
     fallbackStartIndex,
     width,
   ]);

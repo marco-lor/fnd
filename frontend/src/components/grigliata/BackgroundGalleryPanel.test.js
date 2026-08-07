@@ -352,6 +352,14 @@ describe('BackgroundGalleryPanel', () => {
     });
     expect(container.querySelector('video')).not.toBeInTheDocument();
     expect(getBlob).toHaveBeenCalledWith({ path: poster.path }, poster.bytes);
+    expect(getBlob).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Move Private Video Map to folder',
+    }));
+
+    expect(rowImage).toHaveAttribute('src', 'blob:private-map-poster');
+    expect(getBlob).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'Preview Private Video Map' }));
     const previewVideo = within(screen.getByRole('dialog', {
