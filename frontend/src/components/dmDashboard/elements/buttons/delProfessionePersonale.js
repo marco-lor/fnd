@@ -1,33 +1,34 @@
-// frontend/src/components/dmDashboard/elements/buttons/delProfessionePersonale.js
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import ReactDOM from 'react-dom';
-import { db } from '../../../firebaseConfig';
-import { doc, getDoc, updateDoc } from "../../../../performance/firestore";
+import { persistProfileContentMap } from '../../../../data/userData/managerProfileContent';
 
-export function DelProfessionePersonaleOverlay({ userId, professioneName, onClose }) {
-  const [userName, setUserName] = useState("");
-  const [confirmInput, setConfirmInput] = useState("");
+export function DelProfessionePersonaleOverlay({
+  userId,
+  userLabel,
+  currentMap,
+  professioneName,
+  onClose,
+}) {
+  const [confirmInput, setConfirmInput] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
-
-  useEffect(() => {
-    (async () => {
-      const snap = await getDoc(doc(db, "users", userId));
-      if (snap.exists()) setUserName(snap.data().characterId || snap.data().email);
-    })();
-  }, [userId]);
 
   const handleDelete = async () => {
     setIsDeleting(true);
-    const userRef = doc(db, "users", userId);
-    const snap = await getDoc(userRef);
-    if (snap.exists()) {
-      const data = { ...(snap.data().professioni || {}) };
-      delete data[professioneName];
-      await updateDoc(userRef, { professioni: data });
+    try {
+      await persistProfileContentMap({
+        userId,
+        field: 'professioni',
+        currentMap,
+        action: 'delete',
+        name: professioneName,
+      });
       onClose(true);
-    } else {
-      alert("Utente non trovato");
+    } catch (error) {
+      console.error('Error deleting professione:', error);
+      alert(error.message || 'Errore durante l eliminazione della professione');
       onClose(false);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -35,14 +36,14 @@ export function DelProfessionePersonaleOverlay({ userId, professioneName, onClos
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-md">
         <h2 className="text-xl text-white mb-2">Elimina Professione</h2>
-        <p className="text-gray-300 mb-4">Giocatore: <span className="font-semibold">{userName}</span></p>
+        <p className="text-gray-300 mb-4">Giocatore: <span className="font-semibold">{userLabel || 'Unknown User'}</span></p>
         <div className="bg-red-900 bg-opacity-25 border border-red-700 rounded p-4 mb-4">
           <p className="text-white">Per eliminare <span className="font-semibold">{professioneName}</span>, digita il nome esatto qui sotto:</p>
         </div>
         <input
           type="text"
           value={confirmInput}
-          onChange={e => setConfirmInput(e.target.value)}
+          onChange={(event) => setConfirmInput(event.target.value)}
           placeholder="Conferma il nome"
           className="w-full px-3 py-2 mb-4 rounded bg-gray-700 text-white focus:outline-none"
         />

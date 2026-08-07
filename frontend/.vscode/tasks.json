@@ -5,7 +5,7 @@
     {
       "label": "Deploy Firebase Rules",
       "type": "shell",
-  "command": "npx firebase deploy --only firestore:rules,storage --project fatins",
+      "command": "npx firebase deploy --only firestore:rules,firestore:indexes,storage --project fatins",
       "group": "build",
       "problemMatcher": []
     },
@@ -19,7 +19,7 @@
     {
       "label": "Start Emulators (FS/Storage/Functions/Hosting)",
       "type": "shell",
-      "command": "npx firebase emulators:start --only firestore,storage,functions,hosting",
+      "command": "npx firebase emulators:start --only firestore,storage,functions,hosting --project demo-fnd-perf",
       "isBackground": true,
       "problemMatcher": []
     }

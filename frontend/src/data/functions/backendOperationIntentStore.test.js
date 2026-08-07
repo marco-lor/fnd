@@ -1,6 +1,7 @@
 import { webcrypto } from 'node:crypto';
 import { TextEncoder } from 'node:util';
 import {
+  BackendOperationCommittedError,
   BackendOperationIntentError,
   TASK06_OPERATION_INTENT_STORAGE_KEY,
   runWithDurableOperationIntent,
@@ -315,6 +316,40 @@ describe('durable Task 06 operation intents', () => {
 
     expect(storedEntries(storage)[0].operationId)
       .toBe('delete-npc-operation-0001');
+  });
+
+  test('preserves committed result data when success receipt removal fails', async () => {
+    const storage = createMemoryStorage();
+    storage.setItem.mockImplementation((key, value) => {
+      const entries = JSON.parse(value).entries;
+      if (entries.length === 0) {
+        throw new DOMException('blocked', 'SecurityError');
+      }
+      storage.values.set(key, value);
+    });
+    const result = {status: 'completed', revision: 7};
+
+    await expect(runIntent({
+      storage,
+      invoke: jest.fn().mockResolvedValue(result),
+    })).rejects.toMatchObject({
+      committed: true,
+      result,
+      operationId: 'delete-npc-operation-0001',
+    });
+    await expect(runIntent({
+      storage: (() => {
+        const next = createMemoryStorage();
+        next.setItem.mockImplementation((key, value) => {
+          if (JSON.parse(value).entries.length === 0) {
+            throw new DOMException('blocked', 'SecurityError');
+          }
+          next.values.set(key, value);
+        });
+        return next;
+      })(),
+      invoke: jest.fn().mockResolvedValue(result),
+    })).rejects.toBeInstanceOf(BackendOperationCommittedError);
   });
 
   test('malformed or oversized state fails closed before invocation', async () => {

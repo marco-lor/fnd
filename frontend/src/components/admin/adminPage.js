@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../AuthContext'; // Assuming this provides logged-in user info
-import { db } from '../firebaseConfig';
-import { collection, getDocs } from '../../performance/firestore';
 import { getPossibleLists } from '../../data/configRepository';
+import { getAdminUsersPage } from '../../data/userData/userDataCommands';
 import { getCallable } from '../../data/functions/callableRegistry';
 
 const DEFAULT_ROLES = ['player', 'dm', 'webmaster'];
@@ -45,25 +44,30 @@ const AdminPage = () => {
       setLoading(true);
       setError(null);
       try {
-        const usersCollectionRef = collection(db, 'users');
-        const [usersSnapshot, rolesData] = await Promise.all([
-          getDocs(usersCollectionRef),
-          getPossibleLists()
-        ]);
+        const rolesPromise = getPossibleLists();
+        const directoryUsers = [];
+        let cursor = null;
+        do {
+          const page = await getAdminUsersPage({ cursor });
+          directoryUsers.push(...(page?.items || []));
+          cursor = page?.hasMore ? page.cursor : null;
+        } while (cursor);
+        const rolesData = await rolesPromise;
 
-        if (!usersSnapshot.empty) {
+        if (directoryUsers.length > 0) {
           const usersData = {};
-          usersSnapshot.forEach((doc) => {
-            const userDocData = doc.data();
-            const normalizedRole = normalizeStoredRole(userDocData.role);
-            usersData[doc.id] = {
-              ...userDocData,
-              role: normalizedRole || userDocData.role,
+          directoryUsers.forEach((entry) => {
+            const normalizedRole = normalizeStoredRole(entry.role);
+            usersData[entry.id] = {
+              characterId: entry.characterId || '',
+              username: entry.username || '',
+              email: entry.email || '',
+              role: normalizedRole || entry.role,
             };
           });
           setUsers(usersData);
         } else {
-          console.log("No user data available in Firestore collection 'users'");
+          console.log("No user data available in the canonical user directory");
           setUsers({});
         }
 

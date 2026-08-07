@@ -11,6 +11,10 @@ const processorSource = readFileSync(join(
   __dirname,
   "../src/mediaAssetProcessor.ts"
 ), "utf8");
+const targetAdaptersSource = readFileSync(join(
+  __dirname,
+  "../src/mediaTargetAdapters.ts"
+), "utf8");
 
 test("processor code never offers promoted canonical paths to deletion", () => {
   assert.doesNotMatch(
@@ -58,7 +62,7 @@ test("manual retry is state guarded and sweeps paginate past terminals", () => {
   );
   assert.match(
     lifecycleSource,
-    /partitioned\.terminal[\s\S]*?cleanupAfter:\s*admin\.firestore\.FieldValue\.delete\(\)/
+    /partitioned\.terminal[\s\S]*?cleanupAfter:\s*FieldValue\.delete\(\)/
   );
 });
 
@@ -72,7 +76,11 @@ test(`reference-removal triggers retry transient delivery failures`, () => {
 test("foe prepare and retirement reject conflicts and mutate canonically", () => {
   assert.match(
     lifecycleSource,
-    /task07FoeCanonicalMediaStateFromTarget\(data\)/
+    /task07MediaTargetState\(data, plan\)/
+  );
+  assert.match(
+    targetAdaptersSource,
+    /task07MediaTargetState[\s\S]*?task07FoeCanonicalMediaStateFromTarget\(data\)/
   );
   assert.equal(
     (lifecycleSource.match(/targetBinding\.conflict/g) || []).length,

@@ -122,7 +122,7 @@ service firebase.storage {
         )
         || (
           manifest.kind == 'foe'
-          && isDM()
+          && isCatalogManager()
         )
         || (
           manifest.kind == 'item'
@@ -170,8 +170,9 @@ service firebase.storage {
     }
 
     // Cloud Storage write rules expose custom metadata, size, content type,
-    // name, and bucket. Standard cacheControl/contentDisposition are stamped
-    // and verified by the server finalizer before an asset becomes shared.
+    // contentDisposition, name, and bucket. cacheControl is not exposed by
+    // Rules; the browser stamps it and the server finalizer verifies it before
+    // an asset becomes shared.
     // Exact map equality rejects missing, altered, and extra client metadata.
     function task07UploadMetadataMatches(
       manifest,
@@ -330,6 +331,42 @@ service firebase.storage {
         };
     }
 
+    function task07FoeOperationReceiptPath(receiptId) {
+      return /databases/(default)/documents/task07_foe_media_operations/$(receiptId);
+    }
+
+    function task07FoeOperationCreateMatches(
+      actorUid,
+      receiptId,
+      foeId,
+      slot,
+      fileName
+    ) {
+      let receipt = firestore.get(
+        task07FoeOperationReceiptPath(receiptId)
+      ).data;
+      let upload = receipt.uploadsBySlot[slot];
+      return resource == null
+        && isCatalogManager()
+        && request.auth.uid == actorUid
+        && receipt.schemaVersion == 1
+        && receipt.status == 'pending'
+        && receipt.actorUid == actorUid
+        && receipt.foeId == foeId
+        && upload.path == 'foes/task07-operations/' + actorUid + '/'
+          + receiptId + '/' + foeId + '/' + slot + '/' + fileName
+        && upload.fileName == fileName
+        && upload.bytes > 0
+        && upload.bytes <= 8 * 1024 * 1024
+        && request.resource.size == upload.bytes
+        && request.resource.contentType == upload.contentType
+        && request.resource.contentType in [
+          'image/jpeg', 'image/png', 'image/webp', 'image/gif'
+        ]
+        && request.resource.contentDisposition == 'inline'
+        && request.resource.metadata == upload.metadata;
+    }
+
     function task07GeneratedAudienceCanRead(audience, ownerUid) {
       return audience == 'signed-in'
         || (
@@ -341,7 +378,7 @@ service firebase.storage {
         )
         || (
           audience == 'dm-only'
-          && isDM()
+          && isCatalogManager()
         );
     }
 
@@ -402,7 +439,6 @@ service firebase.storage {
           == firestore.get(task07ManifestPath(assetId)).data.plan.sourceBytes
         && request.resource.contentType
           == firestore.get(task07ManifestPath(assetId)).data.plan.sourceContentType
-        && request.resource.cacheControl == 'private, no-store'
         && request.resource.contentDisposition == 'inline'
         && task07StagingMetadataMatches(
           firestore.get(task07ManifestPath(assetId)).data,
@@ -498,8 +534,24 @@ service firebase.storage {
       allow delete: if isCatalogManager();
     }
 
-    match /foes/{allPaths=**} {
-      allow read, write: if isDM();
+    match /foes/task07-operations/{actorUid}/{receiptId}/{foeId}/{slot}/{fileName} {
+      allow read: if isCatalogManager();
+      allow create: if task07FoeOperationCreateMatches(
+        actorUid,
+        receiptId,
+        foeId,
+        slot,
+        fileName
+      );
+      // Staged generations are server-owned after receipt-bound creation.
+      // Client deletion cannot prove that no live foe still references them.
+      allow update, delete: if false;
+    }
+
+    match /foes/{firstSegment}/{remaining=**} {
+      allow read: if isDM();
+      allow create, update, delete: if isDM()
+        && firstSegment != 'task07-operations';
     }
 
     match /echi_npcs/{userId}/{fileName} {

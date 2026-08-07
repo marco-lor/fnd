@@ -5,6 +5,7 @@ import * as admin from "firebase-admin";
 import {collectOwnedMediaPaths} from "./userOwnedMediaCleanup";
 import {legacyRootMutationBlockReason} from "./legacyRootMutationGate";
 import {isValidFirestoreDocumentId} from "./userDataV2";
+import {assertActiveCaller} from "./callerAuthorization";
 
 // Do NOT call admin.initializeApp() here; it is already done in index.ts.
 
@@ -58,7 +59,12 @@ export const deleteUser = onCall(
             transaction.get(targetUserRef),
             transaction.get(jobRef),
           ]);
-        if (!requester.exists || requester.get("role") !== "webmaster") {
+        assertActiveCaller(
+          requester,
+          "Requesting user not found.",
+          "Requesting user is pending deletion."
+        );
+        if (requester.get("role") !== "webmaster") {
           throw new HttpsError(
             "permission-denied",
             "Only webmasters can delete users."

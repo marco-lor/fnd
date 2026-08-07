@@ -21,6 +21,16 @@ export class BackendOperationIntentError extends Error {
   }
 }
 
+export class BackendOperationCommittedError extends BackendOperationIntentError {
+  constructor(message, { cause, result, operationId }) {
+    super(message, cause);
+    this.name = 'BackendOperationCommittedError';
+    this.committed = true;
+    this.result = result;
+    this.operationId = operationId;
+  }
+}
+
 const canonicalJson = (value, seen = new Set()) => {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') {
     return JSON.stringify(value);
@@ -316,13 +326,20 @@ export const runWithDurableOperationIntent = async ({
       }
       throw invocationError;
     }
-    clearIntent({
-      storage: resolvedStorage,
-      kind,
-      intentDigest,
-      operationId,
-      now: now(),
-    });
+    try {
+      clearIntent({
+        storage: resolvedStorage,
+        kind,
+        intentDigest,
+        operationId,
+        now: now(),
+      });
+    } catch (storageError) {
+      throw new BackendOperationCommittedError(
+        'The server committed the operation, but its local recovery receipt could not be removed.',
+        { cause: storageError, result, operationId }
+      );
+    }
     return result;
   })();
   activeIntentRuns.set(activeKey, run);

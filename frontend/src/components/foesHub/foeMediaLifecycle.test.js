@@ -3,6 +3,7 @@ import {
   classifyFoeImageSave,
   collectClientDeletableFoeMainStoragePaths,
   collectClientDeletableFoeStoragePaths,
+  deleteFoeDocumentThenCleanupStorage,
   isClientDeletableFoeStoragePath,
   isDefinitiveFoeDuplicationError,
   resolveFoeMediaBinding,
@@ -47,6 +48,43 @@ describe('foe media lifecycle ownership', () => {
     expect(shouldClientDeleteFoeMainStorageObject(legacyFoe)).toBe(true);
     expect(isClientDeletableFoeStoragePath('foes/../media_assets/a')).toBe(false);
     expect(isClientDeletableFoeStoragePath('foes\\other.png')).toBe(false);
+  });
+
+  test('keeps immutable Task 07 operation uploads server-owned after edit', () => {
+    const operationPath =
+      'foes/task07-operations/dm/receipt/foe/spells-0/digest.png';
+    expect(isClientDeletableFoeStoragePath(operationPath)).toBe(false);
+    expect(collectClientDeletableFoeStoragePaths({
+      spells: [{imagePath: operationPath}],
+    })).toEqual([]);
+  });
+
+  test('deletes the foe document before best-effort legacy cleanup', async () => {
+    const calls = [];
+    const result = await deleteFoeDocumentThenCleanupStorage({
+      deleteFoeDocument: async () => calls.push('firestore'),
+      deleteStoragePath: async (path) => calls.push(path),
+      paths: ['foes/main.png', 'foes/spells/hex.png'],
+    });
+
+    expect(calls).toEqual([
+      'firestore',
+      'foes/main.png',
+      'foes/spells/hex.png',
+    ]);
+    expect(result.every(({status}) => status === 'fulfilled')).toBe(true);
+  });
+
+  test('does not delete storage when the foe document deletion fails', async () => {
+    const failure = new Error('firestore unavailable');
+    const deleteStoragePath = jest.fn();
+
+    await expect(deleteFoeDocumentThenCleanupStorage({
+      deleteFoeDocument: async () => { throw failure; },
+      deleteStoragePath,
+      paths: ['foes/main.png'],
+    })).rejects.toBe(failure);
+    expect(deleteStoragePath).not.toHaveBeenCalled();
   });
 
   test('omits all Task 07 transport and the General map from canonical edits', () => {
@@ -301,7 +339,17 @@ describe('foe media lifecycle ownership', () => {
     })).toBe(true);
     expect(shouldUseDurableFoeDuplication({
       imagePath: 'foes/main/legacy.png',
-    })).toBe(false);
+    })).toBe(true);
+    expect(shouldUseDurableFoeDuplication({
+      tecniche: [{imageUrl: 'https://legacy.example/technique.png'}],
+    })).toBe(true);
+    expect(shouldUseDurableFoeDuplication({
+      spells: [{media: {}}],
+    })).toBe(true);
+    expect(shouldUseDurableFoeDuplication({
+      General: {videoUrl: 'https://legacy.example/video.mp4'},
+    })).toBe(true);
+    expect(shouldUseDurableFoeDuplication({name: 'No media'})).toBe(false);
     expect(shouldUseDurableFoeDuplication({}, { force: true })).toBe(true);
   });
 

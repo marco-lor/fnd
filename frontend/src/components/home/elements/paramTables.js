@@ -1,13 +1,18 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import React, { useState, useEffect, useRef } from "react";
-import { doc, updateDoc, onSnapshot } from "../../../performance/firestore";
-import { db } from "../../firebaseConfig";
 import { useAuth } from "../../../AuthContext";
+import {
+  spendCharacterPoint,
+  updateProgression,
+} from '../../../data/userData/userDataCommands';
+import {
+  useProgression,
+  useUserSettings,
+} from '../../../data/userData/userDataHooks';
 import { FaDiceD20 } from 'react-icons/fa';
 import DiceRoller from '../../common/DiceRoller';
 import { getParamDisplayName, SPECIAL_PARAM_SCHEMA_IDS } from '../../common/paramMetadata';
 import { getSchema, getVarie } from '../../../data/configRepository';
-import { getCallable } from '../../../data/functions/callableRegistry';
 import {
   TASK06_LOCAL_CANDIDATE,
 } from '../../../data/functions/backendOperationClient';
@@ -15,9 +20,6 @@ import {
   runWithDurableOperationIntent,
 } from '../../../data/functions/backendOperationIntentStore';
 
-const spendCharacterPoint = getCallable(
-  TASK06_LOCAL_CANDIDATE ? "spendCharacterPointV2" : "spendCharacterPoint"
-);
 const displayName = (k) => getParamDisplayName(k);
 
 const StatButton = ({ onClick, disabled, children, className = "" }) => (
@@ -31,7 +33,21 @@ const StatButton = ({ onClick, disabled, children, className = "" }) => (
 );
 
 export function MergedStatsTable() {
-  const { user, userData } = useAuth();
+  const { user } = useAuth();
+  const {
+    data: progression,
+    status: progressionStatus,
+    uid: progressionUid,
+  } = useProgression(user?.uid);
+  const {
+    data: userSettings,
+    uid: settingsUid,
+  } = useUserSettings(user?.uid);
+  const progressionReady = progressionStatus === 'fresh'
+    && progression !== null
+    && progressionUid === user?.uid;
+  const settingsReady = userSettings !== null
+    && settingsUid === user?.uid;
   const [dadiAnimaByLevel, setDadiAnimaByLevel] = useState([]);
   const [roller, setRoller] = useState({ visible: false, faces: 0, count: 1, modifier: 0, description: '' });
   const [baseStats, setBaseStats] = useState(null);
@@ -152,22 +168,33 @@ export function MergedStatsTable() {
   }, [showSpecial]);
 
   useEffect(() => {
-    if (!userData) return;
-    const { Parametri, stats, settings } = userData;
+    if (!progressionReady) {
+      setBaseStats(null);
+      setCombStats(null);
+      setSpecialStats(null);
+      setBasePointsAvailable(0);
+      setBasePointsSpent(0);
+      setCombatTokensAvailable(0);
+      setCombatTokensSpent(0);
+      return;
+    }
+    const { Parametri, stats } = progression;
     if (Parametri?.Base) setBaseStats(Parametri.Base);
     if (Parametri?.Combattimento) setCombStats(Parametri.Combattimento);
     if (Parametri?.Special) setSpecialStats(Parametri.Special);
     if (stats) {
-      setBasePointsAvailable(stats.basePointsAvailable || 0);
-      setBasePointsSpent(stats.basePointsSpent || 0);
-      setCombatTokensAvailable(stats.combatTokensAvailable || 0);
-      setCombatTokensSpent(stats.combatTokensSpent || 0);
+      setBasePointsAvailable(stats.basePointsAvailable ?? 0);
+      setBasePointsSpent(stats.basePointsSpent ?? 0);
+      setCombatTokensAvailable(stats.combatTokensAvailable ?? 0);
+      setCombatTokensSpent(stats.combatTokensSpent ?? 0);
     }
-    if (settings) {
-      setLockBase(settings.lock_param_base || false);
-      setLockCombat(settings.lock_param_combat || false);
-    }
-  }, [userData]);
+  }, [progression, progressionReady]);
+
+  useEffect(() => {
+    const settings = settingsReady ? userSettings?.settings : null;
+    setLockBase(Boolean(settings?.lock_param_base));
+    setLockCombat(Boolean(settings?.lock_param_combat));
+  }, [settingsReady, userSettings]);
 
   useEffect(() => {
     (async () => {
@@ -207,23 +234,6 @@ export function MergedStatsTable() {
     })();
   }, []);
 
-  useEffect(() => {
-    if (!user) return;
-    return onSnapshot(doc(db, "users", user.uid), snap => {
-      if (!snap.exists()) return;
-      const data = snap.data();
-      if (data.Parametri?.Base) setBaseStats(data.Parametri.Base);
-      if (data.Parametri?.Combattimento) setCombStats(data.Parametri.Combattimento);
-      if (data.Parametri?.Special) setSpecialStats(data.Parametri.Special);
-      if (data.stats) {
-        setBasePointsAvailable(data.stats.basePointsAvailable || 0);
-        setBasePointsSpent(data.stats.basePointsSpent || 0);
-        setCombatTokensAvailable(data.stats.combatTokensAvailable || 0);
-        setCombatTokensSpent(data.stats.combatTokensSpent || 0);
-      }
-    });
-  }, [user]);
-
   const triggerCooldown = () => {
     setCooldown(true);
     setTimeout(() => setCooldown(false), 500);
@@ -258,16 +268,34 @@ export function MergedStatsTable() {
   };
 
   const handleModChange = async (stat, type, delta) => {
-    if (cooldown) return;
+    if (cooldown || !progressionReady) return;
     triggerCooldown();
-    const key = type === 'Base' ? 'Parametri.Base' : type === 'Combat' ? 'Parametri.Combattimento' : 'Parametri.Special';
+    const group = type === 'Base'
+      ? 'Base'
+      : type === 'Combat'
+        ? 'Combattimento'
+        : 'Special';
     const curSource = type === 'Base' ? baseStats : type === 'Combat' ? combStats : specialStats;
     const cur = Number(curSource?.[stat]?.Mod) || 0;
-    await updateDoc(doc(db, "users", user.uid), { [`${key}.${stat}.Mod`]: cur + delta });
+    try {
+      await updateProgression({
+        patch: {
+          Parametri: {
+            [group]: {
+              [stat]: { Mod: cur + delta },
+            },
+          },
+        },
+      });
+    } catch (error) {
+      console.error('Error updating parameter modifier:', error);
+      setErrorMsg('Error updating modifier.');
+      setTimeout(() => setErrorMsg(''), 3000);
+    }
   };
 
   const handleRollParam = (statName, total) => {
-    const level = userData?.stats?.level;
+    const level = progression?.stats?.level;
     if (!level) return;
     // Use the same indexing convention as Home (anima die shown there uses [level])
     const diceTypeStr = dadiAnimaByLevel[level];

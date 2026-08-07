@@ -1,6 +1,6 @@
 // file ./frontend/src/components/firebaseConfig.js # do not remove this line
 import { getApp, getApps, initializeApp } from "firebase/app";
-import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "firebase/app-check";
 import { connectAuthEmulator, getAuth } from "firebase/auth";
 import {
   connectFirestoreEmulator,
@@ -119,7 +119,7 @@ export const loadFirebaseConfig = async ({ fetchImpl, forceRuntime = false } = {
 
 const initializeFirebaseServices = (config, {
   production = process.env.NODE_ENV === "production",
-  appCheckSiteKey = process.env.REACT_APP_RECAPTCHA_V3_SITE_KEY,
+  appCheckSiteKey = process.env.REACT_APP_RECAPTCHA_ENTERPRISE_SITE_KEY,
 } = {}) => {
   if (app && auth && db) {
     return { app, auth, db };
@@ -129,11 +129,12 @@ const initializeFirebaseServices = (config, {
 
   if (
     production
+    && !performanceMode
     && appCheckSiteKey
     && !appCheckInitialized
   ) {
     initializeAppCheck(app, {
-      provider: new ReCaptchaV3Provider(appCheckSiteKey),
+      provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
       isTokenAutoRefreshEnabled: true,
     });
     appCheckInitialized = true;

@@ -1,11 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FiDownload, FiFolder, FiHeadphones, FiLoader, FiPause, FiPlay, FiRepeat, FiSquare, FiTrash2, FiUploadCloud, FiX } from 'react-icons/fi';
+import { task07ModeReadsDerivatives } from '../../data/media/task07MediaControl';
+import {
+  acquirePrivateAudioAsset,
+} from '../common/privateMediaAssets';
 import MediaFolderFilterButton from './MediaFolderFilterButton';
 import MediaFolderOrganizerOverlay from './MediaFolderOrganizerOverlay';
 import {
   computeGrigliataMusicPlaybackOffsetMs,
   GRIGLIATA_MUSIC_PLAYBACK_STATUSES,
+  normalizeGrigliataMusicMedia,
   normalizeGrigliataMusicVolume,
 } from './music';
 import {
@@ -70,6 +75,8 @@ const getSessionProgressMs = (session, now) => {
 };
 
 export default function MusicLibraryPanel({
+  acquireAudioAsset = acquirePrivateAudioAsset,
+  mediaMode = 'legacy',
   tracks,
   musicFolders = [],
   selectedFolderId = UNFILED_MUSIC_FOLDER_ID,
@@ -106,9 +113,11 @@ export default function MusicLibraryPanel({
   const [isOrganizerOpen, setIsOrganizerOpen] = useState(false);
   const [folderMenuTrackId, setFolderMenuTrackId] = useState('');
   const [previewTrack, setPreviewTrack] = useState(null);
+  const [previewAudioSource, setPreviewAudioSource] = useState('');
   const uploadFileInputRef = useRef(null);
   const folderOptions = useMemo(() => buildMusicFolderOptions(musicFolders), [musicFolders]);
   const previewTrackName = previewTrack?.name || 'Untitled Track';
+  const readsCanonicalMusic = task07ModeReadsDerivatives(mediaMode);
   const playbackSessionsByTrackId = useMemo(() => {
     const nextMap = new Map();
 
@@ -157,6 +166,45 @@ export default function MusicLibraryPanel({
         : nextDrafts;
     });
   }, [activePlaybackSessions]);
+
+  useEffect(() => {
+    setPreviewAudioSource('');
+    if (!previewTrack) return undefined;
+    if (!readsCanonicalMusic) {
+      setPreviewAudioSource(previewTrack.audioUrl || '');
+      return undefined;
+    }
+    const descriptor = normalizeGrigliataMusicMedia(previewTrack.media)?.original;
+    if (!descriptor) return undefined;
+    let active = true;
+    const lease = acquireAudioAsset(descriptor);
+    lease.promise.then(({url}) => {
+      if (active) setPreviewAudioSource(url);
+    }).catch(() => {
+      if (active) console.error('Failed to load the canonical music preview.');
+    });
+    return () => {
+      active = false;
+      lease.release();
+    };
+  }, [acquireAudioAsset, previewTrack, readsCanonicalMusic]);
+
+  const downloadCanonicalTrack = async (track) => {
+    const descriptor = normalizeGrigliataMusicMedia(track?.media)?.original;
+    if (!descriptor) return;
+    const lease = acquireAudioAsset(descriptor);
+    try {
+      const {url} = await lease.promise;
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = track.fileName || `${track.name || 'track'}.mp3`;
+      link.click();
+    } catch {
+      console.error('Failed to download the canonical music track.');
+    } finally {
+      lease.release();
+    }
+  };
 
   const commitSharedVolume = (nextPercent) => {
     onSharedVolumeCommit?.(toVolumeValue(nextPercent));
@@ -352,7 +400,7 @@ export default function MusicLibraryPanel({
         <div className="bg-slate-950 p-4">
           <p className="mb-3 truncate text-sm font-semibold text-slate-100">{previewTrackName}</p>
           <audio
-            src={previewTrack.audioUrl}
+            src={previewAudioSource || undefined}
             aria-label={`${previewTrackName} preview`}
             className="w-full"
             controls
@@ -571,7 +619,7 @@ export default function MusicLibraryPanel({
                     )}
 
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {track.audioUrl && (
+                      {(readsCanonicalMusic ? normalizeGrigliataMusicMedia(track.media) : track.audioUrl) && (
                         <button
                           type="button"
                           onClick={() => setPreviewTrack(track)}
@@ -666,17 +714,31 @@ export default function MusicLibraryPanel({
                         </button>
                       )}
 
-                      <a
-                        href={track.audioUrl}
-                        download={track.fileName || `${track.name || 'track'}.mp3`}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label={buildTrackActionLabel('Download', trackName)}
-                        title={buildTrackActionLabel('Download', trackName)}
-                        className={getMusicActionClassName('border-sky-500/40 text-sky-200 hover:bg-sky-500/10')}
-                      >
-                        <FiDownload className={MUSIC_ACTION_ICON_CLASS_NAME} />
-                      </a>
+                      {readsCanonicalMusic ? (
+                        normalizeGrigliataMusicMedia(track.media) && (
+                          <button
+                            type="button"
+                            onClick={() => downloadCanonicalTrack(track)}
+                            aria-label={buildTrackActionLabel('Download', trackName)}
+                            title={buildTrackActionLabel('Download', trackName)}
+                            className={getMusicActionClassName('border-sky-500/40 text-sky-200 hover:bg-sky-500/10')}
+                          >
+                            <FiDownload className={MUSIC_ACTION_ICON_CLASS_NAME} />
+                          </button>
+                        )
+                      ) : (
+                        <a
+                          href={track.audioUrl}
+                          download={track.fileName || `${track.name || 'track'}.mp3`}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={buildTrackActionLabel('Download', trackName)}
+                          title={buildTrackActionLabel('Download', trackName)}
+                          className={getMusicActionClassName('border-sky-500/40 text-sky-200 hover:bg-sky-500/10')}
+                        >
+                          <FiDownload className={MUSIC_ACTION_ICON_CLASS_NAME} />
+                        </a>
+                      )}
 
                       <button
                         type="button"

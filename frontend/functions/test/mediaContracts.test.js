@@ -9,11 +9,14 @@ const {
   buildTask07StagingPath,
   parseCanonicalMediaPath,
   parseTask07StagingPath,
+  plannedMediaVariantDimensions,
 } = require("../lib/mediaContracts");
 const {
+  asStoredTask07MediaUploadPlan,
   buildTask07MediaUploadPlan,
   isTask07CleanupQueueClaimable,
   isTask07MediaRequestAuthorized,
+  isTask07MediaRetirementAuthorized,
   isTask07MediaStateAbandonable,
   isTask07MediaStateCleanupEligible,
   isTask07MediaStateManualCleanupRetryable,
@@ -53,6 +56,22 @@ test("Task 07 policy exposes the exact version-one purpose set", () => {
   assert.equal(MEDIA_STAGING_CACHE_CONTROL, "private, no-store");
 });
 
+test("cover variants preserve Sharp no-enlargement dimensions", () => {
+  const contract = MEDIA_CONTRACTS.avatar.variants.thumbnail2x;
+  assert.deepEqual(
+    plannedMediaVariantDimensions({width: 96, height: 96}, contract),
+    {width: 96, height: 96}
+  );
+  assert.deepEqual(
+    plannedMediaVariantDimensions({width: 200, height: 50}, contract),
+    {width: 128, height: 50}
+  );
+  assert.deepEqual(
+    plannedMediaVariantDimensions({width: 50, height: 200}, contract),
+    {width: 50, height: 128}
+  );
+});
+
 test("prepare plans bind exact bytes and expose only one staging source", () => {
   const input = {
     actorUid: "user-a",
@@ -65,6 +84,8 @@ test("prepare plans bind exact bytes and expose only one staging source", () => 
   };
   const plan = buildTask07MediaUploadPlan(input);
   assert.deepEqual(plan, buildTask07MediaUploadPlan(input));
+  assert.equal(Object.hasOwn(plan, "commonTechnique"), false);
+  assert.deepEqual(asStoredTask07MediaUploadPlan(plan), plan);
   assert.equal(
     plan.sourcePath,
     buildTask07StagingPath(plan.ownerUid, plan.assetId)
@@ -112,14 +133,18 @@ test("prepare rejects unsupported formats, imprecise bytes, and missing adapters
     }),
     /source byte budget/
   );
-  assert.throws(
-    () => buildTask07MediaUploadPlan({
-      ...base,
-      kind: "music",
-      sourceContentType: "audio/mpeg",
-      entityId: "track",
-    }),
-    /No Task 07 target adapter/
+  const music = buildTask07MediaUploadPlan({
+    ...base,
+    operationId: "music_track_upload_1234",
+    kind: "music",
+    sourceContentType: "audio/mpeg",
+    entityId: "track",
+  });
+  assert.equal(music.targetKind, "grigliata-music-track");
+  assert.equal(music.audienceScope, "signed-in");
+  assert.equal(
+    task07MediaReferencePath(music),
+    "grigliata_music_tracks/track"
   );
 });
 
@@ -181,6 +206,45 @@ test("personal technique and spell plans bind separate art and video slots", () 
   );
   assert.equal(task07MediaTargetFields(spell).slot, "media");
   assert.equal(task07MediaTargetFields(spellVideo).slot, "videoMedia");
+});
+
+test("common technique plans bind nested map identity and signed-in slots", () => {
+  const base = {
+    actorUid: "webmaster-a",
+    ownerUid: "webmaster-a",
+    entityId: "tecnica-comune-a",
+    commonTechnique: true,
+    sourceBytes: 1024,
+  };
+  const art = buildTask07MediaUploadPlan({
+    ...base,
+    operationId: "common_technique_art_1234",
+    kind: "technique",
+    sourceContentType: "image/png",
+  });
+  const video = buildTask07MediaUploadPlan({
+    ...base,
+    operationId: "common_technique_video_1234",
+    kind: "technique-video",
+    sourceContentType: "video/mp4",
+  });
+
+  assert.equal(art.targetKind, "common-technique");
+  assert.equal(video.targetKind, "common-technique");
+  assert.equal(art.commonTechnique, true);
+  assert.equal(art.audienceScope, "signed-in");
+  assert.equal(video.audienceScope, "signed-in");
+  assert.equal(task07MediaReferencePath(art), "utils/tecniche_common");
+  assert.equal(task07MediaReferencePath(video), "utils/tecniche_common");
+  assert.equal(task07MediaTargetFields(art).slot, "media");
+  assert.equal(task07MediaTargetFields(video).slot, "videoMedia");
+  assert.notEqual(art.requestHash, video.requestHash);
+  assert.throws(() => buildTask07MediaUploadPlan({
+    ...base,
+    operationId: "common_spell_invalid_1234",
+    kind: "spell",
+    sourceContentType: "image/png",
+  }), /identity is invalid/);
 });
 
 test("personal content authorization matches the Task 05 owner/manager boundary", () => {
@@ -314,17 +378,71 @@ test("authorization and target adapters remain enumerated", () => {
     ownerUid: "web",
     referenceScope: null,
     actorRole: "webmaster",
-  }), false);
+  }), true);
   assert.equal(task07MediaReferencePath({
     kind: "token",
     ownerUid: "u1",
     entityId: "token-1",
     referenceScope: null,
   }), "grigliata_tokens/token-1");
-  assert.throws(() => task07MediaReferencePath({
+  assert.equal(task07MediaReferencePath({
     kind: "music",
     ownerUid: "dm",
     entityId: "track-1",
     referenceScope: null,
-  }), /unsupported/);
+  }), "grigliata_music_tracks/track-1");
+  assert.equal(isTask07MediaRequestAuthorized({
+    kind: "music",
+    actorUid: "web",
+    ownerUid: "web",
+    referenceScope: null,
+    actorRole: "webmaster",
+  }), true);
+  assert.equal(isTask07MediaRequestAuthorized({
+    kind: "music",
+    actorUid: "player",
+    ownerUid: "player",
+    referenceScope: null,
+    actorRole: "player",
+  }), false);
+});
+
+test("webmasters manage foe and map media without gaining token manager access", () => {
+  for (const kind of ["foe", "map", "map-video"]) {
+    assert.equal(isTask07MediaRequestAuthorized({
+      kind,
+      actorUid: "web",
+      ownerUid: "web",
+      referenceScope: null,
+      actorRole: "webmaster",
+    }), true);
+    assert.equal(isTask07MediaRetirementAuthorized({
+      kind,
+      actorUid: "web",
+      ownerUid: "another-owner",
+      referenceScope: null,
+      actorRole: "webmaster",
+    }), true);
+    assert.equal(isTask07MediaRequestAuthorized({
+      kind,
+      actorUid: "player",
+      ownerUid: "player",
+      referenceScope: null,
+      actorRole: "player",
+    }), false);
+  }
+  assert.equal(isTask07MediaRequestAuthorized({
+    kind: "token",
+    actorUid: "web",
+    ownerUid: "another-owner",
+    referenceScope: null,
+    actorRole: "webmaster",
+  }), false);
+  assert.equal(isTask07MediaRetirementAuthorized({
+    kind: "token",
+    actorUid: "web",
+    ownerUid: "another-owner",
+    referenceScope: null,
+    actorRole: "webmaster",
+  }), false);
 });

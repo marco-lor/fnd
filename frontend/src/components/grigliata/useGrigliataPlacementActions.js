@@ -8,6 +8,7 @@ import {
   writeBatch,
 } from '../../performance/firestore';
 import { db } from '../firebaseConfig';
+import { updateUserSettings } from '../../data/userData/userDataCommands';
 import {
   buildPlacementDocId,
   normalizeTokenSizeSquares,
@@ -35,13 +36,97 @@ const normalizeOptionalVisionRadiusSquares = (visionRadiusSquares) => {
     : undefined;
 };
 
+const timestampIdentity = (value) => {
+  if (!value) return '';
+  if (typeof value.toMillis === 'function') return String(value.toMillis());
+  if (Number.isFinite(value.seconds)) {
+    return `${value.seconds}:${Number.isFinite(value.nanoseconds) ? value.nanoseconds : 0}`;
+  }
+  return '';
+};
+
+const placementVersionIdentity = (placement) => {
+  if (!placement) return 'missing';
+  const timestamp = timestampIdentity(placement.updatedAt);
+  if (timestamp) return `updated-${timestamp}`;
+  return [
+    placement.col,
+    placement.row,
+    placement.sizeSquares,
+    placement.isVisibleToPlayers === false ? 'hidden' : 'visible',
+    placement.isDead === true ? 'dead' : 'alive',
+    normalizeTurnCounter(placement.turnCounter, 0),
+  ].join(':');
+};
+
+const buildAtomicPlacementWrite = (placementPayload = {}) => ({
+  label: placementPayload.label,
+  imageUrl: placementPayload.imageUrl,
+  col: placementPayload.col,
+  row: placementPayload.row,
+  sizeSquares: placementPayload.sizeSquares,
+  isVisibleToPlayers: placementPayload.isVisibleToPlayers,
+  isDead: placementPayload.isDead,
+  ...(Array.isArray(placementPayload.statuses) ? { statuses: placementPayload.statuses } : {}),
+  ...(typeof placementPayload.visionEnabled === 'boolean'
+    ? { visionEnabled: placementPayload.visionEnabled } : {}),
+  ...(Number.isInteger(placementPayload.visionRadiusSquares)
+    ? { visionRadiusSquares: placementPayload.visionRadiusSquares } : {}),
+});
+
+const hashPlacementMutationIntent = (serializedIntent) => {
+  const states = [
+    0x811c9dc5,
+    0x9e3779b9,
+    0x85ebca6b,
+    0xc2b2ae35,
+  ];
+  const multipliers = [
+    0x01000193,
+    0x85ebca6b,
+    0xc2b2ae35,
+    0x27d4eb2f,
+  ];
+  for (let index = 0; index < serializedIntent.length; index += 1) {
+    const characterCode = serializedIntent.charCodeAt(index);
+    states.forEach((state, stateIndex) => {
+      states[stateIndex] = Math.imul(
+        state ^ (characterCode + stateIndex),
+        multipliers[stateIndex]
+      ) >>> 0;
+    });
+  }
+  return states.map((state) => state.toString(16).padStart(8, '0')).join('');
+};
+
+export const placementMutationIntentIdentity = (mutation = {}) => {
+  if (mutation.action === 'delete') {
+    return `delete:${mutation.deleteFoeTokenProfile === true ? 'foe' : 'placement'}`;
+  }
+  const placement = mutation.placement || {};
+  const boundedIntent = [
+    mutation.action,
+    mutation.deleteFoeTokenProfile === true,
+    placement.label ?? null,
+    placement.imageUrl ?? null,
+    placement.col ?? null,
+    placement.row ?? null,
+    placement.sizeSquares ?? null,
+    placement.isVisibleToPlayers ?? null,
+    placement.isDead ?? null,
+    Array.isArray(placement.statuses) ? placement.statuses : null,
+    placement.visionEnabled ?? null,
+    placement.visionRadiusSquares ?? null,
+  ];
+  return `upsert:${hashPlacementMutationIntent(JSON.stringify(boundedIntent))}`;
+};
+
 export default function useGrigliataPlacementActions({
   activeBackgroundId = '',
   activePlacementsById,
   currentUserId = '',
   isManager = false,
   ownedTrayTokensById,
-  buildHiddenPlacementSettingsPayload,
   isLegacyHiddenPlacementToken,
   isCustomTokenInstance,
   deleteCustomToken,
@@ -49,6 +134,38 @@ export default function useGrigliataPlacementActions({
   placementAndUserSettingsBatchSize = 4,
   placementDeleteBatchSize = 3,
 }) {
+  const persistPlacementAndHiddenSetting = useCallback(({
+    ownerUid,
+    backgroundId,
+    tokenId,
+    isHidden,
+    placementMutation,
+    sourcePlacement = null,
+  }) => {
+    if (!ownerUid || !backgroundId || !tokenId || !placementMutation) {
+      return Promise.resolve();
+    }
+    const includeLegacyFallback = isLegacyHiddenPlacementToken({ tokenId, ownerUid });
+    const retryScope = `grigliata-placement:${ownerUid}:${backgroundId}:${tokenId}`;
+    const retryKey = [
+      retryScope,
+      placementVersionIdentity(sourcePlacement),
+      placementMutationIntentIdentity(placementMutation),
+    ].join(':');
+    return updateUserSettings({
+      userId: ownerUid,
+      hiddenPlacement: {
+        backgroundId,
+        tokenId,
+        isHidden,
+        includeLegacyFallback,
+        placementMutation,
+      },
+      retryKey,
+      retryScope,
+    });
+  }, [isLegacyHiddenPlacementToken]);
+
   const buildPlacementWritePayload = useCallback(({
     backgroundId,
     tokenId,
@@ -231,6 +348,7 @@ export default function useGrigliataPlacementActions({
   }) => {
     const resolvedTokenId = typeof tokenId === 'string' && tokenId ? tokenId : ownerUid;
     const placementId = buildPlacementDocId(backgroundId, resolvedTokenId);
+    const sourcePlacement = activePlacementsById.get(placementId) || null;
     const placementPayload = buildPlacementWritePayload({
       backgroundId,
       tokenId: resolvedTokenId,
@@ -242,29 +360,22 @@ export default function useGrigliataPlacementActions({
       isDead,
       statuses,
     });
-    const isHidden = placementPayload.isVisibleToPlayers === false;
-    const batch = writeBatch(db);
-
-    batch.set(doc(db, 'grigliata_token_placements', placementId), placementPayload, { merge: true });
-    batch.set(
-      doc(db, 'users', ownerUid),
-      buildHiddenPlacementSettingsPayload({
-        backgroundId,
-        tokenId: resolvedTokenId,
-        isHidden,
-        includeLegacyBackgroundFallback: isLegacyHiddenPlacementToken({
-          tokenId: resolvedTokenId,
-          ownerUid,
-        }),
-      }),
-      { merge: true }
-    );
-
-    await batch.commit();
+    await persistPlacementAndHiddenSetting({
+      ownerUid,
+      backgroundId,
+      tokenId: resolvedTokenId,
+      isHidden: placementPayload.isVisibleToPlayers === false,
+      sourcePlacement,
+      placementMutation: {
+        action: 'upsert',
+        deleteFoeTokenProfile: false,
+        placement: buildAtomicPlacementWrite(placementPayload),
+      },
+    });
   }, [
-    buildHiddenPlacementSettingsPayload,
+    activePlacementsById,
     buildPlacementWritePayload,
-    isLegacyHiddenPlacementToken,
+    persistPlacementAndHiddenSetting,
   ]);
 
   const commitPlacementMoves = useCallback(async (moves) => {
@@ -288,36 +399,29 @@ export default function useGrigliataPlacementActions({
     ).values()];
 
     for (let index = 0; index < normalizedMoves.length; index += placementAndUserSettingsBatchSize) {
-      const batch = writeBatch(db);
-      normalizedMoves.slice(index, index + placementAndUserSettingsBatchSize).forEach((move) => {
+      const moveChunk = normalizedMoves.slice(index, index + placementAndUserSettingsBatchSize);
+      await Promise.all(moveChunk.map((move) => {
+        const placementId = buildPlacementDocId(move.backgroundId, move.tokenId);
         const placementPayload = buildPlacementWritePayload(move);
-        const isHidden = placementPayload.isVisibleToPlayers === false;
-        batch.set(
-          doc(db, 'grigliata_token_placements', buildPlacementDocId(move.backgroundId, move.tokenId)),
-          placementPayload,
-          { merge: true }
-        );
-        batch.set(
-          doc(db, 'users', move.ownerUid),
-          buildHiddenPlacementSettingsPayload({
-            backgroundId: move.backgroundId,
-            tokenId: move.tokenId,
-            isHidden,
-            includeLegacyBackgroundFallback: isLegacyHiddenPlacementToken({
-              tokenId: move.tokenId,
-              ownerUid: move.ownerUid,
-            }),
-          }),
-          { merge: true }
-        );
-      });
-      await batch.commit();
+        return persistPlacementAndHiddenSetting({
+          ownerUid: move.ownerUid,
+          backgroundId: move.backgroundId,
+          tokenId: move.tokenId,
+          isHidden: placementPayload.isVisibleToPlayers === false,
+          sourcePlacement: activePlacementsById.get(placementId) || null,
+          placementMutation: {
+            action: 'upsert',
+            deleteFoeTokenProfile: false,
+            placement: buildAtomicPlacementWrite(placementPayload),
+          },
+        });
+      }));
     }
   }, [
-    buildHiddenPlacementSettingsPayload,
+    activePlacementsById,
     buildPlacementWritePayload,
-    isLegacyHiddenPlacementToken,
     placementAndUserSettingsBatchSize,
+    persistPlacementAndHiddenSetting,
   ]);
 
   const deleteActiveMapPlacements = useCallback(async (tokenIds) => {
@@ -354,34 +458,29 @@ export default function useGrigliataPlacementActions({
         continue;
       }
 
-      const batch = writeBatch(db);
-      directDeletePlacements.forEach(({ ownerUid, placementId, tokenId }) => {
+      await Promise.all(directDeletePlacements.map(({ ownerUid, placementId, tokenId }) => {
         const tokenProfile = deleteTargetTokenProfiles.get(tokenId) || null;
-        batch.delete(doc(db, 'grigliata_token_placements', placementId));
-        if (tokenProfile?.tokenType === 'foe') {
-          batch.delete(doc(db, 'grigliata_tokens', tokenId));
-        }
-        batch.set(
-          doc(db, 'users', ownerUid),
-          buildHiddenPlacementSettingsPayload({
-            backgroundId: activeBackgroundId,
-            tokenId,
-            isHidden: false,
-            includeLegacyBackgroundFallback: isLegacyHiddenPlacementToken({ tokenId, ownerUid }),
-          }),
-          { merge: true }
-        );
-      });
-      await batch.commit();
+        return persistPlacementAndHiddenSetting({
+          ownerUid,
+          backgroundId: activeBackgroundId,
+          tokenId,
+          isHidden: false,
+          sourcePlacement: activePlacementsById.get(placementId) || null,
+          placementMutation: {
+            action: 'delete',
+            deleteFoeTokenProfile: tokenProfile?.tokenType === 'foe',
+          },
+        });
+      }));
     }
   }, [
     activeBackgroundId,
-    buildHiddenPlacementSettingsPayload,
+    activePlacementsById,
     deleteCustomToken,
     getActiveMapPlacementContexts,
     isCustomTokenInstance,
-    isLegacyHiddenPlacementToken,
     placementDeleteBatchSize,
+    persistPlacementAndHiddenSetting,
   ]);
 
   const setSelectedTokensVisibility = useCallback(async (tokenIds, nextIsVisibleToPlayers) => {
@@ -400,45 +499,40 @@ export default function useGrigliataPlacementActions({
     }
 
     for (let index = 0; index < targetPlacements.length; index += placementAndUserSettingsBatchSize) {
-      const batch = writeBatch(db);
-
-      targetPlacements.slice(index, index + placementAndUserSettingsBatchSize).forEach((placement) => {
-        batch.set(
-          doc(db, 'grigliata_token_placements', placement.placementId),
-          buildPlacementWritePayload({
-            backgroundId: activeBackgroundId,
-            tokenId: placement.tokenId,
-            ownerUid: placement.ownerUid,
-            col: placement.col,
-            row: placement.row,
-            sizeSquares: placement.sizeSquares,
-            isVisibleToPlayers: nextIsVisibleToPlayers,
-          }),
-          { merge: true }
-        );
-        batch.set(
-          doc(db, 'users', placement.ownerUid),
-          buildHiddenPlacementSettingsPayload({
-            backgroundId: activeBackgroundId,
-            tokenId: placement.tokenId,
-            isHidden: nextIsVisibleToPlayers === false,
-            includeLegacyBackgroundFallback: isLegacyHiddenPlacementToken(placement),
-          }),
-          { merge: true }
-        );
-      });
-
-      await batch.commit();
+      const placementChunk = targetPlacements.slice(index, index + placementAndUserSettingsBatchSize);
+      await Promise.all(placementChunk.map((placement) => {
+        const placementPayload = buildPlacementWritePayload({
+          backgroundId: activeBackgroundId,
+          tokenId: placement.tokenId,
+          ownerUid: placement.ownerUid,
+          col: placement.col,
+          row: placement.row,
+          sizeSquares: placement.sizeSquares,
+          isVisibleToPlayers: nextIsVisibleToPlayers,
+        });
+        return persistPlacementAndHiddenSetting({
+          ownerUid: placement.ownerUid,
+          backgroundId: activeBackgroundId,
+          tokenId: placement.tokenId,
+          isHidden: nextIsVisibleToPlayers === false,
+          sourcePlacement: activePlacementsById.get(placement.placementId) || null,
+          placementMutation: {
+            action: 'upsert',
+            deleteFoeTokenProfile: false,
+            placement: buildAtomicPlacementWrite(placementPayload),
+          },
+        });
+      }));
     }
   }, [
     activeBackgroundId,
-    buildHiddenPlacementSettingsPayload,
+    activePlacementsById,
     buildPlacementWritePayload,
     currentUserId,
     getActiveMapPlacementContexts,
-    isLegacyHiddenPlacementToken,
     isManager,
     placementAndUserSettingsBatchSize,
+    persistPlacementAndHiddenSetting,
   ]);
 
   const setSelectedTokensDeadState = useCallback(async (tokenIds, nextIsDead) => {

@@ -1,4 +1,5 @@
 import * as admin from "firebase-admin";
+import {FieldValue, Timestamp} from "firebase-admin/firestore";
 import {getStorage} from "firebase-admin/storage";
 import {onObjectFinalized} from "firebase-functions/v2/storage";
 import {Readable} from "stream";
@@ -11,16 +12,17 @@ import {
   MEDIA_CONTRACT_VERSION,
   MEDIA_PROCESSING_MAX_AUTO_ATTEMPTS,
   MEDIA_SCHEMA_VERSION,
-  MEDIA_STAGING_CACHE_CONTROL,
   MediaVariantName,
   parseTask07StagingPath,
 } from "./mediaContracts";
 import {
+  isAuthorizedTask07LegacyMapBackfill,
   processTask07MediaSource,
   task07ProcessorClaimDecision,
   task07ProcessorFailureCleanupPaths,
   Task07GeneratedObject,
   Task07ProcessorError,
+  validateTask07StagingMetadata,
 } from "./mediaAssetProcessorCore";
 import {createTask07DefaultMediaTransformer} from "./mediaProcessorRuntime";
 
@@ -33,6 +35,8 @@ const PROCESSOR_OPTIONS = {
   timeoutSeconds: 540,
   retry: true,
 };
+
+const BACKFILL_RECEIPT_COLLECTION = "task07_media_backfill_receipts";
 
 const assetRef = (
   db: admin.firestore.Firestore,
@@ -47,7 +51,7 @@ const cleanupRef = (
   db.doc(`media_asset_cleanup/${assetId}`);
 
 const timestampMillis = (value: unknown): number => {
-  if (value instanceof admin.firestore.Timestamp) return value.toMillis();
+  if (value instanceof Timestamp) return value.toMillis();
   return Number.NaN;
 };
 
@@ -83,43 +87,10 @@ const readSourceWithHardCap = async (input: {
   });
 });
 
-const validateStagingMetadata = (input: {
-  plan: MediaUploadPlan;
-  metadata: {
-    cacheControl?: string;
-    contentDisposition?: string;
-    contentType?: string;
-    metadata?: Record<
-      string, string | number | boolean | null | undefined
-    >;
-    size?: string | number;
-  };
-}): void => {
-  const custom = input.metadata.metadata || {};
-  const expected: Record<string, string> = {
-    task07AssetId: input.plan.assetId,
-    task07ContractVersion: String(MEDIA_CONTRACT_VERSION),
-    task07EntityId: input.plan.entityId,
-    task07Kind: input.plan.kind,
-    task07OwnerUid: input.plan.ownerUid,
-    task07Role: "source",
-  };
-  const actualKeys = Object.keys(custom)
-    .filter((key) => custom[key] !== undefined)
-    .sort();
-  if (input.metadata.contentType !== input.plan.sourceContentType ||
-    Number(input.metadata.size) !== input.plan.sourceBytes ||
-    input.metadata.cacheControl !== MEDIA_STAGING_CACHE_CONTROL ||
-    input.metadata.contentDisposition !== "inline" ||
-    actualKeys.join(",") !== Object.keys(expected).sort().join(",") ||
-    Object.entries(expected).some(([key, value]) => custom[key] !== value)) {
-    throw new Task07ProcessorError("staging-metadata-mismatch");
-  }
-};
-
 type ClaimIntentResult =
   {status: "ack" | "terminal"} |
-  {status: "claimed"; attempt: number; plan: MediaUploadPlan};
+  {status: "claimed"; attempt: number; plan: MediaUploadPlan;
+    legacyMapBackfill: boolean};
 
 const claimIntent = async (input: {
   db: admin.firestore.Firestore;
@@ -138,6 +109,24 @@ const claimIntent = async (input: {
       plan.sourcePath !== input.sourcePath) {
       return {status: "terminal"};
     }
+    const marker = snapshot.get("legacyBackfill");
+    const markerRecord = marker && typeof marker === "object" &&
+      !Array.isArray(marker) ?
+      marker as Record<string, unknown> :
+      null;
+    const receiptId = typeof markerRecord?.receiptId === "string" ?
+      markerRecord.receiptId :
+      "";
+    const receipt = /^r_[a-f0-9]{40}$/.test(receiptId) ?
+      await transaction.get(input.db.doc(
+        `${BACKFILL_RECEIPT_COLLECTION}/${receiptId}`
+      )) :
+      null;
+    const legacyMapBackfill = isAuthorizedTask07LegacyMapBackfill({
+      plan,
+      marker,
+      receipt: receipt?.data(),
+    });
     const state = String(snapshot.get("state") || "");
     const expiresAtMs = timestampMillis(snapshot.get("retention.cleanupAfter"));
     const activeGeneration = String(
@@ -162,10 +151,10 @@ const claimIntent = async (input: {
     if (decision.action === "terminal") {
       const queueRef = cleanupRef(input.db, input.assetId);
       const queue = await transaction.get(queueRef);
-      const now = admin.firestore.Timestamp.now();
+      const now = Timestamp.now();
       transaction.update(ref, {
         state: state === "cancelled" ? "cancelled" : "rejected",
-        processing: admin.firestore.FieldValue.delete(),
+        processing: FieldValue.delete(),
         retention: {cleanupAfter: now},
         error: {
           code: decision.code,
@@ -189,13 +178,13 @@ const claimIntent = async (input: {
       return {status: "terminal"};
     }
     const attempt = decision.attempt;
-    const now = admin.firestore.Timestamp.now();
+    const now = Timestamp.now();
     transaction.update(ref, {
       state: "processing",
       generation: input.sourceGeneration,
       processing: {
         sourceGeneration: input.sourceGeneration,
-        leaseUntil: admin.firestore.Timestamp.fromMillis(
+        leaseUntil: Timestamp.fromMillis(
           Date.now() + 15 * 60 * 1000
         ),
       },
@@ -206,7 +195,7 @@ const claimIntent = async (input: {
       },
       updatedAt: now,
     });
-    return {status: "claimed", attempt, plan};
+    return {status: "claimed", attempt, plan, legacyMapBackfill};
   });
 };
 
@@ -216,7 +205,7 @@ type StoredGeneratedDescriptor = Omit<Task07GeneratedObject, "buffer"> & {
   cacheControl: string;
 };
 
-const uploadGeneratedSet = async (input: {
+export const uploadTask07GeneratedSet = async (input: {
   assetId: string;
   eventId: string;
   objects: Task07GeneratedObject[];
@@ -355,12 +344,12 @@ const markFailure = async (input: {
       snapshot.get("state") !== "processing" ||
       String(snapshot.get("generation")) !== input.sourceGeneration ||
       Number(snapshot.get("error.attempts")) !== input.attempt) return;
-    const now = admin.firestore.Timestamp.now();
+    const now = Timestamp.now();
     const manifestUpdate: admin.firestore.UpdateData<
       admin.firestore.DocumentData
     > = {
       state: input.retryable ? "failed" : "rejected",
-      processing: admin.firestore.FieldValue.delete(),
+      processing: FieldValue.delete(),
       error: {
         code: input.code,
         retryable: input.retryable,
@@ -414,7 +403,7 @@ export const task07ProcessMediaUpload = onObjectFinalized(
     const finalPaths: string[] = [];
     try {
       const [metadata] = await sourceFile.getMetadata();
-      validateStagingMetadata({plan: claimed.plan, metadata});
+      validateTask07StagingMetadata({plan: claimed.plan, metadata});
       const source = await readSourceWithHardCap({
         file: sourceFile,
         expectedBytes: claimed.plan.sourceBytes,
@@ -434,13 +423,14 @@ export const task07ProcessMediaUpload = onObjectFinalized(
         sourceGeneration,
         source,
         transformer: createTask07DefaultMediaTransformer(),
+        legacyMapBackfill: claimed.legacyMapBackfill,
       });
       const eventId = event.id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 96);
       temporaryPaths.push(...result.objects.map(
         ({path}) => `${path}.tmp-${eventId}`
       ));
       finalPaths.push(...result.objects.map(({path}) => path));
-      const promoted = await uploadGeneratedSet({
+      const promoted = await uploadTask07GeneratedSet({
         assetId: claimed.plan.assetId,
         eventId,
         objects: result.objects,
@@ -469,21 +459,21 @@ export const task07ProcessMediaUpload = onObjectFinalized(
             original: promoted.original,
             variants: promoted.variants,
           },
-          processing: admin.firestore.FieldValue.delete(),
-          cleanupTemporaryPaths: admin.firestore.FieldValue.delete(),
+          processing: FieldValue.delete(),
+          cleanupTemporaryPaths: FieldValue.delete(),
           error: {
             code: null,
             retryable: false,
             attempts: claimed.attempt,
           },
           retention: {
-            cleanupAfter: admin.firestore.Timestamp.fromMillis(
+            cleanupAfter: Timestamp.fromMillis(
               Date.now() +
               MEDIA_CONTRACTS[claimed.plan.kind].retention.uncommittedHours *
               60 * 60 * 1000
             ),
           },
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
         });
       });
       await deletePaths(temporaryPaths);

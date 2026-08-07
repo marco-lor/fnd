@@ -199,6 +199,72 @@ describe('MediaImage', () => {
     expect(v1OnlyRollback.url).toBe('https://private.example/large-original.png');
   });
 
+  test('canonical-only reads verified derivatives without any legacy fallback', () => {
+    const strictEntity = {
+      imageUrl: 'https://private.example/original-legacy.jpg',
+      media: {
+        schemaVersion: 1,
+        state: 'ready',
+        kind: 'avatar',
+        placeholder: { url: 'https://private.example/legacy-placeholder.jpg' },
+        original: privateDescriptor('original'),
+        variants: {
+          card: {
+            ...privateDescriptor('card'),
+            downloadUrl: 'https://private.example/card-legacy.webp',
+          },
+          thumbnail: privateDescriptor('thumbnail'),
+        },
+      },
+    };
+    const result = resolveMediaAsset(strictEntity, {
+      compatibilityMode: 'canonical-only',
+      variant: 'card',
+    });
+    expect(result.candidates.map(({variant}) => variant)).toEqual(['card']);
+    expect(result.candidates.every(({url}) => url === '')).toBe(true);
+    expect(result.placeholderUrl).toBe('');
+    expect(resolveMediaAsset({
+      imageUrl: 'https://private.example/legacy-only.jpg',
+    }, {
+      compatibilityMode: 'canonical-only',
+      variant: 'card',
+    }).candidates).toHaveLength(0);
+  });
+
+  test('canonical-only never attaches a persisted legacy URL to the DOM', () => {
+    render(
+      <MediaImage
+        compatibilityMode="canonical-only"
+        media={{image_url: 'https://firebasestorage.example/legacy-only.jpg'}}
+        mediaPurpose="item"
+        src="https://firebasestorage.example/legacy-only.jpg"
+        loading="eager"
+        alt="Strict legacy-only item"
+        fallback={<span>Canonical image unavailable</span>}
+      />
+    );
+
+    expect(screen.queryByAltText('Strict legacy-only item')).not.toBeInTheDocument();
+    expect(screen.getByText('Canonical image unavailable')).toBeInTheDocument();
+  });
+
+  test('pending mode does not attach a legacy image URL', () => {
+    render(
+      <MediaImage
+        compatibilityMode="pending"
+        media={{imageUrl: 'https://private.example/must-not-load.jpg'}}
+        loading="eager"
+        alt="Pending media control"
+      />
+    );
+    expect(screen.getByAltText('Pending media control')).not.toHaveAttribute('src');
+    expect(resolveMediaAsset(mediaEntity, {
+      compatibilityMode: 'pending',
+      variant: 'card',
+    }).candidates).toHaveLength(0);
+  });
+
   test('maps legacy board preview requests onto approved gallery density variants', () => {
     const result = resolveMediaAsset({
       media: {

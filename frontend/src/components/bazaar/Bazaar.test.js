@@ -232,7 +232,6 @@ describe('Bazaar layout', () => {
       'user-1',
       expect.objectContaining({ id: 'weapon-1' }),
       undefined,
-      USER_DATA_ROLLOUT_STAGES.LEGACY_READ,
       'user-1:purchase-flow-fixed'
     ));
   });

@@ -1034,7 +1034,7 @@ test('NPC and encounter cleanup remove indexed and nested descendants', async ()
   assert.equal(encounterReplay.replayed, true);
 });
 
-test('foe duplication cleans partial Storage copies and resumes with one receipt', async () => {
+test('foe duplication skips a missing optional legacy image and replays', async () => {
   await resetTask06ControlPlane();
   const sourceFoeId = 'task06-storage-source';
   const bucket = getStorage(app).bucket();
@@ -1069,38 +1069,6 @@ test('foe duplication cleans partial Storage copies and resumes with one receipt
     stats: {hpTotal: 20, manaTotal: 10},
   });
 
-  await assert.rejects(
-    invokeCallable('duplicateFoeWithAssetsV2', {
-      operationId: FOE_OPERATION_ID,
-      sourceFoeId,
-      newFoeName: 'Task 06 duplicate',
-    }),
-    /UNAVAILABLE|could not be copied safely/i
-  );
-  const failed = await invokeCallable('getBackendOperationStatus', {
-    operationId: FOE_OPERATION_ID,
-  });
-  assert.equal(failed.status, 'failed');
-  assert.equal(failed.retryable, true);
-  assert.equal(failed.errorClass, 'storage');
-
-  const operationQuery = await db.collection('backend_operations')
-    .where('operationId', '==', FOE_OPERATION_ID)
-    .limit(1)
-    .get();
-  assert.equal(operationQuery.size, 1);
-  const manifest = operationQuery.docs[0].get('assetManifest');
-  assert.equal(manifest.length, 3);
-  const destinationState = await Promise.all(
-    manifest.map(({destinationPath}) => (
-      bucket.file(destinationPath).exists().then(([exists]) => exists)
-    ))
-  );
-  assert.deepEqual(destinationState, [false, false, false]);
-
-  await bucket.file(sourcePaths.spell).save(Buffer.from('task06-spell'), {
-    metadata: {contentType: 'image/png'},
-  });
   const completed = await invokeCallable('duplicateFoeWithAssetsV2', {
     operationId: FOE_OPERATION_ID,
     sourceFoeId,
@@ -1108,6 +1076,28 @@ test('foe duplication cleans partial Storage copies and resumes with one receipt
   });
   assert.equal(completed.replayed, false);
   assert.ok(completed.newFoeId);
+
+  const operationQuery = await db.collection('backend_operations')
+    .where('operationId', '==', FOE_OPERATION_ID)
+    .limit(1)
+    .get();
+  assert.equal(operationQuery.size, 1);
+  const operation = operationQuery.docs[0];
+  const manifest = operation.get('assetManifest');
+  assert.equal(manifest.length, 3);
+  const destinationState = await Promise.all(
+    manifest.map(({destinationPath}) => (
+      bucket.file(destinationPath).exists().then(([exists]) => exists)
+    ))
+  );
+  assert.deepEqual(destinationState, [true, true, false]);
+  assert.deepEqual(operation.get('progress'), {
+    planned: 3,
+    processed: 3,
+    succeeded: 2,
+    skipped: 1,
+    failed: 0,
+  });
   const duplicate = await db.doc(`foes/${completed.newFoeId}`).get();
   assert.equal(duplicate.exists, true);
   assert.equal(duplicate.get('name'), 'Task 06 duplicate');
@@ -1117,8 +1107,9 @@ test('foe duplication cleans partial Storage copies and resumes with one receipt
     )),
     true
   );
+  const copiedManifest = manifest.filter(({key}) => key !== 'spell:0');
   const destinationMetadata = await Promise.all(
-    manifest.map(async (entry) => {
+    copiedManifest.map(async (entry) => {
       const [exists] = await bucket.file(entry.destinationPath).exists();
       const [metadata] = await bucket.file(entry.destinationPath).getMetadata();
       return {entry, exists, metadata};
@@ -1149,10 +1140,13 @@ test('foe duplication cleans partial Storage copies and resumes with one receipt
     duplicate.get('tecniche')[0].imagePath,
     manifestByKey.get('tecnica:0').destinationPath
   );
-  assert.equal(
-    duplicate.get('spells')[0].imagePath,
-    manifestByKey.get('spell:0').destinationPath
-  );
+  assert.equal(duplicate.get('spells')[0].imagePath, '');
+  assert.equal(duplicate.get('spells')[0].imageUrl, '');
+  assert.deepEqual(completed.assets.spells[0], {
+    name: 'Spell',
+    path: '',
+    url: '',
+  });
 
   const replay = await invokeCallable('duplicateFoeWithAssetsV2', {
     operationId: FOE_OPERATION_ID,

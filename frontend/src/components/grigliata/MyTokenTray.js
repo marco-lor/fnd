@@ -27,7 +27,7 @@ const buildFoeLibraryDragPayload = (foe, ownerUid) => JSON.stringify({
 
 const getTraySummaryText = (hasActiveMap) => (
   hasActiveMap
-    ? 'Drag and drop tokens onto the active map to place or reposition them.'
+    ? 'Drag and drop tokens onto the active map, or use Place on map.'
     : 'Select an active map to place or reposition tokens.'
 );
 
@@ -438,7 +438,7 @@ function CreateCustomTokenDialog({
   );
 }
 
-function FoeLibrarySection({ currentUserId, foeLibrary = [], hasActiveMap, onDragStart, onDragEnd }) {
+function FoeLibrarySection({ currentUserId, foeLibrary = [], hasActiveMap, onDragStart, onDragEnd, onPlaceToken }) {
   const [query, setQuery] = useState('');
   const [isCollapsed, setIsCollapsed] = useState(() => readStoredFoeLibraryCollapsed(currentUserId));
   const skipPersistCollapsedStateRef = useRef(false);
@@ -599,6 +599,21 @@ function FoeLibrarySection({ currentUserId, foeLibrary = [], hasActiveMap, onDra
                           </div>
                         </div>
                       </div>
+                      <button
+                        type="button"
+                        draggable={false}
+                        disabled={!canDrag}
+                        onClick={() => onPlaceToken?.({
+                          type: FOE_LIBRARY_DRAG_TYPE,
+                          foeId: foe.id,
+                          ownerUid: currentUserId,
+                        })}
+                        aria-label={`Place ${foe.name || 'foe'} on active map`}
+                        className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-violet-300/35 bg-violet-500/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-violet-100 transition-colors hover:border-violet-200/60 hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <FiPlus className="h-4 w-4" aria-hidden="true" />
+                        Place on map
+                      </button>
                     </div>
                   );
                 })}
@@ -1275,6 +1290,7 @@ export default function MyTokenTray({
   hasActiveMap = false,
   onDragStart,
   onDragEnd,
+  onPlaceToken,
   onCreateCustomToken,
   isCreatingCustomToken = false,
   onUpdateCustomToken,
@@ -1443,6 +1459,24 @@ export default function MyTokenTray({
                 </div>
               )}
 
+              {!isEditing && (
+                <button
+                  type="button"
+                  draggable={false}
+                  disabled={!canDrag}
+                  onClick={() => onPlaceToken?.({
+                    type: 'grigliata-token',
+                    tokenId,
+                    ownerUid: token?.ownerUid || '',
+                  })}
+                  aria-label={`Place ${token?.label || 'token'} on active map`}
+                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-300/35 bg-amber-500/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-amber-100 transition-colors hover:border-amber-200/60 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <FiPlus className="h-4 w-4" aria-hidden="true" />
+                  Place on map
+                </button>
+              )}
+
               {getTokenHelpText(token, hasActiveMap) && <p className="mt-3 text-xs text-slate-300">{getTokenHelpText(token, hasActiveMap)}</p>}
               {isCustomToken && !isEditing && (isUpdating || isDeleting) && <p className="mt-3 text-xs font-medium text-slate-300">{isDeleting ? 'Deleting custom token...' : 'Saving custom token...'}</p>}
 
@@ -1484,7 +1518,7 @@ export default function MyTokenTray({
           </span>
         </button>
 
-        {isManager && <FoeLibrarySection currentUserId={currentUserId} foeLibrary={foeLibrary} hasActiveMap={hasActiveMap} onDragStart={onDragStart} onDragEnd={onDragEnd} />}
+        {isManager && <FoeLibrarySection currentUserId={currentUserId} foeLibrary={foeLibrary} hasActiveMap={hasActiveMap} onDragStart={onDragStart} onDragEnd={onDragEnd} onPlaceToken={onPlaceToken} />}
       </div>
 
       <CreateCustomTokenDialog

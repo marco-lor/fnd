@@ -13,6 +13,7 @@ import {
 } from './galleryFolders';
 import MediaImage, { hasMediaAsset } from '../common/MediaImage';
 import MediaVideo, { resolveMediaVideoAsset } from '../common/MediaVideo';
+import useTask07MediaReadMode from '../../data/media/useTask07MediaReadMode';
 
 const GALLERY_ACTION_BASE_CLASS_NAME = 'inline-flex h-9 w-9 items-center justify-center rounded-md border transition-colors disabled:cursor-not-allowed disabled:opacity-60';
 const GALLERY_ACTION_ICON_CLASS_NAME = 'h-4 w-4';
@@ -59,6 +60,7 @@ export default function BackgroundGalleryPanel({
   onSelectedFolderIdChange,
   onUploadBackgroundFiles,
   onSelectBackground,
+  onOpenLighting,
   onUseBackground,
   onNarrateBackground,
   onCloseNarration,
@@ -84,6 +86,8 @@ export default function BackgroundGalleryPanel({
   const [isOrganizerOpen, setIsOrganizerOpen] = useState(false);
   const [folderMenuBackgroundId, setFolderMenuBackgroundId] = useState('');
   const [previewBackground, setPreviewBackground] = useState(null);
+  const mapMediaMode = useTask07MediaReadMode({ purpose: 'map' });
+  const mapVideoMode = useTask07MediaReadMode({ purpose: 'map-video' });
   const uploadFileInputRef = useRef(null);
   const folderOptions = useMemo(() => (
     buildGalleryFolderOptions(galleryFolders)
@@ -138,6 +142,8 @@ export default function BackgroundGalleryPanel({
           {isPreviewVideo ? (
             <MediaVideo
               media={previewBackground}
+              mediaPurpose="map-video"
+              compatibilityMode={mapVideoMode}
               src={previewBackground.imageUrl || ''}
               aria-label={`${previewBackgroundName} preview`}
               className="max-h-full max-w-full rounded-lg object-contain"
@@ -149,6 +155,8 @@ export default function BackgroundGalleryPanel({
           ) : (
             <MediaImage
               media={previewBackground}
+              mediaPurpose="map"
+              compatibilityMode={mapMediaMode}
               src={previewBackground.imageUrl || ''}
               variant="board"
               alt={`${previewBackgroundName} preview`}
@@ -248,11 +256,13 @@ export default function BackgroundGalleryPanel({
                   : background;
                 const thumbnailVariant = isVideo ? 'poster' : 'thumbnail';
                 const thumbnailAvailable = hasMediaAsset(thumbnailMedia, {
+                  compatibilityMode: isVideo ? mapVideoMode : mapMediaMode,
+                  fallbackSrc: isVideo ? '' : (background.imageUrl || ''),
                   variant: thumbnailVariant,
                 });
                 const previewAvailable = isVideo
                   ? resolveMediaVideoAsset(background, {
-                    compatibilityMode: 'derivative-read',
+                    compatibilityMode: mapVideoMode,
                     fallbackSrc: background.imageUrl || '',
                   }).candidates.length > 0
                   : thumbnailAvailable;
@@ -305,6 +315,8 @@ export default function BackgroundGalleryPanel({
                           {(isVideo || thumbnailAvailable) && (
                             <MediaImage
                               media={thumbnailMedia}
+                              mediaPurpose={isVideo ? "map-video" : "map"}
+                              compatibilityMode={isVideo ? mapVideoMode : mapMediaMode}
                               src={isVideo ? '' : background.imageUrl || ''}
                               variant={thumbnailVariant}
                               alt={backgroundName}
@@ -330,46 +342,61 @@ export default function BackgroundGalleryPanel({
                         )}
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => onSelectBackground(background.id)}
-                        className="min-w-0 flex-1 text-left"
-                      >
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-semibold text-slate-100 truncate">{backgroundName}</p>
-                            {isActive && (
-                              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-300">
-                                Active
-                              </span>
-                            )}
-                            {isIncludedInNarration && (
-                              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200">
-                                {narrationBadgeLabel}
-                              </span>
-                            )}
-                            {hasLightingMetadata && (
-                              <span
-                                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-cyan-300/50 bg-cyan-500/15 text-cyan-200"
-                                title="Lighting metadata imported"
-                                aria-label="Lighting metadata imported"
-                              >
-                                <FiZap aria-hidden="true" className="h-3 w-3" />
-                              </span>
-                            )}
-                          </div>
+                      <div className="flex min-w-0 flex-1 items-start gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onSelectBackground(background.id)}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="truncate text-sm font-semibold text-slate-100">{backgroundName}</p>
+                              {isActive && (
+                                <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-300">
+                                  Active
+                                </span>
+                              )}
+                              {isIncludedInNarration && (
+                                <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200">
+                                  {narrationBadgeLabel}
+                                </span>
+                              )}
+                            </div>
 
-                          <p className="mt-1 text-xs text-slate-400">
-                            {background.imageWidth || '?'} x {background.imageHeight || '?'} px{isVideo ? ' | Video' : ''}
-                          </p>
-                          <p className="mt-1 text-[11px] font-medium text-sky-200/80">
-                            Folder: {getGalleryFolderDisplayName(background, galleryFolders)}
-                          </p>
-                          <p className="mt-1 text-[11px] text-slate-500">
-                            Grid {background.grid?.cellSizePx || 70}px | offset {background.grid?.offsetXPx || 0}, {background.grid?.offsetYPx || 0}
-                          </p>
-                        </div>
-                      </button>
+                            <p className="mt-1 text-xs text-slate-400">
+                              {background.imageWidth || '?'} x {background.imageHeight || '?'} px{isVideo ? ' | Video' : ''}
+                            </p>
+                            <p className="mt-1 text-[11px] font-medium text-sky-200/80">
+                              Folder: {getGalleryFolderDisplayName(background, galleryFolders)}
+                            </p>
+                            <p className="mt-1 text-[11px] text-slate-500">
+                              Grid {background.grid?.cellSizePx || 70}px | offset {background.grid?.offsetXPx || 0}, {background.grid?.offsetYPx || 0}
+                            </p>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={hasLightingMetadata
+                            ? `Open lighting for ${backgroundName} — configured${background.lightingEnabled === false ? ', currently disabled' : ''}`
+                            : `Set up lighting for ${backgroundName}`}
+                          title={hasLightingMetadata
+                            ? `Open lighting for ${backgroundName}${background.lightingEnabled === false ? ' (currently disabled)' : ''}`
+                            : `Set up lighting for ${backgroundName}`}
+                          data-lighting-configured={hasLightingMetadata ? 'true' : 'false'}
+                          data-lighting-background-id={background.id}
+                          onClick={(event) => {
+                            onSelectBackground(background.id);
+                            onOpenLighting?.(background.id, event.currentTarget);
+                          }}
+                          className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/80 ${
+                            hasLightingMetadata
+                              ? 'border-cyan-300/60 bg-cyan-500/15 text-cyan-200 shadow-md shadow-cyan-950/40 hover:bg-cyan-500/25'
+                              : 'border-slate-600 bg-transparent text-slate-500 hover:border-cyan-500/45 hover:bg-cyan-500/5 hover:text-cyan-300/80'
+                          }`}
+                        >
+                          <FiZap aria-hidden="true" className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
 
                     <div className="mt-3 space-y-2">

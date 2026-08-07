@@ -20,14 +20,24 @@ export const PRIVATE_VIDEO_CONTENT_TYPES = Object.freeze([
   'video/mp4',
   'video/webm',
 ]);
+export const PRIVATE_AUDIO_CONTENT_TYPES = Object.freeze([
+  'audio/mpeg',
+  'audio/mp4',
+  'audio/aac',
+  'audio/ogg',
+  'audio/wav',
+  'audio/x-wav',
+]);
 // Retained as the default video MIME for callers that imported the old scalar.
 export const PRIVATE_VIDEO_CONTENT_TYPE = PRIVATE_VIDEO_CONTENT_TYPES[0];
 
 const allowedPrivateImageContentTypes = new Set(PRIVATE_MEDIA_ALLOWED_CONTENT_TYPES);
 const allowedPrivateVideoContentTypes = new Set(PRIVATE_VIDEO_CONTENT_TYPES);
+const allowedPrivateAudioContentTypes = new Set(PRIVATE_AUDIO_CONTENT_TYPES);
 const supportedPrivateMediaContentTypes = new Set([
   ...PRIVATE_MEDIA_ALLOWED_CONTENT_TYPES,
   ...PRIVATE_VIDEO_CONTENT_TYPES,
+  ...PRIVATE_AUDIO_CONTENT_TYPES,
 ]);
 
 const CANONICAL_MEDIA_ASSET_ID_PATTERN = /^m_[a-f0-9]{40}$/;
@@ -268,6 +278,18 @@ export const normalizePrivateVideoDescriptor = (value) => {
   ) ? normalized : null;
 };
 
+export const normalizePrivateAudioDescriptor = (value) => {
+  const normalized = normalizePrivateMediaDescriptorForTypes(
+    value,
+    allowedPrivateAudioContentTypes
+  );
+  if (!normalized) return null;
+  const parsed = parseCanonicalPrivateMediaPath(normalized.path);
+  return (
+    parsed?.role === 'original'
+  ) ? normalized : null;
+};
+
 const getNormalizedPrivateMediaAssetKey = (descriptor) => (
   JSON.stringify([descriptor.path, descriptor.generation])
 );
@@ -279,6 +301,11 @@ export const getPrivateMediaAssetKey = (descriptor) => {
 
 export const getPrivateVideoAssetKey = (descriptor) => {
   const normalized = normalizePrivateVideoDescriptor(descriptor);
+  return normalized ? getNormalizedPrivateMediaAssetKey(normalized) : '';
+};
+
+export const getPrivateAudioAssetKey = (descriptor) => {
+  const normalized = normalizePrivateAudioDescriptor(descriptor);
   return normalized ? getNormalizedPrivateMediaAssetKey(normalized) : '';
 };
 
@@ -448,6 +475,18 @@ const validateFetchedBlob = (blob, descriptor) => {
   }
 };
 
+const restoreBoundedBlobContentType = (blob, descriptor) => {
+  const blobType = typeof blob?.type === 'string'
+    ? blob.type.trim().toLowerCase()
+    : '';
+  if (blobType || typeof blob?.slice !== 'function') return blob;
+
+  // Firebase Storage bounds getBlob() with Blob.slice(), whose default type is
+  // empty. Restore the already-validated manifest type without removing the
+  // download-size bound or accepting a conflicting non-empty response type.
+  return blob.slice(0, blob.size, descriptor.contentType);
+};
+
 const getFailureBackoffMs = (failureCount) => (
   runtime.failureBackoffMs[Math.max(
     0,
@@ -477,9 +516,16 @@ const fetchRecord = async (record, epoch) => {
     if (epoch !== runtimeEpoch || records.get(record.key) !== record) return;
 
     const objectRef = storageApi.ref(storageApi.storage, record.descriptor.path);
-    const blob = await storageApi.getBlob(objectRef, record.descriptor.bytes);
+    const fetchedBlob = await storageApi.getBlob(
+      objectRef,
+      record.descriptor.bytes
+    );
     if (epoch !== runtimeEpoch || records.get(record.key) !== record) return;
 
+    const blob = restoreBoundedBlobContentType(
+      fetchedBlob,
+      record.descriptor
+    );
     validateFetchedBlob(blob, record.descriptor);
     reserveByteCapacity(blob.size, record.key);
     const decodedBytes = getDescriptorDecodedBytes(record.descriptor);
@@ -686,6 +732,10 @@ export const acquirePrivateMediaAsset = (value) => (
 
 export const acquirePrivateVideoAsset = (value) => (
   acquireNormalizedPrivateMediaAsset(normalizePrivateVideoDescriptor(value))
+);
+
+export const acquirePrivateAudioAsset = (value) => (
+  acquireNormalizedPrivateMediaAsset(normalizePrivateAudioDescriptor(value))
 );
 
 export const getPrivateMediaAssetCacheSnapshot = () => {

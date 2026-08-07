@@ -93,7 +93,7 @@ describe('Firebase callable registry', () => {
       await registry.getCallable(logicalKey)({probe: true});
     }
 
-    expect(entries).toHaveLength(37);
+    expect(entries).toHaveLength(44);
     expect(getFunctions).toHaveBeenCalledTimes(
       callableManifest.supportedRegions.length
     );
@@ -119,6 +119,7 @@ describe('Firebase callable registry', () => {
     expect(callableManifest.callables.spendCharacterPointV2.region)
       .toBe('europe-west8');
     [
+      'task07ResolveCharacterMedia',
       'task07PrepareMediaUpload',
       'task07GetMediaStatus',
       'task07AttachMediaAsset',
@@ -134,6 +135,18 @@ describe('Firebase callable registry', () => {
         compatibilityAliasOf: logicalKey === 'task07ConfirmMediaReference'
           ? 'task07AttachMediaAsset'
           : null,
+      });
+    });
+    [
+      'task07PrepareFoeMediaRetirement',
+      'task07CommitFoeMediaRetirement',
+      'task07AbandonFoeMediaRetirement',
+    ].forEach((logicalKey) => {
+      expect(callableManifest.callables[logicalKey]).toEqual({
+        functionId: logicalKey,
+        region: 'europe-west8',
+        owner: 'foe-media-retirement',
+        compatibilityAliasOf: null,
       });
     });
   });

@@ -15,6 +15,7 @@ const {
   drainPageConnections,
   installBootstrap,
   installDeterministicFontRoutes,
+  isExpectedDemoRecaptchaReportOnlyWarning,
   navigateToCleanup,
   storageStateForRole,
   waitForReadiness,
@@ -181,7 +182,10 @@ const runPlayerRouteSoak = async ({ browser, baseURL, errors }) => {
   }, 1);
   const page = await context.newPage();
   page.on('console', (message) => {
-    if (message.type() === 'error') errors.push(message.text());
+    if (message.type() !== 'error') return;
+    const text = message.text();
+    if (isExpectedDemoRecaptchaReportOnlyWarning(text, {baseURL})) return;
+    errors.push(text);
   });
   page.on('pageerror', (error) => errors.push(error.message));
 
@@ -226,7 +230,10 @@ const runGrigliataRegistrySoak = async ({ browser, baseURL, errors, testInfo }) 
   }, 1);
   const page = await context.newPage();
   page.on('console', (message) => {
-    if (message.type() === 'error') errors.push(message.text());
+    if (message.type() !== 'error') return;
+    const text = message.text();
+    if (isExpectedDemoRecaptchaReportOnlyWarning(text, {baseURL})) return;
+    errors.push(text);
   });
   page.on('pageerror', (error) => errors.push(error.message));
   const samples = [];

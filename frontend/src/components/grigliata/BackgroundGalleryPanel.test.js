@@ -10,7 +10,7 @@ import {
 
 jest.mock('../../data/media/useTask07MediaReadMode', () => ({
   __esModule: true,
-  default: jest.fn(() => 'derivative-read'),
+  default: () => 'derivative-read',
 }));
 
 const backgrounds = [{
@@ -69,6 +69,7 @@ const buildProps = (overrides = {}) => ({
   onSelectedFolderIdChange: jest.fn(),
   onUploadBackgroundFiles: jest.fn(),
   onSelectBackground: jest.fn(),
+  onOpenLighting: jest.fn(),
   onUseBackground: jest.fn(),
   onNarrateBackground: jest.fn(),
   onCloseNarration: jest.fn(),
@@ -175,12 +176,17 @@ describe('BackgroundGalleryPanel', () => {
     expect(onRemoveNarrationBackground).toHaveBeenCalledWith(backgrounds[2]);
   });
 
-  test('shows the lighting indicator only for maps with imported lighting metadata', () => {
+  test('shows an always-available map lighting button with configured and muted states', () => {
+    const onSelectBackground = jest.fn();
+    const onOpenLighting = jest.fn();
     render(
       <BackgroundGalleryPanel
         {...buildProps({
+          onSelectBackground,
+          onOpenLighting,
           backgrounds: [{
             ...backgrounds[0],
+            lightingEnabled: false,
             lightingSummary: {
               sourceType: 'dungeon-alchemist-foundry',
               schemaVersion: 1,
@@ -193,7 +199,23 @@ describe('BackgroundGalleryPanel', () => {
       />
     );
 
-    expect(screen.getAllByLabelText('Lighting metadata imported')).toHaveLength(1);
+    const configuredButton = screen.getByRole('button', {
+      name: 'Open lighting for Sunken Ruins — configured, currently disabled',
+    });
+    const setupButton = screen.getByRole('button', { name: 'Set up lighting for Iron Keep' });
+
+    expect(configuredButton).toHaveAttribute('data-lighting-configured', 'true');
+    expect(configuredButton).toHaveAttribute('data-lighting-background-id', 'map-1');
+    expect(configuredButton).toHaveClass('text-cyan-200');
+    expect(setupButton).toHaveAttribute('data-lighting-configured', 'false');
+    expect(setupButton).toHaveAttribute('data-lighting-background-id', 'map-2');
+    expect(setupButton).toHaveClass('text-slate-500');
+    expect(screen.getByRole('button', { name: 'Set up lighting for Frost Hall' })).toBeInTheDocument();
+
+    fireEvent.click(setupButton);
+
+    expect(onSelectBackground).toHaveBeenCalledWith('map-2');
+    expect(onOpenLighting).toHaveBeenCalledWith('map-2', setupButton);
   });
 
   test('accepts MP4 uploads without attaching a legacy original video in the list', () => {
@@ -330,6 +352,14 @@ describe('BackgroundGalleryPanel', () => {
     });
     expect(container.querySelector('video')).not.toBeInTheDocument();
     expect(getBlob).toHaveBeenCalledWith({ path: poster.path }, poster.bytes);
+    expect(getBlob).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Move Private Video Map to folder',
+    }));
+
+    expect(rowImage).toHaveAttribute('src', 'blob:private-map-poster');
+    expect(getBlob).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'Preview Private Video Map' }));
     const previewVideo = within(screen.getByRole('dialog', {

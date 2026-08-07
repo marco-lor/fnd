@@ -17,11 +17,16 @@ const testPattern = /(?:^|[\\/])[^\\/]+\.(?:test|spec)\.[jt]sx?$/;
 const allowedRelativePaths = new Set([
   path.normalize('data/userData/userDataRepository.js'),
 ]);
-// These aggregate writes are an explicit, stage-gated compatibility seam for
-// legacy-read/shadow-verify. They must be removed before the new-only gate.
-const legacyAdapterRelativePaths = new Set([
+const forbiddenLegacyCommandRelativePaths = new Set([
   path.normalize('data/userData/legacyUserDataCommands.js'),
+  path.normalize('data/userData/legacyUserDataCommands.test.js'),
+  path.normalize('data/userData/userDataCommandRouting.js'),
+  path.normalize('data/userData/userDataCommandRouting.test.js'),
 ]);
+const forbiddenLegacyCommandModuleNames = [
+  'legacyUserDataCommands',
+  'userDataCommandRouting',
+];
 const BASELINE_SCHEMA_VERSION = 2;
 const FIRESTORE_OPERATION_NAMES = new Set([
   'addDoc',
@@ -424,7 +429,6 @@ const findDirectAccessesInSource = (source) => {
 const scanDirectUserAccesses = (sourceRoot = defaultSourceRoot) => walk(sourceRoot)
   .filter((filePath) => !testPattern.test(filePath))
   .filter((filePath) => !allowedRelativePaths.has(path.normalize(path.relative(sourceRoot, filePath))))
-  .filter((filePath) => !legacyAdapterRelativePaths.has(path.normalize(path.relative(sourceRoot, filePath))))
   .map((filePath) => {
     const matches = findDirectAccessesInSource(fs.readFileSync(filePath, 'utf8'));
     return {
@@ -437,6 +441,27 @@ const scanDirectUserAccesses = (sourceRoot = defaultSourceRoot) => walk(sourceRo
   })
   .filter(({count}) => count > 0)
   .sort((left, right) => left.path.localeCompare(right.path));
+
+const scanForbiddenLegacyCommandArtifacts = (sourceRoot = defaultSourceRoot) => walk(sourceRoot)
+  .flatMap((filePath) => {
+    const normalizedRelativePath = path.normalize(path.relative(sourceRoot, filePath));
+    const relativePath = normalizedRelativePath.replaceAll('\\', '/');
+    if (forbiddenLegacyCommandRelativePaths.has(normalizedRelativePath)) {
+      return [{path: relativePath, reason: 'forbidden-legacy-command-file'}];
+    }
+    const source = fs.readFileSync(filePath, 'utf8');
+    return forbiddenLegacyCommandModuleNames
+      .filter((moduleName) => source.includes(moduleName))
+      .map((moduleName) => ({
+        path: relativePath,
+        reason: 'forbidden-legacy-command-reference',
+        moduleName,
+      }));
+  })
+  .sort((left, right) => (
+    left.path.localeCompare(right.path)
+    || String(left.moduleName || '').localeCompare(String(right.moduleName || ''))
+  ));
 
 const createBaseline = (accesses) => ({
   schemaVersion: BASELINE_SCHEMA_VERSION,
@@ -498,6 +523,16 @@ const compareWithBaseline = (accesses, baseline) => {
 const main = () => {
   const printBaseline = process.argv.includes('--print-baseline');
   const accesses = scanDirectUserAccesses();
+  const forbiddenArtifacts = scanForbiddenLegacyCommandArtifacts();
+  if (forbiddenArtifacts.length) {
+    console.error('Task 05 obsolete command-routing boundary changed:');
+    for (const violation of forbiddenArtifacts) {
+      console.error(` - ${violation.path}: ${violation.reason}`);
+    }
+    console.error('Use canonical Task 05 commands directly. Legacy adapters and stage-based command routing are forbidden.');
+    process.exitCode = 1;
+    return;
+  }
   if (printBaseline) {
     console.log(JSON.stringify(createBaseline(accesses), null, 2));
     return;
@@ -514,7 +549,7 @@ const main = () => {
     return;
   }
   console.log(
-    `Task 05 user-data boundary is stable (${accesses.length} explicitly tracked legacy files; reference operations and mutation payloads locked; ${legacyAdapterRelativePaths.size} stage-gated legacy adapter; no new direct access).`
+    `Task 05 user-data boundary is stable (${accesses.length} explicitly tracked legacy files; reference operations and mutation payloads locked; obsolete command adapters forbidden; no new direct access).`
   );
 };
 
@@ -523,7 +558,7 @@ if (require.main === module) main();
 module.exports = {
   allowedRelativePaths,
   BASELINE_SCHEMA_VERSION,
-  legacyAdapterRelativePaths,
+  forbiddenLegacyCommandRelativePaths,
   collectCallExpressions,
   collectOperationsForAccess,
   compareWithBaseline,
@@ -533,4 +568,5 @@ module.exports = {
   main,
   readBaseline,
   scanDirectUserAccesses,
+  scanForbiddenLegacyCommandArtifacts,
 };

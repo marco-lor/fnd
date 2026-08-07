@@ -66,6 +66,7 @@ jest.mock('react-router-dom', () => {
 
 jest.mock('../../AuthContext', () => ({
   useAuthSession: jest.fn(),
+  useOptionalAuth: () => null,
   useShellProfile: jest.fn(),
 }));
 

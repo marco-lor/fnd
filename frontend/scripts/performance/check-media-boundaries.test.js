@@ -57,6 +57,11 @@ test('allows browser object URLs, Storage operations, and reserved paths only in
   );
   write(
     sourceRoot,
+    'data/media/foeMediaRetirement.js',
+    "await uploadBytes(ref(storage, preparedPath), file, preparedMetadata);\n"
+  );
+  write(
+    sourceRoot,
     'data/media/mediaPaths.js',
     "export const generatedRoot = 'media_assets/v1/';\n"
   );
@@ -66,6 +71,7 @@ test('allows browser object URLs, Storage operations, and reserved paths only in
     [
       "const preview = URL.createObjectURL(file);",
       'await deleteObject(ref(storage, oldPath));',
+      'await uploadBytes(ref(storage, preparedPath), file);',
       "const path = 'media_assets/v1/signed-in/u/a/1/original';",
       '',
     ].join('\n')
@@ -86,7 +92,8 @@ test('allows browser object URLs, Storage operations, and reserved paths only in
     [
       { kind: 'raw-object-url', line: 1 },
       { kind: 'direct-storage-operation', line: 2 },
-      { kind: 'generated-or-staging-path', line: 3 },
+      { kind: 'direct-storage-operation', line: 3 },
+      { kind: 'generated-or-staging-path', line: 4 },
       { kind: 'browser-derivative-generation', line: 1 },
       { kind: 'browser-derivative-generation', line: 2 },
     ]

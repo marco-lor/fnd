@@ -24,13 +24,15 @@ const SECURITY_HEADERS = Object.freeze({
   'Content-Security-Policy-Report-Only': [
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.gstatic.com https://apis.google.com",
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob: https://firebasestorage.googleapis.com https://storage.googleapis.com",
-    "media-src 'self' blob: https://firebasestorage.googleapis.com https://storage.googleapis.com",
-    "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://*.firebaseinstallations.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://firebase.googleapis.com https://firebasestorage.googleapis.com https://*.cloudfunctions.net wss://*.firebaseio.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' data: https://fonts.gstatic.com",
+    "img-src 'self' data: blob: https://firebasestorage.googleapis.com https://storage.googleapis.com http://127.0.0.1:9199",
+    "media-src 'self' blob: https://firebasestorage.googleapis.com https://storage.googleapis.com http://127.0.0.1:9199",
+    "connect-src 'self' https://*.googleapis.com https://apis.google.com https://www.google.com https://*.firebaseio.com https://*.firebaseapp.com https://*.firebaseinstallations.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://firebase.googleapis.com https://firebasestorage.googleapis.com https://*.cloudfunctions.net wss://*.firebaseio.com http://127.0.0.1:5001 http://127.0.0.1:8080 http://127.0.0.1:9099 http://127.0.0.1:9199",
     "object-src 'none'",
     "base-uri 'self'",
-    "frame-ancestors 'none'",
+    "frame-src 'self' http://127.0.0.1:9099 https://www.google.com",
+    'report-to fnd-performance-csp',
   ].join('; '),
 });
 const MIME_TYPES = Object.freeze({
@@ -118,19 +120,36 @@ const cacheControlForPath = (assetPath) => {
   return 'no-cache';
 };
 
+const classifyBuildEntry = (entry, absolutePath, fsImpl = fs) => {
+  let isDirectory = entry.isDirectory();
+  let isFile = entry.isFile();
+  if (entry.isSymbolicLink()) {
+    const entryStat = fsImpl.lstatSync(absolutePath);
+    if (entryStat.isSymbolicLink()) {
+      throw new Error(`Performance build snapshot refuses symbolic-link entry: ${entry.name}`);
+    }
+    // OneDrive cloud-file reparse points are reported as symbolic Dirents on
+    // Windows even though lstat identifies the hydrated entry as a regular
+    // file or directory. Accept only that verified regular shape.
+    isDirectory = entryStat.isDirectory();
+    isFile = entryStat.isFile();
+  }
+  if (isDirectory) return 'directory';
+  if (isFile) return 'file';
+  return null;
+};
+
 const collectBuildFiles = (directory, relativeDirectory = '', fsImpl = fs) => {
   const entries = fsImpl.readdirSync(directory, { withFileTypes: true })
     .sort((left, right) => left.name.localeCompare(right.name));
   return entries.flatMap((entry) => {
-    if (entry.isSymbolicLink()) {
-      throw new Error(`Performance build snapshot refuses symbolic-link entry: ${entry.name}`);
-    }
     const absolutePath = path.join(directory, entry.name);
     const relativePath = path.join(relativeDirectory, entry.name);
-    if (entry.isDirectory()) {
+    const entryKind = classifyBuildEntry(entry, absolutePath, fsImpl);
+    if (entryKind === 'directory') {
       return collectBuildFiles(absolutePath, relativePath, fsImpl);
     }
-    if (!entry.isFile()) return [];
+    if (entryKind !== 'file') return [];
     return [{ absolutePath, relativePath }];
   });
 };
@@ -540,6 +559,7 @@ module.exports = {
   SECURITY_HEADERS,
   SERVER_ID,
   STATIC_CACHE_CONTROL,
+  classifyBuildEntry,
   createBuildSnapshot,
   createDeterministicBuildServer,
   parseSingleByteRange,

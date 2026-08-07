@@ -22,7 +22,6 @@ import {
 } from './lazyBazaarEditors';
 import { useResources } from '../../data/userData/userDataHooks';
 import { createUserOperationId } from '../../data/userData/userDataCommands';
-import { isUserDataCommandStageResolved } from '../../data/userData/userDataCommandRouting';
 import MediaImage, { hasMediaAsset } from '../common/MediaImage';
 import { normalizeCatalogItemMedia } from './catalogItemMedia';
 
@@ -279,12 +278,10 @@ export default function Bazaar() {
   const [confirmationMessage, setConfirmationMessage] = useState("");
   const {
     data: resources,
-    stage: resourcesStage,
     status: resourcesStatus,
   } = useResources(user?.uid);
   const resourcesReady = resourcesStatus === 'fresh'
-    && resources !== null
-    && isUserDataCommandStageResolved(resourcesStage);
+    && resources !== null;
   const userGold = resourcesReady ? (resources?.stats?.gold ?? 0) : 0;
   const [purchasingItemId, setPurchasingItemId] = useState(null);
   const [pendingPurchaseItem, setPendingPurchaseItem] = useState(null);
@@ -705,7 +702,6 @@ export default function Bazaar() {
         user.uid,
         item,
         undefined,
-        resourcesStage,
         pendingPurchaseRetryKey
       );
       if (catalogScopeRef.current !== actionScopeKey) return;

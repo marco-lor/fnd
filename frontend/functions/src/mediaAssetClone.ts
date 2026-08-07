@@ -1,4 +1,5 @@
 import * as admin from "firebase-admin";
+import {FieldValue, Timestamp} from "firebase-admin/firestore";
 import {getStorage} from "firebase-admin/storage";
 import {mapWithConcurrency} from "./backendOperationCore";
 import {
@@ -282,12 +283,17 @@ export const copyTask07CanonicalMediaFamily = async (input: {
   clone: Task07FoeMediaClonePlan;
   concurrency: number;
   storage?: Task07MediaCloneStorage;
+  onCopy?: () => void;
 }): Promise<Task07CanonicalCloneResult> => {
   const storage = input.storage || adminStorage();
   const copied = await mapWithConcurrency(
     input.clone.entries,
     input.concurrency,
-    async (entry) => copyEntry({clone: input.clone, entry, storage})
+    async (entry) => {
+      const result = await copyEntry({clone: input.clone, entry, storage});
+      if (result.copied) input.onCopy?.();
+      return result;
+    }
   );
   const originalEntry = copied.find((_, index) =>
     input.clone.entries[index].role === "original");
@@ -318,9 +324,9 @@ export const copyTask07CanonicalMediaFamily = async (input: {
 
 export const buildTask07MediaCloneManifest = (input: {
   clone: Task07FoeMediaClonePlan;
-  now: admin.firestore.Timestamp;
-  leaseExpiresAt: admin.firestore.Timestamp;
-  cleanupAfter: admin.firestore.Timestamp;
+  now: Timestamp;
+  leaseExpiresAt: Timestamp;
+  cleanupAfter: Timestamp;
   attempt: number;
 }): admin.firestore.DocumentData => {
   const plan = input.clone.destinationPlan;
@@ -373,9 +379,9 @@ export const buildTask07MediaCloneManifest = (input: {
 
 export const task07MediaCloneProcessingPatch = (input: {
   clone: Task07FoeMediaClonePlan;
-  now: admin.firestore.Timestamp;
-  leaseExpiresAt: admin.firestore.Timestamp;
-  cleanupAfter: admin.firestore.Timestamp;
+  now: Timestamp;
+  leaseExpiresAt: Timestamp;
+  cleanupAfter: Timestamp;
   attempt: number;
 }): admin.firestore.UpdateData<admin.firestore.DocumentData> => ({
   state: "processing",
@@ -394,8 +400,8 @@ export const task07MediaCloneProcessingPatch = (input: {
 export const task07MediaCloneReadyPatch = (input: {
   clone: Task07FoeMediaClonePlan;
   result: Task07CanonicalCloneResult;
-  now: admin.firestore.Timestamp;
-  cleanupAfter: admin.firestore.Timestamp;
+  now: Timestamp;
+  cleanupAfter: Timestamp;
   attempt: number;
 }): admin.firestore.UpdateData<admin.firestore.DocumentData> => ({
   schemaVersion: MEDIA_SCHEMA_VERSION,
@@ -403,8 +409,8 @@ export const task07MediaCloneReadyPatch = (input: {
   state: "ready",
   generation: input.clone.sourceGeneration,
   generated: input.result.generated,
-  processing: admin.firestore.FieldValue.delete(),
-  cleanupTemporaryPaths: admin.firestore.FieldValue.delete(),
+  processing: FieldValue.delete(),
+  cleanupTemporaryPaths: FieldValue.delete(),
   error: {code: null, retryable: false, attempts: input.attempt},
   retention: {cleanupAfter: input.cleanupAfter},
   updatedAt: input.now,

@@ -8,10 +8,15 @@ import {
 import { withAsyncResourceOwner } from '../../performance/runtime';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../../AuthContext';
+import { useUserSettings } from '../../data/userData/userDataHooks';
 import {
   loadTask07MediaMode,
   task07ModeReadsDerivatives,
 } from '../../data/media/task07MediaControl';
+import {
+  acquirePrivateAudioAsset,
+  getPrivateAudioAssetKey,
+} from '../common/privateMediaAssets';
 import {
   computeGrigliataMusicPlaybackOffsetMs,
   EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE,
@@ -22,6 +27,7 @@ import {
   GRIGLIATA_MUSIC_PLAYBACK_STATUSES,
   normalizeGrigliataMusicPlaybackSession,
   normalizeGrigliataMusicPlaybackState,
+  normalizeGrigliataMusicMedia,
   normalizeGrigliataMusicVolume,
   sortGrigliataMusicPlaybackSessions,
 } from './music';
@@ -31,13 +37,14 @@ export const GRIGLIATA_MUSIC_STREAM_COLLECTION = 'grigliata_music_stream';
 export const GRIGLIATA_MUSIC_STREAM_DOC_ID = 'current';
 export const MAX_GLOBAL_GRIGLIATA_MUSIC_SESSIONS = 4;
 export const MAX_GLOBAL_GRIGLIATA_MUSIC_AUDIO_NODES = MAX_GLOBAL_GRIGLIATA_MUSIC_SESSIONS;
-export const GRIGLIATA_MUSIC_STREAM_SCHEMA_VERSION = 1;
+export const GRIGLIATA_MUSIC_STREAM_SCHEMA_VERSION = 2;
 
 const MAX_GLOBAL_GRIGLIATA_MUSIC_DURATION_MS = 60 * 60 * 1000;
 const MUSIC_STREAM_HASH_PATTERN = /^[a-f0-9]{64}$/;
 
 export const EMPTY_GRIGLIATA_MUSIC_STREAM = Object.freeze({
   schemaVersion: 0,
+  controlMode: '',
   revision: 0,
   volume: normalizeGrigliataMusicVolume(undefined),
   sessions: Object.freeze([]),
@@ -66,19 +73,6 @@ const isIntegerBetween = (value, minimum, maximum) => (
   && value <= maximum
 );
 
-const isSafeMusicAudioUrl = (value) => {
-  if (typeof value !== 'string' || !value.trim() || value.length > 2048) return false;
-  try {
-    const parsed = new URL(value.trim());
-    if (parsed.username || parsed.password) return false;
-    if (parsed.protocol === 'https:') return true;
-    return parsed.protocol === 'http:'
-      && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
-  } catch {
-    return false;
-  }
-};
-
 const isValidMusicStreamSession = (session) => {
   if (!session || typeof session !== 'object' || Array.isArray(session)) return false;
   const isActiveStatus = session.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING
@@ -102,10 +96,13 @@ const isValidMusicStreamSession = (session) => {
   const hasValidStartedAt = session.status === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING
     ? isIntegerBetween(session.startedAtMs, 1, Number.MAX_SAFE_INTEGER)
     : session.startedAtMs === 0;
+  const media = normalizeGrigliataMusicMedia(session.media);
   return isActiveStatus
     && hasValidIdentity
     && hasValidTrackName
-    && isSafeMusicAudioUrl(session.audioUrl)
+    && !Object.prototype.hasOwnProperty.call(session, 'audioUrl')
+    && media
+    && session.mediaAssetId === media.assetId
     && hasValidDuration
     && hasValidOffset
     && typeof session.loop === 'boolean'
@@ -121,6 +118,8 @@ export const normalizeGrigliataMusicStream = (
   const sessionCount = Array.isArray(stream.sessions) ? stream.sessions.length : 0;
   if (
     stream.schemaVersion !== GRIGLIATA_MUSIC_STREAM_SCHEMA_VERSION
+    || !['shadow', 'derivative-read', 'v1-write', 'canonical-only']
+      .includes(stream.controlMode)
     || !isIntegerBetween(stream.revision, 1, Number.MAX_SAFE_INTEGER)
     || typeof stream.sourceHash !== 'string'
     || !MUSIC_STREAM_HASH_PATTERN.test(stream.sourceHash)
@@ -151,7 +150,6 @@ export const normalizeGrigliataMusicStream = (
       !session.id
       || !session.trackId
       || !session.trackName
-      || !session.audioUrl
       || seenSessionIds.has(session.id)
     ) {
       reportDiagnostic('malformed-session', stream.sessions.length);
@@ -166,6 +164,7 @@ export const normalizeGrigliataMusicStream = (
 
   return {
     schemaVersion: stream.schemaVersion,
+    controlMode: stream.controlMode,
     revision: stream.revision,
     volume: normalizeGrigliataMusicVolume(stream.volume),
     sessions,
@@ -268,7 +267,6 @@ const comparableMusicStream = (stream) => ({
     status: session.status,
     trackId: session.trackId,
     trackName: session.trackName,
-    audioUrl: session.audioUrl,
     durationMs: session.durationMs,
     offsetMs: session.offsetMs,
     loop: session.loop === true,
@@ -309,9 +307,26 @@ const clearAudioSource = (audio) => {
   try { audio.load(); } catch { /* detached media cleanup */ }
 };
 
-const clearAudioSources = (audioMap) => {
-  audioMap.forEach((audio) => clearAudioSource(audio));
+const releaseAudioLease = (leaseMap, sessionId) => {
+  const entry = leaseMap.get(sessionId);
+  if (!entry) return;
+  leaseMap.delete(sessionId);
+  entry.lease.release();
+};
+
+const clearOwnedAudioSource = (audio, sessionId, leaseMap) => {
+  releaseAudioLease(leaseMap, sessionId);
+  clearAudioSource(audio);
+};
+
+const clearOwnedAudioSources = (audioMap, leaseMap) => {
+  audioMap.forEach((audio, sessionId) => {
+    clearOwnedAudioSource(audio, sessionId, leaseMap);
+  });
   audioMap.clear();
+  [...leaseMap.keys()].forEach((sessionId) => {
+    releaseAudioLease(leaseMap, sessionId);
+  });
 };
 
 const getPlaybackSessionId = (session) => session?.id || session?.trackId || '';
@@ -329,8 +344,44 @@ const createAudioLoadError = (message, cause) => {
   return error;
 };
 
-const ensureAudioSource = async (audio, audioUrl) => {
-  if (!audio || !audioUrl || audio.dataset.grigliataAudioUrl === audioUrl) return;
+const ensureAudioSource = async ({
+  acquireAudioAsset,
+  audio,
+  leaseMap,
+  session,
+  sessionId,
+}) => {
+  if (!audio) return;
+  let audioUrl = session.audioUrl || '';
+  const descriptor = session.media?.original || null;
+  if (descriptor) {
+    const sourceKey = getPrivateAudioAssetKey(descriptor);
+    if (!sourceKey) {
+      throw createAudioLoadError('Canonical shared music is invalid.');
+    }
+    let entry = leaseMap.get(sessionId);
+    if (!entry || entry.key !== sourceKey) {
+      releaseAudioLease(leaseMap, sessionId);
+      entry = {
+        key: sourceKey,
+        lease: acquireAudioAsset(descriptor),
+      };
+      leaseMap.set(sessionId, entry);
+    }
+    try {
+      const result = await entry.lease.promise;
+      if (leaseMap.get(sessionId) !== entry) return;
+      audioUrl = result.url;
+    } catch (error) {
+      if (leaseMap.get(sessionId) === entry) {
+        releaseAudioLease(leaseMap, sessionId);
+      }
+      throw createAudioLoadError('Unable to acquire canonical shared music.', error);
+    }
+  } else {
+    releaseAudioLease(leaseMap, sessionId);
+  }
+  if (!audioUrl || audio.dataset.grigliataAudioUrl === audioUrl) return;
   audio.dataset.grigliataAudioUrl = audioUrl;
   audio.src = audioUrl;
   try {
@@ -394,6 +445,7 @@ const TASK07_MUSIC_MODES = new Set([
   'shadow',
   'derivative-read',
   'v1-write',
+  'canonical-only',
 ]);
 
 const normalizeTask07MusicMode = (mode) => (
@@ -401,6 +453,7 @@ const normalizeTask07MusicMode = (mode) => (
 );
 
 export default function GlobalGrigliataMusicPlayer({
+  acquireAudioAsset = acquirePrivateAudioAsset,
   musicModeOverride = null,
   resolveMusicMode = loadTask07MediaMode,
   subscribeToPlaybackSessions = subscribeToGrigliataMusicPlaybackSessions,
@@ -408,7 +461,9 @@ export default function GlobalGrigliataMusicPlayer({
   subscribeToMusicStream = subscribeToGrigliataMusicStream,
 }) {
   const { user, userData } = useAuth();
+  const { data: userSettingsDomain } = useUserSettings();
   const audioRefs = useRef(new Map());
+  const audioLeaseRefs = useRef(new Map());
   const audioRefCallbacks = useRef(new Map());
   const playbackGenerationRef = useRef(0);
   const projectedEnvelopeRef = useRef(null);
@@ -424,7 +479,8 @@ export default function GlobalGrigliataMusicPlayer({
   const [projectedStreamReady, setProjectedStreamReady] = useState(false);
   const [blockedPlaybackSessionIds, setBlockedPlaybackSessionIds] = useState([]);
   const [endedPlaybackSessionKeys, setEndedPlaybackSessionKeys] = useState([]);
-  const isMusicMuted = userData?.settings?.[GRIGLIATA_MUSIC_MUTED_FIELD] === true;
+  const userSettings = userSettingsDomain?.settings || userData?.settings || {};
+  const isMusicMuted = userSettings[GRIGLIATA_MUSIC_MUTED_FIELD] === true;
   const userRole = typeof userData?.role === 'string' ? userData.role : '';
 
   useEffect(() => {
@@ -465,7 +521,7 @@ export default function GlobalGrigliataMusicPlayer({
     projectedEnvelopeRef.current = null;
     shadowComparisonRef.current = '';
     playbackGenerationRef.current += 1;
-    clearAudioSources(audioRefs.current);
+    clearOwnedAudioSources(audioRefs.current, audioLeaseRefs.current);
     if (!user?.uid || !musicMode) {
       setBlockedPlaybackSessionIds([]);
       setEndedPlaybackSessionKeys([]);
@@ -508,6 +564,17 @@ export default function GlobalGrigliataMusicPlayer({
       unsubscribes.push(subscribeToMusicStream(
         (nextMusicStream) => {
           const normalized = normalizeGrigliataMusicStream(nextMusicStream);
+          if (musicMode === 'canonical-only'
+            && normalized.revision > 0
+            && normalized.controlMode !== 'canonical-only') {
+            reportMusicStreamDiagnostic(
+              'stale-control-mode',
+              normalized.sessions.length
+            );
+            setProjectedStream(EMPTY_GRIGLIATA_MUSIC_STREAM);
+            setProjectedStreamReady(true);
+            return;
+          }
           if (normalized.revision === 0) {
             setProjectedStream(EMPTY_GRIGLIATA_MUSIC_STREAM);
             setProjectedStreamReady(true);
@@ -649,11 +716,13 @@ export default function GlobalGrigliataMusicPlayer({
       callback = (audio) => {
         const previousAudio = audioRefs.current.get(sessionId);
         if (audio) {
-          if (previousAudio && previousAudio !== audio) clearAudioSource(previousAudio);
+          if (previousAudio && previousAudio !== audio) {
+            clearOwnedAudioSource(previousAudio, sessionId, audioLeaseRefs.current);
+          }
           audioRefs.current.set(sessionId, audio);
           return;
         }
-        if (previousAudio) clearAudioSource(previousAudio);
+        if (previousAudio) clearOwnedAudioSource(previousAudio, sessionId, audioLeaseRefs.current);
         audioRefs.current.delete(sessionId);
         audioRefCallbacks.current.delete(sessionId);
       };
@@ -664,7 +733,7 @@ export default function GlobalGrigliataMusicPlayer({
 
   useEffect(() => () => {
     playbackGenerationRef.current += 1;
-    clearAudioSources(audioRefs.current);
+    clearOwnedAudioSources(audioRefs.current, audioLeaseRefs.current);
     audioRefCallbacks.current.clear();
   }, []);
 
@@ -693,13 +762,20 @@ export default function GlobalGrigliataMusicPlayer({
 
     try {
       if (clearIfStale()) return;
-      if (session.status !== GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING || !session.audioUrl) {
+      if (session.status !== GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING
+        || (!session.audioUrl && !session.media?.original)) {
         clearBlockedPlaybackSession(sessionId);
-        clearAudioSource(audio);
+        clearOwnedAudioSource(audio, sessionId, audioLeaseRefs.current);
         return;
       }
 
-      await ensureAudioSource(audio, session.audioUrl);
+      await ensureAudioSource({
+        acquireAudioAsset,
+        audio,
+        leaseMap: audioLeaseRefs.current,
+        session,
+        sessionId,
+      });
       if (clearIfStale()) return;
       const targetOffsetMs = computeGrigliataMusicPlaybackOffsetMs(session);
       if (!session.loop && session.durationMs > 0 && targetOffsetMs >= session.durationMs) {
@@ -723,19 +799,19 @@ export default function GlobalGrigliataMusicPlayer({
       }
       if (error?.name === 'GrigliataAudioLoadError') {
         console.error('Failed to prepare Grigliata music playback.');
-        clearAudioSource(audio);
+        clearOwnedAudioSource(audio, sessionId, audioLeaseRefs.current);
       } else {
         console.error('Failed to start Grigliata music playback.');
       }
       clearBlockedPlaybackSession(sessionId);
     }
-  }, [clearBlockedPlaybackSession, markPlaybackSessionBlocked, musicStream.volume]);
+  }, [acquireAudioAsset, clearBlockedPlaybackSession, markPlaybackSessionBlocked, musicStream.volume]);
 
   useEffect(() => {
     const activeSessionIds = new Set(playingSessions.map(getPlaybackSessionId).filter(Boolean));
     audioRefs.current.forEach((audio, sessionId) => {
       if (!activeSessionIds.has(sessionId)) {
-        clearAudioSource(audio);
+        clearOwnedAudioSource(audio, sessionId, audioLeaseRefs.current);
         audioRefs.current.delete(sessionId);
       }
     });
@@ -763,7 +839,7 @@ export default function GlobalGrigliataMusicPlayer({
 
   const handlePlaybackSessionEnded = useCallback((sessionId, sessionKey) => {
     const audio = audioRefs.current.get(sessionId);
-    if (audio) clearAudioSource(audio);
+    if (audio) clearOwnedAudioSource(audio, sessionId, audioLeaseRefs.current);
     clearBlockedPlaybackSession(sessionId);
     setEndedPlaybackSessionKeys((currentKeys) => (
       currentKeys.includes(sessionKey)

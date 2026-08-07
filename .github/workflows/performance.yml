@@ -18,8 +18,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            frontend/functions/package-lock.json
       - run: npm ci
+      - run: npm --prefix functions ci
+      - run: npm --prefix functions run build
       - run: npm run perf:test
       - run: npm run perf:check-firestore-imports
       - run: npm run perf:check-shared-config-boundaries
@@ -37,7 +44,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/functions/package-lock.json }
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            frontend/functions/package-lock.json
+      - run: npm --prefix .. ci
       - run: npm ci
       - run: npm run lint
       - run: npx tsc --noEmit
@@ -67,10 +80,12 @@ jobs:
       - run: npm --prefix functions run build
       - run: node --test --test-concurrency=1 functions/test/*.test.js
       - run: npm run perf:check-media-boundaries
-      - run: npx firebase emulators:exec --project demo-fnd-perf --only auth,firestore,functions,storage "node scripts/performance/rules-exec.js --task07-only"
+      - run: node scripts/performance/rules-emulators.js --task07-only
+        timeout-minutes: 15
 
   emulator-rules:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -80,7 +95,7 @@ jobs:
       - run: npm ci
       - run: npm --prefix functions ci
       - run: npm --prefix functions run build
-      - run: npx firebase emulators:exec --project demo-fnd-perf --only auth,firestore,functions,storage "node scripts/performance/rules-exec.js"
+      - run: node scripts/performance/rules-emulators.js
 
   hardened-build:
     runs-on: ubuntu-latest
@@ -134,7 +149,7 @@ jobs:
       - run: npm ci
       - run: npm --prefix functions ci
       - run: npm --prefix functions run build
-      - run: npx playwright install --with-deps firefox webkit
+      - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run perf:build
       - run: npm run perf:smoke-cross-browser
       - uses: actions/upload-artifact@v4

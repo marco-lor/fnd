@@ -1,10 +1,9 @@
 // file: ./frontend/src/components/Login.js
 import React, { useEffect, useRef, useState } from "react";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, fetchSignInMethodsForEmail } from "firebase/auth";
-import { auth, db } from "./firebaseConfig";
+import { auth } from "./firebaseConfig";
 import { useNavigate } from "react-router-dom";
-import { setDoc, doc } from "../performance/firestore";
-import { getSchema } from '../data/configRepository';
+import { updateCharacterCreation } from '../data/userData/userDataCommands';
 import { useAuthSession, useProfileState } from "../AuthContext";
 import AuroraBackground from "./backgrounds/AuroraBackground";
 import "./LoginAnimations.css"; // Added import
@@ -39,14 +38,10 @@ function Login() {
 
     if (profileStatus === "missing" && missingProfileCreationUid.current !== pendingLoginUid) {
       missingProfileCreationUid.current = pendingLoginUid;
-      const basicUserData = {
-        email: user.email,
-        role: "player",
-        created_at: new Date().toISOString(),
-        flags: { characterCreationDone: false },
-      };
-
-      setDoc(doc(db, "users", pendingLoginUid), basicUserData).catch((profileError) => {
+      updateCharacterCreation({
+        action: 'initialize',
+        retryKey: `login-profile-initialize:${pendingLoginUid}`,
+      }).catch((profileError) => {
         console.error("Login profile creation error:", profileError);
         setError("Login succeeded, but the character profile could not be created. Please try again.");
         setIsLoggingIn(false);
@@ -119,48 +114,10 @@ function Login() {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Fetch initial schema for character defaults
-      const schemaData = await getSchema('schema_pg');
-      let initialSchemaData = {};
-      if (schemaData) {
-        const fieldsToPick = [
-          "AltriParametri",
-          "Parametri",
-          "characterId",
-          "conoscenze",
-          "inventory",
-          "lingue",
-          "professioni",
-          "settings",
-          "spells",
-          "stats",
-          "tecniche",
-          "imageUrl"
-        ];
-        fieldsToPick.forEach(field => {
-          if (schemaData[field] !== undefined) {
-            initialSchemaData[field] = JSON.parse(JSON.stringify(schemaData[field]));
-          }
-        });
-      }
-
-      initialSchemaData.stats = {
-        ...(initialSchemaData.stats || {}),
-        essenzaTotal: Number(initialSchemaData.stats?.essenzaTotal) || 0,
-        essenzaCurrent: Number(initialSchemaData.stats?.essenzaCurrent) || 0,
-      };
-
-      // Prepare basic user data including schema defaults
-      const basicUserData = {
-        email: user.email,
-        role: "player",
-        created_at: new Date().toISOString(),
-        flags: { characterCreationDone: false },
-        ...initialSchemaData
-      };
-
-      // Save the initial user data to Firestore
-      await setDoc(doc(db, "users", user.uid), basicUserData);
+      await updateCharacterCreation({
+        action: 'initialize',
+        retryKey: `account-profile-initialize:${user.uid}`,
+      });
       
       setSuccessMessage("Account created successfully! Redirecting to character setup...");
       

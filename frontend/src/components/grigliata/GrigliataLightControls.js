@@ -146,34 +146,45 @@ export function GrigliataSelectedLightPanel({
 
   useEffect(() => {
     setDraftLabel(light?.label || '');
+  }, [light?.id, light?.label]);
+
+  useEffect(() => {
     setDraftBrightRadiusSquares(pxToSquares(light?.brightRadiusPx, grid));
+  }, [grid, light?.brightRadiusPx, light?.id]);
+
+  useEffect(() => {
     setDraftDimRadiusSquares(pxToSquares(light?.dimRadiusPx, grid));
+  }, [grid, light?.dimRadiusPx, light?.id]);
+
+  useEffect(() => {
     setDraftColor(light?.color || DEFAULT_LIGHT_SOURCE_COLOR);
-  }, [grid, light]);
+  }, [light?.color, light?.id]);
 
   if (!light) {
     return null;
   }
 
-  const commitRadius = (fieldName, value) => {
-    const radiusSquares = normalizeRadiusSquares(value);
-    if (fieldName === 'brightRadiusPx') {
-      setDraftBrightRadiusSquares(radiusSquares);
-    } else {
-      setDraftDimRadiusSquares(radiusSquares);
-    }
+  const buildDraftPatch = (overrides = {}) => ({
+    label: draftLabel.trim() || 'Light',
+    brightRadiusPx: normalizeRadiusSquares(draftBrightRadiusSquares) * cellSizePx,
+    dimRadiusPx: normalizeRadiusSquares(draftDimRadiusSquares) * cellSizePx,
+    color: draftColor,
+    ...overrides,
+  });
 
-    onUpdateLight?.(light.id, {
-      [fieldName]: radiusSquares * cellSizePx,
-    });
-  };
+  const commitDrafts = () => onUpdateLight?.(light.id, buildDraftPatch());
 
   const commitColor = (nextColor) => {
     const color = typeof nextColor === 'string' && /^#[\da-fA-F]{6}$/.test(nextColor)
       ? nextColor.toUpperCase()
       : DEFAULT_LIGHT_SOURCE_COLOR;
     setDraftColor(color);
-    onUpdateLight?.(light.id, { color });
+    onUpdateLight?.(light.id, buildDraftPatch({ color }));
+  };
+
+  const handlePanelBlur = (event) => {
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+    commitDrafts();
   };
 
   return (
@@ -183,6 +194,7 @@ export function GrigliataSelectedLightPanel({
       style={style}
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
+      onBlur={handlePanelBlur}
     >
       <div className="mb-3 flex items-center justify-between gap-3 border-b border-slate-800 pb-2">
         <div>
@@ -193,7 +205,10 @@ export function GrigliataSelectedLightPanel({
           <button
             type="button"
             aria-label="Close light editor"
-            onClick={onRequestClose}
+            onClick={() => {
+              commitDrafts();
+              onRequestClose();
+            }}
             className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-slate-500 hover:text-slate-100"
           >
             Close
@@ -210,7 +225,9 @@ export function GrigliataSelectedLightPanel({
             value={draftLabel}
             disabled={isPending}
             onChange={(event) => setDraftLabel(event.target.value)}
-            onBlur={() => onUpdateLight?.(light.id, { label: draftLabel.trim() || 'Light' })}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commitDrafts();
+            }}
             className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-semibold text-slate-100 outline-none focus:border-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
           />
         </label>
@@ -221,7 +238,7 @@ export function GrigliataSelectedLightPanel({
             type="checkbox"
             checked={light.enabled !== false}
             disabled={isPending}
-            onChange={(event) => onUpdateLight?.(light.id, { enabled: event.target.checked })}
+            onChange={(event) => onUpdateLight?.(light.id, buildDraftPatch({ enabled: event.target.checked }))}
             className="h-4 w-4 accent-amber-300"
           />
         </label>
@@ -237,7 +254,9 @@ export function GrigliataSelectedLightPanel({
               value={draftBrightRadiusSquares}
               disabled={isPending}
               onChange={(event) => setDraftBrightRadiusSquares(event.target.value)}
-              onBlur={() => commitRadius('brightRadiusPx', draftBrightRadiusSquares)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') commitDrafts();
+              }}
               className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-center text-sm font-semibold text-slate-100 outline-none focus:border-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
             />
           </label>
@@ -252,7 +271,9 @@ export function GrigliataSelectedLightPanel({
               value={draftDimRadiusSquares}
               disabled={isPending}
               onChange={(event) => setDraftDimRadiusSquares(event.target.value)}
-              onBlur={() => commitRadius('dimRadiusPx', draftDimRadiusSquares)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') commitDrafts();
+              }}
               className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-center text-sm font-semibold text-slate-100 outline-none focus:border-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
             />
           </label>
@@ -286,7 +307,7 @@ export function GrigliataSelectedLightPanel({
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
-            onClick={() => onDuplicateLight?.(light.id)}
+            onClick={() => onDuplicateLight?.(light.id, buildDraftPatch())}
             disabled={isPending}
             className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
           >

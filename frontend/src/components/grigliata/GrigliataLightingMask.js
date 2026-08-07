@@ -90,11 +90,11 @@ const buildLightCutoutGradientStops = (light) => {
   ];
 };
 
-const buildLightTintGradientStops = (light, isGlobalLight) => {
+const buildLightTintGradientStops = (light, isDefaultBrightness) => {
   const radius = getGradientRadius(light);
   const brightStop = getBrightStop(light, radius);
-  const dimOpacity = isGlobalLight ? GLOBAL_DIM_LIGHT_TINT_OPACITY : DIM_LIGHT_TINT_OPACITY;
-  const brightOpacity = isGlobalLight ? GLOBAL_BRIGHT_LIGHT_TINT_OPACITY : BRIGHT_LIGHT_TINT_OPACITY;
+  const dimOpacity = isDefaultBrightness ? GLOBAL_DIM_LIGHT_TINT_OPACITY : DIM_LIGHT_TINT_OPACITY;
+  const brightOpacity = isDefaultBrightness ? GLOBAL_BRIGHT_LIGHT_TINT_OPACITY : BRIGHT_LIGHT_TINT_OPACITY;
 
   return [
     0,
@@ -257,9 +257,10 @@ export default function GrigliataLightingMask({
   }
 
   const scene = metadata.scene || {};
-  const isGlobalLight = scene.globalLight === true;
+  const isGlobalLightEnabled = scene.globalLight === true;
+  const isDefaultBrightness = !isGlobalLightEnabled;
   const darknessOpacity = clamp(asFiniteNumber(scene.darkness, 0), 0, 1);
-  const hasDarkness = !isGlobalLight && darknessOpacity > 0;
+  const hasDarkness = isGlobalLightEnabled && darknessOpacity > 0;
   const hasLightContribution = lightPolygons.some((light) => (
     hasRenderablePolygon(light.dimPolygon) || hasRenderablePolygon(light.brightPolygon)
   ));
@@ -328,7 +329,7 @@ export default function GrigliataLightingMask({
             clipFunc={buildPolygonClipFunc([[clipPolygon]])}
             listening={false}
           >
-            {!isGlobalLight && (
+            {isGlobalLightEnabled && (
               <Circle
                 data-testid="lighting-light-dim-cutout"
                 x={light.origin.x}
@@ -344,7 +345,7 @@ export default function GrigliataLightingMask({
               />
             )}
 
-            {!isGlobalLight && asFiniteNumber(light.brightRadiusPx, 0) > 0 && (
+            {isGlobalLightEnabled && asFiniteNumber(light.brightRadiusPx, 0) > 0 && (
               <Circle
                 data-testid="lighting-light-bright-cutout"
                 x={light.origin.x}
@@ -376,7 +377,7 @@ export default function GrigliataLightingMask({
               fillRadialGradientStartRadius={0}
               fillRadialGradientEndPoint={{ x: 0, y: 0 }}
               fillRadialGradientEndRadius={radius}
-              fillRadialGradientColorStops={buildLightTintGradientStops(light, isGlobalLight)}
+              fillRadialGradientColorStops={buildLightTintGradientStops(light, isDefaultBrightness)}
               listening={false}
             />
 
@@ -392,7 +393,7 @@ export default function GrigliataLightingMask({
                 fillRadialGradientEndRadius={Math.min(radius, asFiniteNumber(light.brightRadiusPx, 0))}
                 fillRadialGradientColorStops={[
                   0,
-                  withAlpha(light.color, isGlobalLight ? GLOBAL_BRIGHT_LIGHT_TINT_OPACITY : BRIGHT_LIGHT_TINT_OPACITY),
+                  withAlpha(light.color, isDefaultBrightness ? GLOBAL_BRIGHT_LIGHT_TINT_OPACITY : BRIGHT_LIGHT_TINT_OPACITY),
                   1,
                   withAlpha(light.color, 0),
                 ]}
@@ -437,7 +438,7 @@ export default function GrigliataLightingMask({
         />
       )}
 
-      {!isGlobalLight && tokenVisionPolygons.map((vision) => (
+      {isGlobalLightEnabled && tokenVisionPolygons.map((vision) => (
         hasRenderablePolygon(vision.polygon) && (
           <Line
             key={`token-vision-${vision.tokenId || `${vision.origin.x}-${vision.origin.y}`}`}

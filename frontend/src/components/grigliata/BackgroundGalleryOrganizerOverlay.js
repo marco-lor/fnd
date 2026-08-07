@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { FiTrash2 } from 'react-icons/fi';
 import { isVideoBackground } from './boardUtils';
 import MediaImage, { hasMediaAsset } from '../common/MediaImage';
+import useTask07MediaReadMode from '../../data/media/useTask07MediaReadMode';
 import MediaFolderOrganizerOverlay from './MediaFolderOrganizerOverlay';
 import {
   buildGalleryFolderOptions,
@@ -40,14 +41,19 @@ const buildVideoPosterMedia = (manifest) => {
   };
 };
 
-const buildOrganizerThumbnail = (background) => {
+const buildOrganizerThumbnail = (
+  background,
+  { mapMediaMode, mapVideoMode },
+) => {
   const manifest = getBackgroundMediaManifest(background);
   const isVideo = isVideoGalleryBackground(background, manifest);
   const media = isVideo ? buildVideoPosterMedia(manifest) : background;
   const src = isVideo ? '' : (background?.imageUrl || '');
   const variant = isVideo ? 'poster' : 'thumbnail';
+  const compatibilityMode = isVideo ? mapVideoMode : mapMediaMode;
   return {
-    available: hasMediaAsset(media, { fallbackSrc: src, variant }),
+    available: hasMediaAsset(media, { compatibilityMode, fallbackSrc: src, variant }),
+    compatibilityMode,
     isVideo,
     media,
     src,
@@ -72,6 +78,8 @@ export default function BackgroundGalleryOrganizerOverlay({
   onDeleteBackgrounds,
 }) {
   const folderOptions = useMemo(() => buildGalleryFolderOptions(folders), [folders]);
+  const mapMediaMode = useTask07MediaReadMode({ purpose: 'map' });
+  const mapVideoMode = useTask07MediaReadMode({ purpose: 'map-video' });
 
   return (
     <MediaFolderOrganizerOverlay
@@ -98,12 +106,16 @@ export default function BackgroundGalleryOrganizerOverlay({
       isItemSelectionEnabled
       renderItem={({ item: background, itemId, moving, dragProps, isSelectionEnabled, isSelected, onSelectedChange }) => {
         const {
+          compatibilityMode,
           available: thumbnailAvailable,
           isVideo,
           media: thumbnailMedia,
           src: thumbnailSrc,
           variant: thumbnailVariant,
-        } = buildOrganizerThumbnail(background);
+        } = buildOrganizerThumbnail(background, {
+          mapMediaMode,
+          mapVideoMode,
+        });
         const resolvedFolderId = getResolvedGalleryFolderId(background, folders);
         const selectValue = getWritableGalleryFolderId(resolvedFolderId);
         const backgroundName = background.name || 'Untitled Map';
@@ -134,6 +146,8 @@ export default function BackgroundGalleryOrganizerOverlay({
               {thumbnailAvailable && (
                 <MediaImage
                   media={thumbnailMedia}
+                  mediaPurpose={isVideo ? "map-video" : "map"}
+                  compatibilityMode={compatibilityMode}
                   src={thumbnailSrc}
                   variant={thumbnailVariant}
                   alt={backgroundName}

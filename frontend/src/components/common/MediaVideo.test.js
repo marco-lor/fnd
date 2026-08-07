@@ -139,6 +139,54 @@ describe('MediaVideo', () => {
     }));
   });
 
+  test('canonical-only reads the verified original without a legacy fallback', () => {
+    const original = descriptor('strict');
+    const result = resolveMediaVideoAsset({
+      video_url: 'https://legacy.example/must-not-load.mp4',
+      media: versionedVideo(original),
+    }, {compatibilityMode: 'canonical-only'});
+
+    expect(result.candidates).toEqual([
+      expect.objectContaining({
+        privateAsset: expect.objectContaining({path: original.path}),
+        variant: 'original',
+      }),
+    ]);
+    expect(resolveMediaVideoAsset({
+      video_url: 'https://legacy.example/legacy-only.mp4',
+    }, {compatibilityMode: 'canonical-only'}).candidates).toHaveLength(0);
+  });
+
+  test('canonical-only never attaches a persisted legacy video URL to the DOM', () => {
+    render(
+      <MediaVideo
+        compatibilityMode="canonical-only"
+        media={{video_url: 'https://firebasestorage.example/legacy-only.mp4'}}
+        mediaPurpose="spell-video"
+        src="https://firebasestorage.example/legacy-only.mp4"
+        aria-label="Strict legacy-only video"
+      />
+    );
+
+    expect(screen.getByLabelText('Strict legacy-only video'))
+      .not.toHaveAttribute('src');
+  });
+
+  test('pending mode does not attach a legacy video URL', () => {
+    render(
+      <MediaVideo
+        compatibilityMode="pending"
+        media={{video_url: 'https://legacy.example/must-not-load.mp4'}}
+        aria-label="Pending video control"
+      />
+    );
+
+    expect(screen.getByLabelText('Pending video control')).not.toHaveAttribute('src');
+    expect(resolveMediaVideoAsset({
+      video_url: 'https://legacy.example/must-not-load.mp4',
+    }, {compatibilityMode: 'pending'}).candidates).toHaveLength(0);
+  });
+
   test('loads an authenticated MP4 lease and releases it on replacement and unmount', async () => {
     const runtime = configureRuntime();
     const first = descriptor('first');

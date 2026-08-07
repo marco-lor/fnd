@@ -63,9 +63,23 @@ export const isClientDeletableFoeStoragePath = (path) => {
   if (typeof path !== 'string') return false;
   const normalized = path.trim();
   if (!normalized.startsWith('foes/') || normalized.includes('\\')) return false;
+  if (normalized.startsWith('foes/task07-operations/')) return false;
   return normalized.split('/').every((part) => (
     Boolean(part) && part !== '.' && part !== '..'
   ));
+};
+
+export const deleteFoeDocumentThenCleanupStorage = async ({
+  deleteFoeDocument,
+  deleteStoragePath,
+  paths,
+}) => {
+  await deleteFoeDocument();
+  return Promise.allSettled(
+    [...new Set(Array.isArray(paths) ? paths : [])]
+      .filter(isClientDeletableFoeStoragePath)
+      .map((path) => deleteStoragePath(path))
+  );
 };
 
 export const resolveFoeMediaBinding = (foe) => {
@@ -173,11 +187,32 @@ export const shouldClientDeleteFoeMainStorageObject = (foe) => (
 const hasTask07DuplicateState = (foe) => {
   const root = isRecord(foe) ? foe : {};
   const general = isRecord(root.General) ? root.General : {};
-  return [root, general].some((container) => (
-    isRecord(container.media)
-    || isRecord(container.videoMedia)
-    || String(container.imagePath || '').trim().startsWith('media_assets/')
-  ));
+  const nested = [
+    ...(Array.isArray(root.tecniche) ? root.tecniche : []),
+    ...(Array.isArray(root.spells) ? root.spells : []),
+  ];
+  return [root, general, ...nested].some((container) => {
+    if (!isRecord(container)) return false;
+    if (
+      (hasOwn(container, 'media') && container.media != null)
+      || (hasOwn(container, 'videoMedia') && container.videoMedia != null)
+    ) return true;
+    return [
+      'imagePath',
+      'imageUrl',
+      'image_url',
+      'url',
+      'downloadUrl',
+      'videoPath',
+      'videoUrl',
+      'video_url',
+    ].some((field) => {
+      const value = container[field];
+      return typeof value === 'string'
+        ? Boolean(value.trim())
+        : value != null;
+    });
+  });
 };
 
 export const shouldUseDurableFoeDuplication = (

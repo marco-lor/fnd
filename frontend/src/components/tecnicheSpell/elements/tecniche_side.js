@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { GiCrossedSwords, GiMinotaur } from "react-icons/gi";
 import { FaPen } from "react-icons/fa";
-import { doc, updateDoc, getFirestore } from "../../../performance/firestore";
+import { updateResource } from '../../../data/userData/userDataCommands';
+import MediaImage, { hasMediaAsset } from '../../common/MediaImage';
+import MediaVideo from '../../common/MediaVideo';
 
 // Cache dismissal timeouts to prevent flickering
 const timeoutCache = new Map();
@@ -20,8 +22,14 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData, onEdit }) => 
   const cardRef = useRef(null);
   const overlayRef = useRef(null);
   const dismissTimeoutRef = useRef(null);
-  const hasImage = tecnica.image_url && tecnica.image_url.trim() !== "";
-  const db = getFirestore();
+  const legacyImageUrl = typeof tecnica.image_url === 'string'
+    ? tecnica.image_url.trim()
+    : '';
+  const legacyVideoUrl = typeof tecnica.video_url === 'string'
+    ? tecnica.video_url.trim()
+    : '';
+  const hasImage = Boolean(legacyImageUrl || hasMediaAsset(tecnica));
+  const hasVideo = Boolean(legacyVideoUrl || tecnica?.videoMedia);
   const azione = tecnica.Azione || tecnica.azione || "";
 
   // --- Mana validation logic with special reduction (ridCostoTec) ---
@@ -217,9 +225,13 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData, onEdit }) => 
   const confirmUseTecnica = async () => {
     if (!hasSufficientMana) return;
     try {
-      const userRef = doc(db, "users", userData.uid);
-      const newManaValue = currentMana - manaCost;
-      await updateDoc(userRef, { "stats.manaCurrent": newManaValue });
+      if (!userData?.uid) throw new Error('Authenticated user data is not ready.');
+      await updateResource({
+        resource: 'mana',
+        mode: 'delta',
+        value: -manaCost,
+        retryKey: `tecnica-use:${userData.uid}:${tecnicaName}`,
+      });
       setSuccessMessage(
         `Tecnica ${tecnica.Nome || tecnicaName} utilizzata! (-${manaCost} PM)`
       );
@@ -295,11 +307,14 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData, onEdit }) => 
       {/* Base card with image or icon */}
       <div className="relative h-full w-full overflow-hidden rounded-md">
         {hasImage ? (
-          <img
-            src={tecnica.image_url}
+          <MediaImage
+            media={tecnica}
+            mediaPurpose="technique"
+            src={legacyImageUrl}
             alt={tecnica.Nome || tecnicaName}
             className="w-full h-full object-cover"
             loading="lazy"
+            variant="card"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gray-800">
@@ -357,10 +372,12 @@ const TecnicaCard = ({ tecnicaName, tecnica, isPersonal, userData, onEdit }) => 
           className={overlayClasses}
           style={overlayStyle}
         >
-          {tecnica.video_url && (
+          {hasVideo && (
             <div className="absolute inset-0 z-0">
-              <video
-                src={tecnica.video_url}
+              <MediaVideo
+                media={tecnica}
+                mediaPurpose="technique-video"
+                src={legacyVideoUrl}
                 autoPlay
                 muted
                 loop

@@ -91,6 +91,58 @@ export const isValidFirestoreDocumentId = (value: unknown): boolean => {
     Buffer.byteLength(candidate, "utf8") <= 1500;
 };
 
+export interface AdminUserListPagination {
+  cursor: string | null;
+  limit: number;
+}
+
+export interface AdminUserListItem {
+  id: string;
+  characterId: string;
+  username: string;
+  email: string;
+  role: string;
+}
+
+export const normalizeAdminUserListPagination = (
+  input: unknown
+): AdminUserListPagination => {
+  const data = asRecord(input);
+  const limit = data.limit === undefined ? 100 : data.limit;
+  if (typeof limit !== "number" || !Number.isInteger(limit) ||
+    limit < 1 || limit > 100) {
+    throw new TypeError("limit must be an integer from 1 to 100.");
+  }
+  if (data.cursor === undefined) return {cursor: null, limit};
+  const cursor = asTrimmedString(data.cursor);
+  if (!isValidFirestoreDocumentId(cursor)) {
+    throw new TypeError("cursor must be a valid user document ID.");
+  }
+  return {cursor, limit};
+};
+
+export const canListPrivateUserLabels = (role: unknown): boolean => (
+  asTrimmedString(role).toLowerCase() === "webmaster"
+);
+
+export const buildAdminUserListItem = (
+  documentId: unknown,
+  source: unknown
+): AdminUserListItem => {
+  const id = asTrimmedString(documentId);
+  if (!isValidFirestoreDocumentId(id)) {
+    throw new TypeError("A valid user document ID is required.");
+  }
+  const data = asRecord(source);
+  return {
+    id,
+    characterId: asTrimmedString(data.characterId),
+    username: asTrimmedString(data.username),
+    email: asTrimmedString(data.email),
+    role: asTrimmedString(data.role).toLowerCase(),
+  };
+};
+
 export const resolveUserDataCommandTargetUid = (
   actorUid: unknown,
   requestedUserId: unknown,
@@ -319,6 +371,54 @@ export const applyResourceMutation = (
   const amount = asFiniteNumber(value, Number.NaN);
   if (!Number.isFinite(amount)) return null;
   return mode === "delta" ? asFiniteNumber(current) + amount : amount;
+};
+
+export const normalizeResourceTotalValue = (value: unknown): number | null => {
+  const total = asFiniteNumber(value, Number.NaN);
+  return Number.isFinite(total) && total >= 0 ? total : null;
+};
+
+export interface TurnEffectConsumption {
+  changed: boolean;
+  effects: UnknownRecord;
+  barrierExpired: boolean;
+}
+
+export const consumeActiveTurnEffects = (
+  source: unknown
+): TurnEffectConsumption => {
+  const effects = asRecord(source);
+  let changed = false;
+  const nextEffects = Object.fromEntries(Object.entries(effects).map(
+    ([key, value]) => {
+      const effect = asRecord(value);
+      const remaining = typeof effect.remainingTurns === "number" &&
+        Number.isFinite(effect.remainingTurns)
+        ? effect.remainingTurns
+        : null;
+      if (remaining === null) return [key, value];
+      const nextRemaining = Math.max(0, remaining - 1);
+      if (nextRemaining !== remaining) changed = true;
+      return [key, {...effect, remainingTurns: nextRemaining}];
+    }
+  ));
+  const barrier = asRecord(nextEffects.barriera);
+  const barrierExpired = asFiniteNumber(
+    barrier.totalTurns,
+    0
+  ) > 0 && asFiniteNumber(barrier.remainingTurns, 0) <= 0;
+  if (barrierExpired) {
+    nextEffects.barriera = {
+      ...barrier,
+      remainingTurns: 0,
+      totalTurns: 0,
+    };
+  }
+  return {
+    changed,
+    effects: nextEffects,
+    barrierExpired,
+  };
 };
 
 export const applyConsumableCap = (

@@ -4,7 +4,7 @@ import BackgroundGalleryOrganizerOverlay from './BackgroundGalleryOrganizerOverl
 
 jest.mock('../../data/media/useTask07MediaReadMode', () => ({
   __esModule: true,
-  default: jest.fn(() => 'derivative-read'),
+  default: () => 'derivative-read',
 }));
 
 const folders = [
@@ -167,7 +167,7 @@ describe('BackgroundGalleryOrganizerOverlay', () => {
                 schemaVersion: 1,
                 state: 'ready',
                 variants: {
-                  thumbnail: {
+                  gallery: {
                     url: imageThumbnailUrl,
                     width: 320,
                     height: 180,

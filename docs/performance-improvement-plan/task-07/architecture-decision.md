@@ -1,8 +1,8 @@
 # Task 07 architecture decision
 
-Date: 2026-07-26
+Date: 2026-07-31
 
-Status: implemented local candidate; default off; production activation blocked
+Status: inactive deployment candidate; non-legacy production activation gated
 
 ## Context
 
@@ -140,15 +140,16 @@ that compact authenticated-shell stream.
 
 ### 7. Default the new write path off
 
-The client media pipeline is enabled only when either
-`REACT_APP_TASK07_MEDIA_PIPELINE=1` or the exact performance harness flag
-`REACT_APP_FND_PERF=1` is present. Normal and production builds leave the path
-off. The exact `demo-fnd-perf` harness enables it for emulator-only evidence.
+The client and Functions resolve Task 07 mode from the versioned Firestore
+control document `utils/task07_media`. Missing, malformed, and explicit
+`legacy` control all fail closed to existing legacy upload behavior. The former
+`REACT_APP_TASK07_MEDIA_PIPELINE` build flag is a compatibility no-op and
+cannot activate the pipeline.
 
-A missing or false flag returns the existing legacy upload behavior. The
-versioned control document supports `legacy`, `shadow`, `derivative-read`, and
-`v1-write` with purpose, role, and UID allowlists; malformed control fails
-closed to legacy behavior.
+The control supports `legacy`, `shadow`, `derivative-read`, and `v1-write`
+with purpose, role, and UID allowlists. All three allowlists must match an actor
+before a non-legacy mode applies. Exact `demo-fnd-perf` fixtures seed reviewed
+control values for emulator-only evidence.
 
 ### 8. Keep migration emulator-only
 
@@ -194,8 +195,8 @@ bounded cache, lifecycle cleanup, low-node shell, and default-off consumer
 integration. Existing records continue to render through legacy fallbacks, and
 `npm start` retains its existing contract.
 
-The trade-off is that the candidate is deliberately additive and incomplete
-relative to the full Task 07 definition of done. Production activation remains
-blocked by the final full regression, emulator, route/cross-browser, soak, and
-repeatability evidence; V1-owned token copy/spawn semantics; and a reviewed
-production migration/backup/restore path.
+The compatibility-preserving code can be reviewed for an inactive deployment
+while the control remains legacy. Non-legacy production activation is a
+separate operation and remains gated by App Check, exact-origin CORS, canary
+lifecycle evidence, duplicate/copy ownership, cleanup monitoring, and reviewed
+production backup, reconciliation, migration, and rollback procedures.

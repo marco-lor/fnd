@@ -53,7 +53,9 @@ describe('Task 07 media policy', () => {
     );
     expect(getTask07MediaPurpose('map')).toEqual(expect.objectContaining({
       maxBytes: 15 * 1024 * 1024,
-      maxPixels: 32_000_000,
+      maxWidth: 9600,
+      maxHeight: 9600,
+      maxPixels: 92_160_000,
     }));
     expect(getTask07MediaPurpose('map-video')).toEqual(expect.objectContaining({
       maxDurationMs: 10 * 60 * 1000,

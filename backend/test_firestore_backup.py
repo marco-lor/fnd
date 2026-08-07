@@ -7,6 +7,7 @@ from pathlib import Path
 
 try:
     from firestore_backup import (
+        FirestoreAdminAdapter,
         apply_restore_plan,
         assert_approved_restore_report,
         assert_safe_firestore_target,
@@ -22,6 +23,7 @@ try:
     )
 except ModuleNotFoundError:  # Supports root-level unittest discovery.
     from backend.firestore_backup import (
+        FirestoreAdminAdapter,
         apply_restore_plan,
         assert_approved_restore_report,
         assert_safe_firestore_target,
@@ -96,6 +98,49 @@ class FakeAdapter:
 
 
 class FirestoreBackupTests(unittest.TestCase):
+    def test_admin_adapter_uses_public_list_documents_api(self):
+        created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        updated_at = datetime(2026, 1, 2, tzinfo=timezone.utc)
+
+        class Snapshot:
+            exists = True
+            create_time = created_at
+            update_time = updated_at
+
+            @staticmethod
+            def to_dict():
+                return {"role": "player"}
+
+        class Reference:
+            path = "users/example"
+
+            @staticmethod
+            def get():
+                return Snapshot()
+
+        class Collection:
+            @staticmethod
+            def list_documents():
+                return [Reference()]
+
+        class Client:
+            @staticmethod
+            def collection(collection_path):
+                self.assertEqual(collection_path, "users")
+                return Collection()
+
+        records = list(FirestoreAdminAdapter(Client()).list_documents("users"))
+        self.assertEqual(
+            records,
+            [{
+                "path": "users/example",
+                "exists": True,
+                "fields": {"role": "player"},
+                "create_time": created_at,
+                "update_time": updated_at,
+            }],
+        )
+
     def test_value_encoding_is_unambiguous_and_round_trips_special_types(self):
         source = {
             "$firestore": "ordinary user key",

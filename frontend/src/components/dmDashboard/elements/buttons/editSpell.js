@@ -1,11 +1,7 @@
 // file: ./frontend/src/components/dmDashboard/elements/buttons/editSpell.js
 import React, { useEffect, useState } from "react";
 import { SpellOverlay } from "../../../common/SpellOverlay";
-import { db } from "../../../firebaseConfig";
 import { saveSpellForUser } from "../../../common/userOwnedMedia";
-import {
-  doc, getDoc,
-} from "../../../../performance/firestore";
 import { getSchema } from '../../../../data/configRepository';
 import useTask07MediaOperationOwner from '../../../../data/media/useTask07MediaOperationOwner';
 
@@ -19,10 +15,15 @@ import useTask07MediaOperationOwner from '../../../../data/media/useTask07MediaO
  *  • onClose(bool)     true  ⇒ updated
  *                      false ⇒ cancelled / error
  */
-export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
+export function EditSpellOverlay({
+  userId,
+  userLabel,
+  spellName,
+  spellData,
+  onClose,
+}) {
   const task07MediaOperationOwner = useTask07MediaOperationOwner();
   const [schema,   setSchema]   = useState(null);
-  const [userName, setUserName] = useState("");
 
   /* fetch schema + user once */
   useEffect(() => {
@@ -30,12 +31,9 @@ export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
       try {
         const schemaData = await getSchema('schema_spell');
         if (schemaData) setSchema(schemaData);
-        const userSnap   = await getDoc(doc(db, "users", userId));
-        if (userSnap.exists())
-          setUserName(userSnap.data().characterId || userSnap.data().email || "Unknown User");
       } catch (err) { console.error("Fetch error:", err); }
     })();
-  }, [userId]);
+  }, []);
 
   /* ↑ when loaded, we can show overlay */
   const handleOverlayClose = async (result) => {
@@ -76,7 +74,7 @@ export function EditSpellOverlay({ userId, spellName, spellData, onClose }) {
       <SpellOverlay
         mode="edit"
         schema={schema}
-        userName={userName}
+        userName={userLabel || 'Unknown User'}
         initialData={spellData}
         onClose={handleOverlayClose}
       />

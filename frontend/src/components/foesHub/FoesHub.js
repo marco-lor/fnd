@@ -1,5 +1,5 @@
 // DM Foes Hub: create, list, expand, edit, delete foes in Firestore "foes" collection
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { auth, db } from '../firebaseConfig';
 import {
@@ -7,7 +7,9 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   onSnapshot,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -34,12 +36,17 @@ import MediaImage, { hasMediaAsset } from '../common/MediaImage';
 import {
   buildCanonicalFoeClientPayload,
   classifyFoeImageSave,
-  collectClientDeletableFoeMainStoragePaths,
   collectClientDeletableFoeStoragePaths,
+  deleteFoeDocumentThenCleanupStorage,
   isClientDeletableFoeStoragePath,
   isDefinitiveFoeDuplicationError,
   shouldUseDurableFoeDuplication,
 } from './foeMediaLifecycle';
+import {
+  assertFoeRecoveryFence,
+  persistFoeRecoveryWithMarker,
+  runFencedFoeRecoveryWrite,
+} from './foeRecoveryLifecycle';
 
 const duplicateFoeWithAssetsLegacy = getCallable('duplicateFoeWithAssets');
 const duplicateFoeWithAssetsV2 = getCallable('duplicateFoeWithAssetsV2');
@@ -258,6 +265,7 @@ const FoesHub = () => {
   const [dupName, setDupName] = useState('');
   const [dupBusy, setDupBusy] = useState(false);
   const [dupError, setDupError] = useState('');
+  const pendingFoeRetirementRef = useRef(null);
 
   // Subscribe foes
   useEffect(() => {
@@ -346,16 +354,13 @@ const FoesHub = () => {
 
       const clientDeletablePaths = collectClientDeletableFoeStoragePaths(foe);
       // Canonical main media is retired by the Firestore deletion trigger.
-      // Only legacy main and nested legacy objects remain client-deletable.
-      try {
-        await Promise.allSettled(
-          clientDeletablePaths.map((path) => deleteLegacyStoragePath(path))
-        );
-      } catch (e) {
-        console.warn('Some foe asset deletions failed', e);
-      }
-
-      await deleteDoc(doc(db, 'foes', foe.id));
+      // Delete Firestore first so a failed document deletion can never leave a
+      // live foe pointing at objects that this client already removed.
+      await deleteFoeDocumentThenCleanupStorage({
+        deleteFoeDocument: () => deleteDoc(doc(db, 'foes', foe.id)),
+        deleteStoragePath: deleteLegacyStoragePath,
+        paths: clientDeletablePaths,
+      });
     } catch (e) {
       console.error('delete foe failed', e);
       setError('Eliminazione fallita.');
@@ -365,6 +370,8 @@ const FoesHub = () => {
   };
 
   const handleSave = async (foeData, options = {}) => {
+    const uploadedLegacyPaths = new Set();
+    let mediaMetadataCommitted = false;
     try {
       setBusy(true);
       setError('');
@@ -421,6 +428,7 @@ const FoesHub = () => {
           const fname = `${safe}_${Date.now()}`;
           const path = `foes/${folder}/${fname}`;
           ({ downloadUrl: eUrl } = await uploadLegacyImage(path, entry.imageFile));
+          uploadedLegacyPaths.add(path);
           ePath = path;
         } else if (entry.removeImage) {
           eUrl = '';
@@ -531,16 +539,22 @@ const FoesHub = () => {
               kind: 'foe',
               previousAssetId: receiptPreviousAssetId,
               expectedRevision: receiptExpectedRevision,
-              prepareEntity: () => (
-                editing?.id
-                  ? updateDoc(foeRef, payload)
-                  : setDoc(foeRef, {
+              prepareEntity: async () => {
+                if (editing?.id) {
+                  await updateDoc(foeRef, payload);
+                } else {
+                  await setDoc(foeRef, {
                     ...payload,
                     created_at: serverTimestamp(),
-                  })
-              ),
+                  });
+                }
+                mediaMetadataCommitted = true;
+              },
               ...(editing?.id ? {} : {
-                rollbackPreparedEntity: () => deleteDoc(foeRef),
+                rollbackPreparedEntity: async () => {
+                  await deleteDoc(foeRef);
+                  mediaMetadataCommitted = false;
+                },
               }),
               signal,
             }),
@@ -560,89 +574,190 @@ const FoesHub = () => {
       }
 
       if (imageSave.mode === 'canonical-remove') {
-        const foeRef = doc(db, 'foes', editing.id);
-        const withTec = Array.isArray(basePayload.tecniche)
-          ? await Promise.all(basePayload.tecniche.map((entry) => uploadEntryImage('tecniche', entry)))
-          : [];
-        const withSp = Array.isArray(basePayload.spells)
-          ? await Promise.all(basePayload.spells.map((entry) => uploadEntryImage('spells', entry)))
-          : [];
-        basePayload.tecniche = withTec;
-        basePayload.spells = withSp;
-
-        // Persist only client-owned, nonmedia fields before asking the server
-        // to atomically detach and retire the canonical asset.
-        await updateDoc(foeRef, {
-          ...basePayload,
-          updated_at: serverTimestamp(),
-        });
-        const { retireTask07MediaAsset } = await import(
+        const actorUid = auth.currentUser?.uid || '';
+        const {
+          buildFoeMediaRetirementReconciliationMarker,
+          buildFoeMediaRetirementIntent,
+          isDefinitiveFoeRetirementError,
+          planFoeMediaRetirementRecovery,
+          runFoeMediaRetirement,
+          shouldSaveCurrentFoeAfterRetirementRecovery,
+        } = await import(
           /* webpackChunkName: "feature-task07-media" */
-          '../../data/media/mediaPipeline'
+          '../../data/media/foeMediaRetirement'
         );
-        await retireTask07MediaAsset(imageSave.binding.assetId);
-
-        // Retirement acknowledgement clears the document reference. The only
-        // browser-owned main object that can now be removed is a legacy
-        // rollback fallback under foes/**.
-        try {
-          const legacyFallbackPaths = new Set([
-            ...collectClientDeletableFoeMainStoragePaths(editing),
-            ...collectClientDeletableFoeMainStoragePaths(currentFoe),
-            ...collectClientDeletableFoeMainStoragePaths({
-              imagePath: originalImagePath,
-              imageUrl: originalImageUrl,
-            }),
-          ]);
-          await Promise.allSettled(
-            [...legacyFallbackPaths].map((path) => deleteLegacyStoragePath(path))
-          );
-          await cleanupReplacedEntryImages(withTec, withSp);
-        } catch (cleanupError) {
-          console.warn('cleanup retired foe fallback failed', cleanupError);
+        let retirement = await buildFoeMediaRetirementIntent({
+          payload: basePayload,
+          assetId: imageSave.binding.assetId,
+          expectedRevision: imageSave.binding.revision,
+          expectedUpdatedAt: currentFoe?.updated_at ?? editing?.updated_at ?? null,
+        });
+        const pendingRetirement = pendingFoeRetirementRef.current;
+        let saveCurrentAfterRecovery = false;
+        let recoveryMarker = null;
+        let preflightRecoveryFence = false;
+        if (pendingRetirement) {
+          const liveAssetId = currentFoe?.media?.assetId
+            || currentFoe?.General?.media?.assetId
+            || null;
+          const recovery = planFoeMediaRetirementRecovery({
+            currentRetirement: retirement,
+            foeId: editing.id,
+            liveAssetId,
+            pendingRetirement,
+          });
+          if (recovery.action === 'run-pending') {
+            retirement = recovery.retirement;
+          } else if (recovery.action === 'save-current') {
+            recoveryMarker = recovery.marker;
+            saveCurrentAfterRecovery = true;
+          } else if (recovery.action !== 'run-current') {
+            const { abandonDurableFoeMediaRetirement } = await import(
+              /* webpackChunkName: "feature-task07-media" */
+              '../../data/media/foeMediaRetirement'
+            );
+            const settlement = await abandonDurableFoeMediaRetirement(
+              pendingRetirement
+            );
+            saveCurrentAfterRecovery =
+              shouldSaveCurrentFoeAfterRetirementRecovery({
+                action: recovery.action,
+                settlement,
+              });
+            if (saveCurrentAfterRecovery) {
+              recoveryMarker = buildFoeMediaRetirementReconciliationMarker({
+                currentUpdatedAt: currentFoe?.updated_at ?? editing?.updated_at,
+                foeId: editing.id,
+                pendingRetirement,
+                settlement,
+              });
+              pendingFoeRetirementRef.current = recoveryMarker;
+              preflightRecoveryFence = true;
+            } else {
+              pendingFoeRetirementRef.current = null;
+            }
+          }
         }
-
-        setModalOpen(false);
-        setEditing(null);
-        return;
+        if (!saveCurrentAfterRecovery) {
+          try {
+            await runFoeMediaRetirement({
+              actorUid,
+              ...retirement,
+              onOperation: (operation) => {
+                pendingFoeRetirementRef.current = {
+                  actorUid,
+                  immutableIntent: operation.immutableIntent,
+                  filesByKey: retirement.filesByKey,
+                };
+              },
+            });
+          } catch (retirementError) {
+            if (retirementError?.committed === true) {
+              console.warn(
+                'foe retirement committed but local receipt cleanup failed',
+                retirementError
+              );
+            } else {
+              if (isDefinitiveFoeRetirementError(retirementError)) {
+                pendingFoeRetirementRef.current = null;
+              }
+              throw retirementError;
+            }
+          }
+          pendingFoeRetirementRef.current = null;
+          setModalOpen(false);
+          setEditing(null);
+          return;
+        }
+        // The old operation removed the canonical binding. Persist the newer
+        // form through the existing non-canonical path below so its edits and
+        // nested image selections are not replaced by the completed intent.
+        if (preflightRecoveryFence) {
+          const fresh = await getDoc(doc(db, 'foes', editing.id));
+          assertFoeRecoveryFence({
+            current: fresh.exists() ? fresh.data() : null,
+            exists: fresh.exists(),
+            expectedUpdatedAt:
+              recoveryMarker.reconciliation.expectedUpdatedAt,
+          });
+        }
       }
 
-      let imageUrl = basePayload.imageUrl || null;
-      let imagePath = basePayload.imagePath || null;
+      const recoveryMarker = pendingFoeRetirementRef.current?.reconciliation
+        ?.status === 'save-current'
+        ? pendingFoeRetirementRef.current
+        : null;
+      const storedRecoveryPayload = recoveryMarker?.reconciliation?.payload;
+      let imageUrl = storedRecoveryPayload?.imageUrl
+        ?? basePayload.imageUrl
+        ?? null;
+      let imagePath = storedRecoveryPayload?.imagePath
+        ?? basePayload.imagePath
+        ?? null;
 
       // If a new file selected, upload to foes/ and get URL
-      if (imageFile) {
+      if (imageFile && !storedRecoveryPayload) {
         const safeName = (basePayload?.name || 'foe').toString().trim().replace(/\s+/g, '_').slice(0, 40) || 'foe';
         const fileName = `${safeName}_${Date.now()}`;
         const path = `foes/${fileName}`;
         ({ downloadUrl: imageUrl } = await uploadLegacyImage(path, imageFile));
+        uploadedLegacyPaths.add(path);
         imagePath = path;
       }
 
       // Remove image explicit request
-      if (removeImage) {
+      if (removeImage && !storedRecoveryPayload) {
         imageUrl = null;
         imagePath = null;
       }
 
-      const withTec = Array.isArray(basePayload.tecniche) ? await Promise.all(basePayload.tecniche.map((t) => uploadEntryImage('tecniche', t))) : [];
-      const withSp = Array.isArray(basePayload.spells) ? await Promise.all(basePayload.spells.map((s) => uploadEntryImage('spells', s))) : [];
+      const withTec = storedRecoveryPayload
+        ? storedRecoveryPayload.tecniche || []
+        : Array.isArray(basePayload.tecniche)
+          ? await Promise.all(basePayload.tecniche.map((t) => uploadEntryImage('tecniche', t)))
+          : [];
+      const withSp = storedRecoveryPayload
+        ? storedRecoveryPayload.spells || []
+        : Array.isArray(basePayload.spells)
+          ? await Promise.all(basePayload.spells.map((s) => uploadEntryImage('spells', s)))
+          : [];
       basePayload.tecniche = withTec;
       basePayload.spells = withSp;
 
-      const payload = {
+      const payload = storedRecoveryPayload || {
         ...basePayload,
         imageUrl: normalizeImageUrl(imageUrl) || '',
         imagePath: imagePath || '',
         updated_at: serverTimestamp(),
       };
+      if (recoveryMarker && !storedRecoveryPayload) {
+        recoveryMarker.reconciliation.payload = payload;
+      }
 
       let docId = editing?.id;
       if (docId) {
-        await updateDoc(doc(db, 'foes', docId), payload);
+        const foeRef = doc(db, 'foes', docId);
+        if (recoveryMarker) {
+          await persistFoeRecoveryWithMarker({
+            marker: recoveryMarker,
+            markerRef: pendingFoeRetirementRef,
+            persist: () => runFencedFoeRecoveryWrite({
+              db,
+              expectedUpdatedAt:
+                recoveryMarker.reconciliation.expectedUpdatedAt,
+              foeRef,
+              payload,
+              runTransaction,
+            }),
+          });
+        } else {
+          await updateDoc(foeRef, payload);
+        }
+        mediaMetadataCommitted = true;
       } else {
         const added = await addDoc(collection(db, 'foes'), { ...payload, created_at: serverTimestamp() });
         docId = added.id;
+        mediaMetadataCommitted = true;
       }
 
       // If we uploaded/replaced or removed, delete the original image from storage
@@ -669,6 +784,23 @@ const FoesHub = () => {
       setEditing(null);
     } catch (e) {
       console.error('save foe failed', e);
+      const canRollbackLegacyUploads = !mediaMetadataCommitted
+        && e?.committed !== true
+        && e?.commitAttempted !== true;
+      if (canRollbackLegacyUploads && uploadedLegacyPaths.size) {
+        const rollbackPaths = [...uploadedLegacyPaths];
+        const rollbackResults = await Promise.allSettled(
+          rollbackPaths.map((path) => deleteLegacyStoragePath(path))
+        );
+        rollbackResults.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            console.warn(
+              `Foe upload rollback failed for ${rollbackPaths[index]}:`,
+              result.reason
+            );
+          }
+        });
+      }
       setModalError(e?.message || 'Salvataggio fallito.');
     } finally {
       setBusy(false);
@@ -759,8 +891,21 @@ const FoesHub = () => {
     <FoeFormModal
       open
       initial={initialForModal}
-      onCancel={() => {
+      onCancel={async () => {
         if (busy) return;
+        const pending = pendingFoeRetirementRef.current;
+        if (pending && !pending.reconciliation) {
+          try {
+            const { abandonDurableFoeMediaRetirement } = await import(
+              /* webpackChunkName: "feature-task07-media" */
+              '../../data/media/foeMediaRetirement'
+            );
+            await abandonDurableFoeMediaRetirement(pending);
+          } catch (abandonError) {
+            console.warn('foe retirement abandonment was deferred', abandonError);
+          }
+        }
+        pendingFoeRetirementRef.current = null;
         setModalOpen(false);
         setEditing(null);
         setModalError('');

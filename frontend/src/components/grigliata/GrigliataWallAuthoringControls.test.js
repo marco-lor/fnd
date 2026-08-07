@@ -168,11 +168,46 @@ describe('GrigliataSelectedWallPanel', () => {
     fireEvent.click(within(panel).getByRole('button', { name: /duplicate wall/i }));
     fireEvent.click(within(panel).getByRole('button', { name: /delete wall/i }));
 
-    expect(onUpdateWall).toHaveBeenCalledWith('wall-1', { label: 'Kitchen Window' });
-    expect(onUpdateWall).toHaveBeenCalledWith('wall-1', { wallType: 'window' });
-    expect(onUpdateWall).toHaveBeenCalledWith('wall-1', { blocksVision: false });
-    expect(onUpdateWall).toHaveBeenCalledWith('wall-1', { blocksLight: false });
-    expect(onDuplicateWall).toHaveBeenCalledWith('wall-1');
+    expect(onUpdateWall).toHaveBeenCalledWith('wall-1', expect.objectContaining({ label: 'Kitchen Window' }));
+    expect(onUpdateWall).toHaveBeenCalledWith('wall-1', expect.objectContaining({ wallType: 'window' }));
+    expect(onUpdateWall).toHaveBeenCalledWith('wall-1', expect.objectContaining({ blocksVision: false }));
+    expect(onUpdateWall).toHaveBeenCalledWith('wall-1', expect.objectContaining({ blocksLight: false }));
+    expect(onDuplicateWall).toHaveBeenCalledWith('wall-1', expect.objectContaining({
+      label: 'Kitchen Window',
+    }));
     expect(onDeleteWall).toHaveBeenCalledWith('wall-1');
+  });
+
+  test('commits a dirty name together with the next type action before pending state disables controls', () => {
+    const onUpdateWall = jest.fn();
+
+    function PendingHarness() {
+      const [isPending, setIsPending] = React.useState(false);
+      return (
+        <GrigliataSelectedWallPanel
+          wall={wall}
+          isPending={isPending}
+          onUpdateWall={(wallId, patch) => {
+            onUpdateWall(wallId, patch);
+            setIsPending(true);
+          }}
+        />
+      );
+    }
+
+    render(<PendingHarness />);
+
+    const panel = screen.getByTestId('selected-wall-panel');
+    const nameInput = within(panel).getByLabelText(/wall name/i);
+    const typeSelect = within(panel).getByLabelText(/wall type/i);
+    fireEvent.change(nameInput, { target: { value: 'Kitchen Window' } });
+    fireEvent.blur(nameInput, { relatedTarget: typeSelect });
+    fireEvent.change(typeSelect, { target: { value: 'window' } });
+
+    expect(onUpdateWall).toHaveBeenCalledTimes(1);
+    expect(onUpdateWall).toHaveBeenCalledWith('wall-1', expect.objectContaining({
+      label: 'Kitchen Window',
+      wallType: 'window',
+    }));
   });
 });

@@ -11,17 +11,11 @@ import { getVarie } from '../../data/configRepository';
 import Extra from './elements/Extra';
 import { updateProgression } from '../../data/userData/userDataCommands';
 import { useProfileContent, useProgression } from '../../data/userData/userDataHooks';
-import { legacyUpdateProgression } from '../../data/userData/legacyUserDataCommands';
-import {
-  isUserDataCommandStageResolved,
-  runVersionedUserDataCommand,
-} from '../../data/userData/userDataCommandRouting';
 
 function Home() {
   const { user } = useAuth();
   const {
     data: progression,
-    stage: progressionStage,
     status: progressionStatus,
   } = useProgression(user?.uid);
   const { data: profileContent } = useProfileContent(user?.uid);
@@ -31,8 +25,7 @@ function Home() {
     stats: { ...(progression?.stats || {}) },
   }), [profileContent, progression]);
   const progressionCommandsReady = progressionStatus === 'fresh'
-    && progression !== null
-    && isUserDataCommandStageResolved(progressionStage);
+    && progression !== null;
   // helper to show anima field value or empty
   const getAnimaField = (key) => {
     const val = userData?.AltriParametri?.[key];
@@ -228,11 +221,7 @@ function Home() {
               if (!user || !progressionCommandsReady) return;
               const key = animaPickerLevel === 7 ? 'Anima_7' : 'Anima_4';
               const patch = { AltriParametri: { [key]: choice } };
-              await runVersionedUserDataCommand({
-                stage: progressionStage,
-                legacy: () => legacyUpdateProgression({ uid: user.uid, patch }),
-                authoritative: () => updateProgression({ patch }),
-              });
+              await updateProgression({ patch });
             } catch (e) {
               console.error('Failed to save anima choice', e);
             } finally {

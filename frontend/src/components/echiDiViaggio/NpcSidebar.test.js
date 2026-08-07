@@ -145,4 +145,41 @@ describe('NpcSidebar', () => {
 
     confirmSpy.mockRestore();
   });
+
+  test('deletes the legacy NPC reference before eager Storage cleanup', async () => {
+    const legacyNpc = {
+      id: 'npc-legacy',
+      data: () => ({
+        nome: 'Legacy NPC',
+        description: 'Legacy portrait',
+        imageUrl: 'https://example.com/npc.png',
+        imagePath: 'echi_npcs/dm-1/legacy.png',
+      }),
+    };
+    onSnapshot.mockImplementation((target, onNext) => {
+      onNext({ docs: [legacyNpc] });
+      return () => {};
+    });
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(
+      <NpcSidebar
+        user={{ uid: 'dm-1' }}
+        userData={{ role: 'dm' }}
+        stickyOffset={104}
+        canDragToMap={false}
+      />
+    );
+
+    const npcName = await screen.findByText('Legacy NPC');
+    fireEvent.mouseEnter(npcName.closest('button'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(deleteObject).toHaveBeenCalled());
+    expect(deleteDoc).toHaveBeenCalledWith({ path: 'echi_npcs/npc-legacy' });
+    expect(deleteDoc.mock.invocationCallOrder[0])
+      .toBeLessThan(deleteObject.mock.invocationCallOrder[0]);
+
+    confirmSpy.mockRestore();
+  });
 });

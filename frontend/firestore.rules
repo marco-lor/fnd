@@ -513,12 +513,30 @@ service cloud.firestore {
     function isValidOptionalGrigliataCharacterMedia(data, existingData) {
       let hasMedia = data.keys().hasAny(["media"])
         && data.media != null;
-      let assetIdsUnchanged = task07MediaAssetIdsUnchanged(
-        data,
-        existingData
-      );
-      return assetIdsUnchanged
-        ? task07MediaReferencesUnchanged(data, existingData)
+      let hasTask07MediaFields = data.keys().hasAny([
+        "media",
+        "task07MediaRevision",
+        "mediaUpdatedAt"
+      ]);
+      let existingHasTask07MediaFields = existingData.keys().hasAny([
+        "media",
+        "task07MediaRevision",
+        "mediaUpdatedAt"
+      ]);
+      let assetIdUnchanged = task07MediaAssetId(data.get("media", null))
+        == task07MediaAssetId(existingData.get("media", null));
+      let referencesUnchanged = data.get("media", null)
+          == existingData.get("media", null)
+        && data.get("task07MediaRevision", null)
+          == existingData.get("task07MediaRevision", null)
+        && data.get("mediaUpdatedAt", null)
+          == existingData.get("mediaUpdatedAt", null);
+      return data.tokenType != "character"
+          && !hasTask07MediaFields
+          && !existingHasTask07MediaFields
+        ? true
+        : assetIdUnchanged
+        ? referencesUnchanged
         : hasMedia
         ? (
           data.tokenType == "character"
@@ -1345,6 +1363,57 @@ service cloud.firestore {
         && (data.updatedBy == null || data.updatedBy is string);
     }
 
+    function isTask07CanonicalOnlyMode() {
+      let controlPath = /databases/$(database)/documents/utils/task07_media;
+      return exists(controlPath)
+        && get(controlPath).data.get("schemaVersion", 0) == 1
+        && get(controlPath).data.get("policyVersion", 0) == 1
+        && get(controlPath).data.get("mode", "legacy") == "canonical-only";
+    }
+
+    function isValidCanonicalGrigliataMusicBinding(trackId, assetId) {
+      let trackPath = /databases/$(database)/documents/grigliata_music_tracks/$(trackId);
+      let hasTrack = exists(trackPath);
+      let track = hasTrack ? get(trackPath).data : {};
+      let media = track.get("media", {});
+      let original = media.get("original", {});
+      let generation = media.get("generation", "invalid");
+      let ownerUid = media.get("ownerUid", "");
+      return trackId is string
+        && trackId.size() > 0
+        && assetId is string
+        && assetId.matches('^m_[a-f0-9]{40}$')
+        && hasTrack
+        && media is map
+        && media.get("schemaVersion", 0) == 1
+        && media.get("contractVersion", 0) == 1
+        && media.get("assetId", "") == assetId
+        && media.get("kind", "") == "music"
+        && media.get("state", "") == "ready"
+        && media.get("audience", "") == "signed-in"
+        && generation is string
+        && ownerUid is string
+        && ownerUid.size() > 0
+        && generation.matches('^[1-9][0-9]*$')
+        && original is map
+        && original.get("path", "").matches(
+          '^media_assets/v1/signed-in/'
+          + ownerUid
+          + '/'
+          + assetId
+          + '/'
+          + generation
+          + '/original$'
+        )
+        && original.get("contentType", "").matches(
+          '^audio/(mpeg|mp4|aac|ogg|wav|x-wav)$'
+        )
+        && original.get("bytes", 0) is int
+        && original.get("bytes", 0) > 0
+        && original.get("durationMs", 0) is int
+        && original.get("durationMs", 0) == track.get("durationMs", -1);
+    }
+
     function isValidGrigliataMusicTrack(data) {
       return data.keys().hasAll([
           "name",
@@ -1364,6 +1433,9 @@ service cloud.firestore {
           "fileName",
           "audioUrl",
           "audioPath",
+          "media",
+          "task07MediaRevision",
+          "mediaUpdatedAt",
           "contentType",
           "sizeBytes",
           "durationMs",
@@ -1380,9 +1452,17 @@ service cloud.firestore {
         && data.fileName is string
         && data.fileName.size() > 0
         && data.audioUrl is string
-        && data.audioUrl.size() > 0
         && data.audioPath is string
-        && data.audioPath.matches('^grigliata/music/.+$')
+        && (
+          (
+            data.audioUrl.size() > 0
+            && data.audioPath.matches('^grigliata/music/.+$')
+          )
+          || (
+            data.audioUrl.size() == 0
+            && data.audioPath.size() == 0
+          )
+        )
         && data.contentType is string
         && data.contentType.matches('^audio/.+$')
         && data.sizeBytes is int
@@ -1400,12 +1480,26 @@ service cloud.firestore {
       return status in ["playing", "paused", "stopped"];
     }
 
+    function isValidGrigliataMusicPlaybackSource(data) {
+      let mediaAssetId = data.get("mediaAssetId", "");
+      let canonical = isValidCanonicalGrigliataMusicBinding(
+        data.trackId,
+        mediaAssetId
+      );
+      let legacy = data.audioUrl.size() > 0
+        && mediaAssetId.size() == 0;
+      return isTask07CanonicalOnlyMode()
+        ? canonical && data.audioUrl.size() == 0
+        : canonical || legacy;
+    }
+
     function isValidGrigliataMusicPlayback(data) {
       return data.keys().hasAll([
           "status",
           "trackId",
           "trackName",
           "audioUrl",
+          "mediaAssetId",
           "durationMs",
           "offsetMs",
           "volume",
@@ -1419,6 +1513,7 @@ service cloud.firestore {
           "trackId",
           "trackName",
           "audioUrl",
+          "mediaAssetId",
           "durationMs",
           "offsetMs",
           "volume",
@@ -1432,6 +1527,7 @@ service cloud.firestore {
         && data.trackId is string
         && data.trackName is string
         && data.audioUrl is string
+        && data.mediaAssetId is string
         && data.durationMs is int
         && data.durationMs >= 0
         && data.offsetMs is int
@@ -1448,6 +1544,7 @@ service cloud.firestore {
             && data.trackId.size() == 0
             && data.trackName.size() == 0
             && data.audioUrl.size() == 0
+            && data.mediaAssetId.size() == 0
             && data.durationMs == 0
             && data.offsetMs == 0
             && data.startedAt == null
@@ -1456,7 +1553,7 @@ service cloud.firestore {
             data.status == "paused"
             && data.trackId.size() > 0
             && data.trackName.size() > 0
-            && data.audioUrl.size() > 0
+            && isValidGrigliataMusicPlaybackSource(data)
             && data.offsetMs <= data.durationMs
             && data.startedAt == null
           )
@@ -1464,7 +1561,7 @@ service cloud.firestore {
             data.status == "playing"
             && data.trackId.size() > 0
             && data.trackName.size() > 0
-            && data.audioUrl.size() > 0
+            && isValidGrigliataMusicPlaybackSource(data)
             && data.offsetMs <= data.durationMs
             && data.startedAt != null
           )
@@ -1477,6 +1574,7 @@ service cloud.firestore {
           "trackId",
           "trackName",
           "audioUrl",
+          "mediaAssetId",
           "durationMs",
           "offsetMs",
           "loop",
@@ -1491,6 +1589,7 @@ service cloud.firestore {
           "trackId",
           "trackName",
           "audioUrl",
+          "mediaAssetId",
           "durationMs",
           "offsetMs",
           "loop",
@@ -1507,7 +1606,8 @@ service cloud.firestore {
         && data.trackName is string
         && data.trackName.size() > 0
         && data.audioUrl is string
-        && data.audioUrl.size() > 0
+        && data.mediaAssetId is string
+        && isValidGrigliataMusicPlaybackSource(data)
         && data.durationMs is int
         && data.durationMs > 0
         && data.offsetMs is int
@@ -1771,6 +1871,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /legacy_media_cleanup/{cleanupId} {
+      // Reference-removal receipts contain private Storage paths and are
+      // created, retried, and settled exclusively by Cloud Functions.
+      allow read, write: if false;
+    }
+
     // Task 07 media manifests and cleanup leases contain actor ownership,
     // canonical private paths, processing errors, and lifecycle timestamps.
     // Clients receive only privacy-minimized descriptors from authenticated
@@ -1780,6 +1886,14 @@ service cloud.firestore {
     }
 
     match /media_asset_cleanup/{assetId} {
+      allow read, write: if false;
+    }
+
+    match /task07_foe_media_operations/{receiptId} {
+      allow read, write: if false;
+    }
+
+    match /task07_foe_media_cleanup/{receiptId} {
       allow read, write: if false;
     }
 
@@ -2123,8 +2237,31 @@ service cloud.firestore {
     match /grigliata_music_tracks/{trackId} {
       allow read: if isGrigliataManager();
 
-      allow create, update: if isGrigliataManager()
-        && isValidGrigliataMusicTrack(request.resource.data);
+      allow create: if isGrigliataManager()
+        && isValidGrigliataMusicTrack(request.resource.data)
+        && !request.resource.data.keys().hasAny([
+          "media",
+          "task07MediaRevision",
+          "mediaUpdatedAt"
+        ])
+        && (
+          !isTask07CanonicalOnlyMode()
+          || (
+            request.resource.data.audioUrl.size() == 0
+            && request.resource.data.audioPath.size() == 0
+          )
+        );
+
+      allow update: if isGrigliataManager()
+        && isValidGrigliataMusicTrack(request.resource.data)
+        && task07MediaReferencesUnchanged(request.resource.data, resource.data)
+        && (
+          !isTask07CanonicalOnlyMode()
+          || (
+            request.resource.data.audioUrl == resource.data.audioUrl
+            && request.resource.data.audioPath == resource.data.audioPath
+          )
+        );
 
       allow delete: if isGrigliataManager()
         && isValidGrigliataMusicTrack(resource.data);

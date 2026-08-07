@@ -1,22 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react'; // added useCallback
-import { doc, onSnapshot } from '../../../performance/firestore';
-import { db } from "../../firebaseConfig";
-import { useAuth } from '../../../AuthContext';
+import { useAuthSession } from '../../../AuthContext';
+import { useProgression } from '../../../data/userData/userDataHooks';
 import { getVarie } from '../../../data/configRepository';
-import { getCallable } from '../../../data/functions/callableRegistry';
-import {
-  TASK06_LOCAL_CANDIDATE,
-} from '../../../data/functions/backendOperationClient';
+import { spendCharacterPoint } from '../../../data/userData/userDataCommands';
 import {
   runWithDurableOperationIntent,
 } from '../../../data/functions/backendOperationIntentStore';
 
-const spendCharacterPoint = getCallable(
-  TASK06_LOCAL_CANDIDATE ? 'spendCharacterPointV2' : 'spendCharacterPoint'
-);
-
 export default function PointsDistribution() {
-  const { user, userData } = useAuth();
+  const { user } = useAuthSession();
+  const { data: progression } = useProgression(user?.uid);
 
   // Base stats state
   const [baseStats, setBaseStats] = useState(null);
@@ -41,69 +34,45 @@ export default function PointsDistribution() {
 
   // Sync initial from context
   useEffect(() => {
-    if (!userData) return;
-    const { Parametri, stats } = userData;
+    if (!progression) return;
+    const { Parametri, stats = {} } = progression;
     setBaseStats(Parametri?.Base || null);
     setCombStats(Parametri?.Combattimento || null);
-    setBasePointsAvailable(stats.basePointsAvailable || 0);
-    setBasePointsSpent(stats.basePointsSpent || 0);
-    setNegativeBaseStatCount(stats.negativeBaseStatCount || 0);
-    setCombatTokensAvailable(stats.combatTokensAvailable || 0);
-    setCombatTokensSpent(stats.combatTokensSpent || 0);
-  }, [userData]);
-
-  // Real-time updates
-  useEffect(() => {
-    if (!user) return;
-    return onSnapshot(doc(db, 'users', user.uid), snap => {
-      if (!snap.exists()) return;
-      const d = snap.data();
-      setBasePointsAvailable(d.stats?.basePointsAvailable || 0);
-      setBasePointsSpent(d.stats?.basePointsSpent || 0);
-      setNegativeBaseStatCount(d.stats?.negativeBaseStatCount || 0);
-      setCombatTokensAvailable(d.stats?.combatTokensAvailable || 0);
-      setCombatTokensSpent(d.stats?.combatTokensSpent || 0);
-      setBaseStats(d.Parametri?.Base || null);
-      setCombStats(d.Parametri?.Combattimento || null);
-    });
-  }, [user]);
+    setBasePointsAvailable(stats?.basePointsAvailable || 0);
+    setBasePointsSpent(stats?.basePointsSpent || 0);
+    setNegativeBaseStatCount(stats?.negativeBaseStatCount || 0);
+    setCombatTokensAvailable(stats?.combatTokensAvailable || 0);
+    setCombatTokensSpent(stats?.combatTokensSpent || 0);
+  }, [progression]);
 
   // Base handlers with stable references
   const handleBaseChange = useCallback(async (stat, delta) => {
     if (!user || !baseStats) return;
     const payload = { statName: stat, statType: 'Base', change: delta };
-    if (TASK06_LOCAL_CANDIDATE) {
-      await runWithDurableOperationIntent({
-        actorUid: user.uid,
-        kind: 'spend-character-point',
-        intent: payload,
-        invoke: (operationId) => spendCharacterPoint({
-          ...payload,
-          operationId,
-        }),
-      });
-    } else {
-      await spendCharacterPoint(payload);
-    }
+    await runWithDurableOperationIntent({
+      actorUid: user.uid,
+      kind: 'spend-character-point',
+      intent: payload,
+      invoke: (operationId) => spendCharacterPoint({
+        ...payload,
+        operationId,
+      }),
+    });
   }, [user, baseStats]);
 
   // Combat handlers with stable references
   const handleCombChange = useCallback(async (stat, delta) => {
     if (!user || !combStats) return;
     const payload = { statName: stat, statType: 'Combat', change: delta };
-    if (TASK06_LOCAL_CANDIDATE) {
-      await runWithDurableOperationIntent({
-        actorUid: user.uid,
-        kind: 'spend-character-point',
-        intent: payload,
-        invoke: (operationId) => spendCharacterPoint({
-          ...payload,
-          operationId,
-        }),
-      });
-    } else {
-      await spendCharacterPoint(payload);
-    }
+    await runWithDurableOperationIntent({
+      actorUid: user.uid,
+      kind: 'spend-character-point',
+      intent: payload,
+      invoke: (operationId) => spendCharacterPoint({
+        ...payload,
+        operationId,
+      }),
+    });
   }, [user, combStats]);
 
   // Helper free credits

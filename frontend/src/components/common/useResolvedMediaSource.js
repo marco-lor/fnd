@@ -27,7 +27,11 @@ const VIDEO_URL_FIELDS = [
   'imageUrl',
   'image_url',
 ];
-const DERIVATIVE_READ_MODES = new Set(['derivative-read', 'v1-write']);
+const DERIVATIVE_READ_MODES = new Set([
+  'derivative-read',
+  'v1-write',
+  'canonical-only',
+]);
 
 const isRecord = (value) => (
   value != null && typeof value === 'object' && !Array.isArray(value)
@@ -78,7 +82,12 @@ const normalizeVideoDescriptor = (value) => {
   };
 };
 
-const appendVideoCandidates = (candidates, variant, descriptor) => {
+const appendVideoCandidates = (
+  candidates,
+  variant,
+  descriptor,
+  { allowUrl = true } = {}
+) => {
   if (!descriptor) return;
   if (descriptor.privateAsset) {
     candidates.push({
@@ -88,7 +97,7 @@ const appendVideoCandidates = (candidates, variant, descriptor) => {
       sourceKey: `path:${descriptor.path}:${descriptor.generation}`,
     });
   }
-  if (descriptor.url) {
+  if (allowUrl && descriptor.url) {
     candidates.push({
       ...descriptor,
       path: '',
@@ -146,20 +155,26 @@ export const resolveMediaVideoAsset = (
   const state = typeof manifest.state === 'string'
     ? manifest.state.trim().toLowerCase()
     : '';
+  const canonicalOnly = compatibilityMode === 'canonical-only';
+  const pending = compatibilityMode === 'pending';
   const readsCanonical = schemaVersion === 1
     && state === 'ready'
     && DERIVATIVE_READ_MODES.has(compatibilityMode);
   const collectedCandidates = [];
   if (readsCanonical) {
-    appendVideoCandidates(collectedCandidates, 'original', original);
+    appendVideoCandidates(collectedCandidates, 'original', original, {
+      allowUrl: !canonicalOnly,
+    });
   }
-  appendVideoCandidates(collectedCandidates, 'legacy', legacy);
-  if (schemaVersion === 1 && state === 'ready' && !readsCanonical && !legacy) {
-    // A v1-only video has no legacy object to restore. Rollback modes may use
-    // the validated canonical original but never a poster/derivative.
-    appendVideoCandidates(collectedCandidates, 'original', original);
-  } else if (schemaVersion !== 1) {
-    appendVideoCandidates(collectedCandidates, 'legacy', original);
+  if (!canonicalOnly && !pending) {
+    appendVideoCandidates(collectedCandidates, 'legacy', legacy);
+    if (schemaVersion === 1 && state === 'ready' && !readsCanonical && !legacy) {
+      // A v1-only video has no legacy object to restore. Rollback modes may use
+      // the validated canonical original but never a poster/derivative.
+      appendVideoCandidates(collectedCandidates, 'original', original);
+    } else if (schemaVersion !== 1) {
+      appendVideoCandidates(collectedCandidates, 'legacy', original);
+    }
   }
   const candidates = dedupeCandidates(collectedCandidates);
   const selected = candidates[0] || null;
@@ -270,11 +285,12 @@ export const useResolvedMediaSource = (
     compatibilityMode = 'auto',
     fallbackSrc = '',
     kind = 'image',
+    purpose: purposeOverride = '',
     releaseDelayMs = 0,
     variant = 'board',
   } = {}
 ) => {
-  const purpose = useMemo(() => {
+  const inferredPurpose = useMemo(() => {
     if (kind !== 'video') return getTask07MediaPurpose(media);
     const entity = isRecord(media) ? media : {};
     const general = isRecord(entity.General) ? entity.General : null;
@@ -291,6 +307,10 @@ export const useResolvedMediaSource = (
       );
     return typeof manifest.kind === 'string' ? manifest.kind.trim() : '';
   }, [kind, media]);
+  const purpose = (
+    (typeof purposeOverride === 'string' ? purposeOverride.trim() : '')
+    || inferredPurpose
+  );
   const readerMode = useTask07MediaReadMode({
     override: compatibilityMode,
     purpose,

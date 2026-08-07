@@ -65,6 +65,142 @@ test('anonymous, player, DM, and webmaster rules match their intended boundaries
   await assertSucceeds(getDoc(doc(webmaster, 'users/perf-player')));
 });
 
+test('DM wall runtime cleanup can replace segments with a rule-safe empty map', async () => {
+  const backgroundId = 'rules-wall-runtime-cleanup';
+  const dm = environment.authenticatedContext('perf-dm').firestore();
+  const player = environment.authenticatedContext('perf-player').firestore();
+  const dmWallStateRef = doc(dm, 'grigliata_wall_state', backgroundId);
+  const playerWallStateRef = doc(player, 'grigliata_wall_state', backgroundId);
+
+  try {
+    await assertSucceeds(setDoc(dmWallStateRef, {
+      backgroundId,
+      segments: {
+        'wall-1': {
+          isOpen: true,
+          updatedAt: Timestamp.now(),
+          updatedBy: 'perf-dm',
+        },
+      },
+      updatedAt: Timestamp.now(),
+      updatedBy: 'perf-dm',
+    }));
+
+    await assertFails(setDoc(playerWallStateRef, {
+      backgroundId,
+      segments: {},
+      updatedAt: Timestamp.now(),
+      updatedBy: 'perf-player',
+    }, {merge: true}));
+
+    await assertSucceeds(setDoc(dmWallStateRef, {
+      backgroundId,
+      segments: {},
+      updatedAt: Timestamp.now(),
+      updatedBy: 'perf-dm',
+    }, {merge: true}));
+
+    const wallState = await assertSucceeds(getDoc(dmWallStateRef));
+    assert.deepEqual(wallState.data().segments, {});
+  } finally {
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await deleteDoc(doc(context.firestore(), 'grigliata_wall_state', backgroundId));
+    });
+  }
+});
+
+test('shared character profile queries stay authorized in six safe 10-id chunks', async () => {
+  const characterIds = Array.from(
+    {length: 60},
+    (_, index) => `rules-shared-character-${String(index + 1).padStart(2, '0')}`
+  );
+  const ownedCustomId = 'rules-shared-owned-custom';
+  const peerCustomId = 'rules-shared-peer-custom';
+  const peerFoeId = 'rules-shared-peer-foe';
+  const seededIds = [...characterIds, ownedCustomId, peerCustomId, peerFoeId];
+
+  await environment.withSecurityRulesDisabled(async (context) => {
+    const firestore = context.firestore();
+    await Promise.all([
+      ...characterIds.map((id) => setDoc(doc(firestore, 'grigliata_tokens', id), {
+        ownerUid: id,
+        characterId: id,
+        label: id,
+        tokenType: 'character',
+        imageSource: 'profile',
+      })),
+      setDoc(doc(firestore, 'grigliata_tokens', ownedCustomId), {
+        ownerUid: 'perf-player',
+        label: ownedCustomId,
+        tokenType: 'custom',
+        customTokenRole: 'template',
+        customTemplateId: ownedCustomId,
+        imageSource: 'uploaded',
+      }),
+      setDoc(doc(firestore, 'grigliata_tokens', peerCustomId), {
+        ownerUid: 'perf-peer-2',
+        label: peerCustomId,
+        tokenType: 'custom',
+        customTokenRole: 'template',
+        customTemplateId: peerCustomId,
+        imageSource: 'uploaded',
+      }),
+      setDoc(doc(firestore, 'grigliata_tokens', peerFoeId), {
+        ownerUid: 'perf-dm',
+        label: peerFoeId,
+        tokenType: 'foe',
+        imageSource: 'foesHub',
+      }),
+    ]);
+  });
+
+  const anonymous = environment.unauthenticatedContext().firestore();
+  const player = environment.authenticatedContext('perf-player').firestore();
+  const dm = environment.authenticatedContext('perf-dm').firestore();
+  const buildCharacterQuery = (firestore, ids) => query(
+    collection(firestore, 'grigliata_tokens'),
+    where(documentId(), 'in', ids),
+    where('tokenType', '==', 'character')
+  );
+
+  try {
+    await assertFails(getDocs(buildCharacterQuery(anonymous, characterIds.slice(0, 10))));
+    await assertFails(getDocs(query(
+      collection(player, 'grigliata_tokens'),
+      where(documentId(), 'in', [
+        ...characterIds.slice(0, 9),
+        peerCustomId,
+      ])
+    )));
+
+    for (let offset = 0; offset < characterIds.length; offset += 10) {
+      const ids = characterIds.slice(offset, offset + 10);
+      const playerPage = await assertSucceeds(getDocs(buildCharacterQuery(player, ids)));
+      const dmPage = await assertSucceeds(getDocs(buildCharacterQuery(dm, ids)));
+      assert.deepEqual(playerPage.docs.map(({id}) => id).sort(), ids);
+      assert.deepEqual(dmPage.docs.map(({id}) => id).sort(), ids);
+    }
+
+    await assertSucceeds(getDoc(doc(player, 'grigliata_tokens', characterIds[0])));
+    await assertFails(getDoc(doc(player, 'grigliata_tokens', peerCustomId)));
+    await assertFails(getDoc(doc(player, 'grigliata_tokens', peerFoeId)));
+    const ownedCustom = await assertSucceeds(getDocs(query(
+      collection(player, 'grigliata_tokens'),
+      where('ownerUid', '==', 'perf-player'),
+      where('tokenType', '==', 'custom'),
+      where(documentId(), 'in', [ownedCustomId])
+    )));
+    assert.deepEqual(ownedCustom.docs.map(({id}) => id), [ownedCustomId]);
+  } finally {
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const firestore = context.firestore();
+      await Promise.all(seededIds.map((id) => (
+        deleteDoc(doc(firestore, 'grigliata_tokens', id))
+      )));
+    });
+  }
+});
+
 test('roles cannot be changed through a direct privileged client update', async () => {
   const webmaster = environment.authenticatedContext('perf-webmaster').firestore();
   await assertFails(updateDoc(doc(webmaster, 'users/perf-player'), { role: 'dm' }));

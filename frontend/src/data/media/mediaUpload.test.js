@@ -28,6 +28,94 @@ const upload = {
   expiresInSeconds: 3600,
 };
 
+const deferred = () => {
+  let resolve;
+  const promise = new Promise((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+};
+
+const createControlledResumableTask = () => {
+  const subscription = deferred();
+  let handlers = null;
+  const unsubscribe = jest.fn();
+  const task = {
+    snapshot: {},
+    cancel: jest.fn(),
+    on: jest.fn((_event, progress, error, complete) => {
+      handlers = { progress, error, complete };
+      subscription.resolve();
+      return unsubscribe;
+    }),
+  };
+  return {
+    task,
+    subscribed: subscription.promise,
+    unsubscribe,
+    progress: (bytesTransferred, totalBytes = file.size) => {
+      if (!handlers) throw new Error('Task is not subscribed.');
+      handlers.progress({ bytesTransferred, totalBytes });
+    },
+    complete: (snapshot = task.snapshot) => {
+      task.snapshot = snapshot;
+      if (!handlers) throw new Error('Task is not subscribed.');
+      handlers.complete();
+    },
+    fail: (error = new Error('upload failed')) => {
+      if (!handlers) throw new Error('Task is not subscribed.');
+      handlers.error(error);
+    },
+    cancel: () => {
+      if (!handlers) throw new Error('Task is not subscribed.');
+      handlers.error({ code: 'storage/canceled' });
+    },
+  };
+};
+
+const activeControllers = new Set();
+const activePromises = new Set();
+
+const trackedUpload = (args, options) => {
+  const controller = new AbortController();
+  activeControllers.add(controller);
+  const promise = uploadTask07Source({
+    ...args,
+    signal: controller.signal,
+  }, options);
+  activePromises.add(promise);
+  promise.catch(() => {}).finally(() => activePromises.delete(promise));
+  return { controller, promise };
+};
+
+const waitForQueueState = async (expected) => {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const current = getTask07UploadQueueStats();
+    if (Object.entries(expected).every(([key, value]) => current[key] === value)) {
+      return current;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(
+    `Upload queue did not reach ${JSON.stringify(expected)}; `
+      + `last state ${JSON.stringify(getTask07UploadQueueStats())}`
+  );
+};
+
+afterEach(async () => {
+  activeControllers.forEach((controller) => {
+    if (!controller.signal.aborted) controller.abort('test-cleanup');
+  });
+  await Promise.allSettled([...activePromises]);
+  activeControllers.clear();
+  activePromises.clear();
+  expect(getTask07UploadQueueStats()).toEqual({
+    active: 0,
+    pending: 0,
+    concurrency: 1,
+  });
+});
+
 describe('Task 07 staging source uploads', () => {
   test('accepts only the server-issued staging path and exact source contract', () => {
     expect(TASK07_MEDIA_UPLOAD_CONCURRENCY).toBe(1);
@@ -67,34 +155,28 @@ describe('Task 07 staging source uploads', () => {
   test('starts one resumable source upload and reports bounded progress', async () => {
     const storage = { name: 'storage' };
     const storageRef = { fullPath: upload.sourcePath };
-    const snapshot = { ref: storageRef };
-    const unsubscribe = jest.fn();
-    const task = {
-      snapshot,
-      cancel: jest.fn(),
-      on: jest.fn((_event, progress, _error, complete) => {
-        progress({ bytesTransferred: 2, totalBytes: file.size });
-        complete();
-        return unsubscribe;
-      }),
-    };
+    const controlled = createControlledResumableTask();
+    controlled.task.snapshot = { ref: storageRef };
     const ref = jest.fn(() => storageRef);
-    const uploadBytesResumable = jest.fn(() => task);
+    const uploadBytesResumable = jest.fn(() => controlled.task);
     const progress = [];
-
-    await expect(uploadTask07Source({
+    const running = trackedUpload({
       upload,
       file,
       onProgress: (value) => progress.push(value),
     }, {
       loadApi: async () => ({ storage, ref, uploadBytesResumable }),
-    })).resolves.toEqual({
+    });
+
+    await controlled.subscribed;
+    controlled.progress(2);
+    controlled.complete();
+    await expect(running.promise).resolves.toEqual({
       entries: [{ role: 'source', path: upload.sourcePath }],
-      snapshot,
+      snapshot: { ref: storageRef },
     });
 
     expect(ref).toHaveBeenCalledWith(storage, upload.sourcePath);
-    expect(uploadBytesResumable).toHaveBeenCalledTimes(1);
     expect(uploadBytesResumable).toHaveBeenCalledWith(
       storageRef,
       file,
@@ -115,119 +197,110 @@ describe('Task 07 staging source uploads', () => {
         fraction: 1,
       }),
     ]);
-    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(controlled.unsubscribe).toHaveBeenCalledTimes(1);
   });
 
   test('cancels the resumable source task when the caller aborts', async () => {
-    const controller = new AbortController();
-    let rejectUpload;
-    const unsubscribe = jest.fn();
-    const task = {
-      snapshot: {},
-      cancel: jest.fn(),
-      on: jest.fn((_event, _progress, error) => {
-        rejectUpload = error;
-        return unsubscribe;
-      }),
-    };
-    const promise = uploadTask07Source({
-      upload,
-      file,
-      signal: controller.signal,
-    }, {
+    const controlled = createControlledResumableTask();
+    const running = trackedUpload({ upload, file }, {
       loadApi: async () => ({
         storage: {},
         ref: jest.fn(() => ({})),
-        uploadBytesResumable: jest.fn(() => task),
+        uploadBytesResumable: jest.fn(() => controlled.task),
       }),
     });
 
-    await Promise.resolve();
-    expect(rejectUpload).toEqual(expect.any(Function));
-    controller.abort('view-unmounted');
+    await controlled.subscribed;
+    running.controller.abort('view-unmounted');
 
-    await expect(promise).rejects.toMatchObject({
+    await expect(running.promise).rejects.toMatchObject({
       name: 'AbortError',
       code: 'aborted',
     });
-    expect(task.cancel).toHaveBeenCalledTimes(1);
-    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(controlled.task.cancel).toHaveBeenCalledTimes(1);
+    expect(controlled.unsubscribe).toHaveBeenCalledTimes(1);
   });
 
   test('serializes concurrent sources and releases the slot after completion', async () => {
-    const completions = [];
+    const tasks = [];
     const uploadBytesResumable = jest.fn(() => {
-      const task = {
-        snapshot: {},
-        on: jest.fn((_event, _progress, _error, complete) => {
-          completions.push(complete);
-          return jest.fn();
-        }),
-      };
-      return task;
+      const controlled = createControlledResumableTask();
+      tasks.push(controlled);
+      return controlled.task;
     });
     const loadApi = async () => ({
       storage: {},
       ref: jest.fn(() => ({})),
       uploadBytesResumable,
     });
+    const first = trackedUpload({ upload, file }, { loadApi });
+    const second = trackedUpload({ upload, file }, { loadApi });
 
-    const first = uploadTask07Source({ upload, file }, { loadApi });
-    const second = uploadTask07Source({ upload, file }, { loadApi });
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForQueueState({ active: 1, pending: 1 });
+    await tasks[0].subscribed;
     expect(uploadBytesResumable).toHaveBeenCalledTimes(1);
-    expect(getTask07UploadQueueStats()).toEqual({
-      active: 1,
-      pending: 1,
-      concurrency: 1,
-    });
-
-    completions.shift()();
-    await first;
-    await Promise.resolve();
+    tasks[0].complete();
+    await first.promise;
+    await waitForQueueState({ active: 1, pending: 0 });
+    await tasks[1].subscribed;
     expect(uploadBytesResumable).toHaveBeenCalledTimes(2);
-    expect(getTask07UploadQueueStats().active).toBe(1);
-    completions.shift()();
-    await second;
-    expect(getTask07UploadQueueStats()).toEqual({
-      active: 0,
-      pending: 0,
-      concurrency: 1,
-    });
+    tasks[1].complete();
+    await second.promise;
   });
 
   test('aborts a queued source without starting another network task', async () => {
-    const completions = [];
-    const uploadBytesResumable = jest.fn(() => ({
-      snapshot: {},
-      on: jest.fn((_event, _progress, _error, complete) => {
-        completions.push(complete);
-        return jest.fn();
-      }),
-    }));
+    const controlled = createControlledResumableTask();
+    const uploadBytesResumable = jest.fn(() => controlled.task);
     const loadApi = async () => ({
       storage: {},
       ref: jest.fn(() => ({})),
       uploadBytesResumable,
     });
-    const first = uploadTask07Source({ upload, file }, { loadApi });
-    const controller = new AbortController();
-    const queued = uploadTask07Source({
-      upload,
-      file,
-      signal: controller.signal,
-    }, { loadApi });
-    await Promise.resolve();
-    await Promise.resolve();
-    controller.abort('dialog-closed');
-    await expect(queued).rejects.toMatchObject({
+    const first = trackedUpload({ upload, file }, { loadApi });
+    const queued = trackedUpload({ upload, file }, { loadApi });
+
+    await controlled.subscribed;
+    await waitForQueueState({ active: 1, pending: 1 });
+    queued.controller.abort('dialog-closed');
+    await expect(queued.promise).rejects.toMatchObject({
       name: 'AbortError',
       code: 'aborted',
     });
     expect(uploadBytesResumable).toHaveBeenCalledTimes(1);
-    expect(getTask07UploadQueueStats().pending).toBe(0);
-    completions.shift()();
-    await first;
+    await waitForQueueState({ active: 1, pending: 0 });
+    controlled.complete();
+    await first.promise;
+  });
+
+  test('recovers after cancelling one active and one queued upload', async () => {
+    const tasks = [];
+    const uploadBytesResumable = jest.fn(() => {
+      const controlled = createControlledResumableTask();
+      tasks.push(controlled);
+      return controlled.task;
+    });
+    const loadApi = async () => ({
+      storage: {},
+      ref: jest.fn(() => ({})),
+      uploadBytesResumable,
+    });
+    const active = trackedUpload({ upload, file }, { loadApi });
+    const queued = trackedUpload({ upload, file }, { loadApi });
+
+    await waitForQueueState({ active: 1, pending: 1 });
+    await tasks[0].subscribed;
+    active.controller.abort('active-cancelled');
+    queued.controller.abort('queued-cancelled');
+    await Promise.allSettled([active.promise, queued.promise]);
+    await waitForQueueState({ active: 0, pending: 0 });
+
+    const fresh = trackedUpload({ upload, file }, { loadApi });
+    await waitForQueueState({ active: 1, pending: 0 });
+    await tasks[1].subscribed;
+    tasks[1].complete();
+    await expect(fresh.promise).resolves.toEqual(expect.objectContaining({
+      entries: [{ role: 'source', path: upload.sourcePath }],
+    }));
+    expect(uploadBytesResumable).toHaveBeenCalledTimes(2);
   });
 });

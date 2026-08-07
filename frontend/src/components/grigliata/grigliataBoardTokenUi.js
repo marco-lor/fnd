@@ -253,6 +253,7 @@ export const TokenNode = ({
   canMove,
   isSelected,
   isActiveTurn = false,
+  loadMedia = true,
   badgeImages,
   drawTheme = DEFAULT_DRAW_THEME,
   onMouseDown,
@@ -262,18 +263,19 @@ export const TokenNode = ({
   onOverflowMouseLeave,
   onOverflowToggle,
 }) => {
-  const mediaSource = useResolvedMediaSource(token, {
-    fallbackSrc: token?.imageUrl || '',
+  const mediaSource = useResolvedMediaSource(loadMedia ? token : null, {
+    fallbackSrc: loadMedia ? token?.imageUrl || '' : '',
     kind: 'image',
     variant: 'thumbnail',
   });
   const advanceTokenMediaFallback = mediaSource.advanceFallback;
   const tokenMediaStatus = mediaSource.status;
   const imageSnapshot = useImageAssetSnapshot(mediaSource.url);
-  const image = imageSnapshot.image;
+  const image = loadMedia ? imageSnapshot.image : null;
   React.useEffect(() => {
     if (
-      imageSnapshot.status === 'error'
+      loadMedia
+      && imageSnapshot.status === 'error'
       && tokenMediaStatus === 'ready'
     ) {
       advanceTokenMediaFallback(imageSnapshot.error);
@@ -282,6 +284,7 @@ export const TokenNode = ({
     advanceTokenMediaFallback,
     imageSnapshot.error,
     imageSnapshot.status,
+    loadMedia,
     tokenMediaStatus,
   ]);
   const size = position.size;
@@ -603,6 +606,13 @@ export const buildSelectedTokenActionState = ({
       ...normalizeTokenVisionSettings(selectedToken),
     }
     : null;
+  const turnOrderToken = selectedToken?.canMove
+    ? {
+      tokenId: selectedToken.tokenId,
+      label: selectedToken.label || 'token',
+      isInTurnOrder: selectedToken.isInTurnOrder === true,
+    }
+    : null;
   const tokenLayerStepState = selectedToken && isManager
     ? buildTokenLayerStepState({
       tokens: allTokens,
@@ -621,7 +631,8 @@ export const buildSelectedTokenActionState = ({
   const standardActionCount = (isManager ? 2 : 0)
     + (statusToken ? 1 : 0)
     + (sizeToken ? 1 : 0)
-    + (visionToken ? 1 : 0);
+    + (visionToken ? 1 : 0)
+    + (turnOrderToken ? 1 : 0);
   const layerActionCount = layerToken ? 2 : 0;
   const actionCount = standardActionCount + layerActionCount;
   if (actionCount < 1) {
@@ -656,6 +667,7 @@ export const buildSelectedTokenActionState = ({
     statusToken,
     sizeToken,
     visionToken,
+    turnOrderToken,
     layerToken,
     nextIsVisibleToPlayers: allSelectedTokensHidden,
     nextIsDead: !allSelectedTokensDead,

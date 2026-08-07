@@ -12,6 +12,7 @@ backend/firestoreServiceAccountKey.json
 
 # Local Firestore exports/backups
 backend/firestore_backup_*.json
+!backend/firestore_backup_v2.schema.json
 backend/backups/
 
 # Frontend generated output and deploy cache

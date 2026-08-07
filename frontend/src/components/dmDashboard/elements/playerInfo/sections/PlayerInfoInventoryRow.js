@@ -7,14 +7,25 @@ import AddBazaarItemOverlay from "../overlays/AddBazaarItemOverlay"; // new over
 
 const deriveInventoryId = (entry, index) => {
   if (!entry) return `item-${index}`;
-  if (typeof entry === "string") return entry;
-  return entry.id || entry.name || entry?.General?.Nome || `item-${index}`;
+  if (typeof entry === "string") return null;
+  return entry?._task05?.inventoryId
+    || entry?._instance?.instanceId
+    || null;
+};
+
+const deriveCatalogItemId = (entry) => {
+  if (!entry || typeof entry === "string") return typeof entry === "string" ? entry : null;
+  return entry?._task05?.catalogItemId
+    || entry?._instance?.catalogItemId
+    || entry.id
+    || null;
 };
 
 const resolveDisplayName = (entry, index, catalog) => {
   if (!entry) return `item-${index}`;
   if (typeof entry === "string") return catalog[entry] || entry;
-  return entry?.General?.Nome || entry.name || (entry.id && catalog[entry.id]) || deriveInventoryId(entry, index);
+  const catalogId = deriveCatalogItemId(entry);
+  return entry?.General?.Nome || entry.name || (catalogId && catalog[catalogId]) || deriveInventoryId(entry, index) || `item-${index}`;
 };
 
 const PlayerInfoInventoryRow = ({
@@ -43,23 +54,26 @@ const PlayerInfoInventoryRow = ({
       const entry = inventory[i];
       if (!entry) continue;
       if (typeof entry === "string") {
-        const id = entry;
-        const name = catalog[id] || id;
-        const type = (itemsDocs[id]?.item_type || itemsDocs[id]?.type || "").toLowerCase();
+        const catalogId = entry;
+        const id = `legacy-${i}`;
+        const name = catalog[catalogId] || catalogId;
+        const type = (itemsDocs[catalogId]?.item_type || itemsDocs[catalogId]?.type || "").toLowerCase();
         if (type === "varie") {
-          if (!varieMap[id]) varieMap[id] = { id, name, qty: 0, type: "varie" };
+          if (!varieMap[id]) varieMap[id] = { id, catalogId, name, qty: 0, type: "varie", stable: false };
           varieMap[id].qty += 1;
         } else {
-          nonVarieInstances.push({ id, name, type: type || "oggetto", invIndex: i });
+          nonVarieInstances.push({ id, catalogId, name, type: type || "oggetto", invIndex: i, stable: false });
         }
         continue;
       }
-      const id = deriveInventoryId(entry, i);
+      const stableId = deriveInventoryId(entry, i);
+      const id = stableId || `legacy-${i}`;
+      const catalogId = deriveCatalogItemId(entry);
       const name = resolveDisplayName(entry, i, catalog);
-      const type = (entry.type || itemsDocs[id]?.item_type || itemsDocs[id]?.type || "").toLowerCase();
+      const type = (entry.type || entry.item_type || itemsDocs[catalogId]?.item_type || itemsDocs[catalogId]?.type || "").toLowerCase();
       const qty = typeof entry.qty === "number" ? Math.max(1, entry.qty) : 1;
       if (type === "varie") {
-        if (!varieMap[id]) varieMap[id] = { id, name, qty: 0, type: "varie", invIndices: [] };
+        if (!varieMap[id]) varieMap[id] = { id, catalogId, name, qty: 0, type: "varie", invIndices: [], stable: Boolean(stableId) };
         varieMap[id].qty += qty;
         // store each contributing inventory index so we could support per-unit deletion in future
         for (let q = 0; q < qty; q += 1) {
@@ -67,7 +81,7 @@ const PlayerInfoInventoryRow = ({
         }
       } else {
         for (let q = 0; q < qty; q += 1) {
-          nonVarieInstances.push({ id, name, type: type || "oggetto", invIndex: i });
+          nonVarieInstances.push({ id, catalogId, name, type: type || "oggetto", invIndex: i, stable: Boolean(stableId) });
         }
       }
     }
@@ -84,6 +98,7 @@ const PlayerInfoInventoryRow = ({
 
     const gold = typeof user?.stats?.gold === "number" ? user.stats.gold : parseInt(user?.stats?.gold, 10) || 0;
     const goldBusy = !!goldUpdating[user.id];
+    const userLabel = user.characterId || user.label || user.displayName || user.email || user.id;
 
     return (
       <div className="align-top">
@@ -136,7 +151,7 @@ const PlayerInfoInventoryRow = ({
               const isVarie = (item.type || "").toLowerCase() === "varie";
               const displayName = isVarie ? item.name : item.displayName || item.name;
               const key = `${item.id}-${isVarie ? "v" : "n"}-${index}`;
-              const canEdit = itemsDocs?.[item.id]?.item_type || isVarie;
+              const canEdit = item.stable && (itemsDocs?.[item.catalogId]?.item_type || isVarie);
               return (
                 <li key={key} className="flex items-center justify-between text-sm">
                   <span className="truncate mr-2">
@@ -153,7 +168,7 @@ const PlayerInfoInventoryRow = ({
                         <FontAwesomeIcon icon="edit" className="w-3.5 h-3.5" />
                       </button>
                     )}
-                    {canDeleteInventory && !isVarie && (
+                    {canDeleteInventory && item.stable && !isVarie && (
                       <button
                         className="flex h-6 w-6 items-center justify-center rounded-full border border-red-500/70 text-red-300 transition hover:bg-red-500/20 disabled:opacity-50"
                         title="Elimina oggetto"
@@ -163,6 +178,7 @@ const PlayerInfoInventoryRow = ({
                             inventoryItemId: item.id,
                             invIndex: isVarie ? null : item.invIndex,
                             displayName,
+                            userLabel,
                             isVarie,
                           })
                         }
@@ -170,7 +186,7 @@ const PlayerInfoInventoryRow = ({
                         <FontAwesomeIcon icon="trash" className="w-3 h-3" />
                       </button>
                     )}
-                    {canDeleteInventory && isVarie && (
+                    {canDeleteInventory && item.stable && isVarie && (
                       <button
                         className="flex h-6 w-6 items-center justify-center rounded-full border border-red-500/70 text-red-300 transition hover:bg-red-500/20 disabled:opacity-50"
                         title="Rimuovi unità Varie"
@@ -180,6 +196,7 @@ const PlayerInfoInventoryRow = ({
                             varieItemId: item.id,
                             displayName,
                             qty: item.qty || 1,
+                            userLabel,
                           })
                         }
                       >
@@ -230,6 +247,7 @@ const PlayerInfoInventoryRow = ({
           inventoryItemId={deleteTarget.inventoryItemId}
           userInventoryIndex={deleteTarget.invIndex}
           displayName={deleteTarget.displayName}
+          userLabel={deleteTarget.userLabel}
           onClose={() => setDeleteTarget(null)}
           onSuccess={() => setDeleteTarget(null)}
         />
@@ -240,6 +258,7 @@ const PlayerInfoInventoryRow = ({
           varieItemId={deleteVarieTarget.varieItemId}
           displayName={deleteVarieTarget.displayName}
           totalQty={deleteVarieTarget.qty}
+          userLabel={deleteVarieTarget.userLabel}
           onClose={() => setDeleteVarieTarget(null)}
           onSuccess={() => setDeleteVarieTarget(null)}
         />

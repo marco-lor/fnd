@@ -1,4 +1,5 @@
 const { test, expect } = require('./measured-test');
+const {isExpectedDemoRecaptchaReportOnlyWarning} = require('./helpers');
 
 const CONFIG_PATH = '/fatins-runtime/firebase-client';
 const CONFIG_DELAY_MS = 750;
@@ -38,7 +39,10 @@ test('async runtime config remains responsive and makes one request', async ({ b
 
   const page = await context.newPage();
   page.on('console', (message) => {
-    if (message.type() === 'error') browserErrors.push(message.text());
+    if (message.type() !== 'error') return;
+    const text = message.text();
+    if (isExpectedDemoRecaptchaReportOnlyWarning(text, {baseURL})) return;
+    browserErrors.push(text);
   });
   page.on('pageerror', (error) => browserErrors.push(error.message));
 

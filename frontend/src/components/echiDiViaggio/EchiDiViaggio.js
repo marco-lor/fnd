@@ -8,6 +8,7 @@ import { useMapEditing, MapEditorControls, MapMarkerModal, renderMarkerIcon } fr
 import NpcSidebar from './NpcSidebar';
 import { db } from '../firebaseConfig';
 import { useShellLayout } from '../common/shellLayout';
+import MediaImage from '../common/MediaImage';
 
 const getNormalizedText = (value, fallback) => {
   const trimmed = typeof value === 'string' ? value.trim() : '';
@@ -100,7 +101,7 @@ const MapMarkerItem = ({
 
   const hasNpcImage = !!(
     hasNpcInfo
-    && npcImageUrl
+    && (npcImageUrl || npcData?.media)
     && !isNpcImageBroken
   );
   const isNpcMovable = isNpcMarker && editMode && canEdit && !isDeleting;
@@ -197,11 +198,19 @@ const MapMarkerItem = ({
             <span className="absolute inset-0 rounded-full bg-black/70 shadow-xl shadow-black/70 scale-110"></span>
             <span className="absolute inset-0 rounded-full p-[2px] bg-gradient-to-b from-amber-100/90 via-sky-100/70 to-slate-300/80">
               <span className="block w-full h-full rounded-full overflow-hidden border border-black/30 bg-slate-900/70">
-                <img
-                  src={npcImageUrl}
+                <MediaImage
+                  media={npcData}
+                  mediaPurpose="npc"
+                  src={npcImageUrl || ''}
+                  variant="thumbnail"
                   alt={npcNome}
+                  width={40}
+                  height={40}
+                  sizes="40px"
+                  loading="eager"
                   className="w-full h-full object-cover"
                   onError={() => setIsNpcImageBroken(true)}
+                  fallback={renderMarkerIcon(marker.iconType, markerColor)}
                 />
               </span>
             </span>
@@ -261,7 +270,19 @@ const MapMarkerItem = ({
             <div className="flex items-start gap-2 pb-2 border-b border-slate-700/70">
               <div className="w-10 h-10 rounded-full overflow-hidden border border-slate-500/70 bg-slate-800/80 shrink-0">
                 {hasNpcImage ? (
-                  <img src={npcImageUrl} alt={`${npcNome} portrait`} className="w-full h-full object-cover" />
+                  <MediaImage
+                    media={npcData}
+                    mediaPurpose="npc"
+                    src={npcImageUrl || ''}
+                    variant="thumbnail"
+                    alt={npcNome + ' portrait'}
+                    width={40}
+                    height={40}
+                    sizes="40px"
+                    loading="eager"
+                    className="w-full h-full object-cover"
+                    fallback={<div className="w-full h-full flex items-center justify-center text-[9px] text-slate-400">No Img</div>}
+                  />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-[9px] text-slate-400">No Img</div>
                 )}
@@ -320,6 +341,8 @@ function EchiDiViaggio() {
         snapshot.docs.forEach((docSnap) => {
           const data = docSnap.data();
           nextNpcById[docSnap.id] = {
+            ...data,
+            id: docSnap.id,
             nome: getNormalizedText(data?.nome, 'NPC'),
             imageUrl: getNormalizedText(data?.imageUrl, ''),
             description: getNormalizedText(data?.description, '-'),

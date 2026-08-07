@@ -171,13 +171,70 @@ const FIXTURES = {
 };
 
 const MUSIC_STREAM_FIXTURE = {
-  schemaVersion: 1,
+  schemaVersion: 2,
+  controlMode: 'canonical-only',
   revision: 1,
   volume: 0.65,
   sessions: [],
   sourceHash: 'a'.repeat(64),
   updatedAt: new Date('2026-07-27T00:00:00.000Z'),
 };
+
+const FOE_OPERATION_FIXTURE = (() => {
+  const receiptId = 'f'.repeat(48);
+  const foeId = 'task07-operation-foe';
+  const slot = 'spells-0';
+  const digest = 'c'.repeat(64);
+  const fileName = `${digest}.png`;
+  const operationId = 'foe-retirement-rules-0001';
+  const path = [
+    'foes',
+    'task07-operations',
+    USERS.webmaster.uid,
+    receiptId,
+    foeId,
+    slot,
+    fileName,
+  ].join('/');
+  const metadata = {
+    task07ActorUid: USERS.webmaster.uid,
+    task07AssetId: FIXTURES.dmOnly.assetId,
+    task07Bytes: '8',
+    task07Digest: digest,
+    task07FoeId: foeId,
+    task07OperationId: operationId,
+    task07ReceiptId: receiptId,
+    task07Slot: slot,
+  };
+  return {
+    receiptId,
+    path,
+    uploadMetadata: {
+      contentType: 'image/png',
+      cacheControl: PRIVATE_CACHE,
+      contentDisposition: 'inline',
+      customMetadata: metadata,
+    },
+    receipt: {
+      schemaVersion: 1,
+      actorUid: USERS.webmaster.uid,
+      operationId,
+      assetId: FIXTURES.dmOnly.assetId,
+      foeId,
+      status: 'pending',
+      uploadsBySlot: {
+        [slot]: {
+          path,
+          fileName,
+          bytes: 8,
+          contentType: 'image/png',
+          digest,
+          metadata,
+        },
+      },
+    },
+  };
+})();
 
 const sourceMetadata = (manifest, overrides = {}) => ({
   contentType: manifest.plan.sourceContentType,
@@ -236,6 +293,10 @@ before(async () => {
       doc(firestore, 'grigliata_music_stream/private-copy'),
       MUSIC_STREAM_FIXTURE
     );
+    await setDoc(doc(
+      firestore,
+      `task07_foe_media_operations/${FOE_OPERATION_FIXTURE.receiptId}`
+    ), FOE_OPERATION_FIXTURE.receipt);
     for (const manifest of Object.values(FIXTURES)) {
       await setDoc(
         doc(firestore, `media_assets/${manifest.assetId}`),
@@ -303,6 +364,18 @@ after(async () => {
     }
     await deleteDoc(doc(firestore, 'grigliata_music_stream/current'));
     await deleteDoc(doc(firestore, 'grigliata_music_stream/private-copy'));
+    await deleteObject(ref(
+      storage,
+      FOE_OPERATION_FIXTURE.path
+    )).catch(() => undefined);
+    await deleteObject(ref(
+      storage,
+      'foes/task07-rules-generic.png'
+    )).catch(() => undefined);
+    await deleteDoc(doc(
+      firestore,
+      `task07_foe_media_operations/${FOE_OPERATION_FIXTURE.receiptId}`
+    ));
   });
   await environment.cleanup();
 });
@@ -337,6 +410,169 @@ test('music stream remains server-owned for every privileged client role', async
     await assertFails(setDoc(stream, MUSIC_STREAM_FIXTURE));
     await assertFails(updateDoc(stream, {volume: 0.2}));
     await assertFails(deleteDoc(stream));
+  }
+});
+
+test('canonical-only music writes bind tracks and cannot introduce legacy URLs', async () => {
+  const trackId = 'task07-music-track';
+  const newTrackId = 'task07-music-new';
+  const legacyTrackId = 'task07-music-legacy';
+  const mediaAssetId = assetId('9');
+  const timestamp = new Date('2026-08-01T00:00:00.000Z');
+  const baseTrack = {
+    name: 'Canonical track',
+    fileName: 'canonical.mp3',
+    audioUrl: 'https://legacy.example/canonical.mp3',
+    audioPath: 'grigliata/music/task07-dm/canonical.mp3',
+    contentType: 'audio/mpeg',
+    sizeBytes: 4096,
+    durationMs: 120000,
+    createdAt: timestamp,
+    createdBy: USERS.dm.uid,
+    updatedAt: timestamp,
+    updatedBy: USERS.dm.uid,
+  };
+  const media = {
+    schemaVersion: 1,
+    contractVersion: 1,
+    assetId: mediaAssetId,
+    kind: 'music',
+    state: 'ready',
+    generation: '7',
+    audience: 'signed-in',
+    ownerUid: USERS.dm.uid,
+    original: {
+      path: `media_assets/v1/signed-in/${USERS.dm.uid}/${mediaAssetId}/7/original`,
+      contentType: 'audio/mpeg',
+      bytes: 4096,
+      durationMs: 120000,
+      width: 0,
+      height: 0,
+      generation: '9',
+    },
+  };
+  await environment.withSecurityRulesDisabled(async (context) => {
+    const firestore = context.firestore();
+    await setDoc(doc(firestore, 'utils/task07_media'), {
+      schemaVersion: 1,
+      policyVersion: 1,
+      mode: 'canonical-only',
+      enabledPurposes: ['*'],
+      enabledRoles: ['*'],
+      enabledUids: ['*'],
+    });
+    await setDoc(doc(firestore, `grigliata_music_tracks/${trackId}`), {
+      ...baseTrack,
+      media,
+      task07MediaRevision: 1,
+      mediaUpdatedAt: timestamp,
+    });
+  });
+
+  const dm = environment.authenticatedContext(USERS.dm.uid).firestore();
+  const track = doc(dm, `grigliata_music_tracks/${trackId}`);
+  const newTrack = doc(dm, `grigliata_music_tracks/${newTrackId}`);
+  const legacyTrack = doc(dm, `grigliata_music_tracks/${legacyTrackId}`);
+  try {
+    await assertSucceeds(updateDoc(track, {musicFolderId: 'combat'}));
+    await assertFails(updateDoc(track, {
+      audioUrl: 'https://legacy.example/replacement.mp3',
+    }));
+    await assertSucceeds(setDoc(newTrack, {
+      ...baseTrack,
+      name: 'New canonical source',
+      audioUrl: '',
+      audioPath: '',
+    }));
+    await assertFails(setDoc(legacyTrack, {
+      ...baseTrack,
+      name: 'Forbidden legacy source',
+    }));
+
+    const canonicalSession = {
+      status: 'paused',
+      trackId,
+      trackName: 'Canonical track',
+      audioUrl: '',
+      mediaAssetId,
+      durationMs: 120000,
+      offsetMs: 2000,
+      loop: false,
+      startedAt: null,
+      startedAtMs: 0,
+      commandId: 'music_rules_canonical',
+      updatedAt: timestamp,
+      updatedBy: USERS.dm.uid,
+    };
+    const session = doc(dm, `grigliata_music_playback_sessions/${trackId}`);
+    await assertSucceeds(setDoc(session, canonicalSession));
+    await assertFails(setDoc(session, {
+      ...canonicalSession,
+      audioUrl: 'https://legacy.example/canonical.mp3',
+      mediaAssetId: '',
+    }));
+    await assertFails(setDoc(session, {
+      ...canonicalSession,
+      mediaAssetId: assetId('8'),
+    }));
+
+    const playback = doc(dm, 'grigliata_music_playback/current');
+    await assertSucceeds(setDoc(playback, {
+      status: 'paused',
+      trackId,
+      trackName: 'Canonical track',
+      audioUrl: '',
+      mediaAssetId,
+      durationMs: 120000,
+      offsetMs: 2000,
+      volume: 0.65,
+      startedAt: null,
+      commandId: 'music_rules_state',
+      updatedAt: timestamp,
+      updatedBy: USERS.dm.uid,
+    }));
+    await assertFails(setDoc(playback, {
+      status: 'playing',
+      trackId,
+      trackName: 'Canonical track',
+      audioUrl: 'https://legacy.example/canonical.mp3',
+      mediaAssetId: '',
+      durationMs: 120000,
+      offsetMs: 2000,
+      volume: 0.65,
+      startedAt: timestamp,
+      commandId: 'music_rules_legacy_state',
+      updatedAt: timestamp,
+      updatedBy: USERS.dm.uid,
+    }));
+    await assertSucceeds(setDoc(playback, {
+      status: 'stopped',
+      trackId: '',
+      trackName: '',
+      audioUrl: '',
+      mediaAssetId: '',
+      durationMs: 0,
+      offsetMs: 0,
+      volume: 0.65,
+      startedAt: null,
+      commandId: 'music_rules_stopped',
+      updatedAt: timestamp,
+      updatedBy: USERS.dm.uid,
+    }));
+  } finally {
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const firestore = context.firestore();
+      for (const pathName of [
+        `grigliata_music_playback_sessions/${trackId}`,
+        'grigliata_music_playback/current',
+        `grigliata_music_tracks/${trackId}`,
+        `grigliata_music_tracks/${newTrackId}`,
+        `grigliata_music_tracks/${legacyTrackId}`,
+        'utils/task07_media',
+      ]) {
+        await deleteDoc(doc(firestore, pathName));
+      }
+    });
   }
 });
 
@@ -556,7 +792,7 @@ test('only the manifest actor can create the exact immutable staging source', as
   await assertFails(deleteObject(ref(owner, path)));
 });
 
-test('staging rejects wrong bytes, MIME, cache policy, and custom metadata', async () => {
+test('staging rejects wrong bytes, MIME, disposition, and custom metadata', async () => {
   const owner = environment.authenticatedContext(USERS.owner.uid).storage();
   const manifest = makeManifest({
     asset: assetId('e'),
@@ -590,7 +826,7 @@ test('staging rejects wrong bytes, MIME, cache policy, and custom metadata', asy
     target,
     '12345678',
     'raw',
-    sourceMetadata(manifest, {cacheControl: 'public, max-age=3600'})
+    sourceMetadata(manifest, {contentDisposition: 'attachment'})
   ));
   await assertFails(uploadString(
     target,
@@ -606,6 +842,73 @@ test('staging rejects wrong bytes, MIME, cache policy, and custom metadata', asy
       `media_assets/${manifest.assetId}`
     ));
   });
+});
+
+test('foe operation paths are receipt-bound, immutable, and server-deletable', async () => {
+  const dm = environment.authenticatedContext(USERS.dm.uid).storage();
+  const peer = environment.authenticatedContext(USERS.peer.uid).storage();
+  const webmaster = environment.authenticatedContext(USERS.webmaster.uid).storage();
+  const target = ref(webmaster, FOE_OPERATION_FIXTURE.path);
+  await assertFails(uploadString(
+    ref(dm, FOE_OPERATION_FIXTURE.path),
+    '12345678',
+    'raw',
+    FOE_OPERATION_FIXTURE.uploadMetadata
+  ));
+  await assertFails(uploadString(
+    ref(peer, FOE_OPERATION_FIXTURE.path),
+    '12345678',
+    'raw',
+    FOE_OPERATION_FIXTURE.uploadMetadata
+  ));
+  await assertFails(uploadString(
+    ref(webmaster, `${FOE_OPERATION_FIXTURE.path}/bypass.png`),
+    '12345678',
+    'raw',
+    FOE_OPERATION_FIXTURE.uploadMetadata
+  ));
+  await assertFails(uploadString(
+    target,
+    '12345678',
+    'raw',
+    {
+      ...FOE_OPERATION_FIXTURE.uploadMetadata,
+      customMetadata: {
+        ...FOE_OPERATION_FIXTURE.uploadMetadata.customMetadata,
+        arbitrary: 'rejected',
+      },
+    }
+  ));
+  await assertSucceeds(uploadString(
+    target,
+    '12345678',
+    'raw',
+    FOE_OPERATION_FIXTURE.uploadMetadata
+  ));
+  await assertSucceeds(getMetadata(target));
+  await assertFails(uploadString(
+    target,
+    '12345678',
+    'raw',
+    FOE_OPERATION_FIXTURE.uploadMetadata
+  ));
+  await assertFails(deleteObject(ref(peer, FOE_OPERATION_FIXTURE.path)));
+  await assertFails(deleteObject(target));
+
+  const generic = ref(dm, 'foes/task07-rules-generic.png');
+  await assertSucceeds(uploadString(generic, 'first', 'raw', {
+    contentType: 'image/png',
+  }));
+  await assertSucceeds(uploadString(generic, 'second', 'raw', {
+    contentType: 'image/png',
+  }));
+  await assertSucceeds(deleteObject(generic));
+
+  const nestedGeneric = ref(dm, 'foes/legacy/task07-rules-generic.png');
+  await assertSucceeds(uploadString(nestedGeneric, 'legacy', 'raw', {
+    contentType: 'image/png',
+  }));
+  await assertSucceeds(deleteObject(nestedGeneric));
 });
 
 test('generated paths are read-only and enforce signed-in audiences', async () => {
@@ -631,7 +934,7 @@ test('generated paths are read-only and enforce signed-in audiences', async () =
   await assertFails(getMetadata(ref(owner, pathOf(FIXTURES.dmOnly))));
   await assertFails(getMetadata(ref(peer, pathOf(FIXTURES.dmOnly))));
   await assertSucceeds(getMetadata(ref(dm, pathOf(FIXTURES.dmOnly))));
-  await assertFails(getMetadata(ref(webmaster, pathOf(FIXTURES.dmOnly))));
+  await assertSucceeds(getMetadata(ref(webmaster, pathOf(FIXTURES.dmOnly))));
 
   await assertFails(uploadString(
     ref(owner, pathOf(FIXTURES.signedIn)),
@@ -640,6 +943,88 @@ test('generated paths are read-only and enforce signed-in audiences', async () =
     {contentType: 'image/png'}
   ));
   await assertFails(deleteObject(ref(dm, pathOf(FIXTURES.dmOnly))));
+});
+
+test('map gallery and video poster derivatives are readable by signed-in users', async () => {
+  const createVariantFixture = ({asset, kind, variant}) => {
+    const manifest = makeManifest({
+      asset,
+      actorUid: USERS.dm.uid,
+      audience: 'signed-in',
+      entityId: `task07-${kind}-derivative`,
+      kind,
+      ownerUid: USERS.dm.uid,
+      state: 'attached',
+    });
+    const variantPath = manifest.generated.original.path.replace(
+      '/original',
+      `/${variant}`
+    );
+    manifest.plan.variants = {[variant]: variantPath};
+    manifest.generated.variants = {
+      [variant]: {
+        ...manifest.generated.original,
+        path: variantPath,
+        contentType: 'image/webp',
+        role: variant,
+      },
+    };
+    return manifest;
+  };
+  const manifests = [
+    createVariantFixture({
+      asset: assetId('e'),
+      kind: 'map',
+      variant: 'gallery',
+    }),
+    createVariantFixture({
+      asset: assetId('f'),
+      kind: 'map-video',
+      variant: 'poster',
+    }),
+  ];
+
+  await environment.withSecurityRulesDisabled(async (context) => {
+    const firestore = context.firestore();
+    const storage = context.storage();
+    for (const manifest of manifests) {
+      await setDoc(doc(firestore, `media_assets/${manifest.assetId}`), manifest);
+      const descriptor = Object.values(manifest.generated.variants)[0];
+      await uploadString(ref(storage, descriptor.path), '12345678', 'raw', {
+        contentType: descriptor.contentType,
+        cacheControl: PRIVATE_CACHE,
+        contentDisposition: 'inline',
+      });
+    }
+  });
+
+  try {
+    const anonymous = environment.unauthenticatedContext().storage();
+    const signedIn = [
+      USERS.owner,
+      USERS.peer,
+      USERS.dm,
+      USERS.webmaster,
+    ].map((user) => environment.authenticatedContext(user.uid).storage());
+
+    for (const manifest of manifests) {
+      const descriptor = Object.values(manifest.generated.variants)[0];
+      await assertFails(getMetadata(ref(anonymous, descriptor.path)));
+      for (const storage of signedIn) {
+        await assertSucceeds(getMetadata(ref(storage, descriptor.path)));
+      }
+    }
+  } finally {
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const firestore = context.firestore();
+      const storage = context.storage();
+      for (const manifest of manifests) {
+        const descriptor = Object.values(manifest.generated.variants)[0];
+        await deleteObject(ref(storage, descriptor.path)).catch(() => undefined);
+        await deleteDoc(doc(firestore, `media_assets/${manifest.assetId}`));
+      }
+    });
+  }
 });
 
 test('intent state and copied generated paths remain unreadable', async () => {

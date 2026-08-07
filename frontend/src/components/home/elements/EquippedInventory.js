@@ -15,15 +15,14 @@ import {
   useResources,
 } from '../../../data/userData/userDataHooks';
 import { setEquipment } from '../../../data/userData/userDataCommands';
-import { legacySetEquipment } from '../../../data/userData/legacyUserDataCommands';
-import {
-  isUserDataCommandStageResolved,
-  runVersionedUserDataCommand,
-} from '../../../data/userData/userDataCommandRouting';
-import { increment } from '../../../performance/firestore';
-import { computeValue } from '../../common/computeFormula';
 import { stableUserDataJson } from '../../../data/userData/legacyInventoryProjection';
 import { buildAvailableEquipmentInventory } from './equipmentInventoryProjection';
+import MediaImage from '../../common/MediaImage';
+import useCatalogItemsById from '../../../data/useCatalogItemsById';
+import {
+  collectInventoryCatalogItemIds,
+  resolveInventoryCatalogMediaList,
+} from '../../../data/inventoryCatalogProjection';
 
 // Slot metadata (icon + label) retained; layout will be Diablo-like around a silhouette
 const SLOT_DEFS = [
@@ -77,7 +76,6 @@ const EquippedInventory = () => {
   const { user } = useAuthSession();
   const {
     data: equipment,
-    stage: equipmentStage,
     status: equipmentStatus,
     uid: equipmentUid,
   } = useEquipment(user?.uid);
@@ -86,6 +84,11 @@ const EquippedInventory = () => {
     status: inventoryStatus,
     uid: inventoryUid,
   } = useInventory(user?.uid);
+  const catalogItemIds = useMemo(
+    () => collectInventoryCatalogItemIds(inventoryData),
+    [inventoryData]
+  );
+  const { itemsById: catalogItemsById } = useCatalogItemsById(catalogItemIds);
   const {
     data: progression,
     status: progressionStatus,
@@ -98,8 +101,7 @@ const EquippedInventory = () => {
   } = useResources(user?.uid);
   const equipmentReady = equipmentStatus === 'fresh'
     && equipment !== null
-    && equipmentUid === user?.uid
-    && isUserDataCommandStageResolved(equipmentStage);
+    && equipmentUid === user?.uid;
   const inventoryReady = inventoryStatus === 'fresh'
     && inventoryData !== null
     && inventoryUid === user?.uid;
@@ -110,7 +112,10 @@ const EquippedInventory = () => {
     && resources !== null
     && resourcesUid === user?.uid;
   const equipmentMutationsReady = equipmentReady && inventoryReady && progressionReady && resourcesReady;
-  const inventory = useMemo(() => inventoryData || [], [inventoryData]);
+  const inventory = useMemo(
+    () => resolveInventoryCatalogMediaList(inventoryData || [], catalogItemsById),
+    [catalogItemsById, inventoryData]
+  );
   const inventoryById = useMemo(() => Object.fromEntries(inventory.map((entry) => [
     entry?._task05?.inventoryId || entry?._instance?.instanceId,
     entry,
@@ -171,58 +176,12 @@ const EquippedInventory = () => {
     setPreviewItem(null);
   }, [user?.uid]);
 
-  // Keep the legacy aggregate's equipment-derived Parametri behavior intact
-  // until the authoritative equipment command is enabled for this user.
-  const getDefaultLevelKey = () => {
-    const thresholds = [1, 4, 7, 10];
-    const userLevel = Number(userData?.stats?.level || 1);
-    for (let i = thresholds.length - 1; i >= 0; i -= 1) {
-      if (userLevel >= thresholds[i]) return String(thresholds[i]);
+  const executeEquipmentMutation = useCallback(({ slot, inventoryId }) => {
+    if (!equipmentMutationsReady) {
+      return Promise.reject(new Error('Canonical equipment data is still loading.'));
     }
-    return '1';
-  };
-  const isDice = (value) => typeof value === 'string' && /\b\d+d\d+\b/i.test(value);
-  const looksLikeFormula = (value) => {
-    if (typeof value !== 'string' || isDice(value)) return false;
-    return /[+\-*/()]|\bMAX\b|\bMIN\b|[A-Za-z]/i.test(value);
-  };
-  const asNumber = (value) => {
-    if (value == null) return 0;
-    if (typeof value === 'number') return value;
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  };
-  const buildEquipDeltaFromItem = (item, sign = 1) => {
-    const updates = {};
-    if (!item || typeof item !== 'object') return updates;
-    const params = item.Parametri || {};
-    const levelKey = getDefaultLevelKey();
-    const userParams = userData?.Parametri;
-    ['Base', 'Combattimento', 'Special'].forEach((groupName) => {
-      const group = params[groupName];
-      if (!group || typeof group !== 'object') return;
-      Object.entries(group).forEach(([stat, levels]) => {
-        const raw = levels?.[levelKey];
-        if (raw == null || String(raw).trim() === '') return;
-        let value = 0;
-        if (looksLikeFormula(raw) && userParams) {
-          const computed = computeValue(String(raw), userParams);
-          value = Number.isFinite(computed) ? computed : 0;
-        } else if (!isDice(raw)) {
-          value = asNumber(raw);
-        }
-        if (value) updates[`Parametri.${groupName}.${stat}.Equip`] = increment(sign * value);
-      });
-    });
-    return updates;
-  };
-  const executeEquipmentMutation = useCallback(({ slot, item, inventoryId, parameterUpdates }) => (
-    runVersionedUserDataCommand({
-      stage: equipmentMutationsReady ? equipmentStage : null,
-      legacy: () => legacySetEquipment({ uid: user.uid, slot, item, parameterUpdates }),
-      authoritative: () => setEquipment({ slot, inventoryId }),
-    })
-  ), [equipmentMutationsReady, equipmentStage, user]);
+    return setEquipment({ slot, inventoryId });
+  }, [equipmentMutationsReady]);
 
   // --- Belt (Cintura) helpers: dynamic consumable slots --------------------
   // Capacity comes from equipped belt item Specific.slotCintura
@@ -263,7 +222,6 @@ const EquippedInventory = () => {
     if (needs) {
       Promise.all(Object.keys(updates).map((path) => executeEquipmentMutation({
         slot: path.replace(/^equipped\./, ''),
-        item: null,
         inventoryId: null,
       }))).catch(console.error);
     }
@@ -273,16 +231,9 @@ const EquippedInventory = () => {
     if (!user || !equipmentMutationsReady) return;
     setLoading(true);
     try {
-      const previousItem = equipped?.[slotKey];
-      const parameterUpdates = buildEquipDeltaFromItem(
-        resolveItemDoc(previousItem) || previousItem,
-        -1
-      );
       await executeEquipmentMutation({
         slot: slotKey,
-        item: null,
         inventoryId: null,
-        parameterUpdates,
       });
     } catch (e) { console.error(e); }
     setLoading(false);
@@ -312,17 +263,9 @@ const EquippedInventory = () => {
       }
       const inventoryId = item?._task05?.inventoryId || item?._instance?.instanceId;
       if (!inventoryId) throw new Error('Inventory item is missing its stable instance ID.');
-      const previousItem = equipped?.[activeSlot];
-      const subtractPrevious = buildEquipDeltaFromItem(
-        resolveItemDoc(previousItem) || previousItem,
-        -1
-      );
-      const addNext = buildEquipDeltaFromItem(toCheck, 1);
       await executeEquipmentMutation({
         slot: activeSlot,
-        item,
         inventoryId,
-        parameterUpdates: { ...subtractPrevious, ...addNext },
       });
     } catch (e) { console.error(e); }
     setLoading(false);
@@ -484,9 +427,20 @@ const EquippedInventory = () => {
           }}
           title={blocked ? 'Bloccato: arma a due mani equipaggiata nell\'altra mano' : (item ? `Click to unequip ${item.name || item}` : `Equip ${label}`)}
         >
-          {item && imgUrl ? (
+          {item ? (
             <div className="h-10 w-10 mb-1 rounded-lg overflow-hidden border border-indigo-400/40 bg-slate-900/40 shadow-inner">
-              <img src={imgUrl} alt={typeof item === 'string' ? (item) : (item.name || item?.General?.Nome || item.id)} className="h-full w-full object-contain" />
+              <MediaImage
+                media={itemDoc || item}
+                mediaPurpose="item"
+                src={imgUrl || ''}
+                variant="thumbnail"
+                alt={typeof item === 'string' ? item : (item.name || item?.General?.Nome || item.id)}
+                width={40}
+                height={40}
+                sizes="40px"
+                className="h-full w-full object-contain"
+                fallback={<Icon className="h-full w-full p-2 text-indigo-300 drop-shadow" />}
+              />
             </div>
           ) : (
             <Icon className={`w-6 h-6 mb-1 ${item ? 'text-indigo-300 drop-shadow' : 'text-slate-500 group-hover:text-slate-300'}`} />
@@ -610,13 +564,20 @@ const EquippedInventory = () => {
               {inventoryConsumables.map((c) => (
                 <div key={c.id} className="group relative h-28 rounded-xl border border-slate-600/50 bg-slate-800/40 p-2 flex flex-col items-center justify-between">
                   <div className="flex flex-col items-center gap-1 w-full">
-                    {c.imgUrl ? (
-                      <div className="h-10 w-10 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/40">
-                        <img src={c.imgUrl} alt={c.name} className="h-full w-full object-contain" />
-                      </div>
-                    ) : (
-                      <GiPotionBall className="w-6 h-6 text-slate-400" />
-                    )}
+                    <div className="h-10 w-10 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/40">
+                      <MediaImage
+                        media={c}
+                        mediaPurpose="item"
+                        src={c.imgUrl || ''}
+                        variant="thumbnail"
+                        alt={c.name}
+                        width={40}
+                        height={40}
+                        sizes="40px"
+                        className="h-full w-full object-contain"
+                        fallback={<GiPotionBall className="h-full w-full p-2 text-slate-400" />}
+                      />
+                    </div>
                     <span className="text-[10px] text-slate-300 font-medium text-center px-1 truncate w-full" title={c.name}>{c.name}</span>
                     {c.qty > 1 && <span className="text-[9px] text-amber-300">x{c.qty}</span>}
                   </div>
@@ -667,11 +628,20 @@ const EquippedInventory = () => {
                 return (
                   <li key={`${it.id}-${idx}`}>
                     <div className="w-full px-3 py-2 rounded-lg bg-slate-800/70 border border-slate-600/50 flex items-center justify-between gap-2">
-                      {imgUrl && (
-                        <div className="h-8 w-8 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/50 mr-2">
-                          <img src={imgUrl} alt={name} className="h-full w-full object-contain" />
-                        </div>
-                      )}
+                      <div className="h-8 w-8 rounded-md overflow-hidden border border-slate-600/60 bg-slate-900/50 mr-2">
+                        <MediaImage
+                          media={docObj || it}
+                          mediaPurpose="item"
+                          src={imgUrl || ''}
+                          variant="thumbnail"
+                          alt={name}
+                          width={32}
+                          height={32}
+                          sizes="32px"
+                          className="h-full w-full object-contain"
+                          fallback={<GiPotionBall className="h-full w-full p-1.5 text-slate-400" />}
+                        />
+                      </div>
                       <button
                         onClick={() => handleEquip(it)}
                         disabled={!equipmentMutationsReady}
@@ -716,11 +686,8 @@ const EquippedInventory = () => {
             try {
               await consumeConsumable({
                 user,
-                userData,
                 item: confirmUse.itemDoc,
-                slotKey: confirmUse.slotKey,
                 mode, // regen target
-                stage: equipmentStage,
               });
             } catch (e) {
               console.error('Errore uso consumabile', e);

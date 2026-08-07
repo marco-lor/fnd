@@ -13,10 +13,12 @@ import GlobalGrigliataMusicPlayer, {
   task07MusicStreamsMatch,
 } from './GlobalGrigliataMusicPlayer';
 import { useAuth } from '../../AuthContext';
+import { useUserSettings } from '../../data/userData/userDataHooks';
 import * as firestoreRuntime from '../../performance/firestore';
 import * as performanceRuntime from '../../performance/runtime';
 
 jest.mock('../../AuthContext', () => ({ useAuth: jest.fn() }));
+jest.mock('../../data/userData/userDataHooks', () => ({ useUserSettings: jest.fn() }));
 jest.mock('../firebaseConfig', () => ({ db: { name: 'test-db' } }));
 jest.mock('../../performance/firestore', () => ({
   collection: jest.fn(),
@@ -28,23 +30,55 @@ jest.mock('../../performance/runtime', () => ({
   withAsyncResourceOwner: jest.fn((_owner, callback) => callback()),
 }));
 
-const makeSession = (id, overrides = {}) => ({
-  id,
-  status: overrides.status || 'playing',
-  trackId: id,
-  trackName: `Track ${id}`,
-  audioUrl: `https://example.com/audio/${id}.mp3`,
-  durationMs: 120000,
-  offsetMs: 2000,
-  loop: false,
-  startedAtMs: overrides.status === 'paused' || overrides.status === 'stopped' ? 0 : 9000,
-  updatedAtMs: 9000,
-  updatedAt: new Date(9000),
-  ...overrides,
-});
+const makeSession = (id, overrides = {}) => {
+  const mediaAssetId = `m_${'a'.repeat(40)}`;
+  const ownerUid = `owner-${id}`;
+  return {
+    id,
+    status: overrides.status || 'playing',
+    trackId: id,
+    trackName: `Track ${id}`,
+    mediaAssetId,
+    media: {
+      schemaVersion: 1,
+      contractVersion: 1,
+      assetId: mediaAssetId,
+      kind: 'music',
+      state: 'ready',
+      generation: '7',
+      audience: 'signed-in',
+      ownerUid,
+      original: {
+        path: `media_assets/v1/signed-in/${ownerUid}/${mediaAssetId}/7/original`,
+        contentType: 'audio/mpeg',
+        bytes: 4096,
+        durationMs: 120000,
+        width: 0,
+        height: 0,
+        generation: '9',
+      },
+    },
+    durationMs: 120000,
+    offsetMs: 2000,
+    loop: false,
+    startedAtMs: overrides.status === 'paused' || overrides.status === 'stopped' ? 0 : 9000,
+    updatedAtMs: 9000,
+    updatedAt: new Date(9000),
+    ...overrides,
+  };
+};
+
+const makeLegacySession = (id, overrides = {}) => {
+  const { media, mediaAssetId, ...session } = makeSession(id, overrides);
+  return {
+    ...session,
+    audioUrl: `https://example.com/audio/${id}.mp3`,
+  };
+};
 
 const makeStream = (sessions = [], overrides = {}) => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
+  controlMode: 'canonical-only',
   revision: 1,
   volume: 0.4,
   sessions,
@@ -65,9 +99,12 @@ describe('GlobalGrigliataMusicPlayer', () => {
   let originalReadyState;
   let originalCurrentTime;
   let mediaTimes;
+  let acquireAudioAsset;
+  let audioLeaseReleases;
 
   const candidatePlayer = () => (
     <GlobalGrigliataMusicPlayer
+      acquireAudioAsset={acquireAudioAsset}
       musicModeOverride="derivative-read"
       subscribeToMusicStream={subscribeToMusicStream}
     />
@@ -80,8 +117,18 @@ describe('GlobalGrigliataMusicPlayer', () => {
   };
 
   beforeEach(() => {
+    audioLeaseReleases = [];
+    acquireAudioAsset = jest.fn((descriptor) => {
+      const release = jest.fn();
+      audioLeaseReleases.push(release);
+      return {
+        promise: Promise.resolve({url: `blob:private-${descriptor.path}`}),
+        release,
+      };
+    });
     authState = { user: { uid: 'user-1' }, userData: { settings: {} } };
     useAuth.mockImplementation(() => authState);
+    useUserSettings.mockReturnValue({ data: null });
     unsubscribe = jest.fn();
     streamHandlers = null;
     subscribeToMusicStream = jest.fn((onMusicStream, onError) => {
@@ -160,7 +207,7 @@ describe('GlobalGrigliataMusicPlayer', () => {
   test('requires the exact versioned envelope and rejects revision downgrade or conflict', () => {
     const diagnostic = jest.fn();
     const invalidStreams = [
-      makeStream([], { schemaVersion: 2 }),
+      makeStream([], { schemaVersion: 1 }),
       makeStream([], { revision: 0 }),
       makeStream([], { sourceHash: 'not-a-hash' }),
       makeStream([], { updatedAt: null }),
@@ -206,14 +253,14 @@ describe('GlobalGrigliataMusicPlayer', () => {
       startedAt: new Date(8000),
       updatedAt: new Date(9000),
     };
-    const activeSession = makeSession('session-track');
+    const activeSession = makeLegacySession('session-track');
     const legacy = buildLegacyGrigliataMusicStream({
       playbackState,
       playbackSessions: [activeSession],
     });
     expect(legacy.sessions.map(({ id }) => id)).toEqual(['session-track']);
     const projected = normalizeGrigliataMusicStream(
-      makeStream([activeSession])
+      makeStream([makeSession('session-track')])
     );
     expect(task07MusicStreamsMatch(legacy, projected)).toBe(true);
     expect(task07MusicStreamsMatch(legacy, {
@@ -241,7 +288,7 @@ describe('GlobalGrigliataMusicPlayer', () => {
       return jest.fn();
     });
     const legacySessions = jest.fn((onValue) => {
-      onValue([makeSession('legacy')]);
+      onValue([makeLegacySession('legacy')]);
       return jest.fn();
     });
     const stream = jest.fn((onValue) => {
@@ -251,6 +298,7 @@ describe('GlobalGrigliataMusicPlayer', () => {
     const paritySpy = jest.spyOn(console, 'info').mockImplementation(() => {});
     const { rerender } = render(
       <GlobalGrigliataMusicPlayer
+        acquireAudioAsset={acquireAudioAsset}
         musicModeOverride="legacy"
         subscribeToPlaybackState={legacyState}
         subscribeToPlaybackSessions={legacySessions}
@@ -263,6 +311,7 @@ describe('GlobalGrigliataMusicPlayer', () => {
 
     rerender(
       <GlobalGrigliataMusicPlayer
+        acquireAudioAsset={acquireAudioAsset}
         musicModeOverride="shadow"
         subscribeToPlaybackState={legacyState}
         subscribeToPlaybackSessions={legacySessions}
@@ -277,6 +326,7 @@ describe('GlobalGrigliataMusicPlayer', () => {
 
     rerender(
       <GlobalGrigliataMusicPlayer
+        acquireAudioAsset={acquireAudioAsset}
         musicModeOverride="derivative-read"
         subscribeToPlaybackState={legacyState}
         subscribeToPlaybackSessions={legacySessions}
@@ -318,6 +368,18 @@ describe('GlobalGrigliataMusicPlayer', () => {
     expect(subscribeToMusicStream).toHaveBeenCalledTimes(1);
   });
 
+  test('honors rollout-aware V2 mute settings when the legacy profile is stale', async () => {
+    useUserSettings.mockReturnValue({
+      data: { settings: { grigliata_music_muted: true } },
+    });
+    const { container } = render(candidatePlayer());
+
+    await emitStream(makeStream([makeSession('v2-muted')]));
+
+    expect(container.querySelectorAll('audio')).toHaveLength(0);
+    expect(playSpy).not.toHaveBeenCalled();
+  });
+
   test('renders and plays up to four preload-none sessions with authoritative offsets and loop state', async () => {
     const sessions = [
       makeSession('track-1'),
@@ -337,7 +399,8 @@ describe('GlobalGrigliataMusicPlayer', () => {
     audioNodes.forEach((audio) => {
       expect(audio.getAttribute('preload')).toBe('none');
       expect(audio.volume).toBeCloseTo(0.27);
-      expect(audio.dataset.grigliataAudioUrl).toMatch(/^https:\/\/example\.com\/audio\//);
+      expect(audio.dataset.grigliataAudioUrl).toMatch(/^blob:private-media_assets\//);
+      expect(audio.src).toMatch(/^blob:private-media_assets\//);
     });
 
     const firstAudio = container.querySelector('audio[data-session-id=track-1]');
@@ -357,7 +420,7 @@ describe('GlobalGrigliataMusicPlayer', () => {
       await emitStream(makeStream([makeSession('owned')]));
       await waitFor(() => expect(playSpy).toHaveBeenCalledTimes(1));
       const previousAudio = container.querySelector('audio');
-      expect(previousAudio.dataset.grigliataAudioUrl).toContain('/owned.mp3');
+      expect(previousAudio.dataset.grigliataAudioUrl).toContain('/owner-owned/');
 
       const overCapSessions = Array.from(
         { length: MAX_GLOBAL_GRIGLIATA_MUSIC_SESSIONS + 1 },
@@ -500,6 +563,7 @@ describe('GlobalGrigliataMusicPlayer', () => {
     expect(container.querySelectorAll('audio')).toHaveLength(0);
     expect(previousAudio.getAttribute('src')).toBe(null);
     expect(previousAudio.dataset.grigliataAudioUrl).toBeUndefined();
+    expect(audioLeaseReleases.some((release) => release.mock.calls.length > 0)).toBe(true);
   });
 
   test('fails closed and clears playback when the compact stream listener disconnects', async () => {

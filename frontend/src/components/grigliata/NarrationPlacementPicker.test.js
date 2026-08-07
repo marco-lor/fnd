@@ -4,7 +4,7 @@ import NarrationPlacementPicker from './NarrationPlacementPicker';
 
 jest.mock('../../data/media/useTask07MediaReadMode', () => ({
   __esModule: true,
-  default: jest.fn(() => 'derivative-read'),
+  default: () => 'derivative-read',
 }));
 
 describe('NarrationPlacementPicker media thumbnails', () => {
@@ -22,7 +22,7 @@ describe('NarrationPlacementPicker media thumbnails', () => {
           schemaVersion: 1,
           state: 'ready',
           variants: {
-            thumbnail: {
+            gallery: {
               url: descriptorThumbnailUrl,
               width: 320,
               height: 180,

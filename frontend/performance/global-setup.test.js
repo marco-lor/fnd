@@ -22,10 +22,17 @@ test('seed trigger summary allows only bounded readiness activity', () => {
     invocation('europe-west8-cleanupTask07RemovedInventoryMedia'),
     invocation('europe-west8-cleanupTask07RemovedNpcMedia'),
     invocation('europe-west8-cleanupTask07RemovedUserMedia'),
+    invocation('europe-west8-cleanupTask07MediaAsset'),
     invocation('europe-west1-clientFirebaseConfig'),
+    invocation('europe-west8-task07PrepareMediaUpload'),
+    invocation('europe-west8-task07GetMediaStatus'),
+    invocation('europe-west8-task07AttachMediaAsset'),
+    invocation('europe-west8-task07PrepareFoeMediaRetirement'),
+    invocation('europe-west8-task07CommitFoeMediaRetirement'),
+    invocation('europe-west8-task07AbandonFoeMediaRetirement'),
   ].join('\n'));
 
-  assert.equal(summary.backgroundInvocations, 10);
+  assert.equal(summary.backgroundInvocations, 11);
   assert.equal(summary.cleanupInvocations, 0);
   assert.deepEqual(summary.counts, {
     'europe-west8-updateTotParameters': 2,
@@ -37,7 +44,14 @@ test('seed trigger summary allows only bounded readiness activity', () => {
     'europe-west8-cleanupTask07RemovedInventoryMedia': 1,
     'europe-west8-cleanupTask07RemovedNpcMedia': 1,
     'europe-west8-cleanupTask07RemovedUserMedia': 1,
+    'europe-west8-cleanupTask07MediaAsset': 1,
     'europe-west1-clientFirebaseConfig': 1,
+    'europe-west8-task07PrepareMediaUpload': 1,
+    'europe-west8-task07GetMediaStatus': 1,
+    'europe-west8-task07AttachMediaAsset': 1,
+    'europe-west8-task07PrepareFoeMediaRetirement': 1,
+    'europe-west8-task07CommitFoeMediaRetirement': 1,
+    'europe-west8-task07AbandonFoeMediaRetirement': 1,
   });
 });
 

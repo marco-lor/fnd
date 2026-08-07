@@ -3,6 +3,7 @@ const {
   drainPageConnections,
   installBootstrap,
   installDeterministicFontRoutes,
+  isExpectedDemoRecaptchaReportOnlyWarning,
   storageStateForRole,
   waitForReadiness,
 } = require('./helpers');
@@ -26,7 +27,10 @@ test('Task 07 media shell renders and stays dormant cross-browser', async ({
   const errors = [];
   const page = await context.newPage();
   page.on('console', (message) => {
-    if (message.type() === 'error') errors.push(message.text());
+    if (message.type() !== 'error') return;
+    const text = message.text();
+    if (isExpectedDemoRecaptchaReportOnlyWarning(text, {baseURL})) return;
+    errors.push(text);
   });
   page.on('pageerror', (error) => errors.push(error.message));
 
@@ -43,11 +47,15 @@ test('Task 07 media shell renders and stays dormant cross-browser', async ({
         .filter((audio) => Boolean(audio.currentSrc || audio.getAttribute('src')))
         .length,
       audioNodes: document.querySelectorAll('audio').length,
-      meteors: document.querySelectorAll('.shooting-star').length,
+      activeMeteors: document.querySelectorAll(
+        '.shooting-star[data-active="true"]'
+      ).length,
+      meteorSlots: document.querySelectorAll('.shooting-star').length,
       managedImages: document.querySelectorAll('img[data-media-state]').length,
     }));
     expect(shell.managedImages).toBeGreaterThan(0);
-    expect(shell.meteors).toBe(0);
+    expect(shell.meteorSlots).toBe(2);
+    expect(shell.activeMeteors).toBe(0);
     expect(shell.audioNodes).toBeLessThanOrEqual(4);
     expect(shell.activeAudioSources).toBe(0);
     expect(errors).toEqual([]);

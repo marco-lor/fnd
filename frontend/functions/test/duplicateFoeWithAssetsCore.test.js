@@ -2,6 +2,10 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  assessCanonicalOnlyFoeDuplication,
+  foeDuplicationControlFenceMatches,
+  foeHasNestedPersistedMedia,
+  foeHasPersistedMedia,
   stripTask07MediaFromDuplicatedFoe,
 } = require("../lib/duplicateFoeWithAssetsCore");
 
@@ -94,4 +98,68 @@ test("legacy foe duplication preserves media fields and unrelated General data",
   };
 
   assert.deepEqual(stripTask07MediaFromDuplicatedFoe(source), source);
+});
+
+test("media-bearing detection fails closed across root, General, and nested aliases", () => {
+  assert.equal(foeHasPersistedMedia({}), false);
+  assert.equal(foeHasPersistedMedia({imagePath: ""}), false);
+  assert.equal(foeHasPersistedMedia({imagePath: "foes/main/a.png"}), true);
+  assert.equal(foeHasPersistedMedia({General: {media: {}}}), true);
+  assert.equal(foeHasPersistedMedia({videoUrl: "https://example.test/a.mp4"}), true);
+  assert.equal(foeHasPersistedMedia({
+    tecniche: [{imageUrl: "https://example.test/technique.png"}],
+  }), true);
+  assert.equal(foeHasPersistedMedia({
+    spells: [{media: {assetId: "malformed"}}],
+  }), true);
+  assert.equal(foeHasNestedPersistedMedia({
+    spells: [{imagePath: "foes/spells/a.png"}],
+  }), true);
+  assert.equal(foeHasNestedPersistedMedia({
+    imagePath: "foes/main/a.png",
+  }), false);
+});
+
+test("Task 07 control fences bind both exact hash and effective mode", () => {
+  const matching = {
+    storedControlHash: "hash-a",
+    storedMode: "canonical-only",
+    currentControlHash: "hash-a",
+    currentMode: "canonical-only",
+  };
+  assert.equal(foeDuplicationControlFenceMatches(matching), true);
+  assert.equal(foeDuplicationControlFenceMatches({
+    ...matching,
+    currentControlHash: "hash-b",
+  }), false);
+  assert.equal(foeDuplicationControlFenceMatches({
+    ...matching,
+    currentMode: "v1-write",
+  }), false);
+  assert.equal(foeDuplicationControlFenceMatches({
+    ...matching,
+    storedControlHash: "",
+  }), false);
+});
+
+test("canonical-only assessment requires one valid main clone and no nested media", () => {
+  assert.deepEqual(
+    assessCanonicalOnlyFoeDuplication({name: "No media"}, false),
+    {allowed: true, reason: null}
+  );
+  assert.deepEqual(
+    assessCanonicalOnlyFoeDuplication({imagePath: "foes/main/a.png"}, false),
+    {allowed: false, reason: "canonical-media-required"}
+  );
+  assert.deepEqual(
+    assessCanonicalOnlyFoeDuplication({media: {assetId: "canonical"}}, true),
+    {allowed: true, reason: null}
+  );
+  assert.deepEqual(
+    assessCanonicalOnlyFoeDuplication({
+      media: {assetId: "canonical"},
+      spells: [{imagePath: "foes/spells/a.png"}],
+    }, true),
+    {allowed: false, reason: "nested-media-unsupported"}
+  );
 });

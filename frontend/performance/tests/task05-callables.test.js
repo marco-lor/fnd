@@ -354,6 +354,62 @@ test('Task 05 callables enforce authentication, owner access, and peer denial', 
   assert.equal((await db.doc('users/perf-peer-2/state/resources').get()).get('stats.hpCurrent'), 30);
 });
 
+test('the admin user list paginates safe private fields without reading root aggregates', async () => {
+  const extraUid = 'task05-admin-list-extra';
+  await withBackgroundTriggersDisabled(async () => {
+    await Promise.all([
+      db.doc(`users/${extraUid}`).set({
+        characterId: 'Task 05 Admin Extra',
+        username: 'task05-admin-extra',
+        email: 'task05-admin-extra@example.test',
+        role: 'player',
+        privateAggregate: 'never-return-this-field'.repeat(10_000),
+      }),
+      db.doc(`user_directory/${extraUid}`).set({
+        schemaVersion: 1,
+        characterId: 'Task 05 Admin Extra',
+        label: 'Task 05 Admin Extra',
+        normalizedLabel: 'task 05 admin extra',
+        role: 'player',
+      }),
+    ]);
+  });
+
+  const webmasterToken = await signIn('perf-webmaster');
+  const pageLengths = [];
+  const ids = [];
+  let cursor = null;
+  let hasMore = true;
+  while (hasMore) {
+    const page = await callFunction('task05ListAdminUsers', {
+      limit: 100,
+      ...(cursor ? {cursor} : {}),
+    }, {token: webmasterToken});
+    pageLengths.push(page.items.length);
+    page.items.forEach((item) => {
+      assert.deepEqual(
+        Object.keys(item).sort(),
+        ['characterId', 'email', 'id', 'role', 'username']
+      );
+      ids.push(item.id);
+    });
+    hasMore = page.hasMore;
+    cursor = page.cursor;
+  }
+
+  assert.deepEqual(pageLengths, [100, 100, 1]);
+  assert.equal(ids.length, 201);
+  assert.equal(new Set(ids).size, 201);
+  assert.ok(ids.includes(extraUid));
+  assert.equal(cursor, null);
+
+  const dmToken = await signIn('perf-dm');
+  await expectCallableError(
+    callFunction('task05ListAdminUsers', {limit: 100}, {token: dmToken}),
+    'permission-denied'
+  );
+});
+
 test('Task 05 operation receipts replay exact requests and reject operationId tampering', async () => {
   const token = await signIn('perf-new-player');
   const payload = {

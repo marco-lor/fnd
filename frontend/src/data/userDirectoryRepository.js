@@ -24,7 +24,7 @@ const {
   buildUserDirectoryQuery,
   USER_DIRECTORY_PAGE_SIZE,
   USER_DIRECTORY_QUERY_KEYS,
-} = require('./userDirectoryQueryFactory.cjs');
+} = require('./userDirectoryQueryFactory.js');
 
 export { USER_DIRECTORY_PAGE_SIZE, USER_DIRECTORY_QUERY_KEYS };
 
@@ -107,11 +107,11 @@ export const __buildUserDirectoryQuery = ({
   });
 };
 
-const privatePageInstanceKey = ({ role, cursor }) => (
-  `directory:users:page:${role || 'all'}:${cursor ? JSON.stringify(cursor) : 'first'}`
+const privatePageInstanceKey = ({ role, cursor, pageSize }) => (
+  `directory:users:page:${role || 'all'}:${pageSize}:${cursor ? JSON.stringify(cursor) : 'first'}`
 );
 
-const normalizePageSnapshot = (snapshot, queryKey) => {
+const normalizePageSnapshot = (snapshot, queryKey, pageSize = USER_DIRECTORY_PAGE_SIZE) => {
   const documents = Array.isArray(snapshot?.docs) ? snapshot.docs : [];
   const items = documents.map(normalizeUserDirectoryDocument);
   const lastDocument = documents[documents.length - 1];
@@ -123,36 +123,53 @@ const normalizePageSnapshot = (snapshot, queryKey) => {
         sortFields: ['normalizedLabel'],
       })
       : null,
-    hasMore: documents.length === USER_DIRECTORY_PAGE_SIZE,
+    hasMore: documents.length === pageSize,
   });
 };
 
 /**
  * @param {{role?: 'player'|'dm'|'webmaster'|null, cursor?: import('./pagination').FirestorePageCursorV1|null}} options
  */
-export const getUserDirectoryPage = ({ role = null, cursor = null } = {}) => {
-  const built = __buildUserDirectoryQuery({ role, cursor });
-  const instanceKey = privatePageInstanceKey({ role: built.role, cursor });
+export const getUserDirectoryPage = ({
+  role = null,
+  cursor = null,
+  pageSize = USER_DIRECTORY_PAGE_SIZE,
+} = {}) => {
+  const built = __buildUserDirectoryQuery({ role, cursor, pageSize });
+  const instanceKey = privatePageInstanceKey({
+    role: built.role,
+    cursor,
+    pageSize,
+  });
   return getCached({
     metricKey: METRIC_KEYS.list,
     instanceKey,
     load: async () => normalizePageSnapshot(
       await getDocs(labelFirestoreTarget(built.target, METRIC_KEYS.list)),
-      built.queryKey
+      built.queryKey,
+      pageSize
     ),
   });
 };
 
 /**
- * Shares the first 50-row listener and applies only document changes so every
+ * Shares one bounded directory page and applies only document changes so every
  * unaffected directory entity preserves identity across revisions.
  */
-export const subscribeUserDirectoryFirstPage = (observer, { role = null } = {}) => {
-  const built = __buildUserDirectoryQuery({ role });
+export const subscribeUserDirectoryPage = (observer, {
+  role = null,
+  cursor = null,
+  pageSize = USER_DIRECTORY_PAGE_SIZE,
+} = {}) => {
+  const built = __buildUserDirectoryQuery({ role, cursor, pageSize });
   let structuralResult = null;
   return subscribeShared({
     metricKey: METRIC_KEYS.subscribe,
-    instanceKey: `directory:users:subscribe:first:${built.role || 'all'}`,
+    instanceKey: privatePageInstanceKey({
+      role: built.role,
+      cursor,
+      pageSize,
+    }).replace(':page:', ':subscribe:'),
     listen: ({ next, error }) => onSnapshot(
       labelFirestoreTarget(built.target, METRIC_KEYS.subscribe),
       {
@@ -162,10 +179,24 @@ export const subscribeUserDirectoryFirstPage = (observer, { role = null } = {}) 
             snapshot,
             normalizeUserDirectoryDocument
           );
-          next(structuralResult);
+          const lastDocument = snapshot.docs?.[snapshot.docs.length - 1];
+          next(Object.freeze({
+            ...structuralResult,
+            cursor: lastDocument
+              ? createCursorFromDocument(lastDocument, {
+                queryKey: built.queryKey,
+                sortFields: ['normalizedLabel'],
+              })
+              : null,
+            hasMore: structuralResult.items.length === pageSize,
+          }));
         },
         error,
       }
     ),
   }, observer);
 };
+
+export const subscribeUserDirectoryFirstPage = (observer, { role = null } = {}) => (
+  subscribeUserDirectoryPage(observer, {role})
+);

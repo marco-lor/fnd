@@ -4,11 +4,6 @@ import { createPortal } from 'react-dom';
 import { useAuthSession } from '../../../AuthContext';
 import { useResources } from '../../../data/userData/userDataHooks';
 import { updateResource } from '../../../data/userData/userDataCommands';
-import { legacyUpdateResource } from '../../../data/userData/legacyUserDataCommands';
-import {
-  isUserDataCommandStageResolved,
-  runVersionedUserDataCommand,
-} from '../../../data/userData/userDataCommandRouting';
 import { FaAngleRight, FaAngleLeft, FaAnglesRight, FaAnglesLeft, FaDroplet } from 'react-icons/fa6';
 import { FaRedo, FaBan } from 'react-icons/fa';
 import { GiHearts, GiMagicSwirl, GiShield } from 'react-icons/gi';
@@ -20,17 +15,11 @@ const StatsBars = () => {
   actionScopeRef.current = actionScopeKey;
   const {
     data: userData,
-    stage: resourcesStage,
     status: resourcesStatus,
   } = useResources(user?.uid);
   const mutationsReady = resourcesStatus === 'fresh'
-    && userData !== null
-    && isUserDataCommandStageResolved(resourcesStage);
-  const executeResourceMutation = (payload) => runVersionedUserDataCommand({
-    stage: mutationsReady ? resourcesStage : null,
-    legacy: () => legacyUpdateResource({ uid: user.uid, ...payload }),
-    authoritative: () => updateResource(payload),
-  });
+    && userData !== null;
+  const executeResourceMutation = (payload) => updateResource(payload);
   // State for custom input modal
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [customInputValue, setCustomInputValue] = useState('');

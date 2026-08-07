@@ -1,10 +1,12 @@
 // file: ./frontend/src/components/bazaar/elements/comparisonComponent.js
 import React, { useContext, useState, useEffect, useRef, useMemo } from 'react';
-import { deleteDoc, doc, onSnapshot, getDoc } from '../../../performance/firestore';
+import { deleteDoc, doc } from '../../../performance/firestore';
 import { db } from '../../firebaseConfig';
 import { createLegacyStorageCleanup } from '../../common/legacyMediaStorage';
 import { computeValue } from '../../common/computeFormula';
 import { AuthContext } from '../../../AuthContext';
+import { useProgression } from '../../../data/userData/userDataHooks';
+import { getUserDirectoryPage } from '../../../data/userDirectoryRepository';
 import {
   AddAccessorioOverlay,
   AddArmaturaOverlay,
@@ -16,6 +18,7 @@ import { FaTrash, FaEdit } from 'react-icons/fa';
 import { GiSpellBook } from "react-icons/gi";
 import { getSchema, getVarie } from '../../../data/configRepository';
 import MediaImage, { hasMediaAsset } from '../../common/MediaImage';
+import MediaVideo from '../../common/MediaVideo';
 import { normalizeCatalogItemMedia } from '../catalogItemMedia';
 
 const SpellCard = ({ spellName, spell, userData }) => {
@@ -28,7 +31,14 @@ const SpellCard = ({ spellName, spell, userData }) => {
   const cardRef = useRef(null);
   const overlayRef = useRef(null);
   const dismissTimeoutRef = useRef(null);
-  const hasImage = spell.image_url && spell.image_url.trim() !== "";
+  const hasImage = Boolean(
+    spell?.image_url
+    || spell?.media
+    || spell?.General?.media
+  );
+  const hasVideo = Boolean(
+    spell?.video_url || spell?.videoMedia || spell?.General?.videoMedia
+  );
 
   // Fetch shared dadiAnimaByLevel data when the component mounts.
   useEffect(() => {
@@ -214,10 +224,14 @@ const SpellCard = ({ spellName, spell, userData }) => {
       {/* Base card with image or icon */}
       <div className="relative h-full w-full overflow-hidden rounded-md">
         {hasImage ? (
-          <img
-            src={spell.image_url}
+          <MediaImage
+            media={spell}
+            mediaPurpose="spell"
+            src={spell.image_url || ''}
+            variant="card"
             alt={spell.Nome || spellName}
             className="w-full h-full object-cover"
+            fallback={<GiSpellBook className="w-8 h-8 text-gray-400" />}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gray-800">
@@ -241,10 +255,12 @@ const SpellCard = ({ spellName, spell, userData }) => {
           className={getOverlayClasses()}
           style={getOverlayStyle()}
         >
-          {spell.video_url && (
+          {hasVideo && (
             <div className="absolute inset-0 z-0">
-              <video
-                src={spell.video_url}
+              <MediaVideo
+                media={spell}
+                mediaPurpose="spell-video"
+                src={spell.video_url || ''}
                 autoPlay
                 muted
                 loop
@@ -374,12 +390,19 @@ const SpellCard = ({ spellName, spell, userData }) => {
 };
 
 export default function ComparisonPanel({ item, showMessage }) {
-  const { user } = useContext(AuthContext);
+  const { user, userData: authUserData } = useContext(AuthContext);
+  const { data: progression } = useProgression(user?.uid);
+  const userData = useMemo(() => ({
+    ...(progression || {}),
+    role: authUserData?.role || null,
+  }), [authUserData?.role, progression]);
+  const userParams = useMemo(
+    () => progression?.Parametri || { Base: {}, Combattimento: {} },
+    [progression]
+  );
   /* ----------------------------------------------------------------------- */
   /*  Local state                                                            */
   /* ----------------------------------------------------------------------- */
-  const [userData, setUserData]      = useState(null);
-  const [userParams, setUserParams]  = useState({ Base: {}, Combattimento: {} });
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [showEditOverlay, setShowEditOverlay] = useState(false);
   const [imageError, setImageError]  = useState(false);
@@ -388,45 +411,6 @@ export default function ComparisonPanel({ item, showMessage }) {
   const [allowedUsersNames, setAllowedUsersNames] = useState([]);
   const [allowedUsersLoading, setAllowedUsersLoading] = useState(false);
 
-  /* ----------------------------------------------------------------------- */
-  /*  Fetch user & params                                                    */
-  /* ----------------------------------------------------------------------- */
-  useEffect(() => {
-    if (!user) {
-      setUserData(null);
-      setUserParams({ Base: {}, Combattimento: {} });
-      return;
-    }
-
-    const userRef = doc(db, 'users', user.uid);
-
-    const unsubscribeUser = onSnapshot(
-      userRef,
-      (snap) => {
-        if (snap.exists()) {
-          setUserData(snap.data());
-          setUserParams(snap.data().Parametri || { Base: {}, Combattimento: {} });
-        }
-      },
-      (err) => {
-        console.error('Error fetching user data:', err);
-        setUserData(null);
-        setUserParams({ Base: {}, Combattimento: {} });
-      }
-    );
-
-    // one-off fetch in case Params aren’t in the real-time payload yet
-    (async () => {
-      try {
-        const docSnap = await getDoc(userRef);
-        if (docSnap.exists()) {
-          setUserParams(docSnap.data().Parametri || { Base: {}, Combattimento: {} });
-        }
-      } catch (e) {
-        console.error('Error fetching user parameters', e);
-      }
-    })();    return () => unsubscribeUser();
-  }, [user]);
 
   /* ----------------------------------------------------------------------- */
   /*  Fetch schema based on item type                                        */
@@ -593,17 +577,9 @@ export default function ComparisonPanel({ item, showMessage }) {
     try {
       storageCleanup.addUrl(imageUrl);
 
-      // delete spell assets if any
-      const itemSpells = general.spells;
-      if (itemSpells && typeof itemSpells === 'object') {
-        for (const spellName in itemSpells) {
-          const spell = itemSpells[spellName];
-          if (!spell || typeof spell !== 'object') continue;
-
-          storageCleanup.addUrl(spell.image_url);
-          storageCleanup.addUrl(spell.video_url);
-        }
-      }
+      // Embedded spells can reference personal media that the catalog item
+      // does not own. The server lifecycle removes only item-bound spell
+      // uploads after revalidating the deleted Firestore document.
 
       // delete firestore doc
       await deleteDoc(doc(db, 'items', item.id));
@@ -619,7 +595,7 @@ export default function ComparisonPanel({ item, showMessage }) {
   const handleEditClick       = () => setShowEditOverlay(true);
   const handleCloseEditOverlay = () => setShowEditOverlay(false);
 
-  const isAdmin = userData?.role === 'webmaster' || userData?.role === 'dm';
+  const isAdmin = authUserData?.role === 'webmaster' || authUserData?.role === 'dm';
   const allowedUsersSignature = JSON.stringify(
     Array.isArray(item?.allowed_users) ? item.allowed_users : []
   );
@@ -637,21 +613,15 @@ export default function ComparisonPanel({ item, showMessage }) {
       }
       setAllowedUsersLoading(true);
       try {
-        const names = [];
-        for (const uid of allowedUserIds) {
-          try {
-            const snap = await getDoc(doc(db, 'users', uid));
-            if (snap.exists()) {
-              const d = snap.data();
-              names.push(d.characterId || d.email || uid);
-            } else {
-              names.push(uid);
-            }
-          } catch (e) {
-            names.push(uid);
-          }
-        }
+        const page = await getUserDirectoryPage();
+        const labelsByUid = new Map((page?.items || []).map((entry) => [
+          entry.id,
+          entry.label,
+        ]));
+        const names = allowedUserIds.map((uid) => labelsByUid.get(uid) || uid);
         if (!cancelled) setAllowedUsersNames(names);
+      } catch (error) {
+        if (!cancelled) setAllowedUsersNames(allowedUserIds);
       } finally {
         if (!cancelled) setAllowedUsersLoading(false);
       }

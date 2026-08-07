@@ -5,9 +5,14 @@ const test = require('node:test');
 const {
   buildRulesExecCommands,
   runRulesExec,
+  task06RulesPath,
   task07CallablesPath,
   task07RulesPath,
 } = require('./rules-exec');
+const {
+  buildFirebaseRulesInvocation,
+  runRulesEmulators,
+} = require('./rules-emulators');
 const {
   TASK07_SOAK_DEFAULT_DURATION_MS,
   TASK07_SOAK_DESKTOP_LIMITS,
@@ -66,6 +71,10 @@ const settledCycle = (cycle, registryOverrides = {}) => ({
 test('owned emulator runner executes Task 07 rules and callables serially', () => {
   const commands = buildRulesExecCommands();
   const nodeTests = commands.filter(([first]) => first === '--test');
+  const fixtureSeed = [
+    path.join(frontendRoot, 'scripts', 'performance', 'fixtures.js'),
+    'seed',
+  ];
   assert.equal(commands.length, 7);
   assert.equal(nodeTests.length, 6);
   assert.equal(commands.some((args) => args.includes(task07RulesPath)), true);
@@ -74,6 +83,14 @@ test('owned emulator runner executes Task 07 rules and callables serially', () =
     commands.findIndex((args) => args.includes(task07CallablesPath))
       > commands.findIndex((args) => args.includes(task07RulesPath))
   );
+  assert.deepEqual(commands.filter((args) => (
+    args[0] === fixtureSeed[0] && args[1] === fixtureSeed[1]
+  )), [fixtureSeed]);
+  assert.deepEqual(commands.at(-1), [
+    '--test',
+    '--test-concurrency=1',
+    task06RulesPath,
+  ]);
   nodeTests.forEach((args) => {
     assert.equal(args.length, 3);
     assert.equal(args[0], '--test');
@@ -81,7 +98,7 @@ test('owned emulator runner executes Task 07 rules and callables serially', () =
   });
 
   assert.deepEqual(buildRulesExecCommands({ task07Only: true }), [
-    [path.join(frontendRoot, 'scripts', 'performance', 'fixtures.js'), 'seed'],
+    fixtureSeed,
     ['--test', '--test-concurrency=1', task07RulesPath],
     ['--test', '--test-concurrency=1', task07CallablesPath],
   ]);
@@ -122,6 +139,103 @@ test('owned emulator runner stops after the first failure and rejects unknown mo
     () => runRulesExec({ argv: ['--parallel'], spawnSyncImpl: () => ({ status: 0 }) }),
     /Unknown rules runner argument/
   );
+});
+
+test('rules emulator owner injects the demo Functions environment and propagates failures', async () => {
+  const fakeFirebaseCli = 'firebase-cli.js';
+  const fakeFs = {
+    existsSync: () => true,
+    mkdirSync: () => {},
+  };
+  const invocation = buildFirebaseRulesInvocation({
+    argv: ['--task07-only'],
+    firebaseCli: fakeFirebaseCli,
+    fsImpl: fakeFs,
+  });
+  assert.equal(invocation.command, process.execPath);
+  assert.deepEqual(invocation.args.slice(0, 7), [
+    fakeFirebaseCli,
+    'emulators:exec',
+    '--project',
+    'demo-fnd-perf',
+    '--only',
+    'auth,firestore,storage,functions',
+    '--config',
+  ]);
+  assert.equal(
+    invocation.args.at(-1),
+    'node scripts/performance/rules-exec.js --task07-only'
+  );
+  assert.throws(
+    () => buildFirebaseRulesInvocation({
+      firebaseCli: fakeFirebaseCli,
+      fsImpl: fakeFs,
+      projectId: 'fatins',
+    }),
+    /refuse non-demo Firebase project/
+  );
+
+  const calls = [];
+  const commonOptions = {
+    assertEmulatorPortsFreeImpl: async ({ports}) => calls.push(['ports:start', ports]),
+    createFirebaseCliEnvironmentImpl: (env, overrides) => ({...env, ...overrides}),
+    env: {PATH: 'test-path'},
+    firebaseCli: fakeFirebaseCli,
+    fsImpl: fakeFs,
+    resolvePortableJavaHomeImpl: () => null,
+    waitForEmulatorPortsFreeImpl: async ({ports}) => calls.push(['ports:end', ports]),
+    withDemoFunctionsEnvironmentImpl: async (operation, options) => {
+      calls.push(['demo-env', options.projectId]);
+      return operation();
+    },
+    withEmulatorPortCleanupImpl: async (operation, options) => {
+      try {
+        return await operation();
+      } finally {
+        await options.waitForPorts();
+      }
+    },
+  };
+  await runRulesEmulators({
+    ...commonOptions,
+    argv: ['--task07-only'],
+    spawnSyncImpl: (command, args, options) => {
+      calls.push(['spawn', command, args.at(-1), options.shell]);
+      return {status: 0};
+    },
+  });
+  assert.deepEqual(calls.map(([name]) => name), [
+    'ports:start',
+    'demo-env',
+    'spawn',
+    'ports:end',
+  ]);
+  assert.equal(calls[0][1].includes(9299), true);
+  assert.equal(calls[0][1].includes(9499), true);
+  assert.deepEqual(calls[3], ['ports:end', calls[0][1]]);
+  assert.deepEqual(calls[1], ['demo-env', 'demo-fnd-perf']);
+  assert.deepEqual(calls[2], [
+    'spawn',
+    process.execPath,
+    'node scripts/performance/rules-exec.js --task07-only',
+    false,
+  ]);
+
+  const failureCallStart = calls.length;
+  await assert.rejects(
+    () => runRulesEmulators({
+      ...commonOptions,
+      spawnSyncImpl: () => ({status: 9}),
+    }),
+    (error) => error.exitCode === 9 && /exit code 9/.test(error.message)
+  );
+  assert.deepEqual(calls.slice(failureCallStart).map(([name]) => name), [
+    'ports:start',
+    'demo-env',
+    'ports:end',
+  ]);
+  assert.equal(calls.at(-1)[1].includes(9299), true);
+  assert.equal(calls.at(-1)[1].includes(9499), true);
 });
 
 test('Task 07 soak requires three to five cycles', () => {
@@ -292,7 +406,7 @@ test('checked-in Task 07 PR gate keeps heavy checks serial and schedules the bou
     'npm --prefix functions run build',
     'node --test --test-concurrency=1 functions/test/*.test.js',
     'npm run perf:check-media-boundaries',
-    'rules-exec.js --task07-only',
+    'rules-emulators.js --task07-only',
   ];
   let previous = -1;
   for (const command of commands) {
@@ -300,8 +414,47 @@ test('checked-in Task 07 PR gate keeps heavy checks serial and schedules the bou
     assert.ok(index > previous, `${command} must appear once in serial gate order`);
     previous = index;
   }
-  assert.match(gate, /--only auth,firestore,functions,storage/);
+  assert.doesNotMatch(gate, /firebase emulators:exec/);
   assert.doesNotMatch(gate, /strategy:\s*matrix|&\s*$/m);
   assert.doesNotMatch(gate, /npm --prefix functions test/);
+  assert.match(
+    gate,
+    /rules-emulators\.js --task07-only\r?\n\s+timeout-minutes:\s*15/
+  );
   assert.match(workflow, /full-benchmark:[\s\S]*npm run perf:authoritative[\s\S]*npm run perf:media:soak/);
+  const rulesJobStart = workflow.indexOf('  emulator-rules:');
+  const rulesJobEnd = workflow.indexOf('\n  hardened-build:', rulesJobStart);
+  const rulesJob = workflow.slice(rulesJobStart, rulesJobEnd);
+  assert.match(rulesJob, /timeout-minutes:\s*20/);
+  assert.match(rulesJob, /node scripts\/performance\/rules-emulators\.js/);
+  assert.doesNotMatch(rulesJob, /npx firebase|firebase emulators:exec/);
+});
+
+test('checked-in workflow provisions every dependency used by frontend and browser jobs', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const frontendStart = workflow.indexOf('  frontend-unit:');
+  const frontendEnd = workflow.indexOf('\n  functions-checks:', frontendStart);
+  const frontendJob = workflow.slice(frontendStart, frontendEnd);
+  assert.match(frontendJob, /frontend\/functions\/package-lock\.json/);
+  assert.match(
+    frontendJob,
+    /npm --prefix functions ci[\s\S]*npm --prefix functions run build[\s\S]*npm run perf:test/
+  );
+
+  const functionsStart = workflow.indexOf('  functions-checks:');
+  const functionsEnd = workflow.indexOf('\n  task07-pr-gate:', functionsStart);
+  const functionsJob = workflow.slice(functionsStart, functionsEnd);
+  assert.match(functionsJob, /frontend\/package-lock\.json/);
+  assert.match(
+    functionsJob,
+    /npm --prefix \.\. ci[\s\S]*- run: npm ci[\s\S]*- run: npm run lint/
+  );
+
+  const crossBrowserStart = workflow.indexOf('  cross-browser-readiness:');
+  const crossBrowserEnd = workflow.indexOf('\n  full-benchmark:', crossBrowserStart);
+  const crossBrowserJob = workflow.slice(crossBrowserStart, crossBrowserEnd);
+  assert.match(
+    crossBrowserJob,
+    /npx playwright install --with-deps chromium firefox webkit/
+  );
 });

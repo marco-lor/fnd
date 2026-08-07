@@ -1,7 +1,9 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import GrigliataPage from './GrigliataPage';
+import { placementMutationIntentIdentity } from './useGrigliataPlacementActions';
 import { useAuth } from '../../AuthContext';
+import { useUserSettings } from '../../data/userData/userDataHooks';
 import { useShellLayout } from '../common/shellLayout';
 import {
   GRIGLIATA_LIVE_INTERACTION_STALE_MS,
@@ -10,6 +12,7 @@ import {
 import { preloadImageAssets, scheduleImageAssetPreload } from '../common/imageAssets/imageAssetRegistry';
 import { readAudioFileMetadata } from './music';
 import { __resetRepositoryRuntimeForTests } from '../../data/repositoryRuntime';
+import { buildGrigliataWorkspaceStorageKey } from './grigliataWorkspacePreferences';
 import {
   buildFogRasterTilePayload,
   FOG_RASTER_MASK_ENCODING,
@@ -22,6 +25,13 @@ const mockDeleteGrigliataCustomTokenCallable = jest.fn(() => Promise.resolve({ d
 const mockSpawnGrigliataCustomTokenInstanceCallable = jest.fn(() => Promise.resolve({ data: { success: true, tokenId: 'custom-instance-1' } }));
 const mockSpawnGrigliataFoeTokenCallable = jest.fn(() => Promise.resolve({ data: { success: true, tokenId: 'foe-token-1' } }));
 const mockUpdateGrigliataCustomTokenTemplateCallable = jest.fn(() => Promise.resolve({ data: { success: true } }));
+const mockTask05UpdateSettingsCallable = jest.fn(() => Promise.resolve({ data: { success: true } }));
+const mockTask05UpdateResourceCallable = jest.fn(() => Promise.resolve({ data: { success: true } }));
+const mockTask05ConsumeTurnEffectsCallable = jest.fn(() => Promise.resolve({ data: { success: true } }));
+const mockTask05UpdateGrigliataCharacterResourcesCallable = jest.fn(() => Promise.resolve({ data: { success: true } }));
+const mockTask07ResolveCharacterMediaCallable = jest.fn(() => Promise.resolve({
+  data: { schemaVersion: 1, entries: [] },
+}));
 const mockLogGrigliataFogDebug = jest.fn();
 const mockRunWithDurableOperationIntent = jest.fn(({
   kind,
@@ -68,6 +78,21 @@ function mockResolveGrigliataCallable(functionName) {
   if (functionName === 'updateGrigliataCustomTokenTemplate') {
     return mockInvokeUpdateGrigliataCustomTokenTemplateCallable;
   }
+  if (functionName === 'task05UpdateSettings') {
+    return mockTask05UpdateSettingsCallable;
+  }
+  if (functionName === 'task05UpdateResource') {
+    return mockTask05UpdateResourceCallable;
+  }
+  if (functionName === 'task05ConsumeTurnEffects') {
+    return mockTask05ConsumeTurnEffectsCallable;
+  }
+  if (functionName === 'task05UpdateGrigliataCharacterResources') {
+    return mockTask05UpdateGrigliataCharacterResourcesCallable;
+  }
+  if (functionName === 'task07ResolveCharacterMedia') {
+    return mockTask07ResolveCharacterMediaCallable;
+  }
   return jest.fn();
 }
 
@@ -104,17 +129,31 @@ const mockCreateDocSnapshot = (path, data) => ({
   data: () => (data || {}),
 });
 
-const mockCreateQuerySnapshot = (path, items) => ({
-  empty: items.length === 0,
-  size: items.length,
-  docs: items.map((item) => ({
+const mockCreateQuerySnapshot = (path, items) => {
+  const docs = items.map((item) => ({
     id: item.id,
     data: () => {
       const { id, ...rest } = item;
       return rest;
     },
     ref: { path: `${path}/${item.id}` },
-  })),
+  }));
+  return {
+    empty: items.length === 0,
+    size: items.length,
+    docs,
+    docChanges: () => docs.map((docSnapshot, index) => ({
+      type: 'added',
+      doc: docSnapshot,
+      oldIndex: -1,
+      newIndex: index,
+    })),
+  };
+};
+
+const mockResolveSnapshotHandlers = (observerOrNext, onError) => ({
+  onNext: typeof observerOrNext === 'function' ? observerOrNext : observerOrNext?.next,
+  onError: typeof observerOrNext === 'function' ? onError : observerOrNext?.error,
 });
 
 const mockApplyQueryConstraints = (items, constraints) => (
@@ -252,9 +291,24 @@ jest.mock('../../AuthContext', () => ({
   useOptionalAuth: jest.fn(() => null),
 }));
 
+jest.mock('../../data/userData/userDataHooks', () => ({
+  useUserSettings: jest.fn(),
+}));
+
+jest.mock('../../data/media/useTask07MediaReadMode', () => ({
+  __esModule: true,
+  default: () => 'derivative-read',
+}));
+
 jest.mock('../../data/functions/backendOperationIntentStore', () => ({
   runWithDurableOperationIntent: (options) => (
     mockRunWithDurableOperationIntent(options)
+  ),
+}));
+
+jest.mock('../../data/grigliata/foeTokenSpawn', () => ({
+  spawnGrigliataFoeToken: (payload) => (
+    mockSpawnGrigliataFoeTokenCallable(payload)
   ),
 }));
 
@@ -343,10 +397,11 @@ jest.mock('firebase/firestore', () => ({
   getDoc: jest.fn((target) => Promise.resolve(mockBuildSnapshotForTarget(target))),
   getDocs: jest.fn((target) => Promise.resolve(mockBuildSnapshotForTarget(target))),
   limit: jest.fn((value) => ({ kind: 'limit', value })),
-  onSnapshot: jest.fn((target, onNext) => {
-    const listener = { target, onNext };
+  onSnapshot: jest.fn((target, observerOrNext, onError) => {
+    const handlers = mockResolveSnapshotHandlers(observerOrNext, onError);
+    const listener = { target, ...handlers };
     mockFirestoreListeners.push(listener);
-    onNext(mockBuildSnapshotForTarget(target));
+    handlers.onNext?.(mockBuildSnapshotForTarget(target));
 
     return () => {
       const listenerIndex = mockFirestoreListeners.indexOf(listener);
@@ -962,6 +1017,46 @@ const clickAndFlush = async (element) => {
 };
 
 const openDiceSidebar = () => clickAndFlush(screen.getByRole('tab', { name: /dice/i }));
+const openLightingSheetFor = async (backgroundId, triggerElement = null) => {
+  await clickAndFlush(screen.getByRole('tab', { name: /dm gallery/i }));
+  const latestBackgroundGalleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+  await act(async () => {
+    latestBackgroundGalleryProps.onOpenLighting(backgroundId, triggerElement);
+    await Promise.resolve();
+  });
+};
+
+test('placement mutation retry identity covers display, status, and vision fields', () => {
+  const baseMutation = {
+    action: 'upsert',
+    deleteFoeTokenProfile: false,
+    placement: {
+      label: 'Original',
+      imageUrl: 'https://example.test/original.png',
+      col: 1,
+      row: 2,
+      sizeSquares: 1,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: ['poisoned'],
+      visionEnabled: true,
+      visionRadiusSquares: 4,
+    },
+  };
+  const baseIdentity = placementMutationIntentIdentity(baseMutation);
+  [
+    { label: 'Changed' },
+    { imageUrl: 'https://example.test/changed.png' },
+    { statuses: ['stunned'] },
+    { visionEnabled: false },
+    { visionRadiusSquares: 5 },
+  ].forEach((placementPatch) => {
+    expect(placementMutationIntentIdentity({
+      ...baseMutation,
+      placement: { ...baseMutation.placement, ...placementPatch },
+    })).not.toBe(baseIdentity);
+  });
+});
 
 describe('GrigliataPage', () => {
   let firestore;
@@ -1050,6 +1145,7 @@ describe('GrigliataPage', () => {
       },
       loading: false,
     });
+    useUserSettings.mockReturnValue({ data: null });
     useShellLayout.mockReturnValue({
       topInset: 0,
     });
@@ -1068,10 +1164,11 @@ describe('GrigliataPage', () => {
       Promise.resolve(mockBuildSnapshotForTarget(target) || mockCreateQuerySnapshot('', []))
     ));
     firestore.limit.mockClear().mockImplementation((value) => ({ kind: 'limit', value }));
-    firestore.onSnapshot.mockClear().mockImplementation((target, onNext) => {
-      const listener = { target, onNext };
+    firestore.onSnapshot.mockClear().mockImplementation((target, observerOrNext, onError) => {
+      const handlers = mockResolveSnapshotHandlers(observerOrNext, onError);
+      const listener = { target, ...handlers };
       mockFirestoreListeners.push(listener);
-      onNext(mockBuildSnapshotForTarget(target));
+      handlers.onNext?.(mockBuildSnapshotForTarget(target));
 
       return () => {
         const listenerIndex = mockFirestoreListeners.indexOf(listener);
@@ -1133,6 +1230,13 @@ describe('GrigliataPage', () => {
     mockSpawnGrigliataCustomTokenInstanceCallable.mockClear().mockResolvedValue({ data: { success: true, tokenId: 'custom-instance-1' } });
     mockSpawnGrigliataFoeTokenCallable.mockClear().mockResolvedValue({ data: { success: true, tokenId: 'foe-token-1' } });
     mockUpdateGrigliataCustomTokenTemplateCallable.mockClear().mockResolvedValue({ data: { success: true } });
+    mockTask05UpdateSettingsCallable.mockClear().mockResolvedValue({ data: { success: true } });
+    mockTask05UpdateResourceCallable.mockClear().mockResolvedValue({ data: { success: true } });
+    mockTask05ConsumeTurnEffectsCallable.mockClear().mockResolvedValue({ data: { success: true } });
+    mockTask05UpdateGrigliataCharacterResourcesCallable.mockClear().mockResolvedValue({ data: { success: true } });
+    mockTask07ResolveCharacterMediaCallable.mockClear().mockResolvedValue({
+      data: { schemaVersion: 1, entries: [] },
+    });
   });
 
   afterEach(() => {
@@ -1461,7 +1565,7 @@ describe('GrigliataPage', () => {
     expect(screen.getByTestId('board-active-viewers')).not.toHaveTextContent('Old Watcher');
   });
 
-  test('preloads the active battlemap, visible board tokens, and the tray portrait for players', async () => {
+  test('preloads the active battlemap and tray portrait without eagerly retaining every board token', async () => {
     mockFirestoreState.collections.grigliata_backgrounds = [
       {
         id: 'map-1',
@@ -1528,13 +1632,15 @@ describe('GrigliataPage', () => {
       expect(
         preloadImageAssets.mock.calls.some(([urls]) => (
           Array.isArray(urls)
-          && urls.length === 3
+          && urls.length === 2
           && urls.includes('https://example.com/map-1.png')
-          && urls.includes('https://example.com/orc-raider.png')
           && urls.includes('https://example.com/player-tray.png')
         ))
       ).toBe(true);
     });
+
+    expect(preloadImageAssets.mock.calls.flatMap(([urls]) => urls || []))
+      .not.toContain('https://example.com/orc-raider.png');
 
     expect(scheduleImageAssetPreload).not.toHaveBeenCalled();
   });
@@ -1698,7 +1804,8 @@ describe('GrigliataPage', () => {
         expect.objectContaining({
           path: expect.stringMatching(/^grigliata\/backgrounds\/user-1\/dungeon_alchemist_loop_\d+\.mp4$/),
         }),
-        file
+        file,
+        undefined
       );
       expect(firestore.addDoc).toHaveBeenCalledWith(
         expect.objectContaining({ path: 'grigliata_backgrounds' }),
@@ -1964,6 +2071,207 @@ describe('GrigliataPage', () => {
     });
   });
 
+  test('restores the DM tab, map, and media-folder filters before filtered subscriptions start', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_gallery_folders', [{
+      id: 'maps-folder',
+      name: 'Boss Arenas',
+      normalizedName: 'boss arenas',
+    }]);
+    setCollectionData('grigliata_music_folders', [{
+      id: 'music-folder',
+      name: 'Combat',
+      normalizedName: 'combat',
+    }]);
+    setCollectionData('grigliata_backgrounds', [{
+      id: 'map-1',
+      name: 'Sunken Ruins',
+      galleryFolderId: '',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+    }, {
+      id: 'map-2',
+      name: 'Iron Keep',
+      galleryFolderId: 'maps-folder',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+    }]);
+    const storageKey = buildGrigliataWorkspaceStorageKey({
+      currentUserId: 'user-1',
+      isManager: true,
+    });
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      version: 1,
+      selectedGalleryFolderId: 'maps-folder',
+      selectedMusicFolderId: 'music-folder',
+      selectedBackgroundId: 'map-2',
+      activeSidebarTab: 'gallery',
+    }));
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'DM Gallery' })).toHaveAttribute('aria-selected', 'true');
+      expect(BackgroundGalleryPanelMock).toHaveBeenCalled();
+    });
+    const galleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+    expect(galleryProps.selectedFolderId).toBe('maps-folder');
+    expect(galleryProps.selectedBackgroundId).toBe('map-2');
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'query'
+      && target.base?.path === 'grigliata_backgrounds'
+      && target.constraints?.some((constraint) => (
+        constraint.kind === 'where'
+        && constraint.field === 'galleryFolderId'
+        && constraint.value === 'maps-folder'
+      ))
+    ))).toBe(true);
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'query'
+      && target.base?.path === 'grigliata_music_tracks'
+      && target.constraints?.some((constraint) => (
+        constraint.kind === 'where'
+        && constraint.field === 'musicFolderId'
+        && constraint.value === 'music-folder'
+      ))
+    ))).toBe(true);
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'doc' && target.path === 'grigliata_backgrounds/map-2'
+    ))).toBe(true);
+  });
+
+  test('retains persisted media-folder filters through transient folder subscription errors', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_gallery_folders', [{
+      id: 'maps-folder',
+      name: 'Boss Arenas',
+      normalizedName: 'boss arenas',
+    }]);
+    setCollectionData('grigliata_music_folders', [{
+      id: 'music-folder',
+      name: 'Combat',
+      normalizedName: 'combat',
+    }]);
+    const storageKey = buildGrigliataWorkspaceStorageKey({
+      currentUserId: 'user-1',
+      isManager: true,
+    });
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      version: 1,
+      selectedGalleryFolderId: 'maps-folder',
+      selectedMusicFolderId: 'music-folder',
+      selectedBackgroundId: 'map-1',
+      activeSidebarTab: 'gallery',
+    }));
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      render(<GrigliataPage />);
+
+      await waitFor(() => {
+        expect(BackgroundGalleryPanelMock.mock.calls.at(-1)[0].selectedFolderId).toBe('maps-folder');
+      });
+      const galleryFolderListener = mockFirestoreListeners.find(({ target }) => (
+        target?.kind === 'collection' && target.path === 'grigliata_gallery_folders'
+      ));
+      const musicFolderListener = mockFirestoreListeners.find(({ target }) => (
+        target?.kind === 'collection' && target.path === 'grigliata_music_folders'
+      ));
+
+      await act(async () => {
+        galleryFolderListener.onError(new Error('temporary gallery folder failure'));
+        musicFolderListener.onError(new Error('temporary music folder failure'));
+        await Promise.resolve();
+      });
+
+      expect(BackgroundGalleryPanelMock.mock.calls.at(-1)[0].selectedFolderId).toBe('maps-folder');
+      expect(JSON.parse(window.localStorage.getItem(storageKey))).toEqual(expect.objectContaining({
+        selectedGalleryFolderId: 'maps-folder',
+        selectedMusicFolderId: 'music-folder',
+      }));
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  test('migrates a persisted Lighting tab selection to DM Gallery', async () => {
+    setManagerAuth();
+    const storageKey = buildGrigliataWorkspaceStorageKey({
+      currentUserId: 'user-1',
+      isManager: true,
+    });
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      activeSidebarTab: 'lighting',
+    }));
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'DM Gallery' })).toHaveAttribute('aria-selected', 'true');
+    });
+    expect(screen.queryByRole('tab', { name: 'Lighting' })).not.toBeInTheDocument();
+  });
+
+  test('retains changed DM workspace selections after the page remounts', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_gallery_folders', [{
+      id: 'maps-folder',
+      name: 'Boss Arenas',
+      normalizedName: 'boss arenas',
+    }]);
+    setCollectionData('grigliata_music_folders', [{
+      id: 'music-folder',
+      name: 'Combat',
+      normalizedName: 'combat',
+    }]);
+    setCollectionData('grigliata_backgrounds', [{
+      id: 'map-1',
+      name: 'Sunken Ruins',
+      galleryFolderId: '',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+    }, {
+      id: 'map-2',
+      name: 'Iron Keep',
+      galleryFolderId: 'maps-folder',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+    }]);
+    const storageKey = buildGrigliataWorkspaceStorageKey({
+      currentUserId: 'user-1',
+      isManager: true,
+    });
+    const firstRender = render(<GrigliataPage />);
+
+    await clickAndFlush(screen.getByRole('tab', { name: 'DM Gallery' }));
+    let galleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+    await act(async () => {
+      galleryProps.onSelectedFolderIdChange('maps-folder');
+      galleryProps.onSelectBackground('map-2');
+    });
+    await clickAndFlush(screen.getByRole('tab', { name: 'Music' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Music by folder' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Combat' }));
+
+    await waitFor(() => {
+      expect(JSON.parse(window.localStorage.getItem(storageKey))).toEqual(expect.objectContaining({
+        selectedGalleryFolderId: 'maps-folder',
+        selectedMusicFolderId: 'music-folder',
+        selectedBackgroundId: 'map-2',
+        activeSidebarTab: 'music',
+      }));
+    });
+
+    firstRender.unmount();
+    BackgroundGalleryPanelMock.mockClear();
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Music' })).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByRole('button', { name: 'Filter Music by folder' })).toHaveTextContent('Combat');
+    });
+    await clickAndFlush(screen.getByRole('tab', { name: 'DM Gallery' }));
+    galleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+    expect(galleryProps.selectedFolderId).toBe('maps-folder');
+    expect(galleryProps.selectedBackgroundId).toBe('map-2');
+  });
+
   test('does not subscribe gallery folders for non-DM users', async () => {
     render(<GrigliataPage />);
 
@@ -2138,8 +2446,8 @@ describe('GrigliataPage', () => {
 
     render(<GrigliataPage />);
 
-    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
-    expect(screen.getByRole('heading', { name: /lighting import/i })).toBeInTheDocument();
+    await openLightingSheetFor('map-1');
+    expect(screen.getByRole('dialog', { name: /lighting — dungeon alchemist loop/i })).toBeInTheDocument();
 
     await act(async () => {
       fireEvent.change(screen.getByLabelText(/dungeon alchemist json/i), {
@@ -2300,7 +2608,7 @@ describe('GrigliataPage', () => {
       target?.path === 'grigliata_lighting_render_inputs/map-1'
     ))).toBe(true);
 
-    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+    await openLightingSheetFor('map-1');
     fireEvent.click(screen.getByRole('button', { name: /hide debug overlay/i }));
 
     expect(screen.getByTestId('board-lighting-debug')).toHaveTextContent('false');
@@ -2363,6 +2671,63 @@ describe('GrigliataPage', () => {
     expect(firestore.onSnapshot.mock.calls.some(([target]) => (
       target?.path === 'grigliata_lighting_render_inputs/map-1'
     ))).toBe(true);
+  });
+
+  test('keeps the DM global-light control and battlemap aligned while render input lags', async () => {
+    setManagerAuth();
+    const baseMetadata = {
+      schemaVersion: 1,
+      backgroundId: 'map-1',
+      source: { type: 'manual', importedAt: null, importedBy: 'user-1' },
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [],
+      darknessSources: [],
+    };
+    setDocData('grigliata_background_lighting/map-1', baseMetadata);
+    setDocData('grigliata_lighting_render_inputs/map-1', {
+      backgroundId: 'map-1',
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [],
+      lights: [],
+      darknessSources: [],
+    });
+
+    render(<GrigliataPage />);
+    await openLightingSheetFor('map-1');
+
+    const globalLightToggle = await screen.findByRole('checkbox', { name: /global light/i });
+    expect(globalLightToggle).not.toBeChecked();
+    expect(screen.getByTestId('board-lighting-scene')).toHaveTextContent('0.6:false');
+
+    act(() => {
+      setDocData('grigliata_background_lighting/map-1', {
+        ...baseMetadata,
+        scene: { darkness: 0.6, globalLight: true },
+      });
+    });
+
+    await waitFor(() => {
+      expect(globalLightToggle).toBeChecked();
+      expect(screen.getByTestId('board-lighting-scene')).toHaveTextContent('0.6:true');
+    });
+
+    act(() => {
+      setDocData('grigliata_lighting_render_inputs/map-1', {
+        backgroundId: 'map-1',
+        scene: { darkness: 0.6, globalLight: true },
+        walls: [],
+        lights: [],
+        darknessSources: [],
+      });
+      setDocData('grigliata_background_lighting/map-1', baseMetadata);
+    });
+
+    await waitFor(() => {
+      expect(globalLightToggle).not.toBeChecked();
+      expect(screen.getByTestId('board-lighting-scene')).toHaveTextContent('0.6:false');
+    });
   });
 
   test('passes editable light sources only to the DM board', async () => {
@@ -2485,7 +2850,7 @@ describe('GrigliataPage', () => {
     setDocData('grigliata_background_lighting/map-1', baseMetadata);
 
     render(<GrigliataPage />);
-    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+    await openLightingSheetFor('map-1');
 
     await waitFor(() => {
       expect(screen.getByRole('spinbutton', { name: /scene darkness/i })).toBeInTheDocument();
@@ -2542,7 +2907,7 @@ describe('GrigliataPage', () => {
     });
   });
 
-  test('disables scene lighting controls when the selected gallery map is not active', async () => {
+  test('disables scene lighting controls for an unconfigured gallery map', async () => {
     setManagerAuth();
     setDocData('grigliata_background_lighting/map-1', {
       schemaVersion: 1,
@@ -2557,12 +2922,7 @@ describe('GrigliataPage', () => {
 
     render(<GrigliataPage />);
 
-    fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
-    await act(async () => {
-      BackgroundGalleryPanelMock.mock.calls.at(-1)[0].onSelectBackground('map-2');
-    });
-
-    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+    await openLightingSheetFor('map-2');
 
     const darknessInput = await screen.findByRole('spinbutton', { name: /scene darkness/i });
     const globalLightInput = screen.getByRole('checkbox', { name: /global light/i });
@@ -3262,18 +3622,68 @@ describe('GrigliataPage', () => {
       );
     });
     await waitFor(() => {
+      expect(getTransactionSetCalls()).toEqual(expect.arrayContaining([
+        [
+          expect.objectContaining({ path: 'grigliata_wall_state/map-1' }),
+          expect.objectContaining({
+            backgroundId: 'map-1',
+            segments: {},
+            updatedBy: 'user-1',
+          }),
+          { merge: true },
+        ],
+      ]));
+    });
+  });
+
+  test('deletes a wall without creating optional runtime state when no wall state document exists', async () => {
+    setManagerAuth();
+    setDocData('grigliata_background_lighting/map-1', {
+      schemaVersion: 1,
+      backgroundId: 'map-1',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+      scene: { darkness: 0.6, globalLight: false },
+      walls: [{
+        id: 'wall-1',
+        label: 'Temporary Wall',
+        x1: 0,
+        y1: 0,
+        x2: 140,
+        y2: 0,
+        wallType: 'wall',
+        blocksSight: true,
+        blocksVision: true,
+        blocksLight: true,
+      }],
+      lights: [],
+    });
+
+    render(<GrigliataPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('board-wall-source-count')).toHaveTextContent('1');
+    });
+
+    firestore.setDoc.mockClear();
+    firestore.runTransaction.mockClear();
+    mockTransactionInstances.length = 0;
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /delete wall source/i }));
+    });
+
+    await waitFor(() => {
       expect(firestore.setDoc).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'grigliata_wall_state/map-1' }),
-        expect.objectContaining({
-          backgroundId: 'map-1',
-          segments: {
-            'wall-1': { __type: 'deleteField' },
-          },
-          updatedBy: 'user-1',
-        }),
+        expect.objectContaining({ path: 'grigliata_background_lighting/map-1' }),
+        expect.objectContaining({ walls: [] }),
         { merge: true }
       );
+      expect(firestore.runTransaction).toHaveBeenCalledTimes(1);
     });
+    expect(mockTransactionInstances).toHaveLength(1);
+    expect(mockTransactionInstances[0].get).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_wall_state/map-1' })
+    );
+    expect(mockTransactionInstances[0].set).not.toHaveBeenCalled();
+    expect(screen.queryByText(/unable to clear that wall source runtime state/i)).not.toBeInTheDocument();
   });
 
   test('lets the DM enable and disable computed scene lighting independently from debug overlay', async () => {
@@ -3304,7 +3714,7 @@ describe('GrigliataPage', () => {
     render(<GrigliataPage />);
 
     expect(screen.getByTestId('board-lighting-count')).toHaveTextContent('0');
-    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+    await openLightingSheetFor('map-1');
     const lightingToggle = screen.getByRole('checkbox', { name: /computed lighting enabled/i });
     expect(lightingToggle).not.toBeChecked();
 
@@ -3322,6 +3732,164 @@ describe('GrigliataPage', () => {
       );
     });
     expect(screen.getByTestId('board-lighting-debug')).toHaveTextContent('false');
+  });
+
+  test('does not restore a lighting file draft whose parse finished after the sheet closed', async () => {
+    setManagerAuth();
+    const deferredText = createDeferred();
+    const lightingJson = JSON.stringify({
+      width: 2040,
+      height: 1620,
+      grid: 70,
+      lights: [],
+      walls: [],
+    });
+    const file = new File([lightingJson], 'slow-lighting.json', { type: 'application/json' });
+    Object.defineProperty(file, 'text', {
+      value: jest.fn(() => deferredText.promise),
+    });
+
+    render(<GrigliataPage />);
+    await openLightingSheetFor('map-1');
+    fireEvent.change(screen.getByLabelText(/dungeon alchemist json/i), {
+      target: { files: [file] },
+    });
+    const closingDialog = screen.getByRole('dialog', { name: 'Lighting — Sunken Ruins' });
+    fireEvent.click(screen.getByRole('button', { name: /close lighting for sunken ruins/i }));
+    fireEvent.transitionEnd(closingDialog, { propertyName: 'transform' });
+
+    await act(async () => {
+      deferredText.resolve(lightingJson);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await openLightingSheetFor('map-1');
+
+    expect(screen.queryByText(/parsed 0 walls and 0 lights/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /import lighting metadata/i })).toBeDisabled();
+  });
+
+  test('does not carry a delayed lighting file parse into another map sheet', async () => {
+    setManagerAuth();
+    const deferredText = createDeferred();
+    const lightingJson = JSON.stringify({
+      width: 2040,
+      height: 1620,
+      grid: 70,
+      lights: [],
+      walls: [],
+    });
+    const file = new File([lightingJson], 'slow-lighting.json', { type: 'application/json' });
+    Object.defineProperty(file, 'text', {
+      value: jest.fn(() => deferredText.promise),
+    });
+
+    render(<GrigliataPage />);
+    await openLightingSheetFor('map-1');
+    fireEvent.change(screen.getByLabelText(/dungeon alchemist json/i), {
+      target: { files: [file] },
+    });
+    await act(async () => {
+      BackgroundGalleryPanelMock.mock.calls.at(-1)[0].onOpenLighting('map-2');
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      deferredText.resolve(lightingJson);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole('dialog', { name: 'Lighting — Iron Keep' })).toBeInTheDocument();
+    expect(screen.queryByText(/parsed 0 walls and 0 lights/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /import lighting metadata/i })).toBeDisabled();
+  });
+
+  test('opens and edits lighting for an inactive map without activating it', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_backgrounds', [{
+      id: 'map-1',
+      name: 'Sunken Ruins',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+      isGridVisible: true,
+    }, {
+      id: 'map-2',
+      name: 'Iron Keep',
+      grid: { cellSizePx: 80, offsetXPx: 4, offsetYPx: 6 },
+      lightingSummary: {
+        sourceType: 'manual',
+        schemaVersion: 1,
+        wallCount: 0,
+        lightCount: 0,
+        alignmentStatus: 'match',
+      },
+      isGridVisible: true,
+    }]);
+    setDocData('grigliata_background_lighting/map-2', {
+      backgroundId: 'map-2',
+      grid: { cellSizePx: 80, offsetXPx: 4, offsetYPx: 6 },
+      scene: { darkness: 0.35, globalLight: false },
+      lights: [],
+      walls: [],
+      darknessSources: [],
+    });
+
+    const lightingTrigger = document.createElement('button');
+    lightingTrigger.type = 'button';
+    document.body.appendChild(lightingTrigger);
+
+    render(<GrigliataPage />);
+    await openLightingSheetFor('map-2', lightingTrigger);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Lighting — Iron Keep' });
+    const sidebar = screen.getByTestId('grigliata-sidebar');
+    const sidebarContent = screen.getByTestId('grigliata-sidebar-content');
+    const sheetHost = screen.getByTestId('grigliata-lighting-sheet-host');
+    const board = screen.getByTestId('grigliata-board');
+    expect(sidebar).toHaveClass('relative');
+    expect(sheetHost).toHaveClass('absolute', 'inset-0');
+    expect(sheetHost).toHaveStyle({ overflow: 'clip' });
+    expect(sidebar).toContainElement(sheetHost);
+    expect(sheetHost).toContainElement(dialog);
+    expect(sidebarContent).toHaveAttribute('aria-hidden', 'true');
+    expect(sidebarContent).toHaveClass('invisible', 'pointer-events-none');
+    expect(sidebar).not.toContainElement(board);
+    expect(board).not.toHaveAttribute('aria-hidden');
+    expect(screen.getByTestId('board-background-name')).toHaveTextContent('Sunken Ruins');
+    expect(within(dialog).getByRole('spinbutton', { name: 'Scene darkness' })).toHaveValue(0.35);
+    expect(within(dialog).getByRole('button', { name: /debug overlay · active map only/i })).toBeDisabled();
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'doc' && target.path === 'grigliata_background_lighting/map-2'
+    ))).toBe(true);
+
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Global light' }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_background_lighting/map-2' }),
+        expect.objectContaining({
+          backgroundId: 'map-2',
+          scene: { darkness: 0.35, globalLight: true },
+        }),
+        { merge: true }
+      );
+    });
+    expect(firestore.updateDoc).not.toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_state/current' }),
+      expect.anything()
+    );
+    expect(screen.getByTestId('board-background-name')).toHaveTextContent('Sunken Ruins');
+
+    lightingTrigger.style.visibility = 'hidden';
+    setTimeout(() => {
+      lightingTrigger.style.visibility = 'visible';
+    }, 10);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close lighting for Iron Keep' }));
+    fireEvent.transitionEnd(dialog, { propertyName: 'transform' });
+    await waitFor(() => expect(lightingTrigger).toHaveFocus());
+    lightingTrigger.remove();
   });
 
   test('applies Dungeon Alchemist grid calibration to the active selected map', async () => {
@@ -3354,7 +3922,7 @@ describe('GrigliataPage', () => {
 
     render(<GrigliataPage />);
 
-    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+    await openLightingSheetFor('map-1');
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /apply json calibration/i })).toBeEnabled();
     });
@@ -4767,7 +5335,7 @@ describe('GrigliataPage', () => {
 
     render(<GrigliataPage />);
 
-    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+    await openLightingSheetFor('map-1');
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /reset fog/i }));
@@ -4865,15 +5433,19 @@ describe('GrigliataPage', () => {
           });
         });
 
-  test('projects canonical-only user media and syncs the exact profile-global manifest', async () => {
+  test('projects canonical-only user media without copying the manifest into the token profile', async () => {
     const assetId = `m_${'a'.repeat(40)}`;
-    const thumbnailPath = `media/v1/avatar/user/${assetId}/derivatives/v1/thumbnail.webp`;
-    const originalPath = `media/v1/avatar/user/${assetId}/original/source.png`;
+    const thumbnailPath = `media_assets/v1/signed-in/user-1/${assetId}/1/thumbnail`;
+    const originalPath = `media_assets/v1/signed-in/user-1/${assetId}/1/original`;
     const media = {
+      schemaVersion: 1,
+      contractVersion: 1,
       assetId,
       kind: 'avatar',
-      schemaVersion: 1,
       state: 'ready',
+      generation: '1',
+      audience: 'signed-in',
+      ownerUid: 'user-1',
       original: {
         path: originalPath,
         generation: '1',
@@ -4930,47 +5502,180 @@ describe('GrigliataPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('board-token-media-paths')).toHaveTextContent(thumbnailPath);
       expect(container.querySelector('img[src="blob:task07-media-test"]')).not.toBeNull();
-      expect(firestore.setDoc).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'grigliata_tokens/user-1' }),
-        expect.objectContaining({
-          imageUrl: '',
-          imagePath: originalPath,
-          media,
-          tokenType: 'character',
-        }),
-        { merge: true }
-      );
     });
+
+    const profileSyncCall = firestore.setDoc.mock.calls.find(([target]) => (
+      target?.path === 'grigliata_tokens/user-1'
+    ));
+    expect(profileSyncCall).toBeDefined();
+    expect(profileSyncCall[1]).toEqual(expect.objectContaining({
+      imageUrl: '',
+      imagePath: originalPath,
+      tokenType: 'character',
+    }));
+    expect(profileSyncCall[1]).not.toHaveProperty('media');
+  });
+
+  test('does not sync a token profile solely because the canonical avatar manifest differs', async () => {
+    const assetId = `m_${'b'.repeat(40)}`;
+    const originalPath = `media_assets/v1/signed-in/user-1/${assetId}/1/original`;
+    const thumbnailPath = `media_assets/v1/signed-in/user-1/${assetId}/1/thumbnail`;
+    const media = {
+      schemaVersion: 1,
+      contractVersion: 1,
+      assetId,
+      kind: 'avatar',
+      state: 'ready',
+      generation: '1',
+      audience: 'signed-in',
+      ownerUid: 'user-1',
+      original: {
+        path: originalPath,
+        generation: '1',
+        bytes: 4,
+        contentType: 'image/png',
+        width: 512,
+        height: 512,
+      },
+      variants: {
+        thumbnail: {
+          path: thumbnailPath,
+          generation: '1',
+          bytes: 4,
+          contentType: 'image/webp',
+          width: 96,
+          height: 96,
+        },
+      },
+    };
+    useAuth.mockReturnValue({
+      user: {
+        uid: 'user-1',
+        email: 'user-1@example.com',
+      },
+      userData: {
+        role: 'player',
+        characterId: 'Aldor',
+        imageUrl: '',
+        imagePath: originalPath,
+        media,
+        settings: {
+          grigliata_draw_color: 'ion-cyan',
+          grigliata_share_interactions: false,
+        },
+      },
+      loading: false,
+    });
+    setCollectionData('grigliata_tokens', [{
+      id: 'user-1',
+      ownerUid: 'user-1',
+      characterId: 'Aldor',
+      label: 'Aldor',
+      imageUrl: '',
+      imagePath: originalPath,
+      tokenType: 'character',
+      imageSource: 'profile',
+      updatedAt: { seconds: 1 },
+      updatedBy: 'user-1',
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Aldor')).toBeInTheDocument();
+    });
+    expect(firestore.setDoc.mock.calls.filter(([target]) => (
+      target?.path === 'grigliata_tokens/user-1'
+    ))).toHaveLength(0);
+  });
+
+  test('does not retry the same rejected token profile sync after equivalent snapshots', async () => {
+    const legacyProfile = {
+      id: 'user-1',
+      ownerUid: 'user-1',
+      characterId: '',
+      label: 'Legacy Token',
+      imageUrl: '',
+      imagePath: '',
+      tokenType: 'character',
+      imageSource: 'profile',
+      updatedAt: { seconds: 1 },
+      updatedBy: 'user-1',
+    };
+    setCollectionData('grigliata_tokens', [legacyProfile]);
+    firestore.setDoc.mockImplementation((target) => (
+      target?.path === 'grigliata_tokens/user-1'
+        ? Promise.reject(Object.assign(new Error('denied'), { code: 'permission-denied' }))
+        : Promise.resolve()
+    ));
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(firestore.setDoc.mock.calls.filter(([target]) => (
+        target?.path === 'grigliata_tokens/user-1'
+      ))).toHaveLength(1);
+    });
+
+    await act(async () => {
+      setCollectionData('grigliata_tokens', [{ ...legacyProfile }]);
+      await Promise.resolve();
+    });
+
+    expect(firestore.setDoc.mock.calls.filter(([target]) => (
+      target?.path === 'grigliata_tokens/user-1'
+    ))).toHaveLength(1);
+    consoleErrorSpy.mockRestore();
   });
 
   test('reads canonical media from a visible peer character profile without copying it into placement state', async () => {
     const assetId = `m_${'d'.repeat(40)}`;
-    const thumbnailPath = `media/v1/avatar/user-2/${assetId}/derivatives/v1/thumbnail.webp`;
+    const thumbnailPath = `media_assets/v1/signed-in/user-2/${assetId}/1/thumbnail`;
+    const originalPath = `media_assets/v1/signed-in/user-2/${assetId}/1/original`;
+    const media = {
+      schemaVersion: 1,
+      contractVersion: 1,
+      assetId,
+      kind: 'avatar',
+      state: 'ready',
+      generation: '1',
+      audience: 'signed-in',
+      ownerUid: 'user-2',
+      original: {
+        path: originalPath,
+        generation: '1',
+        bytes: 4,
+        contentType: 'image/png',
+        width: 512,
+        height: 512,
+      },
+      variants: {
+        thumbnail: {
+          path: thumbnailPath,
+          generation: '4',
+          bytes: 4,
+          contentType: 'image/webp',
+          width: 96,
+          height: 96,
+        },
+      },
+    };
+    mockTask07ResolveCharacterMediaCallable.mockResolvedValueOnce({
+      data: {
+        schemaVersion: 1,
+        entries: [{ tokenId: 'user-2', media }],
+      },
+    });
     setCollectionData('grigliata_tokens', [{
       id: 'user-2',
       ownerUid: 'user-2',
       characterId: 'Bran',
       label: 'Bran',
       imageUrl: '',
-      imagePath: `media/v1/avatar/user-2/${assetId}/original/source.png`,
+      imagePath: originalPath,
       tokenType: 'character',
       imageSource: 'profile',
-      media: {
-        assetId,
-        kind: 'avatar',
-        schemaVersion: 1,
-        state: 'ready',
-        variants: {
-          thumbnail: {
-            path: thumbnailPath,
-            generation: '4',
-            bytes: 4,
-            contentType: 'image/webp',
-            width: 96,
-            height: 96,
-          },
-        },
-      },
       updatedAt: { seconds: 1 },
       updatedBy: 'user-2',
     }]);
@@ -5008,13 +5713,16 @@ describe('GrigliataPage', () => {
       })).toBe(true);
       expect(screen.getByTestId('board-token-media-paths')).toHaveTextContent(thumbnailPath);
     });
+    expect(mockTask07ResolveCharacterMediaCallable).toHaveBeenCalledWith({
+      tokenIds: ['user-2'],
+    });
     expect(firestore.setDoc.mock.calls.some(([target, payload]) => (
       target?.path === 'grigliata_token_placements/map-1__user-2'
       && Object.prototype.hasOwnProperty.call(payload || {}, 'media')
     ))).toBe(false);
   });
 
-  test('caps visible peer character profile reads at two deterministic 30-id queries', async () => {
+  test('caps visible peer character profile reads at six deterministic 10-id queries', async () => {
     const peerIds = Array.from(
       { length: 61 },
       (_, index) => `user-peer-${String(index + 1).padStart(2, '0')}`
@@ -5031,7 +5739,38 @@ describe('GrigliataPage', () => {
       updatedAt: { seconds: 1 },
       updatedBy: peerId,
     })));
-    setCollectionData('grigliata_token_placements', peerIds.map((peerId, index) => ({
+    const customPlacement = {
+      id: 'map-1__custom-peer-token',
+      backgroundId: 'map-1',
+      tokenId: 'custom-peer-token',
+      ownerUid: 'custom-peer-owner',
+      label: 'Custom peer token',
+      imageUrl: '',
+      col: 0,
+      row: 0,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    };
+    const foePlacement = {
+      ...customPlacement,
+      id: 'map-1__foe-peer-token',
+      tokenId: 'foe-peer-token',
+      ownerUid: 'foe-peer-owner',
+      label: 'Foe peer token',
+    };
+    const whitespaceCollisionPlacement = {
+      ...customPlacement,
+      id: 'map-1__whitespace-peer-token',
+      tokenId: ' whitespace-peer-token ',
+      ownerUid: 'whitespace-peer-token',
+      label: 'Whitespace collision token',
+    };
+    setCollectionData('grigliata_token_placements', [
+      customPlacement,
+      foePlacement,
+      whitespaceCollisionPlacement,
+      ...peerIds.map((peerId, index) => ({
       id: `map-1__${peerId}`,
       backgroundId: 'map-1',
       tokenId: peerId,
@@ -5043,9 +5782,10 @@ describe('GrigliataPage', () => {
       isVisibleToPlayers: true,
       isDead: false,
       statuses: [],
-    })));
+      })),
+    ]);
 
-    render(<GrigliataPage />);
+    const { unmount } = render(<GrigliataPage />);
 
     let sharedProfileTargets = [];
     await waitFor(() => {
@@ -5058,7 +5798,7 @@ describe('GrigliataPage', () => {
             constraint.field === '__name__' && constraint.op === 'in'
           ))
         ));
-      expect(sharedProfileTargets).toHaveLength(2);
+      expect(sharedProfileTargets).toHaveLength(6);
     });
 
     const idChunks = sharedProfileTargets.map((target) => (
@@ -5066,9 +5806,12 @@ describe('GrigliataPage', () => {
         constraint.field === '__name__' && constraint.op === 'in'
       )).value
     ));
-    expect(idChunks.map((chunk) => chunk.length)).toEqual([30, 30]);
+    expect(idChunks.map((chunk) => chunk.length)).toEqual([10, 10, 10, 10, 10, 10]);
     expect(idChunks.flat()).toEqual(peerIds.slice(0, 60));
     expect(idChunks.flat()).not.toContain('user-peer-61');
+    expect(idChunks.flat()).not.toContain('custom-peer-token');
+    expect(idChunks.flat()).not.toContain('foe-peer-token');
+    expect(idChunks.flat()).not.toContain('whitespace-peer-token');
     sharedProfileTargets.forEach((target) => {
       expect(target.constraints).toContainEqual(expect.objectContaining({
         field: 'tokenType',
@@ -5076,17 +5819,46 @@ describe('GrigliataPage', () => {
         value: 'character',
       }));
     });
+
+    expect(mockFirestoreListeners.filter(({ target }) => (
+      target?.kind === 'query'
+      && target?.base?.path === 'grigliata_tokens'
+      && target.constraints?.some((constraint) => (
+        constraint.field === '__name__' && constraint.op === 'in'
+      ))
+    ))).toHaveLength(6);
+    unmount();
+    expect(mockFirestoreListeners.filter(({ target }) => (
+      target?.kind === 'query'
+      && target?.base?.path === 'grigliata_tokens'
+      && target.constraints?.some((constraint) => (
+        constraint.field === '__name__' && constraint.op === 'in'
+      ))
+    ))).toHaveLength(0);
   });
 
   test('projects the current canonical foe source into board and turn-order views', async () => {
     setManagerAuth();
     const sourceAssetId = `m_${'b'.repeat(40)}`;
-    const sourceThumbnailPath = `media/v1/foe/user/${sourceAssetId}/derivatives/v1/thumbnail.webp`;
+    const sourceThumbnailPath = `media_assets/v1/owner-manager/user/${sourceAssetId}/3/thumbnail`;
+    const sourceOriginalPath = `media_assets/v1/owner-manager/user/${sourceAssetId}/3/original`;
     const sourceMedia = {
+      schemaVersion: 1,
+      contractVersion: 1,
       assetId: sourceAssetId,
       kind: 'foe',
-      schemaVersion: 1,
       state: 'ready',
+      generation: '3',
+      audience: 'owner-manager',
+      ownerUid: 'user',
+      original: {
+        path: sourceOriginalPath,
+        generation: '3',
+        bytes: 8,
+        contentType: 'image/png',
+        width: 512,
+        height: 512,
+      },
       variants: {
         thumbnail: {
           path: sourceThumbnailPath,
@@ -5117,7 +5889,7 @@ describe('GrigliataPage', () => {
         kind: 'foe',
         variants: {
           thumbnail: {
-            path: `media/v1/foe/user/m_${'c'.repeat(40)}/derivatives/v1/thumbnail.webp`,
+            path: `media_assets/v1/owner-manager/user/m_${'c'.repeat(40)}/2/thumbnail`,
           },
         },
       },
@@ -5172,24 +5944,31 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      expect(mockBatchInstances).toHaveLength(1);
-      expect(mockBatchInstances[0].commit).toHaveBeenCalledTimes(1);
+      expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledTimes(1);
     });
 
-    expect(mockBatchInstances[0].set).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-1' }),
+    expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledWith(
       expect.objectContaining({
-        backgroundId: 'map-1',
-        tokenId: 'user-1',
-        ownerUid: 'user-1',
-        label: 'user-1',
-        imageUrl: 'https://example.com/token.png',
-        sizeSquares: 1,
-        isVisibleToPlayers: true,
-        isDead: false,
-        updatedBy: 'user-1',
-      }),
-      { merge: true }
+        userId: 'user-1',
+        hiddenPlacement: expect.objectContaining({
+          backgroundId: 'map-1',
+          tokenId: 'user-1',
+          isHidden: false,
+          includeLegacyFallback: true,
+          placementMutation: {
+            action: 'upsert',
+            deleteFoeTokenProfile: false,
+            placement: expect.objectContaining({
+              label: 'user-1',
+              imageUrl: 'https://example.com/token.png',
+              sizeSquares: 1,
+              isVisibleToPlayers: true,
+              isDead: false,
+            }),
+          },
+        }),
+        operationId: expect.any(String),
+      })
     );
   });
 
@@ -5217,27 +5996,34 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      expect(mockBatchInstances).toHaveLength(1);
-      expect(mockBatchInstances[0].commit).toHaveBeenCalledTimes(1);
+      expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledTimes(1);
     });
 
-    expect(mockBatchInstances[0].set).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-1' }),
+    expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledWith(
       expect.objectContaining({
-        backgroundId: 'map-1',
-        tokenId: 'user-1',
-        ownerUid: 'user-1',
-        label: 'user-1',
-        imageUrl: '',
-        col: 4,
-        row: 5,
-        sizeSquares: 3,
-        isVisibleToPlayers: true,
-        isDead: true,
-        statuses: ['burning'],
-        updatedBy: 'user-1',
-      }),
-      { merge: true }
+        userId: 'user-1',
+        hiddenPlacement: expect.objectContaining({
+          backgroundId: 'map-1',
+          tokenId: 'user-1',
+          isHidden: false,
+          includeLegacyFallback: true,
+          placementMutation: {
+            action: 'upsert',
+            deleteFoeTokenProfile: false,
+            placement: expect.objectContaining({
+              label: 'user-1',
+              imageUrl: '',
+              col: 4,
+              row: 5,
+              sizeSquares: 3,
+              isVisibleToPlayers: true,
+              isDead: true,
+              statuses: ['burning'],
+            }),
+          },
+        }),
+        operationId: expect.any(String),
+      })
     );
   });
 
@@ -5293,13 +6079,14 @@ describe('GrigliataPage', () => {
     });
 
     let delayedBoardStateListener = null;
-    firestore.onSnapshot.mockClear().mockImplementation((target, onNext) => {
-      const listener = { target, onNext };
+    firestore.onSnapshot.mockClear().mockImplementation((target, observerOrNext, onError) => {
+      const handlers = mockResolveSnapshotHandlers(observerOrNext, onError);
+      const listener = { target, ...handlers };
       mockFirestoreListeners.push(listener);
       if (target?.path === 'grigliata_state/current') {
         delayedBoardStateListener = listener;
       } else {
-        onNext(mockBuildSnapshotForTarget(target));
+        handlers.onNext?.(mockBuildSnapshotForTarget(target));
       }
 
       return () => {
@@ -5361,44 +6148,38 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      expect(getLastCommittedBatch()).toBeDefined();
+      expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledTimes(1);
     });
 
-    const committedBatch = getLastCommittedBatch();
-    expect(committedBatch.commit).toHaveBeenCalledTimes(1);
-    expect(committedBatch.set).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+    expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledWith(
       expect.objectContaining({
-        backgroundId: 'map-1',
-        tokenId: 'user-2',
-        ownerUid: 'user-2',
-        label: 'user-2',
-        imageUrl: '',
-        col: 3,
-        row: 4,
-        sizeSquares: 4,
-        isVisibleToPlayers: false,
-        isDead: true,
-        statuses: ['burning'],
-        updatedBy: 'user-1',
-      }),
-      { merge: true }
-    );
-    expect(committedBatch.set).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'users/user-2' }),
-      {
-        settings: {
-          grigliata_hidden_token_ids_by_background: {
-            'map-1': { __type: 'arrayUnion', value: 'user-2' },
+        userId: 'user-2',
+        hiddenPlacement: expect.objectContaining({
+          backgroundId: 'map-1',
+          tokenId: 'user-2',
+          isHidden: true,
+          includeLegacyFallback: true,
+          placementMutation: {
+            action: 'upsert',
+            deleteFoeTokenProfile: false,
+            placement: expect.objectContaining({
+              label: 'user-2',
+              imageUrl: '',
+              col: 3,
+              row: 4,
+              sizeSquares: 4,
+              isVisibleToPlayers: false,
+              isDead: true,
+              statuses: ['burning'],
+            }),
           },
-          grigliata_hidden_background_ids: { __type: 'arrayUnion', value: 'map-1' },
-        },
-      },
-      { merge: true }
+        }),
+        operationId: expect.any(String),
+      })
     );
   });
 
-  test('splits bulk selected-token visibility changes into multiple safe batches', async () => {
+  test('persists bulk selected-token visibility changes atomically per token', async () => {
     setManagerAuth();
 
     act(() => {
@@ -5426,21 +6207,30 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      const committedBatches = mockBatchInstances.filter((batch) => batch.commit.mock.calls.length > 0);
-      expect(committedBatches).toHaveLength(2);
+      expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledTimes(5);
     });
 
-    const committedBatches = mockBatchInstances.filter((batch) => batch.commit.mock.calls.length > 0);
-    expect(committedBatches[0].set).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
-      expect.objectContaining({ isVisibleToPlayers: false }),
-      { merge: true }
-    );
-    expect(committedBatches[1].set).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-6' }),
-      expect.objectContaining({ isVisibleToPlayers: false }),
-      { merge: true }
-    );
+    ['user-2', 'user-6'].forEach((ownerUid) => {
+      expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: ownerUid,
+          hiddenPlacement: expect.objectContaining({
+            backgroundId: 'map-1',
+            tokenId: ownerUid,
+            isHidden: true,
+            includeLegacyFallback: true,
+            placementMutation: expect.objectContaining({
+              action: 'upsert',
+              deleteFoeTokenProfile: false,
+              placement: expect.objectContaining({
+                isVisibleToPlayers: false,
+              }),
+            }),
+          }),
+          operationId: expect.any(String),
+        })
+      );
+    });
   });
 
   test('applies selected-token dead-state changes from the board actions', async () => {
@@ -5920,22 +6710,23 @@ describe('GrigliataPage', () => {
       fireEvent.keyDown(screen.getByLabelText('Current HP'), { key: 'Enter', code: 'Enter' });
     });
 
-    expect(firestore.updateDoc).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'users/user-1' }),
+    expect(mockTask05UpdateGrigliataCharacterResourcesCallable).toHaveBeenCalledWith(
       expect.objectContaining({
-        'stats.hpCurrent': 27,
-        'stats.manaCurrent': 15,
-        'stats.barrieraCurrent': 10,
+        userId: 'user-1',
+        backgroundId: 'map-1',
+        tokenId: 'user-1',
+        resources: {
+          hpCurrent: 27,
+          manaCurrent: 15,
+          barrieraCurrent: 10,
+        },
+        tokenPatch: expect.objectContaining({
+          characterId: 'Aldor',
+          label: 'Aldor',
+          notes: 'Hold the line',
+        }),
+        operationId: expect.any(String),
       })
-    );
-    expect(firestore.setDoc).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'grigliata_tokens/user-1' }),
-      expect.objectContaining({
-        ownerUid: 'user-1',
-        notes: 'Hold the line',
-        tokenType: 'character',
-      }),
-      { merge: true }
     );
   });
 
@@ -6026,21 +6817,23 @@ describe('GrigliataPage', () => {
       fireEvent.blur(screen.getByLabelText('Current HP'));
     });
 
-    expect(firestore.updateDoc).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'users/user-2' }),
+    expect(mockTask05UpdateGrigliataCharacterResourcesCallable).toHaveBeenCalledWith(
       expect.objectContaining({
-        'stats.hpCurrent': 31,
-        'stats.manaCurrent': 13,
-        'stats.barrieraCurrent': 6,
+        userId: 'user-2',
+        backgroundId: 'map-1',
+        tokenId: 'user-2',
+        resources: {
+          hpCurrent: 31,
+          manaCurrent: 13,
+          barrieraCurrent: 6,
+        },
+        tokenPatch: expect.objectContaining({
+          characterId: 'Bran',
+          label: 'Bran',
+          notes: 'Advance scout',
+        }),
+        operationId: expect.any(String),
       })
-    );
-    expect(firestore.setDoc).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'grigliata_tokens/user-2' }),
-      expect.objectContaining({
-        notes: 'Advance scout',
-        tokenType: 'character',
-      }),
-      { merge: true }
     );
 
     await act(async () => {
@@ -6145,14 +6938,15 @@ describe('GrigliataPage', () => {
 
     const delayedTargetPaths = new Set(['grigliata_tokens/token-2']);
     const delayedListeners = [];
-    firestore.onSnapshot.mockClear().mockImplementation((target, onNext) => {
-      const listener = { target, onNext };
+    firestore.onSnapshot.mockClear().mockImplementation((target, observerOrNext, onError) => {
+      const handlers = mockResolveSnapshotHandlers(observerOrNext, onError);
+      const listener = { target, ...handlers };
       mockFirestoreListeners.push(listener);
 
       if (delayedTargetPaths.has(target?.path)) {
         delayedListeners.push(listener);
       } else {
-        onNext(mockBuildSnapshotForTarget(target));
+        handlers.onNext?.(mockBuildSnapshotForTarget(target));
       }
 
       return () => {
@@ -6354,7 +7148,7 @@ describe('GrigliataPage', () => {
     render(<GrigliataPage />);
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /drop custom token template/i }));
+      fireEvent.click(screen.getByRole('button', { name: /place wolf on active map/i }));
       fireEvent.click(screen.getByRole('button', { name: /drop custom token template/i }));
     });
 
@@ -6512,15 +7306,21 @@ describe('GrigliataPage', () => {
 
   test('spawns a foe token when a foes hub library payload is dropped onto the board', async () => {
     setManagerAuth();
+    setCollectionData('foes', [{
+      id: 'foe-1',
+      name: 'Test One',
+      stats: { hpTotal: 60, manaTotal: 20 },
+    }]);
 
     render(<GrigliataPage />);
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /drop foe library token/i }));
+      fireEvent.click(screen.getByRole('button', { name: /place test one on active map/i }));
     });
 
     await waitFor(() => {
       expect(mockSpawnGrigliataFoeTokenCallable).toHaveBeenCalledWith({
+        actorUid: 'user-1',
         foeId: 'foe-1',
         backgroundId: 'map-1',
         col: 2,
@@ -6651,13 +7451,22 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      const deletionBatch = mockBatchInstances.find((batch) => (
-        batch.delete.mock.calls.some(([ref]) => ref?.path === 'grigliata_token_placements/map-1__foe-token-1')
-      ));
-
-      expect(deletionBatch).toBeTruthy();
-      expect(deletionBatch.delete).toHaveBeenCalledWith(expect.objectContaining({ path: 'grigliata_token_placements/map-1__foe-token-1' }));
-      expect(deletionBatch.delete).toHaveBeenCalledWith(expect.objectContaining({ path: 'grigliata_tokens/foe-token-1' }));
+      expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-1',
+          hiddenPlacement: {
+            backgroundId: 'map-1',
+            tokenId: 'foe-token-1',
+            isHidden: false,
+            includeLegacyFallback: false,
+            placementMutation: {
+              action: 'delete',
+              deleteFoeTokenProfile: true,
+            },
+          },
+          operationId: expect.any(String),
+        })
+      );
     });
   });
 
@@ -6714,6 +7523,56 @@ describe('GrigliataPage', () => {
     expect(issuedClientDelete).toBe(false);
   });
 
+  test('uses the durable custom-token cleanup flow after the V2 new-only cutover', async () => {
+    useUserSettings.mockReturnValue({
+      data: null,
+      stage: 'new-only',
+    });
+    setCollectionData('grigliata_tokens', [{
+      id: 'custom-instance-1',
+      ownerUid: 'user-1',
+      tokenType: 'custom',
+      customTokenRole: 'instance',
+      customTemplateId: 'token-2',
+      imageSource: 'uploaded',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      imagePath: 'grigliata/tokens/user-1/wolf.png',
+      stats: { hpTotal: 12, hpCurrent: 9, manaTotal: 4, manaCurrent: 4, shieldTotal: 2, shieldCurrent: 2 },
+    }]);
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__custom-instance-1',
+      backgroundId: 'map-1',
+      tokenId: 'custom-instance-1',
+      ownerUid: 'user-1',
+      label: 'Wolf',
+      imageUrl: 'https://example.com/wolf.png',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /delete custom token placement/i }));
+    });
+
+    await waitFor(() => {
+      expect(mockRunWithDurableOperationIntent).toHaveBeenCalledWith(expect.objectContaining({
+        actorUid: 'user-1',
+        kind: 'delete-custom-token',
+        intent: { tokenId: 'custom-instance-1' },
+      }));
+      expect(mockDeleteGrigliataCustomTokenCallable).toHaveBeenCalledWith({
+        tokenId: 'custom-instance-1',
+        operationId: expect.stringMatching(/^delete-custom-token-/),
+      });
+    });
+  });
+
   test('deletes a foe token profile even when the local token cache has not loaded it yet', async () => {
     setManagerAuth();
     setDocData('grigliata_tokens/foe-token-1', {
@@ -6752,18 +7611,26 @@ describe('GrigliataPage', () => {
 
     await waitFor(() => {
       expect(firestore.getDoc).toHaveBeenCalledWith(expect.objectContaining({ path: 'grigliata_tokens/foe-token-1' }));
-
-      const deletionBatch = mockBatchInstances.find((batch) => (
-        batch.delete.mock.calls.some(([ref]) => ref?.path === 'grigliata_token_placements/map-1__foe-token-1')
-      ));
-
-      expect(deletionBatch).toBeTruthy();
-      expect(deletionBatch.delete).toHaveBeenCalledWith(expect.objectContaining({ path: 'grigliata_token_placements/map-1__foe-token-1' }));
-      expect(deletionBatch.delete).toHaveBeenCalledWith(expect.objectContaining({ path: 'grigliata_tokens/foe-token-1' }));
+      expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-1',
+          hiddenPlacement: {
+            backgroundId: 'map-1',
+            tokenId: 'foe-token-1',
+            isHidden: false,
+            includeLegacyFallback: false,
+            placementMutation: {
+              action: 'delete',
+              deleteFoeTokenProfile: true,
+            },
+          },
+          operationId: expect.any(String),
+        })
+      );
     });
   });
 
-  test('splits bulk token deletions into multiple safe batches', async () => {
+  test('deletes bulk token placements atomically per token', async () => {
     setManagerAuth();
     setCollectionData('grigliata_token_placements', ['user-2', 'user-3', 'user-4', 'user-5', 'user-6'].map((ownerUid, index) => ({
       id: `map-1__${ownerUid}`,
@@ -6791,17 +7658,27 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      const committedBatches = mockBatchInstances.filter((batch) => batch.commit.mock.calls.length > 0);
-      expect(committedBatches).toHaveLength(2);
+      expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledTimes(5);
     });
 
-    const committedBatches = mockBatchInstances.filter((batch) => batch.commit.mock.calls.length > 0);
-    expect(committedBatches[0].delete).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' })
-    );
-    expect(committedBatches[1].delete).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-6' })
-    );
+    ['user-2', 'user-6'].forEach((ownerUid) => {
+      expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: ownerUid,
+          hiddenPlacement: {
+            backgroundId: 'map-1',
+            tokenId: ownerUid,
+            isHidden: false,
+            includeLegacyFallback: true,
+            placementMutation: {
+              action: 'delete',
+              deleteFoeTokenProfile: false,
+            },
+          },
+          operationId: expect.any(String),
+        })
+      );
+    });
   });
 
   test('clears the gallery map turn-order cursor before deleting that map\'s token placements', async () => {
@@ -6879,13 +7756,21 @@ describe('GrigliataPage', () => {
       );
     });
 
-    const deletionBatch = mockBatchInstances.find((batch) => batch.delete.mock.calls.some(
-      ([ref]) => ref?.path === 'grigliata_token_placements/map-1__user-1'
-    ));
-
-    expect(deletionBatch).toBeTruthy();
-    expect(deletionBatch.delete).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-1' })
+    expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        hiddenPlacement: {
+          backgroundId: 'map-1',
+          tokenId: 'user-1',
+          isHidden: false,
+          includeLegacyFallback: true,
+          placementMutation: {
+            action: 'delete',
+            deleteFoeTokenProfile: false,
+          },
+        },
+        operationId: expect.any(String),
+      })
     );
 
     confirmSpy.mockRestore();
@@ -6930,7 +7815,7 @@ describe('GrigliataPage', () => {
     setManagerAuth();
     render(<GrigliataPage />);
 
-    ['DM Gallery', 'Music', 'Map Calibration', 'Lighting'].forEach((label) => {
+    ['DM Gallery', 'Music', 'Map Calibration'].forEach((label) => {
       const tab = screen.getByRole('tab', { name: label });
 
       expect(tab).toHaveAttribute('aria-label', label);
@@ -6938,6 +7823,7 @@ describe('GrigliataPage', () => {
       expect(tab).not.toHaveTextContent(label);
       expect(tab.querySelector('svg')).toBeInTheDocument();
     });
+    expect(screen.queryByRole('tab', { name: 'Lighting' })).not.toBeInTheDocument();
   });
 
   test('lays out icon sidebar tabs as an equal-width wrapping strip', () => {
@@ -7126,7 +8012,9 @@ describe('GrigliataPage', () => {
         '"faces":8,"count":1,"modifier":2,"formula":"d8 + 2"'
       );
     });
-    expect(firestore.getDoc).toHaveBeenCalledWith(expect.objectContaining({ path: 'users/user-2' }));
+    expect(firestore.getDoc).not.toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'users/user-2' })
+    );
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'resolve initiative roll custom-token-1' }));
@@ -7248,15 +8136,21 @@ describe('GrigliataPage', () => {
 
   test('opens DM dice roll logs in an overlay and fetches only the selected user', async () => {
     setManagerAuth();
-    setCollectionData('users', [
+    setCollectionData('user_directory', [
       {
         id: 'user-1',
+        schemaVersion: 1,
         characterId: 'Dungeon Master',
+        label: 'Dungeon Master',
+        normalizedLabel: 'dungeon master',
         role: 'dm',
       },
       {
         id: 'user-2',
+        schemaVersion: 1,
         characterId: 'Bran',
+        label: 'Bran',
+        normalizedLabel: 'bran',
         role: 'player',
       },
     ]);
@@ -7280,7 +8174,7 @@ describe('GrigliataPage', () => {
     expect(dmLogsButton).toHaveAttribute('aria-haspopup', 'dialog');
     expect(screen.queryByRole('heading', { name: /dice roll logs/i })).not.toBeInTheDocument();
     expect(screen.queryByText('Attacco (d8 + 5)')).not.toBeInTheDocument();
-    expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'users')).toBe(true);
+    expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'user_directory')).toBe(true);
     expect(firestore.collection.mock.calls.some(([, ...segments]) => segments.join('/') === 'users/user-2/diceRolls')).toBe(false);
 
     await clickAndFlush(dmLogsButton);
@@ -7306,12 +8200,36 @@ describe('GrigliataPage', () => {
     expect(firestore.onSnapshot.mock.calls.some(([target]) => target?.base?.path === 'users/user-2/diceRolls')).toBe(false);
   });
 
+  test('warns when the DM user directory reaches its explicit first-page limit', async () => {
+    setManagerAuth();
+    setCollectionData('user_directory', Array.from({ length: 50 }, (_, index) => ({
+      id: `user-${index + 1}`,
+      schemaVersion: 1,
+      characterId: `Character ${index + 1}`,
+      label: `Character ${index + 1}`,
+      normalizedLabel: `character ${String(index + 1).padStart(2, '0')}`,
+      role: index === 0 ? 'dm' : 'player',
+    })));
+
+    render(<GrigliataPage />);
+    await openDiceSidebar();
+    await clickAndFlush(await screen.findByRole('button', { name: /dm dice logs/i }));
+
+    const dialog = await screen.findByRole('dialog', { name: /dm dice roll logs/i });
+    expect(within(dialog).getByText(
+      'Only the first 50 users are shown in this panel.'
+    )).toBeInTheDocument();
+  });
+
   test('loads older selected-user dice logs with pagination in the DM overlay', async () => {
     setManagerAuth();
-    setCollectionData('users', [
+    setCollectionData('user_directory', [
       {
         id: 'user-2',
+        schemaVersion: 1,
         characterId: 'Bran',
+        label: 'Bran',
+        normalizedLabel: 'bran',
         role: 'player',
       },
     ]);
@@ -7392,15 +8310,21 @@ describe('GrigliataPage', () => {
 
   test('keeps DM dice log content stable while switching users', async () => {
     setManagerAuth();
-    setCollectionData('users', [
+    setCollectionData('user_directory', [
       {
         id: 'user-1',
+        schemaVersion: 1,
         characterId: 'Dungeon Master',
+        label: 'Dungeon Master',
+        normalizedLabel: 'dungeon master',
         role: 'dm',
       },
       {
         id: 'user-2',
+        schemaVersion: 1,
         characterId: 'Bran',
+        label: 'Bran',
+        normalizedLabel: 'bran',
         role: 'player',
       },
     ]);
@@ -7477,17 +8401,17 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      expect(firestore.updateDoc).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'users/user-1' }),
-        { 'settings.grigliata_music_muted': true }
-      );
+      expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledWith(expect.objectContaining({
+        patch: { settings: { grigliata_music_muted: true } },
+        operationId: expect.any(String),
+      }));
     });
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /^mute music$/i })).toBeEnabled();
     });
 
-    firestore.updateDoc.mockClear();
+    mockTask05UpdateSettingsCallable.mockClear();
 
     useAuth.mockReturnValue({
       user: {
@@ -7518,16 +8442,45 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      expect(firestore.updateDoc).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'users/user-1' }),
-        { 'settings.grigliata_music_muted': false }
-      );
+      expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledWith(expect.objectContaining({
+        patch: { settings: { grigliata_music_muted: false } },
+        operationId: expect.any(String),
+      }));
+    });
+  });
+
+  test('uses rollout-aware V2 settings instead of a stale legacy preference', async () => {
+    useUserSettings.mockReturnValue({
+      data: {
+        settings: {
+          grigliata_draw_color: 'nova-teal',
+          grigliata_share_interactions: true,
+          grigliata_music_muted: true,
+        },
+      },
+    });
+
+    render(<GrigliataPage />);
+
+    const unmuteButton = await screen.findByRole('button', { name: /^unmute music$/i });
+    expect(screen.getByTestId('board-sharing-state')).toHaveTextContent('true');
+    expect(screen.getByTestId('board-draw-color')).toHaveTextContent('nova-teal');
+
+    await act(async () => {
+      fireEvent.click(unmuteButton);
+    });
+
+    await waitFor(() => {
+      expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledWith(expect.objectContaining({
+        patch: { settings: { grigliata_music_muted: false } },
+        operationId: expect.any(String),
+      }));
     });
   });
 
   test('shows an error when the current user music mute preference cannot be updated', async () => {
     const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-    firestore.updateDoc.mockRejectedValueOnce(new Error('write failed'));
+    mockTask05UpdateSettingsCallable.mockRejectedValueOnce(new Error('write failed'));
 
     try {
       render(<GrigliataPage />);
@@ -7820,6 +8773,7 @@ describe('GrigliataPage', () => {
         })
       );
     });
+    expect(firestore.setDoc.mock.calls[firestore.setDoc.mock.calls.length - 1][1]).not.toHaveProperty('media');
     firestore.setDoc.mockClear();
 
     await act(async () => {
@@ -7843,6 +8797,7 @@ describe('GrigliataPage', () => {
         })
       );
     });
+    expect(firestore.setDoc.mock.calls[firestore.setDoc.mock.calls.length - 1][1]).not.toHaveProperty('media');
     firestore.setDoc.mockClear();
 
     await act(async () => {
@@ -7866,6 +8821,7 @@ describe('GrigliataPage', () => {
         })
       );
     });
+    expect(firestore.setDoc.mock.calls[firestore.setDoc.mock.calls.length - 1][1]).not.toHaveProperty('media');
     firestore.setDoc.mockClear();
 
     act(() => {
@@ -7923,6 +8879,7 @@ describe('GrigliataPage', () => {
         })
       );
     });
+    expect(firestore.setDoc.mock.calls[firestore.setDoc.mock.calls.length - 1][1]).not.toHaveProperty('media');
     firestore.setDoc.mockClear();
 
     act(() => {
@@ -8913,11 +9870,15 @@ describe('GrigliataPage', () => {
       fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
     });
 
-    firestore.getDoc.mockImplementation((target) => (
-      target?.path === 'users/user-2'
-        ? pendingCharacterRead.promise
-        : Promise.resolve(mockBuildSnapshotForTarget(target))
-    ));
+    const defaultOnSnapshot = firestore.onSnapshot.getMockImplementation();
+    firestore.onSnapshot.mockImplementation((target, observerOrNext, onError) => {
+      if (target?.path !== 'users/user-2') {
+        return defaultOnSnapshot(target, observerOrNext, onError);
+      }
+      const handlers = mockResolveSnapshotHandlers(observerOrNext, onError);
+      pendingCharacterRead.promise.then((snapshot) => handlers.onNext?.(snapshot));
+      return () => {};
+    });
     mockBatchInstances.splice(0, mockBatchInstances.length);
 
     await act(async () => {
@@ -9735,6 +10696,40 @@ describe('GrigliataPage', () => {
       );
     });
     expect(storageApi.deleteObject).not.toHaveBeenCalled();
+
+    confirmSpy.mockRestore();
+  });
+
+  test('deletes the legacy map reference before eager Storage cleanup', async () => {
+    setManagerAuth();
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    const storageApi = require('firebase/storage');
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+    });
+
+    firestore.deleteDoc.mockClear();
+    storageApi.deleteObject.mockClear();
+
+    const latestBackgroundGalleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+    await act(async () => {
+      await latestBackgroundGalleryProps.onDeleteBackground({
+        id: 'map-legacy',
+        name: 'Legacy Map',
+        imagePath: 'grigliata/backgrounds/user-1/map-legacy.png',
+      });
+    });
+
+    await waitFor(() => expect(storageApi.deleteObject).toHaveBeenCalled());
+    const backgroundDelete = firestore.deleteDoc.mock.calls.findIndex(([ref]) => (
+      ref?.path === 'grigliata_backgrounds/map-legacy'
+    ));
+    expect(backgroundDelete).toBeGreaterThanOrEqual(0);
+    expect(firestore.deleteDoc.mock.invocationCallOrder[backgroundDelete])
+      .toBeLessThan(storageApi.deleteObject.mock.invocationCallOrder[0]);
 
     confirmSpy.mockRestore();
   });
@@ -10587,18 +11582,7 @@ describe('GrigliataPage', () => {
         }),
         { merge: true }
       );
-      expect(committedBatch.set).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'users/user-2' }),
-        expect.objectContaining({
-          active_turn_effect: {
-            barriera: {
-              totalTurns: 3,
-              remainingTurns: 3,
-            },
-          },
-        }),
-        { merge: true }
-      );
+      expect(mockTask05ConsumeTurnEffectsCallable).not.toHaveBeenCalled();
     });
   });
 
@@ -10721,35 +11705,18 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      const committedBatch = getLastCommittedBatch();
-      expect(committedBatch).toBeDefined();
-      expect(committedBatch.set).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
-        expect.objectContaining({
-          turnCounter: 2,
-          turnEffects: expect.arrayContaining([
-            expect.objectContaining({
-              id: 'shield',
-              remainingTurns: 1,
-              appliesFromTurnCounter: 1,
-            }),
-          ]),
-          updatedBy: 'user-1',
-        }),
-        { merge: true }
-      );
-      expect(committedBatch.set).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'users/user-2' }),
-        expect.objectContaining({
-          active_turn_effect: {
-            barriera: {
-              totalTurns: 2,
-              remainingTurns: 1,
-            },
-          },
-        }),
-        { merge: true }
-      );
+      expect(mockTask05ConsumeTurnEffectsCallable).toHaveBeenCalledTimes(1);
+      expect(mockTask05ConsumeTurnEffectsCallable).toHaveBeenCalledWith(expect.objectContaining({
+        userId: 'user-2',
+        grigliataTransition: {
+          backgroundId: 'map-1',
+          tokenId: 'user-2',
+          expectedPreviousActiveTokenId: 'user-3',
+          expectedTurnCounter: 2,
+          preserveStartedAt: true,
+        },
+        operationId: expect.any(String),
+      }));
     });
 
     mockBatchInstances.splice(0, mockBatchInstances.length);
@@ -10860,32 +11827,20 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      const committedBatch = getLastCommittedBatch();
-      expect(committedBatch).toBeDefined();
-      expect(committedBatch.set).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-2' }),
+      expect(mockTask05ConsumeTurnEffectsCallable).toHaveBeenCalledTimes(2);
+      expect(mockTask05ConsumeTurnEffectsCallable).toHaveBeenNthCalledWith(
+        2,
         expect.objectContaining({
-          turnCounter: 3,
-          turnEffects: { __type: 'deleteField' },
-          updatedBy: 'user-1',
-        }),
-        { merge: true }
-      );
-      expect(committedBatch.set).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'users/user-2' }),
-        expect.objectContaining({
-          stats: {
-            barrieraCurrent: 0,
-            barrieraTotal: 0,
+          userId: 'user-2',
+          grigliataTransition: {
+            backgroundId: 'map-1',
+            tokenId: 'user-2',
+            expectedPreviousActiveTokenId: 'user-3',
+            expectedTurnCounter: 3,
+            preserveStartedAt: true,
           },
-          active_turn_effect: {
-            barriera: {
-              totalTurns: 0,
-              remainingTurns: 0,
-            },
-          },
-        }),
-        { merge: true }
+          operationId: expect.any(String),
+        })
       );
     });
   });
@@ -11178,15 +12133,11 @@ describe('GrigliataPage', () => {
       const placementBatch = committedBatches.find((batch) => batch.set.mock.calls.some(
         ([target]) => target?.path === 'grigliata_token_placements/map-1__user-1'
       ));
-      const userBatch = committedBatches.find((batch) => batch.set.mock.calls.some(
-        ([target]) => target?.path === 'users/user-1'
-      ));
       const customTokenBatch = committedBatches.find((batch) => batch.set.mock.calls.some(
         ([target]) => target?.path === 'grigliata_tokens/token-1'
       ));
 
       expect(placementBatch).toBeDefined();
-      expect(userBatch).toBeDefined();
       expect(customTokenBatch).toBeDefined();
       expect(placementBatch.set).toHaveBeenCalledWith(
         expect.objectContaining({ path: 'grigliata_token_placements/map-1__user-1' }),
@@ -11212,22 +12163,16 @@ describe('GrigliataPage', () => {
         }),
         { merge: true }
       );
-      expect(userBatch.set).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'users/user-1' }),
-        expect.objectContaining({
-          stats: {
-            barrieraCurrent: 0,
-            barrieraTotal: 0,
-          },
-          active_turn_effect: {
-            barriera: {
-              totalTurns: 0,
-              remainingTurns: 0,
-            },
-          },
-        }),
-        { merge: true }
-      );
+      expect(mockTask05UpdateResourceCallable).toHaveBeenCalledWith(expect.objectContaining({
+        userId: 'user-1',
+        resource: 'barriera',
+        mode: 'set',
+        value: 0,
+        totalValue: 0,
+        remainingTurns: 0,
+        totalTurns: 0,
+        operationId: expect.any(String),
+      }));
       expect(customTokenBatch.set).toHaveBeenCalledWith(
         expect.objectContaining({ path: 'grigliata_tokens/token-1' }),
         expect.objectContaining({
@@ -11491,10 +12436,10 @@ describe('GrigliataPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /toggle interaction sharing/i }));
 
     await waitFor(() => {
-      expect(firestore.updateDoc).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'users/user-1' }),
-        { 'settings.grigliata_share_interactions': true }
-      );
+      expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledWith(expect.objectContaining({
+        patch: { settings: { grigliata_share_interactions: true } },
+        operationId: expect.any(String),
+      }));
     });
 
     await waitFor(() => {
@@ -11545,22 +12490,22 @@ describe('GrigliataPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /emit draw color nova teal/i }));
 
     expect(screen.getByTestId('board-draw-color')).toHaveTextContent('nova-teal');
-    expect(firestore.updateDoc).not.toHaveBeenCalled();
+    expect(mockTask05UpdateSettingsCallable).not.toHaveBeenCalled();
 
     await act(async () => {
       jest.advanceTimersByTime(299);
     });
-    expect(firestore.updateDoc).not.toHaveBeenCalled();
+    expect(mockTask05UpdateSettingsCallable).not.toHaveBeenCalled();
 
     await act(async () => {
       jest.advanceTimersByTime(1);
     });
 
     await waitFor(() => {
-      expect(firestore.updateDoc).toHaveBeenCalledWith(
-        expect.objectContaining({ path: 'users/user-1' }),
-        { 'settings.grigliata_draw_color': 'nova-teal' }
-      );
+      expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledWith(expect.objectContaining({
+        patch: { settings: { grigliata_draw_color: 'nova-teal' } },
+        operationId: expect.any(String),
+      }));
     });
   });
 
@@ -11577,13 +12522,13 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      expect(firestore.updateDoc).toHaveBeenCalledTimes(1);
+      expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledTimes(1);
     });
 
-    expect(firestore.updateDoc).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'users/user-1' }),
-      { 'settings.grigliata_draw_color': 'solar-amber' }
-    );
+    expect(mockTask05UpdateSettingsCallable).toHaveBeenCalledWith(expect.objectContaining({
+      patch: { settings: { grigliata_draw_color: 'solar-amber' } },
+      operationId: expect.any(String),
+    }));
   });
 
   test('lets the DM decrease the active grid size down to 12px without persisting a smaller value', async () => {

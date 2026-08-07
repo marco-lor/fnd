@@ -6,6 +6,7 @@ const {
   assertSafeTarget,
   buildUserDirectoryProjection,
   parseArguments,
+  planFingerprintFor,
   projectionMatches,
   runBackfill,
 } = require('./backfill-user-directory');
@@ -16,27 +17,58 @@ test('requires an explicit project and defaults to dry-run mode', () => {
   assert.equal(parsed.projectId, 'demo-fnd-perf');
   assert.equal(parsed.shouldWrite, false);
   assert.equal(parsed.resume, false);
+  assert.equal(parsed.authMode, 'admin');
 });
 
-test('hard-refuses production and non-loopback targets', () => {
+test('refuses production-through-emulator, nonproduction live, and non-loopback targets', () => {
   assert.throws(
-    () => assertSafeTarget('fatins', {FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080'}),
-    /refuses non-demo/
+    () => assertSafeTarget({projectId: 'fatins'}, {
+      FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
+    }),
+    /requires a demo-/
   );
   assert.throws(
-    () => assertSafeTarget('demo-fnd-perf', {}),
-    /requires FIRESTORE_EMULATOR_HOST/
+    () => assertSafeTarget({projectId: 'fatin-test'}, {}),
+    /accepts only live project fatins/
   );
   assert.throws(
-    () => assertSafeTarget('demo-fnd-perf', {FIRESTORE_EMULATOR_HOST: 'firestore.example:8080'}),
-    /requires FIRESTORE_EMULATOR_HOST/
+    () => assertSafeTarget({projectId: 'demo-fnd-perf'}, {
+      FIRESTORE_EMULATOR_HOST: 'firestore.example:8080',
+    }),
+    /Non-loopback/
   );
   assert.deepEqual(
-    assertSafeTarget('demo-fnd-perf', {
+    assertSafeTarget({projectId: 'demo-fnd-perf'}, {
       FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
       GCLOUD_PROJECT: 'demo-fnd-perf',
     }),
-    {emulatorHost: '127.0.0.1:8080', projectId: 'demo-fnd-perf'}
+    {emulatorHost: '127.0.0.1:8080', live: false, projectId: 'demo-fnd-perf'}
+  );
+});
+
+test('live access is hard-locked to confirmed fatins Firebase CLI auth', () => {
+  const base = {
+    allowLiveProject: true,
+    authMode: 'firebase-cli',
+    confirmProject: 'fatins',
+    projectId: 'fatins',
+  };
+  assert.deepEqual(assertSafeTarget(base, {}), {
+    emulatorHost: null,
+    live: true,
+    projectId: 'fatins',
+  });
+  assert.throws(
+    () => assertSafeTarget({...base, allowLiveProject: false}, {}),
+    /allow-live-project/
+  );
+  assert.throws(
+    () => assertSafeTarget({...base, confirmProject: 'fatin-test'}, {}),
+    /confirm-project fatins/
+  );
+  assert.throws(
+    () => assertSafeTarget({...base, authMode: 'admin'}, {}),
+    /requires --auth firebase-cli/
   );
 });
 
@@ -59,17 +91,36 @@ test('projection matches the Functions privacy and normalization contract', () =
 });
 
 test('write mode requires a completed matching dry-run report', () => {
+  const subjects = [{
+    action: 'create',
+    currentHash: 'current',
+    documentIdHash: 'id',
+    projectionHash: 'projection',
+  }];
   const valid = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     mode: 'dry-run',
     projectId: 'demo-fnd-perf',
     batchSize: BATCH_SIZE,
     complete: true,
+    subjects,
+    planFingerprint: planFingerprintFor({projectId: 'demo-fnd-perf', subjects}),
   };
-  assert.equal(assertCompletedDryRunReport(valid, 'demo-fnd-perf'), valid);
+  assert.equal(
+    assertCompletedDryRunReport(valid, 'demo-fnd-perf', valid.planFingerprint),
+    valid
+  );
   assert.throws(
-    () => assertCompletedDryRunReport({...valid, complete: false}, 'demo-fnd-perf'),
+    () => assertCompletedDryRunReport(
+      {...valid, complete: false},
+      'demo-fnd-perf',
+      valid.planFingerprint
+    ),
     /requires a completed/
+  );
+  assert.throws(
+    () => assertCompletedDryRunReport(valid, 'demo-fnd-perf', '0'.repeat(64)),
+    /approve-fingerprint/
   );
 });
 
@@ -114,6 +165,12 @@ test('backfill is ordered, bounded, idempotent, and checkpoints after commit', a
   assert.deepEqual(commits.map((entries) => entries.map(({id}) => id)), [['b', 'c']]);
   assert.equal(checkpoints.length, 1);
   assert.equal(checkpoints[0].lastDocumentId, 'c');
+  assert.equal(result.subjects.length, 3);
+  assert.deepEqual(result.subjects.map(({action}) => action), [
+    'unchanged',
+    'update',
+    'create',
+  ]);
 });
 
 test('backfill rejects a page that is not strictly ordered by document ID', async () => {

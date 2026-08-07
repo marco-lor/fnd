@@ -5,34 +5,16 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import DiceRoller from '../../common/DiceRoller';
-import { getVarie } from '../../../data/configRepository';
 import {
   commitConsumable,
   isDefinitiveUserDataCommandError,
   prepareConsumable,
 } from '../../../data/userData/userDataCommands';
-import { runVersionedUserDataCommand } from '../../../data/userData/userDataCommandRouting';
-import { legacyConsumeConsumable } from '../../../data/userData/legacyUserDataCommands';
 
-const LEVEL_THRESHOLDS = [1, 4, 7, 10];
 const pendingConsumptions = new Map();
 
 export const __resetConsumableOperationsForTests = () => {
   if (process.env.NODE_ENV === 'test') pendingConsumptions.clear();
-};
-
-const resolveLevelKey = (userLevel) => {
-  for (let index = LEVEL_THRESHOLDS.length - 1; index >= 0; index -= 1) {
-    if (userLevel >= LEVEL_THRESHOLDS[index]) return String(LEVEL_THRESHOLDS[index]);
-  }
-  return '1';
-};
-
-const getDiceCount = (item, fieldKey, levelKey) => {
-  const raw = item?.Parametri?.Special?.[fieldKey]?.[levelKey];
-  if (raw == null || String(raw).trim() === '') return 0;
-  const count = Number(raw);
-  return Number.isFinite(count) ? count : 0;
 };
 
 // Get Bonus Creazione from Specific['Bonus Creazione'] (string/number). Non-numeric becomes 0.
@@ -140,59 +122,7 @@ const consumeAuthoritatively = async ({ user, item, mode }) => {
   }
 };
 
-const consumeLegacy = async ({ user, userData, item, slotKey, mode }) => {
-  if (!user?.uid || !item) return;
-  const level = Number(userData?.stats?.level || 1);
-  const levelKey = resolveLevelKey(level);
-  const isHP = mode === 'hp';
-  const isMana = mode === 'mana';
-  const consumeOnly = !isHP && !isMana;
-  const fieldKey = isHP
-    ? 'Rigenera Dado Anima HP'
-    : isMana ? 'Rigenera Dado Anima Mana' : null;
-  const diceCount = fieldKey ? getDiceCount(item, fieldKey, levelKey) : 0;
-
-  let finalGain = null;
-  if (!consumeOnly && diceCount > 0) {
-    let animaDieFaces = 10;
-    try {
-      const varie = await getVarie();
-      const diceByLevel = varie?.dadiAnimaByLevel || [];
-      const diceType = diceByLevel[level] || diceByLevel[diceByLevel.length - 1];
-      if (diceType && /^d\d+$/i.test(diceType)) {
-        const parsed = parseInt(diceType.replace(/^d/i, ''), 10);
-        if (!Number.isNaN(parsed)) animaDieFaces = parsed;
-      }
-    } catch (_error) {
-      // Preserve the legacy d10 fallback when configuration is unavailable.
-    }
-    const modifier = getBonusCreazione(item) * diceCount;
-    const description = `Lancio ${diceCount}d${animaDieFaces}${modifier ? `+${modifier}` : ''} Anima per ${isHP ? 'HP' : 'Mana'}`;
-    const { total } = await rollDiceOverlay({
-      faces: animaDieFaces,
-      count: diceCount,
-      modifier,
-      description,
-      user,
-    });
-    finalGain = total;
-  }
-
-  await legacyConsumeConsumable({
-    uid: user.uid,
-    item,
-    slotKey,
-    mode,
-    gain: finalGain,
-  });
-};
-
-// Core logic. Legacy-read and shadow-verify preserve the established aggregate
-// mutation; activated rollout stages use only the authoritative command pair.
-export default function useConsumable({ user, userData, item, slotKey, mode, stage }) {
-  return runVersionedUserDataCommand({
-    stage,
-    legacy: () => consumeLegacy({ user, userData, item, slotKey, mode }),
-    authoritative: () => consumeAuthoritatively({ user, item, mode }),
-  });
+// Every interactive consumption uses the canonical Task 05 preparation/commit pair.
+export default function useConsumable({ user, item, mode }) {
+  return consumeAuthoritatively({ user, item, mode });
 }

@@ -155,6 +155,7 @@ const NpcTile = ({
           {hasMediaAsset(npc, { variant: 'thumbnail' }) ? (
             <MediaImage
               media={npc}
+              mediaPurpose="npc"
               src={npc?.imageUrl || ''}
               variant="thumbnail"
               alt={nome}
@@ -223,6 +224,7 @@ const NpcHoverPortal = ({
                     >
                       <MediaImage
                         media={npc}
+                        mediaPurpose="npc"
                         src={npc?.imageUrl || ''}
                         variant="thumbnail"
                         alt={`${getNpcNome(npc)} portrait`}
@@ -337,6 +339,7 @@ const NpcImageZoomModal = ({ imageData, onClose }) => {
             </button>
             <MediaImage
               media={imageData.npc}
+              mediaPurpose="npc"
               src={imageData.npc?.imageUrl || ''}
               variant="full"
               alt={imageData.nome ? `${imageData.nome} portrait zoomed` : 'NPC portrait zoomed'}
@@ -1137,10 +1140,6 @@ export default function NpcSidebar({
 
     const path = getNpcStoragePath(npc);
     const hasCanonicalMedia = hasCanonicalTask07MediaAssetId(npc);
-    if (!TASK06_LOCAL_CANDIDATE && !hasCanonicalMedia && !path) {
-      setNpcError('Cannot delete NPC image: missing storage path.');
-      return;
-    }
 
     setDeletingNpcId(npc.id);
     try {
@@ -1156,16 +1155,6 @@ export default function NpcSidebar({
           ),
         });
       } else {
-        if (!hasCanonicalMedia) {
-          try {
-            await deleteLegacyStoragePath(path);
-          } catch (error) {
-            console.error('Delete NPC image failed:', error);
-            setNpcError('Image deletion failed. NPC document was not deleted.');
-            return;
-          }
-        }
-
         try {
           const linkedMarkersQuery = query(
             collection(db, 'map_markers'),
@@ -1189,8 +1178,21 @@ export default function NpcSidebar({
         try {
           await deleteDoc(doc(db, 'echi_npcs', npc.id));
         } catch (error) {
-          console.error('Delete NPC document failed after image deletion:', error);
+          console.error('Delete NPC document failed:', error);
           setNpcError('Linked map markers were cleaned up, but NPC document deletion failed.');
+          return;
+        }
+
+        // The document deletion is the durable cleanup signal. This eager
+        // legacy delete is only a latency optimization; the server queue
+        // retries and verifies it if the browser request fails.
+        if (!hasCanonicalMedia && path) {
+          try {
+            await deleteLegacyStoragePath(path);
+          } catch (error) {
+            console.warn('Eager NPC image cleanup failed:', error);
+            setNpcError('NPC deleted. Its image cleanup is queued for retry.');
+          }
         }
       }
     } catch (error) {

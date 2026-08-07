@@ -1,6 +1,6 @@
 import {randomBytes} from "crypto";
 import * as admin from "firebase-admin";
-import {FieldValue, Timestamp} from "firebase-admin/firestore";
+import {FieldPath, FieldValue, Timestamp} from "firebase-admin/firestore";
 import {
   CallableRequest,
   FunctionsErrorCode,
@@ -22,9 +22,14 @@ import {
   asFiniteNumber,
   asRecord,
   asTrimmedString,
+  buildAdminUserListItem,
+  canListPrivateUserLabels,
+  normalizeAdminUserListPagination,
+  buildLegacyDomainProjection,
   buildConsumableRollPlan,
   buildLegacyEquippedSnapshot,
   buildUserShellProjection,
+  consumeActiveTurnEffects,
   canAccessCatalogItem,
   cloneWithoutUndefined,
   deepMergeRecords,
@@ -39,6 +44,7 @@ import {
   isValidFirestoreDocumentId,
   isOperationExpired,
   normalizeDisplayName,
+  normalizeResourceTotalValue,
   operationReceiptId,
   operationRequestHash,
   parseCatalogPrice,
@@ -64,6 +70,7 @@ import {
   stripTask07PersonalContentProjection,
   stripUntrustedTask07InventoryMedia,
 } from "./task07ServerBoundary";
+import {assertActiveCaller} from "./callerAuthorization";
 
 const REGION = "europe-west8";
 const MAX_MUTATION_BYTES = 256 * 1024;
@@ -89,6 +96,35 @@ type UnknownRecord = Record<string, unknown>;
 type Transaction = admin.firestore.Transaction;
 type Firestore = admin.firestore.Firestore;
 type UserSnapshot = admin.firestore.DocumentSnapshot;
+
+const SETTINGS_PARAMETER_LOCK_FIELDS = new Set([
+  "lock_param_base",
+  "lock_param_combat",
+]);
+
+export const classifyUpdateSettingsPatch = (patch: UnknownRecord): {
+  hasLocks: boolean;
+  hasPreferences: boolean;
+} => {
+  const rootLockFields = new Set(["parameterLocks", "paramLocks"]);
+  const requestedFields = Object.keys(patch);
+  const hasSettingsPatch = Object.prototype.hasOwnProperty.call(
+    patch,
+    "settings"
+  );
+  const settingsFields = Object.keys(asRecord(patch.settings));
+  const hasLocks = requestedFields.some((key) => rootLockFields.has(key)) ||
+    settingsFields.some((key) => SETTINGS_PARAMETER_LOCK_FIELDS.has(key));
+  const hasPreferences = requestedFields.some(
+    (key) => key !== "settings" && !rootLockFields.has(key)
+  ) || (
+    hasSettingsPatch && (
+      settingsFields.length === 0 ||
+      settingsFields.some((key) => !SETTINGS_PARAMETER_LOCK_FIELDS.has(key))
+    )
+  );
+  return {hasLocks, hasPreferences};
+};
 
 interface BaseCommand {
   operationId: string;
@@ -271,7 +307,7 @@ const commandAccess = async (
     ? await transaction.getAll(actorRef).then(([snapshot]) => [snapshot, snapshot])
     : await transaction.getAll(actorRef, targetRef);
 
-  if (!actorSnapshot.exists) fail("permission-denied", "Caller profile missing.");
+  assertActiveCaller(actorSnapshot);
   if (!targetSnapshot.exists) fail("not-found", "Target user not found.");
   if (targetSnapshot.get("deletionState") === "pending") {
     fail("failed-precondition", "The target account is pending deletion.");
@@ -386,6 +422,677 @@ const requireLegacyInventory = (
   }
   return inventory as unknown[];
 };
+
+type CharacterCreationAction =
+  "initialize" | "selectRace" | "selectAnima" | "complete";
+
+export const task05ListAdminUsers = onCall(
+  {region: REGION},
+  async (request: CallableRequest<{cursor?: string; limit?: number}>) => {
+    assertPayloadSize(request.data);
+    const actorUid = requireActor(request);
+    const pagination = (() => {
+      try {
+        return normalizeAdminUserListPagination(request.data);
+      } catch (error) {
+        return fail("invalid-argument", (error as Error).message);
+      }
+    })();
+
+    const db = admin.firestore();
+    const actor = await db.doc(`users/${actorUid}`).get();
+    assertActiveCaller(actor);
+    if (!canListPrivateUserLabels(actor.get("role"))) {
+      fail("permission-denied", "Only webmasters may list private user labels.");
+    }
+
+    const directory = db.collection("user_directory");
+    let query: admin.firestore.Query = directory
+      .orderBy(FieldPath.documentId());
+    if (pagination.cursor) {
+      query = query.startAfter(directory.doc(pagination.cursor));
+    }
+    const snapshot = await query.limit(pagination.limit + 1).get();
+    const hasMore = snapshot.docs.length > pagination.limit;
+    const pageDocs = snapshot.docs.slice(0, pagination.limit);
+    const userSnapshots = pageDocs.length > 0 ? await db.getAll(
+      ...pageDocs.map((document) => db.doc(`users/${document.id}`)),
+      {fieldMask: ["characterId", "username", "email", "role"]}
+    ) : [];
+    const usersById = new Map(
+      userSnapshots
+        .filter((document) => document.exists)
+        .map((document) => [document.id, document])
+    );
+    return {
+      items: pageDocs
+        .map((document) => usersById.get(document.id))
+        .filter((document): document is admin.firestore.DocumentSnapshot =>
+          document !== undefined
+        )
+        .map((document) => buildAdminUserListItem(
+          document.id,
+          document.data()
+        )),
+      cursor: hasMore && pageDocs.length > 0 ?
+        pageDocs[pageDocs.length - 1].id : null,
+      hasMore,
+    };
+  }
+);
+
+export const task05CharacterCreation = onCall(
+  {region: REGION},
+  async (request: CallableRequest<BaseCommand & {
+    action: CharacterCreationAction;
+    race?: string;
+    anima?: string;
+    characterId?: string;
+    profile?: UnknownRecord;
+  }>) => {
+    const action = request.data?.action;
+    if (![
+      "initialize",
+      "selectRace",
+      "selectAnima",
+      "complete",
+    ].includes(action)) {
+      fail("invalid-argument", "A valid character creation action is required.");
+    }
+
+    if (action === "initialize") {
+      const actorUid = requireActor(request);
+      if (!validateOperationId(request.data?.operationId)) {
+        fail("invalid-argument", "A valid operationId is required.");
+      }
+      assertPayloadSize(request.data);
+      const db = admin.firestore();
+      const userRef = db.doc(`users/${actorUid}`);
+      const rolloutRef = db.doc("app_config/user_data_v2");
+      const schemaRef = db.doc("utils/schema_pg");
+      const stateRefs = {
+        progression: db.doc(`users/${actorUid}/state/progression`),
+        resources: db.doc(`users/${actorUid}/state/resources`),
+        settings: db.doc(`users/${actorUid}/state/settings`),
+        equipment: db.doc(`users/${actorUid}/state/equipment`),
+        profileContent: db.doc(`users/${actorUid}/state/profileContent`),
+      };
+      return db.runTransaction(async (transaction) => {
+        const [
+          rollout,
+          schema,
+          user,
+          progression,
+          resources,
+          settings,
+          equipment,
+          profileContent,
+        ] = await transaction.getAll(
+          rolloutRef,
+          schemaRef,
+          userRef,
+          stateRefs.progression,
+          stateRefs.resources,
+          stateRefs.settings,
+          stateRefs.equipment,
+          stateRefs.profileContent
+        );
+        if (isUserDataLegacyDrainFrozen(rollout.data(), actorUid)) {
+          fail("unavailable", "User data is temporarily frozen. Retry later.");
+        }
+        if (user.get("deletionState") === "pending") {
+          fail("failed-precondition", "The account is pending deletion.");
+        }
+        if (!schema.exists) {
+          fail("failed-precondition", "Character schema is missing.");
+        }
+        const tokenEmail = asTrimmedString(request.auth?.token?.email);
+        const schemaData = asRecord(schema.data());
+        const userData = asRecord(user.data());
+        const source: UnknownRecord = {
+          ...schemaData,
+          ...userData,
+          ...(tokenEmail ? {email: asTrimmedString(userData.email) || tokenEmail} : {}),
+          username: asTrimmedString(userData.username) ||
+            tokenEmail.split("@")[0] ||
+            `user_${actorUid.slice(0, 5)}`,
+          role: asTrimmedString(userData.role).toLowerCase() || "player",
+          flags: {
+            ...asRecord(schemaData.flags),
+            ...asRecord(userData.flags),
+            characterCreationDone:
+              asRecord(userData.flags).characterCreationDone === true,
+          },
+        };
+        const domains = buildLegacyDomainProjection(source);
+        if (!user.exists) {
+          const stats = asRecord(source.stats);
+          transaction.create(userRef, {
+            ...buildUserShellProjection(source),
+            modelVersion: USER_DATA_SCHEMA_VERSION,
+            flags: source.flags,
+            summary: {
+              ...asRecord(source.summary),
+              level: asFiniteNumber(stats.level, 1),
+            },
+            createdAt: FieldValue.serverTimestamp(),
+          });
+        }
+        const statePlans = [
+          [progression, stateRefs.progression, domains.progression],
+          [resources, stateRefs.resources, domains.resources],
+          [settings, stateRefs.settings, domains.settings],
+          [equipment, stateRefs.equipment, domains.equipment],
+          [profileContent, stateRefs.profileContent, domains.profileContent],
+        ] as const;
+        statePlans.forEach(([snapshot, ref, data]) => {
+          if (!snapshot.exists) transaction.create(ref, data);
+        });
+        return {
+          success: true,
+          created: !user.exists,
+          initializedDomains: statePlans
+            .filter(([snapshot]) => !snapshot.exists)
+            .length,
+        };
+      });
+    }
+
+    return runIdempotent(
+      request,
+      `character-creation-${action}`,
+      "actor-only",
+      async (context) => {
+        const access = await commandAccess(
+          context.transaction,
+          context.db,
+          context.actorUid,
+          context.targetUid,
+          true
+        );
+        const progressionRef = context.db.doc(
+          `users/${access.targetUid}/state/progression`
+        );
+        const progression = await context.transaction.get(progressionRef);
+        const rootFlags = asRecord(access.targetSnapshot.get("flags"));
+        const progressionFlags = asRecord(progression.get("flags"));
+        if (
+          rootFlags.characterCreationDone === true ||
+          progressionFlags.characterCreationDone === true
+        ) {
+          fail("failed-precondition", "Character creation is already complete.");
+        }
+
+        if (action === "selectRace") {
+          const race = asTrimmedString(request.data?.race);
+          if (!race || race.length > 100) {
+            fail("invalid-argument", "A valid race is required.");
+          }
+          const schemaRef = context.db.doc("utils/schema_pg");
+          const varieRef = context.db.doc("utils/varie");
+          const [schema, varie] = await context.transaction.getAll(
+            schemaRef,
+            varieRef
+          );
+          if (!schema.exists || !varie.exists) {
+            fail("failed-precondition", "Character configuration is missing.");
+          }
+          const starting = asRecord(varie.get("starting_values"));
+          const raceExtra = asRecord(asRecord(
+            varie.get("races_extra")
+          )[race]);
+          const schemaParametri = asRecord(schema.get("Parametri"));
+          const currentParametri = asRecord(
+            progression.get("Parametri") ??
+              access.targetSnapshot.get("Parametri")
+          );
+          const currentStats = {
+            ...asRecord(access.targetSnapshot.get("stats")),
+            ...asRecord(progression.get("stats")),
+          };
+          const nextParametri = {
+            ...currentParametri,
+            Base: asRecord(schemaParametri.Base),
+            Combattimento: asRecord(schemaParametri.Combattimento),
+          };
+          const nextStats = {
+            ...currentStats,
+            basePointsAvailable: Math.max(0, asFiniteNumber(
+              starting.abilityPoints
+            ) + asFiniteNumber(raceExtra.extraAbilityCreation)),
+            combatTokensAvailable: Math.max(0, asFiniteNumber(
+              starting.tokenPoints
+            ) + asFiniteNumber(raceExtra.extraTokenCreation)),
+            basePointsSpent: 0,
+            combatTokensSpent: 0,
+            negativeBaseStatCount: 0,
+          };
+          const nextAltriParametri = {
+            ...asRecord(
+              progression.get("AltriParametri") ??
+                access.targetSnapshot.get("AltriParametri")
+            ),
+            Anima_1: "---",
+          };
+          context.transaction.set(progressionRef, {
+            ...stateMetadata(context.actorUid),
+            Parametri: nextParametri,
+            AltriParametri: nextAltriParametri,
+            stats: nextStats,
+          }, {merge: true});
+          const rootUpdate: UnknownRecord = {race};
+          if (context.writeLegacy) {
+            rootUpdate.Parametri = nextParametri;
+            rootUpdate.AltriParametri = nextAltriParametri;
+            rootUpdate.stats = nextStats;
+          }
+          context.transaction.update(
+            access.targetSnapshot.ref,
+            asUpdateData(rootUpdate)
+          );
+          return {success: true, race};
+        }
+
+        if (action === "selectAnima") {
+          const anima = asTrimmedString(request.data?.anima);
+          if (!anima || anima.length > 100) {
+            fail("invalid-argument", "A valid Anima shard is required.");
+          }
+          const nextAltriParametri = {
+            ...asRecord(
+              progression.get("AltriParametri") ??
+                access.targetSnapshot.get("AltriParametri")
+            ),
+            Anima_1: anima,
+          };
+          context.transaction.set(progressionRef, {
+            ...stateMetadata(context.actorUid),
+            AltriParametri: nextAltriParametri,
+          }, {merge: true});
+          if (context.writeLegacy) {
+            context.transaction.update(access.targetSnapshot.ref, {
+              AltriParametri: nextAltriParametri,
+            });
+          }
+          return {success: true, anima};
+        }
+
+        const characterId = asTrimmedString(request.data?.characterId);
+        if (!characterId || characterId.length > 100) {
+          fail("invalid-argument", "A valid characterId is required.");
+        }
+        const profile = asRecord(request.data?.profile);
+        const profileKeys = Object.keys(profile);
+        if (profileKeys.some((key) => !["imageUrl", "imagePath"].includes(key)) ||
+          profileKeys.some((key) => typeof profile[key] !== "string")) {
+          fail("invalid-argument", "Character profile media is invalid.");
+        }
+        const settingsRef = context.db.doc(
+          `users/${access.targetUid}/state/settings`
+        );
+        const settings = await context.transaction.get(settingsRef);
+        const completedFlags = {
+          ...rootFlags,
+          ...progressionFlags,
+          characterCreationDone: true,
+        };
+        const nextSettings = {
+          ...asRecord(settings.get("settings")),
+          lock_param_base: true,
+          lock_param_combat: true,
+        };
+        context.transaction.set(progressionRef, {
+          ...stateMetadata(context.actorUid),
+          flags: completedFlags,
+        }, {merge: true});
+        context.transaction.set(settingsRef, {
+          ...stateMetadata(context.actorUid),
+          settings: nextSettings,
+        }, {merge: true});
+        context.transaction.update(access.targetSnapshot.ref, {
+          characterId,
+          flags: completedFlags,
+          ...profile,
+          ...(context.writeLegacy ? {settings: nextSettings} : {}),
+        });
+        return {success: true, characterId};
+      }
+    );
+  }
+);
+
+interface GrigliataTurnTransition {
+  backgroundId: string;
+  tokenId: string;
+  expectedPreviousActiveTokenId: string;
+  expectedTurnCounter: number;
+  preserveStartedAt: boolean;
+}
+
+interface GrigliataBoardTurnEffect {
+  id: string;
+  kind: string;
+  totalTurns: number;
+  remainingTurns: number;
+  appliesFromTurnCounter: number;
+}
+
+const GRIGLIATA_TURN_TRANSITION_KEYS = [
+  "backgroundId",
+  "expectedPreviousActiveTokenId",
+  "expectedTurnCounter",
+  "preserveStartedAt",
+  "tokenId",
+] as const;
+
+export const normalizeGrigliataTurnTransition = (
+  value: unknown
+): GrigliataTurnTransition | null => {
+  if (value === undefined) return null;
+  const source = asRecord(value);
+  const keys = Object.keys(source).sort();
+  if (
+    keys.length !== GRIGLIATA_TURN_TRANSITION_KEYS.length ||
+    keys.some((key, index) => key !== GRIGLIATA_TURN_TRANSITION_KEYS[index])
+  ) {
+    fail(
+      "invalid-argument",
+      "The Grigliata turn transition must contain only its reviewed fields."
+    );
+  }
+  const backgroundId = asTrimmedString(source.backgroundId);
+  const tokenId = asTrimmedString(source.tokenId);
+  const expectedPreviousActiveTokenId = asTrimmedString(
+    source.expectedPreviousActiveTokenId
+  );
+  const expectedTurnCounter = typeof source.expectedTurnCounter === "number" ?
+    source.expectedTurnCounter : Number.NaN;
+  if (
+    !isValidFirestoreDocumentId(backgroundId) ||
+    !isValidFirestoreDocumentId(tokenId) ||
+    (expectedPreviousActiveTokenId &&
+      !isValidFirestoreDocumentId(expectedPreviousActiveTokenId)) ||
+    !Number.isSafeInteger(expectedTurnCounter) ||
+    expectedTurnCounter < 1 ||
+    typeof source.preserveStartedAt !== "boolean"
+  ) {
+    fail("invalid-argument", "The Grigliata turn transition is invalid.");
+  }
+  return {
+    backgroundId,
+    tokenId,
+    expectedPreviousActiveTokenId,
+    expectedTurnCounter,
+    preserveStartedAt: source.preserveStartedAt === true,
+  };
+};
+
+const normalizeGrigliataBoardTurnEffect = (
+  value: unknown
+): GrigliataBoardTurnEffect | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const source = asRecord(value);
+  const id = asTrimmedString(source.id);
+  const kind = asTrimmedString(source.kind);
+  const totalTurns = typeof source.totalTurns === "number" &&
+    Number.isSafeInteger(source.totalTurns) && source.totalTurns >= 1 ?
+    source.totalTurns : 0;
+  if (!id || !kind || totalTurns < 1) return null;
+  const remainingTurns = typeof source.remainingTurns === "number" &&
+    Number.isSafeInteger(source.remainingTurns) && source.remainingTurns >= 0 ?
+    Math.min(totalTurns, source.remainingTurns) : totalTurns;
+  const appliesFromTurnCounter = typeof source.appliesFromTurnCounter === "number" &&
+    Number.isSafeInteger(source.appliesFromTurnCounter) &&
+    source.appliesFromTurnCounter >= 0 ? source.appliesFromTurnCounter : 0;
+  return {
+    id,
+    kind,
+    totalTurns,
+    remainingTurns,
+    appliesFromTurnCounter,
+  };
+};
+
+const reconcileGrigliataBoardTurnEffects = (
+  value: unknown,
+  turnCounter: number
+): {turnEffects: GrigliataBoardTurnEffect[]; expiredShield: boolean} => {
+  const turnEffects: GrigliataBoardTurnEffect[] = [];
+  let expiredShield = false;
+  (Array.isArray(value) ? value : []).forEach((candidate) => {
+    const effect = normalizeGrigliataBoardTurnEffect(candidate);
+    if (!effect) return;
+    const consumedTurns = Math.max(
+      0,
+      turnCounter - effect.appliesFromTurnCounter
+    );
+    const remainingTurns = Math.max(0, effect.totalTurns - consumedTurns);
+    if (remainingTurns < 1) {
+      if (effect.kind === "shield") expiredShield = true;
+      return;
+    }
+    turnEffects.push({...effect, remainingTurns});
+  });
+  return {turnEffects, expiredShield};
+};
+
+export const task05ConsumeTurnEffects = onCall(
+  {region: REGION},
+  async (request: CallableRequest<BaseCommand & {
+    grigliataTransition?: GrigliataTurnTransition;
+  }>) => {
+    const grigliataTransition = normalizeGrigliataTurnTransition(
+      request.data?.grigliataTransition
+    );
+    return runIdempotent(
+      request,
+      "consume-turn-effects",
+      "request-user-or-actor",
+      async (context) => {
+        const access = await commandAccess(
+          context.transaction,
+          context.db,
+          context.actorUid,
+          context.targetUid
+        );
+        if (access.actorRole !== "dm") {
+          fail("permission-denied", "Only a DM may consume turn effects.");
+        }
+        const resourcesRef = context.db.doc(
+          `users/${access.targetUid}/state/resources`
+        );
+        const resources = await context.transaction.get(resourcesRef);
+        let transitionState: null | {
+          backgroundRef: admin.firestore.DocumentReference;
+          placementRef: admin.firestore.DocumentReference;
+          activeTurn: UnknownRecord;
+          joinedAt: unknown;
+          initiative: number;
+          label: string;
+          nextTurnEffects: GrigliataBoardTurnEffect[];
+          nextShieldEffect: GrigliataBoardTurnEffect | null;
+          expiredShield: boolean;
+          currentShieldEffect: GrigliataBoardTurnEffect;
+        } = null;
+        if (grigliataTransition) {
+          const backgroundRef = context.db.doc(
+            `grigliata_backgrounds/${grigliataTransition.backgroundId}`
+          );
+          const placementRef = context.db.doc(
+            `grigliata_token_placements/${grigliataTransition.backgroundId}__${grigliataTransition.tokenId}`
+          );
+          const tokenRef = context.db.doc(
+            `grigliata_tokens/${grigliataTransition.tokenId}`
+          );
+          const [background, placement, token] = await context.transaction.getAll(
+            backgroundRef,
+            placementRef,
+            tokenRef
+          );
+          if (!background.exists || !placement.exists) {
+            fail("failed-precondition", "The Grigliata turn context is stale.");
+          }
+          const activeTurn = asRecord(background.get("turnOrderActive"));
+          const currentActiveTokenId = asTrimmedString(activeTurn.tokenId);
+          const currentTurnCounterValue = placement.get("turnCounter");
+          const currentTurnCounter = typeof currentTurnCounterValue === "number" &&
+            Number.isSafeInteger(currentTurnCounterValue) &&
+            currentTurnCounterValue >= 0 ? currentTurnCounterValue : 0;
+          const placementOwnerUid = asTrimmedString(placement.get("ownerUid"));
+          const placementTokenId = asTrimmedString(
+            placement.get("tokenId")
+          ) || placementOwnerUid;
+          const currentTurnEffects = Array.isArray(placement.get("turnEffects")) ?
+            placement.get("turnEffects") : [];
+          const currentShieldEffects = currentTurnEffects
+            .map((effect: unknown) => normalizeGrigliataBoardTurnEffect(effect))
+            .filter((effect: GrigliataBoardTurnEffect | null): effect is GrigliataBoardTurnEffect =>
+              effect?.kind === "shield"
+            );
+          const currentShieldEffect = currentShieldEffects.length === 1 ?
+            currentShieldEffects[0] : null;
+          if (
+            placement.get("backgroundId") !== grigliataTransition.backgroundId ||
+            placementTokenId !== grigliataTransition.tokenId ||
+            placementOwnerUid !== access.targetUid ||
+            grigliataTransition.tokenId !== access.targetUid ||
+            placement.get("isInTurnOrder") !== true ||
+            (token.exists && (
+              (asTrimmedString(token.get("tokenType")) &&
+                token.get("tokenType") !== "character") ||
+              (asTrimmedString(token.get("ownerUid")) &&
+                asTrimmedString(token.get("ownerUid")) !== access.targetUid)
+            )) ||
+            currentActiveTokenId !==
+              grigliataTransition.expectedPreviousActiveTokenId ||
+            currentTurnCounter + 1 !== grigliataTransition.expectedTurnCounter ||
+            !currentShieldEffect
+          ) {
+            fail("failed-precondition", "The Grigliata turn context changed.");
+          }
+          const initiativeValue = placement.get("turnOrderInitiative");
+          const reconciled = reconcileGrigliataBoardTurnEffects(
+            currentTurnEffects,
+            grigliataTransition.expectedTurnCounter
+          );
+          transitionState = {
+            backgroundRef,
+            placementRef,
+            currentShieldEffect: currentShieldEffect as GrigliataBoardTurnEffect,
+            activeTurn,
+            joinedAt: placement.get("turnOrderJoinedAt") ?? null,
+            initiative: typeof initiativeValue === "number" &&
+              Number.isSafeInteger(initiativeValue) ? initiativeValue : 0,
+            label: asTrimmedString(placement.get("label")),
+            nextTurnEffects: reconciled.turnEffects,
+            nextShieldEffect: reconciled.turnEffects.find(
+              (effect) => effect.kind === "shield"
+            ) ?? null,
+            expiredShield: reconciled.expiredShield,
+          };
+        }
+        const canonicalActiveTurnEffects = resources.get("active_turn_effect");
+        const activeTurnEffectsSource = context.rolloutStage === "new-only" ?
+          canonicalActiveTurnEffects :
+          canonicalActiveTurnEffects ?? access.targetSnapshot.get("active_turn_effect");
+        if (transitionState) {
+          const resourceShield = asRecord(
+            asRecord(activeTurnEffectsSource).barriera
+          );
+          if (
+            resourceShield.totalTurns !== transitionState.currentShieldEffect.totalTurns ||
+            resourceShield.remainingTurns !== transitionState.currentShieldEffect.remainingTurns
+          ) {
+            fail(
+              "failed-precondition",
+              "The Grigliata shield timer changed outside the active board."
+            );
+          }
+        }
+        const consumption = consumeActiveTurnEffects(activeTurnEffectsSource);
+        if (!consumption.changed && !transitionState) {
+          return {success: true, changed: false};
+        }
+        const barrierExpired = transitionState ?
+          transitionState.expiredShield : consumption.barrierExpired;
+        const synchronizedEffects = transitionState ? {
+          ...consumption.effects,
+          barriera: transitionState.nextShieldEffect ? {
+            ...asRecord(consumption.effects.barriera),
+            totalTurns: transitionState.nextShieldEffect.totalTurns,
+            remainingTurns: transitionState.nextShieldEffect.remainingTurns,
+          } : {
+            ...asRecord(consumption.effects.barriera),
+            totalTurns: 0,
+            remainingTurns: 0,
+          },
+        } : consumption.effects;
+        if (consumption.changed || barrierExpired || transitionState) {
+          const resourcesUpdate: UnknownRecord = {
+            ...stateMetadata(context.actorUid),
+            active_turn_effect: synchronizedEffects,
+          };
+          if (barrierExpired) {
+            resourcesUpdate.stats = {
+              ...asRecord(resources.get("stats")),
+              barrieraCurrent: 0,
+              barrieraTotal: 0,
+            };
+          }
+          context.transaction.set(resourcesRef, resourcesUpdate, {merge: true});
+          if (context.writeLegacy) {
+            const legacyUpdate: UnknownRecord = {
+              active_turn_effect: synchronizedEffects,
+            };
+            if (barrierExpired) {
+              legacyUpdate["stats.barrieraCurrent"] = 0;
+              legacyUpdate["stats.barrieraTotal"] = 0;
+            }
+            context.transaction.update(
+              access.targetSnapshot.ref,
+              asUpdateData(legacyUpdate)
+            );
+          }
+        }
+        if (transitionState && grigliataTransition) {
+          const startedAt = grigliataTransition.preserveStartedAt &&
+            transitionState.activeTurn.startedAt ?
+            transitionState.activeTurn.startedAt : FieldValue.serverTimestamp();
+          context.transaction.set(transitionState.backgroundRef, {
+            turnOrderActive: {
+              tokenId: grigliataTransition.tokenId,
+              initiative: transitionState.initiative,
+              joinedAt: transitionState.joinedAt,
+              label: transitionState.label,
+              startedAt,
+            },
+            updatedAt: FieldValue.serverTimestamp(),
+            updatedBy: context.actorUid,
+          }, {merge: true});
+          context.transaction.set(transitionState.placementRef, {
+            backgroundId: grigliataTransition.backgroundId,
+            tokenId: grigliataTransition.tokenId,
+            ownerUid: access.targetUid,
+            turnCounter: grigliataTransition.expectedTurnCounter,
+            turnEffects: transitionState.nextTurnEffects.length ?
+              transitionState.nextTurnEffects : FieldValue.delete(),
+            updatedAt: FieldValue.serverTimestamp(),
+            updatedBy: context.actorUid,
+          }, {merge: true});
+        }
+        return {
+          success: true,
+          changed: consumption.changed,
+          barrierExpired,
+          transitioned: !!transitionState,
+          ...(grigliataTransition ? {
+            turnCounter: grigliataTransition.expectedTurnCounter,
+          } : {}),
+        };
+      }
+    );
+  }
+);
 
 export const task05PurchaseItem = onCall(
   {region: REGION},
@@ -558,6 +1265,12 @@ export const task05UpdateResource = onCall(
         asRecord(access.targetSnapshot.get("stats"))[fields.current];
       const next = applyResourceMutation(current, mode, request.data?.value);
       if (next === null) fail("invalid-argument", "Resource value must be finite.");
+      const totalValue = request.data?.totalValue === undefined
+        ? null
+        : normalizeResourceTotalValue(request.data.totalValue);
+      if (request.data?.totalValue !== undefined && totalValue === null) {
+        fail("invalid-argument", "Resource total must be a non-negative finite value.");
+      }
       const stateUpdate: UnknownRecord = {
         ...stateMetadata(context.actorUid),
         stats: {[fields.current]: next},
@@ -565,11 +1278,11 @@ export const task05UpdateResource = onCall(
       const legacyUpdate: UnknownRecord = {
         [`stats.${fields.current}`]: next,
       };
-      if (resource === "barriera" && request.data?.totalValue !== undefined) {
-        const totalValue = asFiniteNumber(
-          request.data.totalValue,
-          Number.NaN
-        );
+      if (totalValue !== null) {
+        asRecord(stateUpdate.stats)[fields.total] = totalValue;
+        legacyUpdate[`stats.${fields.total}`] = totalValue;
+      }
+      if (resource === "barriera" && totalValue !== null) {
         const remainingTurns = Math.trunc(asFiniteNumber(
           request.data.remainingTurns,
           Number.NaN
@@ -579,17 +1292,14 @@ export const task05UpdateResource = onCall(
           Number.NaN
         ));
         if (
-          !Number.isFinite(totalValue) || totalValue < 0 ||
           !Number.isFinite(remainingTurns) || remainingTurns < 0 ||
           !Number.isFinite(totalTurns) || totalTurns < remainingTurns
         ) {
           fail("invalid-argument", "Barrier total and turns are invalid.");
         }
-        asRecord(stateUpdate.stats)[fields.total] = totalValue;
         stateUpdate.active_turn_effect = {
           barriera: {remainingTurns, totalTurns},
         };
-        legacyUpdate[`stats.${fields.total}`] = totalValue;
         legacyUpdate["active_turn_effect.barriera"] = {
           remainingTurns,
           totalTurns,
@@ -607,6 +1317,7 @@ export const task05UpdateResource = onCall(
         resource,
         previousValue: asFiniteNumber(current),
         newValue: next,
+        ...(totalValue === null ? {} : {newTotalValue: totalValue}),
       };
       }
     );
@@ -1478,10 +2189,204 @@ export const task05UpdateProfile = onCall(
   }
 );
 
+
+interface GrigliataPlacementWrite {
+  label: string;
+  imageUrl: string;
+  col: number;
+  row: number;
+  sizeSquares: number;
+  isVisibleToPlayers: boolean;
+  isDead: boolean;
+  statuses?: string[];
+  visionEnabled?: boolean;
+  visionRadiusSquares?: number;
+}
+
+interface GrigliataPlacementMutation {
+  action: "upsert" | "delete";
+  deleteFoeTokenProfile: boolean;
+  placement?: GrigliataPlacementWrite;
+}
+
+interface HiddenPlacementMutation {
+  backgroundId: string;
+  tokenId: string;
+  isHidden: boolean;
+  placementMutation?: GrigliataPlacementMutation;
+  includeLegacyFallback: boolean;
+}
+
+const HIDDEN_PLACEMENT_MUTATION_KEYS = [
+  "backgroundId",
+  "includeLegacyFallback",
+  "isHidden",
+  "tokenId",
+] as const;
+const GRIGLIATA_HIDDEN_BACKGROUND_IDS_FIELD =
+  "grigliata_hidden_background_ids";
+const GRIGLIATA_HIDDEN_TOKEN_IDS_BY_BACKGROUND_FIELD =
+  "grigliata_hidden_token_ids_by_background";
+
+const GRIGLIATA_PLACEMENT_WRITE_KEYS = new Set([
+  "col",
+  "imageUrl",
+  "isDead",
+  "isVisibleToPlayers",
+  "label",
+  "row",
+  "sizeSquares",
+  "statuses",
+  "visionEnabled",
+  "visionRadiusSquares",
+]);
+
+const normalizeGrigliataPlacementMutation = (
+  value: unknown
+): GrigliataPlacementMutation | null => {
+  if (value === undefined) return null;
+  const source = asRecord(value);
+  const action = asTrimmedString(source.action);
+  const deleteFoeTokenProfile = source.deleteFoeTokenProfile;
+  const expectedKeys = action === "upsert" ?
+    ["action", "deleteFoeTokenProfile", "placement"] :
+    ["action", "deleteFoeTokenProfile"];
+  const keys = Object.keys(source).sort();
+  if (
+    !["upsert", "delete"].includes(action) ||
+    typeof deleteFoeTokenProfile !== "boolean" ||
+    keys.length !== expectedKeys.length ||
+    keys.some((key, index) => key !== expectedKeys[index])
+  ) {
+    fail("invalid-argument", "The Grigliata placement mutation is invalid.");
+  }
+  if (action === "delete") {
+    return {
+      action: "delete",
+      deleteFoeTokenProfile: deleteFoeTokenProfile === true,
+    };
+  }
+  const placement = asRecord(source.placement);
+  const placementKeys = Object.keys(placement);
+  const requiredKeys = [
+    "col",
+    "imageUrl",
+    "isDead",
+    "isVisibleToPlayers",
+    "label",
+    "row",
+    "sizeSquares",
+  ];
+  const label = asTrimmedString(placement.label);
+  const imageUrl = typeof placement.imageUrl === "string" ?
+    placement.imageUrl.trim() : "";
+  const col = placement.col;
+  const row = placement.row;
+  const sizeSquares = placement.sizeSquares;
+  const statuses = placement.statuses;
+  const visionEnabled = placement.visionEnabled;
+  const visionRadiusSquares = placement.visionRadiusSquares;
+  if (
+    placementKeys.some((key) => !GRIGLIATA_PLACEMENT_WRITE_KEYS.has(key)) ||
+    requiredKeys.some((key) => !Object.prototype.hasOwnProperty.call(placement, key)) ||
+    !label || label.length > 200 ||
+    imageUrl.length > 4096 ||
+    typeof col !== "number" || !Number.isSafeInteger(col) || col < 0 || col > 10000 ||
+    typeof row !== "number" || !Number.isSafeInteger(row) || row < 0 || row > 10000 ||
+    typeof sizeSquares !== "number" || !Number.isSafeInteger(sizeSquares) ||
+      sizeSquares < 1 || sizeSquares > 9 ||
+    typeof placement.isVisibleToPlayers !== "boolean" ||
+    typeof placement.isDead !== "boolean" ||
+    (statuses !== undefined && (
+      !Array.isArray(statuses) || statuses.length > 64 ||
+      statuses.some((status) => typeof status !== "string" ||
+        !status.trim() || status.length > 100)
+    )) ||
+    (visionEnabled !== undefined && typeof visionEnabled !== "boolean") ||
+    (visionRadiusSquares !== undefined && (
+      typeof visionRadiusSquares !== "number" ||
+      !Number.isSafeInteger(visionRadiusSquares) ||
+      visionRadiusSquares < 1 || visionRadiusSquares > 60
+    ))
+  ) {
+    fail("invalid-argument", "The Grigliata placement write is invalid.");
+  }
+  return {
+    action: "upsert",
+    deleteFoeTokenProfile: deleteFoeTokenProfile === true,
+    placement: {
+      label,
+      imageUrl,
+      col: col as number,
+      row: row as number,
+      sizeSquares: sizeSquares as number,
+      isVisibleToPlayers: placement.isVisibleToPlayers === true,
+      isDead: placement.isDead === true,
+      ...(statuses === undefined ? {} : {
+        statuses: (statuses as string[]).map((status: string) => status.trim()),
+      }),
+      ...(visionEnabled === undefined ? {} : {visionEnabled: visionEnabled as boolean}),
+      ...(visionRadiusSquares === undefined ? {} : {
+        visionRadiusSquares: visionRadiusSquares as number,
+      }),
+    },
+  };
+};
+
+
+export const normalizeHiddenPlacementMutation = (
+  value: unknown
+): HiddenPlacementMutation | null => {
+  if (value === undefined) return null;
+  const source = asRecord(value);
+  const keys = Object.keys(source).sort();
+  const placementMutation = normalizeGrigliataPlacementMutation(
+    source.placementMutation
+  );
+  const expectedKeys = placementMutation ?
+    [...HIDDEN_PLACEMENT_MUTATION_KEYS, "placementMutation"].sort() :
+    [...HIDDEN_PLACEMENT_MUTATION_KEYS];
+  if (
+    keys.length !== expectedKeys.length ||
+    keys.some((key, index) => key !== expectedKeys[index])
+  ) {
+    fail(
+      "invalid-argument",
+      "The hidden-placement mutation must contain only its reviewed fields."
+    );
+  }
+  const backgroundId = asTrimmedString(source.backgroundId);
+  const tokenId = asTrimmedString(source.tokenId);
+  if (
+    !isValidFirestoreDocumentId(backgroundId) ||
+    !isValidFirestoreDocumentId(tokenId) ||
+    typeof source.isHidden !== "boolean" ||
+    typeof source.includeLegacyFallback !== "boolean"
+  ) {
+    fail(
+      "invalid-argument",
+      "The hidden-placement mutation is invalid."
+    );
+  }
+  return {
+    backgroundId,
+    tokenId,
+    isHidden: source.isHidden === true,
+    ...(placementMutation ? {placementMutation} : {}),
+    includeLegacyFallback: source.includeLegacyFallback === true,
+  };
+};
+
 export const task05UpdateSettings = onCall(
   {region: REGION},
-  async (request: CallableRequest<BaseCommand & {patch: UnknownRecord}>) => {
+  async (request: CallableRequest<BaseCommand & {
+    patch?: UnknownRecord;
+    hiddenPlacement?: HiddenPlacementMutation;
+  }>) => {
     const patch = asRecord(request.data?.patch);
+    const hiddenPlacement = normalizeHiddenPlacementMutation(
+      request.data?.hiddenPlacement
+    );
     const allowedRootFields = new Set([
       "settings",
       "parameterLocks",
@@ -1494,8 +2399,11 @@ export const task05UpdateSettings = onCall(
       "hiddenGrigliataTokens",
     ]);
     if (
-      !Object.keys(patch).length ||
+      (Object.keys(patch).length ? 1 : 0) + (hiddenPlacement ? 1 : 0) !== 1 ||
+      (Object.keys(patch).length > 0 &&
+      (
       Object.keys(patch).some((key) => !allowedRootFields.has(key))
+      ))
     ) {
       fail("invalid-argument", "The settings patch contains unsupported fields.");
     }
@@ -1511,19 +2419,117 @@ export const task05UpdateSettings = onCall(
         context.actorUid,
         context.targetUid
       );
-      const lockFields = new Set(["parameterLocks", "paramLocks"]);
-      const requestedFields = Object.keys(patch);
-      const hasLocks = requestedFields.some((key) => lockFields.has(key));
-      const hasPreferences = requestedFields.some((key) => !lockFields.has(key));
-      if (
+      const {hasLocks, hasPreferences} = classifyUpdateSettingsPatch(patch);
+      if (hiddenPlacement) {
+        if (
+          hiddenPlacement.includeLegacyFallback &&
+          hiddenPlacement.tokenId !== access.targetUid
+        ) {
+          fail(
+            "invalid-argument",
+            "Legacy background fallback is valid only for the main user token."
+          );
+        }
+        if (
+          access.targetUid !== context.actorUid &&
+          access.actorRole !== "dm"
+        ) {
+          fail(
+            "permission-denied",
+            "Only a DM may update another user's hidden placements."
+          );
+        }
+      } else if (
         (hasLocks && access.actorRole !== "dm") ||
         (access.targetUid !== context.actorUid && hasPreferences)
       ) {
         fail("permission-denied", "Only a DM may update parameter locks.");
       }
+      let placementState: null | {
+        mutation: GrigliataPlacementMutation;
+        placementRef: admin.firestore.DocumentReference;
+        tokenRef: admin.firestore.DocumentReference;
+        deleteTokenProfile: boolean;
+      } = null;
+      if (hiddenPlacement?.placementMutation) {
+        const mutation = hiddenPlacement.placementMutation;
+        const backgroundRef = context.db.doc(
+          `grigliata_backgrounds/${hiddenPlacement.backgroundId}`
+        );
+        const placementRef = context.db.doc(
+          `grigliata_token_placements/${hiddenPlacement.backgroundId}__${hiddenPlacement.tokenId}`
+        );
+        const tokenRef = context.db.doc(
+          `grigliata_tokens/${hiddenPlacement.tokenId}`
+        );
+        const [background, placement, token] = await context.transaction.getAll(
+          backgroundRef,
+          placementRef,
+          tokenRef
+        );
+        if (!background.exists) {
+          fail("failed-precondition", "The Grigliata background no longer exists.");
+        }
+        const existingOwnerUid = asTrimmedString(placement.get("ownerUid"));
+        const existingTokenId = asTrimmedString(placement.get("tokenId")) ||
+          existingOwnerUid;
+        if (placement.exists && (
+          placement.get("backgroundId") !== hiddenPlacement.backgroundId ||
+          existingTokenId !== hiddenPlacement.tokenId ||
+          existingOwnerUid !== access.targetUid
+        )) {
+          fail("failed-precondition", "The Grigliata placement identity changed.");
+        }
+        const tokenOwnerUid = asTrimmedString(token.get("ownerUid"));
+        const tokenType = asTrimmedString(token.get("tokenType"));
+        if (token.exists && tokenOwnerUid && tokenOwnerUid !== access.targetUid) {
+          fail("failed-precondition", "The Grigliata token owner changed.");
+        }
+        if (hiddenPlacement.tokenId === access.targetUid && token.exists &&
+          tokenType && tokenType !== "character") {
+          fail("failed-precondition", "The main token is not a character token.");
+        }
+        if (mutation.action === "upsert") {
+          if (
+            mutation.deleteFoeTokenProfile ||
+            !mutation.placement ||
+            mutation.placement.isVisibleToPlayers === hiddenPlacement.isHidden ||
+            (hiddenPlacement.tokenId !== access.targetUid && (
+              !token.exists || tokenOwnerUid !== access.targetUid
+            ))
+          ) {
+            fail("failed-precondition", "The Grigliata placement write is stale.");
+          }
+        } else if (hiddenPlacement.isHidden) {
+          fail("invalid-argument", "A deleted placement cannot remain hidden.");
+        }
+        if (mutation.deleteFoeTokenProfile && token.exists && (
+          tokenType !== "foe" || tokenOwnerUid !== access.targetUid
+        )) {
+          fail("failed-precondition", "The foe token identity changed.");
+        }
+        placementState = {
+          mutation,
+          placementRef,
+          tokenRef,
+          deleteTokenProfile: mutation.deleteFoeTokenProfile && token.exists,
+        };
+      }
       const settingsRef = context.db.doc(
         `users/${access.targetUid}/state/settings`
       );
+      const hiddenPlacementSettings = hiddenPlacement ? {
+        [GRIGLIATA_HIDDEN_TOKEN_IDS_BY_BACKGROUND_FIELD]: {
+          [hiddenPlacement.backgroundId]: hiddenPlacement.isHidden ?
+            FieldValue.arrayUnion(hiddenPlacement.tokenId) :
+            FieldValue.arrayRemove(hiddenPlacement.tokenId),
+        },
+        ...(hiddenPlacement.includeLegacyFallback ? {
+          [GRIGLIATA_HIDDEN_BACKGROUND_IDS_FIELD]: hiddenPlacement.isHidden ?
+            FieldValue.arrayUnion(hiddenPlacement.backgroundId) :
+            FieldValue.arrayRemove(hiddenPlacement.backgroundId),
+        } : {}),
+      } : null;
       const domainPatch: UnknownRecord = {
         ...stateMetadata(context.actorUid),
       };
@@ -1539,6 +2545,9 @@ export const task05UpdateSettings = onCall(
           ...asRecord(access.targetSnapshot.get("settings")),
           ...asRecord(patch.settings),
         };
+      }
+      if (hiddenPlacementSettings) {
+        domainPatch.settings = hiddenPlacementSettings;
       }
       const grigliata = {
         ...asRecord(patch.grigliata),
@@ -1556,13 +2565,40 @@ export const task05UpdateSettings = onCall(
         Object.assign(legacyPatch, grigliata);
       }
       context.transaction.set(settingsRef, domainPatch, {merge: true});
-      if (context.writeLegacy) {
-        context.transaction.update(
-          access.targetSnapshot.ref,
-          asUpdateData(legacyPatch)
-        );
+      if (placementState) {
+        if (placementState.mutation.action === "upsert") {
+          context.transaction.set(placementState.placementRef, {
+            backgroundId: hiddenPlacement?.backgroundId,
+            tokenId: hiddenPlacement?.tokenId,
+            ownerUid: access.targetUid,
+            ...asRecord(placementState.mutation.placement),
+            updatedAt: FieldValue.serverTimestamp(),
+            updatedBy: context.actorUid,
+          }, {merge: true});
+        } else {
+          context.transaction.delete(placementState.placementRef);
+          if (placementState.deleteTokenProfile) {
+            context.transaction.delete(placementState.tokenRef);
+          }
+        }
       }
-      return {success: true, updatedFields: Object.keys(patch)};
+      if (context.writeLegacy) {
+        if (hiddenPlacementSettings) {
+          context.transaction.set(access.targetSnapshot.ref, {
+            settings: hiddenPlacementSettings,
+          }, {merge: true});
+        } else {
+          context.transaction.update(
+            access.targetSnapshot.ref,
+            asUpdateData(legacyPatch)
+          );
+        }
+      }
+      return {
+        success: true,
+        updatedFields: hiddenPlacement ?
+          ["hiddenPlacement"] : Object.keys(patch),
+      };
       }
     );
   }

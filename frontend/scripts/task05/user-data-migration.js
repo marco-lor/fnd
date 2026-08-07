@@ -11,11 +11,16 @@ const {
   canonicalHash,
   materializeLegacyUser,
 } = require('./user-data-model');
+const {
+  createFirebaseCliAdcFile,
+} = require('../firebase-cli-admin-credential');
+const {PRODUCTION_PROJECT_ID} = require('../production-target');
 
 const BATCH_SIZE = 100;
 const WRITE_BATCH_SIZE = 400;
 const REPORT_SCHEMA_VERSION = 2;
 const OPERATIONS = new Set(['stabilize', 'backfill', 'verify', 'archive', 'reverse']);
+const AUTH_MODES = new Set(['admin', 'firebase-cli']);
 const LEGACY_DRAIN_SCOPES = new Set(['global', 'user']);
 const PRE_DRAIN_SCOPES = new Set(['global', 'user']);
 const LEGACY_DRAIN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{7,99}$/;
@@ -109,6 +114,7 @@ const printHelp = () => console.log([
   '',
   'Usage:',
   '  node scripts/task05/user-data-migration.js --project <project> [--operation stabilize|backfill|verify|archive|reverse]',
+  '    [--auth admin|firebase-cli]',
   '    [--report <path>] [--checkpoint <path>] [--execute --approve-fingerprint <sha256>]',
   '    [--resume] [--max-users <count>] [--allow-live-project --confirm-project <project>]',
   '    [--drain-scope global|user --drain-id <id> [--drain-user <uid>]]',
@@ -119,6 +125,7 @@ const printHelp = () => console.log([
   '  - Every write requires a completed matching dry-run report and exact fingerprint approval.',
   '  - Demo writes require a loopback Firestore emulator.',
   '  - Any live read/write requires both --allow-live-project and exact --confirm-project.',
+  '  - Firebase CLI auth uses a short-lived temporary ADC file and deletes it on exit.',
   '  - Legacy fields are never deleted. Reverse materialization merges legacy domains back.',
   '  - Live archive/reverse execution is blocked until it has an exact compatible pause fence.',
   '  - A drain sweep is opt-in and binds scope, drain identity, cutoff, and frozen projection hashes.',
@@ -131,6 +138,7 @@ const printHelp = () => console.log([
 const parseArguments = (args = []) => {
   const options = {
     allowLiveProject: false,
+    authMode: 'admin',
     approveFingerprint: '',
     checkpointPath: defaultPath('checkpoint'),
     confirmProject: '',
@@ -156,6 +164,7 @@ const parseArguments = (args = []) => {
     else if (argument === '--allow-live-project') options.allowLiveProject = true;
     else if ([
       '--project',
+      '--auth',
       '--operation',
       '--report',
       '--checkpoint',
@@ -172,6 +181,7 @@ const parseArguments = (args = []) => {
       if (!value || value.startsWith('--')) throw new Error(`Missing value for ${argument}.`);
       index += 1;
       if (argument === '--project') options.projectId = value;
+      if (argument === '--auth') options.authMode = value;
       if (argument === '--operation') options.operation = value;
       if (argument === '--report') options.reportPath = path.resolve(value);
       if (argument === '--checkpoint') options.checkpointPath = path.resolve(value);
@@ -192,6 +202,7 @@ const parseArguments = (args = []) => {
   }
 
   if (!options.help && !options.projectId) throw new Error('Explicit --project is required.');
+  if (!AUTH_MODES.has(options.authMode)) throw new Error('--auth must be exactly admin or firebase-cli.');
   if (!OPERATIONS.has(options.operation)) throw new Error(`Unsupported operation: ${options.operation}`);
   if (options.operation === 'verify' && options.execute) throw new Error('Verification is always read-only.');
   if (options.resume && !options.execute) throw new Error('--resume is only valid with --execute.');
@@ -281,6 +292,9 @@ const assertSafeTarget = (options, env = process.env) => {
     throw new Error(
       'Live Firestore access is refused without --allow-live-project and an exact --confirm-project value.'
     );
+  }
+  if (projectId !== PRODUCTION_PROJECT_ID) {
+    throw new Error(`This production migration tool accepts only live project ${PRODUCTION_PROJECT_ID}.`);
   }
   if (options.execute && ['archive', 'reverse'].includes(options.operation)) {
     throw new Error(
@@ -1377,10 +1391,23 @@ const executeMigrationPlan = async ({backend, options, plan, onCheckpoint = asyn
   return {processed, complete: processed === plan.entries.length};
 };
 
-const createAdminBackend = (projectId) => {
+const createAdminBackend = async (projectId, authMode = 'admin') => {
   const {deleteApp, initializeApp} = require('firebase-admin/app');
   const {FieldPath, getFirestore} = require('firebase-admin/firestore');
-  const app = initializeApp({projectId}, `task05-user-data-${process.pid}-${Date.now()}`);
+  const previousAdcPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  const temporaryAdc = authMode === 'firebase-cli'
+    ? await createFirebaseCliAdcFile({projectId})
+    : null;
+  if (temporaryAdc) process.env.GOOGLE_APPLICATION_CREDENTIALS = temporaryAdc.filePath;
+  let app;
+  try {
+    app = initializeApp({projectId}, `task05-user-data-${process.pid}-${Date.now()}`);
+  } catch (error) {
+    if (previousAdcPath === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    else process.env.GOOGLE_APPLICATION_CREDENTIALS = previousAdcPath;
+    temporaryAdc?.cleanup();
+    throw error;
+  }
   const firestore = getFirestore(app);
   const rolloutConfigReference = firestore.doc(USER_DATA_ROLLOUT_CONFIG_PATH);
 
@@ -1454,7 +1481,15 @@ const createAdminBackend = (projectId) => {
   };
 
   return {
-    close: () => deleteApp(app),
+    close: async () => {
+      try {
+        await deleteApp(app);
+      } finally {
+        if (previousAdcPath === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+        else process.env.GOOGLE_APPLICATION_CREDENTIALS = previousAdcPath;
+        temporaryAdc?.cleanup();
+      }
+    },
     fetchUserPage: async ({afterDocumentId, limit}) => {
       let query = firestore.collection('users').orderBy(FieldPath.documentId()).limit(limit);
       if (afterDocumentId) query = query.startAfter(afterDocumentId);
@@ -1760,7 +1795,7 @@ const main = async () => {
   const options = parseArguments(process.argv.slice(2));
   if (options.help) return printHelp();
   const target = assertSafeTarget(options);
-  const backend = createAdminBackend(options.projectId);
+  const backend = await createAdminBackend(options.projectId, options.authMode);
   try {
     const plan = await buildMigrationPlan({
       backend,

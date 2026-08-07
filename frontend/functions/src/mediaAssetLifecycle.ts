@@ -1,4 +1,5 @@
 import * as admin from "firebase-admin";
+import {FieldValue, Timestamp} from "firebase-admin/firestore";
 import {getStorage} from "firebase-admin/storage";
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
 import {onDocumentWritten} from "firebase-functions/v2/firestore";
@@ -17,15 +18,14 @@ import {
   scanTask07MediaTargetReferences,
   task07MediaTargetMayReferenceAsset,
   task07MediaReferencePath,
-  task07MediaTargetSlotAssetId,
-  task07MediaTargetSlotReferencesAsset,
   task07MediaTargetFields,
 } from "./mediaAssetLifecycleCore";
 import {task07ProcessMediaUpload} from "./mediaAssetProcessor";
 import {
   attachTask07ReadyAssetTransaction,
-  task07FoeCanonicalMediaStateFromTarget,
+  task07CommonTechniqueRetirementPatch,
   task07FoeCanonicalRetirementPatch,
+  task07MediaTargetState,
   Task07TargetAdapterError,
   validateTask07MediaTarget,
 } from "./mediaTargetAdapters";
@@ -128,18 +128,9 @@ const requireAssetId = (value: unknown): string => {
 
 const mediaBindingFromTarget = (
   data: admin.firestore.DocumentData | undefined,
-  plan: Pick<MediaUploadPlan, "kind" | "targetKind">
-): {assetId: string | null; revision: number; conflict: boolean} => {
-  const fields = task07MediaTargetFields(plan);
-  if (plan.targetKind === "foe" && fields.slot === "media") {
-    return task07FoeCanonicalMediaStateFromTarget(data);
-  }
-  return {
-    assetId: task07MediaTargetSlotAssetId(data, fields.slot),
-    revision: Number(data?.[fields.revisionField]) || 0,
-    conflict: false,
-  };
-};
+  plan: MediaUploadPlan
+): {assetId: string | null; revision: number; conflict: boolean} =>
+  task07MediaTargetState(data, plan);
 
 const publicUploadPlan = (plan: MediaUploadPlan) => ({
   schemaVersion: MEDIA_SCHEMA_VERSION,
@@ -248,8 +239,8 @@ export const task07PrepareMediaUpload = onCall(
           "previousAssetId must match the target media reference."
         );
       }
-      const now = admin.firestore.Timestamp.now();
-      const cleanupAfter = admin.firestore.Timestamp.fromMillis(
+      const now = Timestamp.now();
+      const cleanupAfter = Timestamp.fromMillis(
         Date.now() +
         MEDIA_CONTRACTS[plan.kind].retention.uncommittedHours *
         60 * 60 * 1000
@@ -329,11 +320,11 @@ export const task07GetMediaStatus = onCall(
       const target = await admin.firestore()
         .doc(task07MediaReferencePath(authorizedPlan))
         .get();
-      attached = task07MediaTargetSlotReferencesAsset(
+      const targetState = task07MediaTargetState(
         target.data(),
-        task07MediaTargetFields(authorizedPlan).slot,
-        assetId
+        authorizedPlan
       );
+      attached = !targetState.conflict && targetState.assetId === assetId;
     }
     const state = storedState === "attached" && !attached ?
       "reference-missing" :
@@ -393,10 +384,10 @@ export const task07AbandonMediaAsset = onCall(
       if (!isTask07MediaStateAbandonable(state)) {
         fail("failed-precondition", "Media asset cannot be cancelled.");
       }
-      const now = admin.firestore.Timestamp.now();
+      const now = Timestamp.now();
       transaction.update(ref, {
         state: "cancelled",
-        processing: admin.firestore.FieldValue.delete(),
+        processing: FieldValue.delete(),
         retention: {cleanupAfter: now},
         updatedAt: now,
       });
@@ -449,8 +440,8 @@ export const task07RetireMediaAsset = onCall(
         fail("failed-precondition", "Media target changed.");
       }
       const targetFields = task07MediaTargetFields(plan);
-      const now = admin.firestore.Timestamp.now();
-      const cleanupAfter = admin.firestore.Timestamp.fromMillis(
+      const now = Timestamp.now();
+      const cleanupAfter = Timestamp.fromMillis(
         Date.now() +
         MEDIA_CONTRACTS[plan.kind].retention.supersededGraceHours *
         60 * 60 * 1000
@@ -462,8 +453,15 @@ export const task07RetireMediaAsset = onCall(
           revision: targetBinding.revision,
           timestamp: now,
         }) :
+        plan.targetKind === "common-technique" ?
+          task07CommonTechniqueRetirementPatch({
+            current: target.data() || {},
+            plan,
+            revision: targetBinding.revision,
+            timestamp: now,
+          }) :
         {
-          [targetFields.mediaField]: admin.firestore.FieldValue.delete(),
+          [targetFields.mediaField]: FieldValue.delete(),
           [targetFields.revisionField]: targetBinding.revision + 1,
           [targetFields.updatedAtField]: now,
         };
@@ -471,18 +469,22 @@ export const task07RetireMediaAsset = onCall(
         if ([
           "profile", "npc", "grigliata-token", "grigliata-background",
         ].includes(plan.targetKind)) {
-          targetUpdate.imagePath = admin.firestore.FieldValue.delete();
+          targetUpdate.imagePath = FieldValue.delete();
           targetUpdate.imageUrl = "";
         }
         if (plan.targetKind === "grigliata-background") {
-          targetUpdate.imageWidth = admin.firestore.FieldValue.delete();
-          targetUpdate.imageHeight = admin.firestore.FieldValue.delete();
-          targetUpdate.contentType = admin.firestore.FieldValue.delete();
-          targetUpdate.sizeBytes = admin.firestore.FieldValue.delete();
-          targetUpdate.durationMs = admin.firestore.FieldValue.delete();
+          targetUpdate.imageWidth = FieldValue.delete();
+          targetUpdate.imageHeight = FieldValue.delete();
+          targetUpdate.contentType = FieldValue.delete();
+          targetUpdate.sizeBytes = FieldValue.delete();
+          targetUpdate.durationMs = FieldValue.delete();
         }
       }
-      transaction.update(targetRef, targetUpdate);
+      if (plan.targetKind === "common-technique") {
+        transaction.set(targetRef, targetUpdate, {merge: true});
+      } else {
+        transaction.update(targetRef, targetUpdate);
+      }
       transaction.update(ref, {
         state: "superseded",
         retention: {supersededAt: now, cleanupAfter},
@@ -540,7 +542,7 @@ export const task07RetryMediaCleanup = onCall(
           "Media cleanup is already active or complete."
         );
       }
-      const now = admin.firestore.Timestamp.now();
+      const now = Timestamp.now();
       transaction.set(cleanupRef(db, assetId), {
         schemaVersion: MEDIA_SCHEMA_VERSION,
         assetId,
@@ -636,20 +638,20 @@ const processCleanup = async (assetId: string): Promise<boolean> => {
     const leaseUntil = queue.get("leaseUntil");
     if (!isTask07CleanupQueueClaimable({
       state: asString(queue.get("state")),
-      leaseUntilMs: leaseUntil instanceof admin.firestore.Timestamp ?
+      leaseUntilMs: leaseUntil instanceof Timestamp ?
         leaseUntil.toMillis() : Number.NaN,
       nowMs,
     })) return null;
     const cleanupAfter = queue.get("cleanupAfter");
-    if (cleanupAfter instanceof admin.firestore.Timestamp &&
+    if (cleanupAfter instanceof Timestamp &&
       cleanupAfter.toMillis() > nowMs) return null;
     if (!manifest.exists) {
       transaction.update(queueRef, {
         state: "dead-letter",
-        cleanupAfter: admin.firestore.FieldValue.delete(),
-        leaseUntil: admin.firestore.FieldValue.delete(),
+        cleanupAfter: FieldValue.delete(),
+        leaseUntil: FieldValue.delete(),
         lastErrorCode: "media-manifest-missing",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       return null;
     }
@@ -657,20 +659,20 @@ const processCleanup = async (assetId: string): Promise<boolean> => {
     if (!plan) {
       transaction.update(queueRef, {
         state: "dead-letter",
-        cleanupAfter: admin.firestore.FieldValue.delete(),
-        leaseUntil: admin.firestore.FieldValue.delete(),
+        cleanupAfter: FieldValue.delete(),
+        leaseUntil: FieldValue.delete(),
         lastErrorCode: "media-plan-invalid",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       return null;
     }
     if (!isTask07MediaStateCleanupEligible(manifest.get("state"))) {
       transaction.update(queueRef, {
         state: "dead-letter",
-        cleanupAfter: admin.firestore.FieldValue.delete(),
-        leaseUntil: admin.firestore.FieldValue.delete(),
+        cleanupAfter: FieldValue.delete(),
+        leaseUntil: FieldValue.delete(),
         lastErrorCode: "manifest-state-not-cleanup-eligible",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       return null;
     }
@@ -678,24 +680,31 @@ const processCleanup = async (assetId: string): Promise<boolean> => {
       db.doc(task07MediaReferencePath(plan))
     );
     const referenceScan = scanTask07MediaTargetReferences(reference.data());
-    if (task07MediaTargetMayReferenceAsset(reference.data(), assetId)) {
+    const commonTargetState = plan.targetKind === "common-technique" ?
+      task07MediaTargetState(reference.data(), plan) :
+      null;
+    const mayReferenceAsset = commonTargetState ?
+      commonTargetState.conflict || commonTargetState.assetId === assetId :
+      task07MediaTargetMayReferenceAsset(reference.data(), assetId);
+    if (mayReferenceAsset) {
       const attempts = Number(queue.get("attempts") || 0) + 1;
       const deadLetter = attempts >= MEDIA_CLEANUP_MAX_AUTO_ATTEMPTS;
-      const malformed = Object.values(referenceScan)
-        .some((scan) => scan.malformed);
+      const malformed = commonTargetState ?
+        commonTargetState.conflict :
+        Object.values(referenceScan).some((scan) => scan.malformed);
       transaction.update(queueRef, {
         state: deadLetter ? "dead-letter" : "retry",
         attempts,
         cleanupAfter: deadLetter ?
-          admin.firestore.FieldValue.delete() :
-          admin.firestore.Timestamp.fromMillis(
+          FieldValue.delete() :
+          Timestamp.fromMillis(
             Date.now() + 60 * 60 * 1000
           ),
-        leaseUntil: admin.firestore.FieldValue.delete(),
+        leaseUntil: FieldValue.delete(),
         lastErrorCode: malformed ?
           "target-media-reference-malformed" :
           "asset-still-referenced",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       return null;
     }
@@ -703,14 +712,14 @@ const processCleanup = async (assetId: string): Promise<boolean> => {
     if (attempts > MEDIA_CLEANUP_MAX_AUTO_ATTEMPTS) {
       transaction.update(queueRef, {
         state: "dead-letter",
-        cleanupAfter: admin.firestore.FieldValue.delete(),
-        leaseUntil: admin.firestore.FieldValue.delete(),
+        cleanupAfter: FieldValue.delete(),
+        leaseUntil: FieldValue.delete(),
         lastErrorCode: "cleanup-attempt-limit-reached",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       return null;
     }
-    const now = admin.firestore.Timestamp.fromMillis(nowMs);
+    const now = Timestamp.fromMillis(nowMs);
     transaction.update(assetRef(db, assetId), {
       state: "cleanup-pending",
       updatedAt: now,
@@ -718,7 +727,7 @@ const processCleanup = async (assetId: string): Promise<boolean> => {
     transaction.update(queueRef, {
       state: "processing",
       attempts,
-      leaseUntil: admin.firestore.Timestamp.fromMillis(
+      leaseUntil: Timestamp.fromMillis(
         nowMs + CLEANUP_LEASE_MS
       ),
       updatedAt: now,
@@ -735,7 +744,7 @@ const processCleanup = async (assetId: string): Promise<boolean> => {
     for (const path of claimed.paths) {
       await bucket.file(path).delete({ignoreNotFound: true});
     }
-    const now = admin.firestore.Timestamp.now();
+    const now = Timestamp.now();
     await db.runTransaction(async (transaction) => {
       const [queue, manifest] = await transaction.getAll(
         queueRef,
@@ -746,17 +755,17 @@ const processCleanup = async (assetId: string): Promise<boolean> => {
         manifest.get("state") !== "cleanup-pending") return;
       transaction.update(assetRef(db, assetId), {
         state: "deleted",
-        generated: admin.firestore.FieldValue.delete(),
-        source: admin.firestore.FieldValue.delete(),
-        cleanupTemporaryPaths: admin.firestore.FieldValue.delete(),
-        "retention.cleanupAfter": admin.firestore.FieldValue.delete(),
+        generated: FieldValue.delete(),
+        source: FieldValue.delete(),
+        cleanupTemporaryPaths: FieldValue.delete(),
+        "retention.cleanupAfter": FieldValue.delete(),
         updatedAt: now,
       });
       transaction.update(queueRef, {
         state: "complete",
         completedAt: now,
-        cleanupAfter: admin.firestore.FieldValue.delete(),
-        leaseUntil: admin.firestore.FieldValue.delete(),
+        cleanupAfter: FieldValue.delete(),
+        leaseUntil: FieldValue.delete(),
         updatedAt: now,
       });
     });
@@ -770,16 +779,16 @@ const processCleanup = async (assetId: string): Promise<boolean> => {
       transaction.update(queueRef, {
         state: deadLetter ? "dead-letter" : "retry",
         cleanupAfter: deadLetter ?
-          admin.firestore.FieldValue.delete() :
-          admin.firestore.Timestamp.fromMillis(
+          FieldValue.delete() :
+          Timestamp.fromMillis(
             Date.now() + Math.min(
               60 * 60 * 1000,
               30_000 * (2 ** Math.max(0, attempts - 1))
             )
           ),
         lastErrorCode: "storage-delete-failed",
-        leaseUntil: admin.firestore.FieldValue.delete(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        leaseUntil: FieldValue.delete(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
     });
   }
@@ -838,8 +847,8 @@ const stageRemovedReferences = async (input: {
         task07MediaReferencePath(plan) !== input.referencePath ||
         task07MediaTargetFields(plan).slot !== slot ||
         manifest.get("state") !== "attached") return;
-      const now = admin.firestore.Timestamp.now();
-      const cleanupAfter = admin.firestore.Timestamp.fromMillis(
+      const now = Timestamp.now();
+      const cleanupAfter = Timestamp.fromMillis(
         Date.now() +
         MEDIA_CONTRACTS[plan.kind].retention.supersededGraceHours *
         60 * 60 * 1000
@@ -920,6 +929,10 @@ export const cleanupTask07RemovedTokenMedia = referenceRemovalTrigger(
   "grigliata_tokens/{entityId}",
   ({entityId}) => `grigliata_tokens/${entityId}`
 );
+export const cleanupTask07RemovedMusicTrackMedia = referenceRemovalTrigger(
+  "grigliata_music_tracks/{entityId}",
+  ({entityId}) => `grigliata_music_tracks/${entityId}`
+);
 
 const normalizeExpiredAsset = async (
   manifestRef: admin.firestore.DocumentReference,
@@ -933,14 +946,14 @@ const normalizeExpiredAsset = async (
     );
     if (!manifest.exists) return false;
     const cleanupAfter = manifest.get("retention.cleanupAfter");
-    if (!(cleanupAfter instanceof admin.firestore.Timestamp) ||
+    if (!(cleanupAfter instanceof Timestamp) ||
       cleanupAfter.toMillis() > nowMs) return false;
-    const now = admin.firestore.Timestamp.fromMillis(nowMs);
+    const now = Timestamp.fromMillis(nowMs);
     const plan = asStoredTask07MediaUploadPlan(manifest.get("plan"));
     const state = asString(manifest.get("state"));
     const leaseUntil = manifest.get("processing.leaseUntil");
     if (state === "processing" &&
-      leaseUntil instanceof admin.firestore.Timestamp &&
+      leaseUntil instanceof Timestamp &&
       leaseUntil.toMillis() > nowMs) {
       transaction.update(manifestRef, {
         "retention.cleanupAfter": leaseUntil,
@@ -950,7 +963,7 @@ const normalizeExpiredAsset = async (
     }
     if (["attached", "deleted"].includes(state)) {
       transaction.update(manifestRef, {
-        "retention.cleanupAfter": admin.firestore.FieldValue.delete(),
+        "retention.cleanupAfter": FieldValue.delete(),
         updatedAt: now,
       });
       return true;
@@ -961,7 +974,7 @@ const normalizeExpiredAsset = async (
     ].includes(state);
     if (!plan || !cleanupState) {
       transaction.update(manifestRef, {
-        "retention.cleanupAfter": admin.firestore.FieldValue.delete(),
+        "retention.cleanupAfter": FieldValue.delete(),
         updatedAt: now,
       });
       if (!queue.exists) {
@@ -983,8 +996,8 @@ const normalizeExpiredAsset = async (
       state: terminalize ? "rejected" :
         ["ready", "superseded"].includes(state) ?
           "cleanup-pending" : state,
-      processing: admin.firestore.FieldValue.delete(),
-      "retention.cleanupAfter": admin.firestore.FieldValue.delete(),
+      processing: FieldValue.delete(),
+      "retention.cleanupAfter": FieldValue.delete(),
       ...(terminalize ? {
         error: {
           code: "expired-uncommitted",
@@ -1013,7 +1026,7 @@ const normalizeExpiredAsset = async (
 const enqueueExpiredAssets = async (): Promise<number> => {
   const db = admin.firestore();
   const nowMs = Date.now();
-  const now = admin.firestore.Timestamp.fromMillis(nowMs);
+  const now = Timestamp.fromMillis(nowMs);
   let normalized = 0;
   for (let page = 0; page < CLEANUP_SWEEP_MAX_SCAN_PAGES; page += 1) {
     const snapshot = await db.collection("media_assets")
@@ -1031,7 +1044,7 @@ const enqueueExpiredAssets = async (): Promise<number> => {
 
 const sweepDueCleanupQueue = async (): Promise<number> => {
   const db = admin.firestore();
-  const now = admin.firestore.Timestamp.now();
+  const now = Timestamp.now();
   let cursor: admin.firestore.QueryDocumentSnapshot | null = null;
   let processed = 0;
   for (let page = 0;
@@ -1054,8 +1067,8 @@ const sweepDueCleanupQueue = async (): Promise<number> => {
       const batch = db.batch();
       partitioned.terminal.forEach(({document}) => {
         batch.update(document.ref, {
-          cleanupAfter: admin.firestore.FieldValue.delete(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          cleanupAfter: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
         });
       });
       await batch.commit();

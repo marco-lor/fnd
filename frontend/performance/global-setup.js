@@ -1,9 +1,9 @@
-const childProcess = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { deleteApp, initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 const fixtureManifest = require('./fixture-manifest.json');
+const { runBoundedChildProcess } = require('../scripts/bounded-child-process');
 const {
   DEFAULT_LOG_BUDGET_BYTES,
   assertLogWithinBudget,
@@ -27,9 +27,22 @@ const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
 const STARTUP_TIMEOUT_MS = 240_000;
 const STARTUP_REQUEST_TIMEOUT_MS = 10_000;
 const STARTUP_INTERVAL_MS = 500;
+const FIXTURE_SEED_TIMEOUT_MS = 120_000;
+const TASK07_CALLABLES_TIMEOUT_MS = 240_000;
+const SECURITY_RULES_TIMEOUT_MS = 120_000;
+const DIRECTORY_QUERY_TIMEOUT_MS = 30_000;
 const MAX_SEED_BACKGROUND_INVOCATIONS = 50;
 const TASK07_MEDIA_INTEGRATION_ENABLED =
   process.env.FND_TASK07_MEDIA_INTEGRATION === '1';
+const READINESS_HTTP_FUNCTIONS = new Set([
+  'europe-west1-clientFirebaseConfig',
+  'europe-west8-task07PrepareMediaUpload',
+  'europe-west8-task07GetMediaStatus',
+  'europe-west8-task07AttachMediaAsset',
+  'europe-west8-task07PrepareFoeMediaRetirement',
+  'europe-west8-task07CommitFoeMediaRetirement',
+  'europe-west8-task07AbandonFoeMediaRetirement',
+]);
 const READINESS_BACKGROUND_TRIGGERS = new Set([
   'europe-west8-updateHpTotal',
   'europe-west8-updateManaTotal',
@@ -44,6 +57,7 @@ const READINESS_BACKGROUND_TRIGGERS = new Set([
   'europe-west8-cleanupTask07RemovedInventoryMedia',
   'europe-west8-cleanupTask07RemovedNpcMedia',
   'europe-west8-cleanupTask07RemovedUserMedia',
+  'europe-west8-cleanupTask07MediaAsset',
   'europe-west8-syncTask07MusicStreamFromControl',
   'europe-west8-syncTask07MusicStreamFromPlayback',
   'europe-west8-syncTask07MusicStreamFromSession',
@@ -58,7 +72,7 @@ const summarizeTriggerActivityText = (contents = '') => {
   }, {});
   const cleanupInvocations = counts['europe-west1-cleanupReplacedGrigliataTokenImage'] || 0;
   const backgroundInvocations = names.filter((name) => (
-    name !== 'europe-west1-clientFirebaseConfig'
+    !READINESS_HTTP_FUNCTIONS.has(name)
   )).length;
   const activity = { counts, backgroundInvocations, cleanupInvocations };
   const failWithActivity = (message) => {
@@ -73,7 +87,7 @@ const summarizeTriggerActivityText = (contents = '') => {
     );
   }
   const unexpectedBackgroundTriggers = [...new Set(names.filter((name) => (
-    name !== 'europe-west1-clientFirebaseConfig'
+    !READINESS_HTTP_FUNCTIONS.has(name)
     && !READINESS_BACKGROUND_TRIGGERS.has(name)
   )))];
   if (unexpectedBackgroundTriggers.length) {
@@ -342,24 +356,28 @@ module.exports = async () => {
     await waitForEmulators();
 
     stage = 'fixture-seed';
-    const seed = childProcess.spawnSync(
-      process.execPath,
-      [path.join(frontendRoot, 'scripts', 'performance', 'fixtures.js'), 'seed'],
-      { cwd: frontendRoot, env: process.env, encoding: 'utf8' }
-    );
+    const seed = await runBoundedChildProcess({
+      command: process.execPath,
+      args: [path.join(frontendRoot, 'scripts', 'performance', 'fixtures.js'), 'seed'],
+      cwd: frontendRoot,
+      environment: process.env,
+      timeoutMs: FIXTURE_SEED_TIMEOUT_MS,
+      label: 'Deterministic fixture setup',
+    });
     if (seed.status !== 0) {
       throw new Error(`Deterministic fixture setup failed.\n${seed.stdout || ''}\n${seed.stderr || ''}`);
     }
     process.stdout.write(seed.stdout || '');
+    process.stderr.write(seed.stderr || '');
 
     stage = 'post-seed-health';
     report.health = await collectEmulatorHealth('post-seed');
 
     if (TASK07_MEDIA_INTEGRATION_ENABLED) {
       stage = 'task07-callable-integration';
-      const task07Callables = childProcess.spawnSync(
-        process.execPath,
-        [
+      const task07Callables = await runBoundedChildProcess({
+        command: process.execPath,
+        args: [
           '--test',
           '--test-concurrency=1',
           path.join(
@@ -369,18 +387,26 @@ module.exports = async () => {
             'task07-media-callables.test.js'
           ),
         ],
-        { cwd: frontendRoot, env: process.env, encoding: 'utf8' }
-      );
+        cwd: frontendRoot,
+        environment: process.env,
+        timeoutMs: TASK07_CALLABLES_TIMEOUT_MS,
+        label: 'Task 07 callable integration tests',
+      });
       if (task07Callables.status !== 0) {
         throw new Error(
           `Task 07 callable integration tests failed.\n${task07Callables.stdout || ''}\n${task07Callables.stderr || ''}`
         );
       }
       process.stdout.write(task07Callables.stdout || '');
+      process.stderr.write(task07Callables.stderr || '');
     }
 
     stage = 'disable-measurement-triggers';
-    await disableBackgroundTriggersWithRecovery({ projectId });
+    await disableBackgroundTriggersWithRecovery({
+      projectId,
+      disableAttempts: 2,
+      retryDelayMs: 250,
+    });
     triggersDisabled = true;
     report.measurementWindow.backgroundTriggersEnabled = false;
 
@@ -395,25 +421,36 @@ module.exports = async () => {
         path.join(frontendRoot, 'performance', 'tests', 'task07-media-rules.test.js'),
       ] : []),
     ];
-    const rules = childProcess.spawnSync(
-      process.execPath,
-      ['--test', '--test-concurrency=1', ...ruleTestFiles],
-      { cwd: frontendRoot, env: process.env, encoding: 'utf8' }
-    );
+    const rules = await runBoundedChildProcess({
+      command: process.execPath,
+      args: ['--test', '--test-concurrency=1', ...ruleTestFiles],
+      cwd: frontendRoot,
+      environment: process.env,
+      timeoutMs: SECURITY_RULES_TIMEOUT_MS,
+      label: 'Security Rules integration tests',
+    });
     if (rules.status !== 0) {
       throw new Error(`Security Rules integration tests failed.\n${rules.stdout || ''}\n${rules.stderr || ''}`);
     }
     process.stdout.write(rules.stdout || '');
+    process.stderr.write(rules.stderr || '');
 
-    const directoryQueryBuilder = childProcess.spawnSync(
-      process.execPath,
-      ['--test', path.join(frontendRoot, 'performance', 'tests', 'user-directory-query-builder.test.js')],
-      { cwd: frontendRoot, env: process.env, encoding: 'utf8' }
-    );
+    const directoryQueryBuilder = await runBoundedChildProcess({
+      command: process.execPath,
+      args: [
+        '--test',
+        path.join(frontendRoot, 'performance', 'tests', 'user-directory-query-builder.test.js'),
+      ],
+      cwd: frontendRoot,
+      environment: process.env,
+      timeoutMs: DIRECTORY_QUERY_TIMEOUT_MS,
+      label: 'User-directory query-builder integration tests',
+    });
     if (directoryQueryBuilder.status !== 0) {
       throw new Error(`User-directory query-builder integration tests failed.\n${directoryQueryBuilder.stdout || ''}\n${directoryQueryBuilder.stderr || ''}`);
     }
     process.stdout.write(directoryQueryBuilder.stdout || '');
+    process.stderr.write(directoryQueryBuilder.stderr || '');
 
     stage = 'measurement-health';
     report.measurementWindow.health = await collectEmulatorHealth('measurement-ready');

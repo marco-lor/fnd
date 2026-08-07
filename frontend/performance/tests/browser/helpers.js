@@ -17,6 +17,17 @@ const FIRESTORE_EMULATOR_STARTUP_WARNING = /^(?:\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:
 const FIRESTORE_STREAM_PATH = /^\/google\.firestore\.v1\.Firestore\/(Listen|Write)\/channel$/;
 const FIRESTORE_EMULATOR_ORIGIN = 'http://127.0.0.1:8080';
 const FIRESTORE_EMULATOR_DATABASE = 'projects/demo-fnd-perf/databases/(default)';
+const FIRESTORE_WEBCHANNEL_CONTINUATION_KEYS = [
+  'AID',
+  'CI',
+  'RID',
+  'SID',
+  'TYPE',
+  'VER',
+  'database',
+  't',
+  'zx',
+];
 const RESOURCE_TIMING_BUFFER_SIZE = 5_000;
 
 const demoFirestoreStreamOperation = (url) => {
@@ -482,6 +493,54 @@ const isExpectedFirestoreLifecycleCancellation = ({
   return Boolean(operation && allowedOperations.has(operation));
 };
 
+const isExpectedFivePeerFirestoreWriteTurnover = ({
+  lifecyclePhase,
+  resourceType,
+  failure,
+  method,
+  responseStatus,
+  url,
+  firebaseProjectId = projectId,
+} = {}) => {
+  if (
+    firebaseProjectId !== 'demo-fnd-perf'
+    || lifecyclePhase !== 'route-active'
+    || resourceType !== 'fetch'
+    || failure !== 'net::ERR_ABORTED'
+    || method !== 'GET'
+  ) {
+    return false;
+  }
+
+  if (demoFirestoreStreamOperation(url) !== 'Write') return false;
+  if (responseStatus === 200) return true;
+  if (responseStatus !== undefined && responseStatus !== null) return false;
+
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (_error) {
+    return false;
+  }
+  const parameterKeys = [...parsed.searchParams.keys()].sort();
+  if (
+    parameterKeys.length !== FIRESTORE_WEBCHANNEL_CONTINUATION_KEYS.length
+    || parameterKeys.some((key, index) => (
+      key !== FIRESTORE_WEBCHANNEL_CONTINUATION_KEYS[index]
+    ))
+  ) {
+    return false;
+  }
+  return parsed.searchParams.get('VER') === '8'
+    && parsed.searchParams.get('RID') === 'rpc'
+    && /^[A-Za-z0-9+/=_-]{8,}$/.test(parsed.searchParams.get('SID') || '')
+    && /^\d+$/.test(parsed.searchParams.get('AID') || '')
+    && parsed.searchParams.get('CI') === '0'
+    && parsed.searchParams.get('TYPE') === 'xmlhttp'
+    && parsed.searchParams.get('t') === '1'
+    && /^[A-Za-z0-9_-]{6,}$/.test(parsed.searchParams.get('zx') || '');
+};
+
 const isExpectedTask07MediaDetachmentCancellation = ({
   lifecyclePhase,
   resourceType,
@@ -510,10 +569,72 @@ const isExpectedTask07MediaDetachmentCancellation = ({
   );
 };
 
+const isExpectedDemoRecaptchaCancellation = ({
+  lifecyclePhase,
+  resourceType,
+  failure,
+  url,
+  firebaseProjectId = projectId,
+} = {}) => {
+  if (
+    firebaseProjectId !== 'demo-fnd-perf'
+    || failure !== 'net::ERR_ABORTED'
+  ) {
+    return false;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (_error) {
+    return false;
+  }
+  if (
+    resourceType === 'fetch'
+    && [
+      'auth-bootstrap',
+      'auth-transition',
+      'connection-drain',
+      'route-navigation',
+      'route-active',
+      'route-cleanup',
+    ].includes(lifecyclePhase)
+  ) {
+    return parsed.origin === 'https://www.google.com'
+      && parsed.pathname === '/recaptcha/enterprise/clr';
+  }
+
+  return resourceType === 'script'
+    && lifecyclePhase === 'route-navigation'
+    && parsed.origin === 'https://www.gstatic.com'
+    && /^\/recaptcha\/releases\/[A-Za-z0-9_-]+\/recaptcha__en\.js$/.test(parsed.pathname);
+};
+
+const isExpectedDemoRecaptchaReportOnlyWarning = (text, {
+  baseURL,
+  firebaseProjectId = projectId,
+} = {}) => {
+  if (firebaseProjectId !== 'demo-fnd-perf') return false;
+  let hostname;
+  try {
+    hostname = new URL(baseURL).hostname;
+  } catch (_error) {
+    return false;
+  }
+  if (!['127.0.0.1', 'localhost', '::1'].includes(hostname)) return false;
+  const message = String(text || '').trim();
+  return message.startsWith(
+    "Framing 'https://www.google.com/' violates the following report-only Content Security Policy directive:"
+  )
+    && message.includes('The violation has been logged, but no further action has been taken.')
+    && message.includes("'frame-src' was not explicitly set, so 'default-src' is used as a fallback.");
+};
+
 const installDeterministicFontRoutes = async (context) => {
   await context.route(GOOGLE_FONT_URL, (route) => route.fulfill({
     status: 204,
     body: '',
+    contentType: 'text/css; charset=utf-8',
   }));
 };
 
@@ -830,7 +951,7 @@ const runInteraction = async (page, scenario) => {
       break;
     }
     case 'dm-dashboard': {
-      const playerCard = locateDmDashboardPlayerCard(page, 'Performance Hero 2');
+      const playerCard = locateDmDashboardPlayerCard(page, 'Performance Hero 10');
       await expect(playerCard).toHaveCount(1);
       await expect(playerCard).toBeVisible();
       const expandButton = playerCard.getByRole('button', { name: 'Espandi', exact: true });
@@ -1020,6 +1141,44 @@ const countChangedDocumentsForTarget = (snapshot, targetMetricKey) => (
     .reduce((sum, event) => sum + Number(event.value || 0), 0)
 );
 
+const collectChangedDocumentDeliveryTelemetryInPage = (targetMetricKey) => {
+  const snapshot = window.__FND_PERF__.snapshot();
+  const events = Array.isArray(snapshot.events) ? snapshot.events : [];
+  return {
+    changedDocumentsDelivered: events
+      .filter((event) => (
+        event.category === 'firestore'
+        && event.metric === 'changed-documents-delivered'
+        && event.tags?.target === targetMetricKey
+      ))
+      .reduce((sum, event) => sum + Number(event.value || 0), 0),
+    eventCount: events.length,
+  };
+};
+
+const readChangedDocumentDeliveryTelemetry = async (page, targetMetricKey) => (
+  page.evaluate(collectChangedDocumentDeliveryTelemetryInPage, targetMetricKey)
+);
+
+const collectRouteCleanupSummaryInPage = (route) => {
+  const snapshot = window.__FND_PERF__.snapshot();
+  const routePrefix = `${route}::`;
+  const onlyRouteEntries = (entries) => Object.fromEntries(
+    Object.entries(entries || {}).filter(([key]) => key.startsWith(routePrefix))
+  );
+  return {
+    activeListeners: onlyRouteEntries(snapshot.activeListeners),
+    activeResources: onlyRouteEntries(snapshot.activeResources),
+    media: {
+      activeSources: Number(snapshot.media?.activeSources || 0),
+    },
+  };
+};
+
+const readRouteCleanupSummary = async (page, route) => (
+  page.evaluate(collectRouteCleanupSummaryInPage, route)
+);
+
 const restoreScenarioState = async (scenarioId) => {
   if (!['home', 'grigliata-manager', 'grigliata-five-peer'].includes(scenarioId)) return;
   configureOwnedPerformanceEnvironment();
@@ -1059,12 +1218,17 @@ module.exports = {
   installBootstrap,
   installDeterministicFontRoutes,
   isExpectedFirestoreLifecycleCancellation,
+  isExpectedFivePeerFirestoreWriteTurnover,
+  isExpectedDemoRecaptchaCancellation,
+  isExpectedDemoRecaptchaReportOnlyWarning,
   isExpectedTask07MediaDetachmentCancellation,
   isKnownDemoFirestoreStartupWarning,
   isRouteReadyInPage,
   locateDmDashboardPlayerCard,
   navigateToCleanup,
+  readChangedDocumentDeliveryTelemetry,
   readKonvaTokenPositions,
+  readRouteCleanupSummary,
   restoreScenarioState,
   runBrowserStaticAssetWarmupPass,
   runStaticAssetWarmupPass,

@@ -2,12 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import PerformanceProfiler from '../../performance/PerformanceProfiler';
 import { installGrigliataBenchmarkBridge } from '../../performance/grigliataBenchmarks';
 import { FaDiceD20 } from 'react-icons/fa';
-import { FiImage, FiMap, FiMusic, FiSun } from 'react-icons/fi';
+import { FiImage, FiMap, FiMusic } from 'react-icons/fi';
 import { GiCrackedHelm } from 'react-icons/gi';
 import {
   addDoc,
-  arrayRemove,
-  arrayUnion,
   collection,
   deleteDoc,
   deleteField,
@@ -28,6 +26,8 @@ import {
   writeBatch,
 } from '../../performance/firestore';
 import { useAuth } from '../../AuthContext';
+import { USER_DATA_ROLLOUT_STAGES } from '../../data/userData/domainSchema';
+import { useUserSettings } from '../../data/userData/userDataHooks';
 import { auth, db } from '../firebaseConfig';
 import {
   deleteLegacyStoragePath,
@@ -45,6 +45,7 @@ import {
 } from '../../data/functions/backendOperationIntentStore';
 import { isTask07MediaV1WriteEnabled } from '../../data/media/mediaFeatureFlags';
 import useTask07MediaOperationOwner from '../../data/media/useTask07MediaOperationOwner';
+import useTask07MediaReadMode from '../../data/media/useTask07MediaReadMode';
 import {
   buildGrigliataLightingSummary,
   GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION,
@@ -188,6 +189,8 @@ import {
   TURN_EFFECT_KIND_SHIELD,
 } from './turnOrder';
 import useGrigliataPageData from './useGrigliataPageData';
+import GrigliataLightingSheet from './GrigliataLightingSheet';
+import useGrigliataWorkspacePreferences from './grigliataWorkspacePreferences';
 import {
   buildTask07CustomTokenCreateIntentKey,
   buildTask07CustomTokenTemplatePayload,
@@ -233,6 +236,15 @@ import {
 } from './fogVisibilityFiltering';
 import { useShellLayout } from '../common/shellLayout';
 import { getVarie } from '../../data/configRepository';
+import { USER_DATA_DOMAINS } from '../../data/userData/domainSchema';
+import { subscribeUserDomain } from '../../data/userData/userDataRepository';
+import {
+  consumeTurnEffects,
+  updateGrigliataCharacterResources,
+  updateResource,
+  updateUserSettings,
+} from '../../data/userData/userDataCommands';
+import { spawnGrigliataFoeToken } from '../../data/grigliata/foeTokenSpawn';
 import {
   canPrefetchModules,
   createModuleLoader,
@@ -379,6 +391,9 @@ const buildMusicPlaybackSessionTrack = (track = {}, session = {}) => ({
   id: track?.id || session?.trackId || session?.id || '',
   name: track?.name || session?.trackName || '',
   audioUrl: track?.audioUrl || session?.audioUrl || '',
+  media: track?.media || session?.media || null,
+  mediaAssetId: track?.media?.assetId || track?.mediaAssetId
+    || session?.media?.assetId || session?.mediaAssetId || '',
   durationMs: Number.isFinite(Number(track?.durationMs))
     ? Number(track.durationMs)
     : Number(session?.durationMs || 0),
@@ -394,6 +409,28 @@ const GRIGLIATA_HIDDEN_BACKGROUND_IDS_FIELD = 'grigliata_hidden_background_ids';
 const GRIGLIATA_HIDDEN_TOKEN_IDS_BY_BACKGROUND_FIELD = 'grigliata_hidden_token_ids_by_background';
 const GRIGLIATA_SHARE_INTERACTIONS_FIELD = 'grigliata_share_interactions';
 
+const grigliataTimestampIdentity = (value) => {
+  if (!value) return '';
+  if (typeof value.toMillis === 'function') return String(value.toMillis());
+  if (Number.isFinite(value.seconds)) {
+    return `${value.seconds}:${Number.isFinite(value.nanoseconds) ? value.nanoseconds : 0}`;
+  }
+  return '';
+};
+
+const grigliataPlacementVersionIdentity = (placement = {}) => {
+  const timestamp = grigliataTimestampIdentity(placement.updatedAt);
+  if (timestamp) return `updated-${timestamp}`;
+  return [
+    placement.col,
+    placement.row,
+    placement.sizeSquares,
+    placement.isVisibleToPlayers === false ? 'hidden' : 'visible',
+    placement.isDead === true ? 'dead' : 'alive',
+    normalizeTurnCounter(placement.turnCounter, 0),
+  ].join(':');
+};
+
 const clampNumber = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const normalizeSceneLightingSettings = (scene = {}) => {
@@ -407,7 +444,6 @@ const normalizeSceneLightingSettings = (scene = {}) => {
 
 const deleteGrigliataCustomTokenCallable = getCallable('deleteGrigliataCustomToken');
 const spawnGrigliataCustomTokenInstanceCallable = getCallable('spawnGrigliataCustomTokenInstance');
-const spawnGrigliataFoeTokenCallable = getCallable('spawnGrigliataFoeToken');
 const updateGrigliataCustomTokenTemplateCallable = getCallable('updateGrigliataCustomTokenTemplate');
 
 const buildFogBrushQueueKey = ({
@@ -426,26 +462,6 @@ const buildFogBrushQueueKey = ({
   ownerUids,
 ]);
 
-const buildHiddenPlacementSettingsPayload = ({
-  backgroundId,
-  tokenId,
-  isHidden,
-  includeLegacyBackgroundFallback = false,
-}) => ({
-  settings: {
-    [GRIGLIATA_HIDDEN_TOKEN_IDS_BY_BACKGROUND_FIELD]: {
-      [backgroundId]: isHidden
-        ? arrayUnion(tokenId)
-        : arrayRemove(tokenId),
-    },
-    ...(includeLegacyBackgroundFallback ? {
-      [GRIGLIATA_HIDDEN_BACKGROUND_IDS_FIELD]: isHidden
-        ? arrayUnion(backgroundId)
-        : arrayRemove(backgroundId),
-    } : {}),
-  },
-});
-
 const isLegacyHiddenPlacementToken = ({ tokenId, ownerUid }) => tokenId === ownerUid;
 const isPermissionDeniedError = (error) => (
   error?.code === 'permission-denied'
@@ -453,38 +469,28 @@ const isPermissionDeniedError = (error) => (
   || error?.code === 'functions/permission-denied'
 );
 const SIDEBAR_TAB_LIST_CLASS_NAME = 'flex flex-wrap gap-2';
+
+const findLightingTriggerElement = (backgroundId) => {
+  if (!backgroundId || typeof document === 'undefined') return null;
+
+  return Array.from(document.querySelectorAll('button[data-lighting-background-id]'))
+    .find((element) => element.dataset.lightingBackgroundId === backgroundId) || null;
+};
+
+const focusLightingTriggerWithoutScrolling = (element) => {
+  if (!element || typeof element.focus !== 'function') return;
+
+  try {
+    element.focus({ preventScroll: true });
+  } catch {
+    element.focus();
+  }
+};
+const MAX_IMMEDIATE_IMAGE_PRELOADS = 12;
 const MAX_DEFERRED_GALLERY_IMAGE_PRELOADS = 6;
 const collectUniqueImageUrls = (urls) => [...new Set(
   (urls || []).map((url) => (typeof url === 'string' ? url.trim() : '')).filter(Boolean)
 )];
-const areMediaManifestValuesEqual = (left, right) => {
-  if (left === right) return true;
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return (
-      Array.isArray(left)
-      && Array.isArray(right)
-      && left.length === right.length
-      && left.every((value, index) => areMediaManifestValuesEqual(value, right[index]))
-    );
-  }
-  if (
-    !left
-    || !right
-    || typeof left !== 'object'
-    || typeof right !== 'object'
-  ) {
-    return false;
-  }
-  const leftKeys = Object.keys(left).sort();
-  const rightKeys = Object.keys(right).sort();
-  return (
-    leftKeys.length === rightKeys.length
-    && leftKeys.every((key, index) => (
-      key === rightKeys[index]
-      && areMediaManifestValuesEqual(left[key], right[key])
-    ))
-  );
-};
 const getBackgroundImageUrlForPreload = (background) => (
   background && !isVideoBackground(background) ? background.imageUrl : ''
 );
@@ -543,6 +549,40 @@ const buildEmptySelectedExternalTokenState = () => ({
   isTokenProfileReady: false,
   userDataError: '',
   tokenProfileError: '',
+});
+const readUserDomainOnce = (uid, domain) => new Promise((resolve, reject) => {
+  let unsubscribe = null;
+  let unsubscribeWhenReady = false;
+  let settled = false;
+  const stop = () => {
+    if (unsubscribe) {
+      unsubscribe();
+    } else {
+      unsubscribeWhenReady = true;
+    }
+  };
+  try {
+    unsubscribe = subscribeUserDomain(uid, domain, {
+      next: (value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+        stop();
+      },
+      error: (error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+        stop();
+      },
+    });
+    if (unsubscribeWhenReady) {
+      unsubscribe?.();
+    }
+  } catch (error) {
+    settled = true;
+    reject(error);
+  }
 });
 const buildCharacterResourceValues = (stats = {}) => {
   const hpTotal = normalizeNonNegativeNumericValue(stats?.hpTotal, 0);
@@ -619,7 +659,13 @@ export default function GrigliataPage() {
   }, []);
 
   const { user, userData, loading } = useAuth();
+  const {
+    data: userSettingsDomain,
+    stage: userDataRolloutStage,
+  } = useUserSettings();
   const task07MediaOperationOwner = useTask07MediaOperationOwner();
+  const musicMediaMode = useTask07MediaReadMode({ purpose: 'music' });
+  const canonicalOnlyMusic = musicMediaMode === 'canonical-only';
   const customTokenCreateTargetRef = useRef(null);
   const customTokenReplacementTargetRef = useRef(null);
   const { topInset } = useShellLayout();
@@ -637,9 +683,12 @@ export default function GrigliataPage() {
     variant: 'thumbnail',
   }) ? currentMediaCandidate : null;
   const currentTokenLabel = currentCharacterId || currentUserEmail.split('@')[0] || 'Player';
-  const persistedDrawColorKey = resolveGrigliataDrawColorKey(userData?.settings?.grigliata_draw_color);
-  const persistedInteractionSharingEnabled = userData?.settings?.[GRIGLIATA_SHARE_INTERACTIONS_FIELD] === true;
-  const isMusicMuted = userData?.settings?.[GRIGLIATA_MUSIC_MUTED_FIELD] === true;
+  const userSettings = useMemo(() => (
+    userSettingsDomain?.settings || userData?.settings || {}
+  ), [userData?.settings, userSettingsDomain?.settings]);
+  const persistedDrawColorKey = resolveGrigliataDrawColorKey(userSettings.grigliata_draw_color);
+  const persistedInteractionSharingEnabled = userSettings[GRIGLIATA_SHARE_INTERACTIONS_FIELD] === true;
+  const isMusicMuted = userSettings[GRIGLIATA_MUSIC_MUTED_FIELD] === true;
   const [localLiveInteraction, setLocalLiveInteraction] = useState(null);
   const [isInteractionSharingEnabled, setIsInteractionSharingEnabled] = useState(persistedInteractionSharingEnabled);
   const [viewAsPlayerUid, setViewAsPlayerUid] = useState('');
@@ -649,8 +698,6 @@ export default function GrigliataPage() {
   const [musicUploadError, setMusicUploadError] = useState('');
   const [isMusicUploading, setIsMusicUploading] = useState(false);
   const [isMusicMutePending, setIsMusicMutePending] = useState(false);
-  const [selectedGalleryFolderId, setSelectedGalleryFolderId] = useState(UNFILED_GALLERY_FOLDER_ID);
-  const [selectedMusicFolderId, setSelectedMusicFolderId] = useState(UNFILED_MUSIC_FOLDER_ID);
 
   const [activatingBackgroundId, setActivatingBackgroundId] = useState('');
   const [narrationActionBackgroundId, setNarrationActionBackgroundId] = useState('');
@@ -671,6 +718,8 @@ export default function GrigliataPage() {
   const [lightingSelectedFile, setLightingSelectedFile] = useState(null);
   const [lightingImportDraft, setLightingImportDraft] = useState(null);
   const [lightingImportError, setLightingImportError] = useState('');
+  const [lightingSheetBackgroundId, setLightingSheetBackgroundId] = useState('');
+  const [isLightingImportDraftDirty, setIsLightingImportDraftDirty] = useState(false);
   const [isImportingLighting, setIsImportingLighting] = useState(false);
   const [isApplyingLightingCalibration, setIsApplyingLightingCalibration] = useState(false);
   const [isLightingEnabledPending, setIsLightingEnabledPending] = useState(false);
@@ -696,11 +745,15 @@ export default function GrigliataPage() {
   const [isFogBrushMutationPending, setIsFogBrushMutationPending] = useState(false);
   const [drawColorKey, setDrawColorKey] = useState(persistedDrawColorKey);
   const [activeGridSizeOverride, setActiveGridSizeOverride] = useState(null);
-  const [activeSidebarTab, setActiveSidebarTab] = useState('tokens');
   const legacyCleanupStartedRef = useRef(false);
   const legacyPlacementDeadStateCleanupStartedRef = useRef(false);
   const legacyPlacementVisibilityCleanupStartedRef = useRef(false);
+  const currentUserTokenProfileSyncAttemptRef = useRef('');
   const calibrationSelectionRef = useRef('');
+  const lightingSheetWasAvailableRef = useRef(false);
+  const lightingFileParseGenerationRef = useRef(0);
+  const lightingSheetBackgroundIdRef = useRef('');
+  const lightingSheetTriggerRef = useRef(null);
   const drawColorAutosaveTimeoutRef = useRef(null);
   const pendingDrawColorAutosaveRef = useRef(null);
   const activeDrawColorAutosaveRef = useRef(null);
@@ -765,19 +818,36 @@ export default function GrigliataPage() {
 
   const role = (userData?.role || '').toLowerCase();
   const isManager = isManagerRole(role);
+  const {
+    storageKey: workspacePreferenceKey,
+    preferences: workspacePreferences,
+    setActiveSidebarTab,
+    setSelectedBackgroundIdPreference,
+    setSelectedGalleryFolderId,
+    setSelectedMusicFolderId,
+  } = useGrigliataWorkspacePreferences({
+    currentUserId,
+    isManager,
+  });
+  const {
+    activeSidebarTab,
+    selectedBackgroundId: preferredSelectedBackgroundId,
+    selectedGalleryFolderId,
+    selectedMusicFolderId,
+  } = workspacePreferences;
   useEffect(() => {
     if (!isManager && viewAsPlayerUid) {
       setViewAsPlayerUid('');
     }
   }, [isManager, viewAsPlayerUid]);
   const currentUserHiddenBackgroundIds = useMemo(() => {
-    const hiddenBackgroundIds = userData?.settings?.[GRIGLIATA_HIDDEN_BACKGROUND_IDS_FIELD];
+    const hiddenBackgroundIds = userSettings[GRIGLIATA_HIDDEN_BACKGROUND_IDS_FIELD];
     return Array.isArray(hiddenBackgroundIds)
       ? hiddenBackgroundIds.filter((backgroundId) => typeof backgroundId === 'string' && backgroundId)
       : [];
-  }, [userData]);
+  }, [userSettings]);
   const currentUserHiddenTokenIdsByBackground = useMemo(() => {
-    const hiddenTokenIdsByBackground = userData?.settings?.[GRIGLIATA_HIDDEN_TOKEN_IDS_BY_BACKGROUND_FIELD];
+    const hiddenTokenIdsByBackground = userSettings[GRIGLIATA_HIDDEN_TOKEN_IDS_BY_BACKGROUND_FIELD];
 
     if (!hiddenTokenIdsByBackground || typeof hiddenTokenIdsByBackground !== 'object' || Array.isArray(hiddenTokenIdsByBackground)) {
       return {};
@@ -799,7 +869,7 @@ export default function GrigliataPage() {
 
       return nextMap;
     }, {});
-  }, [userData]);
+  }, [userSettings]);
   const {
     activeBackground: combatBackground,
     activeBackgroundId,
@@ -819,6 +889,9 @@ export default function GrigliataPage() {
     grid,
     isActivePlacementsReady,
     isBoardStateReady,
+    isGalleryFoldersReady,
+    isMusicFoldersReady,
+    isTokenProfilesReady,
     isGridVisible,
     isTurnOrderEnabled,
     isTurnOrderStarted,
@@ -850,16 +923,39 @@ export default function GrigliataPage() {
     currentUserHiddenTokenIdsByBackground,
     currentUserId,
     isManager,
+    preferredSelectedBackgroundId,
+    selectedBackgroundPreferenceKey: workspacePreferenceKey,
     selectedGalleryFolderId,
     selectedMusicFolderId,
   });
   const {
     lightingMetadata,
+    isLightingMetadataReady,
   } = useGrigliataLightingMetadata({
     backgroundId: activeBackgroundId,
     currentUserId,
     isManager,
   });
+  const lightingSheetBackground = useMemo(
+    () => backgrounds.find((background) => background.id === lightingSheetBackgroundId) || null,
+    [backgrounds, lightingSheetBackgroundId]
+  );
+  const isLightingSheetTargetActive = !!lightingSheetBackgroundId
+    && lightingSheetBackgroundId === activeBackgroundId;
+  const {
+    lightingMetadata: inactiveLightingSheetMetadata,
+    isLightingMetadataReady: isInactiveLightingSheetMetadataReady,
+  } = useGrigliataLightingMetadata({
+    backgroundId: isLightingSheetTargetActive ? '' : lightingSheetBackgroundId,
+    currentUserId,
+    isManager,
+  });
+  const lightingSheetMetadata = isLightingSheetTargetActive
+    ? lightingMetadata
+    : inactiveLightingSheetMetadata;
+  const isLightingSheetMetadataReady = isLightingSheetTargetActive
+    ? isLightingMetadataReady
+    : isInactiveLightingSheetMetadataReady;
   const {
     lightingRenderInput,
   } = useGrigliataLightingRenderInput({
@@ -880,23 +976,30 @@ export default function GrigliataPage() {
     isManager,
   });
   const dmPreviewLightingRenderInput = useMemo(() => {
-    if (lightingRenderInput) {
-      return lightingRenderInput;
+    if (isManager && lightingMetadata) {
+      try {
+        const authoringRenderInput = buildGrigliataLightingRenderInput(lightingMetadata, {
+          updatedAt: lightingMetadata.updatedAt || null,
+          updatedBy: lightingMetadata.updatedBy || '',
+        });
+
+        if (!lightingRenderInput) {
+          return authoringRenderInput;
+        }
+
+        // Scene controls read the raw authoring document. Override only those
+        // fields so the DM board cannot lag one toggle behind while retaining
+        // the latest sanitized walls, lights, and darkness sources.
+        return {
+          ...lightingRenderInput,
+          scene: authoringRenderInput.scene,
+        };
+      } catch (error) {
+        console.error('Failed to build DM lighting preview input:', error);
+      }
     }
 
-    if (!isManager || !lightingMetadata) {
-      return null;
-    }
-
-    try {
-      return buildGrigliataLightingRenderInput(lightingMetadata, {
-        updatedAt: lightingMetadata.updatedAt || null,
-        updatedBy: lightingMetadata.updatedBy || '',
-      });
-    } catch (error) {
-      console.error('Failed to build DM lighting preview input:', error);
-      return null;
-    }
+    return lightingRenderInput;
   }, [isManager, lightingMetadata, lightingRenderInput]);
   const effectiveLightingRenderInput = useMemo(() => buildEffectiveLightingRenderInput({
     lightingRenderInput: dmPreviewLightingRenderInput,
@@ -917,18 +1020,21 @@ export default function GrigliataPage() {
     () => (isManager ? normalizeEditableWallSegments(lightingMetadata?.walls) : []),
     [isManager, lightingMetadata?.walls]
   );
-  const editableSceneLighting = useMemo(() => {
-    if (!isManager || selectedBackground?.id !== activeBackgroundId) {
+  const lightingSheetSceneLighting = useMemo(() => {
+    if (!isManager || !lightingSheetBackground?.id || !isLightingSheetMetadataReady) {
       return null;
     }
 
-    return normalizeSceneLightingSettings(lightingMetadata?.scene || enabledLightingRenderInput?.scene);
+    const sceneSource = lightingSheetMetadata?.scene
+      || (isLightingSheetTargetActive ? enabledLightingRenderInput?.scene : null);
+    return sceneSource ? normalizeSceneLightingSettings(sceneSource) : null;
   }, [
-    activeBackgroundId,
     enabledLightingRenderInput?.scene,
+    isLightingSheetMetadataReady,
+    isLightingSheetTargetActive,
     isManager,
-    lightingMetadata?.scene,
-    selectedBackground?.id,
+    lightingSheetBackground?.id,
+    lightingSheetMetadata?.scene,
   ]);
   useEffect(() => {
     if (!currentUserId || isManager || !currentCharacterId) {
@@ -980,7 +1086,10 @@ export default function GrigliataPage() {
       .map((token) => [token.tokenId, token])
   ), [currentUserId, currentUserToken, customUserTokens]);
   const deleteCustomTokenWithCandidateReceipt = useCallback(async ({ tokenId }) => {
-    if (!TASK06_LOCAL_CANDIDATE) {
+    if (
+      !TASK06_LOCAL_CANDIDATE
+      && userDataRolloutStage !== USER_DATA_ROLLOUT_STAGES.NEW_ONLY
+    ) {
       return deleteGrigliataCustomTokenCallable({ tokenId });
     }
     return runWithDurableOperationIntent({
@@ -992,7 +1101,7 @@ export default function GrigliataPage() {
         operationId,
       }),
     });
-  }, [currentUserId]);
+  }, [currentUserId, userDataRolloutStage]);
   const {
     buildPlacementWritePayload,
     buildTurnOrderRemovalPlacementWrite,
@@ -1012,7 +1121,6 @@ export default function GrigliataPage() {
     currentUserId,
     isManager,
     ownedTrayTokensById,
-    buildHiddenPlacementSettingsPayload,
     isLegacyHiddenPlacementToken,
     isCustomTokenInstance,
     deleteCustomToken: deleteCustomTokenWithCandidateReceipt,
@@ -1082,7 +1190,7 @@ export default function GrigliataPage() {
       .filter(Boolean),
     [presentationBackgroundsById, presentationPlacements]
   );
-  const canEditSceneLighting = !!editableSceneLighting && !isNarrationOverlayActive;
+  const canEditLightingSheetScene = !!lightingSheetSceneLighting && !isNarrationOverlayActive;
   const isTurnOrderMutationPending = (
     isTurnOrderProgressPending
     || isTurnOrderResetPending
@@ -1211,26 +1319,62 @@ export default function GrigliataPage() {
     };
 
     if (tokenType === 'character' && nextSelectionState.ownerUid) {
-      unsubscribes.push(onSnapshot(
-        doc(db, 'users', nextSelectionState.ownerUid),
-        (snapshot) => {
-          updateSelectedExternalTokenState((currentState) => ({
-            ...currentState,
-            userData: snapshot.exists() ? snapshot.data() : null,
-            isUserDataReady: true,
-            userDataError: '',
-          }));
-        },
-        (error) => {
-          console.error('Failed to subscribe to selected Grigliata character user data:', error);
-          updateSelectedExternalTokenState((currentState) => ({
-            ...currentState,
-            userData: null,
-            isUserDataReady: false,
-            userDataError: 'Unable to load the current character sheet values.',
-          }));
+      const selectedDomains = {
+        profile: null,
+        resources: null,
+      };
+      const selectedDomainReady = {
+        profile: false,
+        resources: false,
+      };
+      const selectedDomainErrors = {
+        profile: '',
+        resources: '',
+      };
+      const publishSelectedUserData = () => {
+        const isReady = selectedDomainReady.profile && selectedDomainReady.resources;
+        const userDataError = selectedDomainErrors.profile || selectedDomainErrors.resources;
+        const hasUserData = !!(selectedDomains.profile || selectedDomains.resources);
+        updateSelectedExternalTokenState((currentState) => ({
+          ...currentState,
+          userData: hasUserData ? {
+            ...(selectedDomains.profile || {}),
+            ...(selectedDomains.resources || {}),
+            stats: {
+              ...(selectedDomains.profile?.stats || {}),
+              ...(selectedDomains.resources?.stats || {}),
+            },
+          } : null,
+          isUserDataReady: isReady && !userDataError,
+          userDataError,
+        }));
+      };
+      const subscribeSelectedDomain = (domain, stateKey) => subscribeUserDomain(
+        nextSelectionState.ownerUid,
+        domain,
+        {
+          next: (value) => {
+            selectedDomains[stateKey] = value;
+            selectedDomainReady[stateKey] = true;
+            selectedDomainErrors[stateKey] = '';
+            publishSelectedUserData();
+          },
+          error: (error) => {
+            console.error(
+              `Failed to subscribe to selected Grigliata character ${stateKey}:`,
+              error
+            );
+            selectedDomainReady[stateKey] = false;
+            selectedDomainErrors[stateKey] =
+              'Unable to load the current character sheet values.';
+            publishSelectedUserData();
+          },
         }
-      ));
+      );
+      unsubscribes.push(
+        subscribeSelectedDomain(USER_DATA_DOMAINS.PROFILE, 'profile'),
+        subscribeSelectedDomain(USER_DATA_DOMAINS.RESOURCES, 'resources')
+      );
     }
 
     if (tokenType === 'character' || tokenType === 'custom') {
@@ -1683,14 +1827,36 @@ export default function GrigliataPage() {
   );
 
   useEffect(() => {
-    if (galleryFolderOptions.some((folder) => folder.id === selectedGalleryFolderId)) return;
-    setSelectedGalleryFolderId(UNFILED_GALLERY_FOLDER_ID);
-  }, [galleryFolderOptions, selectedGalleryFolderId]);
+    if (!workspacePreferenceKey || selectedBackgroundId === preferredSelectedBackgroundId) return;
+    setSelectedBackgroundIdPreference(selectedBackgroundId);
+  }, [
+    preferredSelectedBackgroundId,
+    selectedBackgroundId,
+    setSelectedBackgroundIdPreference,
+    workspacePreferenceKey,
+  ]);
 
   useEffect(() => {
+    if (!isGalleryFoldersReady) return;
+    if (galleryFolderOptions.some((folder) => folder.id === selectedGalleryFolderId)) return;
+    setSelectedGalleryFolderId(UNFILED_GALLERY_FOLDER_ID);
+  }, [
+    galleryFolderOptions,
+    isGalleryFoldersReady,
+    selectedGalleryFolderId,
+    setSelectedGalleryFolderId,
+  ]);
+
+  useEffect(() => {
+    if (!isMusicFoldersReady) return;
     if (musicFolderOptions.some((folder) => folder.id === selectedMusicFolderId)) return;
     setSelectedMusicFolderId(UNFILED_MUSIC_FOLDER_ID);
-  }, [musicFolderOptions, selectedMusicFolderId]);
+  }, [
+    isMusicFoldersReady,
+    musicFolderOptions,
+    selectedMusicFolderId,
+    setSelectedMusicFolderId,
+  ]);
 
   useEffect(() => {
     latestMusicPlaybackStateRef.current = normalizedMusicPlaybackState;
@@ -1713,7 +1879,6 @@ export default function GrigliataPage() {
         { key: 'gallery', label: 'DM Gallery', Icon: FiImage },
         { key: 'music', label: 'Music', Icon: FiMusic },
         { key: 'calibration', label: 'Map Calibration', Icon: FiMap },
-        { key: 'lighting', label: 'Lighting', Icon: FiSun },
       ]
       : [
         { key: 'tokens', label: 'Tokens', Icon: GiCrackedHelm },
@@ -1727,9 +1892,7 @@ export default function GrigliataPage() {
     getBackgroundImageUrlForPreload(displayBackground),
     currentUserToken?.imageUrl,
     ...customUserTokens.map((token) => token?.imageUrl),
-    ...boardTokens.map((token) => token?.imageUrl),
-  ]), [
-    boardTokens,
+  ]).slice(0, MAX_IMMEDIATE_IMAGE_PRELOADS), [
     combatBackground,
     currentUserToken?.imageUrl,
     customUserTokens,
@@ -1820,7 +1983,7 @@ export default function GrigliataPage() {
   useEffect(() => {
     if (sidebarTabs.some((tab) => tab.key === activeSidebarTab)) return;
     setActiveSidebarTab(sidebarTabs[0].key);
-  }, [activeSidebarTab, sidebarTabs]);
+  }, [activeSidebarTab, setActiveSidebarTab, sidebarTabs]);
 
   useEffect(() => {
     if (!isNarrationOverlayActive) {
@@ -1874,10 +2037,41 @@ export default function GrigliataPage() {
   }, [selectedBackground?.grid, selectedBackground?.id]);
 
   useEffect(() => {
+    lightingFileParseGenerationRef.current += 1;
     setLightingSelectedFile(null);
     setLightingImportDraft(null);
     setLightingImportError('');
+    setIsLightingImportDraftDirty(false);
   }, [selectedBackgroundId]);
+
+  useEffect(() => {
+    if (isManager || !lightingSheetBackgroundId) return;
+    lightingFileParseGenerationRef.current += 1;
+    lightingSheetBackgroundIdRef.current = '';
+    setLightingSheetBackgroundId('');
+    setIsLightingImportDraftDirty(false);
+  }, [isManager, lightingSheetBackgroundId]);
+
+  useEffect(() => {
+    if (!lightingSheetBackgroundId) {
+      lightingSheetWasAvailableRef.current = false;
+      return;
+    }
+
+    if (lightingSheetBackground) {
+      lightingSheetWasAvailableRef.current = true;
+      return;
+    }
+
+    if (lightingSheetWasAvailableRef.current) {
+      lightingSheetWasAvailableRef.current = false;
+      lightingFileParseGenerationRef.current += 1;
+      lightingSheetBackgroundIdRef.current = '';
+      setLightingSheetBackgroundId('');
+      setIsLightingImportDraftDirty(false);
+      setBoardError('That map is no longer available.');
+    }
+  }, [lightingSheetBackground, lightingSheetBackgroundId]);
 
   const currentTokenHasImage = hasMediaAsset({ media: currentMedia }, {
     fallbackSrc: currentImageUrl,
@@ -1885,7 +2079,7 @@ export default function GrigliataPage() {
   });
 
   useEffect(() => {
-    if (!currentUserId) return undefined;
+    if (!currentUserId || !isTokenProfilesReady) return undefined;
 
     let isActive = true;
 
@@ -1910,10 +2104,29 @@ export default function GrigliataPage() {
         || existingToken.label !== currentTokenLabel
         || existingToken.imageUrl !== currentImageUrl
         || existingToken.imagePath !== currentImagePath
-        || !areMediaManifestValuesEqual(existingToken.media || null, currentMedia || null)
         || hasLegacyPlacementFields;
 
       if (!needsSync || !isActive) return;
+
+      const syncAttemptKey = JSON.stringify({
+        desired: {
+          ownerUid: currentUserId,
+          characterId: currentCharacterId,
+          label: currentTokenLabel,
+          imageUrl: currentImageUrl,
+          imagePath: currentImagePath,
+        },
+        existing: existingToken ? {
+          ownerUid: existingToken.ownerUid || '',
+          characterId: existingToken.characterId || '',
+          label: existingToken.label || '',
+          imageUrl: existingToken.imageUrl || '',
+          imagePath: existingToken.imagePath || '',
+          hasLegacyPlacementFields,
+        } : null,
+      });
+      if (currentUserTokenProfileSyncAttemptRef.current === syncAttemptKey) return;
+      currentUserTokenProfileSyncAttemptRef.current = syncAttemptKey;
 
       try {
         const tokenProfilePayload = {
@@ -1922,7 +2135,6 @@ export default function GrigliataPage() {
           label: currentTokenLabel,
           imageUrl: currentImageUrl,
           imagePath: currentImagePath,
-          media: currentMedia || deleteField(),
           tokenType: 'character',
           imageSource: 'profile',
           updatedAt: serverTimestamp(),
@@ -1950,11 +2162,11 @@ export default function GrigliataPage() {
     currentCharacterId,
     currentImagePath,
     currentImageUrl,
-    currentMedia,
     currentTokenLabel,
     currentTokenHasImage,
     currentUserId,
     currentUserTokenProfileDoc,
+    isTokenProfilesReady,
   ]);
 
   const legacyCleanupCompletedAt = boardState?.[LEGACY_TOKEN_CLEANUP_FIELD];
@@ -2179,8 +2391,12 @@ export default function GrigliataPage() {
     activeDrawColorAutosaveRef.current = saveRequest;
 
     try {
-      await updateDoc(doc(db, 'users', currentUserId), {
-        'settings.grigliata_draw_color': saveRequest.colorKey,
+      await updateUserSettings({
+        patch: {
+          settings: { grigliata_draw_color: saveRequest.colorKey },
+        },
+        retryKey: `grigliata-draw-color:${currentUserId}:${saveRequest.requestId}`,
+        retryScope: `grigliata-draw-color:${currentUserId}`,
       });
     } catch (error) {
       console.error('Failed to save Grigliata draw color preference:', error);
@@ -2312,8 +2528,12 @@ export default function GrigliataPage() {
   const persistInteractionSharingPreference = useCallback(async (nextIsEnabled) => {
     if (!currentUserId) return;
 
-    await updateDoc(doc(db, 'users', currentUserId), {
-      [`settings.${GRIGLIATA_SHARE_INTERACTIONS_FIELD}`]: nextIsEnabled,
+    await updateUserSettings({
+      patch: {
+        settings: { [GRIGLIATA_SHARE_INTERACTIONS_FIELD]: nextIsEnabled },
+      },
+      retryKey: `grigliata-sharing:${currentUserId}:${nextIsEnabled ? 'on' : 'off'}`,
+      retryScope: `grigliata-sharing:${currentUserId}`,
     });
   }, [currentUserId]);
 
@@ -2324,8 +2544,12 @@ export default function GrigliataPage() {
     setIsMusicMutePending(true);
 
     try {
-      await updateDoc(doc(db, 'users', currentUserId), {
-        [`settings.${GRIGLIATA_MUSIC_MUTED_FIELD}`]: !isMusicMuted,
+      await updateUserSettings({
+        patch: {
+          settings: { [GRIGLIATA_MUSIC_MUTED_FIELD]: !isMusicMuted },
+        },
+        retryKey: `grigliata-mute:${currentUserId}:${isMusicMuted ? 'off' : 'on'}`,
+        retryScope: `grigliata-mute:${currentUserId}`,
       });
     } catch (error) {
       console.error('Failed to update Grigliata music mute preference:', error);
@@ -2508,6 +2732,7 @@ export default function GrigliataPage() {
     if (!backgroundId) return 0;
 
     let deletedCount = 0;
+    let lastPlacementDoc = null;
     const background = backgrounds.find((candidate) => candidate?.id === backgroundId) || null;
     const hasActiveTurnOrderCursor = !!(
       background?.turnOrderActive
@@ -2518,37 +2743,49 @@ export default function GrigliataPage() {
       await clearTurnOrderActiveState(backgroundId);
     }
 
-    await runPaginatedWriteBatch({
-      collectionName: 'grigliata_token_placements',
-      baseConstraints: [
+    while (true) {
+      const snapshot = await getDocs(query(
+        collection(db, 'grigliata_token_placements'),
         where('backgroundId', '==', backgroundId),
-        limit(PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE),
-      ],
-      pageSize: PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE,
-      applyDocument: ({ batch, docSnap }) => {
+        orderBy(documentId()),
+        ...(lastPlacementDoc ? [startAfter(lastPlacementDoc)] : []),
+        limit(PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE)
+      ));
+      if (!snapshot || snapshot.empty) break;
+
+      const pageDocs = snapshot.docs;
+      lastPlacementDoc = pageDocs[pageDocs.length - 1] || null;
+      const pageDeleteCounts = await Promise.all(pageDocs.map(async (docSnap) => {
         const placement = docSnap.data() || {};
-        const ownerUid = placement?.ownerUid;
-        const tokenId = typeof placement?.tokenId === 'string' && placement.tokenId
+        const ownerUid = typeof placement.ownerUid === 'string' ? placement.ownerUid : '';
+        const tokenId = typeof placement.tokenId === 'string' && placement.tokenId
           ? placement.tokenId
           : ownerUid;
-        batch.delete(docSnap.ref);
-        if (typeof ownerUid === 'string' && ownerUid && typeof tokenId === 'string' && tokenId) {
-          batch.set(
-            doc(db, 'users', ownerUid),
-            buildHiddenPlacementSettingsPayload({
-              backgroundId,
-              tokenId,
-              isHidden: false,
-              includeLegacyBackgroundFallback: isLegacyHiddenPlacementToken({ tokenId, ownerUid }),
-            }),
-            { merge: true }
-          );
+        if (!ownerUid || !tokenId) {
+          await deleteDoc(docSnap.ref);
+          return 1;
         }
-        deletedCount += 1;
+        const retryScope = `grigliata-placement:${ownerUid}:${backgroundId}:${tokenId}`;
+        await updateUserSettings({
+          userId: ownerUid,
+          hiddenPlacement: {
+            backgroundId,
+            tokenId,
+            isHidden: false,
+            includeLegacyFallback: isLegacyHiddenPlacementToken({ tokenId, ownerUid }),
+            placementMutation: {
+              action: 'delete',
+              deleteFoeTokenProfile: false,
+            },
+          },
+          retryKey: `${retryScope}:${grigliataPlacementVersionIdentity(placement)}:delete:placement`,
+          retryScope,
+        });
         return 1;
-      },
-      useCursor: false,
-    });
+      }));
+      deletedCount += pageDeleteCounts.reduce((total, count) => total + count, 0);
+      if (pageDocs.length < PLACEMENT_AND_USER_SETTINGS_BATCH_SIZE) break;
+    }
 
     return deletedCount;
   };
@@ -2567,9 +2804,12 @@ export default function GrigliataPage() {
   ), []);
 
   const persistMusicPlaybackState = useCallback(async (nextPlaybackState) => {
+    const playbackStatePayload = { ...nextPlaybackState };
+    delete playbackStatePayload.media;
+
     await setDoc(
       doc(db, GRIGLIATA_MUSIC_PLAYBACK_COLLECTION, GRIGLIATA_MUSIC_PLAYBACK_DOC_ID),
-      nextPlaybackState
+      playbackStatePayload
     );
   }, []);
 
@@ -2578,6 +2818,7 @@ export default function GrigliataPage() {
     if (!targetTrackId) return;
     const sessionPayload = { ...nextPlaybackSession };
     delete sessionPayload.id;
+    delete sessionPayload.media;
 
     await setDoc(
       doc(db, GRIGLIATA_MUSIC_PLAYBACK_SESSION_COLLECTION, targetTrackId),
@@ -2783,6 +3024,61 @@ export default function GrigliataPage() {
 
     try {
       const { durationMs } = await readAudioFileMetadata(file);
+      const musicWriter = await import(
+        /* webpackChunkName: "feature-task07-media" */
+        '../../data/media/musicTrackMediaWriter'
+      );
+      const writerEnabled = await musicWriter.isTask07MusicTrackWriterEnabled({
+        actorUid: currentUserId,
+        role,
+        file,
+      });
+      if (writerEnabled) {
+        const adapter = await import(
+          /* webpackChunkName: "feature-task07-media" */
+          '../../data/media/mediaConsumerAdapter'
+        );
+        const trackRef = doc(collection(db, GRIGLIATA_MUSIC_TRACK_COLLECTION));
+        const lease = task07MediaOperationOwner.start(
+          'Music upload was replaced.'
+        );
+        try {
+          const outcome = await musicWriter.runTask07MusicTrackWriter({
+            actorUid: currentUserId,
+            role,
+            trackId: trackRef.id,
+            file,
+            currentTrack: null,
+            signal: lease.signal,
+            prepareEntity: () => setDoc(trackRef, {
+              name: trackName || 'Untitled Track',
+              fileName: file.name || '',
+              audioUrl: '',
+              audioPath: '',
+              contentType: file.type || '',
+              sizeBytes: file.size || 0,
+              durationMs,
+              musicFolderId: getWritableMusicFolderId(selectedMusicFolderId),
+              musicFolderAssignedAt: null,
+              musicFolderAssignedBy: '',
+              createdAt: serverTimestamp(),
+              createdBy: currentUserId,
+              updatedAt: serverTimestamp(),
+              updatedBy: currentUserId,
+            }),
+            rollbackPreparedEntity: () => deleteDoc(trackRef),
+          });
+          return {
+            ...outcome,
+            attentionMessage: adapter.task07ConsumerNeedsAttention(outcome)
+              ? adapter.describeTask07ConsumerOutcome(outcome, 'Music track')
+              : '',
+          };
+        } finally {
+          lease.release();
+        }
+      }
+
       const { downloadUrl: audioUrl } = await uploadLegacyBlob(storagePath, file);
       uploadedPath = storagePath;
 
@@ -2816,7 +3112,12 @@ export default function GrigliataPage() {
 
       throw error;
     }
-  }, [currentUserId, selectedMusicFolderId]);
+  }, [
+    currentUserId,
+    role,
+    selectedMusicFolderId,
+    task07MediaOperationOwner,
+  ]);
 
   const handleUploadMusicTrackFiles = useCallback(async (files) => {
     if (!isManager || !currentUserId) return;
@@ -2840,11 +3141,15 @@ export default function GrigliataPage() {
 
     setIsMusicUploading(true);
     try {
+      let firstAttentionMessage = '';
       for (const [fileIndex, file] of selectedFiles.entries()) {
-        await uploadMusicTrackFile(file, fileIndex);
+        const outcome = await uploadMusicTrackFile(file, fileIndex);
+        if (!firstAttentionMessage && outcome?.attentionMessage) {
+          firstAttentionMessage = outcome.attentionMessage;
+        }
       }
 
-      setMusicUploadError('');
+      setMusicUploadError(firstAttentionMessage);
     } catch {
       // uploadMusicTrackFile already surfaced the file-specific error and cleanup.
     } finally {
@@ -2871,9 +3176,15 @@ export default function GrigliataPage() {
         startedAtMs: Date.now(),
         updatedAt: serverTimestamp(),
         updatedBy: currentUserId,
+        canonicalOnly: canonicalOnlyMusic,
       })),
     });
-  }, [currentUserId, persistMusicPlaybackSession, runMusicPlaybackAction]);
+  }, [
+    canonicalOnlyMusic,
+    currentUserId,
+    persistMusicPlaybackSession,
+    runMusicPlaybackAction,
+  ]);
 
   const handlePlayMusicTrack = useCallback(async (track) => {
     await handleStartMusicTrack(track, { loop: false });
@@ -2898,9 +3209,16 @@ export default function GrigliataPage() {
         loop: activeSession.loop === true,
         updatedAt: serverTimestamp(),
         updatedBy: currentUserId,
+        canonicalOnly: canonicalOnlyMusic,
       })),
     });
-  }, [currentUserId, musicPlaybackSessionsByTrackId, persistMusicPlaybackSession, runMusicPlaybackAction]);
+  }, [
+    canonicalOnlyMusic,
+    currentUserId,
+    musicPlaybackSessionsByTrackId,
+    persistMusicPlaybackSession,
+    runMusicPlaybackAction,
+  ]);
 
   const handleResumeMusicTrack = useCallback(async (track, playbackSession = null) => {
     const activeSession = playbackSession || musicPlaybackSessionsByTrackId.get(track?.id || '');
@@ -2919,9 +3237,16 @@ export default function GrigliataPage() {
         startedAtMs: Date.now(),
         updatedAt: serverTimestamp(),
         updatedBy: currentUserId,
+        canonicalOnly: canonicalOnlyMusic,
       })),
     });
-  }, [currentUserId, musicPlaybackSessionsByTrackId, persistMusicPlaybackSession, runMusicPlaybackAction]);
+  }, [
+    canonicalOnlyMusic,
+    currentUserId,
+    musicPlaybackSessionsByTrackId,
+    persistMusicPlaybackSession,
+    runMusicPlaybackAction,
+  ]);
 
   const handleSeekMusicTrack = useCallback(async (track, playbackSession = null, nextOffsetMs = 0) => {
     const activeSession = playbackSession || musicPlaybackSessionsByTrackId.get(track?.id || '');
@@ -2944,9 +3269,16 @@ export default function GrigliataPage() {
         startedAtMs: nextStatus === GRIGLIATA_MUSIC_PLAYBACK_STATUSES.PLAYING ? Date.now() : 0,
         updatedAt: serverTimestamp(),
         updatedBy: currentUserId,
+        canonicalOnly: canonicalOnlyMusic,
       })),
     });
-  }, [currentUserId, musicPlaybackSessionsByTrackId, persistMusicPlaybackSession, runMusicPlaybackAction]);
+  }, [
+    canonicalOnlyMusic,
+    currentUserId,
+    musicPlaybackSessionsByTrackId,
+    persistMusicPlaybackSession,
+    runMusicPlaybackAction,
+  ]);
 
   const handleStopMusicTrack = useCallback(async (track, playbackSession = null) => {
     const targetTrackId = playbackSession?.trackId || track?.id || '';
@@ -2981,6 +3313,7 @@ export default function GrigliataPage() {
           volume: getCurrentSharedMusicVolume(),
           updatedAt: serverTimestamp(),
           updatedBy: currentUserId,
+          canonicalOnly: canonicalOnlyMusic,
         }));
       }
 
@@ -2993,6 +3326,7 @@ export default function GrigliataPage() {
     }
   }, [
     clearMusicVolumeWriteTimer,
+    canonicalOnlyMusic,
     currentUserId,
     getCurrentSharedMusicVolume,
     isManager,
@@ -3706,25 +4040,24 @@ export default function GrigliataPage() {
     setSavingSelectedTokenDetailsId(tokenId);
     try {
       if (tokenType === 'character') {
-        await Promise.all([
-          updateDoc(doc(db, 'users', ownerUid || tokenId), {
-            'stats.hpCurrent': normalizeCurrentResourceValue(hpCurrent, 0),
-            'stats.manaCurrent': normalizeCurrentResourceValue(manaCurrent, 0),
-            'stats.barrieraCurrent': normalizeCurrentResourceValue(shieldCurrent, 0),
-          }),
-          setDoc(doc(db, 'grigliata_tokens', tokenId), {
-            ownerUid: ownerUid || tokenId,
+        await updateGrigliataCharacterResources({
+          userId: ownerUid || tokenId,
+          backgroundId: activeBackgroundId,
+          tokenId,
+          resources: {
+            hpCurrent: normalizeCurrentResourceValue(hpCurrent, 0),
+            manaCurrent: normalizeCurrentResourceValue(manaCurrent, 0),
+            barrieraCurrent: normalizeCurrentResourceValue(shieldCurrent, 0),
+          },
+          tokenPatch: {
             characterId: characterId || '',
             label: label || 'Character',
             imageUrl: imageUrl || '',
             imagePath: imagePath || '',
-            tokenType: 'character',
-            imageSource: 'profile',
             notes: normalizeTokenNotesValue(notes),
-            updatedAt: serverTimestamp(),
-            updatedBy: currentUserId,
-          }, { merge: true }),
-        ]);
+          },
+          retryKey: `grigliata-character:${activeBackgroundId}:${tokenId}`,
+        });
 
         return true;
       }
@@ -4363,8 +4696,7 @@ export default function GrigliataPage() {
       return userData;
     }
 
-    const userSnapshot = await getDoc(doc(db, 'users', ownerUid));
-    return userSnapshot.exists() ? userSnapshot.data() : null;
+    return readUserDomainOnce(ownerUid, USER_DATA_DOMAINS.RESOURCES);
   }, [currentUserId, userData]);
 
   const buildCharacterShieldTurnEffect = useCallback((sourceUserData, turnCounter) => {
@@ -4401,10 +4733,14 @@ export default function GrigliataPage() {
 
     const nextTurnCounter = normalizeTurnCounter(placementContext.turnCounter, 0) + 1;
     let nextTurnEffects = normalizeTurnEffects(placementContext.turnEffects);
+    const hadShieldTurnEffect = !!getTurnEffectByKind(
+      nextTurnEffects,
+      TURN_EFFECT_KIND_SHIELD
+    );
 
     if (
       boardToken.tokenType === 'character'
-      && !getTurnEffectByKind(nextTurnEffects, TURN_EFFECT_KIND_SHIELD)
+      && !hadShieldTurnEffect
     ) {
       const sourceUserData = await getCharacterTurnEffectSource(placementContext.ownerUid);
       const shieldTurnEffect = buildCharacterShieldTurnEffect(sourceUserData, nextTurnCounter);
@@ -4424,8 +4760,8 @@ export default function GrigliataPage() {
       nextTurnCounter,
       nextTurnEffects: reconciledTurnEffects.turnEffects,
       expiredTurnEffects: reconciledTurnEffects.expiredEffects,
-      activeShieldEffect: getTurnEffectByKind(reconciledTurnEffects.turnEffects, TURN_EFFECT_KIND_SHIELD),
       expiredShieldEffect: getTurnEffectByKind(reconciledTurnEffects.expiredEffects, TURN_EFFECT_KIND_SHIELD),
+      shouldConsumeCharacterTurnEffects: boardToken.tokenType === 'character' && hadShieldTurnEffect,
     };
   }, [
     boardTokensById,
@@ -4474,9 +4810,31 @@ export default function GrigliataPage() {
       placementContext,
       nextTurnCounter,
       nextTurnEffects,
-      activeShieldEffect,
       expiredShieldEffect,
+      shouldConsumeCharacterTurnEffects,
     } = progressState;
+
+    if (shouldConsumeCharacterTurnEffects) {
+      await consumeTurnEffects({
+        userId: placementContext.ownerUid,
+        grigliataTransition: {
+          backgroundId: targetBackgroundId,
+          tokenId: entry.tokenId,
+          expectedPreviousActiveTokenId: targetCursor?.tokenId || '',
+          expectedTurnCounter: nextTurnCounter,
+          preserveStartedAt,
+        },
+        retryKey: [
+          `grigliata-turn:${targetBackgroundId}:${entry.tokenId}`,
+          grigliataTimestampIdentity(targetCursor?.startedAt) ||
+            grigliataTimestampIdentity(placementContext.turnOrderJoinedAt) || 'legacy-session',
+          nextTurnCounter,
+        ].join(':'),
+        retryScope: `grigliata-turn:${targetBackgroundId}:${entry.tokenId}`,
+      });
+      return;
+    }
+
     const batch = writeBatch(db);
 
     batch.set(doc(db, 'grigliata_backgrounds', targetBackgroundId), {
@@ -4506,31 +4864,7 @@ export default function GrigliataPage() {
       { merge: true }
     );
 
-    if (boardToken.tokenType === 'character') {
-      if (activeShieldEffect) {
-        batch.set(doc(db, 'users', placementContext.ownerUid), {
-          active_turn_effect: {
-            barriera: {
-              totalTurns: activeShieldEffect.totalTurns,
-              remainingTurns: activeShieldEffect.remainingTurns,
-            },
-          },
-        }, { merge: true });
-      } else if (expiredShieldEffect) {
-        batch.set(doc(db, 'users', placementContext.ownerUid), {
-          stats: {
-            barrieraCurrent: 0,
-            barrieraTotal: 0,
-          },
-          active_turn_effect: {
-            barriera: {
-              totalTurns: 0,
-              remainingTurns: 0,
-            },
-          },
-        }, { merge: true });
-      }
-    } else if (boardToken.tokenType === 'custom' && expiredShieldEffect) {
+    if (boardToken.tokenType === 'custom' && expiredShieldEffect) {
       batch.set(doc(db, 'grigliata_tokens', entry.tokenId), {
         stats: {
           shieldCurrent: 0,
@@ -4643,6 +4977,7 @@ export default function GrigliataPage() {
           hasShieldTurnEffect,
           ownerUid: placement.ownerUid,
           placementId: placement.id || buildPlacementDocId(targetBackgroundId, resolvedTokenId),
+          turnOrderJoinedAt: placement?.turnOrderJoinedAt || null,
           col: Number.isFinite(placement?.col) ? placement.col : 0,
           row: Number.isFinite(placement?.row) ? placement.row : 0,
           isVisibleToPlayers: placement?.isVisibleToPlayers !== false,
@@ -4651,12 +4986,6 @@ export default function GrigliataPage() {
         };
       })
       .filter(Boolean);
-    const characterOwnerUidsToClearShieldTimers = [...new Set(
-      targetPlacements
-        .filter(({ tokenType }) => tokenType === 'character')
-        .map(({ ownerUid }) => ownerUid)
-        .filter(Boolean)
-    )];
     const characterOwnerUidsToClearShieldStats = new Set(
       targetPlacements
         .filter(({ tokenType, hasShieldTurnEffect }) => tokenType === 'character' && hasShieldTurnEffect)
@@ -4696,32 +5025,22 @@ export default function GrigliataPage() {
         await batch.commit();
       }
 
-      for (let index = 0; index < characterOwnerUidsToClearShieldTimers.length; index += FIRESTORE_BATCH_SIZE) {
-        const batch = writeBatch(db);
-
-        characterOwnerUidsToClearShieldTimers
-          .slice(index, index + FIRESTORE_BATCH_SIZE)
-          .forEach((ownerUid) => {
-            batch.set(doc(db, 'users', ownerUid), {
-              ...(characterOwnerUidsToClearShieldStats.has(ownerUid)
-                ? {
-                    stats: {
-                      barrieraCurrent: 0,
-                      barrieraTotal: 0,
-                    },
-                  }
-                : {}),
-              active_turn_effect: {
-                barriera: {
-                  totalTurns: 0,
-                  remainingTurns: 0,
-                },
-              },
-            }, { merge: true });
-          });
-
-        await batch.commit();
-      }
+      await Promise.all([...characterOwnerUidsToClearShieldStats].map((ownerUid) => updateResource({
+        userId: ownerUid,
+        resource: 'barriera',
+        mode: 'set',
+        value: 0,
+        totalValue: 0,
+        remainingTurns: 0,
+        totalTurns: 0,
+        retryKey: [
+          `grigliata-reset-shield:${targetBackgroundId}:${ownerUid}`,
+          grigliataTimestampIdentity(
+            targetPlacements.find((placement) => placement.ownerUid === ownerUid)?.turnOrderJoinedAt
+          ) || 'legacy-session',
+        ].join(':'),
+        retryScope: `grigliata-reset-shield:${targetBackgroundId}:${ownerUid}`,
+      })));
 
       for (let index = 0; index < customTokenIdsToClearShieldStats.length; index += FIRESTORE_BATCH_SIZE) {
         const batch = writeBatch(db);
@@ -4831,13 +5150,13 @@ export default function GrigliataPage() {
     if (!isOwnedByCurrentUser) {
       if (!isManager || !ownerUid) return null;
 
-      const [userSnapshot, loadedDiceMetadata] = await Promise.all([
-        getDoc(doc(db, 'users', ownerUid)),
+      const [progression, loadedDiceMetadata] = await Promise.all([
+        readUserDomainOnce(ownerUid, USER_DATA_DOMAINS.PROGRESSION),
         loadDiceMetadata(),
       ]);
-      if (!userSnapshot.exists()) return null;
+      if (!progression) return null;
 
-      characterData = userSnapshot.data();
+      characterData = progression;
       nextDadiAnimaByLevel = loadedDiceMetadata;
     } else {
       nextDadiAnimaByLevel = await loadDiceMetadata();
@@ -5262,8 +5581,11 @@ export default function GrigliataPage() {
         },
       });
 
-      // Canonical objects are retired by the server after this document
-      // reference is deleted; direct client deletion is legacy-only.
+      await deleteDoc(doc(db, 'grigliata_backgrounds', background.id));
+
+      // The deleted Firestore reference drives durable server cleanup. Keep
+      // this eager legacy delete only as a latency optimization, after the
+      // owning document is safely gone.
       if (
         background.imagePath
         && !hasCanonicalTask07MediaAssetId(background)
@@ -5272,12 +5594,10 @@ export default function GrigliataPage() {
           await deleteLegacyStoragePath(background.imagePath);
         } catch (storageError) {
           if (storageError?.code !== 'storage/object-not-found') {
-            throw storageError;
+            console.warn('Eager background media cleanup failed:', storageError);
           }
         }
       }
-
-      await deleteDoc(doc(db, 'grigliata_backgrounds', background.id));
 
       if (background.id === activeBackgroundId) {
         await setDoc(doc(db, 'grigliata_state', 'current'), {
@@ -5353,7 +5673,7 @@ export default function GrigliataPage() {
     importedAt = null,
     updatedAt = null,
   } = {}) => {
-    if (!selectedBackground?.id) {
+    if (!lightingSheetBackground?.id) {
       throw new Error('Select a background before importing lighting metadata.');
     }
 
@@ -5364,7 +5684,7 @@ export default function GrigliataPage() {
     const rawJson = await file.text();
     const parsedJson = parseDungeonAlchemistLightingJson(rawJson);
     return normalizeDungeonAlchemistLightingMetadata(parsedJson, {
-      background: selectedBackground,
+      background: lightingSheetBackground,
       fileName: file.name || '',
       importedAt,
       importedBy: user?.uid || '',
@@ -5374,10 +5694,14 @@ export default function GrigliataPage() {
   };
 
   const handleLightingFileChange = async (event) => {
+    const parseGeneration = lightingFileParseGenerationRef.current + 1;
+    lightingFileParseGenerationRef.current = parseGeneration;
+    const parseBackgroundId = lightingSheetBackgroundIdRef.current;
     const file = event.target.files?.[0] || null;
     setLightingSelectedFile(file);
     setLightingImportDraft(null);
     setLightingImportError('');
+    setIsLightingImportDraftDirty(false);
 
     if (!file) {
       return;
@@ -5385,14 +5709,25 @@ export default function GrigliataPage() {
 
     try {
       const metadataDraft = await buildLightingMetadataFromFile(file);
+      if (
+        lightingFileParseGenerationRef.current !== parseGeneration
+        || lightingSheetBackgroundIdRef.current !== parseBackgroundId
+      ) return;
       setLightingImportDraft(metadataDraft);
+      setIsLightingImportDraftDirty(true);
     } catch (error) {
+      if (
+        lightingFileParseGenerationRef.current !== parseGeneration
+        || lightingSheetBackgroundIdRef.current !== parseBackgroundId
+      ) return;
       setLightingImportError(error?.message || 'Unable to parse that lighting metadata file.');
     }
   };
 
   const handleImportLightingMetadata = async () => {
-    if (!isManager || !user?.uid || !selectedBackground?.id) return;
+    if (!isManager || !user?.uid || !lightingSheetBackground?.id || isImportingLighting) return;
+    const importGeneration = lightingFileParseGenerationRef.current;
+    const importBackgroundId = lightingSheetBackground.id;
 
     setLightingImportError('');
     setBoardError('');
@@ -5412,35 +5747,46 @@ export default function GrigliataPage() {
       });
 
       await setDoc(
-        doc(db, GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION, selectedBackground.id),
+        doc(db, GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION, importBackgroundId),
         metadata,
         { merge: true }
       );
       await setDoc(
-        doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, selectedBackground.id),
+        doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, importBackgroundId),
         renderInput,
         { merge: true }
       );
       await setDoc(
-        doc(db, GRIGLIATA_WALL_STATE_COLLECTION, selectedBackground.id),
+        doc(db, GRIGLIATA_WALL_STATE_COLLECTION, importBackgroundId),
         {
-          backgroundId: selectedBackground.id,
+          backgroundId: importBackgroundId,
           segments: {},
           updatedAt,
           updatedBy: user.uid,
         }
       );
-      await updateDoc(doc(db, 'grigliata_backgrounds', selectedBackground.id), {
+      await updateDoc(doc(db, 'grigliata_backgrounds', importBackgroundId), {
         lightingSummary: summary,
         lightingEnabled: true,
         updatedAt: serverTimestamp(),
         updatedBy: user.uid,
       });
 
-      setLightingImportDraft(metadata);
+      if (
+        lightingFileParseGenerationRef.current === importGeneration
+        && lightingSheetBackgroundIdRef.current === importBackgroundId
+      ) {
+        setLightingImportDraft(metadata);
+        setIsLightingImportDraftDirty(false);
+      }
     } catch (error) {
       console.error('Failed to import Grigliata lighting metadata:', error);
-      setLightingImportError(error?.message || 'Unable to import lighting metadata.');
+      if (
+        lightingFileParseGenerationRef.current === importGeneration
+        && lightingSheetBackgroundIdRef.current === importBackgroundId
+      ) {
+        setLightingImportError(error?.message || 'Unable to import lighting metadata.');
+      }
     } finally {
       setIsImportingLighting(false);
     }
@@ -5451,15 +5797,15 @@ export default function GrigliataPage() {
   };
 
   const handleToggleLightingEnabled = async () => {
-    if (!isManager || !user?.uid || !selectedBackground?.id || isLightingEnabledPending) return;
+    if (!isManager || !user?.uid || !lightingSheetBackground?.id || isLightingEnabledPending) return;
 
     setLightingImportError('');
     setBoardError('');
     setIsLightingEnabledPending(true);
 
     try {
-      await updateDoc(doc(db, 'grigliata_backgrounds', selectedBackground.id), {
-        lightingEnabled: selectedBackground.lightingEnabled === false,
+      await updateDoc(doc(db, 'grigliata_backgrounds', lightingSheetBackground.id), {
+        lightingEnabled: lightingSheetBackground.lightingEnabled === false,
         updatedAt: serverTimestamp(),
         updatedBy: user.uid,
       });
@@ -5472,15 +5818,15 @@ export default function GrigliataPage() {
   };
 
   const handleToggleFogOfWarEnabled = async () => {
-    if (!isManager || !user?.uid || !selectedBackground?.id || isFogOfWarEnabledPending) return;
+    if (!isManager || !user?.uid || !lightingSheetBackground?.id || isFogOfWarEnabledPending) return;
 
     setLightingImportError('');
     setBoardError('');
     setIsFogOfWarEnabledPending(true);
 
     try {
-      await updateDoc(doc(db, 'grigliata_backgrounds', selectedBackground.id), {
-        fogOfWarEnabled: selectedBackground.fogOfWarEnabled === false,
+      await updateDoc(doc(db, 'grigliata_backgrounds', lightingSheetBackground.id), {
+        fogOfWarEnabled: lightingSheetBackground.fogOfWarEnabled === false,
         updatedAt: serverTimestamp(),
         updatedBy: user.uid,
       });
@@ -5735,23 +6081,27 @@ export default function GrigliataPage() {
     nextWalls = null,
     nextDarknessSources = null,
     nextScene = null,
+    targetBackgroundId = activeBackgroundId,
+    targetGrid = grid,
+    targetLightingMetadata = lightingMetadata,
+    targetLightingRenderInput = lightingRenderInput,
     updatedAt,
   } = {}) => {
-    if (!activeBackgroundId) {
+    if (!targetBackgroundId) {
       throw new Error('Select a background before editing lighting metadata.');
     }
 
-    const snapshotMetadata = lightingMetadata && typeof lightingMetadata === 'object'
-      ? lightingMetadata
+    const snapshotMetadata = targetLightingMetadata && typeof targetLightingMetadata === 'object'
+      ? targetLightingMetadata
       : {};
     const baseMetadata = { ...snapshotMetadata };
     delete baseMetadata.id;
-    const normalizedGrid = normalizeGridConfig(baseMetadata.grid || grid);
+    const normalizedGrid = normalizeGridConfig(baseMetadata.grid || targetGrid);
     const metadataGrid = {
       ...(baseMetadata.grid && typeof baseMetadata.grid === 'object' ? baseMetadata.grid : {}),
       ...normalizedGrid,
     };
-    const scene = nextScene || baseMetadata.scene || lightingRenderInput?.scene || {
+    const scene = nextScene || baseMetadata.scene || targetLightingRenderInput?.scene || {
       darkness: 0.6,
       globalLight: false,
     };
@@ -5759,22 +6109,22 @@ export default function GrigliataPage() {
       ? normalizeEditableWallSegments(nextWalls)
       : (Array.isArray(baseMetadata.walls)
       ? baseMetadata.walls
-      : (Array.isArray(lightingRenderInput?.walls) ? lightingRenderInput.walls : []));
+      : (Array.isArray(targetLightingRenderInput?.walls) ? targetLightingRenderInput.walls : []));
     const lights = Array.isArray(nextLights)
       ? normalizeEditableLightSources(nextLights)
       : (Array.isArray(baseMetadata.lights)
         ? normalizeEditableLightSources(baseMetadata.lights)
-        : normalizeEditableLightSources(lightingRenderInput?.lights));
+        : normalizeEditableLightSources(targetLightingRenderInput?.lights));
     const darknessSources = Array.isArray(nextDarknessSources)
       ? normalizeEditableDarknessSources(nextDarknessSources)
       : (Array.isArray(baseMetadata.darknessSources)
         ? normalizeEditableDarknessSources(baseMetadata.darknessSources)
-        : normalizeEditableDarknessSources(lightingRenderInput?.darknessSources));
+        : normalizeEditableDarknessSources(targetLightingRenderInput?.darknessSources));
 
     return {
       ...baseMetadata,
       schemaVersion: baseMetadata.schemaVersion || 1,
-      backgroundId: activeBackgroundId,
+      backgroundId: targetBackgroundId,
       source: baseMetadata.source || {
         type: 'manual',
         importedAt: null,
@@ -5792,10 +6142,7 @@ export default function GrigliataPage() {
     activeBackgroundId,
     grid,
     lightingMetadata,
-    lightingRenderInput?.darknessSources,
-    lightingRenderInput?.lights,
-    lightingRenderInput?.scene,
-    lightingRenderInput?.walls,
+    lightingRenderInput,
     user?.uid,
   ]);
 
@@ -5897,10 +6244,11 @@ export default function GrigliataPage() {
     return persistLightSources(nextLights);
   }, [activeBackgroundId, isManager, lightingMetadata?.lights, persistLightSources]);
 
-  const handleDuplicateLightSource = useCallback(async (lightId) => {
+  const handleDuplicateLightSource = useCallback(async (lightId, draftPatch = {}) => {
     if (!isManager || !activeBackgroundId || !lightId) return false;
 
-    const nextLights = duplicateLightSource(lightingMetadata?.lights, lightId, { grid });
+    const patchedLights = updateLightSource(lightingMetadata?.lights, lightId, draftPatch);
+    const nextLights = duplicateLightSource(patchedLights, lightId, { grid });
     return persistLightSources(nextLights);
   }, [activeBackgroundId, grid, isManager, lightingMetadata?.lights, persistLightSources]);
 
@@ -5916,8 +6264,22 @@ export default function GrigliataPage() {
   ), [buildLightingMetadataForEdits]);
 
   const buildLightingMetadataForScene = useCallback((nextScene, updatedAt) => (
-    buildLightingMetadataForEdits({ nextScene, updatedAt })
-  ), [buildLightingMetadataForEdits]);
+    buildLightingMetadataForEdits({
+      nextScene,
+      targetBackgroundId: lightingSheetBackground?.id || '',
+      targetGrid: lightingSheetBackground?.grid,
+      targetLightingMetadata: lightingSheetMetadata,
+      targetLightingRenderInput: isLightingSheetTargetActive ? lightingRenderInput : null,
+      updatedAt,
+    })
+  ), [
+    buildLightingMetadataForEdits,
+    isLightingSheetTargetActive,
+    lightingRenderInput,
+    lightingSheetBackground?.grid,
+    lightingSheetBackground?.id,
+    lightingSheetMetadata,
+  ]);
 
   const persistDarknessSources = useCallback(async (nextDarknessSources, {
     enableLighting = false,
@@ -5972,7 +6334,8 @@ export default function GrigliataPage() {
   ]);
 
   const persistSceneLighting = useCallback(async (nextScene) => {
-    if (!isManager || !user?.uid || !activeBackgroundId || isSceneLightingMutationPending) {
+    const targetBackgroundId = lightingSheetBackground?.id || '';
+    if (!isManager || !user?.uid || !targetBackgroundId || isSceneLightingMutationPending) {
       return false;
     }
 
@@ -5990,16 +6353,16 @@ export default function GrigliataPage() {
       const summary = buildGrigliataLightingSummary(metadata, metadata.source?.importedAt || null);
 
       await setDoc(
-        doc(db, GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION, activeBackgroundId),
+        doc(db, GRIGLIATA_BACKGROUND_LIGHTING_COLLECTION, targetBackgroundId),
         metadata,
         { merge: true }
       );
       await setDoc(
-        doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, activeBackgroundId),
+        doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, targetBackgroundId),
         renderInput,
         { merge: true }
       );
-      await updateDoc(doc(db, 'grigliata_backgrounds', activeBackgroundId), {
+      await updateDoc(doc(db, 'grigliata_backgrounds', targetBackgroundId), {
         lightingSummary: summary,
         updatedAt: serverTimestamp(),
         updatedBy: user.uid,
@@ -6013,10 +6376,10 @@ export default function GrigliataPage() {
       setIsSceneLightingMutationPending(false);
     }
   }, [
-    activeBackgroundId,
     buildLightingMetadataForScene,
     isManager,
     isSceneLightingMutationPending,
+    lightingSheetBackground?.id,
     user?.uid,
   ]);
 
@@ -6062,10 +6425,15 @@ export default function GrigliataPage() {
     return persistDarknessSources(nextDarknessSources);
   }, [activeBackgroundId, isManager, lightingMetadata?.darknessSources, persistDarknessSources]);
 
-  const handleDuplicateDarknessSource = useCallback(async (darknessId) => {
+  const handleDuplicateDarknessSource = useCallback(async (darknessId, draftPatch = {}) => {
     if (!isManager || !activeBackgroundId || !darknessId) return false;
 
-    const nextDarknessSources = duplicateDarknessSource(lightingMetadata?.darknessSources, darknessId, { grid });
+    const patchedDarknessSources = updateDarknessSource(
+      lightingMetadata?.darknessSources,
+      darknessId,
+      draftPatch
+    );
+    const nextDarknessSources = duplicateDarknessSource(patchedDarknessSources, darknessId, { grid });
     return persistDarknessSources(nextDarknessSources);
   }, [activeBackgroundId, grid, isManager, lightingMetadata?.darknessSources, persistDarknessSources]);
 
@@ -6077,21 +6445,18 @@ export default function GrigliataPage() {
   }, [activeBackgroundId, isManager, lightingMetadata?.darknessSources, persistDarknessSources]);
 
   const handleUpdateSceneLighting = useCallback(async (patch) => {
-    if (!isManager || !activeBackgroundId || selectedBackground?.id !== activeBackgroundId) return false;
+    if (!isManager || !lightingSheetBackground?.id || !lightingSheetSceneLighting) return false;
 
-    const currentScene = normalizeSceneLightingSettings(lightingMetadata?.scene || enabledLightingRenderInput?.scene);
     const nextScene = normalizeSceneLightingSettings({
-      ...currentScene,
+      ...lightingSheetSceneLighting,
       ...(patch || {}),
     });
     return persistSceneLighting(nextScene);
   }, [
-    activeBackgroundId,
-    enabledLightingRenderInput?.scene,
     isManager,
-    lightingMetadata?.scene,
+    lightingSheetBackground?.id,
+    lightingSheetSceneLighting,
     persistSceneLighting,
-    selectedBackground?.id,
   ]);
 
   const buildLightingMetadataForWallSources = useCallback((nextWalls, updatedAt) => (
@@ -6196,10 +6561,11 @@ export default function GrigliataPage() {
     return persistWallSources(nextWalls);
   }, [activeBackgroundId, isManager, lightingMetadata?.walls, persistWallSources]);
 
-  const handleDuplicateWallSegment = useCallback(async (wallId) => {
+  const handleDuplicateWallSegment = useCallback(async (wallId, draftPatch = {}) => {
     if (!isManager || !activeBackgroundId || !wallId) return false;
 
-    const nextWalls = duplicateWallSegment(lightingMetadata?.walls, wallId, { grid });
+    const patchedWalls = updateWallSegment(lightingMetadata?.walls, wallId, draftPatch);
+    const nextWalls = duplicateWallSegment(patchedWalls, wallId, { grid });
     return persistWallSources(nextWalls);
   }, [activeBackgroundId, grid, isManager, lightingMetadata?.walls, persistWallSources]);
 
@@ -6211,19 +6577,33 @@ export default function GrigliataPage() {
     if (!didPersistWalls) return false;
 
     try {
-      const updatedAt = serverTimestamp();
-      await setDoc(
-        doc(db, GRIGLIATA_WALL_STATE_COLLECTION, activeBackgroundId),
-        {
-          backgroundId: activeBackgroundId,
-          segments: {
-            [wallId]: deleteField(),
+      const wallStateDocRef = doc(db, GRIGLIATA_WALL_STATE_COLLECTION, activeBackgroundId);
+      await runTransaction(db, async (transaction) => {
+        const wallStateSnapshot = await transaction.get(wallStateDocRef);
+        if (!wallStateSnapshot.exists()) return;
+
+        const currentSegments = wallStateSnapshot.data()?.segments;
+        if (
+          !currentSegments
+          || typeof currentSegments !== 'object'
+          || !Object.prototype.hasOwnProperty.call(currentSegments, wallId)
+        ) {
+          return;
+        }
+
+        const nextSegments = { ...currentSegments };
+        delete nextSegments[wallId];
+        transaction.set(
+          wallStateDocRef,
+          {
+            backgroundId: activeBackgroundId,
+            segments: nextSegments,
+            updatedAt: serverTimestamp(),
+            updatedBy: user.uid,
           },
-          updatedAt,
-          updatedBy: user.uid,
-        },
-        { merge: true }
-      );
+          { merge: true }
+        );
+      });
     } catch (error) {
       console.error('Failed to clear Grigliata wall runtime state:', error);
       setBoardError('Unable to clear that wall source runtime state right now.');
@@ -6234,9 +6614,9 @@ export default function GrigliataPage() {
   }, [activeBackgroundId, isManager, lightingMetadata?.walls, persistWallSources, user?.uid]);
 
   const handleResetFogOfWar = async () => {
-    if (!isManager || !user?.uid || !selectedBackground?.id || isFogResetPending) return;
+    if (!isManager || !user?.uid || !lightingSheetBackground?.id || isFogResetPending) return;
 
-    const confirmed = window.confirm(`Reset explored fog for "${selectedBackground.name || 'Untitled Map'}"?`);
+    const confirmed = window.confirm(`Reset explored fog for "${lightingSheetBackground.name || 'Untitled Map'}"?`);
     if (!confirmed) return;
 
     setLightingImportError('');
@@ -6246,7 +6626,7 @@ export default function GrigliataPage() {
     try {
       await runPaginatedWriteBatch({
         collectionName: GRIGLIATA_FOG_OF_WAR_COLLECTION,
-        baseConstraints: [where('backgroundId', '==', selectedBackground.id)],
+        baseConstraints: [where('backgroundId', '==', lightingSheetBackground.id)],
         applyDocument: ({ batch, docSnap }) => {
           batch.delete(docSnap.ref);
           return 1;
@@ -6254,7 +6634,7 @@ export default function GrigliataPage() {
       });
       await runPaginatedWriteBatch({
         collectionName: GRIGLIATA_FOG_MEMORY_TILES_COLLECTION,
-        baseConstraints: [where('backgroundId', '==', selectedBackground.id)],
+        baseConstraints: [where('backgroundId', '==', lightingSheetBackground.id)],
         applyDocument: ({ batch, docSnap }) => {
           batch.delete(docSnap.ref);
           return 1;
@@ -6269,10 +6649,10 @@ export default function GrigliataPage() {
   };
 
   const handleApplyLightingCalibration = async () => {
-    if (!isManager || !user?.uid || !selectedBackground?.id) return;
+    if (!isManager || !user?.uid || !lightingSheetBackground?.id) return;
 
     const calibrationSource = lightingImportDraft
-      || (selectedBackground.id === activeBackgroundId ? lightingMetadata : null);
+      || lightingSheetMetadata;
 
     if (!calibrationSource?.grid) {
       setLightingImportError('Import lighting metadata for this background before applying JSON calibration.');
@@ -6287,25 +6667,25 @@ export default function GrigliataPage() {
     try {
       const normalizedCalibration = normalizeGridConfig(calibrationSource.grid);
       const updatedAt = serverTimestamp();
-      const renderInput = selectedBackground.id === activeBackgroundId && lightingMetadata
-        ? buildGrigliataLightingRenderInput(lightingMetadata, {
+      const renderInput = lightingSheetMetadata
+        ? buildGrigliataLightingRenderInput(lightingSheetMetadata, {
           updatedAt,
           updatedBy: user.uid,
         })
         : null;
 
-      if (selectedBackground.id === activeBackgroundId) {
+      if (lightingSheetBackground.id === activeBackgroundId) {
         await flushPendingGridSizeAutosave();
       }
 
-      await updateDoc(doc(db, 'grigliata_backgrounds', selectedBackground.id), {
+      await updateDoc(doc(db, 'grigliata_backgrounds', lightingSheetBackground.id), {
         grid: normalizedCalibration,
         updatedAt,
         updatedBy: user.uid,
       });
       if (renderInput) {
         await setDoc(
-          doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, selectedBackground.id),
+          doc(db, GRIGLIATA_LIGHTING_RENDER_INPUT_COLLECTION, lightingSheetBackground.id),
           renderInput,
           { merge: true }
         );
@@ -6313,9 +6693,9 @@ export default function GrigliataPage() {
 
       setCalibrationDraft(normalizedCalibration);
 
-      if (selectedBackground.id === activeBackgroundId) {
+      if (lightingSheetBackground.id === activeBackgroundId) {
         setActiveGridSizeOverride({
-          backgroundId: selectedBackground.id,
+          backgroundId: lightingSheetBackground.id,
           grid: normalizedCalibration,
         });
       }
@@ -6350,7 +6730,8 @@ export default function GrigliataPage() {
       const snapped = snapBoardPointToGrid(worldPoint, grid, 'center');
 
       try {
-        await spawnGrigliataFoeTokenCallable({
+        await spawnGrigliataFoeToken({
+          actorUid: currentUserId,
           foeId,
           backgroundId: activeBackgroundId,
           col: snapped.col,
@@ -6431,6 +6812,20 @@ export default function GrigliataPage() {
           )
       );
     }
+  };
+
+  const handlePlaceTrayTokenAtDefault = (trayToken) => {
+    const cellSizePx = Math.max(1, Number(grid?.cellSizePx) || DEFAULT_GRID.cellSizePx);
+    const offsetXPx = Number(grid?.offsetXPx) || 0;
+    const offsetYPx = Number(grid?.offsetYPx) || 0;
+    const slotIndex = boardTokens.length;
+    const slotColumn = 2 + (slotIndex % 8);
+    const slotRow = 2 + (Math.floor(slotIndex / 8) % 8);
+
+    return handlePlaceTrayToken(trayToken, {
+      x: offsetXPx + (slotColumn * cellSizePx),
+      y: offsetYPx + (slotRow * cellSizePx),
+    });
   };
 
   const handleMoveTokens = async (moves) => {
@@ -6772,6 +7167,51 @@ export default function GrigliataPage() {
     user?.uid,
   ]);
 
+  const handleOpenLighting = useCallback((backgroundId, triggerElement = null) => {
+    if (!isManager || !backgroundId) return;
+
+    lightingFileParseGenerationRef.current += 1;
+    lightingSheetBackgroundIdRef.current = backgroundId;
+    lightingSheetTriggerRef.current = findLightingTriggerElement(backgroundId) || triggerElement;
+    setSelectedBackgroundId(backgroundId);
+    setLightingSheetBackgroundId(backgroundId);
+    setLightingSelectedFile(null);
+    setLightingImportDraft(null);
+    setLightingImportError('');
+    setIsLightingImportDraftDirty(false);
+  }, [isManager, setSelectedBackgroundId]);
+
+  const handleCloseLighting = useCallback(() => {
+    if (isImportingLighting) return;
+
+    const returnFocusElement = findLightingTriggerElement(lightingSheetBackgroundIdRef.current)
+      || lightingSheetTriggerRef.current;
+    lightingFileParseGenerationRef.current += 1;
+    lightingSheetBackgroundIdRef.current = '';
+    setLightingSheetBackgroundId('');
+    setLightingSelectedFile(null);
+    setLightingImportDraft(null);
+    setLightingImportError('');
+    setIsLightingImportDraftDirty(false);
+
+    const restoreLightingTriggerFocus = (attempt = 0) => {
+      if (lightingSheetBackgroundIdRef.current || !returnFocusElement?.isConnected) return;
+
+      if (
+        typeof window.getComputedStyle === 'function'
+        && window.getComputedStyle(returnFocusElement).visibility === 'hidden'
+      ) {
+        if (attempt < 4) {
+          setTimeout(() => restoreLightingTriggerFocus(attempt + 1), 16);
+        }
+        return;
+      }
+
+      focusLightingTriggerWithoutScrolling(returnFocusElement);
+    };
+    setTimeout(restoreLightingTriggerFocus, 0);
+  }, [isImportingLighting]);
+
   const handleOpenCalibration = useCallback((backgroundId) => {
     if (backgroundId) {
       setSelectedBackgroundId(backgroundId);
@@ -6780,7 +7220,7 @@ export default function GrigliataPage() {
     if (isManager) {
       setActiveSidebarTab('calibration');
     }
-  }, [isManager, setSelectedBackgroundId]);
+  }, [isManager, setActiveSidebarTab, setSelectedBackgroundId]);
 
   if (loading) {
     return <div className="px-6 py-8 text-white">Loading Grigliata...</div>;
@@ -6952,7 +7392,17 @@ export default function GrigliataPage() {
             </div>
           </div>
 
-          <aside className="flex flex-col gap-3 xl:h-full xl:min-h-0">
+          <aside
+            data-testid="grigliata-sidebar"
+            className="relative xl:h-full xl:min-h-0"
+          >
+            <div
+              data-testid="grigliata-sidebar-content"
+              aria-hidden={!!lightingSheetBackground}
+              className={`flex flex-col gap-3 xl:h-full xl:min-h-0 ${
+                lightingSheetBackground ? 'invisible pointer-events-none select-none' : ''
+              }`}
+            >
             {isManager && (
               <div
                 data-testid="grigliata-view-as-control"
@@ -7053,6 +7503,7 @@ export default function GrigliataPage() {
                     hasActiveMap={!!activeBackgroundId}
                     onDragStart={(payload) => setActiveTrayDragType(payload?.type || 'grigliata-token')}
                     onDragEnd={() => setActiveTrayDragType('')}
+                    onPlaceToken={handlePlaceTrayTokenAtDefault}
                     onCreateCustomToken={handleCreateCustomToken}
                     isCreatingCustomToken={isCreatingCustomToken}
                     onUpdateCustomToken={handleUpdateCustomToken}
@@ -7099,6 +7550,7 @@ export default function GrigliataPage() {
                     onSelectedFolderIdChange={setSelectedGalleryFolderId}
                     onUploadBackgroundFiles={handleUploadBackgroundFiles}
                     onSelectBackground={setSelectedBackgroundId}
+                    onOpenLighting={handleOpenLighting}
                     onUseBackground={handleUseBackground}
                     onNarrateBackground={handleStartNarration}
                     onCloseNarration={handleStopNarration}
@@ -7117,6 +7569,7 @@ export default function GrigliataPage() {
 
                 {isManager && activeSidebarTab === 'music' && (
                   <MusicLibraryPanel
+                    mediaMode={musicMediaMode}
                     tracks={musicTracks}
                     musicFolders={musicFolders}
                     selectedFolderId={selectedMusicFolderId}
@@ -7165,38 +7618,60 @@ export default function GrigliataPage() {
                   />
                 )}
 
-                {isManager && activeSidebarTab === 'lighting' && (
+              </div>
+            </div>
+            </div>
+
+            {isManager && lightingSheetBackground && (
+              <div
+                data-testid="grigliata-lighting-sheet-host"
+                className="absolute inset-0 z-20 rounded-2xl"
+                style={{ overflow: 'clip' }}
+              >
+                <GrigliataLightingSheet
+                  key={lightingSheetBackground.id}
+                  background={lightingSheetBackground}
+                  hasLightingMetadata={!!lightingSheetMetadata || !!lightingSheetBackground.lightingSummary}
+                  isLightingEnabled={lightingSheetBackground.lightingEnabled !== false}
+                  isMetadataReady={isLightingSheetMetadataReady}
+                  hasUnsavedChanges={isLightingImportDraftDirty}
+                  isCloseDisabled={isImportingLighting}
+                  returnFocusElement={lightingSheetTriggerRef.current}
+                  onClose={handleCloseLighting}
+                >
                   <GrigliataLightingImportPanel
-                    selectedBackground={selectedBackground}
+                    embedded
+                    selectedBackground={lightingSheetBackground}
                     selectedFileName={lightingSelectedFile?.name || ''}
                     importError={lightingImportError}
                     importWarnings={lightingImportDraft?.importWarnings || null}
                     isImporting={isImportingLighting}
                     isApplyingCalibration={isApplyingLightingCalibration}
-                    isLightingEnabled={selectedBackground?.lightingEnabled !== false}
+                    isLightingEnabled={lightingSheetBackground.lightingEnabled !== false}
                     isLightingEnabledPending={isLightingEnabledPending}
-                    isFogOfWarEnabled={selectedBackground?.fogOfWarEnabled !== false}
+                    isFogOfWarEnabled={lightingSheetBackground.fogOfWarEnabled !== false}
                     isFogOfWarEnabledPending={isFogOfWarEnabledPending}
                     isFogResetPending={isFogResetPending}
                     isDebugOverlayVisible={isLightingDebugOverlayVisible}
-                    hasLightingMetadata={!!lightingMetadata}
+                    isDebugOverlayDisabled={!isLightingSheetTargetActive}
+                    hasLightingMetadata={!!lightingSheetMetadata || !!lightingSheetBackground.lightingSummary}
                     lightingMetadataDraft={lightingImportDraft}
-                    lightingMetadata={selectedBackground?.id === activeBackgroundId ? lightingMetadata : null}
-                    sceneLighting={editableSceneLighting}
+                    lightingMetadata={lightingSheetMetadata}
+                    sceneLighting={lightingSheetSceneLighting}
                     isSceneLightingPending={isSceneLightingMutationPending}
-                    isSceneLightingDisabled={!canEditSceneLighting}
+                    isSceneLightingDisabled={!canEditLightingSheetScene}
                     onLightingFileChange={handleLightingFileChange}
                     onImportLightingMetadata={handleImportLightingMetadata}
                     onApplyLightingCalibration={handleApplyLightingCalibration}
                     onToggleLightingEnabled={handleToggleLightingEnabled}
                     onToggleFogOfWarEnabled={handleToggleFogOfWarEnabled}
                     onResetFogOfWar={handleResetFogOfWar}
-                    onToggleDebugOverlay={handleToggleLightingDebugOverlay}
-                    onUpdateSceneLighting={canEditSceneLighting ? handleUpdateSceneLighting : null}
+                    onToggleDebugOverlay={isLightingSheetTargetActive ? handleToggleLightingDebugOverlay : null}
+                    onUpdateSceneLighting={canEditLightingSheetScene ? handleUpdateSceneLighting : null}
                   />
-                )}
+                </GrigliataLightingSheet>
               </div>
-            </div>
+            )}
           </aside>
         </div>
       </div>

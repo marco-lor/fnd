@@ -1,9 +1,9 @@
 // ./buttons/AddConoscenzaPersonale.js
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
-import { db } from '../../../firebaseConfig';
-import { doc, getDoc, updateDoc } from "../../../../performance/firestore";
 import { getCodex } from '../../../../data/codexRepository';
+import { persistProfileContentMap } from '../../../../data/userData/managerProfileContent';
+import SavingButtonContent from './SavingButtonContent';
 
 // --- Style definition ---
 const sleekButtonStyle = "w-36 px-2 py-1 bg-gradient-to-r from-blue-800 to-indigo-900 hover:from-blue-700 hover:to-indigo-800 text-white text-xs font-medium rounded-md transition-all duration-150 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 shadow-sm";
@@ -24,14 +24,20 @@ const AddConoscenzaPersonale = ({ onClick }) => {
 };
 
 // --- New Overlay Component ---
-export function AddConoscenzaPersonaleOverlay({ userId, onClose }) {
+export function AddConoscenzaPersonaleOverlay({
+  userId,
+  userLabel,
+  currentMap,
+  onClose,
+}) {
   const [codexConoscenze, setCodexConoscenze] = useState({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedConoscenza, setSelectedConoscenza] = useState(null);
   const [livello, setLivello] = useState("Base");
-  const [userName, setUserName] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const saveInFlightRef = useRef(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -49,15 +55,6 @@ export function AddConoscenzaPersonaleOverlay({ userId, onClose }) {
           setError("Documento Codex non trovato");
         }
 
-        // Fetch user data to display the name
-        const userDocRef = doc(db, "users", userId);
-        const userDocSnap = await getDoc(userDocRef);
-
-        if (userDocSnap.exists()) {
-          const userData = userDocSnap.data();
-          setUserName(userData.characterId || userData.email || "Unknown User");
-        }
-
         setIsLoading(false);
       } catch (error) {
         console.error("Error fetching data:", error);
@@ -67,37 +64,36 @@ export function AddConoscenzaPersonaleOverlay({ userId, onClose }) {
     };
 
     fetchData();
-  }, [userId]);
+  }, []);
 
   const handleSaveConoscenza = async () => {
-    if (!selectedConoscenza) {
+    if (!selectedConoscenza || saveInFlightRef.current) {
       return;
     }
+
+    saveInFlightRef.current = true;
+    setIsSaving(true);
 
     try {
       // Get the conoscenza description and include livello
       const descrizione = codexConoscenze[selectedConoscenza];
       const conoscenzaPayload = { descrizione, livello };
       
-      // Update the user's conoscenze field
-      const userRef = doc(db, "users", userId);
-      const userDoc = await getDoc(userRef);
-
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        const updatedConoscenze = { ...(userData.conoscenze || {}) };
-
-        // Add or update the selected conoscenza with payload
-        updatedConoscenze[selectedConoscenza] = conoscenzaPayload;
-
-        await updateDoc(userRef, { conoscenze: updatedConoscenze });
-        onClose(true);
-      } else {
-        alert("User not found");
-      }
+      await persistProfileContentMap({
+        userId,
+        field: 'conoscenze',
+        currentMap,
+        action: 'upsert',
+        name: selectedConoscenza,
+        value: conoscenzaPayload,
+      });
+      onClose(true);
     } catch (error) {
       console.error("Error saving conoscenza:", error);
       alert("Error saving conoscenza");
+    } finally {
+      saveInFlightRef.current = false;
+      setIsSaving(false);
     }
   };
 
@@ -110,7 +106,7 @@ export function AddConoscenzaPersonaleOverlay({ userId, onClose }) {
     <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-[9999]">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-4/5 max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
         <h2 className="text-xl text-white mb-1">Aggiungi Conoscenza</h2>
-        <p className="text-gray-300 mb-4">Per il giocatore: {userName}</p>
+        <p className="text-gray-300 mb-4">Per il giocatore: {userLabel || 'Unknown User'}</p>
         
         {isLoading ? (
           <div className="text-center py-8 text-white">Caricamento conoscenze dal Codex...</div>
@@ -179,22 +175,26 @@ export function AddConoscenzaPersonaleOverlay({ userId, onClose }) {
             <div className="flex justify-end gap-2 mt-2 pt-3 border-t border-gray-700">
               <button
                 type="button"
-                onClick={() => onClose(false)}
-                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+                onClick={() => {
+                  if (!saveInFlightRef.current) onClose(false);
+                }}
+                disabled={isSaving}
+                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Annulla
               </button>
               <button
                 type="button"
                 onClick={handleSaveConoscenza}
-                disabled={!selectedConoscenza}
-                className={`px-4 py-2 rounded ${
+                aria-busy={isSaving}
+                disabled={isSaving || !selectedConoscenza}
+                className={`px-4 py-2 rounded inline-flex items-center justify-center disabled:cursor-not-allowed ${
                   selectedConoscenza
-                    ? 'bg-blue-500 text-white hover:bg-blue-600'
+                    ? 'bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-60'
                     : 'bg-gray-600 text-gray-400 cursor-not-allowed'
                 }`}
               >
-                Aggiungi
+                {isSaving ? <SavingButtonContent /> : 'Aggiungi'}
               </button>
             </div>
           </>

@@ -506,9 +506,10 @@ class FirestoreAdminAdapter:
 
     def list_documents(self, collection_path: str) -> Iterable[dict[str, Any]]:
         records = []
-        references = self.client.collection(collection_path).list_documents(
-            show_missing=True
-        )
+        # google-cloud-firestore's public CollectionReference API always sets
+        # show_missing=True in the underlying ListDocuments request. The
+        # public method does not accept that keyword in the pinned 2.20 client.
+        references = self.client.collection(collection_path).list_documents()
         for reference in references:
             snapshot = reference.get()
             records.append({

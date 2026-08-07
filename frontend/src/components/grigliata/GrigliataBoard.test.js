@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { useReducedMotion } from 'framer-motion';
 import GrigliataBoard, {
   buildAoEFigureMeasurementDecorationLayout,
+  buildBoundedTokenMediaIdSet,
   buildZoomNormalizedOverlayMetrics,
   getAoEFigureMeasurementTextLines,
 } from './GrigliataBoard';
@@ -57,6 +58,43 @@ const createDeferred = () => {
   return { promise, resolve, reject };
 };
 
+test('bounds token media leases and prioritizes active, selected, then visible tokens', () => {
+  const tokens = [
+    {
+      tokenId: 'offscreen',
+      imageUrl: 'https://example.com/offscreen.png',
+      renderPosition: {x: 900, y: 900, size: 50},
+    },
+    {
+      tokenId: 'visible',
+      imageUrl: 'https://example.com/visible.png',
+      renderPosition: {x: 20, y: 20, size: 50},
+    },
+    {
+      tokenId: 'selected',
+      imageUrl: 'https://example.com/selected.png',
+      renderPosition: {x: 800, y: 800, size: 50},
+      isSelected: true,
+    },
+    {
+      tokenId: 'active',
+      imageUrl: 'https://example.com/active.png',
+      renderPosition: {x: 700, y: 700, size: 50},
+      isActiveTurn: true,
+    },
+  ];
+
+  const selectedIds = buildBoundedTokenMediaIdSet({
+    tokens,
+    viewport: {x: 0, y: 0, scale: 1},
+    stageSize: {width: 200, height: 200},
+    limit: 3,
+  });
+
+  expect([...selectedIds]).toEqual(['active', 'selected', 'visible']);
+  expect(selectedIds).not.toContain('offscreen');
+});
+
 jest.mock('framer-motion', () => {
   const actual = jest.requireActual('framer-motion');
 
@@ -77,7 +115,7 @@ jest.mock('../common/imageAssets/useImageAsset', () => ({
 }));
 jest.mock('../../data/media/useTask07MediaReadMode', () => ({
   __esModule: true,
-  default: jest.fn(() => 'derivative-read'),
+  default: () => 'derivative-read',
 }));
 jest.mock('../common/DiceRoller', () => function MockDiceRoller(props) {
   return (
@@ -1024,7 +1062,7 @@ describe('GrigliataBoard', () => {
       backgroundId: 'map-1',
       scene: {
         darkness: 0.6,
-        globalLight: false,
+        globalLight: true,
       },
       walls: [{
         id: 'wall-1',
@@ -1479,7 +1517,7 @@ describe('GrigliataBoard', () => {
       backgroundId: 'map-1',
       scene: {
         darkness: 0.6,
-        globalLight: false,
+        globalLight: true,
       },
       walls: [],
       lights: [{
@@ -5824,6 +5862,63 @@ describe('GrigliataBoard', () => {
     });
 
     expect(screen.getByTestId('turn-order-context-action-user-1')).toHaveTextContent('Remove from turn order');
+  });
+
+  test('adds and removes a selected token from turn order without requiring a right click', async () => {
+    const onJoinTurnOrder = jest.fn(() => Promise.resolve());
+    const onLeaveTurnOrder = jest.fn(() => Promise.resolve());
+    const token = {
+      id: 'user-1',
+      tokenId: 'user-1',
+      ownerUid: 'current-user',
+      label: 'Ilya',
+      tokenType: 'character',
+      imageUrl: '',
+      placed: true,
+      col: 1,
+      row: 1,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+      isInTurnOrder: false,
+    };
+    const { rerender } = render(
+      <GrigliataBoard
+        {...buildProps({
+          tokens: [token],
+          onJoinTurnOrder,
+          onLeaveTurnOrder,
+        })}
+      />
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('token-node-user-1'), {
+      button: 0,
+      buttons: 1,
+      clientX: 140,
+      clientY: 140,
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /add ilya to turn order/i }));
+
+    expect(screen.getByTestId('turn-order-join-overlay')).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('turn-order-join-initiative-input'), {
+      target: { value: '14' },
+    });
+    fireEvent.click(screen.getByTestId('turn-order-join-confirm'));
+    await waitFor(() => expect(onJoinTurnOrder).toHaveBeenCalledWith('user-1', 14));
+
+    rerender(
+      <GrigliataBoard
+        {...buildProps({
+          tokens: [{ ...token, isInTurnOrder: true, turnOrderInitiative: 14 }],
+          onJoinTurnOrder,
+          onLeaveTurnOrder,
+        })}
+      />
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /remove ilya from turn order/i }));
+    await waitFor(() => expect(onLeaveTurnOrder).toHaveBeenCalledWith('user-1'));
   });
 
   test('keeps multi-digit initiative input after the initial focus selection frame', async () => {

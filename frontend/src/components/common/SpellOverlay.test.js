@@ -68,3 +68,36 @@ describe('SpellOverlay preview ownership', () => {
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(initialData.video_url);
   });
 });
+
+describe('SpellOverlay save state', () => {
+  test('shows a spinner and disables actions while a spell is saving', () => {
+    const onClose = jest.fn();
+    const { rerender } = render(
+      <SpellOverlay
+        schema={{}}
+        initialData={{ Nome: 'Loading test spell' }}
+        onClose={onClose}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Save Spell' })).toBeEnabled();
+
+    rerender(
+      <SpellOverlay
+        schema={{}}
+        initialData={{ Nome: 'Loading test spell' }}
+        isSaving
+        onClose={onClose}
+      />
+    );
+
+    const saveButton = screen.getByRole('button', { name: 'Saving...' });
+    expect(saveButton).toBeDisabled();
+    expect(saveButton).toHaveAttribute('aria-busy', 'true');
+    expect(saveButton.querySelector('svg')).toHaveClass('animate-spin');
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+
+    fireEvent.click(saveButton);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});

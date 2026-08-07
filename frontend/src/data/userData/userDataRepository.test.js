@@ -500,4 +500,23 @@ describe('user-data repository compatibility', () => {
       _task05ContentId: 'spell-50',
     }));
   });
-});
+
+  test('keeps a custom Varie display ID separate from its explicit null catalog identity', () => {
+    const normalized = normalizeV2InventoryDocument({
+      id: 'varie-receipt-1',
+      data: () => ({
+        catalogItemId: null,
+        quantity: 1,
+        source: 'player-custom',
+        currentSnapshot: {
+          id: 'catalog-id-collision',
+          name: 'Lanterna',
+          item_type: 'varie',
+        },
+      }),
+    });
+
+    expect(normalized.id).toBe('catalog-id-collision');
+    expect(normalized._task05.catalogItemId).toBeNull();
+    expect(normalized._task05.inventoryId).toBe('varie-receipt-1');
+  });});

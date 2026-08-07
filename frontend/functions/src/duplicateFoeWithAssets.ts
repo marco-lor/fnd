@@ -30,6 +30,14 @@ import {
   duplicateFoeWithAssetsLegacyHandler,
 } from "./duplicateFoeWithAssetsLegacy";
 import {
+  applyLegacyFoeSourcePresenceCheckpoint,
+  copyLegacyFoeManifestEntry,
+  LegacyFoeCopyResult,
+  LegacyFoeCopyStorageError,
+} from "./duplicateFoeStorage";
+import {
+  assessCanonicalOnlyFoeDuplication,
+  foeDuplicationControlFenceMatches,
   stripTask07MediaFromDuplicatedFoe,
 } from "./duplicateFoeWithAssetsCore";
 import {
@@ -64,7 +72,7 @@ import {
 import {
   buildTask07NewTargetAttachment,
 } from "./mediaTargetAdapters";
-import {task07MediaWritesV1ForActor} from "./task07MediaControl";
+import {task07MediaModeForActor} from "./task07MediaControl";
 
 type DuplicatePayload = {
   sourceFoeId?: string;
@@ -73,17 +81,14 @@ type DuplicatePayload = {
   idempotencyKey?: string;
 };
 
-type CopyResult = {
-  key: string;
-  path: string;
-  url: string;
-};
+type CopyResult = LegacyFoeCopyResult;
 
 type ManifestEntry = {
   key: string;
   sourcePath: string;
   destinationPath: string;
   downloadToken: string;
+  sourceKnownPresent: boolean;
 };
 
 type DuplicateCleanupOutcome = {
@@ -109,6 +114,8 @@ type DuplicateClaim = {
   retryOperationAfterCleanup: boolean;
   errorClass: string;
   cleanupCanComplete: boolean;
+  task07ControlHash: string;
+  task07Mode: string;
 };
 
 type OwnedCleanupInput = {
@@ -200,6 +207,7 @@ const buildManifest = (
       `${safeName(entry.name, "asset")}.${guessExtension(entry.path)}`,
     ].join("/"),
     downloadToken: randomUUID(),
+    sourceKnownPresent: false,
   }));
 };
 
@@ -212,6 +220,7 @@ const storedManifestFromData = (value: unknown): ManifestEntry[] | null => {
       sourcePath: asTrimmedString(entry.sourcePath),
       destinationPath: asTrimmedString(entry.destinationPath),
       downloadToken: asTrimmedString(entry.downloadToken),
+      sourceKnownPresent: entry.sourceKnownPresent === true,
     };
   });
   const destinations = new Set<string>();
@@ -256,56 +265,102 @@ const storedCanonicalCloneFromData = (
   return value as Task07FoeMediaClonePlan;
 };
 
-const firebaseDownloadUrl = (
-  bucket: string,
-  path: string,
-  token: string
-): string => (
-  `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/` +
-  `${encodeURIComponent(path)}?alt=media&token=${token}`
-);
-
 const copyManifestEntry = async (
   entry: ManifestEntry
-): Promise<CopyResult> => {
+): Promise<CopyResult> => copyLegacyFoeManifestEntry({entry});
+
+const checkpointLegacySourcePresence = async (input: {
+  db: admin.firestore.Firestore;
+  operationRef: admin.firestore.DocumentReference;
+  sourceRef: admin.firestore.DocumentReference;
+  task07ConfigRef: admin.firestore.DocumentReference;
+  actorUid: string;
+  task07ControlHash: string;
+  task07Mode: string;
+  requestHash: string;
+  invocationId: string;
+  manifest: ManifestEntry[];
+}): Promise<ManifestEntry[]> => {
+  if (input.manifest.length === 0) return input.manifest;
   const bucket = getStorage().bucket();
-  if (!isSafeOwnedStoragePath(
-    entry.destinationPath,
-    ["foes/operations/"]
-  )) {
-    throw new Error("Unsafe destination path.");
-  }
-  const sourceFile = bucket.file(entry.sourcePath);
-  const destinationFile = bucket.file(entry.destinationPath);
-  const [sourceExists] = await sourceFile.exists();
-  if (!sourceExists) throw new Error("Source asset is missing.");
-  const [destinationExists] = await destinationFile.exists();
-  if (!destinationExists) {
-    await sourceFile.copy(destinationFile);
-  }
-  const [sourceMetadata, destinationMetadata] = await Promise.all([
-    sourceFile.getMetadata().then(([metadata]) => metadata),
-    destinationFile.getMetadata().then(([metadata]) => metadata),
+  const pathsToProbe = [...new Set(
+    input.manifest
+      .filter(({sourceKnownPresent}) => !sourceKnownPresent)
+      .map(({sourcePath}) => sourcePath)
+  )];
+  const observations = await mapWithConcurrency(
+    pathsToProbe,
+    BACKEND_OPERATION_STORAGE_CONCURRENCY,
+    async (path) => {
+      try {
+        const [exists] = await bucket.file(path).exists();
+        return {path, exists};
+      } catch {
+        throw new LegacyFoeCopyStorageError(
+          "legacy-source-state-unavailable",
+          "Legacy foe copy source state is unavailable.",
+          true
+        );
+      }
+    }
+  );
+  const presentSourcePaths = new Set([
+    ...input.manifest
+      .filter(({sourceKnownPresent}) => sourceKnownPresent)
+      .map(({sourcePath}) => sourcePath),
+    ...observations
+      .filter(({exists}) => exists)
+      .map(({path}) => path),
   ]);
-  const token = asTrimmedString(entry.downloadToken) || asTrimmedString(
-    asRecord(destinationMetadata.metadata).firebaseStorageDownloadTokens
-  ) || randomUUID();
-  await destinationFile.setMetadata({
-    ...(sourceMetadata.contentType
-      ? {contentType: sourceMetadata.contentType}
-      : {}),
-    cacheControl: "private, max-age=31536000, immutable",
-    metadata: {
-      ...asRecord(destinationMetadata.metadata),
-      firebaseStorageDownloadTokens: token,
-      task06OperationOwned: "true",
-    },
+  const checkpointedManifest = applyLegacyFoeSourcePresenceCheckpoint(
+    input.manifest,
+    presentSourcePaths
+  ) as ManifestEntry[];
+
+  await input.db.runTransaction(async (transaction) => {
+    const [operation, source, task07Config] = await transaction.getAll(
+      input.operationRef,
+      input.sourceRef,
+      input.task07ConfigRef
+    );
+    const currentTask07ControlHash = hashValue(task07Config.data() ?? {});
+    const currentTask07Mode = task07MediaModeForActor({
+      control: task07Config.data(),
+      purpose: "foe",
+      role: "dm",
+      uid: input.actorUid,
+    });
+    const storedManifest = operation.exists ?
+      storedManifestFromData(operation.get("assetManifest")) : null;
+    if (!operation.exists ||
+      operation.get("requestHash") !== input.requestHash ||
+      operation.get("status") !== "running" ||
+      operation.get("phase") !== "copy-assets" ||
+      operation.get("leaseOwner") !== input.invocationId ||
+      !foeDuplicationControlFenceMatches({
+        storedControlHash: operation.get("task07ControlHash"),
+        storedMode: operation.get("task07Mode"),
+        currentControlHash: currentTask07ControlHash,
+        currentMode: currentTask07Mode,
+      }) ||
+      operation.get("task07ControlHash") !== input.task07ControlHash ||
+      operation.get("task07Mode") !== input.task07Mode ||
+      !source.exists ||
+      operation.get("sourceHash") !== hashValue(source.data() ?? {}) ||
+      !storedManifest ||
+      hashValue(storedManifest) !== hashValue(input.manifest)) {
+      throw new HttpsError(
+        "aborted",
+        "Foe duplication lost its legacy media checkpoint fence."
+      );
+    }
+    transaction.update(input.operationRef, {
+      assetManifest: checkpointedManifest,
+      leaseExpiresAt: duplicateLeaseExpiry(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
   });
-  return {
-    key: entry.key,
-    path: entry.destinationPath,
-    url: firebaseDownloadUrl(bucket.name, entry.destinationPath, token),
-  };
+  return checkpointedManifest;
 };
 
 const cleanupManifest = async (
@@ -364,6 +419,7 @@ const copyByKey = (
   copied: CopyResult[],
   key: string
 ): CopyResult => copied.find((entry) => entry.key === key) ?? {
+  outcome: "missing",
   key,
   path: "",
   url: "",
@@ -739,6 +795,12 @@ const duplicateFailureDisposition = (error: unknown): {
       retryOperationAfterCleanup: error.retryable,
     };
   }
+  if (error instanceof LegacyFoeCopyStorageError) {
+    return {
+      errorClass: error.code,
+      retryOperationAfterCleanup: error.retryable,
+    };
+  }
   if (error instanceof HttpsError) {
     const terminal = isTerminalDuplicateFailureCode(error.code);
     return {
@@ -856,6 +918,16 @@ const duplicateFoeHandler = async (
     const task06Config = resolveTask06BackendConfig(
       configSnapshot.data()
     );
+    const task07ControlHash = hashValue(task07Config.data() ?? {});
+    const task07Mode = task07MediaModeForActor({
+      control: task07Config.data(),
+      purpose: "foe",
+      role: "dm",
+      uid: actorUid,
+    });
+    const task07WritesEnabled =
+      task07Mode === "v1-write" || task07Mode === "canonical-only";
+    const canonicalOnly = task07Mode === "canonical-only";
     if (operation.exists && (
       operation.get("actorUid") !== actorUid ||
       operation.get("kind") !== "duplicate-foe" ||
@@ -879,6 +951,8 @@ const duplicateFoeHandler = async (
         retryOperationAfterCleanup: false,
         errorClass: "",
         cleanupCanComplete: true,
+        task07ControlHash,
+        task07Mode,
       };
     }
     if (operation.exists && hasActiveDuplicateLease(operation)) {
@@ -934,8 +1008,19 @@ const duplicateFoeHandler = async (
         retryOperationAfterCleanup,
         errorClass,
         cleanupCanComplete,
+        task07ControlHash,
+        task07Mode,
       };
     };
+
+    if (operation.exists && !foeDuplicationControlFenceMatches({
+      storedControlHash: operation.get("task07ControlHash"),
+      storedMode: operation.get("task07Mode"),
+      currentControlHash: task07ControlHash,
+      currentMode: task07Mode,
+    })) {
+      return claimCleanup("task07-control-drift", false);
+    }
 
     if (operation.exists) {
       const status = asTrimmedString(operation.get("status"));
@@ -967,12 +1052,6 @@ const duplicateFoeHandler = async (
       );
     }
 
-    const task07WritesEnabled = task07MediaWritesV1ForActor({
-      control: task07Config.data(),
-      purpose: "foe",
-      role: "dm",
-      uid: actorUid,
-    });
     if (operation.exists && Boolean(rawStoredClone) &&
       !task07WritesEnabled) {
       return claimCleanup("task07-disabled", false);
@@ -1015,9 +1094,6 @@ const duplicateFoeHandler = async (
         "Foe duplication target identity is invalid."
       );
     }
-    const manifest = operation.exists ?
-      storedManifest as ManifestEntry[] :
-      buildManifest(sourceData, receiptId);
     let clone: Task07FoeMediaClonePlan | null;
     try {
       clone = await loadFoeMediaClonePlan({
@@ -1043,6 +1119,32 @@ const duplicateFoeHandler = async (
         "failed-precondition",
         "Task 07 foe media writes are not enabled."
       );
+    }
+    if (canonicalOnly) {
+      const assessment = assessCanonicalOnlyFoeDuplication(
+        sourceData,
+        Boolean(clone)
+      );
+      if (!assessment.allowed) {
+        if (operation.exists) {
+          return claimCleanup(assessment.reason, false);
+        }
+        throw new HttpsError(
+          "failed-precondition",
+          assessment.reason === "nested-media-unsupported" ?
+            "Nested foe media must be migrated before canonical-only duplication." :
+            "Media-bearing foes require a valid attached canonical Task 07 asset."
+        );
+      }
+    }
+    let manifest = operation.exists ?
+      storedManifest as ManifestEntry[] :
+      buildManifest(sourceData, receiptId);
+    if (canonicalOnly) {
+      if (operation.exists && manifest.length > 0) {
+        return claimCleanup("legacy-manifest-forbidden", false);
+      }
+      manifest = [];
     }
     const cloneManifestRef = clone ?
       db.doc(`media_assets/${clone.destinationAssetId}`) : null;
@@ -1111,6 +1213,8 @@ const duplicateFoeHandler = async (
       transaction.update(operationRef, {
         schemaVersion: 2,
         canonicalMediaClone: clone,
+        task07ControlHash,
+        task07Mode,
         status: "running",
         phase: "copy-assets",
         retryable: false,
@@ -1130,6 +1234,8 @@ const duplicateFoeHandler = async (
         requestHash,
         sourceFoeId,
         sourceHash: hashValue(sourceData),
+        task07ControlHash,
+        task07Mode,
         newFoeId,
         assetManifest: manifest,
         canonicalMediaClone: clone,
@@ -1181,6 +1287,8 @@ const duplicateFoeHandler = async (
       retryOperationAfterCleanup: true,
       errorClass: "",
       cleanupCanComplete: true,
+      task07ControlHash,
+      task07Mode,
     };
   });
   if (claim.mode === "completed") {
@@ -1211,29 +1319,64 @@ const duplicateFoeHandler = async (
     failServerTelemetry(
       telemetry,
       outcome.cleanupComplete ? "conflict" : "storage",
-      {copies: claim.manifest.length + (claim.clone?.entries.length || 0)}
+      {copies: 0}
     );
     throw cleanupOutcomeError(outcome);
   }
 
+  let legacyManifest = claim.manifest;
   let copied: CopyResult[];
   let canonicalResult: Task07CanonicalCloneResult | null = null;
+  let legacyActualCopies = 0;
+  let canonicalActualCopies = 0;
   try {
+    legacyManifest = await checkpointLegacySourcePresence({
+      db,
+      operationRef,
+      sourceRef,
+      task07ConfigRef,
+      actorUid,
+      task07ControlHash: claim.task07ControlHash,
+      task07Mode: claim.task07Mode,
+      requestHash,
+      invocationId,
+      manifest: legacyManifest,
+    });
     copied = await mapWithConcurrency(
-      claim.manifest,
+      legacyManifest,
       BACKEND_OPERATION_STORAGE_CONCURRENCY,
-      copyManifestEntry
+      async (entry) => {
+        const result = await copyManifestEntry(entry);
+        if (result.outcome === "copied") legacyActualCopies += 1;
+        return result;
+      }
     );
     if (claim.clone) {
       canonicalResult = await copyTask07CanonicalMediaFamily({
         clone: claim.clone,
         concurrency: BACKEND_OPERATION_STORAGE_CONCURRENCY,
+        onCopy: () => {
+          canonicalActualCopies += 1;
+        },
       });
       const clone = claim.clone;
       const result = canonicalResult;
       await db.runTransaction(async (transaction) => {
-        const operation = await transaction.get(operationRef);
-        const sourceSnapshot = await transaction.get(sourceRef);
+        const [operation, sourceSnapshot, task07Config] =
+          await transaction.getAll(
+            operationRef,
+            sourceRef,
+            task07ConfigRef
+          );
+        const currentTask07ControlHash = hashValue(
+          task07Config.data() ?? {}
+        );
+        const currentTask07Mode = task07MediaModeForActor({
+          control: task07Config.data(),
+          purpose: "foe",
+          role: "dm",
+          uid: actorUid,
+        });
         if (!sourceSnapshot.exists) {
           throw new HttpsError(
             "aborted",
@@ -1258,6 +1401,14 @@ const duplicateFoeHandler = async (
           operation.get("status") !== "running" ||
           operation.get("phase") !== "copy-assets" ||
           operation.get("leaseOwner") !== invocationId ||
+          !foeDuplicationControlFenceMatches({
+            storedControlHash: operation.get("task07ControlHash"),
+            storedMode: operation.get("task07Mode"),
+            currentControlHash: currentTask07ControlHash,
+            currentMode: currentTask07Mode,
+          }) ||
+          operation.get("task07ControlHash") !== claim.task07ControlHash ||
+          operation.get("task07Mode") !== claim.task07Mode ||
           operation.get("sourceHash") !==
             hashValue(sourceSnapshot.data()) ||
           !task07FoeMediaClonePlansMatch(
@@ -1311,7 +1462,7 @@ const duplicateFoeHandler = async (
         operationRef,
         requestHash,
         invocationId,
-        manifest: claim.manifest,
+        manifest: legacyManifest,
         clone: claim.clone,
         newFoeId: claim.newFoeId,
         attempt: claim.attempt,
@@ -1321,7 +1472,7 @@ const duplicateFoeHandler = async (
       });
     } catch (cleanupError) {
       failServerTelemetry(telemetry, "conflict", {
-        copies: claim.manifest.length + (claim.clone?.entries.length || 0),
+        copies: legacyActualCopies + canonicalActualCopies,
       });
       throw cleanupError;
     }
@@ -1329,7 +1480,7 @@ const duplicateFoeHandler = async (
       telemetry,
       outcome.retryOperationAfterCleanup ? "storage" : "conflict",
       {
-        copies: claim.manifest.length + (claim.clone?.entries.length || 0),
+        copies: legacyActualCopies + canonicalActualCopies,
       }
     );
     throw cleanupOutcomeError(outcome);
@@ -1403,11 +1554,37 @@ const duplicateFoeHandler = async (
       })),
     },
   };
+  const plannedCopies = legacyManifest.length +
+    (claim.clone?.entries.length || 0);
+  const succeededCopies = copied.filter(
+    ({outcome}) => outcome === "copied"
+  ).length + (canonicalResult?.copied || 0);
+  const skippedCopies = copied.filter(
+    ({outcome}) => outcome !== "copied"
+  ).length + (canonicalResult?.reused || 0);
+  const processedCopies = succeededCopies + skippedCopies;
+  if (processedCopies !== plannedCopies) {
+    throw new HttpsError(
+      "internal",
+      "Foe duplication copy accounting is inconsistent."
+    );
+  }
   let finalizedReplay = false;
   try {
     finalizedReplay = await db.runTransaction(async (transaction) => {
-      const operation = await transaction.get(operationRef);
-      const sourceSnapshot = await transaction.get(sourceRef);
+      const [operation, sourceSnapshot, task07Config] =
+        await transaction.getAll(
+          operationRef,
+          sourceRef,
+          task07ConfigRef
+        );
+      const currentTask07ControlHash = hashValue(task07Config.data() ?? {});
+      const currentTask07Mode = task07MediaModeForActor({
+        control: task07Config.data(),
+        purpose: "foe",
+        role: "dm",
+        uid: actorUid,
+      });
       if (
         operation.exists &&
         operation.get("requestHash") === requestHash &&
@@ -1420,6 +1597,14 @@ const duplicateFoeHandler = async (
         operation.get("phase") !==
           (claim.clone ? "commit" : "copy-assets") ||
         operation.get("leaseOwner") !== invocationId ||
+        !foeDuplicationControlFenceMatches({
+          storedControlHash: operation.get("task07ControlHash"),
+          storedMode: operation.get("task07Mode"),
+          currentControlHash: currentTask07ControlHash,
+          currentMode: currentTask07Mode,
+        }) ||
+        operation.get("task07ControlHash") !== claim.task07ControlHash ||
+        operation.get("task07Mode") !== claim.task07Mode ||
         !sourceSnapshot.exists ||
         operation.get("sourceHash") !== hashValue(sourceSnapshot.data())
       ) {
@@ -1488,18 +1673,16 @@ const duplicateFoeHandler = async (
       } else {
         transaction.create(targetRef, payload);
       }
-      const planned = claim.manifest.length +
-        (claim.clone?.entries.length || 0);
       transaction.update(operationRef, {
         status: "completed",
         phase: "completed",
         retryable: false,
         result,
         progress: {
-          planned,
-          processed: planned,
-          succeeded: planned,
-          skipped: canonicalResult?.reused || 0,
+          planned: plannedCopies,
+          processed: processedCopies,
+          succeeded: succeededCopies,
+          skipped: skippedCopies,
           failed: 0,
         },
         completedAt: FieldValue.serverTimestamp(),
@@ -1517,7 +1700,7 @@ const duplicateFoeHandler = async (
         operationRef,
         requestHash,
         invocationId,
-        manifest: claim.manifest,
+        manifest: legacyManifest,
         clone: claim.clone,
         newFoeId: claim.newFoeId,
         attempt: claim.attempt,
@@ -1527,19 +1710,19 @@ const duplicateFoeHandler = async (
       });
     } catch (cleanupError) {
       failServerTelemetry(telemetry, "conflict", {
-        copies: copied.length,
+        copies: legacyActualCopies + canonicalActualCopies,
       });
       throw cleanupError;
     }
     failServerTelemetry(
       telemetry,
       outcome.retryOperationAfterCleanup ? "internal" : "conflict",
-      {copies: copied.length + (claim.clone?.entries.length || 0)}
+      {copies: legacyActualCopies + canonicalActualCopies}
     );
     throw cleanupOutcomeError(outcome);
   }
   completeServerTelemetry(telemetry, {
-    copies: copied.length + (claim.clone?.entries.length || 0),
+    copies: legacyActualCopies + canonicalActualCopies,
     writes: claim.clone ? 3 : 2,
     replayed: replayed || finalizedReplay,
   });

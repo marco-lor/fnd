@@ -34,6 +34,12 @@ test("Task 07 server requires v1-write plus all three allowlists", () => {
     role: "PLAYER",
     uid: "user-1",
   }), true);
+  assert.equal(task07MediaWritesV1ForActor({
+    control: {...enabled, mode: "canonical-only"},
+    purpose: "avatar",
+    role: "PLAYER",
+    uid: "user-1",
+  }), true);
   assert.equal(task07MediaModeForActor({
     control: {...enabled, mode: "shadow"},
     purpose: "avatar",
@@ -52,4 +58,12 @@ test("Task 07 server requires v1-write plus all three allowlists", () => {
     role: "dm",
     uid: "dm-1",
   }), true);
+});
+
+test("Task 07 server accepts canonical-only but rejects pending as control data", () => {
+  assert.equal(normalizeTask07MediaControl({
+    ...enabled,
+    mode: "canonical-only",
+  }).mode, "canonical-only");
+  assert.equal(normalizeTask07MediaControl({...enabled, mode: "pending"}).mode, "legacy");
 });

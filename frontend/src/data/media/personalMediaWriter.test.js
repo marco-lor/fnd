@@ -122,6 +122,51 @@ describe('Task 07 personal media writer', () => {
     });
   });
 
+  test('derives a stable new content ID before the upload receipt and prepares that exact target', async () => {
+    const expectedContentId = 'content_spell_pare-spell-fixed';
+    mockMutatePersonalContent.mockImplementation(async (input) => ({
+      contentId: input.contentId,
+      success: true,
+    }));
+    mockRunTask07ControlledWriterUpload.mockImplementation(async (input) => {
+      expect(input.entityId).toBe(expectedContentId);
+      expect(input.entityId).not.toBeNull();
+      expect(mockMutatePersonalContent).not.toHaveBeenCalled();
+      await input.prepareEntity();
+      return { handled: true, status: 'complete' };
+    });
+
+    const result = await tryPersistTask07PersonalMedia({
+      userId: 'owner-1',
+      collectionKey: 'spells',
+      originalEntity: { Nome: 'Nuova luce' },
+      entryData: { Nome: 'Nuova luce' },
+      imageFile,
+      signal: new AbortController().signal,
+    });
+
+    expect(mockReadUserOwnedDataDocument).toHaveBeenCalledWith(
+      'owner-1',
+      'spells',
+      expectedContentId
+    );
+    expect(mockMutatePersonalContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'upsert',
+        contentId: expectedContentId,
+        kind: 'spell',
+        retryKey: 'task07-prepare-spell-fixed:prepare',
+      })
+    );
+    expect(mockRunTask07ControlledWriterUpload).toHaveBeenCalledWith(
+      expect.objectContaining({ entityId: expectedContentId, kind: 'spell' })
+    );
+    expect(result).toEqual(expect.objectContaining({
+      contentId: expectedContentId,
+      task07: true,
+    }));
+  });
+
   test('prepares the Task 05 target only inside the receipt-owned upload pipeline', async () => {
     mockRunTask07ControlledWriterUpload.mockImplementation(async (input) => {
       expect(mockMutatePersonalContent).not.toHaveBeenCalled();

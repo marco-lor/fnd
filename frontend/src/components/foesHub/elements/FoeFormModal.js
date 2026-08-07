@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FiX } from 'react-icons/fi';
 import { computeParamTotals, deepClone, SectionTitle } from './utils';
@@ -20,6 +20,8 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema, busy = false, e
   // jsonErr removed (was unused)
   const [imageFile, setImageFile] = useState(null);
   const [removeExisting, setRemoveExisting] = useState(false);
+  const imageInputRef = useRef(null);
+  const wasOpenRef = useRef(false);
   const previewUrl = useObjectUrl(imageFile);
   const hasExistingImage = hasMediaAsset(foe, { variant: 'card' });
   const showsImage = !removeExisting && Boolean(previewUrl || hasExistingImage);
@@ -30,12 +32,15 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema, busy = false, e
 
   // Reset form when opening / switching initial foe
   useEffect(() => {
-    if (open) {
+    const justOpened = open && !wasOpenRef.current;
+    if (justOpened) {
       setFoe(deepClone(initial));
       setTab('general');
       setImageFile(null);
       setRemoveExisting(false);
+      if (imageInputRef.current) imageInputRef.current.value = '';
     }
+    wasOpenRef.current = open;
   }, [open, initial]);
 
   const params = useMemo(() => computeParamTotals(foe?.Parametri || {}), [foe?.Parametri]);
@@ -152,6 +157,7 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema, busy = false, e
                         </div>
                         <div className="flex flex-col gap-2">
                           <input
+                            ref={imageInputRef}
                             type="file"
                             accept="image/*"
                             onChange={(e) => {
@@ -166,7 +172,8 @@ const FoeFormModal = ({ open, initial, onCancel, onSave, schema, busy = false, e
                               type="button"
                               onClick={() => {
                                 setImageFile(null);
-                                setRemoveExisting(true);
+                                if (imageInputRef.current) imageInputRef.current.value = '';
+                                setRemoveExisting(hasExistingImage);
                               }}
                               className="px-3 py-1 rounded-md border border-red-400/40 text-red-200 hover:bg-red-500/10 text-[12px] self-start"
                             >

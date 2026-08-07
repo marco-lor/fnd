@@ -146,6 +146,14 @@ test('CLI defaults to dry-run and requires explicit project and approvals', () =
   const parsed = parseArguments(['--project', 'demo-fnd-perf']);
   assert.equal(parsed.execute, false);
   assert.equal(parsed.operation, 'backfill');
+  assert.equal(parsed.authMode, 'admin');
+  assert.equal(parseArguments([
+    '--project', 'demo-fnd-perf', '--auth', 'firebase-cli',
+  ]).authMode, 'firebase-cli');
+  assert.throws(
+    () => parseArguments(['--project', 'demo-fnd-perf', '--auth', 'unknown']),
+    /--auth must be exactly/
+  );
   assert.throws(
     () => parseArguments(['--project', 'demo-fnd-perf', '--operation', 'verify', '--execute']),
     /always read-only/
@@ -221,9 +229,9 @@ test('target safety fails closed for live and mismatched project state', () => {
     }),
     /does not match/
   );
-  assert.deepEqual(
-    assertSafeTarget({projectId: 'fatins', allowLiveProject: true, confirmProject: 'fatins'}, {}),
-    {live: true, emulatorHost: null, projectId: 'fatins'}
+  assert.throws(
+    () => assertSafeTarget({projectId: 'fatin-test', allowLiveProject: true, confirmProject: 'fatin-test'}, {}),
+    /accepts only live project fatins/
   );
   assert.throws(() => assertSafeTarget({
     projectId: 'fatins',

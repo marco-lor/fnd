@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { faEdit, faTrash, faPlus, faMinus, faCoins } from "@fortawesome/free-solid-svg-icons";
-import { collection, getDocs, doc, getDoc, updateDoc } from "../../../performance/firestore";
+import { collection, getDocs } from "../../../performance/firestore";
 import { MdKeyboardDoubleArrowDown, MdKeyboardDoubleArrowUp } from "react-icons/md";
 
 import { db } from "../../firebaseConfig";
@@ -41,6 +41,9 @@ import PlayerInfoProfessioniRow from "./playerInfo/sections/PlayerInfoProfession
 import PlayerInfoLingueRow from "./playerInfo/sections/PlayerInfoLingueRow";
 import PlayerInfoInventoryRow from "./playerInfo/sections/PlayerInfoInventoryRow";
 import PlayerInfoDiceRollsRow from "./playerInfo/sections/PlayerInfoDiceRollsRow";
+import { adjustGold, updateResource } from "../../../data/userData/userDataCommands";
+import { buildManagerResourceTotalOptions } from "../../../data/userData/managerResourceCommands";
+import ManagerActionDialog, { parseIntegerInput } from "./ManagerActionDialog";
 
 library.add(faEdit, faTrash, faPlus, faMinus, faCoins);
 
@@ -48,7 +51,6 @@ const PlayerInfo = ({
   users,
   loading,
   error,
-  setUsers,
   variant = "table",
   onLevelUpOne,
   onAddTokens,
@@ -93,16 +95,11 @@ const PlayerInfo = ({
   const [goldUpdating, setGoldUpdating] = useState({});
   const [goldOverlay, setGoldOverlay] = useState(null);
   const [cardExpanded, setCardExpanded] = useState({});
+  const [vitalDialog, setVitalDialog] = useState(null);
+  const [vitalDialogError, setVitalDialogError] = useState(null);
+  const [vitalDialogBusy, setVitalDialogBusy] = useState(false);
 
-  const refreshUserData = useCallback(async () => {
-    try {
-      const snapshot = await getDocs(collection(db, "users"));
-      const usersData = snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() }));
-      setUsers(usersData);
-    } catch (err) {
-      console.error("Error refreshing users:", err);
-    }
-  }, [setUsers]);
+  const refreshUserData = useCallback(() => Promise.resolve(), []);
 
   const fetchItemsCatalog = useCallback(async () => {
     try {
@@ -151,17 +148,22 @@ const PlayerInfo = ({
     if (!userId || Number.isNaN(amount) || amount === 0) return;
     try {
       setGoldUpdating((prev) => ({ ...prev, [userId]: true }));
-      const userDocRef = doc(db, "users", userId);
-      const userDocSnap = await getDoc(userDocRef);
-      let currentGold = 0;
-      if (userDocSnap.exists()) {
-        const data = userDocSnap.data();
-        const existing = data?.stats?.gold;
-        currentGold = typeof existing === "number" ? existing : parseInt(existing, 10) || 0;
-      }
+      const currentUser = users.find((entry) => entry.id === userId);
+      if (!currentUser) throw new Error("The selected user is no longer available.");
+      const currentGold = Number(currentUser?.stats?.gold) || 0;
       const delta = direction > 0 ? amount : -amount;
       const nextGold = currentGold + delta;
-      await updateDoc(userDocRef, { "stats.gold": nextGold });
+      await adjustGold({
+        userId,
+        delta,
+        retryKey: [
+          "dm-gold",
+          userId,
+          currentGold,
+          delta,
+          nextGold,
+        ].join(":"),
+      });
       setGoldAdjustments((prev) => ({ ...prev, [userId]: "" }));
       setGoldOverlay(null);
       await refreshUserData();
@@ -262,14 +264,18 @@ const PlayerInfo = ({
     if (!inventoryData) {
       for (const entry of inventoryArray) {
         if (!entry || typeof entry !== "object") continue;
-        const entryId = entry.id || entry.name || entry?.General?.Nome;
+        const entryId = entry?._task05?.inventoryId || entry?._instance?.instanceId;
         if (entryId === itemId) {
           inventoryData = entry;
           break;
         }
       }
     }
-    const baseDoc = itemsDocs[itemId];
+    const catalogItemId = inventoryData?._task05?.catalogItemId
+      || inventoryData?._instance?.catalogItemId
+      || inventoryData?.id
+      || null;
+    const baseDoc = catalogItemId ? itemsDocs[catalogItemId] : null;
     const initial = inventoryData || baseDoc;
     if (!initial) {
       console.warn("No data found for inventory item id:", itemId);
@@ -315,23 +321,20 @@ const PlayerInfo = ({
     essenza: { current: "stats.essenzaCurrent", total: "stats.essenzaTotal", label: "Essenza" },
   };
 
-  const promptInteger = (message, defaultVal) => {
-    const input = window.prompt(message, defaultVal != null ? String(defaultVal) : "");
-    if (input === null) return null; // cancelled
-    const n = parseInt(input, 10);
-    if (Number.isNaN(n) || !Number.isFinite(n)) return null;
-    return n;
-  };
-
   const adjustVitalDelta = async (userId, vital, delta) => {
     if (!canEditVitals) return;
-    const fields = vitalFieldMap[vital];
     const u = users.find((x) => x.id === userId);
     if (!u) return;
     const cur = Number(u?.stats?.[`${vital}Current`]) || 0;
     const newVal = Math.max(0, cur + delta);
     try {
-      await updateDoc(doc(db, "users", userId), { [fields.current]: newVal });
+      await updateResource({
+        userId,
+        resource: vital,
+        mode: "set",
+        value: newVal,
+        retryKey: ["dm-vital-delta", userId, vital, cur, delta, newVal].join(":"),
+      });
     } catch (e) {
       console.error("adjustVitalDelta failed", e);
     }
@@ -339,55 +342,109 @@ const PlayerInfo = ({
 
   const resetVital = async (userId, vital) => {
     if (!canEditVitals) return;
-    const fields = vitalFieldMap[vital];
     const u = users.find((x) => x.id === userId);
     if (!u) return;
     const tot = Number(u?.stats?.[`${vital}Total`]) || 0;
     try {
-      await updateDoc(doc(db, "users", userId), { [fields.current]: tot });
+      await updateResource({
+        userId,
+        resource: vital,
+        mode: "set",
+        value: tot,
+        retryKey: ["dm-vital-reset", userId, vital, tot].join(":"),
+      });
     } catch (e) {
       console.error("resetVital failed", e);
     }
   };
 
-  const setVitalCurrent = async (userId, vital) => {
+  const openVitalDialog = (userId, vital, kind) => {
     if (!canEditVitals) return;
     const u = users.find((x) => x.id === userId);
     if (!u) return;
     const cur = Number(u?.stats?.[`${vital}Current`]) || 0;
-    const n = promptInteger(`Set ${vitalFieldMap[vital].label} current value`, cur);
-    if (n === null) return;
-    try {
-      await updateDoc(doc(db, "users", userId), { [vitalFieldMap[vital].current]: Math.max(0, n) });
-    } catch (e) {
-      console.error("setVitalCurrent failed", e);
-    }
+    const total = Number(u?.stats?.[`${vital}Total`]) || 0;
+    setVitalDialogError(null);
+    setVitalDialog({
+      userId,
+      vital,
+      kind,
+      value: String(kind === "total" ? total : kind === "delta" ? 0 : cur),
+      clampCurrent: true,
+    });
   };
 
-  const setVitalTotal = async (userId, vital) => {
-    if (!canEditVitals) return;
-    const u = users.find((x) => x.id === userId);
-    if (!u) return;
-    const tot = Number(u?.stats?.[`${vital}Total`]) || 0;
-    const n = promptInteger(`Set ${vitalFieldMap[vital].label} total value`, tot);
-    if (n === null) return;
-    const cur = Number(u?.stats?.[`${vital}Current`]) || 0;
-    const updates = { [vitalFieldMap[vital].total]: Math.max(0, n) };
-    if (cur > n && window.confirm("Current value exceeds new total. Clamp current to new total?")) {
-      updates[vitalFieldMap[vital].current] = Math.max(0, n);
-    }
-    try {
-      await updateDoc(doc(db, "users", userId), updates);
-    } catch (e) {
-      console.error("setVitalTotal failed", e);
-    }
+  const closeVitalDialog = () => {
+    if (vitalDialogBusy) return;
+    setVitalDialog(null);
+    setVitalDialogError(null);
   };
 
-  const customDeltaPrompt = async (userId, vital) => {
-    if (!canEditVitals) return;
-    const delta = promptInteger(`Enter ${vitalFieldMap[vital].label} delta (use negative to subtract)`, "0");
-    if (delta === null || delta === 0) return;
-    await adjustVitalDelta(userId, vital, delta);
+  const confirmVitalDialog = async () => {
+    if (!vitalDialog || vitalDialogBusy) return;
+    const n = parseIntegerInput(vitalDialog.value);
+    if (n === null) {
+      setVitalDialogError("Enter a valid whole number.");
+      return;
+    }
+    if (vitalDialog.kind === "delta" && n === 0) {
+      setVitalDialogError("Enter a value other than zero.");
+      return;
+    }
+    const u = users.find((x) => x.id === vitalDialog.userId);
+    if (!u) {
+      setVitalDialogError("The selected user is no longer available.");
+      return;
+    }
+    const cur = Number(u?.stats?.[`${vitalDialog.vital}Current`]) || 0;
+    try {
+      setVitalDialogBusy(true);
+      setVitalDialogError(null);
+      if (vitalDialog.kind === "current") {
+        const nextCurrent = Math.max(0, n);
+        await updateResource({
+          userId: vitalDialog.userId,
+          resource: vitalDialog.vital,
+          mode: "set",
+          value: nextCurrent,
+          retryKey: ["dm-vital-current", vitalDialog.userId, vitalDialog.vital, cur, nextCurrent].join(":"),
+        });
+      } else if (vitalDialog.kind === "total") {
+        const nextTotal = Math.max(0, n);
+        const nextCurrent = cur > nextTotal && vitalDialog.clampCurrent ? nextTotal : cur;
+        await updateResource({
+          userId: vitalDialog.userId,
+          resource: vitalDialog.vital,
+          mode: "set",
+          value: nextCurrent,
+          totalValue: nextTotal,
+          ...buildManagerResourceTotalOptions(u, vitalDialog.vital),
+          retryKey: [
+            "dm-vital-total",
+            vitalDialog.userId,
+            vitalDialog.vital,
+            cur,
+            nextCurrent,
+            nextTotal,
+          ].join(":"),
+        });
+      } else {
+        const nextCurrent = Math.max(0, cur + n);
+        await updateResource({
+          userId: vitalDialog.userId,
+          resource: vitalDialog.vital,
+          mode: "set",
+          value: nextCurrent,
+          retryKey: ["dm-vital-delta", vitalDialog.userId, vitalDialog.vital, cur, n, nextCurrent].join(":"),
+        });
+      }
+      setVitalDialog(null);
+    } catch (e) {
+      console.error("Vital update failed", e);
+      setVitalDialogError("Failed to update this vital. See console.");
+    } finally {
+      setVitalDialogBusy(false);
+    }
   };
 
   if (loading) return <div className="text-white mt-4">Loading user data...</div>;
@@ -396,6 +453,14 @@ const PlayerInfo = ({
 
   const iconEditClass = "text-blue-400 hover:text-blue-300 transition transform hover:scale-110 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded";
   const iconDeleteClass = "text-red-500 hover:text-red-400 transition transform hover:scale-110 focus:outline-none focus:ring-1 focus:ring-red-600 rounded";
+  const selectedManagerUser = selectedUserId
+    ? users.find((entry) => entry.id === selectedUserId)
+    : null;
+  const selectedUserLabel = selectedManagerUser?.displayName
+    || selectedManagerUser?.characterId
+    || selectedManagerUser?.label
+    || selectedManagerUser?.email
+    || "Unknown User";
   const sleekButtonClass = "w-36 px-2 py-1 bg-gradient-to-r from-blue-800 to-indigo-900 hover:from-blue-700 hover:to-indigo-800 text-white text-xs font-medium rounded-md transition-all duration-150 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 shadow-sm";
 
   const activeGoldUser = goldOverlay ? users.find((user) => user.id === goldOverlay.userId) : null;
@@ -454,7 +519,7 @@ const PlayerInfo = ({
                   <div className="flex items-center gap-2">
                     <span className="tabular-nums text-slate-100">{cur}</span>
                     <button
-                      onClick={() => setVitalCurrent(user.id, key)}
+                      onClick={() => openVitalDialog(user.id, key, "current")}
                       className="rounded bg-slate-800 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-200 hover:bg-slate-700"
                       title="Set current"
                     >
@@ -469,13 +534,13 @@ const PlayerInfo = ({
                   <div className="flex items-center gap-1">
                     <button onClick={() => adjustVitalDelta(user.id, key, -1)} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700">-</button>
                     <button onClick={() => adjustVitalDelta(user.id, key, 1)} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700">+</button>
-                    <button onClick={() => customDeltaPrompt(user.id, key)} className="px-2 py-1 rounded bg-indigo-900/70 hover:bg-indigo-800">Δ</button>
+                    <button onClick={() => openVitalDialog(user.id, key, "delta")} className="px-2 py-1 rounded bg-indigo-900/70 hover:bg-indigo-800">Δ</button>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span className="text-slate-300">/</span>
                     <span className="tabular-nums text-slate-100">{tot}</span>
                     <button
-                      onClick={() => setVitalTotal(user.id, key)}
+                      onClick={() => openVitalDialog(user.id, key, "total")}
                       className="rounded bg-cyan-900/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-50 hover:bg-cyan-800"
                       title="Set total"
                     >
@@ -730,9 +795,59 @@ const PlayerInfo = ({
         onConfirm={confirmGoldOverlay}
       />}
 
+      {vitalDialog && (() => {
+        const activeUser = users.find((entry) => entry.id === vitalDialog.userId);
+        const current = Number(activeUser?.stats?.[`${vitalDialog.vital}Current`]) || 0;
+        const parsedValue = parseIntegerInput(vitalDialog.value);
+        const nextTotal = parsedValue === null ? null : Math.max(0, parsedValue);
+        const showClamp = vitalDialog.kind === "total" && nextTotal !== null && current > nextTotal;
+        const vitalLabel = vitalFieldMap[vitalDialog.vital].label;
+        const userLabel = activeUser?.characterId || activeUser?.label || activeUser?.email || "this player";
+        const actionLabel = vitalDialog.kind === "current"
+          ? "current value"
+          : vitalDialog.kind === "total"
+            ? "maximum"
+            : "change";
+        return (
+          <ManagerActionDialog
+            visible
+            title={`Set ${vitalLabel} ${actionLabel}`}
+            description={`${userLabel} · current ${current} / ${Number(activeUser?.stats?.[`${vitalDialog.vital}Total`]) || 0}`}
+            inputLabel={`${vitalLabel} ${actionLabel}`}
+            value={vitalDialog.value}
+            onChange={(value) => {
+              setVitalDialog((previous) => ({ ...previous, value }));
+              setVitalDialogError(null);
+            }}
+            error={vitalDialogError}
+            busy={vitalDialogBusy}
+            confirmLabel="Apply"
+            onClose={closeVitalDialog}
+            onConfirm={confirmVitalDialog}
+          >
+            {showClamp && (
+              <label className="mt-3 flex items-start gap-2 text-xs text-amber-200">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={vitalDialog.clampCurrent}
+                  onChange={(event) => setVitalDialog((previous) => ({
+                    ...previous,
+                    clampCurrent: event.target.checked,
+                  }))}
+                  disabled={vitalDialogBusy}
+                />
+                Reduce the current value to the new maximum
+              </label>
+            )}
+          </ManagerActionDialog>
+        );
+      })()}
+
       {showTecnicaOverlay && selectedUserId && (
         <AddTecnicaPersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
           onClose={(ok) => {
             setShowTecnicaOverlay(false);
             setSelectedUserId(null);
@@ -743,6 +858,7 @@ const PlayerInfo = ({
       {showEditTecnicaOverlay && selectedUserId && selectedTecnica && (
         <EditTecnicaPersonale
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
           tecnicaName={selectedTecnica.name}
           tecnicaData={selectedTecnica.data}
           onClose={(ok) => {
@@ -756,6 +872,7 @@ const PlayerInfo = ({
       {showDeleteTecnicaOverlay && selectedUserId && selectedTecnica && (
         <DelTecnicaPersonale
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
           tecnicaName={selectedTecnica.name}
           tecnicaData={selectedTecnica.data}
           onClose={(ok) => {
@@ -770,6 +887,7 @@ const PlayerInfo = ({
       {showSpellOverlay && selectedUserId && (
         <AddSpellOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
           onClose={(ok) => {
             setShowSpellOverlay(false);
             setSelectedUserId(null);
@@ -780,6 +898,7 @@ const PlayerInfo = ({
       {showEditSpellOverlay && selectedUserId && selectedSpell && (
         <EditSpellOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
           spellName={selectedSpell.name}
           spellData={selectedSpell.data}
           onClose={(ok) => {
@@ -793,6 +912,7 @@ const PlayerInfo = ({
       {showDeleteSpellOverlay && selectedUserId && selectedSpell && (
         <DelSpellOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
           spellName={selectedSpell.name}
           spellData={selectedSpell.data}
           onClose={(ok) => {
@@ -807,6 +927,8 @@ const PlayerInfo = ({
       {showLinguaOverlay && selectedUserId && (
         <AddLinguaPersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
+          currentMap={selectedManagerUser?.lingue}
           onClose={(ok) => {
             setShowLinguaOverlay(false);
             setSelectedUserId(null);
@@ -817,6 +939,8 @@ const PlayerInfo = ({
       {showDeleteLinguaOverlay && selectedUserId && selectedLingua && (
         <DelLinguaPersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
+          currentMap={selectedManagerUser?.lingue}
           linguaName={selectedLingua}
           onClose={(ok) => {
             setShowDeleteLinguaOverlay(false);
@@ -830,6 +954,8 @@ const PlayerInfo = ({
       {showConoscenzaOverlay && selectedUserId && (
         <AddConoscenzaPersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
+          currentMap={selectedManagerUser?.conoscenze}
           onClose={(ok) => {
             setShowConoscenzaOverlay(false);
             setSelectedUserId(null);
@@ -840,6 +966,8 @@ const PlayerInfo = ({
       {showDeleteConoscenzaOverlay && selectedUserId && selectedConoscenza && (
         <DelConoscenzaPersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
+          currentMap={selectedManagerUser?.conoscenze}
           conoscenzaName={selectedConoscenza}
           onClose={(ok) => {
             setShowDeleteConoscenzaOverlay(false);
@@ -852,6 +980,8 @@ const PlayerInfo = ({
       {showEditConoscenzaOverlay && selectedUserId && selectedConoscenza && (
         <EditConoscenzaPersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
+          currentMap={selectedManagerUser?.conoscenze}
           conoscenzaName={selectedConoscenza}
           onClose={(ok) => {
             setShowEditConoscenzaOverlay(false);
@@ -865,6 +995,8 @@ const PlayerInfo = ({
       {showProfessioneOverlay && selectedUserId && (
         <AddProfessionePersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
+          currentMap={selectedManagerUser?.professioni}
           onClose={(ok) => {
             setShowProfessioneOverlay(false);
             setSelectedUserId(null);
@@ -875,6 +1007,8 @@ const PlayerInfo = ({
       {showDeleteProfessioneOverlay && selectedUserId && selectedProfessione && (
         <DelProfessionePersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
+          currentMap={selectedManagerUser?.professioni}
           professioneName={selectedProfessione}
           onClose={(ok) => {
             setShowDeleteProfessioneOverlay(false);
@@ -887,6 +1021,8 @@ const PlayerInfo = ({
       {showEditProfessioneOverlay && selectedUserId && selectedProfessione && (
         <EditProfessionePersonaleOverlay
           userId={selectedUserId}
+          userLabel={selectedUserLabel}
+          currentMap={selectedManagerUser?.professioni}
           professioneName={selectedProfessione}
           onClose={(ok) => {
             setShowEditProfessioneOverlay(false);

@@ -68,7 +68,7 @@ const token = {
 const metadata = {
   scene: {
     darkness: 0.6,
-    globalLight: false,
+    globalLight: true,
   },
   walls: [{
     id: 'wall-1',
@@ -95,6 +95,40 @@ const metadata = {
 };
 
 describe('GrigliataLightingMask', () => {
+  test('applies scene darkness only while global light is enabled', () => {
+    const { rerender } = render(
+      <GrigliataLightingMask
+        bounds={bounds}
+        grid={grid}
+        metadata={{
+          scene: { darkness: 0.5, globalLight: false },
+          walls: [],
+          lights: [],
+          darknessSources: [],
+        }}
+        tokens={[]}
+      />
+    );
+
+    expect(screen.queryByTestId('lighting-mask-layer')).not.toBeInTheDocument();
+
+    rerender(
+      <GrigliataLightingMask
+        bounds={bounds}
+        grid={grid}
+        metadata={{
+          scene: { darkness: 0.5, globalLight: true },
+          walls: [],
+          lights: [],
+          darknessSources: [],
+        }}
+        tokens={[]}
+      />
+    );
+
+    expect(screen.getByTestId('lighting-darkness-overlay')).toHaveAttribute('data-opacity', '0.5');
+  });
+
   test('renders darkness, token vision, and clipped light cutouts', () => {
     render(
       <GrigliataLightingMask
@@ -177,7 +211,7 @@ describe('GrigliataLightingMask', () => {
   });
 
 
-  test('skips darkness in global light scenes while showing clipped light contribution', () => {
+  test('uses default brightness when global light is disabled while showing clipped light contribution', () => {
     render(
       <GrigliataLightingMask
         bounds={bounds}
@@ -186,7 +220,7 @@ describe('GrigliataLightingMask', () => {
           ...metadata,
           scene: {
             darkness: 0.7,
-            globalLight: true,
+            globalLight: false,
           },
         }}
         tokens={[token]}
@@ -200,7 +234,7 @@ describe('GrigliataLightingMask', () => {
     expect(screen.getByTestId('lighting-darkness-source-overlay')).toBeInTheDocument();
   });
 
-  test('renders darkness sources even when they are the only lighting contribution in global light', () => {
+  test('renders darkness sources even when they are the only contribution at default brightness', () => {
     render(
       <GrigliataLightingMask
         bounds={bounds}
@@ -208,7 +242,7 @@ describe('GrigliataLightingMask', () => {
         metadata={{
           scene: {
             darkness: 0,
-            globalLight: true,
+            globalLight: false,
           },
           walls: [],
           lights: [],

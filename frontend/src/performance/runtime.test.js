@@ -3,11 +3,13 @@ const mockWebChannelSend = function mockWebChannelSend() {
     onreadystatechange: this.mockReadyStateChange || null,
     readyState: 1,
   };
+  this.mockDuringSend?.();
   return 'sent';
 };
 function MockWebChannelXhrIo() {
   this.g = null;
   this.mockReadyStateChange = null;
+  this.mockDuringSend = null;
 }
 MockWebChannelXhrIo.prototype.ea = mockWebChannelSend;
 MockWebChannelXhrIo.prototype.send = mockWebChannelSend;
@@ -130,7 +132,7 @@ describe('performance runtime', () => {
     runtime.teardownPerformanceRuntimeForTests();
   });
 
-  test('propagates Firestore transport ownership and recognizes pinned delayed WebChannel timers', async () => {
+  test('propagates Firestore ownership without claiming an uncorrelated WebChannel-shaped timer', async () => {
     const runtime = loadRuntime(true);
     window.__FND_PERF_BOOTSTRAP__ = { runId: 'transport-timer-test', actorRole: 'dm' };
     runtime.installPerformanceRuntime();
@@ -176,12 +178,12 @@ describe('performance runtime', () => {
 
     const snapshot = window.__FND_PERF__.snapshot();
     expect(snapshot.activeResources).toEqual({
-      'firestore-transport::timeout': 6,
-      '/grigliata::timeout': 1,
+      'firestore-transport::timeout': 5,
+      '/grigliata::timeout': 2,
     });
     expect(snapshot.activeResourceDiagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ ownerRoute: 'firestore-transport', type: 'timeout', delayMs: 60_000 }),
-      expect.objectContaining({ ownerRoute: 'firestore-transport', type: 'timeout', delayMs: 45_000, callback: 'function(){e()}' }),
+      expect.objectContaining({ ownerRoute: '/grigliata', type: 'timeout', delayMs: 45_000, callback: 'function(){e()}' }),
       expect.objectContaining({ ownerRoute: 'firestore-transport', type: 'timeout', delayMs: 310_875, callback: 'function(){e()}' }),
       expect.objectContaining({ ownerRoute: 'firestore-transport', type: 'timeout', delayMs: 300_000, callback: 'function(){e()}' }),
       expect.objectContaining({ ownerRoute: 'firestore-transport', type: 'timeout', delayMs: 600_000, callback: 'function(){e()}' }),
@@ -200,7 +202,7 @@ describe('performance runtime', () => {
     runtime.teardownPerformanceRuntimeForTests();
   });
 
-  test('classifies pinned WebChannel delays without hiding near-boundary route timers', () => {
+  test('keeps ambiguous WebChannel-shaped delays route-owned until a matching request is sent', () => {
     const runtime = loadRuntime(true);
     window.__FND_PERF_BOOTSTRAP__ = { runId: 'transport-collision-test', actorRole: 'dm' };
     runtime.installPerformanceRuntime();
@@ -218,12 +220,11 @@ describe('performance runtime', () => {
 
     const snapshot = window.__FND_PERF__.snapshot();
     expect(snapshot.activeResources).toEqual({
-      'firestore-transport::timeout': 2,
-      '/grigliata::timeout': 4,
+      '/grigliata::timeout': 6,
     });
     expect(snapshot.activeResourceDiagnostics).toEqual(expect.arrayContaining([
-      expect.objectContaining({ ownerRoute: 'firestore-transport', delayMs: 45_000, callback: 'function(){e()}' }),
-      expect.objectContaining({ ownerRoute: 'firestore-transport', delayMs: 310_875, callback: 'function(){e()}' }),
+      expect.objectContaining({ ownerRoute: '/grigliata', delayMs: 45_000, callback: 'function(){e()}' }),
+      expect.objectContaining({ ownerRoute: '/grigliata', delayMs: 310_875, callback: 'function(){e()}' }),
       expect.objectContaining({ ownerRoute: '/grigliata', delayMs: 44_999, callback: 'function(){e()}' }),
       expect.objectContaining({ ownerRoute: '/grigliata', delayMs: 299_999, callback: 'function(){e()}' }),
       expect.objectContaining({ ownerRoute: '/grigliata', delayMs: 600_001, callback: 'function(){e()}' }),
@@ -388,6 +389,157 @@ describe('performance runtime', () => {
         'firestore-transport::timeout': 1,
       });
       window.clearTimeout(firestoreWatchdog);
+    } finally {
+      runtime.teardownPerformanceRuntimeForTests();
+    }
+  });
+
+  test('keeps a same-turn replacement of a correlated WebChannel watchdog transport-owned', async () => {
+    const runtime = loadRuntime(true);
+    try {
+      window.__FND_PERF_BOOTSTRAP__ = { runId: 'transport-webchannel-replacement-test', actorRole: 'dm' };
+      runtime.installPerformanceRuntime();
+      runtime.startRouteMeasurement('/grigliata', 'dm');
+      const minifiedCallback = new Function(
+        'e',
+        'return function(){e()}'
+      )(() => {});
+      const initialWatchdog = window.setTimeout(minifiedCallback, 45_000);
+      const channel = new MockWebChannelXhrIo();
+
+      channel.ea(
+        'http://127.0.0.1:8080/google.firestore.v1.Firestore/Listen/channel'
+          + '?database=projects%2Fdemo-fnd-perf%2Fdatabases%2F(default)',
+        'POST'
+      );
+      window.clearTimeout(initialWatchdog);
+      const replacementWatchdog = window.setTimeout(minifiedCallback, 45_000);
+
+      expect(window.__FND_PERF__.snapshot().activeResources).toEqual({
+        'firestore-transport::timeout': 1,
+      });
+      expect(window.__FND_PERF__.snapshot().activeResourceDiagnostics).toEqual([
+        expect.objectContaining({
+          ownerRoute: 'firestore-transport',
+          callback: 'function(){e()}',
+          delayMs: 45_000,
+          attribution: 'firestore-webchannel-watchdog-replacement',
+        }),
+      ]);
+
+      window.clearTimeout(replacementWatchdog);
+      await Promise.resolve();
+      const laterApplicationCollision = window.setTimeout(minifiedCallback, 45_000);
+      expect(window.__FND_PERF__.snapshot().activeResources).toEqual({
+        '/grigliata::timeout': 1,
+      });
+      window.clearTimeout(laterApplicationCollision);
+    } finally {
+      runtime.teardownPerformanceRuntimeForTests();
+    }
+  });
+
+  test('does not inherit transport ownership when a route watchdog-shaped timer is replaced', () => {
+    const runtime = loadRuntime(true);
+    try {
+      window.__FND_PERF_BOOTSTRAP__ = { runId: 'transport-webchannel-route-replacement-test', actorRole: 'dm' };
+      runtime.installPerformanceRuntime();
+      runtime.startRouteMeasurement('/grigliata', 'dm');
+      const minifiedCallback = new Function(
+        'e',
+        'return function(){e()}'
+      )(() => {});
+      const routeWatchdog = window.setTimeout(minifiedCallback, 45_000);
+
+      window.clearTimeout(routeWatchdog);
+      const replacement = window.setTimeout(minifiedCallback, 45_000);
+
+      expect(window.__FND_PERF__.snapshot().activeResources).toEqual({
+        '/grigliata::timeout': 1,
+      });
+      window.clearTimeout(replacement);
+    } finally {
+      runtime.teardownPerformanceRuntimeForTests();
+    }
+  });
+
+  test('consumes replacement correlation when the real watchdog is already transport-owned', () => {
+    const runtime = loadRuntime(true);
+    try {
+      window.__FND_PERF_BOOTSTRAP__ = { runId: 'transport-webchannel-owned-replacement-test', actorRole: 'dm' };
+      runtime.installPerformanceRuntime();
+      runtime.startRouteMeasurement('/grigliata', 'dm');
+      const minifiedCallback = new Function(
+        'e',
+        'return function(){e()}'
+      )(() => {});
+      const initialWatchdog = window.setTimeout(minifiedCallback, 45_000);
+      const channel = new MockWebChannelXhrIo();
+
+      channel.ea(
+        'http://127.0.0.1:8080/google.firestore.v1.Firestore/Listen/channel'
+          + '?database=projects%2Fdemo-fnd-perf%2Fdatabases%2F(default)',
+        'POST'
+      );
+      window.clearTimeout(initialWatchdog);
+      const ownedReplacement = runtime.withAsyncResourceOwner(
+        'firestore-transport',
+        () => window.setTimeout(minifiedCallback, 45_000)
+      );
+      const routeLookalike = window.setTimeout(minifiedCallback, 45_000);
+
+      expect(window.__FND_PERF__.snapshot().activeResources).toEqual({
+        'firestore-transport::timeout': 1,
+        '/grigliata::timeout': 1,
+      });
+      expect(window.__FND_PERF__.snapshot().activeResourceDiagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          ownerRoute: 'firestore-transport',
+          callback: 'function(){e()}',
+          delayMs: 45_000,
+          attribution: 'firestore-webchannel-watchdog-replacement',
+        }),
+        expect.objectContaining({
+          ownerRoute: '/grigliata',
+          callback: 'function(){e()}',
+          delayMs: 45_000,
+        }),
+      ]));
+
+      window.clearTimeout(ownedReplacement);
+      window.clearTimeout(routeLookalike);
+    } finally {
+      runtime.teardownPerformanceRuntimeForTests();
+    }
+  });
+
+  test('owns every watchdog scheduled inside an exact demo WebChannel send', () => {
+    const runtime = loadRuntime(true);
+    try {
+      window.__FND_PERF_BOOTSTRAP__ = { runId: 'transport-webchannel-send-owner-test', actorRole: 'dm' };
+      runtime.installPerformanceRuntime();
+      runtime.startRouteMeasurement('/grigliata', 'dm');
+      const minifiedCallback = new Function(
+        'e',
+        'return function(){e()}'
+      )(() => {});
+      const watchdogs = [];
+      const channel = new MockWebChannelXhrIo();
+      channel.mockDuringSend = () => {
+        watchdogs.push(window.setTimeout(minifiedCallback, 45_000));
+        watchdogs.push(window.setTimeout(minifiedCallback, 45_000));
+      };
+
+      channel.ea(
+        'http://127.0.0.1:8080/google.firestore.v1.Firestore/Write/channel'
+          + '?database=projects%2Fdemo-fnd-perf%2Fdatabases%2F(default)',
+        'POST'
+      );
+
+      expect(window.__FND_PERF__.snapshot().activeResources).toEqual({
+        'firestore-transport::timeout': 2,
+      });
+      watchdogs.forEach((watchdog) => window.clearTimeout(watchdog));
     } finally {
       runtime.teardownPerformanceRuntimeForTests();
     }

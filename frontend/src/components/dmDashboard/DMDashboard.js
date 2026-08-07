@@ -1,22 +1,23 @@
 // file: ./frontend/src/components/dmDashboard/DMDashboard.js
-import React, { useState, useEffect } from "react";
-import { db } from "../firebaseConfig";
-import { collection, doc, updateDoc, increment, onSnapshot } from "../../performance/firestore";
+import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "../../AuthContext";
 import { useNavigate } from "react-router-dom";
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { faLock, faLockOpen } from "@fortawesome/free-solid-svg-icons";
 import PlayerInfo from "./elements/playerInfo";
 import LockSettingsTable from "./elements/LockSettingsTable";
+import ManagerActionDialog, { parseIntegerInput } from "./elements/ManagerActionDialog";
 import { useShellLayout } from "../common/shellLayout";
 import { getCallable } from "../../data/functions/callableRegistry";
 import {
   callBackendOperationAndWait,
-  TASK06_LOCAL_CANDIDATE,
 } from "../../data/functions/backendOperationClient";
 import {
   runWithDurableOperationIntent,
 } from "../../data/functions/backendOperationIntentStore";
+import { updateProgression } from "../../data/userData/userDataCommands";
+import { useManagerUserData } from "../../data/userData/managerUserData";
+import { reconcileManagerUserSelection } from "./managerSelection";
 
 // Add icons to library
 library.add(faLock, faLockOpen);
@@ -25,14 +26,30 @@ const levelUpAll = getCallable("levelUpAll");
 const levelUpUser = getCallable("levelUpUser");
 
 const DMDashboard = () => {
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const { user, userData } = useAuth();
+  const [directoryPageIndex, setDirectoryPageIndex] = useState(0);
+  const [directoryPageCursors, setDirectoryPageCursors] = useState([null]);
+  const directoryCursor = directoryPageCursors[directoryPageIndex] || null;
+  const {
+    users,
+    loading,
+    error: userDataError,
+    hasMore = false,
+    nextCursor = null,
+  } = useManagerUserData(userData?.role === "dm", {
+    cursor: directoryCursor,
+  });
+  const [actionError, setError] = useState(null);
+  const error = actionError || userDataError?.message || null;
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
   const [selectedUserIds, setSelectedUserIds] = useState([]);
+  const [actionDialog, setActionDialog] = useState(null);
+  const [actionDialogValue, setActionDialogValue] = useState("1");
+  const [actionDialogError, setActionDialogError] = useState(null);
+  const knownUserIdsRef = useRef([]);
+  const hasLoadedUsersRef = useRef(false);
   const { topInset } = useShellLayout();
   // Collapsible sections state
   const [sectionsOpen, setSectionsOpen] = useState({
@@ -40,36 +57,15 @@ const DMDashboard = () => {
     locks: true,
   });
 
-  // Realtime subscription to users collection once DM status is confirmed.
-  // This removes the need for manual refreshes after operations (level ups, token changes, etc.).
-  // If performance becomes an issue with many users, consider adding query constraints
-  // or switching to individual doc listeners based on a selected subset.
   useEffect(() => {
     if (!userData) return; // Still loading user data
 
     if (userData.role !== "dm") {
       console.log("Access denied: User is not a DM");
       navigate("/home");
-      return;
+      return undefined;
     }
-
-    setLoading(true);
-    const usersRef = collection(db, "users");
-    const unsubscribe = onSnapshot(
-      usersRef,
-      (snapshot) => {
-        const usersData = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setUsers(usersData);
-        setLoading(false);
-      },
-      (err) => {
-        console.error("Realtime users listener error:", err);
-        setError("Failed to subscribe to users updates.");
-        setLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
+    return undefined;
   }, [userData, navigate]);
 
   // Ensure player selection state stays in sync with the current users list.
@@ -77,19 +73,41 @@ const DMDashboard = () => {
   useEffect(() => {
     if (!users.length) {
       setSelectedUserIds([]);
+      knownUserIdsRef.current = [];
+      hasLoadedUsersRef.current = false;
       return;
     }
-    setSelectedUserIds((prev) => {
-      const stillValid = prev.filter((id) => users.some((u) => u.id === id));
-      const withNew = Array.from(new Set([...stillValid, ...users.map((u) => u.id)]));
-      return withNew;
-    });
+    const currentUserIds = users.map((entry) => entry.id);
+    const previousUserIds = knownUserIdsRef.current;
+    const isInitialLoad = !hasLoadedUsersRef.current;
+    setSelectedUserIds((selectedIds) => reconcileManagerUserSelection({
+      selectedUserIds: selectedIds,
+      currentUserIds,
+      previousUserIds,
+      isInitialLoad,
+    }));
+    knownUserIdsRef.current = currentUserIds;
+    hasLoadedUsersRef.current = true;
   }, [users]);
 
   const toggleUserSelection = (userId) => {
     setSelectedUserIds((prev) =>
       prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
     );
+  };
+
+  const showPreviousDirectoryPage = () => {
+    setDirectoryPageIndex((current) => Math.max(0, current - 1));
+  };
+
+  const showNextDirectoryPage = () => {
+    if (!hasMore || !nextCursor) return;
+    setDirectoryPageCursors((current) => {
+      const next = current.slice(0, directoryPageIndex + 1);
+      next[directoryPageIndex + 1] = nextCursor;
+      return next;
+    });
+    setDirectoryPageIndex((current) => current + 1);
   };
 
   // Simple section header with show/hide control
@@ -105,38 +123,26 @@ const DMDashboard = () => {
     </div>
   );
 
-  const handleLevelUpAll = async () => {
+  const executeLevelUpAll = async () => {
     if (userData.role !== "dm") {
       setError("Permission denied: Only DMs can level up players");
-      return;
-    }
-    if (!window.confirm("Are you sure you want to increase the level of all players by 1?")) {
       return;
     }
     try {
       setBusy(true);
       setToast(null);
       setError(null);
-      let updatedCount = 0;
-      if (TASK06_LOCAL_CANDIDATE) {
-        const operation = await runWithDurableOperationIntent({
-          actorUid: user?.uid,
-          kind: "level-up-all",
-          intent: { scope: "all-users" },
-          invoke: (operationId) => callBackendOperationAndWait(
-            levelUpAll,
-            {},
-            { operationId }
-          ),
-        });
-        updatedCount = Number(operation?.progress?.succeeded) || 0;
-      } else {
-        const response = await levelUpAll({ idempotencyKey: `${Date.now()}` });
-        const updated = response?.data?.updated;
-        updatedCount = Array.isArray(updated)
-          ? updated.filter((result) => result?.toLevel).length
-          : 0;
-      }
+      const operation = await runWithDurableOperationIntent({
+        actorUid: user?.uid,
+        kind: "level-up-all",
+        intent: { scope: "all-users" },
+        invoke: (operationId) => callBackendOperationAndWait(
+          levelUpAll,
+          {},
+          { operationId }
+        ),
+      });
+      const updatedCount = Number(operation?.progress?.succeeded) || 0;
       setToast(`Level up done. Updated ${updatedCount} players.`);
   // Realtime listener will update UI automatically
     } catch (e) {
@@ -148,18 +154,24 @@ const DMDashboard = () => {
     }
   };
 
-  const handleLevelUpOne = async (targetUserId) => {
+  const executeLevelUpOne = async (targetUserId) => {
     if (userData.role !== "dm") {
       setError("Permission denied: Only DMs can level up players");
-      return;
-    }
-    if (!window.confirm("Confirm level up for this player?")) {
       return;
     }
     try {
       setBusy(true);
       setToast(null);
-      await levelUpUser({ userId: targetUserId });
+      setError(null);
+      await runWithDurableOperationIntent({
+        actorUid: user?.uid,
+        kind: "level-up-user",
+        intent: { userId: targetUserId },
+        invoke: (operationId) => levelUpUser({
+          userId: targetUserId,
+          operationId,
+        }),
+      });
       setToast(`Level up done for user.`);
   // Realtime listener will update UI automatically
     } catch (e) {
@@ -172,28 +184,33 @@ const DMDashboard = () => {
   };
 
   // Add combat tokens to a specific user
-  const handleAddCombatTokens = async (targetUserId) => {
+  const executeCombatTokenUpdate = async (targetUserId, amount) => {
     if (userData.role !== "dm") {
       setError("Permission denied: Only DMs can modify tokens");
-      return;
-    }
-    const input = window.prompt("How many combat tokens to add? (use negative to remove)", "1");
-    if (input === null) return; // cancelled
-    const amount = parseInt(input, 10);
-    if (Number.isNaN(amount) || !Number.isFinite(amount)) {
-      setError("Invalid number.");
-      return;
-    }
-    if (amount === 0) return;
-    if (amount < 0 && !window.confirm(`Remove ${Math.abs(amount)} tokens from this player?`)) {
       return;
     }
     try {
       setBusy(true);
       setToast(null);
-      const userRef = doc(db, "users", targetUserId);
-      await updateDoc(userRef, {
-        "stats.combatTokensAvailable": increment(amount),
+      setError(null);
+      const targetUser = users.find((entry) => entry.id === targetUserId);
+      if (!targetUser) {
+        throw new Error("The selected user is no longer available.");
+      }
+      const current = Number(targetUser?.stats?.combatTokensAvailable) || 0;
+      const next = current + amount;
+      await updateProgression({
+        userId: targetUserId,
+        patch: {
+          stats: { combatTokensAvailable: next },
+        },
+        retryKey: [
+          "dm-combat-tokens",
+          targetUserId,
+          current,
+          amount,
+          next,
+        ].join(":"),
       });
       setToast(`${amount > 0 ? "Added" : "Removed"} ${Math.abs(amount)} combat token${Math.abs(amount) === 1 ? "" : "s"}.`);
   // Realtime listener will update UI automatically
@@ -205,6 +222,75 @@ const DMDashboard = () => {
       setTimeout(() => setToast(null), 3000);
     }
   };
+
+  const openActionDialog = (kind, targetUserId = null) => {
+    setActionDialogError(null);
+    setActionDialogValue("1");
+    setActionDialog({ kind, targetUserId });
+  };
+
+  const closeActionDialog = () => {
+    if (busy) return;
+    setActionDialog(null);
+    setActionDialogError(null);
+  };
+
+  const handleLevelUpAll = () => openActionDialog("level-up-all");
+  const handleLevelUpOne = (targetUserId) => openActionDialog("level-up-one", targetUserId);
+  const handleAddCombatTokens = (targetUserId) => openActionDialog("combat-tokens", targetUserId);
+
+  const confirmActionDialog = async () => {
+    if (!actionDialog || busy) return;
+    const pendingAction = actionDialog;
+    if (pendingAction.kind === "combat-tokens") {
+      const amount = parseIntegerInput(actionDialogValue);
+      if (amount === null) {
+        setActionDialogError("Enter a valid whole number.");
+        return;
+      }
+      if (amount === 0) {
+        setActionDialogError("Enter a value other than zero.");
+        return;
+      }
+      setActionDialog(null);
+      await executeCombatTokenUpdate(pendingAction.targetUserId, amount);
+      return;
+    }
+
+    setActionDialog(null);
+    if (pendingAction.kind === "level-up-all") {
+      await executeLevelUpAll();
+    } else if (pendingAction.kind === "level-up-one") {
+      await executeLevelUpOne(pendingAction.targetUserId);
+    }
+  };
+
+  const actionTarget = actionDialog?.targetUserId
+    ? users.find((entry) => entry.id === actionDialog.targetUserId)
+    : null;
+  const actionTargetLabel = actionTarget?.characterId
+    || actionTarget?.label
+    || actionTarget?.email
+    || "this player";
+  const actionDialogCopy = actionDialog?.kind === "level-up-all"
+    ? {
+        title: "Level up all players?",
+        description: "This increases every player's level by 1.",
+        confirmLabel: "Level Up All",
+        confirmTone: "danger",
+      }
+    : actionDialog?.kind === "level-up-one"
+      ? {
+          title: `Level up ${actionTargetLabel}?`,
+          description: "This increases this player's level by 1.",
+          confirmLabel: "Level Up",
+        }
+      : {
+          title: `Adjust tokens for ${actionTargetLabel}`,
+          description: "Use a positive number to add combat tokens or a negative number to remove them.",
+          inputLabel: "Combat token change",
+          confirmLabel: "Apply",
+        };
 
   // Note: lock toggles handled in LockSettingsTable to avoid whole-page re-renders
 
@@ -292,6 +378,25 @@ const DMDashboard = () => {
             <>
               <div className="mb-4">
                 <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-2">Seleziona giocatori da mostrare</div>
+                <div className="mb-3 flex items-center gap-2" aria-label="Player directory pagination">
+                  <button
+                    type="button"
+                    onClick={showPreviousDirectoryPage}
+                    disabled={loading || directoryPageIndex === 0}
+                    className="rounded border border-slate-600 px-3 py-1 text-xs text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Previous players
+                  </button>
+                  <span className="text-xs text-slate-400">Page {directoryPageIndex + 1}</span>
+                  <button
+                    type="button"
+                    onClick={showNextDirectoryPage}
+                    disabled={loading || !hasMore || !nextCursor}
+                    className="rounded border border-slate-600 px-3 py-1 text-xs text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Next players
+                  </button>
+                </div>
                 <div className="flex flex-wrap gap-2 items-center">
                   <button
                     onClick={() => setSelectedUserIds(users.map((u) => u.id))}
@@ -308,7 +413,7 @@ const DMDashboard = () => {
                   <span className="mx-2 h-5 w-px bg-slate-700/70" />
                   {users.map((user) => {
                     const isSelected = selectedUserIds.includes(user.id);
-                    const label = user.characterId || user.email;
+                    const label = user.characterId || user.label || user.email;
                     return (
                       <button
                         key={user.id}
@@ -333,7 +438,6 @@ const DMDashboard = () => {
                   users={users.filter((u) => selectedUserIds.includes(u.id))}
                   loading={loading}
                   error={error}
-                  setUsers={setUsers}
                   variant="card"
                   onLevelUpOne={handleLevelUpOne}
                   onAddTokens={handleAddCombatTokens}
@@ -351,6 +455,23 @@ const DMDashboard = () => {
 
         {renderLockSettingsTable()}
       </div>
+      <ManagerActionDialog
+        visible={!!actionDialog}
+        title={actionDialogCopy.title}
+        description={actionDialogCopy.description}
+        inputLabel={actionDialogCopy.inputLabel}
+        value={actionDialogValue}
+        onChange={(value) => {
+          setActionDialogValue(value);
+          setActionDialogError(null);
+        }}
+        error={actionDialogError}
+        busy={busy}
+        confirmLabel={actionDialogCopy.confirmLabel}
+        confirmTone={actionDialogCopy.confirmTone}
+        onClose={closeActionDialog}
+        onConfirm={confirmActionDialog}
+      />
     </div>
   );
 };

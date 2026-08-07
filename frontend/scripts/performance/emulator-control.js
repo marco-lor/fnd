@@ -150,20 +150,34 @@ const setBackgroundTriggersEnabled = async (enabled, {
 };
 
 const disableBackgroundTriggersWithRecovery = async (options = {}) => {
-  assertDemoProject(options.projectId ?? defaultProjectId);
-  try {
-    await setBackgroundTriggersEnabled(false, options);
-  } catch (error) {
-    const disableError = normalizeError(error);
+  const {
+    disableAttempts = 1,
+    retryDelayMs = 0,
+    ...controlOptions
+  } = options;
+  assertDemoProject(controlOptions.projectId ?? defaultProjectId);
+  if (!Number.isSafeInteger(disableAttempts) || disableAttempts <= 0) {
+    throw new TypeError('disableAttempts must be a positive integer.');
+  }
+  assertPositiveNumber(retryDelayMs, 'retry delay', { allowZero: true });
+
+  for (let attempt = 1; attempt <= disableAttempts; attempt += 1) {
     try {
-      await setBackgroundTriggersEnabled(true, options);
-    } catch (recoveryError) {
-      throw new global.AggregateError(
-        [disableError, normalizeError(recoveryError)],
-        'Background triggers could not be confirmed disabled, and recovery enable also failed.'
-      );
+      await setBackgroundTriggersEnabled(false, controlOptions);
+      return;
+    } catch (error) {
+      const disableError = normalizeError(error);
+      try {
+        await setBackgroundTriggersEnabled(true, controlOptions);
+      } catch (recoveryError) {
+        throw new global.AggregateError(
+          [disableError, normalizeError(recoveryError)],
+          'Background triggers could not be confirmed disabled, and recovery enable also failed.'
+        );
+      }
+      if (attempt === disableAttempts) throw disableError;
+      if (retryDelayMs > 0) await delay(retryDelayMs);
     }
-    throw disableError;
   }
 };
 

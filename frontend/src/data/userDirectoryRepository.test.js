@@ -2,6 +2,7 @@ import {
   __buildUserDirectoryQuery,
   getUserDirectoryPage,
   normalizeUserDirectoryDocument,
+  subscribeUserDirectoryPage,
   subscribeUserDirectoryFirstPage,
   USER_DIRECTORY_PAGE_SIZE,
 } from './userDirectoryRepository';
@@ -193,5 +194,46 @@ describe('userDirectoryRepository', () => {
     unsubscribeSecond();
     await Promise.resolve();
     expect(physicalUnsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  test('builds role-scoped live pages with the requested bounded size and cursor metadata', () => {
+    let listener;
+    onSnapshot.mockImplementation((_target, observer) => {
+      listener = observer;
+      return jest.fn();
+    });
+    const observer = jest.fn();
+
+    subscribeUserDirectoryPage(observer, {role: 'player', pageSize: 10});
+    expect(where).toHaveBeenCalledWith('role', '==', 'player');
+    expect(limit).toHaveBeenCalledWith(10);
+
+    const documents = Array.from({length: 10}, (_, index) => firestoreDocument(
+      `player-${index + 1}`,
+      projection({
+        characterId: `Player ${index + 1}`,
+        label: `Player ${index + 1}`,
+        normalizedLabel: `player ${index + 1}`,
+      })
+    ));
+    listener.next({
+      docs: documents,
+      docChanges: () => documents.map((doc, index) => ({
+        type: 'added',
+        doc,
+        oldIndex: -1,
+        newIndex: index,
+      })),
+    });
+
+    expect(observer).toHaveBeenCalledWith(expect.objectContaining({
+      hasMore: true,
+      cursor: {
+        version: 1,
+        queryKey: 'directory.users.by-role.player.page.v1',
+        sortValues: ['player 10'],
+        documentId: 'player-10',
+      },
+    }));
   });
 });

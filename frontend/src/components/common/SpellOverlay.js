@@ -2,6 +2,8 @@
 import React, { useEffect, useState, useCallback } from "react"; // Added useCallback
 import ReactDOM from "react-dom";
 import useObjectUrl from "./useObjectUrl";
+import MediaImage from "./MediaImage";
+import MediaVideo from "./MediaVideo";
 
 /**
  * Generic, storage-agnostic spell form.
@@ -13,6 +15,7 @@ import useObjectUrl from "./useObjectUrl";
  * ▸ userName      String          – Displayed under the title.
  * ▸ initialData   Object|null     – Prefills the form in “edit” mode.
  * ▸ saveButtonText String|null     – Text for the primary action button (defaults to "Save Spell").
+ * ▸ isSaving     Boolean          – Shows progress and prevents another save while true.
  * ▸ onClose       Function(result | null)
  * • null   → user clicked **Cancel**
  * • { spellData, imageFile, videoFile } → user clicked primary action button
@@ -23,6 +26,7 @@ export function SpellOverlay({
   userName = "Unknown User",
   initialData = null,
   saveButtonText = "Save Spell", // Added prop with default
+  isSaving = false,
   onClose,
 }) {
   /* ---------------- state ---------------- */
@@ -39,6 +43,12 @@ export function SpellOverlay({
   const videoObjectUrl = useObjectUrl(videoFile);
   const resolvedImagePreviewUrl = imageObjectUrl || imagePreviewUrl;
   const resolvedVideoPreviewUrl = videoObjectUrl || videoPreviewUrl;
+  const hasImagePreview = !imageRemoved && Boolean(
+    resolvedImagePreviewUrl || initialData?.media
+  );
+  const hasVideoPreview = !videoRemoved && Boolean(
+    resolvedVideoPreviewUrl || initialData?.videoMedia
+  );
   /* ---------------- helpers ---------------- */
   // Use useCallback to memoize buildEmptySpell if schema structure is stable
    const buildEmptySpell = useCallback((s) => ({
@@ -183,6 +193,7 @@ export function SpellOverlay({
 
   const initiateSave = (e) => {
     e.preventDefault();
+    if (isSaving) return;
     if (!spellFormData.Nome || !spellFormData.Nome.trim()) {
       alert("Spell Name (Nome) is required.");
       return;
@@ -341,9 +352,18 @@ export function SpellOverlay({
           <label className="block text-white text-sm mb-1">Immagine (Opzionale)</label>
           <input type="file" accept="image/*" aria-label="Spell image file" onChange={(e) => preview(e, true)}
                  className="w-full text-sm text-white file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
-          {resolvedImagePreviewUrl && (
+          {hasImagePreview && (
              <div className="mt-2 relative w-24 h-24">
-                <img src={resolvedImagePreviewUrl} alt="Preview" className="w-full h-full object-cover rounded border border-gray-600" />
+                <MediaImage
+                  compatibilityMode={imageObjectUrl ? "legacy" : "auto"}
+                  media={imageObjectUrl ? { imageUrl: imageObjectUrl } : initialData}
+                  mediaPurpose={imageObjectUrl ? "" : "spell"}
+                  src={resolvedImagePreviewUrl || ""}
+                  variant="thumbnail"
+                  loading="eager"
+                  alt="Preview"
+                  className="w-full h-full object-cover rounded border border-gray-600"
+                />
                  {/* Add a clear button */}
                   <button type="button" onClick={() => { 
                     setImageFile(null); 
@@ -352,7 +372,7 @@ export function SpellOverlay({
                   }} className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center -mt-1 -mr-1">&times;</button>
               </div>
            )}
-           {!resolvedImagePreviewUrl && <div className="mt-2 w-24 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">No Image</div>}
+           {!hasImagePreview && <div className="mt-2 w-24 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">No Image</div>}
         </div>
 
          {/* Video Upload */}
@@ -360,9 +380,18 @@ export function SpellOverlay({
            <label className="block text-white text-sm mb-1">Video (Opzionale)</label>
            <input type="file" accept="video/*" aria-label="Spell video file" onChange={(e) => preview(e, false)}
                    className="w-full text-sm text-white file:mr-4 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
-           {resolvedVideoPreviewUrl && (
+           {hasVideoPreview && (
              <div className="mt-2 relative max-w-xs">
-                <video src={resolvedVideoPreviewUrl} controls className="w-full max-h-48 rounded border border-gray-600" />
+                <MediaVideo
+                  compatibilityMode={videoObjectUrl ? "legacy" : "auto"}
+                  media={videoObjectUrl ? { video_url: videoObjectUrl } : initialData}
+                  mediaPurpose={videoObjectUrl ? "" : "spell-video"}
+                  src={resolvedVideoPreviewUrl || ""}
+                  controls
+                  preload="metadata"
+                  aria-label="Spell video preview"
+                  className="w-full max-h-48 rounded border border-gray-600"
+                />
                 {/* Add a clear button */}
                 <button type="button" onClick={() => { 
                   setVideoFile(null); 
@@ -371,7 +400,7 @@ export function SpellOverlay({
                 }} className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center -mt-1 -mr-1">&times;</button>
               </div>
             )}
-            {!resolvedVideoPreviewUrl && <div className="mt-2 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">No Video</div>}
+            {!hasVideoPreview && <div className="mt-2 h-24 rounded border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs">No Video</div>}
 
            <p className="text-gray-400 text-xs mt-1">Consigliato: video breve (&lt;30s) e di dimensioni ridotte.</p>
          </div>
@@ -383,16 +412,42 @@ export function SpellOverlay({
         <button
           type="button"
           onClick={() => onClose(null)} // Always pass null on cancel
-          className="px-5 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-md shadow-md transition-colors duration-150"
+          disabled={isSaving}
+          className="px-5 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-md shadow-md transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Cancel
         </button>
         <button
           type="submit" // Triggers initiateSave
-          className="px-5 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-md shadow-md transition-colors duration-150"
-          disabled={!spellFormData.Nome?.trim()} // Disable if name is empty
+          aria-busy={isSaving}
+          className="px-5 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-md shadow-md transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center"
+          disabled={isSaving || !spellFormData.Nome?.trim()} // Disable if saving or name is empty
         >
-          {saveButtonText} {/* Use the prop for button text */}
+          {isSaving ? (
+            <>
+              <svg
+                className="animate-spin h-4 w-4 mr-2"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.37 0 0 5.37 0 12h4z"
+                />
+              </svg>
+              <span>Saving...</span>
+            </>
+          ) : saveButtonText}
         </button>
       </div>
     </form>

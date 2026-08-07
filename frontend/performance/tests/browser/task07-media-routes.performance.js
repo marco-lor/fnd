@@ -4,6 +4,7 @@ const {
   drainPageConnections,
   installBootstrap,
   installDeterministicFontRoutes,
+  isExpectedDemoRecaptchaReportOnlyWarning,
   storageStateForRole,
   waitForReadiness,
   writeScenarioResult,
@@ -58,9 +59,16 @@ for (const scenario of manifest.scenarios) {
     await installDeterministicFontRoutes(context);
     await installBootstrap(context, scenario, 1);
     const errors = [];
+    const explainedRecaptchaReportOnlyWarnings = [];
     const page = await context.newPage();
     page.on('console', (message) => {
-      if (message.type() === 'error') errors.push(message.text());
+      if (message.type() !== 'error') return;
+      const text = message.text();
+      if (isExpectedDemoRecaptchaReportOnlyWarning(text, {baseURL})) {
+        explainedRecaptchaReportOnlyWarnings.push(text.slice(0, 500));
+        return;
+      }
+      errors.push(text);
     });
     page.on('pageerror', (error) => errors.push(error.message));
 
@@ -120,7 +128,10 @@ for (const scenario of manifest.scenarios) {
             browserVersion: browser.version(),
           },
           metrics: task07RegistryMetrics(registry),
-          diagnostics: {consoleErrors: errors},
+          diagnostics: {
+            consoleErrors: errors,
+            explainedRecaptchaReportOnlyWarnings,
+          },
         });
       }
     } finally {
@@ -158,8 +169,15 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
   }, 1);
   const page = await context.newPage();
   const errors = [];
+  const explainedRecaptchaReportOnlyWarnings = [];
   page.on('console', (message) => {
-    if (message.type() === 'error') errors.push(message.text());
+    if (message.type() !== 'error') return;
+    const text = message.text();
+    if (isExpectedDemoRecaptchaReportOnlyWarning(text, {baseURL})) {
+      explainedRecaptchaReportOnlyWarnings.push(text.slice(0, 500));
+      return;
+    }
+    errors.push(text);
   });
   page.on('pageerror', (error) => errors.push(error.message));
 
@@ -177,7 +195,10 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
       visibleStarFields: Array.from(
         document.querySelectorAll('.global-aurora__star-field')
       ).filter((node) => getComputedStyle(node).display !== 'none').length,
-      meteors: document.querySelectorAll('.shooting-star').length,
+      activeMeteors: document.querySelectorAll(
+        '.shooting-star[data-active="true"]'
+      ).length,
+      meteorSlots: document.querySelectorAll('.shooting-star').length,
     }));
     expect(snapshot.registry.limits).toMatchObject({
       profile: 'compact',
@@ -188,7 +209,8 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
       maxLowPriorityQueueSize: 16,
     });
     expect(snapshot.visibleStarFields).toBe(1);
-    expect(snapshot.meteors).toBe(0);
+    expect(snapshot.meteorSlots).toBe(2);
+    expect(snapshot.activeMeteors).toBe(0);
     expect(errors).toEqual([]);
     writeScenarioResult({
       id: 'task07-registry-compact',
@@ -201,7 +223,10 @@ test('compact save-data profile exposes the bounded Task 07 registry limits', as
         browserVersion: browser.version(),
       },
       metrics: task07RegistryMetrics(snapshot.registry),
-      diagnostics: {consoleErrors: errors},
+      diagnostics: {
+        consoleErrors: errors,
+        explainedRecaptchaReportOnlyWarnings,
+      },
     });
   } finally {
     await drainPageConnections(page).catch(() => {});

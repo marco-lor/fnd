@@ -9,6 +9,8 @@ const {
   ACCOUNT,
   createPageAssetTracker,
   drainPageConnections,
+  isExpectedDemoRecaptchaCancellation,
+  isExpectedDemoRecaptchaReportOnlyWarning,
   isExpectedFirestoreLifecycleCancellation,
   isExpectedTask07MediaDetachmentCancellation,
   isKnownDemoFirestoreStartupWarning,
@@ -30,6 +32,12 @@ const summarizeDiagnostics = (accounts) => ({
   ), 0),
   explainedMediaDetachmentCancellations: accounts.reduce((total, account) => (
     total + account.explainedMediaDetachmentCancellations.length
+  ), 0),
+  explainedRecaptchaCancellations: accounts.reduce((total, account) => (
+    total + account.explainedRecaptchaCancellations.length
+  ), 0),
+  explainedRecaptchaReportOnlyWarnings: accounts.reduce((total, account) => (
+    total + account.explainedRecaptchaReportOnlyWarnings.length
   ), 0),
   unhandledErrors: accounts.reduce((total, account) => total + account.unhandledErrors.length, 0),
   failedRequests: accounts.reduce((total, account) => total + account.failedRequests.length, 0),
@@ -57,6 +65,8 @@ test('create deterministic emulator authentication states', async ({ browser, ba
         explainedStartupWarnings: [],
         explainedLifecycleTransportCancellations: [],
         explainedMediaDetachmentCancellations: [],
+        explainedRecaptchaCancellations: [],
+        explainedRecaptchaReportOnlyWarnings: [],
         unhandledErrors: [],
         failedRequests: [],
         cleanupErrors: [],
@@ -90,6 +100,10 @@ test('create deterministic emulator authentication states', async ({ browser, ba
               phase: 'auth-setup',
               text: text.slice(0, 500),
             });
+            return;
+          }
+          if (isExpectedDemoRecaptchaReportOnlyWarning(text, { baseURL })) {
+            diagnostics.explainedRecaptchaReportOnlyWarnings.push(text.slice(0, 500));
             return;
           }
           diagnostics.consoleErrors.push(text.slice(0, 300));
@@ -133,8 +147,20 @@ test('create deterministic emulator authentication states', async ({ browser, ba
             });
             return;
           }
+          if (isExpectedDemoRecaptchaCancellation({
+            ...failure,
+            lifecyclePhase,
+            url: request.url(),
+          })) {
+            diagnostics.explainedRecaptchaCancellations.push({
+              ...failure,
+              phase: lifecyclePhase,
+            });
+            return;
+          }
           diagnostics.failedRequests.push(failure);
         });
+        lifecyclePhase = 'auth-bootstrap';
         await page.goto('/');
         await page.locator('input[type="email"]').fill(`${account.uid}@example.test`);
         await page.locator('input[type="password"]').fill('PerfTest!123');

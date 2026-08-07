@@ -1,10 +1,16 @@
 {
   "firestore": {
     "rules": "firestore.rules",
-    "indexes": "firestore.indexes.json"
+    "indexes": "firestore.indexes.json",
+    "predeploy": [
+      "node \"$PROJECT_DIR/scripts/firebase-backend-release-guard.js\" firestore"
+    ]
   },
   "storage": {
-    "rules": "storage.rules"
+    "rules": "storage.rules",
+    "predeploy": [
+      "node \"$PROJECT_DIR/scripts/firebase-backend-release-guard.js\" storage"
+    ]
   },
   "hosting": {
     "public": "build",
@@ -14,6 +20,7 @@
       "**/node_modules/**"
     ],
     "predeploy": [
+      "node \"$PROJECT_DIR/scripts/firebase-backend-release-guard.js\" hosting",
       "npm --prefix \"$PROJECT_DIR\" run build:production"
     ],
     "headers": [
@@ -148,7 +155,8 @@
         "source": "**",
         "destination": "/index.html"
       }
-    ]
+    ],
+    "site": "fatins"
   },
   "functions": [
     {
@@ -162,8 +170,14 @@
         "*.local"
       ],
       "predeploy": [
+        "node \"$PROJECT_DIR/scripts/firebase-backend-release-guard.js\" functions",
         "npm --prefix \"$RESOURCE_DIR\" run lint",
         "npm --prefix \"$RESOURCE_DIR\" run build"
+      ],
+      "postdeploy": [
+        "node \"$PROJECT_DIR/scripts/callable-invoker-policy.js\" --project fatins --region europe-west8 --check",
+        "node \"$PROJECT_DIR/scripts/callable-invoker-policy.js\" --project fatins --region europe-west1 --check",
+        "node \"$PROJECT_DIR/scripts/callable-invoker-policy.js\" --project fatins --region us-central1 --check"
       ]
     }
   ],

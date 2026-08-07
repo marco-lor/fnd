@@ -2,6 +2,8 @@ const { test, expect } = require('./measured-test');
 const {
   drainPageConnections,
   installDeterministicFontRoutes,
+  isExpectedDemoRecaptchaCancellation,
+  isExpectedDemoRecaptchaReportOnlyWarning,
   storageStateForRole,
   waitForReadiness,
   writeScenarioResult,
@@ -36,8 +38,11 @@ test('Task 07 media and shell budgets hold on read-only home', async ({
   const fixtureImageRequests = [];
   const mediaRequests = [];
   const consoleErrors = [];
+  const explainedRecaptchaCancellations = [];
+  const explainedRecaptchaReportOnlyWarnings = [];
   const failedRequests = [];
   const unhandledErrors = [];
+  let lifecyclePhase = 'route-navigation';
   const page = await context.newPage();
 
   page.on('request', (request) => {
@@ -49,17 +54,32 @@ test('Task 07 media and shell budgets hold on read-only home', async ({
     }
   });
   page.on('console', (message) => {
-    if (message.type() === 'error') consoleErrors.push(message.text());
+    if (message.type() !== 'error') return;
+    const text = message.text();
+    if (isExpectedDemoRecaptchaReportOnlyWarning(text, {baseURL})) {
+      explainedRecaptchaReportOnlyWarnings.push(text.slice(0, 500));
+      return;
+    }
+    consoleErrors.push(text);
   });
   page.on('pageerror', (error) => unhandledErrors.push(error.message));
   page.on('requestfailed', (request) => {
-    failedRequests.push({
+    const failure = {
       failure: request.failure()?.errorText || 'unknown',
       path: (() => {
         try { return new URL(request.url()).pathname; } catch { return '[invalid-url]'; }
       })(),
       resourceType: request.resourceType(),
-    });
+    };
+    if (isExpectedDemoRecaptchaCancellation({
+      ...failure,
+      lifecyclePhase,
+      url: request.url(),
+    })) {
+      explainedRecaptchaCancellations.push(failure);
+      return;
+    }
+    failedRequests.push(failure);
   });
 
   try {
@@ -68,6 +88,7 @@ test('Task 07 media and shell budgets hold on read-only home', async ({
       expectedPathname: '/home',
       timeoutMs: 30_000,
     });
+    lifecyclePhase = 'route-active';
     await expect(page.getByRole('heading', { name: 'Inventario' })).toBeVisible();
     await page.waitForTimeout(750);
 
@@ -132,7 +153,10 @@ test('Task 07 media and shell budgets hold on read-only home', async ({
           document.querySelector('.global-aurora.global-aurora--paused')
         ),
         starFields: document.querySelectorAll('.global-aurora__star-field').length,
-        shootingStars: document.querySelectorAll('.shooting-star').length,
+        activeMeteors: document.querySelectorAll(
+          '.shooting-star[data-active="true"]'
+        ).length,
+        meteorSlots: document.querySelectorAll('.shooting-star').length,
         musicStreamListeners: Number(
           activeListeners['shell::grigliata.music-stream.subscribe.v1'] || 0
         ),
@@ -150,7 +174,8 @@ test('Task 07 media and shell budgets hold on read-only home', async ({
     });
     expect(shell.auroraPaused).toBe(true);
     expect(shell.starFields).toBe(2);
-    expect(shell.shootingStars).toBe(0);
+    expect(shell.meteorSlots).toBe(2);
+    expect(shell.activeMeteors).toBe(0);
     expect(shell.audioNodes.length).toBe(0);
     expect(shell.audioNodes.every(({ preload }) => preload === 'none')).toBe(true);
     expect(shell.audioNodes.some(({ hasSource }) => hasSource)).toBe(false);
@@ -174,16 +199,19 @@ test('Task 07 media and shell budgets hold on read-only home', async ({
         'task07.farOffscreenAttachedImages': inventoryMedia.farOffscreenAttached,
         'task07.managedImages': inventoryMedia.total,
         'task07.musicStreamListeners': shell.musicStreamListeners,
-        'task07.reducedMotionMeteors': shell.shootingStars,
+        'task07.reducedMotionMeteors': shell.activeMeteors,
         'task07.uniqueFixtureImageRequests': new Set(fixtureImageRequests).size,
       },
       diagnostics: {
         consoleErrors,
+        explainedRecaptchaCancellations,
+        explainedRecaptchaReportOnlyWarnings,
         failedRequests,
         unhandledErrors,
       },
     });
   } finally {
+    lifecyclePhase = 'route-cleanup';
     await drainPageConnections(page).catch(() => {});
     await context.close();
   }

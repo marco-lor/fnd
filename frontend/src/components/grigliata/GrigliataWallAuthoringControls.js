@@ -175,11 +175,23 @@ export function GrigliataSelectedWallPanel({
 
   useEffect(() => {
     setDraftLabel(wall?.label || '');
-  }, [wall]);
+  }, [wall?.id, wall?.label]);
 
   if (!wall) {
     return null;
   }
+
+  const buildDraftPatch = (overrides = {}) => ({
+    label: draftLabel.trim(),
+    ...overrides,
+  });
+
+  const commitDrafts = () => onUpdateWall?.(wall.id, buildDraftPatch());
+
+  const handlePanelBlur = (event) => {
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+    commitDrafts();
+  };
 
   return (
     <div
@@ -188,6 +200,7 @@ export function GrigliataSelectedWallPanel({
       style={style}
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
+      onBlur={handlePanelBlur}
     >
       <div className="mb-3 flex items-center justify-between gap-3 border-b border-slate-800 pb-2">
         <div>
@@ -198,7 +211,10 @@ export function GrigliataSelectedWallPanel({
           <button
             type="button"
             aria-label="Close wall editor"
-            onClick={onRequestClose}
+            onClick={() => {
+              commitDrafts();
+              onRequestClose();
+            }}
             className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-slate-500 hover:text-slate-100"
           >
             Close
@@ -215,7 +231,9 @@ export function GrigliataSelectedWallPanel({
             value={draftLabel}
             disabled={isPending}
             onChange={(event) => setDraftLabel(event.target.value)}
-            onBlur={() => onUpdateWall?.(wall.id, { label: draftLabel.trim() })}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commitDrafts();
+            }}
             className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-semibold text-slate-100 outline-none focus:border-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
           />
         </label>
@@ -226,7 +244,7 @@ export function GrigliataSelectedWallPanel({
             aria-label="Wall type"
             value={wall.wallType || 'wall'}
             disabled={isPending}
-            onChange={(event) => onUpdateWall?.(wall.id, { wallType: event.target.value })}
+            onChange={(event) => onUpdateWall?.(wall.id, buildDraftPatch({ wallType: event.target.value }))}
             className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-semibold text-slate-100 outline-none focus:border-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <option value="wall">Wall</option>
@@ -241,7 +259,7 @@ export function GrigliataSelectedWallPanel({
             type="checkbox"
             checked={wall.blocksVision === true}
             disabled={isPending}
-            onChange={(event) => onUpdateWall?.(wall.id, { blocksVision: event.target.checked })}
+            onChange={(event) => onUpdateWall?.(wall.id, buildDraftPatch({ blocksVision: event.target.checked }))}
             className="h-4 w-4 accent-cyan-300"
           />
         </label>
@@ -252,7 +270,7 @@ export function GrigliataSelectedWallPanel({
             type="checkbox"
             checked={wall.blocksLight === true}
             disabled={isPending}
-            onChange={(event) => onUpdateWall?.(wall.id, { blocksLight: event.target.checked })}
+            onChange={(event) => onUpdateWall?.(wall.id, buildDraftPatch({ blocksLight: event.target.checked }))}
             className="h-4 w-4 accent-cyan-300"
           />
         </label>
@@ -260,7 +278,7 @@ export function GrigliataSelectedWallPanel({
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
-            onClick={() => onDuplicateWall?.(wall.id)}
+            onClick={() => onDuplicateWall?.(wall.id, buildDraftPatch())}
             disabled={isPending}
             className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
           >

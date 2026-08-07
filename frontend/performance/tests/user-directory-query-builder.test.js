@@ -11,7 +11,7 @@ const firestoreSdk = require('firebase/firestore');
 const {
   buildUserDirectoryQuery,
   USER_DIRECTORY_PAGE_SIZE,
-} = require('../../src/data/userDirectoryQueryFactory.cjs');
+} = require('../../src/data/userDirectoryQueryFactory.js');
 
 let environment;
 

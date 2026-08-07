@@ -9,6 +9,7 @@ import {
   FiMinus,
   FiPlus,
   FiSun,
+  FiClock,
 } from 'react-icons/fi';
 import { GiAura, GiDeathSkull } from 'react-icons/gi';
 import { normalizeTokenSizeSquares } from './boardUtils';
@@ -408,12 +409,14 @@ export default function GrigliataTokenActions({
   isTokenSizeActionPending = false,
   isTokenVisionActionPending = false,
   isTokenLayerActionPending = false,
+  isTurnOrderActionPending = false,
   onSetSelectedTokensVisibility,
   onSetSelectedTokensDeadState,
   onUpdateTokenStatuses,
   onSetSelectedTokenSize,
   onSetSelectedTokenVision,
   onMoveTokenLayer,
+  onRequestSelectedTokenTurnOrderAction,
 }) {
   const [isStatusPopoverOpen, setIsStatusPopoverOpen] = useState(false);
   const [isSizePopoverOpen, setIsSizePopoverOpen] = useState(false);
@@ -553,6 +556,9 @@ export default function GrigliataTokenActions({
   const visionTitle = actionState.visionToken
     ? `Edit vision for ${actionState.visionToken.label || 'token'}`
     : 'Edit token vision';
+  const turnOrderTitle = actionState.turnOrderToken?.isInTurnOrder
+    ? `Remove ${actionState.turnOrderToken.label || 'token'} from turn order`
+    : `Add ${actionState.turnOrderToken?.label || 'token'} to turn order`;
   const VisibilityIcon = actionState.nextIsVisibleToPlayers ? FiEye : FiEyeOff;
   const renderLayerIcon = (direction) => (
     <span className="relative flex h-[52%] w-[52%] items-center justify-center" aria-hidden="true">
@@ -708,6 +714,34 @@ export default function GrigliataTokenActions({
                 }}
               >
                 <FiSun className="h-[44%] w-[44%]" />
+              </button>
+            )}
+
+            {actionState.turnOrderToken && (
+              <button
+                type="button"
+                aria-label={turnOrderTitle}
+                title={turnOrderTitle}
+                disabled={isTurnOrderActionPending}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsStatusPopoverOpen(false);
+                  setIsSizePopoverOpen(false);
+                  setIsVisionPopoverOpen(false);
+                  onRequestSelectedTokenTurnOrderAction?.(actionState.turnOrderToken);
+                }}
+                className={`flex items-center justify-center rounded-[1.15rem] border text-slate-50 shadow-lg transition-transform duration-150 hover:scale-[1.03] disabled:cursor-not-allowed disabled:opacity-60 ${
+                  actionState.turnOrderToken.isInTurnOrder
+                    ? 'border-rose-300/55 bg-rose-600/28'
+                    : 'border-fuchsia-300/55 bg-fuchsia-500/22'
+                }`}
+                style={{
+                  width: actionState.buttonSize,
+                  height: actionState.buttonSize,
+                }}
+              >
+                <FiClock className="h-[44%] w-[44%]" />
               </button>
             )}
 

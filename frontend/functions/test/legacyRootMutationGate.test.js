@@ -24,7 +24,7 @@ const DERIVED_ROOT_TRIGGERS = Object.freeze([
 
 test('user-data commands use emulator-stable modular Firestore sentinels', () => {
   const contents = source('userDataCommands.ts');
-  assert.match(contents, /import \{FieldValue, Timestamp\} from "firebase-admin\/firestore";/);
+  assert.match(contents, /import \{FieldPath, FieldValue, Timestamp\} from "firebase-admin\/firestore";/);
   assert.doesNotMatch(contents, /admin\.firestore\.(FieldValue|Timestamp)/);
 });
 

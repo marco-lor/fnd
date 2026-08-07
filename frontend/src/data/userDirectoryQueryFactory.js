@@ -1,5 +1,3 @@
-'use strict';
-
 const USER_DIRECTORY_PAGE_SIZE = 50;
 const USER_DIRECTORY_QUERY_KEYS = Object.freeze({
   all: 'directory.users.page.v1',

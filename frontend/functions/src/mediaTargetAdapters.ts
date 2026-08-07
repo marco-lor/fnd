@@ -1,4 +1,5 @@
 import * as admin from "firebase-admin";
+import {FieldValue, Timestamp} from "firebase-admin/firestore";
 import {
   asStoredTask07MediaUploadPlan,
   isTask07MediaRequestAuthorized,
@@ -6,7 +7,6 @@ import {
   scanTask07MediaTargetReferences,
   task07MediaReferencePath,
   task07MediaTargetFields,
-  task07MediaTargetSlotReferencesAsset,
 } from "./mediaAssetLifecycleCore";
 import {
   InspectedMediaObject,
@@ -161,11 +161,23 @@ export const task07ReadyGeneratedMediaFromManifest = (
   return {generation: sourceGeneration, original, variants};
 };
 
+export const task07MediaTargetDataForPlan = (
+  data: admin.firestore.DocumentData | undefined,
+  plan: MediaUploadPlan
+): admin.firestore.DocumentData | undefined => {
+  if (plan.targetKind !== "common-technique") return data;
+  const root = isRecord(data) ? data : {};
+  return isRecord(root[plan.entityId]) ?
+    root[plan.entityId] as admin.firestore.DocumentData :
+    undefined;
+};
+
 const rootTargetRevision = (
   data: admin.firestore.DocumentData | undefined,
   plan: MediaUploadPlan
 ): number => {
-  const value = data?.[task07MediaTargetFields(plan).revisionField];
+  const target = task07MediaTargetDataForPlan(data, plan);
+  const value = target?.[task07MediaTargetFields(plan).revisionField];
   return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : 0;
 };
 
@@ -225,7 +237,7 @@ export const task07FoeCanonicalMediaStateFromTarget = (
   };
 };
 
-const targetMediaState = (
+export const task07MediaTargetState = (
   data: admin.firestore.DocumentData | undefined,
   plan: MediaUploadPlan
 ): Task07FoeCanonicalMediaState => {
@@ -234,13 +246,13 @@ const targetMediaState = (
     return task07FoeCanonicalMediaStateFromTarget(data);
   }
   const fields = task07MediaTargetFields(plan);
-  const media = isRecord(data?.[fields.mediaField]) ?
-    data?.[fields.mediaField] as Record<string, unknown> :
-    null;
+  const target = task07MediaTargetDataForPlan(data, plan);
+  const scan = scanTask07MediaTargetReferences(target)[fields.slot];
   return {
-    assetId: typeof media?.assetId === "string" ? media.assetId : null,
+    assetId: !scan.malformed && scan.assetIds.length === 1 ?
+      scan.assetIds[0] : null,
     revision: rootTargetRevision(data, plan),
-    conflict: false,
+    conflict: scan.malformed || scan.assetIds.length > 1,
   };
 };
 
@@ -268,21 +280,39 @@ export const validateTask07MediaTarget = (input: {
     throw new Task07TargetAdapterError("not-found", "Media target not found.");
   }
   const data = input.target.data() || {};
+  const targetData = task07MediaTargetDataForPlan(data, input.plan);
   const referencePath = task07MediaReferencePath(input.plan);
   if (input.target.ref.path !== referencePath ||
-    (input.plan.targetKind !== "profile" &&
+    (!["profile", "common-technique"].includes(input.plan.targetKind) &&
       input.target.id !== input.plan.entityId)) {
     throw new Task07TargetAdapterError(
       "failed-precondition",
       "Media target identity is invalid."
     );
   }
+  if (!targetData) {
+    throw new Task07TargetAdapterError(
+      "failed-precondition",
+      "Common technique media target is missing."
+    );
+  }
   if (data.deletionState === "pending" ||
     data.pendingDeletion === true ||
-    data.deleted === true) {
+    data.deleted === true ||
+    targetData.deletionState === "pending" ||
+    targetData.pendingDeletion === true ||
+    targetData.deleted === true) {
     throw new Task07TargetAdapterError(
       "failed-precondition",
       "Media target is pending deletion."
+    );
+  }
+  if (input.plan.targetKind === "common-technique" &&
+    (input.target.id !== "tecniche_common" ||
+      input.target.ref.parent.id !== "utils")) {
+    throw new Task07TargetAdapterError(
+      "failed-precondition",
+      "Common technique media target identity is invalid."
     );
   }
   if (input.plan.targetKind === "profile" &&
@@ -321,10 +351,23 @@ export const validateTask07MediaTarget = (input: {
   if (input.plan.targetKind === "grigliata-background") {
     const expectedAssetType = input.plan.kind === "map-video" ?
       "video" : "image";
-    if (data.assetType !== expectedAssetType) {
+    const declaredAssetType = typeof data.assetType === "string" ?
+      data.assetType.trim().toLowerCase() : "";
+    if (declaredAssetType && declaredAssetType !== expectedAssetType) {
       throw new Task07TargetAdapterError(
         "failed-precondition",
         "Background media purpose is invalid."
+      );
+    }
+  }
+  if (input.plan.targetKind === "grigliata-music-track") {
+    const contentType = typeof data.contentType === "string" ?
+      data.contentType.trim().toLowerCase() : "";
+    if (!contentType.startsWith("audio/") ||
+      contentType !== input.plan.sourceContentType) {
+      throw new Task07TargetAdapterError(
+        "failed-precondition",
+        "Music track media purpose is invalid."
       );
     }
   }
@@ -359,11 +402,28 @@ export const task07TargetAttachmentPatch = (input: {
   normalizeFoeCanonicalRoot?: boolean;
   plan: MediaUploadPlan;
   revision: number;
-  timestamp: admin.firestore.Timestamp;
+  timestamp: Timestamp;
 }): admin.firestore.UpdateData<admin.firestore.DocumentData> => {
   const original = input.media.original as StoredTask07MediaObject;
   const fields = task07MediaTargetFields(input.plan);
   const current = input.current || {};
+  if (input.plan.targetKind === "common-technique") {
+    const currentEntry = task07MediaTargetDataForPlan(current, input.plan);
+    if (!currentEntry) {
+      throw new Task07TargetAdapterError(
+        "failed-precondition",
+        "Common technique media target is missing."
+      );
+    }
+    return {
+      [input.plan.entityId]: {
+        ...currentEntry,
+        [fields.mediaField]: input.media,
+        [fields.revisionField]: input.revision,
+        [fields.updatedAtField]: input.timestamp,
+      },
+    };
+  }
   const normalizesFoeCanonicalRoot = Boolean(
     input.normalizeFoeCanonicalRoot &&
     input.plan.targetKind === "foe" && fields.slot === "media"
@@ -402,44 +462,84 @@ export const task07TargetAttachmentPatch = (input: {
       patch.durationMs = original.durationMs || 0;
     }
   }
+  if (input.plan.targetKind === "grigliata-music-track") {
+    const durationMs = typeof original.durationMs === "number" &&
+      Number.isSafeInteger(original.durationMs) && original.durationMs > 0 ?
+      original.durationMs : current.durationMs;
+    patch.contentType = original.contentType;
+    patch.sizeBytes = original.bytes;
+    if (Number.isSafeInteger(durationMs) && Number(durationMs) > 0) {
+      patch.durationMs = durationMs;
+    }
+  }
   if (normalizesFoeCanonicalRoot) {
-    patch.image_url = admin.firestore.FieldValue.delete();
-    patch.url = admin.firestore.FieldValue.delete();
-    patch.downloadUrl = admin.firestore.FieldValue.delete();
-    patch["General.media"] = admin.firestore.FieldValue.delete();
-    patch["General.mediaUpdatedAt"] = admin.firestore.FieldValue.delete();
+    patch.image_url = FieldValue.delete();
+    patch.url = FieldValue.delete();
+    patch.downloadUrl = FieldValue.delete();
+    patch["General.media"] = FieldValue.delete();
+    patch["General.mediaUpdatedAt"] = FieldValue.delete();
     patch["General.task07MediaRevision"] =
-      admin.firestore.FieldValue.delete();
-    patch["General.imagePath"] = admin.firestore.FieldValue.delete();
-    patch["General.imageUrl"] = admin.firestore.FieldValue.delete();
-    patch["General.image_url"] = admin.firestore.FieldValue.delete();
-    patch["General.url"] = admin.firestore.FieldValue.delete();
-    patch["General.downloadUrl"] = admin.firestore.FieldValue.delete();
+      FieldValue.delete();
+    patch["General.imagePath"] = FieldValue.delete();
+    patch["General.imageUrl"] = FieldValue.delete();
+    patch["General.image_url"] = FieldValue.delete();
+    patch["General.url"] = FieldValue.delete();
+    patch["General.downloadUrl"] = FieldValue.delete();
   }
   return patch;
 };
 
 export const task07FoeCanonicalRetirementPatch = (input: {
   revision: number;
-  timestamp: admin.firestore.Timestamp;
+  timestamp: Timestamp;
 }): admin.firestore.UpdateData<admin.firestore.DocumentData> => ({
-  media: admin.firestore.FieldValue.delete(),
+  media: FieldValue.delete(),
   task07MediaRevision: input.revision + 1,
   mediaUpdatedAt: input.timestamp,
-  imagePath: admin.firestore.FieldValue.delete(),
-  imageUrl: admin.firestore.FieldValue.delete(),
-  image_url: admin.firestore.FieldValue.delete(),
-  url: admin.firestore.FieldValue.delete(),
-  downloadUrl: admin.firestore.FieldValue.delete(),
-  "General.media": admin.firestore.FieldValue.delete(),
-  "General.mediaUpdatedAt": admin.firestore.FieldValue.delete(),
-  "General.task07MediaRevision": admin.firestore.FieldValue.delete(),
-  "General.imagePath": admin.firestore.FieldValue.delete(),
-  "General.imageUrl": admin.firestore.FieldValue.delete(),
-  "General.image_url": admin.firestore.FieldValue.delete(),
-  "General.url": admin.firestore.FieldValue.delete(),
-  "General.downloadUrl": admin.firestore.FieldValue.delete(),
+  imagePath: FieldValue.delete(),
+  imageUrl: FieldValue.delete(),
+  image_url: FieldValue.delete(),
+  url: FieldValue.delete(),
+  downloadUrl: FieldValue.delete(),
+  "General.media": FieldValue.delete(),
+  "General.mediaUpdatedAt": FieldValue.delete(),
+  "General.task07MediaRevision": FieldValue.delete(),
+  "General.imagePath": FieldValue.delete(),
+  "General.imageUrl": FieldValue.delete(),
+  "General.image_url": FieldValue.delete(),
+  "General.url": FieldValue.delete(),
+  "General.downloadUrl": FieldValue.delete(),
 });
+
+export const task07CommonTechniqueRetirementPatch = (input: {
+  current: admin.firestore.DocumentData;
+  plan: MediaUploadPlan;
+  revision: number;
+  timestamp: Timestamp;
+}): admin.firestore.UpdateData<admin.firestore.DocumentData> => {
+  if (input.plan.targetKind !== "common-technique") {
+    throw new Task07TargetAdapterError(
+      "invalid-argument",
+      "Common technique retirement plan is invalid."
+    );
+  }
+  const currentEntry = task07MediaTargetDataForPlan(
+    input.current,
+    input.plan
+  );
+  if (!currentEntry) {
+    throw new Task07TargetAdapterError(
+      "failed-precondition",
+      "Common technique media target is missing."
+    );
+  }
+  const fields = task07MediaTargetFields(input.plan);
+  const nextEntry = {...currentEntry};
+  delete nextEntry[fields.mediaField];
+  nextEntry[fields.revisionField] = input.revision + 1;
+  nextEntry[fields.updatedAtField] = input.timestamp;
+  return {[input.plan.entityId]: nextEntry};
+};
 
 export const assertTask07TargetDocumentBudget = (input: {
   current: admin.firestore.DocumentData;
@@ -447,7 +547,7 @@ export const assertTask07TargetDocumentBudget = (input: {
   plan: MediaUploadPlan;
 }): void => {
   if (![
-    "user-inventory", "user-technique", "user-spell",
+    "user-inventory", "user-technique", "common-technique", "user-spell",
   ].includes(input.plan.targetKind)) return;
   const budget = evaluateDocumentBudget(
     {...input.current, ...input.patch},
@@ -472,7 +572,7 @@ export const buildTask07NewTargetAttachment = (input: {
   assetData: admin.firestore.DocumentData;
   plan: MediaUploadPlan;
   targetData: admin.firestore.DocumentData;
-  timestamp: admin.firestore.Timestamp;
+  timestamp: Timestamp;
 }): {
   targetData: admin.firestore.DocumentData;
   referencePath: string;
@@ -578,16 +678,9 @@ export const attachTask07ReadyAssetTransaction = async (input: {
     if (asset.get("state") === "attached" &&
       attachmentMatchesTargetSlot({asset, referencePath, plan})) {
       const target = await transaction.get(input.db.doc(referencePath));
-      const foeState = plan.targetKind === "foe" && targetSlot === "media" ?
-        task07FoeCanonicalMediaStateFromTarget(target.data()) :
-        null;
-      const stillReferencesAsset = foeState ?
-        !foeState.conflict && foeState.assetId === input.assetId :
-        task07MediaTargetSlotReferencesAsset(
-          target.data(),
-          targetSlot,
-          input.assetId
-        );
+      const targetState = task07MediaTargetState(target.data(), plan);
+      const stillReferencesAsset = !targetState.conflict &&
+        targetState.assetId === input.assetId;
       if (!stillReferencesAsset) {
         throw new Task07TargetAdapterError(
           "failed-precondition",
@@ -600,9 +693,7 @@ export const attachTask07ReadyAssetTransaction = async (input: {
         previousAssetId: plan.previousAssetId,
         referencePath,
         targetSlot,
-        revision: foeState ?
-          foeState.revision :
-          rootTargetRevision(target.data(), plan),
+        revision: targetState.revision,
       };
     }
     if (asset.get("state") !== "ready") {
@@ -615,7 +706,7 @@ export const attachTask07ReadyAssetTransaction = async (input: {
     const referenceRef = input.db.doc(referencePath);
     const target = await transaction.get(referenceRef);
     validateTask07MediaTarget({plan, target});
-    const currentState = targetMediaState(target.data(), plan);
+    const currentState = task07MediaTargetState(target.data(), plan);
     if (currentState.conflict) {
       throw new Task07TargetAdapterError(
         "failed-precondition",
@@ -658,7 +749,7 @@ export const attachTask07ReadyAssetTransaction = async (input: {
         "Previous media manifest is not attached to this target."
       );
     }
-    const timestamp = admin.firestore.Timestamp.fromMillis(nowMs);
+    const timestamp = Timestamp.fromMillis(nowMs);
     const targetPatch = task07TargetAttachmentPatch({
       current: target.data() || {},
       media,
@@ -672,7 +763,11 @@ export const attachTask07ReadyAssetTransaction = async (input: {
       patch: targetPatch,
       plan,
     });
-    transaction.update(referenceRef, targetPatch);
+    if (plan.targetKind === "common-technique") {
+      transaction.set(referenceRef, targetPatch, {merge: true});
+    } else {
+      transaction.update(referenceRef, targetPatch);
+    }
     transaction.update(assetRef, {
       state: "attached",
       attachment: {
@@ -681,11 +776,11 @@ export const attachTask07ReadyAssetTransaction = async (input: {
         revision: revision + 1,
         attachedAt: timestamp,
       },
-      "retention.cleanupAfter": admin.firestore.FieldValue.delete(),
+      "retention.cleanupAfter": FieldValue.delete(),
       updatedAt: timestamp,
     });
     if (previousRef && previous) {
-      const cleanupAfter = admin.firestore.Timestamp.fromMillis(
+      const cleanupAfter = Timestamp.fromMillis(
         nowMs +
         MEDIA_CONTRACTS[plan.kind].retention.supersededGraceHours *
         60 * 60 * 1000

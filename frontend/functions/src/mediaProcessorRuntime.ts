@@ -343,16 +343,16 @@ const probeAvSource = async (
 const imageMetadata = async (
   buffer: Buffer,
   kind: MediaKind,
-  contentType: string
+  contentType: string,
+  maxInputPixels: number
 ): Promise<Task07DecodedSource> => {
-  const sourceContract = MEDIA_CONTRACTS[kind].source;
-  const maxPixels = sourceContract.maxPixels || 1;
+  void kind;
   const sharp = sharpFactory();
   let metadata: SharpMetadata;
   try {
     metadata = await sharp(buffer, {
       failOn: "warning",
-      limitInputPixels: maxPixels,
+      limitInputPixels: maxInputPixels,
       pages: 2,
       sequentialRead: true,
     }).metadata();
@@ -384,6 +384,7 @@ const webpVariant = async (input: {
   kind: MediaKind;
   source: Task07DecodedSource;
   variant: MediaVariantName;
+  maxInputPixels: number;
 }): Promise<Task07VariantOutput> => {
   const contract = MEDIA_CONTRACTS[input.kind].variants[input.variant];
   if (!contract) throw new Task07ProcessorError("processor-contract-invalid");
@@ -392,7 +393,7 @@ const webpVariant = async (input: {
   const sharp = sharpFactory();
   const result = await sharp(input.buffer, {
     failOn: "warning",
-    limitInputPixels: MEDIA_CONTRACTS[input.kind].source.maxPixels || 1,
+    limitInputPixels: input.maxInputPixels,
     sequentialRead: true,
   })
     .rotate()
@@ -425,6 +426,7 @@ const videoPoster = async (input: {
   kind: MediaKind;
   source: Task07DecodedSource;
   variant: MediaVariantName;
+  maxInputPixels: number;
 }): Promise<Task07VariantOutput> => {
   const contentType = input.source.contentType;
   return withInputFile(
@@ -453,10 +455,12 @@ const videoPoster = async (input: {
 
 export const createTask07DefaultMediaTransformer =
   (): Task07MediaTransformer => ({
-    inspectSource: async ({buffer, kind, declaredContentType}) => {
+    inspectSource: async ({
+      buffer, kind, declaredContentType, maxInputPixels,
+    }) => {
       const mediaType = MEDIA_CONTRACTS[kind].source.mediaType;
       return mediaType === "image" ?
-        imageMetadata(buffer, kind, declaredContentType) :
+        imageMetadata(buffer, kind, declaredContentType, maxInputPixels) :
         probeAvSource(buffer, declaredContentType);
     },
     createVariant: async (input) => (

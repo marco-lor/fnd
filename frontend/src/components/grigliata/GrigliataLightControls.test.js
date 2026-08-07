@@ -161,12 +161,51 @@ describe('GrigliataSelectedLightPanel', () => {
     fireEvent.click(within(panel).getByRole('button', { name: /duplicate light/i }));
     fireEvent.click(within(panel).getByRole('button', { name: /delete light/i }));
 
-    expect(onUpdateLight).toHaveBeenCalledWith('light-1', { label: 'Lantern' });
-    expect(onUpdateLight).toHaveBeenCalledWith('light-1', { enabled: false });
-    expect(onUpdateLight).toHaveBeenCalledWith('light-1', { brightRadiusPx: 350 });
-    expect(onUpdateLight).toHaveBeenCalledWith('light-1', { dimRadiusPx: 630 });
-    expect(onUpdateLight).toHaveBeenCalledWith('light-1', { color: '#FFFFFF' });
-    expect(onDuplicateLight).toHaveBeenCalledWith('light-1');
+    expect(onUpdateLight).toHaveBeenCalledWith('light-1', expect.objectContaining({ label: 'Lantern' }));
+    expect(onUpdateLight).toHaveBeenCalledWith('light-1', expect.objectContaining({ enabled: false }));
+    expect(onUpdateLight).toHaveBeenCalledWith('light-1', expect.objectContaining({ brightRadiusPx: 350 }));
+    expect(onUpdateLight).toHaveBeenCalledWith('light-1', expect.objectContaining({ dimRadiusPx: 630 }));
+    expect(onUpdateLight).toHaveBeenCalledWith('light-1', expect.objectContaining({ color: '#FFFFFF' }));
+    expect(onDuplicateLight).toHaveBeenCalledWith('light-1', expect.objectContaining({
+      label: 'Lantern',
+      brightRadiusPx: 350,
+      dimRadiusPx: 630,
+      color: '#FFFFFF',
+    }));
     expect(onDeleteLight).toHaveBeenCalledWith('light-1');
+  });
+
+  test('commits a dirty name together with the next color action before pending state disables controls', () => {
+    const onUpdateLight = jest.fn();
+
+    function PendingHarness() {
+      const [isPending, setIsPending] = React.useState(false);
+      return (
+        <GrigliataSelectedLightPanel
+          light={light}
+          grid={grid}
+          isPending={isPending}
+          onUpdateLight={(lightId, patch) => {
+            onUpdateLight(lightId, patch);
+            setIsPending(true);
+          }}
+        />
+      );
+    }
+
+    render(<PendingHarness />);
+
+    const panel = screen.getByTestId('selected-light-panel');
+    const nameInput = within(panel).getByLabelText(/light name/i);
+    const colorButton = within(panel).getByRole('button', { name: /set light color #ffffff/i });
+    fireEvent.change(nameInput, { target: { value: 'Lantern' } });
+    fireEvent.blur(nameInput, { relatedTarget: colorButton });
+    fireEvent.click(colorButton);
+
+    expect(onUpdateLight).toHaveBeenCalledTimes(1);
+    expect(onUpdateLight).toHaveBeenCalledWith('light-1', expect.objectContaining({
+      label: 'Lantern',
+      color: '#FFFFFF',
+    }));
   });
 });

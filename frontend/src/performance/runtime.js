@@ -36,6 +36,7 @@ let originalWebChannelInternalSend = null;
 let originalWebChannelPublicSend = null;
 let firestoreWebChannelResponseCallbacks = new Map();
 let pendingWebChannelTimerTurn = null;
+let pendingFirestoreWatchdogReplacementTurn = null;
 
 const redactString = (value) => {
   const text = String(value ?? '').slice(0, 160);
@@ -105,20 +106,7 @@ const isFirestoreTransportDelayedOperation = (callback, delay) => {
     // through DelayedOperation callbacks with this method name. These timers
     // survive route listener cleanup because they belong to the shared client
     // transport, not the route that happened to initiate the stream.
-    if (source === '()=>this.handleDelayElapsed()') return true;
-
-    // The pinned WebChannel transport owns both a 45-second request watchdog
-    // and a randomized 300-600 second forward-channel request timeout. CRA's
-    // production minifier reduces both Closure-bound callbacks to this exact
-    // signature. Successor watchdogs can be scheduled long after the transport
-    // operation that opened the stream, so attribution uses the pinned callback
-    // and delay shapes rather than a short provenance window.
-    // The performance build fails unless this callback remains unique to one
-    // executable WebChannel callsite in the pinned production bundle.
-    const normalizedDelay = Number(delay);
-    const isWebChannelDelay = normalizedDelay === 45_000
-      || (normalizedDelay >= 300_000 && normalizedDelay <= 600_000);
-    return source === 'function(){e()}' && isWebChannelDelay;
+    return source === '()=>this.handleDelayElapsed()';
   } catch (_error) {
     return false;
   }
@@ -183,6 +171,38 @@ const claimNewestFirestoreWebChannelTimer = () => {
     return true;
   }
   return false;
+};
+
+const recordFirestoreWatchdogReplacementTurn = () => {
+  const turn = {};
+  pendingFirestoreWatchdogReplacementTurn = turn;
+  const expire = () => {
+    if (pendingFirestoreWatchdogReplacementTurn === turn) {
+      pendingFirestoreWatchdogReplacementTurn = null;
+    }
+  };
+  if (typeof queueMicrotask === 'function') queueMicrotask(expire);
+  else Promise.resolve().then(expire);
+};
+
+const claimFirestoreWatchdogReplacement = (resource) => {
+  if (
+    !pendingFirestoreWatchdogReplacementTurn
+    || resource.closed
+    || resource.diagnostics?.callback !== FIRESTORE_WEBCHANNEL_CALLBACK_SOURCE
+    || resource.diagnostics?.delayMs !== 45_000
+  ) {
+    return false;
+  }
+  pendingFirestoreWatchdogReplacementTurn = null;
+  if (resource.ownerRoute !== 'firestore-transport') {
+    resource.ownerRoute = 'firestore-transport';
+  }
+  resource.diagnostics = {
+    ...(resource.diagnostics || {}),
+    attribution: 'firestore-webchannel-watchdog-replacement',
+  };
+  return true;
 };
 
 const wrapFirestoreWebChannelResponseCallback = (xhr) => {
@@ -492,7 +512,12 @@ export const installPerformanceRuntime = () => {
         { method },
         method
       );
-      const result = originalWebChannelInternalSend.call(this, url, method, ...args);
+      const result = isFirestoreWebChannel
+        ? withAsyncResourceOwner(
+          'firestore-transport',
+          () => originalWebChannelInternalSend.call(this, url, method, ...args)
+        )
+        : originalWebChannelInternalSend.call(this, url, method, ...args);
       if (isFirestoreWebChannel) {
         wrapFirestoreWebChannelResponseCallback(this.g);
         claimNewestFirestoreWebChannelTimer();
@@ -538,6 +563,9 @@ export const installPerformanceRuntime = () => {
         throw error;
       }
       timeouts.set(id, resource);
+      if (claimFirestoreWatchdogReplacement(resource)) {
+        return id;
+      }
       if (
         resource.ownerRoute !== 'firestore-transport'
         && resource.diagnostics?.callback === FIRESTORE_WEBCHANNEL_CALLBACK_SOURCE
@@ -548,9 +576,15 @@ export const installPerformanceRuntime = () => {
       return id;
     };
     window.clearTimeout = (id) => {
-      timeouts.get(id)?.close();
+      const resource = timeouts.get(id);
+      const isFirestoreWatchdog = resource?.ownerRoute === 'firestore-transport'
+        && resource.diagnostics?.callback === FIRESTORE_WEBCHANNEL_CALLBACK_SOURCE
+        && resource.diagnostics?.delayMs === 45_000;
+      resource?.close();
       timeouts.delete(id);
-      return originalTimers.clearTimeout(id);
+      const result = originalTimers.clearTimeout(id);
+      if (isFirestoreWatchdog) recordFirestoreWatchdogReplacementTurn();
+      return result;
     };
     window.setInterval = (callback, delay, ...args) => {
       const resource = registerAsyncResource('interval', undefined, {
@@ -647,6 +681,7 @@ export const teardownPerformanceRuntimeForTests = () => {
   asyncResourceOwnerOverride = null;
   asyncResourceOwnerLeases = [];
   pendingWebChannelTimerTurn = null;
+  pendingFirestoreWatchdogReplacementTurn = null;
   asyncResourceSequence = 0;
   routeState = null;
   if (originalXhrOpen && typeof XMLHttpRequest !== 'undefined') {

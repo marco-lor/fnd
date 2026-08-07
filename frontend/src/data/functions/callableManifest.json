@@ -108,6 +108,30 @@
       "owner": "user-data-v2",
       "compatibilityAliasOf": null
     },
+    "task05CharacterCreation": {
+      "functionId": "task05CharacterCreation",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task05ConsumeTurnEffects": {
+      "functionId": "task05ConsumeTurnEffects",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task05ListAdminUsers": {
+      "functionId": "task05ListAdminUsers",
+      "region": "europe-west8",
+      "owner": "user-data-v2",
+      "compatibilityAliasOf": null
+    },
+    "task07ResolveCharacterMedia": {
+      "functionId": "task07ResolveCharacterMedia",
+      "region": "europe-west8",
+      "owner": "media-lifecycle",
+      "compatibilityAliasOf": null
+    },
     "task07PrepareMediaUpload": {
       "functionId": "task07PrepareMediaUpload",
       "region": "europe-west8",
@@ -148,6 +172,24 @@
       "functionId": "task07RetryMediaCleanup",
       "region": "europe-west8",
       "owner": "media-lifecycle",
+      "compatibilityAliasOf": null
+    },
+    "task07PrepareFoeMediaRetirement": {
+      "functionId": "task07PrepareFoeMediaRetirement",
+      "region": "europe-west8",
+      "owner": "foe-media-retirement",
+      "compatibilityAliasOf": null
+    },
+    "task07CommitFoeMediaRetirement": {
+      "functionId": "task07CommitFoeMediaRetirement",
+      "region": "europe-west8",
+      "owner": "foe-media-retirement",
+      "compatibilityAliasOf": null
+    },
+    "task07AbandonFoeMediaRetirement": {
+      "functionId": "task07AbandonFoeMediaRetirement",
+      "region": "europe-west8",
+      "owner": "foe-media-retirement",
       "compatibilityAliasOf": null
     },
     "setAllParameterLocks": {

@@ -4,7 +4,8 @@ import {
 } from "./mediaContracts";
 
 export type Task07MediaMode =
-  "legacy" | "shadow" | "derivative-read" | "v1-write";
+  "legacy" | "shadow" | "derivative-read" | "v1-write" |
+  "canonical-only";
 
 export interface Task07MediaControl {
   schemaVersion: 1;
@@ -17,6 +18,7 @@ export interface Task07MediaControl {
 
 const MODES = new Set<Task07MediaMode>([
   "legacy", "shadow", "derivative-read", "v1-write",
+  "canonical-only",
 ]);
 const MAX_ALLOWLIST_ENTRIES = 100;
 const SAFE_ALLOWLIST_VALUE =
@@ -96,4 +98,7 @@ export const task07MediaWritesV1ForActor = (input: {
   purpose: MediaKind;
   role: string;
   uid: string;
-}): boolean => task07MediaModeForActor(input) === "v1-write";
+}): boolean => {
+  const mode = task07MediaModeForActor(input);
+  return mode === "v1-write" || mode === "canonical-only";
+};

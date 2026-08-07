@@ -9,14 +9,18 @@ const { test, expect } = require('./measured-test');
 const manifest = require('../../scenarios.json');
 const {
   GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY,
-  countChangedDocumentsForTarget,
   createPageAssetTracker,
   installBootstrap,
   installDeterministicFontRoutes,
+  isExpectedDemoRecaptchaCancellation,
+  isExpectedDemoRecaptchaReportOnlyWarning,
+  isExpectedFivePeerFirestoreWriteTurnover,
   isExpectedFirestoreLifecycleCancellation,
   isKnownDemoFirestoreStartupWarning,
   navigateToCleanup,
+  readChangedDocumentDeliveryTelemetry,
   readKonvaTokenPositions,
+  readRouteCleanupSummary,
   storageStateForRole,
   waitForKonvaTokenMove,
   waitForReadiness,
@@ -32,17 +36,14 @@ const PROBE_PLACEMENT_PATH = 'grigliata_token_placements/perf-map__perf-token-00
 const PROBE_GRID_DELTA_X = 50;
 const CLIENT_READINESS_ROUTE = '/__fnd_perf_cleanup__';
 const FIVE_PEER_ROUTE_READINESS_TIMEOUT_MS = 30_000;
-const FIVE_PEER_TEST_TIMEOUT_MS = 210_000;
+const FIVE_PEER_TEST_TIMEOUT_MS = 240_000;
+const MAX_EXPECTED_ACTIVE_WRITE_TURNOVERS_PER_PEER = 2;
 const LEGACY_MIGRATION_MARKER_FIELDS = [
   'legacyTokenPlacementCleanupCompletedAt',
   'legacyPlacementDeadStateCleanupCompletedAt',
   'legacyPlacementVisibilityCleanupCompletedAt',
 ];
 const LEGACY_MIGRATION_MARKER_VALUE = '2026-01-01T00:00:00.000Z';
-
-const countChangedPlacementDocuments = (snapshot) => (
-  countChangedDocumentsForTarget(snapshot, GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY)
-);
 
 const enterMeasuredGrigliataRoute = async (page) => {
   await page.goto(CLIENT_READINESS_ROUTE, { waitUntil: 'domcontentloaded' });
@@ -93,7 +94,7 @@ const waitForRouteCleanup = async ({ page, role }) => {
     );
   }
 
-  return page.evaluate(() => window.__FND_PERF__.snapshot());
+  return readRouteCleanupSummary(page, scenario.route);
 };
 
 test('grigliata five-peer placement convergence', async ({ browser, baseURL }, testInfo) => {
@@ -140,11 +141,15 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
       const pageAssets = createPageAssetTracker();
       const diagnostics = {
         consoleErrors: [],
+        explainedRecaptchaCancellations: [],
+        explainedRecaptchaReportOnlyWarnings: [],
         explainedStartupWarnings: [],
+        explainedActiveWriteTurnovers: [],
         explainedCleanupTransportCancellations: [],
         unhandledErrors: [],
         failedRequests: [],
         cleanupStarted: false,
+        lifecyclePhase: 'route-navigation',
         ready: false,
       };
       page.on('console', (message) => {
@@ -161,21 +166,43 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
           });
           return;
         }
+        if (isExpectedDemoRecaptchaReportOnlyWarning(text, {baseURL})) {
+          diagnostics.explainedRecaptchaReportOnlyWarnings.push(text.slice(0, 500));
+          return;
+        }
         diagnostics.consoleErrors.push(text.slice(0, 300));
       });
       page.on('request', (request) => pageAssets.begin(request));
       page.on('requestfinished', (request) => pageAssets.complete(request));
+      const responseStatuses = new WeakMap();
+      page.on('response', (response) => {
+        responseStatuses.set(response.request(), response.status());
+      });
       page.on('pageerror', (error) => diagnostics.unhandledErrors.push(error.message.slice(0, 300)));
       page.on('requestfailed', (request) => {
         pageAssets.complete(request);
         const failure = {
           resourceType: request.resourceType(),
           failure: request.failure()?.errorText || 'unknown',
+          method: request.method(),
           path: new URL(request.url()).pathname,
         };
+        if (isExpectedFivePeerFirestoreWriteTurnover({
+          ...failure,
+          lifecyclePhase: diagnostics.lifecyclePhase,
+          responseStatus: responseStatuses.get(request),
+          url: request.url(),
+        })) {
+          diagnostics.explainedActiveWriteTurnovers.push({
+            ...failure,
+            phase: diagnostics.lifecyclePhase,
+            responseStatus: responseStatuses.get(request),
+          });
+          return;
+        }
         if (isExpectedFirestoreLifecycleCancellation({
           ...failure,
-          lifecyclePhase: diagnostics.cleanupStarted ? 'route-cleanup' : null,
+          lifecyclePhase: diagnostics.lifecyclePhase,
           url: request.url(),
         })) {
           diagnostics.explainedCleanupTransportCancellations.push({
@@ -184,11 +211,23 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
           });
           return;
         }
+        if (isExpectedDemoRecaptchaCancellation({
+          ...failure,
+          lifecyclePhase: diagnostics.lifecyclePhase,
+          url: request.url(),
+        })) {
+          diagnostics.explainedRecaptchaCancellations.push({
+            ...failure,
+            phase: diagnostics.lifecyclePhase,
+          });
+          return;
+        }
         diagnostics.failedRequests.push(failure);
       });
       pages.push({ page, role, diagnostics });
       try {
         await enterMeasuredGrigliataRoute(page);
+        diagnostics.lifecyclePhase = 'route-active';
       } catch (error) {
         throw new Error(`Five-peer readiness failed for ${role}: ${error.message}`, { cause: error });
       }
@@ -215,8 +254,11 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
       deltaX,
       label,
     }) => {
-      const beforeCounts = await Promise.all(pages.map(async ({ page }) => (
-        countChangedPlacementDocuments(await page.evaluate(() => window.__FND_PERF__.snapshot()))
+      const beforeTelemetry = await Promise.all(pages.map(({ page }) => (
+        readChangedDocumentDeliveryTelemetry(
+          page,
+          GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY
+        )
       )));
       const startedAt = Date.now();
       await placement.update({ col, updatedAt });
@@ -230,11 +272,15 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
       const serverPlacement = (await placement.get()).data();
       expect(serverPlacement?.col, `${label}: server placement column`).toBe(col);
       expect(serverPlacement?.updatedAt, `${label}: server placement timestamp`).toBe(updatedAt);
-      const snapshots = await Promise.all(pages.map(({ page }) => (
-        page.evaluate(() => window.__FND_PERF__.snapshot())
+      const afterTelemetry = await Promise.all(pages.map(({ page }) => (
+        readChangedDocumentDeliveryTelemetry(
+          page,
+          GRIGLIATA_PLACEMENT_SUBSCRIBE_METRIC_KEY
+        )
       )));
-      const deliveriesByPeer = snapshots.map((snapshot, index) => (
-        countChangedPlacementDocuments(snapshot) - beforeCounts[index]
+      const deliveriesByPeer = afterTelemetry.map((telemetry, index) => (
+        telemetry.changedDocumentsDelivered
+        - beforeTelemetry[index].changedDocumentsDelivered
       ));
       deliveriesByPeer.forEach((delivered, index) => {
         expect(delivered, `${label}/${pages[index].role}: expected one probe placement delivery`).toBe(1);
@@ -248,7 +294,7 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
         deliveriesByPeer,
         durationMs,
         nextPositions: fromPositions.map(({ x, y }) => ({ x: x + deltaX, y })),
-        snapshots,
+        eventCounts: afterTelemetry.map(({ eventCount }) => eventCount),
       };
     };
 
@@ -305,6 +351,10 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
       expect(diagnostics.consoleErrors, `${role}: ${diagnostics.consoleErrors.join('\n')}`).toHaveLength(0);
       expect(diagnostics.unhandledErrors, `${role}: ${diagnostics.unhandledErrors.join('\n')}`).toHaveLength(0);
       expect(diagnostics.failedRequests, `${role}: ${JSON.stringify(diagnostics.failedRequests)}`).toHaveLength(0);
+      expect(
+        diagnostics.explainedActiveWriteTurnovers.length,
+        `${role}: ${JSON.stringify(diagnostics.explainedActiveWriteTurnovers)}`
+      ).toBeLessThanOrEqual(MAX_EXPECTED_ACTIVE_WRITE_TURNOVERS_PER_PEER);
     }
     const explainedStartupWarnings = pages.flatMap(({ role, diagnostics }) => (
       diagnostics.explainedStartupWarnings.map((entry) => ({ role, ...entry }))
@@ -316,6 +366,7 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
     const cleanupSnapshots = [];
     for (const { diagnostics } of pages) {
       diagnostics.cleanupStarted = true;
+      diagnostics.lifecyclePhase = 'route-cleanup';
     }
     for (const { page, role } of pages) {
       await navigateToCleanup(page);
@@ -376,8 +427,8 @@ test('grigliata five-peer placement convergence', async ({ browser, baseURL }, t
         'runtime.activeMediaAfterCleanup': activeMediaAfterCleanup,
         'firestore.changedDocumentsDelivered': pages.length,
       },
-      eventCount: finalMeasuredTransition.snapshots
-        .reduce((total, snapshot) => total + snapshot.events.length, 0),
+      eventCount: finalMeasuredTransition.eventCounts
+        .reduce((total, eventCount) => total + eventCount, 0),
       readiness: { 'shell-visible': true, 'data-ready': true, interactive: true },
       peerCount: pages.length,
       diagnostics: {

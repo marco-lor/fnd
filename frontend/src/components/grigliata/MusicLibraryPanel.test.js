@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import MusicLibraryPanel from './MusicLibraryPanel';
 
 const tracks = [{
@@ -224,6 +224,70 @@ describe('MusicLibraryPanel', () => {
     fireEvent.click(within(previewDialog).getByRole('button', { name: 'Close preview' }));
 
     expect(screen.queryByRole('dialog', { name: 'Preview Battle Theme' })).not.toBeInTheDocument();
+  });
+
+  test('canonical-only preview and download acquire blobs without using legacy URLs', async () => {
+    const mediaAssetId = `m_${'a'.repeat(40)}`;
+    const canonicalTrack = {
+      ...tracks[0],
+      media: {
+        schemaVersion: 1,
+        contractVersion: 1,
+        assetId: mediaAssetId,
+        kind: 'music',
+        state: 'ready',
+        generation: '7',
+        audience: 'signed-in',
+        ownerUid: 'music-owner',
+        original: {
+          path: `media_assets/v1/signed-in/music-owner/${mediaAssetId}/7/original`,
+          contentType: 'audio/mpeg',
+          bytes: 4096,
+          durationMs: 120000,
+          width: 0,
+          height: 0,
+          generation: '9',
+        },
+      },
+    };
+    const releases = [];
+    const acquireAudioAsset = jest.fn(() => {
+      const release = jest.fn();
+      releases.push(release);
+      return {
+        promise: Promise.resolve({url: 'blob:canonical-music'}),
+        release,
+      };
+    });
+    const clickSpy = jest.spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {});
+    try {
+      render(
+        <MusicLibraryPanel
+          {...buildProps({tracks: [canonicalTrack]})}
+          acquireAudioAsset={acquireAudioAsset}
+          mediaMode="canonical-only"
+        />
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Preview Battle Theme' }));
+      const previewAudio = await screen.findByLabelText('Battle Theme preview');
+      await screen.findByRole('dialog', {name: 'Preview Battle Theme'});
+      await waitFor(() => {
+        expect(previewAudio).toHaveAttribute('src', 'blob:canonical-music');
+      });
+      expect(previewAudio).not.toHaveAttribute('src', canonicalTrack.audioUrl);
+      fireEvent.click(screen.getByRole('button', {name: 'Close preview'}));
+
+      fireEvent.click(screen.getByRole('button', {name: 'Download Battle Theme'}));
+      await Promise.resolve();
+      expect(clickSpy).toHaveBeenCalledTimes(1);
+      expect(acquireAudioAsset).toHaveBeenCalledTimes(2);
+      expect(releases.every((release) => release.mock.calls.length === 1)).toBe(true);
+      expect(document.querySelector(`a[href="${canonicalTrack.audioUrl}"]`)).toBeNull();
+    } finally {
+      clickSpy.mockRestore();
+    }
   });
 
   test('lets the track list fill the available desktop sidebar height', () => {

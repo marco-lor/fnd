@@ -17,6 +17,8 @@ import DiceRoller from "../../common/DiceRoller";
 import { Button } from "./ui";
 import { advanceTurn as advanceTurnUtil } from "./buttons/advanceTurn";
 import { getVarie } from '../../../data/configRepository';
+import { useProgression } from '../../../data/userData/userDataHooks';
+import { subscribeUserResources } from '../../../data/userData/userDataRepository';
 import { getCallable } from '../../../data/functions/callableRegistry';
 import {
     callBackendOperationAndWait,
@@ -30,6 +32,7 @@ const deleteEncounterV2 = getCallable('deleteEncounterV2');
 
 const EncounterDetails = ({ encounter, isDM }) => {
     const { user, userData } = useAuth();
+    const { data: selfProgression } = useProgression(user?.uid);
     const [participantsMap, setParticipantsMap] = useState({}); // { uid: full participant doc }
     const [roller, setRoller] = useState({ visible: false, faces: 0, modifier: 0 });
     const [dadiAnimaByLevel, setDadiAnimaByLevel] = useState([]);
@@ -151,22 +154,20 @@ const EncounterDetails = ({ encounter, isDM }) => {
         const linkMode = encMeta?.linkMode || "live"; // default live
         const unsubs = [];
         if (linkMode !== "detached") {
+            setLiveUsersMap({});
             const uniqueUserIds = JSON.parse(participantUserIdsKey);
             uniqueUserIds.forEach((uid) => {
-                const uRef = doc(db, "users", uid);
-                const unsub = onSnapshot(
-                    uRef,
-                    (snap) => {
-                        setLiveUsersMap((prev) => ({ ...prev, [uid]: snap.data() || null }));
+                const unsub = subscribeUserResources(uid, {
+                    next: (resources) => {
+                        setLiveUsersMap((prev) => ({ ...prev, [uid]: resources || null }));
                     },
-                    // Swallow permission errors gracefully
-                    (err) => {
+                    error: (err) => {
                         if (typeof process !== "undefined" && process.env && process.env.NODE_ENV !== "production") {
                             // eslint-disable-next-line no-console
-                            console.warn("users doc subscription error", uid, err?.message || err);
+                            console.warn("user resources subscription error", uid, err?.message || err);
                         }
-                    }
-                );
+                    },
+                });
                 unsubs.push(unsub);
             });
 
@@ -327,14 +328,14 @@ const EncounterDetails = ({ encounter, isDM }) => {
     };
 
     const getDexTot = () => {
-        const base = userData?.Parametri?.Base || {};
+        const base = selfProgression?.Parametri?.Base || {};
         const key = Object.keys(base).find((k) => k.toLowerCase() === "destrezza");
         return Number(base?.[key]?.Tot) || 0;
     };
 
     // Use the exact same criteria as Home page: pick dice by current level index and parse faces from string like "d6", "d8", ...
     const computeFaces = () => {
-        const level = userData?.stats?.level;
+        const level = selfProgression?.stats?.level;
         if (!level) return 0;
         const diceTypeStr = dadiAnimaByLevel[level];
         if (!diceTypeStr) return 0;

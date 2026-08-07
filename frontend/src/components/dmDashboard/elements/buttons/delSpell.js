@@ -1,24 +1,18 @@
 // frontend/src/components/dmDashboard/elements/buttons/delSpell.js
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import ReactDOM from 'react-dom';
-import { db } from '../../../firebaseConfig';
-import { doc, getDoc } from "../../../../performance/firestore";
 import { deleteSpellForUser } from '../../../common/userOwnedMedia';
 
-export function DelSpellOverlay({ userId, spellName, spellData, onClose }) {
-  const [userName, setUserName] = useState("");
+export function DelSpellOverlay({
+  userId,
+  userLabel,
+  spellName,
+  spellData,
+  onClose,
+}) {
   const [confirmInput, setConfirmInput] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      const snap = await getDoc(doc(db, "users", userId));
-      if (snap.exists()) {
-        const d = snap.data();
-        setUserName(d.characterId || d.email);
-      }
-    })();
-  }, [userId]);
 
   const handleDelete = async () => {
     setIsDeleting(true);
@@ -48,7 +42,7 @@ export function DelSpellOverlay({ userId, spellName, spellData, onClose }) {
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-md">
         <h2 className="text-xl text-white mb-2">Elimina Spell</h2>
-        <p className="text-gray-300 mb-4">Giocatore: <span className="font-semibold">{userName}</span></p>
+        <p className="text-gray-300 mb-4">Giocatore: <span className="font-semibold">{userLabel || 'Unknown User'}</span></p>
         <div className="bg-red-900 bg-opacity-25 border border-red-700 rounded p-4 mb-4">
           <p className="text-white">Per eliminare <span className="font-semibold">{spellName}</span>, digita il nome esatto qui sotto:</p>
         </div>

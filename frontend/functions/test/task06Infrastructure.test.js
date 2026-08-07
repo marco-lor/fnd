@@ -81,7 +81,11 @@ test("V2 foe asset copies use the checked-in four-way bounded mapper", () => {
   );
   assert.match(
     duplicate,
-    /copied\s*=\s*await mapWithConcurrency\(\s*claim\.manifest,\s*BACKEND_OPERATION_STORAGE_CONCURRENCY,\s*copyManifestEntry\s*\)/
+    /legacyManifest\s*=\s*await checkpointLegacySourcePresence\([\s\S]*?manifest:\s*legacyManifest/
+  );
+  assert.match(
+    duplicate,
+    /copied\s*=\s*await mapWithConcurrency\(\s*legacyManifest,\s*BACKEND_OPERATION_STORAGE_CONCURRENCY,\s*async \(entry\)/
   );
   assert.match(
     duplicate,

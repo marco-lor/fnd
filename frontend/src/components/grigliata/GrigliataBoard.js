@@ -66,6 +66,7 @@ import {
 } from './tokenStatuses';
 import { useImageAssetSnapshot } from '../common/imageAssets/useImageAsset';
 import {
+  getImageAssetRegistryRuntimeLimits,
   IMAGE_ASSET_PIN_NAMES,
   pinImageAsset,
 } from '../common/imageAssets/imageAssetRegistry';
@@ -174,10 +175,65 @@ const TURN_ORDER_PANEL_STORAGE_PREFIX = 'grigliata.turnOrderCollapsed';
 const TURN_ORDER_DRAWER_TRANSITION = { duration: 0.26, ease: DRAW_PICKER_EASE };
 const TURN_ORDER_ENTRY_TRANSITION = { duration: 0.18, ease: DRAW_PICKER_EASE };
 const EMPTY_RENDERED_TOKENS = Object.freeze([]);
+const TOKEN_MEDIA_REGISTRY_HEADROOM = 24;
 
 const isPrimaryMouseButton = (nativeEvent) => nativeEvent?.button === 0;
 const isSecondaryMouseButton = (nativeEvent) => nativeEvent?.button === 2;
 const hasPrimaryMouseButtonPressed = (nativeEvent) => (nativeEvent?.buttons & 1) === 1;
+
+const isTokenWithinStageViewport = (token, viewport, stageSize) => {
+  const position = token?.renderPosition;
+  const scale = Number(viewport?.scale);
+  if (
+    !position
+    || !Number.isFinite(scale)
+    || scale <= 0
+    || !Number.isFinite(stageSize?.width)
+    || !Number.isFinite(stageSize?.height)
+    || stageSize.width <= 0
+    || stageSize.height <= 0
+  ) {
+    return false;
+  }
+
+  const left = Number(viewport?.x) + (Number(position.x) * scale);
+  const top = Number(viewport?.y) + (Number(position.y) * scale);
+  const size = Number(position.size) * scale;
+  if (![left, top, size].every(Number.isFinite) || size <= 0) return false;
+
+  return left + size >= 0
+    && top + size >= 0
+    && left <= stageSize.width
+    && top <= stageSize.height;
+};
+
+export const buildBoundedTokenMediaIdSet = ({
+  tokens,
+  viewport,
+  stageSize,
+  limit,
+}) => {
+  const boundedLimit = Math.max(0, Math.floor(Number(limit) || 0));
+  if (!boundedLimit) return new Set();
+
+  const candidates = (Array.isArray(tokens) ? tokens : [])
+    .map((token, index) => ({
+      token,
+      index,
+      priority: token?.isActiveTurn
+        ? 0
+        : (token?.isSelected
+          ? 1
+          : (isTokenWithinStageViewport(token, viewport, stageSize)
+            ? 2
+            : (token?.canMove ? 3 : 4))),
+    }))
+    .filter(({token}) => token?.tokenId && hasMediaAsset(token))
+    .sort((left, right) => left.priority - right.priority || left.index - right.index)
+    .slice(0, boundedLimit);
+
+  return new Set(candidates.map(({token}) => token.tokenId));
+};
 
 const isSameGridCell = (left, right) => (
   !!left
@@ -5279,6 +5335,29 @@ export default function GrigliataBoard({
     return true;
   }, []);
 
+  const handleTurnOrderTokenAction = useCallback(async (token) => {
+    if (!token?.tokenId || !token?.canMove) {
+      return false;
+    }
+
+    const tokenId = token.tokenId;
+    setTurnOrderContextMenu(null);
+
+    if (token.isInTurnOrder) {
+      await Promise.resolve(onLeaveTurnOrder?.(tokenId));
+      return true;
+    }
+
+    const baseInitiative = Number.isInteger(token.turnOrderInitiative)
+      ? token.turnOrderInitiative
+      : 0;
+    setTurnOrderJoinPrompt({
+      tokenId,
+      draft: String(baseInitiative),
+    });
+    return true;
+  }, [onLeaveTurnOrder]);
+
   const handleSelectLightSource = useCallback((lightId) => {
     const nextLightId = lightId || '';
     setSelectedLightId(nextLightId);
@@ -6239,6 +6318,21 @@ export default function GrigliataBoard({
   );
   const visibleRenderedTokensBelowFog = visibleTokenRenderLayers.belowFogTokens;
   const visibleRenderedTokensAboveFog = visibleTokenRenderLayers.aboveFogTokens;
+  const tokenMediaLoadLimit = useMemo(() => Math.max(
+    0,
+    getImageAssetRegistryRuntimeLimits().maxRecords - TOKEN_MEDIA_REGISTRY_HEADROOM
+  ), []);
+  const tokenMediaIds = useMemo(() => buildBoundedTokenMediaIdSet({
+    tokens: visibleRenderedTokens,
+    viewport,
+    stageSize,
+    limit: tokenMediaLoadLimit,
+  }), [
+    stageSize,
+    tokenMediaLoadLimit,
+    viewport,
+    visibleRenderedTokens,
+  ]);
   const visibleRenderedSharedInteractions = isNarrationPresentationActive ? [] : renderedSharedInteractions;
   const visibleLocalPingsForRender = isNarrationPresentationActive ? [] : visibleLocalPings;
   const visibleMeasurementState = isNarrationPresentationActive ? null : measurementState;
@@ -6860,6 +6954,7 @@ export default function GrigliataBoard({
                   canMove={token.canMove}
                   isActiveTurn={token.isActiveTurn}
                   isSelected={token.isSelected}
+                  loadMedia={tokenMediaIds.has(token.tokenId)}
                   badgeImages={tokenStatusBadgeImages}
                   drawTheme={resolvedDrawTheme}
                   onMouseDown={handleTokenMouseDown}
@@ -6914,6 +7009,7 @@ export default function GrigliataBoard({
                   canMove={token.canMove}
                   isActiveTurn={token.isActiveTurn}
                   isSelected={token.isSelected}
+                  loadMedia={tokenMediaIds.has(token.tokenId)}
                   badgeImages={tokenStatusBadgeImages}
                   drawTheme={resolvedDrawTheme}
                   onMouseDown={handleTokenMouseDown}
@@ -7164,23 +7260,7 @@ export default function GrigliataBoard({
                   type="button"
                   data-testid={`turn-order-context-action-${activeTurnOrderContextToken.tokenId}`}
                   disabled={turnOrderActionTokenId === activeTurnOrderContextToken.tokenId}
-                  onClick={async () => {
-                    const tokenId = activeTurnOrderContextToken.tokenId;
-                    setTurnOrderContextMenu(null);
-
-                    if (activeTurnOrderContextToken.isInTurnOrder) {
-                      await Promise.resolve(onLeaveTurnOrder?.(tokenId));
-                      return;
-                    }
-
-                    const baseInitiative = Number.isInteger(activeTurnOrderContextToken.turnOrderInitiative)
-                      ? activeTurnOrderContextToken.turnOrderInitiative
-                      : 0;
-                    setTurnOrderJoinPrompt({
-                      tokenId,
-                      draft: String(baseInitiative),
-                    });
-                  }}
+                  onClick={() => handleTurnOrderTokenAction(activeTurnOrderContextToken)}
                   className="flex w-full items-center justify-between rounded-[0.95rem] px-3 py-2 text-left text-sm font-medium text-slate-100 transition-colors duration-150 hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <span>
@@ -7371,6 +7451,14 @@ export default function GrigliataBoard({
           onSetSelectedTokenVision={onSetSelectedTokenVision}
           isTokenLayerActionPending={isTokenLayerActionPending}
           onMoveTokenLayer={onMoveTokenLayer}
+          isTurnOrderActionPending={!!(
+            visibleSelectedTokenActionState?.turnOrderToken?.tokenId
+            && turnOrderActionTokenId === visibleSelectedTokenActionState.turnOrderToken.tokenId
+          )}
+          onRequestSelectedTokenTurnOrderAction={(turnOrderToken) => {
+            const token = tokenItemsById.get(turnOrderToken?.tokenId);
+            return handleTurnOrderTokenAction(token);
+          }}
         />
 
         {visibleSelectedAoEFigureActionState && (

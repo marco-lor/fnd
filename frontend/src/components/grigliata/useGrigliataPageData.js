@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   collection,
   documentId,
@@ -65,11 +65,18 @@ import {
   normalizeNarrationPlacements,
 } from './narrationScene';
 import { resolveTask07CustomTokenMediaProjection } from './customTokenMedia';
+import { resolveTask07CharacterCanonicalMedia } from './characterTokenMedia';
+import {
+  resolveTask07BoardTokenCanonicalMedia,
+} from './tokenMediaProjection';
 
 const LIVE_INTERACTION_CLOCK_INTERVAL_MS = 15 * 1000;
-export const GRIGLIATA_SHARED_CHARACTER_PROFILE_QUERY_CHUNK_SIZE = 30;
-export const GRIGLIATA_SHARED_CHARACTER_PROFILE_MAX_IDS = (
-  GRIGLIATA_SHARED_CHARACTER_PROFILE_QUERY_CHUNK_SIZE * 2);
+// A document-ID disjunction is expanded while Firestore evaluates the read
+// rule for every candidate. Ten IDs keeps that evaluation below the emulator
+// and production rules expression ceiling; the overall visible-peer bound is
+// intentionally independent so shrinking a safe chunk never drops coverage.
+export const GRIGLIATA_SHARED_CHARACTER_PROFILE_QUERY_CHUNK_SIZE = 10;
+export const GRIGLIATA_SHARED_CHARACTER_PROFILE_MAX_IDS = 60;
 const PAGE_PRESENCE_CLOCK_INTERVAL_MS = 15 * 1000;
 const resolveCustomTokenRole = (token = {}, tokenType = '') => {
   if (tokenType !== 'custom') {
@@ -141,6 +148,8 @@ export default function useGrigliataPageData({
   activeGridSizeOverride = null,
   selectedGalleryFolderId = '',
   selectedMusicFolderId = '',
+  selectedBackgroundPreferenceKey = '',
+  preferredSelectedBackgroundId = '',
 }) {
   const [galleryBackgrounds, setGalleryBackgrounds] = useState([]);
   const [criticalBackgroundsById, setCriticalBackgroundsById] = useState({});
@@ -148,7 +157,9 @@ export default function useGrigliataPageData({
   const [boardStateReadySubscriptionKey, setBoardStateReadySubscriptionKey] = useState('');
   const [foeLibrary, setFoeLibrary] = useState([]);
   const [tokenProfiles, setTokenProfiles] = useState([]);
+  const [tokenProfilesReadyUserId, setTokenProfilesReadyUserId] = useState('');
   const [sharedCharacterProfilesById, setSharedCharacterProfilesById] = useState({});
+  const [characterCanonicalMediaByTokenId, setCharacterCanonicalMediaByTokenId] = useState({});
   const [activePlacementState, setActivePlacementState] = useState({
     backgroundId: '',
     status: 'idle',
@@ -168,15 +179,50 @@ export default function useGrigliataPageData({
   const [musicPlaybackSessions, setMusicPlaybackSessions] = useState([]);
   const [galleryFolders, setGalleryFolders] = useState([]);
   const [musicFolders, setMusicFolders] = useState([]);
-  const [selectedBackgroundId, setSelectedBackgroundId] = useState('');
+  const [galleryFoldersReadySubscriptionKey, setGalleryFoldersReadySubscriptionKey] = useState('');
+  const [musicFoldersReadySubscriptionKey, setMusicFoldersReadySubscriptionKey] = useState('');
+  const [selectedBackgroundState, setSelectedBackgroundState] = useState({
+    preferenceKey: '',
+    value: '',
+  });
+  const normalizedPreferredSelectedBackgroundId = typeof preferredSelectedBackgroundId === 'string'
+    ? preferredSelectedBackgroundId.trim()
+    : '';
+  const selectedBackgroundId = selectedBackgroundState.preferenceKey === selectedBackgroundPreferenceKey
+    ? selectedBackgroundState.value
+    : normalizedPreferredSelectedBackgroundId;
+  const setSelectedBackgroundId = useCallback((valueOrUpdater) => {
+    setSelectedBackgroundState((currentState) => {
+      const currentValue = currentState.preferenceKey === selectedBackgroundPreferenceKey
+        ? currentState.value
+        : normalizedPreferredSelectedBackgroundId;
+      const requestedValue = typeof valueOrUpdater === 'function'
+        ? valueOrUpdater(currentValue)
+        : valueOrUpdater;
+
+      return {
+        preferenceKey: selectedBackgroundPreferenceKey,
+        value: typeof requestedValue === 'string' ? requestedValue.trim() : '',
+      };
+    });
+  }, [normalizedPreferredSelectedBackgroundId, selectedBackgroundPreferenceKey]);
   const [liveInteractionClock, setLiveInteractionClock] = useState(() => Date.now());
   const [pagePresenceClock, setPagePresenceClock] = useState(() => Date.now());
   const boardStateSubscriptionKey = `${currentUserId}:${isManager ? 'manager' : 'player'}`;
+  const managerFolderSubscriptionKey = isManager && currentUserId
+    ? `${currentUserId}:manager`
+    : '';
   const isBoardStateReady = Boolean(currentUserId)
     && boardStateReadySubscriptionKey === boardStateSubscriptionKey;
+  const isGalleryFoldersReady = !!managerFolderSubscriptionKey
+    && galleryFoldersReadySubscriptionKey === managerFolderSubscriptionKey;
+  const isMusicFoldersReady = !!managerFolderSubscriptionKey
+    && musicFoldersReadySubscriptionKey === managerFolderSubscriptionKey;
   const activePlacementSubscriptionGenerationRef = useRef(0);
   const aoeFigureSubscriptionGenerationRef = useRef(0);
   const liveInteractionSubscriptionGenerationRef = useRef(0);
+  const criticalBackgroundSubscriptionGenerationRef = useRef(0);
+  const [criticalBackgroundResolutionById, setCriticalBackgroundResolutionById] = useState({});
 
   useEffect(() => {
     if (!currentUserId) {
@@ -186,10 +232,14 @@ export default function useGrigliataPageData({
       setBoardStateReadySubscriptionKey('');
       setFoeLibrary([]);
       setTokenProfiles([]);
+      setTokenProfilesReadyUserId('');
       setSharedCharacterProfilesById({});
+      setCharacterCanonicalMediaByTokenId({});
       setPagePresenceSnapshots([]);
       setGalleryFolders([]);
       setMusicFolders([]);
+      setGalleryFoldersReadySubscriptionKey('');
+      setMusicFoldersReadySubscriptionKey('');
       return undefined;
     }
 
@@ -216,8 +266,10 @@ export default function useGrigliataPageData({
           ...docSnap.data(),
         }));
         setTokenProfiles(nextTokens);
+        setTokenProfilesReadyUserId(currentUserId);
       },
       (error) => {
+        setTokenProfilesReadyUserId('');
         console.error('Failed to load Grigliata token profiles:', error);
       }
     );
@@ -251,14 +303,15 @@ export default function useGrigliataPageData({
             ...docSnap.data(),
           }));
           setGalleryFolders(sortGalleryFolders(nextFolders));
+          setGalleryFoldersReadySubscriptionKey(managerFolderSubscriptionKey);
         },
         (error) => {
           console.error('Failed to load Grigliata gallery folders:', error);
-          setGalleryFolders([]);
         }
       )
       : (() => {
         setGalleryFolders([]);
+        setGalleryFoldersReadySubscriptionKey('');
         return () => {};
       })();
 
@@ -284,7 +337,7 @@ export default function useGrigliataPageData({
       unsubscribeTokenProfiles();
       unsubscribePagePresence();
     };
-  }, [boardStateSubscriptionKey, currentUserId, isManager]);
+  }, [boardStateSubscriptionKey, currentUserId, isManager, managerFolderSubscriptionKey]);
 
   const activeBackgroundId = typeof boardState?.activeBackgroundId === 'string'
     ? boardState.activeBackgroundId
@@ -377,8 +430,12 @@ export default function useGrigliataPageData({
   }, [currentUserId, isManager, selectedGalleryFolderId]);
 
   useEffect(() => {
+    const subscriptionGeneration = criticalBackgroundSubscriptionGenerationRef.current + 1;
+    criticalBackgroundSubscriptionGenerationRef.current = subscriptionGeneration;
+
     if (!currentUserId || !criticalBackgroundIds.length) {
       setCriticalBackgroundsById({});
+      setCriticalBackgroundResolutionById({});
       return undefined;
     }
 
@@ -388,11 +445,21 @@ export default function useGrigliataPageData({
         Object.entries(currentMap).filter(([backgroundId]) => criticalBackgroundIdSet.has(backgroundId))
       )
     ));
+    setCriticalBackgroundResolutionById((currentMap) => Object.fromEntries(
+      criticalBackgroundIds.map((backgroundId) => [
+        backgroundId,
+        currentMap[backgroundId] || 'loading',
+      ])
+    ));
 
     const unsubscribes = criticalBackgroundIds.map((backgroundId) => (
       onSnapshot(
         doc(db, 'grigliata_backgrounds', backgroundId),
         (snapshot) => {
+          if (criticalBackgroundSubscriptionGenerationRef.current !== subscriptionGeneration) {
+            return;
+          }
+
           setCriticalBackgroundsById((currentMap) => {
             const nextMap = { ...currentMap };
 
@@ -407,19 +474,29 @@ export default function useGrigliataPageData({
 
             return nextMap;
           });
+          setCriticalBackgroundResolutionById((currentMap) => ({
+            ...currentMap,
+            [backgroundId]: 'ready',
+          }));
         },
         (error) => {
+          if (criticalBackgroundSubscriptionGenerationRef.current !== subscriptionGeneration) {
+            return;
+          }
+
           console.error('Failed to load critical Grigliata background:', error);
-          setCriticalBackgroundsById((currentMap) => {
-            const nextMap = { ...currentMap };
-            delete nextMap[backgroundId];
-            return nextMap;
-          });
+          setCriticalBackgroundResolutionById((currentMap) => ({
+            ...currentMap,
+            [backgroundId]: 'error',
+          }));
         }
       )
     ));
 
     return () => {
+      if (criticalBackgroundSubscriptionGenerationRef.current === subscriptionGeneration) {
+        criticalBackgroundSubscriptionGenerationRef.current += 1;
+      }
       unsubscribes.forEach((unsubscribe) => unsubscribe());
     };
   }, [criticalBackgroundIds, currentUserId]);
@@ -729,6 +806,7 @@ export default function useGrigliataPageData({
     if (!currentUserId || !isManager) {
       setMusicTracks([]);
       setMusicFolders([]);
+      setMusicFoldersReadySubscriptionKey('');
       setMusicPlaybackState(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
       setMusicPlaybackSessions([]);
       return undefined;
@@ -742,10 +820,10 @@ export default function useGrigliataPageData({
           ...docSnap.data(),
         }));
         setMusicFolders(sortMusicFolders(nextFolders));
+        setMusicFoldersReadySubscriptionKey(managerFolderSubscriptionKey);
       },
       (error) => {
         console.error('Failed to load Grigliata music folders:', error);
-        setMusicFolders([]);
       }
     );
 
@@ -806,7 +884,7 @@ export default function useGrigliataPageData({
       unsubscribePlayback();
       unsubscribePlaybackSessions();
     };
-  }, [currentUserId, isManager, selectedMusicFolderId]);
+  }, [currentUserId, isManager, managerFolderSubscriptionKey, selectedMusicFolderId]);
 
   useEffect(() => {
     setLiveInteractionClock(Date.now());
@@ -877,7 +955,22 @@ export default function useGrigliataPageData({
   );
 
   useEffect(() => {
+    if (
+      selectedBackgroundId
+      && backgrounds.some((background) => background.id === selectedBackgroundId)
+    ) {
+      return;
+    }
+
+    if (
+      selectedBackgroundId
+      && criticalBackgroundResolutionById[selectedBackgroundId] !== 'ready'
+    ) {
+      return;
+    }
+
     if (!backgrounds.length) {
+      if (!isBoardStateReady) return;
       setSelectedBackgroundId('');
       return;
     }
@@ -894,7 +987,15 @@ export default function useGrigliataPageData({
       }
       return backgrounds[0].id;
     });
-  }, [backgrounds, activeBackgroundId, presentationBackgroundId]);
+  }, [
+    activeBackgroundId,
+    backgrounds,
+    criticalBackgroundResolutionById,
+    isBoardStateReady,
+    presentationBackgroundId,
+    selectedBackgroundId,
+    setSelectedBackgroundId,
+  ]);
 
   const normalizedHiddenTokenIdsByBackground = useMemo(
     () => normalizeHiddenTokenIdsByBackground(currentUserHiddenTokenIdsByBackground),
@@ -903,23 +1004,19 @@ export default function useGrigliataPageData({
 
   const sharedCharacterProfileIdsKey = useMemo(() => JSON.stringify(
     [...new Set(activePlacements
-      .map((placement) => {
-        const tokenId = typeof placement?.tokenId === 'string'
-          ? placement.tokenId.trim()
-          : '';
-        const ownerUid = typeof placement?.ownerUid === 'string'
-          ? placement.ownerUid.trim()
-          : '';
-        return (
-          tokenId
-          && tokenId === ownerUid
-          && tokenId !== currentUserId
-        ) ? tokenId : '';
-      })
+      .map((placement) => (
+        typeof placement?.tokenId === 'string'
+          && typeof placement?.ownerUid === 'string'
+          && placement.tokenId === placement.ownerUid
+          ? placement.tokenId
+          : ''
+      ))
+      .filter((tokenId) => tokenId && tokenId !== currentUserId)
       .filter(Boolean))]
       .sort()
-      // Keep listener fan-out hard-bounded. Placements beyond this cap retain
-      // their map-local legacy image/initial fallback instead of adding reads.
+      // Character profiles are the only token contract whose document ID is
+      // the owner UID. Excluding custom/foe placement IDs keeps every query
+      // within the signed-in character read boundary. Fan-out stays bounded.
       .slice(0, GRIGLIATA_SHARED_CHARACTER_PROFILE_MAX_IDS)
   ), [activePlacements, currentUserId]);
 
@@ -995,6 +1092,37 @@ export default function useGrigliataPageData({
       unsubscribes.forEach((unsubscribe) => unsubscribe());
     };
   }, [currentUserId, sharedCharacterProfileIdsKey]);
+
+  const characterCanonicalTokenIdsKey = useMemo(() => JSON.stringify(
+    Object.keys(sharedCharacterProfilesById).sort()
+  ), [sharedCharacterProfilesById]);
+
+  useEffect(() => {
+    const tokenIds = JSON.parse(characterCanonicalTokenIdsKey);
+    if (!currentUserId || !tokenIds.length) {
+      setCharacterCanonicalMediaByTokenId({});
+      return undefined;
+    }
+
+    let active = true;
+    setCharacterCanonicalMediaByTokenId({});
+    resolveTask07CharacterCanonicalMedia(tokenIds)
+      .then((mediaByTokenId) => {
+        if (active) setCharacterCanonicalMediaByTokenId(mediaByTokenId);
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.error(
+          'Failed to resolve shared Grigliata character canonical media:',
+          error
+        );
+        setCharacterCanonicalMediaByTokenId({});
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [characterCanonicalTokenIdsKey, currentUserId]);
 
   const normalizedTokenProfiles = useMemo(
     () => [
@@ -1168,21 +1296,42 @@ export default function useGrigliataPageData({
             profilesByTokenId: tokenProfilesByTokenId,
           })
           : null;
+        const characterMedia = tokenType === 'character'
+          ? (
+            isCurrentUserCharacter
+              ? currentMedia
+              : characterCanonicalMediaByTokenId[placement.tokenId] || null
+          )
+          : null;
+        const projectedMedia = resolveTask07BoardTokenCanonicalMedia({
+          tokenType,
+          profile,
+          foeSource,
+          customTokenProjection,
+          characterMedia,
+        });
+        const profileImageUrl = typeof profile?.imageUrl === 'string'
+          ? profile.imageUrl.trim()
+          : '';
+        const foeSourceImageUrl = typeof foeSource?.imageUrl === 'string'
+          ? foeSource.imageUrl.trim()
+          : '';
+        const profileImagePath = typeof profile?.imagePath === 'string'
+          ? profile.imagePath.trim()
+          : '';
+        const foeSourceImagePath = typeof foeSource?.imagePath === 'string'
+          ? foeSource.imagePath.trim()
+          : '';
         const projectedImageUrl = isCurrentUserCharacter && currentMedia
           ? currentImageUrl
-          : (foeSource
-            ? (typeof foeSource?.imageUrl === 'string' ? foeSource.imageUrl.trim() : '')
-            : (placementImageUrl || customTokenProjection?.imageUrl || profile?.imageUrl || ''));
+          : (tokenType === 'foe'
+            ? (profileImageUrl || foeSourceImageUrl || placementImageUrl)
+            : (placementImageUrl || customTokenProjection?.imageUrl || profileImageUrl));
         const projectedImagePath = isCurrentUserCharacter && currentMedia
           ? currentImagePath
-          : (foeSource
-            ? (typeof foeSource?.imagePath === 'string' ? foeSource.imagePath.trim() : '')
-            : (customTokenProjection?.imagePath || profile?.imagePath || ''));
-        const projectedMedia = isCurrentUserCharacter && currentMedia
-          ? currentMedia
-          : (foeSource
-            ? getEntityMedia(foeSource)
-            : (customTokenProjection?.media || getEntityMedia(profile)));
+          : (tokenType === 'foe'
+            ? (profileImagePath || foeSourceImagePath)
+            : (customTokenProjection?.imagePath || profileImagePath));
 
         return {
           ...(profile || {}),
@@ -1230,6 +1379,7 @@ export default function useGrigliataPageData({
       }),
     [
       currentCharacterId,
+      characterCanonicalMediaByTokenId,
       currentMedia,
       currentImagePath,
       currentImageUrl,
@@ -1449,8 +1599,11 @@ export default function useGrigliataPageData({
     grid,
     isActivePlacementsReady,
     isBoardStateReady,
+    isGalleryFoldersReady,
+    isMusicFoldersReady,
     isCurrentUserTokenHiddenOnActiveMap,
     isGridVisible,
+    isTokenProfilesReady: !!currentUserId && tokenProfilesReadyUserId === currentUserId,
     isTurnOrderEnabled,
     isTurnOrderStarted,
     activeTurnEntry,

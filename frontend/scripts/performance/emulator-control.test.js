@@ -183,6 +183,28 @@ test('disableBackgroundTriggersWithRecovery is safe for direct measurement-windo
   assert.deepEqual(events, ['disable', 'enable']);
 });
 
+test('disable recovery can make one bounded retry only after enable is confirmed', async () => {
+  const events = [];
+  let disableCalls = 0;
+  const fetchImpl = async (url) => {
+    const action = url.endsWith('disableBackgroundTriggers') ? 'disable' : 'enable';
+    events.push(action);
+    if (action === 'disable') {
+      disableCalls += 1;
+      if (disableCalls === 1) throw new Error('stale pooled socket');
+      return okResponse({ body: { enabled: false } });
+    }
+    return okResponse({ body: { enabled: true } });
+  };
+
+  await disableBackgroundTriggersWithRecovery({
+    disableAttempts: 2,
+    fetchImpl,
+    projectId: 'demo-control',
+  });
+  assert.deepEqual(events, ['disable', 'enable', 'disable']);
+});
+
 test('withBackgroundTriggersDisabled reports disable and recovery failures together', async () => {
   const fetchImpl = async (url) => {
     throw new Error(url.endsWith('disableBackgroundTriggers')
