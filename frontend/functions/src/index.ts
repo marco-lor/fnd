@@ -69,6 +69,17 @@ import {
 } from "./userDataCommands";
 import {cleanupUserOwnedMedia} from "./userOwnedMediaCleanup";
 import {
+  cleanupLegacyMedia,
+  cleanupLegacyRemovedBackgroundMedia,
+  cleanupLegacyRemovedCatalogItemMedia,
+  cleanupLegacyRemovedFoeMedia,
+  cleanupLegacyRemovedMusicTrackMedia,
+  cleanupLegacyRemovedNpcMedia,
+  cleanupLegacyRemovedTokenMedia,
+  cleanupLegacyRemovedUserMedia,
+  sweepLegacyMediaCleanup,
+} from "./legacyMediaCleanup";
+import {
   cleanupDeletedGrigliataTokenImage,
   cleanupReplacedGrigliataTokenImage,
 } from "./cleanupGrigliataTokenImage";
@@ -176,6 +187,15 @@ export {
   cleanupDeletedGrigliataTokenImage,
   cleanupReplacedGrigliataTokenImage,
   cleanupUserOwnedMedia,
+  cleanupLegacyMedia,
+  cleanupLegacyRemovedBackgroundMedia,
+  cleanupLegacyRemovedCatalogItemMedia,
+  cleanupLegacyRemovedFoeMedia,
+  cleanupLegacyRemovedMusicTrackMedia,
+  cleanupLegacyRemovedNpcMedia,
+  cleanupLegacyRemovedTokenMedia,
+  cleanupLegacyRemovedUserMedia,
+  sweepLegacyMediaCleanup,
   cleanupTask07MediaAsset,
   cleanupTask07RemovedBackgroundMedia,
   cleanupTask07RemovedCatalogItemMedia,

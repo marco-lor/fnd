@@ -370,6 +370,8 @@ const FoesHub = () => {
   };
 
   const handleSave = async (foeData, options = {}) => {
+    const uploadedLegacyPaths = new Set();
+    let mediaMetadataCommitted = false;
     try {
       setBusy(true);
       setError('');
@@ -426,6 +428,7 @@ const FoesHub = () => {
           const fname = `${safe}_${Date.now()}`;
           const path = `foes/${folder}/${fname}`;
           ({ downloadUrl: eUrl } = await uploadLegacyImage(path, entry.imageFile));
+          uploadedLegacyPaths.add(path);
           ePath = path;
         } else if (entry.removeImage) {
           eUrl = '';
@@ -536,16 +539,22 @@ const FoesHub = () => {
               kind: 'foe',
               previousAssetId: receiptPreviousAssetId,
               expectedRevision: receiptExpectedRevision,
-              prepareEntity: () => (
-                editing?.id
-                  ? updateDoc(foeRef, payload)
-                  : setDoc(foeRef, {
+              prepareEntity: async () => {
+                if (editing?.id) {
+                  await updateDoc(foeRef, payload);
+                } else {
+                  await setDoc(foeRef, {
                     ...payload,
                     created_at: serverTimestamp(),
-                  })
-              ),
+                  });
+                }
+                mediaMetadataCommitted = true;
+              },
               ...(editing?.id ? {} : {
-                rollbackPreparedEntity: () => deleteDoc(foeRef),
+                rollbackPreparedEntity: async () => {
+                  await deleteDoc(foeRef);
+                  mediaMetadataCommitted = false;
+                },
               }),
               signal,
             }),
@@ -692,6 +701,7 @@ const FoesHub = () => {
         const fileName = `${safeName}_${Date.now()}`;
         const path = `foes/${fileName}`;
         ({ downloadUrl: imageUrl } = await uploadLegacyImage(path, imageFile));
+        uploadedLegacyPaths.add(path);
         imagePath = path;
       }
 
@@ -743,9 +753,11 @@ const FoesHub = () => {
         } else {
           await updateDoc(foeRef, payload);
         }
+        mediaMetadataCommitted = true;
       } else {
         const added = await addDoc(collection(db, 'foes'), { ...payload, created_at: serverTimestamp() });
         docId = added.id;
+        mediaMetadataCommitted = true;
       }
 
       // If we uploaded/replaced or removed, delete the original image from storage
@@ -772,6 +784,23 @@ const FoesHub = () => {
       setEditing(null);
     } catch (e) {
       console.error('save foe failed', e);
+      const canRollbackLegacyUploads = !mediaMetadataCommitted
+        && e?.committed !== true
+        && e?.commitAttempted !== true;
+      if (canRollbackLegacyUploads && uploadedLegacyPaths.size) {
+        const rollbackPaths = [...uploadedLegacyPaths];
+        const rollbackResults = await Promise.allSettled(
+          rollbackPaths.map((path) => deleteLegacyStoragePath(path))
+        );
+        rollbackResults.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            console.warn(
+              `Foe upload rollback failed for ${rollbackPaths[index]}:`,
+              result.reason
+            );
+          }
+        });
+      }
       setModalError(e?.message || 'Salvataggio fallito.');
     } finally {
       setBusy(false);

@@ -163,6 +163,18 @@
       "fieldPath": "expiresAt",
       "ttl": true,
       "indexes": []
+    },
+    {
+      "collectionGroup": "user_media_cleanup",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "legacy_media_cleanup",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
     }
   ]
 }

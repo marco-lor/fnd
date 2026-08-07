@@ -5,6 +5,8 @@ import {asTrimmedString, hashValue} from "./userDataV2";
 
 const REGION = "europe-west8";
 const QUEUE_COLLECTION = "user_media_cleanup";
+const CLEANUP_RECEIPT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const STALE_PROCESSING_MS = 20 * 60 * 1000;
 
 export type OwnedMediaScope = "profile" | "inventory" | "spells" | "tecniche";
 
@@ -155,6 +157,8 @@ export const enqueueOwnedMediaCleanup = (
       state: "pending",
       attempts: 0,
       deletionVerified: false,
+      expiresAt: admin.firestore.FieldValue.delete(),
+      errorCode: admin.firestore.FieldValue.delete(),
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, {merge: true});
@@ -178,10 +182,48 @@ const containsStoragePath = (value: unknown, path: string): boolean => {
   ));
 };
 
+const cleanupReceiptExpiry = () => admin.firestore.Timestamp.fromMillis(
+  Date.now() + CLEANUP_RECEIPT_TTL_MS
+);
+
+export const retryFailedOwnedMediaCleanup = async (): Promise<number> => {
+  const db = admin.firestore();
+  const [failed, processing] = await Promise.all([
+    db.collection(QUEUE_COLLECTION)
+      .where("state", "==", "failed")
+      .limit(30)
+      .get(),
+    db.collection(QUEUE_COLLECTION)
+      .where("state", "==", "processing")
+      .limit(30)
+      .get(),
+  ]);
+  const staleBefore = Date.now() - STALE_PROCESSING_MS;
+  const retryable = [
+    ...failed.docs,
+    ...processing.docs.filter((document) => {
+      const processingAt = document.get("processingAt");
+      return !(processingAt instanceof admin.firestore.Timestamp) ||
+        processingAt.toMillis() <= staleBefore;
+    }),
+  ];
+  if (!retryable.length) return 0;
+  const batch = db.batch();
+  retryable.forEach((document) => batch.update(document.ref, {
+    state: "pending",
+    errorCode: admin.firestore.FieldValue.delete(),
+    processingAt: admin.firestore.FieldValue.delete(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }));
+  await batch.commit();
+  return retryable.length;
+};
+
 export const cleanupUserOwnedMedia = onDocumentWritten(
   {
     document: `${QUEUE_COLLECTION}/{cleanupId}`,
     region: REGION,
+    retry: true,
   },
   async (event) => {
     if (!event.data?.after.exists || event.data.after.get("state") !== "pending") {
@@ -204,6 +246,7 @@ export const cleanupUserOwnedMedia = onDocumentWritten(
         transaction.update(queueRef, {
           state: "rejected",
           errorCode: "invalid-owned-path",
+          expiresAt: cleanupReceiptExpiry(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         return null;
@@ -225,6 +268,7 @@ export const cleanupUserOwnedMedia = onDocumentWritten(
         await queueRef.update({
           state: "blocked-reference",
           deletionVerified: false,
+          expiresAt: cleanupReceiptExpiry(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         return;
@@ -236,6 +280,7 @@ export const cleanupUserOwnedMedia = onDocumentWritten(
       await queueRef.update({
         state: "completed",
         deletionVerified: true,
+        expiresAt: cleanupReceiptExpiry(),
         completedAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         errorCode: admin.firestore.FieldValue.delete(),

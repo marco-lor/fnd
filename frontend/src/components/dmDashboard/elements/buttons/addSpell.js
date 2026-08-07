@@ -7,6 +7,7 @@ import {
   doc, getDoc, updateDoc,
 } from "../../../../performance/firestore";
 import {
+  deleteLegacyStoragePath,
   uploadLegacyBlob,
   uploadLegacyImage,
 } from "../../../common/legacyMediaStorage";
@@ -67,6 +68,22 @@ export function AddSpellOverlay({
 
     saveInFlightRef.current = true;
     setIsSaving(true);
+    const uploadedLegacyPaths = [];
+    let metadataCommitted = false;
+
+    const rollbackLegacyUploads = async () => {
+      const results = await Promise.allSettled(
+        uploadedLegacyPaths.map((path) => deleteLegacyStoragePath(path))
+      );
+      results.forEach((cleanupResult, index) => {
+        if (cleanupResult.status === 'rejected') {
+          console.warn(
+            `Spell media rollback failed for ${uploadedLegacyPaths[index]}:`,
+            cleanupResult.reason
+          );
+        }
+      });
+    };
 
     try {
       const { spellData, imageFile, videoFile } = result;
@@ -97,14 +114,16 @@ export function AddSpellOverlay({
       }
 
       if (imageFile) {
-        spellData.image_url = (
-          await uploadLegacyImage(`spells/${safeBase}_image`, imageFile)
-        ).downloadUrl;
+        const imagePath = `spells/${safeBase}_image`;
+        const imageUpload = await uploadLegacyImage(imagePath, imageFile);
+        uploadedLegacyPaths.push(imageUpload.storagePath || imagePath);
+        spellData.image_url = imageUpload.downloadUrl;
       }
       if (videoFile) {
-        spellData.video_url = (
-          await uploadLegacyBlob(`spells/videos/${safeBase}_video`, videoFile)
-        ).downloadUrl;
+        const videoPath = `spells/videos/${safeBase}_video`;
+        const videoUpload = await uploadLegacyBlob(videoPath, videoFile);
+        uploadedLegacyPaths.push(videoUpload.storagePath || videoPath);
+        spellData.video_url = videoUpload.downloadUrl;
       }
 
       /* ---------------------------------------------------- */
@@ -116,6 +135,7 @@ export function AddSpellOverlay({
       const snap   = await getDoc(docRef);
       if (!snap.exists()) {
         alert(collection === "items" ? "Item not found" : "User not found");
+        await rollbackLegacyUploads();
         onClose(false); return;
       }
 
@@ -123,15 +143,18 @@ export function AddSpellOverlay({
   const next   = { ...prev, [spellName]: spellData };
 
       if (JSON.stringify(next).length > 900_000) {
+        await rollbackLegacyUploads();
         alert("Data too large – usa un’immagine o video più piccoli.");
         onClose(false); return;
       }
 
       await updateDoc(docRef, { spells: next });
+      metadataCommitted = true;
       onClose(true);
 
     } catch (err) {
       console.error("Error saving spell:", err);
+      if (!metadataCommitted) await rollbackLegacyUploads();
       alert("Errore durante il salvataggio – vedi console.");
       onClose(false);
     }

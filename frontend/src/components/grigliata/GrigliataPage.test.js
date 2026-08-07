@@ -10700,6 +10700,40 @@ describe('GrigliataPage', () => {
     confirmSpy.mockRestore();
   });
 
+  test('deletes the legacy map reference before eager Storage cleanup', async () => {
+    setManagerAuth();
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    const storageApi = require('firebase/storage');
+
+    render(<GrigliataPage />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
+    });
+
+    firestore.deleteDoc.mockClear();
+    storageApi.deleteObject.mockClear();
+
+    const latestBackgroundGalleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+    await act(async () => {
+      await latestBackgroundGalleryProps.onDeleteBackground({
+        id: 'map-legacy',
+        name: 'Legacy Map',
+        imagePath: 'grigliata/backgrounds/user-1/map-legacy.png',
+      });
+    });
+
+    await waitFor(() => expect(storageApi.deleteObject).toHaveBeenCalled());
+    const backgroundDelete = firestore.deleteDoc.mock.calls.findIndex(([ref]) => (
+      ref?.path === 'grigliata_backgrounds/map-legacy'
+    ));
+    expect(backgroundDelete).toBeGreaterThanOrEqual(0);
+    expect(firestore.deleteDoc.mock.invocationCallOrder[backgroundDelete])
+      .toBeLessThan(storageApi.deleteObject.mock.invocationCallOrder[0]);
+
+    confirmSpy.mockRestore();
+  });
+
   test('skips optional wall runtime cleanup when the background has no wall state doc', async () => {
     setManagerAuth();
     const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);

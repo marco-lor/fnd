@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, useContext } from 'rea
 import { collection, doc, updateDoc, onSnapshot, getDoc, setDoc } from "../../../performance/firestore";
 import {
     createLegacyStorageCleanup,
-
+    deleteLegacyStoragePath,
     uploadLegacyImage,
 } from "../../common/legacyMediaStorage";
 import useObjectUrl from "../../common/useObjectUrl";
@@ -390,6 +390,8 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
                 console.warn("Post-commit consumabile media cleanup failed:", path, error);
             },
         });
+        let uploadedLegacyImagePath = '';
+        let catalogWriteCommitted = false;
         
         try {
             if (!editMode) {
@@ -419,7 +421,8 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
             let newImageUrl = editMode ? (initialData?.General?.image_url ?? null) : null;
             if (imageFile && !task07V1Write && !inventoryEditMode) {
                 const consumabileImgFileName = `consumabile_${docId}_${Date.now()}_${imageFile.name}`;
-                newImageUrl = (await uploadLegacyImage('items/' + consumabileImgFileName, imageFile)).downloadUrl;
+                uploadedLegacyImagePath = 'items/' + consumabileImgFileName;
+                newImageUrl = (await uploadLegacyImage(uploadedLegacyImagePath, imageFile)).downloadUrl;
                 if (!inventoryEditMode && editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
                     deferredStorageCleanup.addUrl(initialData.General.image_url);
                 }
@@ -463,17 +466,8 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
                 }
             });
 
-            if (!inventoryEditMode && editMode && initialData?.General?.spells) {
-                for (const initialSpellName in initialData.General.spells) {
-                    if (!finalSpells[initialSpellName]) {
-                        const initialSpellDetails = initialData.General.spells[initialSpellName];
-                        if (typeof initialSpellDetails === 'object') {
-                            if (initialSpellDetails.image_url) deferredStorageCleanup.addUrl(initialSpellDetails.image_url);
-                            if (initialSpellDetails.video_url) deferredStorageCleanup.addUrl(initialSpellDetails.video_url);
-                        }
-                    }
-                }
-            }
+            // Removed embedded spell media is retired by the item document
+            // trigger, which rejects personal spell paths not owned by this item.
             finalConsumabileData.General.spells = finalSpells;
 
             finalConsumabileData.visibility = visibility;
@@ -580,10 +574,12 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
                 } else if (editMode) {
                     console.log("Updating document:", docId, finalConsumabileData);
                     await updateDoc(consumabileDocRef, finalConsumabileData);
+                    catalogWriteCommitted = true;
                     if (showMessage) showMessage(`Consumabile "${consumabileName}" aggiornato!`, "success");
                 } else {
                     console.log("Creating new document:", docId, finalConsumabileData);
                     await setDoc(consumabileDocRef, finalConsumabileData);
+                    catalogWriteCommitted = true;
                     if (showMessage) showMessage(`Consumabile "${consumabileName}" creato!`, "success");
                 }
                 await deferredStorageCleanup.flush();
@@ -592,6 +588,13 @@ export function AddConsumabileOverlay({ onClose, showMessage, initialData = null
 
         } catch (error) {
             console.error("Error saving consumabile:", error);
+            if (uploadedLegacyImagePath && !catalogWriteCommitted) {
+                try {
+                    await deleteLegacyStoragePath(uploadedLegacyImagePath);
+                } catch (cleanupError) {
+                    console.warn("Consumabile upload rollback cleanup failed:", cleanupError);
+                }
+            }
             if (showMessage) showMessage(error?.message || "Errore nel salvataggio del consumabile.", "error");
         } finally {
             setIsLoading(false);

@@ -4,7 +4,7 @@ import { db } from '../../firebaseConfig';
 import { doc, getDoc, setDoc, updateDoc } from "../../../performance/firestore";
 import {
     createLegacyStorageCleanup,
-
+    deleteLegacyStoragePath,
     uploadLegacyImage,
 } from "../../common/legacyMediaStorage";
 import useObjectUrl from "../../common/useObjectUrl";
@@ -416,6 +416,8 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                 console.warn("Post-commit armatura media cleanup failed:", path, error);
             },
         });
+        let uploadedLegacyImagePath = '';
+        let catalogWriteCommitted = false;
         
         try {
             if (!editMode) {
@@ -445,7 +447,8 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
             let newImageUrl = editMode ? (initialData?.General?.image_url ?? null) : null;
             if (imageFile && !task07V1Write && !inventoryEditMode) {
                 const armaturaImgFileName = `armatura_${docId}_${Date.now()}_${imageFile.name}`;
-                newImageUrl = (await uploadLegacyImage('items/' + armaturaImgFileName, imageFile)).downloadUrl;
+                uploadedLegacyImagePath = 'items/' + armaturaImgFileName;
+                newImageUrl = (await uploadLegacyImage(uploadedLegacyImagePath, imageFile)).downloadUrl;
                 if (!inventoryEditMode && editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
                     deferredStorageCleanup.addUrl(initialData.General.image_url);
                 }
@@ -489,17 +492,8 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                 }
             });
 
-            if (!inventoryEditMode && editMode && initialData?.General?.spells) {
-                for (const initialSpellName in initialData.General.spells) {
-                    if (!finalSpells[initialSpellName]) {
-                        const initialSpellDetails = initialData.General.spells[initialSpellName];
-                        if (typeof initialSpellDetails === 'object') {
-                            if (initialSpellDetails.image_url) deferredStorageCleanup.addUrl(initialSpellDetails.image_url);
-                            if (initialSpellDetails.video_url) deferredStorageCleanup.addUrl(initialSpellDetails.video_url);
-                        }
-                    }
-                }
-            }
+            // Removed embedded spell media is retired by the item document
+            // trigger, which rejects personal spell paths not owned by this item.
             finalArmaturaData.General.spells = finalSpells;
 
             finalArmaturaData.visibility = visibility;
@@ -606,10 +600,12 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
                 } else if (editMode) {
                     console.log("Updating document:", docId, finalArmaturaData);
                     await updateDoc(armaturaDocRef, finalArmaturaData);
+                    catalogWriteCommitted = true;
                     if (showMessage) showMessage(`Armatura "${armaturaName}" aggiornata!`, "success");
                 } else {
                     console.log("Creating new document:", docId, finalArmaturaData);
                     await setDoc(armaturaDocRef, finalArmaturaData);
+                    catalogWriteCommitted = true;
                     if (showMessage) showMessage(`Armatura "${armaturaName}" creata!`, "success");
                 }
                 await deferredStorageCleanup.flush();
@@ -618,6 +614,13 @@ export function AddArmaturaOverlay({ onClose, showMessage, initialData = null, e
 
         } catch (error) {
             console.error("Error saving armor:", error);
+            if (uploadedLegacyImagePath && !catalogWriteCommitted) {
+                try {
+                    await deleteLegacyStoragePath(uploadedLegacyImagePath);
+                } catch (cleanupError) {
+                    console.warn("Armatura upload rollback cleanup failed:", cleanupError);
+                }
+            }
             if (showMessage) showMessage(error?.message || "Errore nel salvataggio dell'armatura.", "error");
         } finally {
             setIsLoading(false);

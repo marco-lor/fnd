@@ -577,17 +577,9 @@ export default function ComparisonPanel({ item, showMessage }) {
     try {
       storageCleanup.addUrl(imageUrl);
 
-      // delete spell assets if any
-      const itemSpells = general.spells;
-      if (itemSpells && typeof itemSpells === 'object') {
-        for (const spellName in itemSpells) {
-          const spell = itemSpells[spellName];
-          if (!spell || typeof spell !== 'object') continue;
-
-          storageCleanup.addUrl(spell.image_url);
-          storageCleanup.addUrl(spell.video_url);
-        }
-      }
+      // Embedded spells can reference personal media that the catalog item
+      // does not own. The server lifecycle removes only item-bound spell
+      // uploads after revalidating the deleted Firestore document.
 
       // delete firestore doc
       await deleteDoc(doc(db, 'items', item.id));

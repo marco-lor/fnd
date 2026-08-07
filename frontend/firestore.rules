@@ -1871,6 +1871,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /legacy_media_cleanup/{cleanupId} {
+      // Reference-removal receipts contain private Storage paths and are
+      // created, retried, and settled exclusively by Cloud Functions.
+      allow read, write: if false;
+    }
+
     // Task 07 media manifests and cleanup leases contain actor ownership,
     // canonical private paths, processing errors, and lifecycle timestamps.
     // Clients receive only privacy-minimized descriptors from authenticated

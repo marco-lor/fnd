@@ -3,7 +3,10 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../AuthContext";
 import GlobalAuroraBackground from "../backgrounds/GlobalAuroraBackground";
-import { uploadLegacyImage } from "../common/legacyMediaStorage";
+import {
+  deleteLegacyStoragePath,
+  uploadLegacyImage,
+} from "../common/legacyMediaStorage";
 import useObjectUrl from "../common/useObjectUrl";
 import { isTask07MediaV1WriteEnabled } from '../../data/media/mediaFeatureFlags';
 import { createTask07MediaOperationOwner } from '../../data/media/mediaOperationOwner';
@@ -206,6 +209,8 @@ function CharacterCreation() {
     setLoading(true);
     setError("");
     let avatarLease = null;
+    let uploadedLegacyAvatarPath = '';
+    let characterMetadataCommitted = false;
 
     try {
       const characterBaseData = {
@@ -307,6 +312,7 @@ function CharacterCreation() {
         const safeFileName = `${characterName.trim().replace(/\s+/g, '_')}_${user.uid}_${Date.now()}`;
         const imagePath = `characters/${safeFileName}`;
         const { downloadUrl: imageUrl } = await uploadLegacyImage(imagePath, imageFile);
+        uploadedLegacyAvatarPath = imagePath;
         characterUpdateData.imageUrl = imageUrl;
         characterUpdateData.imagePath = imagePath;
       } else if (userData?.imageUrl) {
@@ -325,11 +331,22 @@ function CharacterCreation() {
           .filter(([key]) => key === 'imageUrl' || key === 'imagePath')),
         retryKey: `character-complete:${user.uid}:${characterBaseData.characterId}`,
       });
+      characterMetadataCommitted = true;
 
       pendingAvatarAttemptRef.current = null;
       navigate("/home"); // Navigate on success
     } catch (error) {
       console.error("Error in character creation/update:", error);
+      if (uploadedLegacyAvatarPath && !characterMetadataCommitted) {
+        try {
+          await deleteLegacyStoragePath(uploadedLegacyAvatarPath);
+        } catch (cleanupError) {
+          console.warn(
+            "Character avatar rollback cleanup failed:",
+            cleanupError
+          );
+        }
+      }
       if (componentMountedRef.current) {
         if (!avatarLease || avatarLease.isCurrent()) {
           setError(`Character creation failed: ${error.message}`);

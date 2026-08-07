@@ -5581,8 +5581,11 @@ export default function GrigliataPage() {
         },
       });
 
-      // Canonical objects are retired by the server after this document
-      // reference is deleted; direct client deletion is legacy-only.
+      await deleteDoc(doc(db, 'grigliata_backgrounds', background.id));
+
+      // The deleted Firestore reference drives durable server cleanup. Keep
+      // this eager legacy delete only as a latency optimization, after the
+      // owning document is safely gone.
       if (
         background.imagePath
         && !hasCanonicalTask07MediaAssetId(background)
@@ -5591,12 +5594,10 @@ export default function GrigliataPage() {
           await deleteLegacyStoragePath(background.imagePath);
         } catch (storageError) {
           if (storageError?.code !== 'storage/object-not-found') {
-            throw storageError;
+            console.warn('Eager background media cleanup failed:', storageError);
           }
         }
       }
-
-      await deleteDoc(doc(db, 'grigliata_backgrounds', background.id));
 
       if (background.id === activeBackgroundId) {
         await setDoc(doc(db, 'grigliata_state', 'current'), {

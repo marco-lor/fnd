@@ -9,7 +9,7 @@ import {
 import { collection, doc, updateDoc, onSnapshot, getDoc, setDoc } from "../../../performance/firestore";
 import {
     createLegacyStorageCleanup,
-
+    deleteLegacyStoragePath,
     uploadLegacyImage,
 } from "../../common/legacyMediaStorage";
 import useObjectUrl from "../../common/useObjectUrl";
@@ -384,6 +384,8 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                 console.warn("Post-commit accessorio media cleanup failed:", path, error);
             },
         });
+        let uploadedLegacyImagePath = '';
+        let catalogWriteCommitted = false;
         
         try {
             if (!editMode) {
@@ -413,7 +415,8 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
             let newImageUrl = editMode ? (initialData?.General?.image_url ?? null) : null;
             if (imageFile && !task07V1Write && !inventoryEditMode) {
                 const accessorioImgFileName = `accessorio_${docId}_${Date.now()}_${imageFile.name}`;
-                newImageUrl = (await uploadLegacyImage('items/' + accessorioImgFileName, imageFile)).downloadUrl;
+                uploadedLegacyImagePath = 'items/' + accessorioImgFileName;
+                newImageUrl = (await uploadLegacyImage(uploadedLegacyImagePath, imageFile)).downloadUrl;
                 if (!inventoryEditMode && editMode && initialData?.General?.image_url && initialData.General.image_url !== newImageUrl) {
                     deferredStorageCleanup.addUrl(initialData.General.image_url);
                 }
@@ -457,17 +460,8 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                 }
             });
 
-            if (!inventoryEditMode && editMode && initialData?.General?.spells) {
-                for (const initialSpellName in initialData.General.spells) {
-                    if (!finalSpells[initialSpellName]) {
-                        const initialSpellDetails = initialData.General.spells[initialSpellName];
-                        if (typeof initialSpellDetails === 'object') {
-                            if (initialSpellDetails.image_url) deferredStorageCleanup.addUrl(initialSpellDetails.image_url);
-                            if (initialSpellDetails.video_url) deferredStorageCleanup.addUrl(initialSpellDetails.video_url);
-                        }
-                    }
-                }
-            }
+            // Removed embedded spell media is retired by the item document
+            // trigger, which rejects personal spell paths not owned by this item.
             finalAccessorioData.General.spells = finalSpells;
 
             finalAccessorioData.visibility = visibility;
@@ -574,10 +568,12 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
                 } else if (editMode) {
                     console.log("Updating document:", docId, finalAccessorioData);
                     await updateDoc(accessorioDocRef, finalAccessorioData);
+                    catalogWriteCommitted = true;
                     if (showMessage) showMessage(`Accessorio "${accessorioName}" aggiornato!`, "success");
                 } else {
                     console.log("Creating new document:", docId, finalAccessorioData);
                     await setDoc(accessorioDocRef, finalAccessorioData);
+                    catalogWriteCommitted = true;
                     if (showMessage) showMessage(`Accessorio "${accessorioName}" creato!`, "success");
                 }
                 await deferredStorageCleanup.flush();
@@ -586,6 +582,13 @@ export function AddAccessorioOverlay({ onClose, showMessage, initialData = null,
 
         } catch (error) {
             console.error("Error saving accessorio:", error);
+            if (uploadedLegacyImagePath && !catalogWriteCommitted) {
+                try {
+                    await deleteLegacyStoragePath(uploadedLegacyImagePath);
+                } catch (cleanupError) {
+                    console.warn("Accessorio upload rollback cleanup failed:", cleanupError);
+                }
+            }
             if (showMessage) showMessage(error?.message || "Errore nel salvataggio dell'accessorio.", "error");
         } finally {
             setIsLoading(false);
