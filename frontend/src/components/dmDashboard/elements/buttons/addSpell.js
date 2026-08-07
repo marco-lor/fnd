@@ -1,5 +1,5 @@
 // file: ./frontend/src/components/dmDashboard/elements/buttons/addSpell.js
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { SpellOverlay } from "../../../common/SpellOverlay";
 import { db } from "../../../firebaseConfig";
 import { saveSpellForUser } from "../../../common/userOwnedMedia";
@@ -44,6 +44,8 @@ export function AddSpellOverlay({
 }) {
   const task07MediaOperationOwner = useTask07MediaOperationOwner();
   const [schema,   setSchema]   = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const saveInFlightRef = useRef(false);
 
   /* fetch schema + user only once */
   useEffect(() => {
@@ -57,7 +59,14 @@ export function AddSpellOverlay({
 
   /* callback from SpellOverlay */
   const handleOverlayClose = async (result) => {
-    if (!result) { onClose(false); return; }       // cancelled
+    if (!result) {
+      if (!saveInFlightRef.current) onClose(false);
+      return;
+    }
+    if (saveInFlightRef.current) return;
+
+    saveInFlightRef.current = true;
+    setIsSaving(true);
 
     try {
       const { spellData, imageFile, videoFile } = result;
@@ -135,6 +144,7 @@ export function AddSpellOverlay({
         mode="add"
         schema={schema}
         userName={userLabel || 'Unknown User'}
+        isSaving={isSaving}
         onClose={handleOverlayClose}
       />
     )
