@@ -1,8 +1,9 @@
 // ./buttons/AddConoscenzaPersonale.js
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { getCodex } from '../../../../data/codexRepository';
 import { persistProfileContentMap } from '../../../../data/userData/managerProfileContent';
+import SavingButtonContent from './SavingButtonContent';
 
 // --- Style definition ---
 const sleekButtonStyle = "w-36 px-2 py-1 bg-gradient-to-r from-blue-800 to-indigo-900 hover:from-blue-700 hover:to-indigo-800 text-white text-xs font-medium rounded-md transition-all duration-150 transform hover:scale-105 flex items-center justify-center space-x-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 shadow-sm";
@@ -35,6 +36,8 @@ export function AddConoscenzaPersonaleOverlay({
   const [selectedConoscenza, setSelectedConoscenza] = useState(null);
   const [livello, setLivello] = useState("Base");
   const [searchTerm, setSearchTerm] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const saveInFlightRef = useRef(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -64,9 +67,12 @@ export function AddConoscenzaPersonaleOverlay({
   }, []);
 
   const handleSaveConoscenza = async () => {
-    if (!selectedConoscenza) {
+    if (!selectedConoscenza || saveInFlightRef.current) {
       return;
     }
+
+    saveInFlightRef.current = true;
+    setIsSaving(true);
 
     try {
       // Get the conoscenza description and include livello
@@ -85,6 +91,9 @@ export function AddConoscenzaPersonaleOverlay({
     } catch (error) {
       console.error("Error saving conoscenza:", error);
       alert("Error saving conoscenza");
+    } finally {
+      saveInFlightRef.current = false;
+      setIsSaving(false);
     }
   };
 
@@ -166,22 +175,26 @@ export function AddConoscenzaPersonaleOverlay({
             <div className="flex justify-end gap-2 mt-2 pt-3 border-t border-gray-700">
               <button
                 type="button"
-                onClick={() => onClose(false)}
-                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+                onClick={() => {
+                  if (!saveInFlightRef.current) onClose(false);
+                }}
+                disabled={isSaving}
+                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Annulla
               </button>
               <button
                 type="button"
                 onClick={handleSaveConoscenza}
-                disabled={!selectedConoscenza}
-                className={`px-4 py-2 rounded ${
+                aria-busy={isSaving}
+                disabled={isSaving || !selectedConoscenza}
+                className={`px-4 py-2 rounded inline-flex items-center justify-center disabled:cursor-not-allowed ${
                   selectedConoscenza
-                    ? 'bg-blue-500 text-white hover:bg-blue-600'
+                    ? 'bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-60'
                     : 'bg-gray-600 text-gray-400 cursor-not-allowed'
                 }`}
               >
-                Aggiungi
+                {isSaving ? <SavingButtonContent /> : 'Aggiungi'}
               </button>
             </div>
           </>
