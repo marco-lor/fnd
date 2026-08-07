@@ -26,8 +26,35 @@ import {
 } from "./mediaAssetProcessorCore";
 import {createTask07DefaultMediaTransformer} from "./mediaProcessorRuntime";
 
+const TASK07_PRODUCTION_PROJECT_ID = "fatins";
+const TASK07_PRODUCTION_STORAGE_REGION = "europe-central2";
+const TASK07_BASELINE_STORAGE_REGION = "europe-west8";
+
+const task07DeploymentProjectId = (
+  environment: NodeJS.ProcessEnv = process.env
+): string => {
+  const explicit = environment.GCLOUD_PROJECT ||
+    environment.GOOGLE_CLOUD_PROJECT;
+  if (explicit) return explicit;
+  try {
+    const config = JSON.parse(environment.FIREBASE_CONFIG || "{}") as {
+      projectId?: unknown;
+    };
+    return typeof config.projectId === "string" ? config.projectId : "";
+  } catch {
+    return "";
+  }
+};
+
+export const task07ProcessorRegion = (
+  environment: NodeJS.ProcessEnv = process.env
+): string => task07DeploymentProjectId(environment) ===
+  TASK07_PRODUCTION_PROJECT_ID ?
+  TASK07_PRODUCTION_STORAGE_REGION :
+  TASK07_BASELINE_STORAGE_REGION;
+
 const PROCESSOR_OPTIONS = {
-  region: "europe-west8",
+  region: task07ProcessorRegion(),
   cpu: 1,
   concurrency: 1,
   maxInstances: 1,
