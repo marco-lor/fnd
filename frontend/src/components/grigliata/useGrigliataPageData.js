@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   collection,
   documentId,
@@ -148,6 +148,8 @@ export default function useGrigliataPageData({
   activeGridSizeOverride = null,
   selectedGalleryFolderId = '',
   selectedMusicFolderId = '',
+  selectedBackgroundPreferenceKey = '',
+  preferredSelectedBackgroundId = '',
 }) {
   const [galleryBackgrounds, setGalleryBackgrounds] = useState([]);
   const [criticalBackgroundsById, setCriticalBackgroundsById] = useState({});
@@ -177,15 +179,50 @@ export default function useGrigliataPageData({
   const [musicPlaybackSessions, setMusicPlaybackSessions] = useState([]);
   const [galleryFolders, setGalleryFolders] = useState([]);
   const [musicFolders, setMusicFolders] = useState([]);
-  const [selectedBackgroundId, setSelectedBackgroundId] = useState('');
+  const [galleryFoldersReadySubscriptionKey, setGalleryFoldersReadySubscriptionKey] = useState('');
+  const [musicFoldersReadySubscriptionKey, setMusicFoldersReadySubscriptionKey] = useState('');
+  const [selectedBackgroundState, setSelectedBackgroundState] = useState({
+    preferenceKey: '',
+    value: '',
+  });
+  const normalizedPreferredSelectedBackgroundId = typeof preferredSelectedBackgroundId === 'string'
+    ? preferredSelectedBackgroundId.trim()
+    : '';
+  const selectedBackgroundId = selectedBackgroundState.preferenceKey === selectedBackgroundPreferenceKey
+    ? selectedBackgroundState.value
+    : normalizedPreferredSelectedBackgroundId;
+  const setSelectedBackgroundId = useCallback((valueOrUpdater) => {
+    setSelectedBackgroundState((currentState) => {
+      const currentValue = currentState.preferenceKey === selectedBackgroundPreferenceKey
+        ? currentState.value
+        : normalizedPreferredSelectedBackgroundId;
+      const requestedValue = typeof valueOrUpdater === 'function'
+        ? valueOrUpdater(currentValue)
+        : valueOrUpdater;
+
+      return {
+        preferenceKey: selectedBackgroundPreferenceKey,
+        value: typeof requestedValue === 'string' ? requestedValue.trim() : '',
+      };
+    });
+  }, [normalizedPreferredSelectedBackgroundId, selectedBackgroundPreferenceKey]);
   const [liveInteractionClock, setLiveInteractionClock] = useState(() => Date.now());
   const [pagePresenceClock, setPagePresenceClock] = useState(() => Date.now());
   const boardStateSubscriptionKey = `${currentUserId}:${isManager ? 'manager' : 'player'}`;
+  const managerFolderSubscriptionKey = isManager && currentUserId
+    ? `${currentUserId}:manager`
+    : '';
   const isBoardStateReady = Boolean(currentUserId)
     && boardStateReadySubscriptionKey === boardStateSubscriptionKey;
+  const isGalleryFoldersReady = !!managerFolderSubscriptionKey
+    && galleryFoldersReadySubscriptionKey === managerFolderSubscriptionKey;
+  const isMusicFoldersReady = !!managerFolderSubscriptionKey
+    && musicFoldersReadySubscriptionKey === managerFolderSubscriptionKey;
   const activePlacementSubscriptionGenerationRef = useRef(0);
   const aoeFigureSubscriptionGenerationRef = useRef(0);
   const liveInteractionSubscriptionGenerationRef = useRef(0);
+  const criticalBackgroundSubscriptionGenerationRef = useRef(0);
+  const [criticalBackgroundResolutionById, setCriticalBackgroundResolutionById] = useState({});
 
   useEffect(() => {
     if (!currentUserId) {
@@ -201,6 +238,8 @@ export default function useGrigliataPageData({
       setPagePresenceSnapshots([]);
       setGalleryFolders([]);
       setMusicFolders([]);
+      setGalleryFoldersReadySubscriptionKey('');
+      setMusicFoldersReadySubscriptionKey('');
       return undefined;
     }
 
@@ -264,14 +303,15 @@ export default function useGrigliataPageData({
             ...docSnap.data(),
           }));
           setGalleryFolders(sortGalleryFolders(nextFolders));
+          setGalleryFoldersReadySubscriptionKey(managerFolderSubscriptionKey);
         },
         (error) => {
           console.error('Failed to load Grigliata gallery folders:', error);
-          setGalleryFolders([]);
         }
       )
       : (() => {
         setGalleryFolders([]);
+        setGalleryFoldersReadySubscriptionKey('');
         return () => {};
       })();
 
@@ -297,7 +337,7 @@ export default function useGrigliataPageData({
       unsubscribeTokenProfiles();
       unsubscribePagePresence();
     };
-  }, [boardStateSubscriptionKey, currentUserId, isManager]);
+  }, [boardStateSubscriptionKey, currentUserId, isManager, managerFolderSubscriptionKey]);
 
   const activeBackgroundId = typeof boardState?.activeBackgroundId === 'string'
     ? boardState.activeBackgroundId
@@ -390,8 +430,12 @@ export default function useGrigliataPageData({
   }, [currentUserId, isManager, selectedGalleryFolderId]);
 
   useEffect(() => {
+    const subscriptionGeneration = criticalBackgroundSubscriptionGenerationRef.current + 1;
+    criticalBackgroundSubscriptionGenerationRef.current = subscriptionGeneration;
+
     if (!currentUserId || !criticalBackgroundIds.length) {
       setCriticalBackgroundsById({});
+      setCriticalBackgroundResolutionById({});
       return undefined;
     }
 
@@ -401,11 +445,21 @@ export default function useGrigliataPageData({
         Object.entries(currentMap).filter(([backgroundId]) => criticalBackgroundIdSet.has(backgroundId))
       )
     ));
+    setCriticalBackgroundResolutionById((currentMap) => Object.fromEntries(
+      criticalBackgroundIds.map((backgroundId) => [
+        backgroundId,
+        currentMap[backgroundId] || 'loading',
+      ])
+    ));
 
     const unsubscribes = criticalBackgroundIds.map((backgroundId) => (
       onSnapshot(
         doc(db, 'grigliata_backgrounds', backgroundId),
         (snapshot) => {
+          if (criticalBackgroundSubscriptionGenerationRef.current !== subscriptionGeneration) {
+            return;
+          }
+
           setCriticalBackgroundsById((currentMap) => {
             const nextMap = { ...currentMap };
 
@@ -420,19 +474,29 @@ export default function useGrigliataPageData({
 
             return nextMap;
           });
+          setCriticalBackgroundResolutionById((currentMap) => ({
+            ...currentMap,
+            [backgroundId]: 'ready',
+          }));
         },
         (error) => {
+          if (criticalBackgroundSubscriptionGenerationRef.current !== subscriptionGeneration) {
+            return;
+          }
+
           console.error('Failed to load critical Grigliata background:', error);
-          setCriticalBackgroundsById((currentMap) => {
-            const nextMap = { ...currentMap };
-            delete nextMap[backgroundId];
-            return nextMap;
-          });
+          setCriticalBackgroundResolutionById((currentMap) => ({
+            ...currentMap,
+            [backgroundId]: 'error',
+          }));
         }
       )
     ));
 
     return () => {
+      if (criticalBackgroundSubscriptionGenerationRef.current === subscriptionGeneration) {
+        criticalBackgroundSubscriptionGenerationRef.current += 1;
+      }
       unsubscribes.forEach((unsubscribe) => unsubscribe());
     };
   }, [criticalBackgroundIds, currentUserId]);
@@ -742,6 +806,7 @@ export default function useGrigliataPageData({
     if (!currentUserId || !isManager) {
       setMusicTracks([]);
       setMusicFolders([]);
+      setMusicFoldersReadySubscriptionKey('');
       setMusicPlaybackState(EMPTY_GRIGLIATA_MUSIC_PLAYBACK_STATE);
       setMusicPlaybackSessions([]);
       return undefined;
@@ -755,10 +820,10 @@ export default function useGrigliataPageData({
           ...docSnap.data(),
         }));
         setMusicFolders(sortMusicFolders(nextFolders));
+        setMusicFoldersReadySubscriptionKey(managerFolderSubscriptionKey);
       },
       (error) => {
         console.error('Failed to load Grigliata music folders:', error);
-        setMusicFolders([]);
       }
     );
 
@@ -819,7 +884,7 @@ export default function useGrigliataPageData({
       unsubscribePlayback();
       unsubscribePlaybackSessions();
     };
-  }, [currentUserId, isManager, selectedMusicFolderId]);
+  }, [currentUserId, isManager, managerFolderSubscriptionKey, selectedMusicFolderId]);
 
   useEffect(() => {
     setLiveInteractionClock(Date.now());
@@ -890,7 +955,22 @@ export default function useGrigliataPageData({
   );
 
   useEffect(() => {
+    if (
+      selectedBackgroundId
+      && backgrounds.some((background) => background.id === selectedBackgroundId)
+    ) {
+      return;
+    }
+
+    if (
+      selectedBackgroundId
+      && criticalBackgroundResolutionById[selectedBackgroundId] !== 'ready'
+    ) {
+      return;
+    }
+
     if (!backgrounds.length) {
+      if (!isBoardStateReady) return;
       setSelectedBackgroundId('');
       return;
     }
@@ -907,7 +987,15 @@ export default function useGrigliataPageData({
       }
       return backgrounds[0].id;
     });
-  }, [backgrounds, activeBackgroundId, presentationBackgroundId]);
+  }, [
+    activeBackgroundId,
+    backgrounds,
+    criticalBackgroundResolutionById,
+    isBoardStateReady,
+    presentationBackgroundId,
+    selectedBackgroundId,
+    setSelectedBackgroundId,
+  ]);
 
   const normalizedHiddenTokenIdsByBackground = useMemo(
     () => normalizeHiddenTokenIdsByBackground(currentUserHiddenTokenIdsByBackground),
@@ -1511,6 +1599,8 @@ export default function useGrigliataPageData({
     grid,
     isActivePlacementsReady,
     isBoardStateReady,
+    isGalleryFoldersReady,
+    isMusicFoldersReady,
     isCurrentUserTokenHiddenOnActiveMap,
     isGridVisible,
     isTokenProfilesReady: !!currentUserId && tokenProfilesReadyUserId === currentUserId,

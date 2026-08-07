@@ -44,6 +44,7 @@ export default function GrigliataLightingImportPanel({
   isFogOfWarEnabledPending = false,
   isFogResetPending = false,
   isDebugOverlayVisible = true,
+  isDebugOverlayDisabled = false,
   hasLightingMetadata = false,
   lightingMetadataDraft = null,
   lightingMetadata = null,
@@ -58,6 +59,7 @@ export default function GrigliataLightingImportPanel({
   onResetFogOfWar,
   onToggleDebugOverlay,
   onUpdateSceneLighting,
+  embedded = false,
 }) {
   const summaryText = formatSummaryText(selectedBackground?.lightingSummary);
   const hasSelectedBackground = !!selectedBackground?.id;
@@ -78,12 +80,19 @@ export default function GrigliataLightingImportPanel({
   );
 
   return (
-    <section className="rounded-2xl border border-slate-700 bg-slate-950/75 shadow-2xl backdrop-blur-sm overflow-hidden">
-      <div className="border-b border-slate-800 px-4 py-3">
-        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-300">Lighting Import</h2>
-      </div>
+    <section
+      aria-label={embedded ? 'Lighting controls' : undefined}
+      className={embedded
+        ? 'min-w-0'
+        : 'overflow-hidden rounded-2xl border border-slate-700 bg-slate-950/75 shadow-2xl backdrop-blur-sm'}
+    >
+      {!embedded && (
+        <div className="border-b border-slate-800 px-4 py-3">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-300">Lighting Import</h2>
+        </div>
+      )}
 
-      <div className="space-y-4 p-4">
+      <div className={embedded ? 'space-y-4' : 'space-y-4 p-4'}>
         {hasSelectedBackground ? (
           <div className="rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-3">
             <p className="text-sm font-semibold text-slate-100">{selectedBackground.name || 'Untitled Map'}</p>
@@ -229,10 +238,13 @@ export default function GrigliataLightingImportPanel({
           <button
             type="button"
             onClick={onToggleDebugOverlay}
-            disabled={!hasLightingMetadata}
+            disabled={!hasLightingMetadata || isDebugOverlayDisabled || !onToggleDebugOverlay}
+            title={isDebugOverlayDisabled ? 'Activate this map to preview its debug overlay on the battlemap' : undefined}
             className="rounded-lg border border-cyan-500/40 px-3 py-2 text-xs font-semibold text-cyan-100 transition-colors hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isDebugOverlayVisible ? 'Hide Debug Overlay' : 'Show Debug Overlay'}
+            {isDebugOverlayDisabled
+              ? 'Debug Overlay · Active Map Only'
+              : (isDebugOverlayVisible ? 'Hide Debug Overlay' : 'Show Debug Overlay')}
           </button>
           <button
             type="button"

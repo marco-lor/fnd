@@ -12,6 +12,7 @@ import {
 import { preloadImageAssets, scheduleImageAssetPreload } from '../common/imageAssets/imageAssetRegistry';
 import { readAudioFileMetadata } from './music';
 import { __resetRepositoryRuntimeForTests } from '../../data/repositoryRuntime';
+import { buildGrigliataWorkspaceStorageKey } from './grigliataWorkspacePreferences';
 import {
   buildFogRasterTilePayload,
   FOG_RASTER_MASK_ENCODING,
@@ -1016,6 +1017,14 @@ const clickAndFlush = async (element) => {
 };
 
 const openDiceSidebar = () => clickAndFlush(screen.getByRole('tab', { name: /dice/i }));
+const openLightingSheetFor = async (backgroundId) => {
+  await clickAndFlush(screen.getByRole('tab', { name: /dm gallery/i }));
+  const latestBackgroundGalleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+  await act(async () => {
+    latestBackgroundGalleryProps.onOpenLighting(backgroundId);
+    await Promise.resolve();
+  });
+};
 
 test('placement mutation retry identity covers display, status, and vision fields', () => {
   const baseMutation = {
@@ -2062,6 +2071,207 @@ describe('GrigliataPage', () => {
     });
   });
 
+  test('restores the DM tab, map, and media-folder filters before filtered subscriptions start', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_gallery_folders', [{
+      id: 'maps-folder',
+      name: 'Boss Arenas',
+      normalizedName: 'boss arenas',
+    }]);
+    setCollectionData('grigliata_music_folders', [{
+      id: 'music-folder',
+      name: 'Combat',
+      normalizedName: 'combat',
+    }]);
+    setCollectionData('grigliata_backgrounds', [{
+      id: 'map-1',
+      name: 'Sunken Ruins',
+      galleryFolderId: '',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+    }, {
+      id: 'map-2',
+      name: 'Iron Keep',
+      galleryFolderId: 'maps-folder',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+    }]);
+    const storageKey = buildGrigliataWorkspaceStorageKey({
+      currentUserId: 'user-1',
+      isManager: true,
+    });
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      version: 1,
+      selectedGalleryFolderId: 'maps-folder',
+      selectedMusicFolderId: 'music-folder',
+      selectedBackgroundId: 'map-2',
+      activeSidebarTab: 'gallery',
+    }));
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'DM Gallery' })).toHaveAttribute('aria-selected', 'true');
+      expect(BackgroundGalleryPanelMock).toHaveBeenCalled();
+    });
+    const galleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+    expect(galleryProps.selectedFolderId).toBe('maps-folder');
+    expect(galleryProps.selectedBackgroundId).toBe('map-2');
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'query'
+      && target.base?.path === 'grigliata_backgrounds'
+      && target.constraints?.some((constraint) => (
+        constraint.kind === 'where'
+        && constraint.field === 'galleryFolderId'
+        && constraint.value === 'maps-folder'
+      ))
+    ))).toBe(true);
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'query'
+      && target.base?.path === 'grigliata_music_tracks'
+      && target.constraints?.some((constraint) => (
+        constraint.kind === 'where'
+        && constraint.field === 'musicFolderId'
+        && constraint.value === 'music-folder'
+      ))
+    ))).toBe(true);
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'doc' && target.path === 'grigliata_backgrounds/map-2'
+    ))).toBe(true);
+  });
+
+  test('retains persisted media-folder filters through transient folder subscription errors', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_gallery_folders', [{
+      id: 'maps-folder',
+      name: 'Boss Arenas',
+      normalizedName: 'boss arenas',
+    }]);
+    setCollectionData('grigliata_music_folders', [{
+      id: 'music-folder',
+      name: 'Combat',
+      normalizedName: 'combat',
+    }]);
+    const storageKey = buildGrigliataWorkspaceStorageKey({
+      currentUserId: 'user-1',
+      isManager: true,
+    });
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      version: 1,
+      selectedGalleryFolderId: 'maps-folder',
+      selectedMusicFolderId: 'music-folder',
+      selectedBackgroundId: 'map-1',
+      activeSidebarTab: 'gallery',
+    }));
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      render(<GrigliataPage />);
+
+      await waitFor(() => {
+        expect(BackgroundGalleryPanelMock.mock.calls.at(-1)[0].selectedFolderId).toBe('maps-folder');
+      });
+      const galleryFolderListener = mockFirestoreListeners.find(({ target }) => (
+        target?.kind === 'collection' && target.path === 'grigliata_gallery_folders'
+      ));
+      const musicFolderListener = mockFirestoreListeners.find(({ target }) => (
+        target?.kind === 'collection' && target.path === 'grigliata_music_folders'
+      ));
+
+      await act(async () => {
+        galleryFolderListener.onError(new Error('temporary gallery folder failure'));
+        musicFolderListener.onError(new Error('temporary music folder failure'));
+        await Promise.resolve();
+      });
+
+      expect(BackgroundGalleryPanelMock.mock.calls.at(-1)[0].selectedFolderId).toBe('maps-folder');
+      expect(JSON.parse(window.localStorage.getItem(storageKey))).toEqual(expect.objectContaining({
+        selectedGalleryFolderId: 'maps-folder',
+        selectedMusicFolderId: 'music-folder',
+      }));
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  test('migrates a persisted Lighting tab selection to DM Gallery', async () => {
+    setManagerAuth();
+    const storageKey = buildGrigliataWorkspaceStorageKey({
+      currentUserId: 'user-1',
+      isManager: true,
+    });
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      activeSidebarTab: 'lighting',
+    }));
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'DM Gallery' })).toHaveAttribute('aria-selected', 'true');
+    });
+    expect(screen.queryByRole('tab', { name: 'Lighting' })).not.toBeInTheDocument();
+  });
+
+  test('retains changed DM workspace selections after the page remounts', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_gallery_folders', [{
+      id: 'maps-folder',
+      name: 'Boss Arenas',
+      normalizedName: 'boss arenas',
+    }]);
+    setCollectionData('grigliata_music_folders', [{
+      id: 'music-folder',
+      name: 'Combat',
+      normalizedName: 'combat',
+    }]);
+    setCollectionData('grigliata_backgrounds', [{
+      id: 'map-1',
+      name: 'Sunken Ruins',
+      galleryFolderId: '',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+    }, {
+      id: 'map-2',
+      name: 'Iron Keep',
+      galleryFolderId: 'maps-folder',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+    }]);
+    const storageKey = buildGrigliataWorkspaceStorageKey({
+      currentUserId: 'user-1',
+      isManager: true,
+    });
+    const firstRender = render(<GrigliataPage />);
+
+    await clickAndFlush(screen.getByRole('tab', { name: 'DM Gallery' }));
+    let galleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+    await act(async () => {
+      galleryProps.onSelectedFolderIdChange('maps-folder');
+      galleryProps.onSelectBackground('map-2');
+    });
+    await clickAndFlush(screen.getByRole('tab', { name: 'Music' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Music by folder' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Combat' }));
+
+    await waitFor(() => {
+      expect(JSON.parse(window.localStorage.getItem(storageKey))).toEqual(expect.objectContaining({
+        selectedGalleryFolderId: 'maps-folder',
+        selectedMusicFolderId: 'music-folder',
+        selectedBackgroundId: 'map-2',
+        activeSidebarTab: 'music',
+      }));
+    });
+
+    firstRender.unmount();
+    BackgroundGalleryPanelMock.mockClear();
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Music' })).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByRole('button', { name: 'Filter Music by folder' })).toHaveTextContent('Combat');
+    });
+    await clickAndFlush(screen.getByRole('tab', { name: 'DM Gallery' }));
+    galleryProps = BackgroundGalleryPanelMock.mock.calls.at(-1)[0];
+    expect(galleryProps.selectedFolderId).toBe('maps-folder');
+    expect(galleryProps.selectedBackgroundId).toBe('map-2');
+  });
+
   test('does not subscribe gallery folders for non-DM users', async () => {
     render(<GrigliataPage />);
 
@@ -2236,8 +2446,8 @@ describe('GrigliataPage', () => {
 
     render(<GrigliataPage />);
 
-    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
-    expect(screen.getByRole('heading', { name: /lighting import/i })).toBeInTheDocument();
+    await openLightingSheetFor('map-1');
+    expect(screen.getByRole('dialog', { name: /lighting — dungeon alchemist loop/i })).toBeInTheDocument();
 
     await act(async () => {
       fireEvent.change(screen.getByLabelText(/dungeon alchemist json/i), {
@@ -2398,7 +2608,7 @@ describe('GrigliataPage', () => {
       target?.path === 'grigliata_lighting_render_inputs/map-1'
     ))).toBe(true);
 
-    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+    await openLightingSheetFor('map-1');
     fireEvent.click(screen.getByRole('button', { name: /hide debug overlay/i }));
 
     expect(screen.getByTestId('board-lighting-debug')).toHaveTextContent('false');
@@ -2485,7 +2695,7 @@ describe('GrigliataPage', () => {
     });
 
     render(<GrigliataPage />);
-    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+    await openLightingSheetFor('map-1');
 
     const globalLightToggle = await screen.findByRole('checkbox', { name: /global light/i });
     expect(globalLightToggle).not.toBeChecked();
@@ -2640,7 +2850,7 @@ describe('GrigliataPage', () => {
     setDocData('grigliata_background_lighting/map-1', baseMetadata);
 
     render(<GrigliataPage />);
-    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+    await openLightingSheetFor('map-1');
 
     await waitFor(() => {
       expect(screen.getByRole('spinbutton', { name: /scene darkness/i })).toBeInTheDocument();
@@ -2697,7 +2907,7 @@ describe('GrigliataPage', () => {
     });
   });
 
-  test('disables scene lighting controls when the selected gallery map is not active', async () => {
+  test('disables scene lighting controls for an unconfigured gallery map', async () => {
     setManagerAuth();
     setDocData('grigliata_background_lighting/map-1', {
       schemaVersion: 1,
@@ -2712,12 +2922,7 @@ describe('GrigliataPage', () => {
 
     render(<GrigliataPage />);
 
-    fireEvent.click(screen.getByRole('tab', { name: /dm gallery/i }));
-    await act(async () => {
-      BackgroundGalleryPanelMock.mock.calls.at(-1)[0].onSelectBackground('map-2');
-    });
-
-    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+    await openLightingSheetFor('map-2');
 
     const darknessInput = await screen.findByRole('spinbutton', { name: /scene darkness/i });
     const globalLightInput = screen.getByRole('checkbox', { name: /global light/i });
@@ -3509,7 +3714,7 @@ describe('GrigliataPage', () => {
     render(<GrigliataPage />);
 
     expect(screen.getByTestId('board-lighting-count')).toHaveTextContent('0');
-    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+    await openLightingSheetFor('map-1');
     const lightingToggle = screen.getByRole('checkbox', { name: /computed lighting enabled/i });
     expect(lightingToggle).not.toBeChecked();
 
@@ -3527,6 +3732,136 @@ describe('GrigliataPage', () => {
       );
     });
     expect(screen.getByTestId('board-lighting-debug')).toHaveTextContent('false');
+  });
+
+  test('does not restore a lighting file draft whose parse finished after the sheet closed', async () => {
+    setManagerAuth();
+    const deferredText = createDeferred();
+    const lightingJson = JSON.stringify({
+      width: 2040,
+      height: 1620,
+      grid: 70,
+      lights: [],
+      walls: [],
+    });
+    const file = new File([lightingJson], 'slow-lighting.json', { type: 'application/json' });
+    Object.defineProperty(file, 'text', {
+      value: jest.fn(() => deferredText.promise),
+    });
+
+    render(<GrigliataPage />);
+    await openLightingSheetFor('map-1');
+    fireEvent.change(screen.getByLabelText(/dungeon alchemist json/i), {
+      target: { files: [file] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /close lighting for sunken ruins/i }));
+
+    await act(async () => {
+      deferredText.resolve(lightingJson);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await openLightingSheetFor('map-1');
+
+    expect(screen.queryByText(/parsed 0 walls and 0 lights/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /import lighting metadata/i })).toBeDisabled();
+  });
+
+  test('does not carry a delayed lighting file parse into another map sheet', async () => {
+    setManagerAuth();
+    const deferredText = createDeferred();
+    const lightingJson = JSON.stringify({
+      width: 2040,
+      height: 1620,
+      grid: 70,
+      lights: [],
+      walls: [],
+    });
+    const file = new File([lightingJson], 'slow-lighting.json', { type: 'application/json' });
+    Object.defineProperty(file, 'text', {
+      value: jest.fn(() => deferredText.promise),
+    });
+
+    render(<GrigliataPage />);
+    await openLightingSheetFor('map-1');
+    fireEvent.change(screen.getByLabelText(/dungeon alchemist json/i), {
+      target: { files: [file] },
+    });
+    await act(async () => {
+      BackgroundGalleryPanelMock.mock.calls.at(-1)[0].onOpenLighting('map-2');
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      deferredText.resolve(lightingJson);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole('dialog', { name: 'Lighting — Iron Keep' })).toBeInTheDocument();
+    expect(screen.queryByText(/parsed 0 walls and 0 lights/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /import lighting metadata/i })).toBeDisabled();
+  });
+
+  test('opens and edits lighting for an inactive map without activating it', async () => {
+    setManagerAuth();
+    setCollectionData('grigliata_backgrounds', [{
+      id: 'map-1',
+      name: 'Sunken Ruins',
+      grid: { cellSizePx: 70, offsetXPx: 0, offsetYPx: 0 },
+      isGridVisible: true,
+    }, {
+      id: 'map-2',
+      name: 'Iron Keep',
+      grid: { cellSizePx: 80, offsetXPx: 4, offsetYPx: 6 },
+      lightingSummary: {
+        sourceType: 'manual',
+        schemaVersion: 1,
+        wallCount: 0,
+        lightCount: 0,
+        alignmentStatus: 'match',
+      },
+      isGridVisible: true,
+    }]);
+    setDocData('grigliata_background_lighting/map-2', {
+      backgroundId: 'map-2',
+      grid: { cellSizePx: 80, offsetXPx: 4, offsetYPx: 6 },
+      scene: { darkness: 0.35, globalLight: false },
+      lights: [],
+      walls: [],
+      darknessSources: [],
+    });
+
+    render(<GrigliataPage />);
+    await openLightingSheetFor('map-2');
+
+    const dialog = await screen.findByRole('dialog', { name: 'Lighting — Iron Keep' });
+    expect(screen.getByTestId('board-background-name')).toHaveTextContent('Sunken Ruins');
+    expect(within(dialog).getByRole('spinbutton', { name: 'Scene darkness' })).toHaveValue(0.35);
+    expect(within(dialog).getByRole('button', { name: /debug overlay · active map only/i })).toBeDisabled();
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'doc' && target.path === 'grigliata_background_lighting/map-2'
+    ))).toBe(true);
+
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Global light' }));
+    });
+
+    await waitFor(() => {
+      expect(firestore.setDoc).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'grigliata_background_lighting/map-2' }),
+        expect.objectContaining({
+          backgroundId: 'map-2',
+          scene: { darkness: 0.35, globalLight: true },
+        }),
+        { merge: true }
+      );
+    });
+    expect(firestore.updateDoc).not.toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'grigliata_state/current' }),
+      expect.anything()
+    );
+    expect(screen.getByTestId('board-background-name')).toHaveTextContent('Sunken Ruins');
   });
 
   test('applies Dungeon Alchemist grid calibration to the active selected map', async () => {
@@ -3559,7 +3894,7 @@ describe('GrigliataPage', () => {
 
     render(<GrigliataPage />);
 
-    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+    await openLightingSheetFor('map-1');
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /apply json calibration/i })).toBeEnabled();
     });
@@ -4972,7 +5307,7 @@ describe('GrigliataPage', () => {
 
     render(<GrigliataPage />);
 
-    fireEvent.click(screen.getByRole('tab', { name: /lighting/i }));
+    await openLightingSheetFor('map-1');
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /reset fog/i }));
@@ -7452,7 +7787,7 @@ describe('GrigliataPage', () => {
     setManagerAuth();
     render(<GrigliataPage />);
 
-    ['DM Gallery', 'Music', 'Map Calibration', 'Lighting'].forEach((label) => {
+    ['DM Gallery', 'Music', 'Map Calibration'].forEach((label) => {
       const tab = screen.getByRole('tab', { name: label });
 
       expect(tab).toHaveAttribute('aria-label', label);
@@ -7460,6 +7795,7 @@ describe('GrigliataPage', () => {
       expect(tab).not.toHaveTextContent(label);
       expect(tab.querySelector('svg')).toBeInTheDocument();
     });
+    expect(screen.queryByRole('tab', { name: 'Lighting' })).not.toBeInTheDocument();
   });
 
   test('lays out icon sidebar tabs as an equal-width wrapping strip', () => {
