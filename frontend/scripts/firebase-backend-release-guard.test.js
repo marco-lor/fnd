@@ -73,6 +73,25 @@ test('Firebase and npm wiring hard-bind every deploy to fatins', () => {
   ));
   assert.equal(firebaseConfig.hosting.site, PRODUCTION_PROJECT_ID);
 
+  const staticHeaders = firebaseConfig.hosting.headers.find(
+    (entry) => entry.source === '/static/**'
+  );
+  const staticCacheControl = staticHeaders?.headers?.find(
+    (header) => header.key.toLowerCase() === 'cache-control'
+  )?.value;
+  assert.equal(staticCacheControl, 'public, max-age=0, must-revalidate');
+  assert.doesNotMatch(staticCacheControl, /immutable/i);
+
+  const fallbackRewrite = firebaseConfig.hosting.rewrites.at(-1);
+  assert.deepEqual(fallbackRewrite, {
+    source: '!/@(static)/**',
+    destination: '/index.html',
+  });
+  assert.equal(
+    firebaseConfig.hosting.rewrites.some((rewrite) => rewrite.source === '**'),
+    false
+  );
+
   for (const scriptName of [
     'fb:init',
     'fb:deploy:rules',

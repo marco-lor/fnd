@@ -232,9 +232,11 @@ test('static server preserves Hosting bytes, headers, cache policy, SPA fallback
     assert.equal(spa.headers['content-type'], 'text/html; charset=utf-8');
     assert.deepEqual(spa.body, fixture.contents.index);
 
-    const unknown = await request({ port, pathname: '/static/js/missing.js' });
-    assert.equal(unknown.statusCode, 200);
-    assert.deepEqual(unknown.body, fixture.contents.index);
+    const unknown = await request({ port, pathname: '/static/js/missing.chunk.js' });
+    assert.equal(unknown.statusCode, 404);
+    assert.equal(unknown.headers['cache-control'], STATIC_CACHE_CONTROL);
+    assert.equal(unknown.headers['content-type'], 'text/plain; charset=utf-8');
+    assert.notDeepEqual(unknown.body, fixture.contents.index);
 
     const range = await request({
       port,
