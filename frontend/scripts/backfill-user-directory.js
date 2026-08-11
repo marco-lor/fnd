@@ -26,6 +26,12 @@ const DEFAULT_REPORT_PATH = path.resolve(
   'performance-results',
   'user-directory-backfill-dry-run.json'
 );
+const DEFAULT_VERIFY_REPORT_PATH = path.resolve(
+  __dirname,
+  '..',
+  'performance-results',
+  'user-directory-backfill-verification.json'
+);
 
 const trimString = (value) => (typeof value === 'string' ? value.trim() : '');
 
@@ -95,12 +101,13 @@ const printHelp = () => {
     '',
     'Usage:',
     '  node scripts/backfill-user-directory.js --project <project> [--auth admin|firebase-cli]',
-    '    [--write --approve-fingerprint <sha256>] [--resume]',
+    '    [--verify | --write --approve-fingerprint <sha256>] [--resume]',
     '    [--checkpoint <path>] [--report <path>] [--max-batches <count>]',
     `    [--allow-live-project --confirm-project ${PRODUCTION_PROJECT_ID}]`,
     '',
     'Safety:',
     '  - Default mode is read-only and writes a local dry-run report.',
+    '  - --verify is read-only and fails on missing, stale, or orphaned projections.',
     '  - --write requires the exact completed dry-run fingerprint.',
     '  - Demo access requires a loopback Firestore emulator.',
     `  - Live access is hard-locked to ${PRODUCTION_PROJECT_ID}, Firebase CLI auth, and exact confirmation.`,
@@ -119,8 +126,10 @@ const parseArguments = (args = []) => {
     maxBatches: Number.POSITIVE_INFINITY,
     projectId: '',
     reportPath: DEFAULT_REPORT_PATH,
+    reportPathExplicit: false,
     resume: false,
     shouldWrite: false,
+    verifyOnly: false,
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -131,6 +140,10 @@ const parseArguments = (args = []) => {
     }
     if (argument === '--write') {
       parsed.shouldWrite = true;
+      continue;
+    }
+    if (argument === '--verify') {
+      parsed.verifyOnly = true;
       continue;
     }
     if (argument === '--allow-live-project') {
@@ -159,7 +172,10 @@ const parseArguments = (args = []) => {
       if (argument === '--project') parsed.projectId = value;
       if (argument === '--auth') parsed.authMode = value;
       if (argument === '--checkpoint') parsed.checkpointPath = path.resolve(value);
-      if (argument === '--report') parsed.reportPath = path.resolve(value);
+      if (argument === '--report') {
+        parsed.reportPath = path.resolve(value);
+        parsed.reportPathExplicit = true;
+      }
       if (argument === '--confirm-project') parsed.confirmProject = value;
       if (argument === '--approve-fingerprint') parsed.approveFingerprint = value;
       if (argument === '--max-batches') {
@@ -184,7 +200,39 @@ const parseArguments = (args = []) => {
   if (parsed.resume && !parsed.shouldWrite) {
     throw new Error('--resume is only valid with --write.');
   }
+  if (parsed.verifyOnly && parsed.shouldWrite) {
+    throw new Error('--verify and --write are mutually exclusive.');
+  }
+  if (parsed.verifyOnly && !parsed.reportPathExplicit) {
+    parsed.reportPath = DEFAULT_VERIFY_REPORT_PATH;
+  }
   return parsed;
+};
+
+const assertDirectoryVerification = (result) => {
+  const counts = result?.counts ?? {};
+  const create = Number(counts.create) || 0;
+  const scanned = Number(counts.scanned) || 0;
+  const update = Number(counts.update) || 0;
+  const directoryDocuments = Number(result?.directoryDocuments);
+  const failures = [];
+  if (result?.complete !== true) failures.push('source scan is incomplete');
+  if (create > 0 || update > 0) {
+    failures.push(`${create} missing and ${update} stale projection(s)`);
+  }
+  if (!Number.isInteger(directoryDocuments) || directoryDocuments < 0) {
+    failures.push('directory document count is unavailable');
+  } else if (directoryDocuments !== scanned) {
+    failures.push(
+      `directory count ${directoryDocuments} does not match ${scanned} source user(s)`
+    );
+  }
+  if (failures.length) {
+    throw new Error(
+      `User-directory verification failed: ${failures.join('; ')}.`
+    );
+  }
+  return result;
 };
 
 const parseEmulatorHost = (value) => {
@@ -441,6 +489,14 @@ const createAdminBackend = async (projectId, authMode = 'admin') => {
         snapshot.exists ? snapshot.data() : null,
       ]));
     },
+    countDirectoryDocuments: async () => {
+      const aggregate = await db.collection('user_directory').count().get();
+      const count = Number(aggregate.data()?.count);
+      if (!Number.isInteger(count) || count < 0) {
+        throw new Error('Firestore returned an invalid user_directory document count.');
+      }
+      return count;
+    },
     commitProjections: async (entries) => {
       if (entries.length > BATCH_SIZE) {
         throw new Error(`Refusing a write batch larger than ${BATCH_SIZE}.`);
@@ -491,7 +547,7 @@ const main = async () => {
   }
 
   const backend = await createAdminBackend(options.projectId, options.authMode);
-  const mode = options.shouldWrite ? 'write' : 'dry-run';
+  const mode = options.shouldWrite ? 'write' : options.verifyOnly ? 'verify' : 'dry-run';
   console.log(`User-directory backfill (${mode}, ${options.projectId}, batch size ${BATCH_SIZE})`);
   try {
     if (options.shouldWrite && !options.resume) {
@@ -520,6 +576,9 @@ const main = async () => {
         });
       },
     });
+    const directoryDocuments = options.verifyOnly
+      ? await backend.countDirectoryDocuments()
+      : undefined;
 
     const report = {
       schemaVersion: REPORT_SCHEMA_VERSION,
@@ -527,6 +586,7 @@ const main = async () => {
       projectId: options.projectId,
       generatedAt: new Date().toISOString(),
       ...result,
+      ...(options.verifyOnly ? {directoryDocuments} : {}),
       live: target.live,
       planFingerprint: options.shouldWrite
         ? approvedReport.planFingerprint
@@ -538,10 +598,12 @@ const main = async () => {
     console.log(JSON.stringify({
       complete: report.complete,
       counts: report.counts,
+      ...(options.verifyOnly ? {directoryDocuments: report.directoryDocuments} : {}),
       mode: report.mode,
       planFingerprint: report.planFingerprint,
       reportPath: options.shouldWrite ? options.checkpointPath : options.reportPath,
     }, null, 2));
+    if (options.verifyOnly) assertDirectoryVerification(report);
   } finally {
     await backend.close();
   }
@@ -556,8 +618,10 @@ if (require.main === module) {
 
 module.exports = {
   BATCH_SIZE,
+  DEFAULT_VERIFY_REPORT_PATH,
   REPORT_SCHEMA_VERSION,
   assertCompletedDryRunReport,
+  assertDirectoryVerification,
   assertResumeCheckpoint,
   assertSafeTarget,
   buildUserDirectoryProjection,

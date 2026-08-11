@@ -21,6 +21,7 @@
     ],
     "predeploy": [
       "node \"$PROJECT_DIR/scripts/firebase-backend-release-guard.js\" hosting",
+      "npm --prefix \"$PROJECT_DIR\" run production:verify-runtime-prerequisites",
       "npm --prefix \"$PROJECT_DIR\" run build:production"
     ],
     "headers": [
@@ -171,6 +172,7 @@
       ],
       "predeploy": [
         "node \"$PROJECT_DIR/scripts/firebase-backend-release-guard.js\" functions",
+        "npm --prefix \"$PROJECT_DIR\" run production:verify-runtime-prerequisites",
         "npm --prefix \"$RESOURCE_DIR\" run lint",
         "npm --prefix \"$RESOURCE_DIR\" run build"
       ],

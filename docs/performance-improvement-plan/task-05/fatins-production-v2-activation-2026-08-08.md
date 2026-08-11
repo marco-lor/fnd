@@ -118,6 +118,37 @@ The corrected final production verification reported:
 - HSTS, `nosniff`, `DENY` frame policy, and strict-origin referrer policy were
   present. No `/grigliata` page was opened or interacted with during validation.
 
+## 2026-08-11 production prerequisite repair
+
+The first authenticated production browser pass exposed two omitted runtime
+prerequisites that were not covered by the original activation checks:
+
+- `firebaseappcheck.googleapis.com` was disabled and the Firebase App Check
+  service identity did not have `roles/firebaseappcheck.serviceAgent`. The API
+  was enabled, the service identity was generated, and the exact service-agent
+  role was bound. The existing reCAPTCHA Enterprise key, domains, score mode,
+  and TTL were not changed.
+- The 11 migrated `users/{uid}` documents had no corresponding server-owned
+  `user_directory/{uid}` projections. The approved directory dry-run reported
+  11 creates, zero updates, and fingerprint
+  `95061deccced4e4186f3877412faa6615011eca580b769b53a5fee5f58c4d4f9`.
+  The write created exactly those 11 projections without changing source user
+  documents. A second read-only pass reported 11 unchanged and zero pending
+  creates or updates.
+
+Live verification in the signed-in in-app browser then showed 11 admin user
+rows and 11 role selectors on `/admin`, no empty-state message, and zero new
+warning/error console entries on fresh `/home` and `/admin` loads. The active
+`/grigliata` route was not opened or interacted with.
+
+To prevent recurrence, Hosting and Functions predeploy now run the read-only
+`production:verify-runtime-prerequisites` gate. It fails closed unless both App
+Check APIs are enabled, the exact App Check service-agent IAM binding exists,
+every production user has a current canonical `user_directory` projection, and
+the directory count exactly matches the source-user count (no orphan entries).
+Directory verification uses a separate ignored report and can never enter
+write mode.
+
 ## Validation
 
 - Pre-activation regression evidence: frontend 135 suites / 1,277 tests,

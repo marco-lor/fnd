@@ -65,6 +65,12 @@ test('Firebase and npm wiring hard-bind every deploy to fatins', () => {
   assert.match(firebaseConfig.storage.predeploy[0], /firebase-backend-release-guard\.js"? storage$/);
   assert.match(firebaseConfig.functions[0].predeploy[0], /firebase-backend-release-guard\.js"? functions$/);
   assert.match(firebaseConfig.hosting.predeploy[0], /firebase-backend-release-guard\.js"? hosting$/);
+  assert.ok(firebaseConfig.functions[0].predeploy.some(
+    (command) => /production:verify-runtime-prerequisites/.test(command)
+  ));
+  assert.ok(firebaseConfig.hosting.predeploy.some(
+    (command) => /production:verify-runtime-prerequisites/.test(command)
+  ));
   assert.equal(firebaseConfig.hosting.site, PRODUCTION_PROJECT_ID);
 
   for (const scriptName of [
@@ -85,4 +91,9 @@ test('Firebase and npm wiring hard-bind every deploy to fatins', () => {
   assert.match(packageJson.scripts['images:backfill-cache'], /--project fatins/);
   assert.match(packageJson.scripts['images:backfill-cache'], /--bucket fatins\.firebasestorage\.app/);
   assert.match(packageJson.scripts['images:backfill-cache'], /--auth firebase-cli/);
+  assert.match(packageJson.scripts['appcheck:verify-production'], /--project fatins/);
+  assert.match(packageJson.scripts['appcheck:verify-production'], /--auth firebase-cli/);
+  assert.match(packageJson.scripts['users:verify-directory'], /--project fatins/);
+  assert.match(packageJson.scripts['users:verify-directory'], /--verify/);
+  assert.doesNotMatch(packageJson.scripts['users:verify-directory'], /--write/);
 });
