@@ -21,6 +21,7 @@
     ],
     "predeploy": [
       "node \"$PROJECT_DIR/scripts/firebase-backend-release-guard.js\" hosting",
+      "npm --prefix \"$PROJECT_DIR\" run production:verify-runtime-prerequisites",
       "npm --prefix \"$PROJECT_DIR\" run build:production"
     ],
     "headers": [
@@ -29,7 +30,7 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "public, max-age=31536000, immutable"
+            "value": "public, max-age=0, must-revalidate"
           }
         ]
       },
@@ -152,7 +153,7 @@
         }
       },
       {
-        "source": "**",
+        "source": "!/@(static)/**",
         "destination": "/index.html"
       }
     ],
@@ -171,6 +172,7 @@
       ],
       "predeploy": [
         "node \"$PROJECT_DIR/scripts/firebase-backend-release-guard.js\" functions",
+        "npm --prefix \"$PROJECT_DIR\" run production:verify-runtime-prerequisites",
         "npm --prefix \"$RESOURCE_DIR\" run lint",
         "npm --prefix \"$RESOURCE_DIR\" run build"
       ],

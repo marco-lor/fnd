@@ -8,10 +8,10 @@ const {canonicalHash} = require('./user-data-model');
 const {
   createFirebaseCliAdcFile,
 } = require('../firebase-cli-admin-credential');
+const {PRODUCTION_PROJECT_ID} = require('../production-target');
 
 const CUTOVER_SCHEMA_VERSION = 1;
 const AUTH_MODES = new Set(['admin', 'firebase-cli']);
-const TEST_PROJECT_ID = 'fatin-test';
 const MIGRATION_REPORT_SCHEMA_VERSION = 2;
 const MODEL_VERSION = 2;
 const CONFIG_PATH = 'app_config/user_data_v2';
@@ -103,7 +103,7 @@ const printHelp = () => console.log([
   '  - Abort from sealed state restores the frozen state; a second abort removes the drain.',
   '  - Reports contain subject hashes only. A raw user ID is never written to a report.',
   '  - Firebase CLI auth uses a short-lived temporary ADC file and deletes it on exit.',
-  '  - Live operation is hard-locked to the isolated fatin-test project.',
+  `  - Live operation is hard-locked to production ${PRODUCTION_PROJECT_ID}.`,
 ].join('\n'));
 
 const parseArguments = (args = []) => {
@@ -228,8 +228,8 @@ const assertSafeTarget = (options, env = process.env) => {
       'Live Firestore access is refused without --allow-live-project and an exact --confirm-project value.'
     );
   }
-  if (options.projectId !== TEST_PROJECT_ID) {
-    throw new Error(`This isolated cutover tool accepts only live project ${TEST_PROJECT_ID}.`);
+  if (options.projectId !== PRODUCTION_PROJECT_ID) {
+    throw new Error(`This production cutover tool accepts only live project ${PRODUCTION_PROJECT_ID}.`);
   }
   return {live: true, emulatorHost: null, projectId: options.projectId};
 };

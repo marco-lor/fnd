@@ -2,11 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  TEST_PROJECT_ID,
-  TEST_BUCKET_NAME,
   LEGACY_IMAGE_CACHE_CONTROL,
   IMMUTABLE_IMAGE_CACHE_CONTROL,
-  assertSafeTarget,
   inspectImage,
   listAllFiles,
   mapWithConcurrency,
@@ -70,13 +67,4 @@ test('mapWithConcurrency preserves result order', async () => {
   });
 
   assert.deepEqual(results, [6, 2, 4]);
-});
-
-test('isolated target guard accepts only the fatin-test project and bucket', () => {
-  assert.doesNotThrow(() => assertSafeTarget(TEST_PROJECT_ID, TEST_BUCKET_NAME));
-  assert.throws(
-    () => assertSafeTarget('fatins', TEST_BUCKET_NAME),
-    /accepts only fatin-test/
-  );
-  assert.throws(() => assertSafeTarget(TEST_PROJECT_ID, 'fatins.firebasestorage.app'), /Blocked bucket/);
 });

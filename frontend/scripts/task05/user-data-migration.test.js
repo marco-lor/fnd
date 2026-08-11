@@ -230,7 +230,7 @@ test('target safety fails closed for live and mismatched project state', () => {
     /does not match/
   );
   assert.throws(
-    () => assertSafeTarget({projectId: 'fatins', allowLiveProject: true, confirmProject: 'fatins'}, {}),
+    () => assertSafeTarget({projectId: 'wrong-project', allowLiveProject: true, confirmProject: 'wrong-project'}, {}),
     /accepts only live project fatin-test/
   );
   assert.throws(() => assertSafeTarget({
@@ -995,6 +995,15 @@ test('owned V2 verification is exact while legacy root and operational metadata 
   progression.data.updatedAt = 'server-time';
   progression.data.updatedBy = 'legacy-bridge';
   progression.data.revision = 9;
+  const spell = actual.find(({path}) => path.includes('/spells/'));
+  Object.assign(spell.data, {
+    media: {assetId: 'm_123', variants: {card: {path: 'canonical/card'}}},
+    mediaUpdatedAt: 'task07-server-time',
+    task07MediaRevision: 1,
+    videoMedia: {assetId: 'm_456', variants: {stream: {path: 'canonical/video'}}},
+    videoMediaUpdatedAt: 'task07-server-time',
+    task07VideoMediaRevision: 1,
+  });
   actual.push({
     path: 'users/a/inventory/manual-command-item',
     data: {legacyManaged: false, displayName: 'Manual'},
@@ -1010,6 +1019,7 @@ test('owned V2 verification is exact while legacy root and operational metadata 
   assert.equal(clean.currentHash, expected.targetHash);
 
   progression.data.stats.unexpectedProgressionValue = 123;
+  progression.data.stats.media = {assetId: 'payload-field-must-not-be-ignored'};
   actual.push({
     path: 'users/a/inventory/stale-migration-item',
     data: {legacyManaged: true, displayName: 'Stale'},

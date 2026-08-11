@@ -2,8 +2,6 @@
 
 const admin = require('firebase-admin');
 
-const TEST_PROJECT_ID = 'fatin-test';
-const TEST_BUCKET_NAME = 'fatin-test.firebasestorage.app';
 const LEGACY_IMAGE_CACHE_CONTROL = 'private, max-age=604800';
 const IMMUTABLE_IMAGE_CACHE_CONTROL = 'private, max-age=31536000, immutable';
 const args = process.argv.slice(2);
@@ -15,8 +13,8 @@ const readArg = (name) => {
   return index >= 0 ? args[index + 1] || '' : '';
 };
 
-const projectId = readArg('--project');
-const bucketName = readArg('--bucket');
+const projectId = readArg('--project') || process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || '';
+const bucketName = readArg('--bucket') || process.env.FIREBASE_STORAGE_BUCKET || '';
 const prefix = readArg('--prefix');
 const authMode = readArg('--auth') || 'admin';
 
@@ -25,9 +23,8 @@ const printHelp = () => {
     'Backfill browser-cache metadata on existing Firebase Storage images.',
     '',
     'Usage:',
-    '  npm run images:backfill-cache -- [--prefix <path>] [--write]',
+    '  npm run images:backfill-cache -- --project <project-id> --bucket <bucket-name> [--auth admin|firebase-cli] [--prefix <path>] [--write]',
     '',
-    `This isolated command is fixed to ${TEST_PROJECT_ID}/${TEST_BUCKET_NAME}.`,
     'The default is a dry run. Only image/* objects whose cacheControl differs are selected.',
     `Write mode sets Cache-Control to: ${LEGACY_IMAGE_CACHE_CONTROL}`,
     'Default authentication uses Application Default Credentials or GOOGLE_APPLICATION_CREDENTIALS.',
@@ -40,15 +37,6 @@ const requireArgValue = (name) => {
     throw new Error(`Missing value for ${name}.`);
   }
 };
-
-function assertSafeTarget(candidateProjectId, candidateBucketName) {
-  if (candidateProjectId !== TEST_PROJECT_ID) {
-    throw new Error(`Blocked project "${candidateProjectId || '<unset>'}". This isolated repository accepts only ${TEST_PROJECT_ID}.`);
-  }
-  if (candidateBucketName !== TEST_BUCKET_NAME) {
-    throw new Error(`Blocked bucket "${candidateBucketName || '<unset>'}". This isolated repository accepts only ${TEST_BUCKET_NAME}.`);
-  }
-}
 
 async function listAllFiles(bucket, pathPrefix = '') {
   const files = [];
@@ -174,7 +162,9 @@ async function main() {
   requireArgValue('--prefix');
   requireArgValue('--auth');
 
-  assertSafeTarget(projectId, bucketName);
+  if (!projectId || !bucketName) {
+    throw new Error('Both --project and --bucket are required unless provided by environment variables.');
+  }
 
   if (!['admin', 'firebase-cli'].includes(authMode)) {
     throw new Error(`Unsupported --auth value "${authMode}". Use "admin" or "firebase-cli".`);
@@ -230,11 +220,8 @@ if (require.main === module) {
 }
 
 module.exports = {
-  TEST_PROJECT_ID,
-  TEST_BUCKET_NAME,
   LEGACY_IMAGE_CACHE_CONTROL,
   IMMUTABLE_IMAGE_CACHE_CONTROL,
-  assertSafeTarget,
   inspectImage,
   listAllFiles,
   mapWithConcurrency,

@@ -10,7 +10,7 @@ const RUNTIME_CONFIG_PATH = '/fatins-runtime/firebase-client';
 const DEFAULT_RUNTIME_CONFIG_UPSTREAM_URL =
   'http://127.0.0.1:5002/fatins-runtime/firebase-client';
 const COMPRESSION_THRESHOLD_BYTES = 1024;
-const STATIC_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+const STATIC_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
 const INDEX_CACHE_CONTROL = 'no-cache, max-age=0, must-revalidate';
 const DAILY_CACHE_CONTROL = 'public, max-age=86400, must-revalidate';
 const SERVER_ID = 'deterministic-build-v1';
@@ -473,7 +473,14 @@ const createDeterministicBuildServer = ({
       await proxyRuntimeConfig(request, response, target.search);
       return;
     }
-    const asset = snapshot.assets.get(target.pathname) || snapshot.index;
+    const requestedAsset = snapshot.assets.get(target.pathname);
+    if (!requestedAsset && target.pathname.startsWith('/static/')) {
+      sendPlainResponse(response, 404, 'Static asset not found.', {
+        'Cache-Control': STATIC_CACHE_CONTROL,
+      });
+      return;
+    }
+    const asset = requestedAsset || snapshot.index;
     sendAsset(request, response, asset);
   };
 

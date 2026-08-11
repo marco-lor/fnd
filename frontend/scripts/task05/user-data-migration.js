@@ -14,13 +14,13 @@ const {
 const {
   createFirebaseCliAdcFile,
 } = require('../firebase-cli-admin-credential');
+const {PRODUCTION_PROJECT_ID} = require('../production-target');
 
 const BATCH_SIZE = 100;
 const WRITE_BATCH_SIZE = 400;
 const REPORT_SCHEMA_VERSION = 2;
 const OPERATIONS = new Set(['stabilize', 'backfill', 'verify', 'archive', 'reverse']);
 const AUTH_MODES = new Set(['admin', 'firebase-cli']);
-const TEST_PROJECT_ID = 'fatin-test';
 const LEGACY_DRAIN_SCOPES = new Set(['global', 'user']);
 const PRE_DRAIN_SCOPES = new Set(['global', 'user']);
 const LEGACY_DRAIN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{7,99}$/;
@@ -96,6 +96,25 @@ const USER_V2_OPERATIONAL_METADATA_FIELDS = new Set([
   'updatedBy',
   'legacySourceHash',
   'legacySourceUpdateTime',
+]);
+
+// Task 07 owns these top-level fields independently from the legacy User Data
+// projection. They may coexist on the user shell and on media-capable personal
+// content documents after User Data reaches new-only. Task 05 must preserve and
+// ignore these additions during projection verification; Task 07 verifies their
+// exact values, revisions, manifests, and generated objects separately.
+const TASK07_USER_MEDIA_FIELDS = new Set([
+  'media',
+  'mediaUpdatedAt',
+  'task07MediaRevision',
+  'videoMedia',
+  'videoMediaUpdatedAt',
+  'task07VideoMediaRevision',
+]);
+const TASK07_USER_MEDIA_COLLECTIONS = new Set([
+  'inventory',
+  'spells',
+  'tecniche',
 ]);
 
 const defaultPath = (name) => path.join(DEFAULT_RESULTS_DIRECTORY, `task05-${name}.json`);
@@ -293,8 +312,8 @@ const assertSafeTarget = (options, env = process.env) => {
       'Live Firestore access is refused without --allow-live-project and an exact --confirm-project value.'
     );
   }
-  if (projectId !== TEST_PROJECT_ID) {
-    throw new Error(`This isolated migration tool accepts only live project ${TEST_PROJECT_ID}.`);
+  if (projectId !== PRODUCTION_PROJECT_ID) {
+    throw new Error(`This production migration tool accepts only live project ${PRODUCTION_PROJECT_ID}.`);
   }
   if (options.execute && ['archive', 'reverse'].includes(options.operation)) {
     throw new Error(
@@ -720,9 +739,14 @@ const inspectOwnedV2Projection = ({uid, actualDocuments, expectedDocuments, lega
     ) {
       issues.push({severity: 'error', code: 'v2-unowned-path-conflict'});
     }
-    const allowedTopLevelFields = descriptor?.kind === 'root'
-      ? new Set(Object.keys(legacyRootData || {}))
-      : new Set();
+    const allowsTask07Media = descriptor?.kind === 'root' || (
+      descriptor?.kind === 'dynamic'
+      && TASK07_USER_MEDIA_COLLECTIONS.has(descriptor.collection)
+    );
+    const allowedTopLevelFields = new Set([
+      ...(descriptor?.kind === 'root' ? Object.keys(legacyRootData || {}) : []),
+      ...(allowsTask07Media ? TASK07_USER_MEDIA_FIELDS : []),
+    ]);
     const normalized = normalizeActualAgainstExpected(actual, expected.data, {allowedTopLevelFields});
     const unexpected = unexpectedFieldPaths(actual, expected.data, {allowedTopLevelFields});
     if (unexpected.length) {

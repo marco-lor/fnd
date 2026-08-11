@@ -2,7 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   BATCH_SIZE,
+  DEFAULT_VERIFY_REPORT_PATH,
   assertCompletedDryRunReport,
+  assertDirectoryVerification,
   assertSafeTarget,
   buildUserDirectoryProjection,
   parseArguments,
@@ -20,15 +22,59 @@ test('requires an explicit project and defaults to dry-run mode', () => {
   assert.equal(parsed.authMode, 'admin');
 });
 
-test('hard-refuses production and non-loopback targets', () => {
+test('verification mode is read-only, uses a separate report, and cannot write', () => {
+  const parsed = parseArguments(['--project', 'demo-fnd-perf', '--verify']);
+  assert.equal(parsed.verifyOnly, true);
+  assert.equal(parsed.shouldWrite, false);
+  assert.equal(parsed.reportPath, DEFAULT_VERIFY_REPORT_PATH);
   assert.throws(
-    () => assertSafeTarget({projectId: 'fatins'}, {
+    () => parseArguments(['--project', 'demo-fnd-perf', '--verify', '--write']),
+    /mutually exclusive/
+  );
+});
+
+test('verification fails closed when a directory projection is missing or stale', () => {
+  const ready = {
+    complete: true,
+    counts: {create: 0, scanned: 3, update: 0},
+    directoryDocuments: 3,
+  };
+  assert.equal(assertDirectoryVerification(ready), ready);
+  assert.throws(
+    () => assertDirectoryVerification({
+      complete: true,
+      counts: {create: 1, scanned: 3, update: 2},
+      directoryDocuments: 3,
+    }),
+    /1 missing and 2 stale/
+  );
+  assert.throws(
+    () => assertDirectoryVerification({
+      complete: false,
+      counts: {create: 0, scanned: 3, update: 0},
+      directoryDocuments: 3,
+    }),
+    /verification failed/
+  );
+  assert.throws(
+    () => assertDirectoryVerification({
+      complete: true,
+      counts: {create: 0, scanned: 3, update: 0},
+      directoryDocuments: 4,
+    }),
+    /directory count 4 does not match 3 source user/
+  );
+});
+
+test('refuses production-through-emulator, nonproduction live, and non-loopback targets', () => {
+  assert.throws(
+    () => assertSafeTarget({projectId: 'fatin-test'}, {
       FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
     }),
     /requires a demo-/
   );
   assert.throws(
-    () => assertSafeTarget({projectId: 'fatins'}, {}),
+    () => assertSafeTarget({projectId: 'wrong-project'}, {}),
     /accepts only live project fatin-test/
   );
   assert.throws(
@@ -63,7 +109,7 @@ test('live access is hard-locked to confirmed fatin-test Firebase CLI auth', () 
     /allow-live-project/
   );
   assert.throws(
-    () => assertSafeTarget({...base, confirmProject: 'fatins'}, {}),
+    () => assertSafeTarget({...base, confirmProject: 'wrong-project'}, {}),
     /confirm-project fatin-test/
   );
   assert.throws(

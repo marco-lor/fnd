@@ -6,8 +6,8 @@ const {canonicalHash} = require('../task05/user-data-model');
 const {
   createFirebaseCliAdcFile,
 } = require('../firebase-cli-admin-credential');
+const {PRODUCTION_PROJECT_ID} = require('../production-target');
 
-const TEST_PROJECT_ID = 'fatin-test';
 const CONFIG_PATH = 'app_config/task06_backend';
 const REPORT_SCHEMA_VERSION = 1;
 const CONFIG_SCHEMA_VERSION = 1;
@@ -35,20 +35,20 @@ const DEFAULT_REPORT = path.resolve(
 );
 
 const printHelp = () => console.log([
-  'Task 06 guarded backend-control operator for the isolated fatin-test project.',
+  `Task 06 guarded backend-control operator for production ${PRODUCTION_PROJECT_ID}.`,
   '',
   'Usage:',
-  '  node scripts/task06/backend-rollout-control.js --project fatin-test',
+  `  node scripts/task06/backend-rollout-control.js --project ${PRODUCTION_PROJECT_ID}`,
   '    --derived-owner legacy|shadow|authoritative',
   '    --enabled-kinds <comma-separated operation kinds>',
   '    [--auth admin|firebase-cli] [--report <path>]',
   '    [--execute --approve-fingerprint <sha256>]',
-  '    --allow-live-project --confirm-project fatin-test',
+  `    --allow-live-project --confirm-project ${PRODUCTION_PROJECT_ID}`,
   '',
   'Safety:',
   '  - Dry-run is the default and writes only a local control-only report.',
   '  - Execution requires the exact dry-run fingerprint and unchanged Firestore state.',
-  '  - This isolated copy refuses every project except fatin-test.',
+  `  - This production operator refuses every project except ${PRODUCTION_PROJECT_ID}.`,
   '  - Unknown config fields and unknown operation kinds are refused.',
 ].join('\n'));
 
@@ -94,8 +94,8 @@ const parseArguments = (args = []) => {
     } else throw new Error(`Unknown argument: ${argument}`);
   }
   if (options.help) return options;
-  if (options.projectId !== TEST_PROJECT_ID) {
-    throw new Error(`This isolated operator accepts only project ${TEST_PROJECT_ID}.`);
+  if (options.projectId !== PRODUCTION_PROJECT_ID) {
+    throw new Error(`This production operator accepts only project ${PRODUCTION_PROJECT_ID}.`);
   }
   if (!DERIVED_OWNER_MODES.has(options.derivedOwnerMode)) {
     throw new Error('--derived-owner must be legacy, shadow, or authoritative.');

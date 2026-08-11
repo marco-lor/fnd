@@ -5,8 +5,8 @@
     "build": "tsc",
     "test": "npm run build && node --test --test-concurrency=1 test/*.test.js",
     "build:watch": "tsc --watch",
-    "serve": "npm run build && firebase emulators:start --only functions --project fatin-test",
-    "shell": "npm run build && firebase functions:shell --project fatin-test",
+    "serve": "npm run build && firebase emulators:start --only functions --project demo-fnd-perf",
+    "shell": "npm run build && firebase functions:shell --project demo-fnd-perf",
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions --project fatin-test",
     "logs": "firebase functions:log --project fatin-test"

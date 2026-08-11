@@ -5,14 +5,11 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-
-const TEST_PROJECT_ID = 'fatin-test';
-const TEST_REGION = 'europe-west8';
-const AUDIT_REGIONS = Object.freeze([
-  'europe-west8',
-  'europe-west1',
-  'us-central1',
-]);
+const {
+  CALLABLE_AUDIT_REGIONS: AUDIT_REGIONS,
+  PRIMARY_CALLABLE_REGION: PRODUCTION_WRITE_REGION,
+  PRODUCTION_PROJECT_ID,
+} = require('./production-target');
 const REPORT_SCHEMA_VERSION = 1;
 const INVOKER_ROLE = 'roles/run.invoker';
 const PUBLIC_MEMBER = 'allUsers';
@@ -228,7 +225,7 @@ const REQUIRED_CALLABLES = Object.freeze([
 ]);
 
 const REQUIRED_CALLABLES_BY_REGION = Object.freeze({
-  [TEST_REGION]: REQUIRED_CALLABLES,
+  [PRODUCTION_WRITE_REGION]: REQUIRED_CALLABLES,
   'europe-west1': Object.freeze([
     Object.freeze({
       logicalKey: 'duplicateFoeWithAssets',
@@ -266,21 +263,21 @@ const REQUIRED_CALLABLES_BY_REGION = Object.freeze({
 });
 
 const printHelp = () => console.log([
-  'Callable public-invoker verifier/reconciler for isolated fatin-test.',
+  `Callable public-invoker verifier/reconciler for production ${PRODUCTION_PROJECT_ID}.`,
   '',
   'Usage:',
   '  node scripts/callable-invoker-policy.js',
-  '    --project fatin-test --region <audited-region> [--check] [--report <path>]',
+  `    --project ${PRODUCTION_PROJECT_ID} --region <audited-region> [--check] [--report <path>]`,
   '  node scripts/callable-invoker-policy.js',
-  '    --project fatin-test --region europe-west8 --execute',
-  '    --allow-live-project --confirm-project fatin-test',
+  `    --project ${PRODUCTION_PROJECT_ID} --region ${PRODUCTION_WRITE_REGION} --execute`,
+  `    --allow-live-project --confirm-project ${PRODUCTION_PROJECT_ID}`,
   '    --approve-fingerprint <sha256> [--report <path>]',
   '',
   'Safety:',
   '  - Dry-run is the default and writes a deterministic local plan.',
   '  - --check is read-only and exits non-zero on any drift or blocker.',
   '  - Read-only audit regions: europe-west8, europe-west1, us-central1.',
-  '  - Writes remain hard-locked to fatin-test/europe-west8.',
+  `  - Writes remain hard-locked to ${PRODUCTION_PROJECT_ID}/${PRODUCTION_WRITE_REGION}.`,
   '  - Execution requires the exact current dry-run fingerprint.',
   '  - Only exact reviewed manifest callables for the selected region are managed.',
   '  - Unrelated IAM bindings are retained and verified after every update.',
@@ -328,8 +325,8 @@ const parseArguments = (args = []) => {
   }
 
   if (options.help) return options;
-  if (options.projectId !== TEST_PROJECT_ID) {
-    throw new Error(`This isolated operator accepts only project ${TEST_PROJECT_ID}.`);
+  if (options.projectId !== PRODUCTION_PROJECT_ID) {
+    throw new Error(`This production operator accepts only project ${PRODUCTION_PROJECT_ID}.`);
   }
   if (!AUDIT_REGIONS.includes(options.region)) {
     throw new Error(
@@ -340,12 +337,12 @@ const parseArguments = (args = []) => {
     throw new Error('--check and --execute are mutually exclusive.');
   }
   if (options.execute) {
-    if (options.region !== TEST_REGION) {
-      throw new Error(`Policy execution is hard-locked to ${TEST_PROJECT_ID}/${TEST_REGION}.`);
+    if (options.region !== PRODUCTION_WRITE_REGION) {
+      throw new Error(`Policy execution is hard-locked to ${PRODUCTION_PROJECT_ID}/${PRODUCTION_WRITE_REGION}.`);
     }
-    if (!options.allowLiveProject || options.confirmProject !== TEST_PROJECT_ID) {
+    if (!options.allowLiveProject || options.confirmProject !== PRODUCTION_PROJECT_ID) {
       throw new Error(
-        'Execution requires --allow-live-project and exact --confirm-project fatin-test.'
+        `Execution requires --allow-live-project and exact --confirm-project ${PRODUCTION_PROJECT_ID}.`
       );
     }
     if (!/^[a-f0-9]{64}$/i.test(options.approveFingerprint)) {
@@ -390,7 +387,7 @@ const readManifest = (manifestPath = MANIFEST_PATH) => (
   JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
 );
 
-const selectManagedCallables = (manifest, region = TEST_REGION) => {
+const selectManagedCallables = (manifest, region = PRODUCTION_WRITE_REGION) => {
   if (!manifest || manifest.schemaVersion !== 1) {
     throw new Error('callableManifest.json must use schemaVersion 1.');
   }
@@ -493,11 +490,11 @@ const relevantUnreachableRegions = (unreachable, region) => (
 const buildPolicyPlan = async ({
   backend,
   manifest,
-  projectId = TEST_PROJECT_ID,
-  region = TEST_REGION,
+  projectId = PRODUCTION_PROJECT_ID,
+  region = PRODUCTION_WRITE_REGION,
 }) => {
-  if (projectId !== TEST_PROJECT_ID || !AUDIT_REGIONS.includes(region)) {
-    throw new Error('Policy planning is hard-locked to fatin-test reviewed audit regions.');
+  if (projectId !== PRODUCTION_PROJECT_ID || !AUDIT_REGIONS.includes(region)) {
+    throw new Error(`Policy planning is hard-locked to ${PRODUCTION_PROJECT_ID} reviewed audit regions.`);
   }
   const managed = selectManagedCallables(manifest, region);
   const listing = await backend.listFunctions(projectId);
@@ -599,8 +596,8 @@ const assertApprovedPlan = ({approved, current, approveFingerprint}) => {
 };
 
 const executePolicyPlan = async ({backend, manifest, plan}) => {
-  if (plan.projectId !== TEST_PROJECT_ID || plan.region !== TEST_REGION) {
-    throw new Error('Policy execution is hard-locked to fatin-test/europe-west8.');
+  if (plan.projectId !== PRODUCTION_PROJECT_ID || plan.region !== PRODUCTION_WRITE_REGION) {
+    throw new Error(`Policy execution is hard-locked to ${PRODUCTION_PROJECT_ID}/${PRODUCTION_WRITE_REGION}.`);
   }
   if (plan.blockers.length > 0) {
     throw new Error('IAM reconciliation is blocked; no IAM writes were attempted.');
@@ -612,7 +609,7 @@ const executePolicyPlan = async ({backend, manifest, plan}) => {
       throw new Error(`IAM policy changed before write for ${entry.functionId}. Re-plan.`);
     }
     await backend.setInvokerUpdate(
-      TEST_PROJECT_ID,
+      PRODUCTION_PROJECT_ID,
       entry.serviceName,
       ['public']
     );
@@ -629,8 +626,8 @@ const executePolicyPlan = async ({backend, manifest, plan}) => {
   const finalPlan = await buildPolicyPlan({
     backend,
     manifest,
-    projectId: TEST_PROJECT_ID,
-    region: TEST_REGION,
+    projectId: PRODUCTION_PROJECT_ID,
+    region: PRODUCTION_WRITE_REGION,
   });
   if (!finalPlan.clean || finalPlan.blockers.length > 0 || finalPlan.counts.repair > 0) {
     throw new Error('Final callable IAM verification is not clean.');
@@ -736,8 +733,8 @@ module.exports = {
   DEFAULT_REPORT_PATH,
   REQUIRED_CALLABLES,
   REQUIRED_CALLABLES_BY_REGION,
-  TEST_PROJECT_ID,
-  TEST_REGION,
+  PRODUCTION_PROJECT_ID,
+  PRODUCTION_WRITE_REGION,
   assertApprovedPlan,
   assertSafeEnvironment,
   assessInvokerPolicy,

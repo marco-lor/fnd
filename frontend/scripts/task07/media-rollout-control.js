@@ -9,10 +9,10 @@ const {
   createFirebaseCliAdcFile,
 } = require('../firebase-cli-admin-credential');
 const {
-  LIVE_TEST_BUCKET,
-  LIVE_TEST_PROJECT_ID,
   PLAN_VERSION: MIGRATION_PLAN_VERSION,
   POLICY_HASH,
+  PRODUCTION_PROJECT_ID,
+  PRODUCTION_STORAGE_BUCKET,
   REPORT_SCHEMA_VERSION: MIGRATION_REPORT_SCHEMA_VERSION,
   SOURCE_KEYS,
   assertCandidateCountBinding,
@@ -658,9 +658,9 @@ const parseArguments = (args = []) => {
     }
   }
   if (options.help) return options;
-  if (options.projectId !== LIVE_TEST_PROJECT_ID) {
+  if (options.projectId !== PRODUCTION_PROJECT_ID) {
     throw new Error(
-      `This isolated operator accepts only project ${LIVE_TEST_PROJECT_ID}.`
+      `This production operator accepts only project ${PRODUCTION_PROJECT_ID}.`
     );
   }
   if (!CONTROL_MODES.has(options.mode)) {
@@ -703,10 +703,10 @@ const assertSafeTarget = (options, environment = process.env) => {
     throw new Error('Media rollout control refuses all emulator hosts.');
   }
   if (!options.allowLiveProject ||
-    options.confirmProject !== LIVE_TEST_PROJECT_ID) {
+    options.confirmProject !== PRODUCTION_PROJECT_ID) {
     throw new Error(
       'Live control access requires --allow-live-project and exact ' +
-      '--confirm-project fatin-test.'
+      `--confirm-project ${PRODUCTION_PROJECT_ID}.`
     );
   }
   if (options.authMode !== 'firebase-cli') {
@@ -721,8 +721,8 @@ const assertSafeTarget = (options, environment = process.env) => {
   }
   return {
     live: true,
-    projectId: LIVE_TEST_PROJECT_ID,
-    storageBucket: LIVE_TEST_BUCKET,
+    projectId: PRODUCTION_PROJECT_ID,
+    storageBucket: PRODUCTION_STORAGE_BUCKET,
   };
 };
 
@@ -810,8 +810,8 @@ const validateVerificationReport = ({
     report.policyVersion !== mediaPolicy.policyVersion ||
     report.policyHash !== POLICY_HASH ||
     report.operation !== 'verify' ||
-    report.projectId !== LIVE_TEST_PROJECT_ID ||
-    report.storageBucket !== LIVE_TEST_BUCKET ||
+    report.projectId !== PRODUCTION_PROJECT_ID ||
+    report.storageBucket !== PRODUCTION_STORAGE_BUCKET ||
     !exactSourceKeys(report.sourceKeys) ||
     report.catalogOwnerUid !== webmasterUid ||
     report.expectedCandidates !== expectedCandidates ||
@@ -928,7 +928,7 @@ const createBackend = async ({projectId, authMode}) => {
   let app;
   try {
     app = initializeApp(
-      {projectId, storageBucket: LIVE_TEST_BUCKET},
+      {projectId, storageBucket: PRODUCTION_STORAGE_BUCKET},
       `task07-media-control-${process.pid}-${Date.now()}`
     );
   } catch (error) {
@@ -1086,8 +1086,8 @@ const createBackend = async ({projectId, authMode}) => {
 
 const refreshVerification = async ({options, reviewedReport}) => {
   const backend = await createMigrationBackend({
-    projectId: LIVE_TEST_PROJECT_ID,
-    storageBucket: LIVE_TEST_BUCKET,
+    projectId: PRODUCTION_PROJECT_ID,
+    storageBucket: PRODUCTION_STORAGE_BUCKET,
     authMode: options.authMode,
   });
   try {
@@ -1095,8 +1095,8 @@ const refreshVerification = async ({options, reviewedReport}) => {
     const fresh = await buildMigrationPlan({
       backend,
       operation: 'verify',
-      projectId: LIVE_TEST_PROJECT_ID,
-      storageBucket: LIVE_TEST_BUCKET,
+      projectId: PRODUCTION_PROJECT_ID,
+      storageBucket: PRODUCTION_STORAGE_BUCKET,
       sourceKeys: SOURCE_KEYS,
       catalogOwnerUid: options.webmasterUid,
       expectedCandidates: options.expectedCandidates,
@@ -1113,12 +1113,12 @@ const refreshVerification = async ({options, reviewedReport}) => {
 };
 
 const printHelp = () => console.log([
-  'Guarded Media V2 rollout control for the isolated fatin-test project.',
+  `Guarded Media V2 rollout control for production ${PRODUCTION_PROJECT_ID}.`,
   '',
   'Usage:',
-  '  node scripts/task07/media-rollout-control.js --project fatin-test',
+  `  node scripts/task07/media-rollout-control.js --project ${PRODUCTION_PROJECT_ID}`,
   '    --mode v1-write|canonical-only|legacy --auth firebase-cli',
-  '    --allow-live-project --confirm-project fatin-test',
+  `    --allow-live-project --confirm-project ${PRODUCTION_PROJECT_ID}`,
   '    --webmaster-uid <uid> --confirm-webmaster-uid <same-uid>',
   '    [--verification-report <zero-error-all-source-report>]',
   '    [--verification-fingerprint <sha256>]',

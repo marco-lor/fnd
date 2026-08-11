@@ -6,6 +6,8 @@ const path = require('node:path');
 const test = require('node:test');
 const {
   AUDIT_REGIONS,
+  PRODUCTION_PROJECT_ID,
+  PRODUCTION_WRITE_REGION,
   REQUIRED_CALLABLES,
   REQUIRED_CALLABLES_BY_REGION,
   assertApprovedPlan,
@@ -16,8 +18,8 @@ const {
   selectManagedCallables,
 } = require('./callable-invoker-policy');
 
-const PROJECT_ID = 'fatin-test';
-const REGION = 'europe-west8';
+const PROJECT_ID = PRODUCTION_PROJECT_ID;
+const REGION = PRODUCTION_WRITE_REGION;
 const serviceNameFor = (functionId, region = REGION) => (
   `projects/${PROJECT_ID}/locations/${region}/services/${functionId.toLowerCase()}`
 );
@@ -103,7 +105,7 @@ const allPolicies = (replacement = {}) => Object.fromEntries(
   ])
 );
 
-test('CLI is dry-run by default and is hard-locked to the isolated target', () => {
+test('CLI is dry-run by default and is hard-locked to production', () => {
   const options = parseArguments([
     '--project', PROJECT_ID,
     '--region', REGION,
@@ -111,7 +113,7 @@ test('CLI is dry-run by default and is hard-locked to the isolated target', () =
   assert.equal(options.execute, false);
   assert.equal(options.check, false);
   assert.throws(
-    () => parseArguments(['--project', 'fatins', '--region', REGION]),
+    () => parseArguments(['--project', 'wrong-project', '--region', REGION]),
     /accepts only project fatin-test/
   );
   assert.throws(

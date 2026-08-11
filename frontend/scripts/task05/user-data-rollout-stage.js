@@ -6,8 +6,8 @@ const {canonicalHash} = require('./user-data-model');
 const {
   createFirebaseCliAdcFile,
 } = require('../firebase-cli-admin-credential');
+const {PRODUCTION_PROJECT_ID} = require('../production-target');
 
-const TEST_PROJECT_ID = 'fatin-test';
 const REPORT_SCHEMA_VERSION = 1;
 const CONFIG_PATH = 'app_config/user_data_v2';
 const AUTH_MODES = new Set(['admin', 'firebase-cli']);
@@ -32,18 +32,18 @@ const DEFAULT_REPORT = path.resolve(
 );
 
 const printHelp = () => console.log([
-  'Task 05 guarded rollout-stage operator for the isolated fatin-test project.',
+  `Task 05 guarded rollout-stage operator for production ${PRODUCTION_PROJECT_ID}.`,
   '',
   'Usage:',
-  '  node scripts/task05/user-data-rollout-stage.js --project fatin-test --stage <stage>',
+  `  node scripts/task05/user-data-rollout-stage.js --project ${PRODUCTION_PROJECT_ID} --stage <stage>`,
   '    [--auth admin|firebase-cli] [--report <path>]',
   '    [--execute --approve-fingerprint <sha256>]',
-  '    --allow-live-project --confirm-project fatin-test',
+  `    --allow-live-project --confirm-project ${PRODUCTION_PROJECT_ID}`,
   '',
   'Safety:',
   '  - Dry-run is the default and writes only a local hash-only report.',
   '  - Execution requires the exact dry-run fingerprint and unchanged Firestore state.',
-  '  - This isolated copy refuses every project except fatin-test.',
+  `  - This production operator refuses every project except ${PRODUCTION_PROJECT_ID}.`,
   '  - Active drains, completion locks, overrides, direct jumps, and new-only are refused.',
 ].join('\n'));
 
@@ -84,8 +84,8 @@ const parseArguments = (args = []) => {
     } else throw new Error(`Unknown argument: ${argument}`);
   }
   if (options.help) return options;
-  if (options.projectId !== TEST_PROJECT_ID) {
-    throw new Error(`This isolated operator accepts only project ${TEST_PROJECT_ID}.`);
+  if (options.projectId !== PRODUCTION_PROJECT_ID) {
+    throw new Error(`This production operator accepts only project ${PRODUCTION_PROJECT_ID}.`);
   }
   if (!MANAGED_STAGES.has(options.stage)) {
     throw new Error('--stage must be legacy-read, shadow-verify, dual-write, or new-read-dual-write.');

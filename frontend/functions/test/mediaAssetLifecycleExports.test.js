@@ -6,6 +6,7 @@ process.env.FUNCTIONS_EMULATOR = "true";
 
 const functions = require("../lib/index");
 const lifecycle = require("../lib/mediaAssetLifecycle");
+const processor = require("../lib/mediaAssetProcessor");
 const {
   task07CallableEnforcesAppCheck,
 } = require("../lib/task07CallableOptions");
@@ -44,6 +45,10 @@ test("existing Function IDs retain registered endpoints", () => {
   assert.ok(functions.task07PrepareMediaUpload.__endpoint.callableTrigger);
   assert.ok(functions.task07ConfirmMediaReference.__endpoint.callableTrigger);
   assert.ok(functions.task07ProcessMediaUpload.__endpoint.eventTrigger);
+  assert.deepEqual(
+    functions.task07ProcessMediaUpload.__endpoint.region,
+    ["europe-west8"]
+  );
   assert.ok(functions.cleanupTask07MediaAsset.__endpoint.eventTrigger);
   assert.ok(functions.sweepTask07MediaOrphans.__endpoint.scheduleTrigger);
   assert.ok(
@@ -57,6 +62,21 @@ test("existing Function IDs retain registered endpoints", () => {
   );
   assert.ok(
     functions.syncTask07MusicStreamFromTrack.__endpoint.eventTrigger
+  );
+});
+
+test("media processor follows each real bucket's region", () => {
+  assert.equal(
+    processor.task07ProcessorRegion({GCLOUD_PROJECT: "fatins"}),
+    "europe-central2"
+  );
+  assert.equal(
+    processor.task07ProcessorRegion({GCLOUD_PROJECT: "fatin-test"}),
+    "europe-west8"
+  );
+  assert.equal(
+    processor.task07ProcessorRegion({GCLOUD_PROJECT: "demo-fnd-perf"}),
+    "europe-west8"
   );
 });
 

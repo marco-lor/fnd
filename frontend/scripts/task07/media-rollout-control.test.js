@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const mediaPolicy = require('../../functions/src/mediaPolicy.json');
 const {
-  LIVE_TEST_BUCKET,
+  PRODUCTION_STORAGE_BUCKET,
   PLAN_VERSION,
   POLICY_HASH,
   REPORT_SCHEMA_VERSION,
@@ -163,7 +163,7 @@ const verificationReport = (entries = [verifiedEntry()]) => {
     policyHash: POLICY_HASH,
     operation: 'verify',
     projectId: 'fatin-test',
-    storageBucket: LIVE_TEST_BUCKET,
+    storageBucket: PRODUCTION_STORAGE_BUCKET,
     sourceKeys: [...SOURCE_KEYS],
     catalogOwnerUid: UID,
     expectedCandidates: entries.length,
@@ -197,7 +197,7 @@ test('CLI is dry-run by default and hard-locks the isolated project', () => {
   assert.equal(options.execute, false);
   assert.equal(options.authMode, 'firebase-cli');
   assert.throws(() => parseArguments([
-    '--project', 'fatins', '--mode', 'legacy',
+    '--project', 'wrong-project', '--mode', 'legacy',
   ]), /accepts only project fatin-test/);
   assert.throws(() => parseArguments(baseArgs([
     '--mode', 'derivative-read',
@@ -233,7 +233,7 @@ test('live target requires exact project, CLI auth, UID, and no emulators', () =
   assert.deepEqual(assertSafeTarget(options, {}), {
     live: true,
     projectId: 'fatin-test',
-    storageBucket: LIVE_TEST_BUCKET,
+    storageBucket: PRODUCTION_STORAGE_BUCKET,
   });
   assert.throws(() => assertSafeTarget({...options, authMode: 'admin'}, {}),
     /--auth firebase-cli/);

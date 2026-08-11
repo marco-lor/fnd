@@ -14,7 +14,7 @@ const snapshot = (data = null, updateTime = null) => ({
   updateTime,
 });
 
-test('CLI is dry-run by default and hard-locks the isolated project', () => {
+test('CLI is dry-run by default and hard-locks the production project', () => {
   const parsed = parseArguments([
     '--project', 'fatin-test',
     '--stage', 'shadow-verify',
@@ -24,7 +24,7 @@ test('CLI is dry-run by default and hard-locks the isolated project', () => {
   assert.equal(parsed.execute, false);
   assert.equal(parsed.authMode, 'admin');
   assert.throws(() => parseArguments([
-    '--project', 'fatins', '--stage', 'shadow-verify',
+    '--project', 'wrong-project', '--stage', 'shadow-verify',
   ]), /accepts only project fatin-test/);
   assert.throws(() => parseArguments([
     '--project', 'fatin-test', '--stage', 'new-only',

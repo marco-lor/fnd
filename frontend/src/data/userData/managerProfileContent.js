@@ -19,7 +19,6 @@ const stableSerialize = (value) => {
     (key) => JSON.stringify(key) + ':' + stableSerialize(value[key])
   ).join(',') + '}';
 };
-
 const shortHash = (value) => {
   let hash = 2166136261;
   const input = stableSerialize(value);
@@ -83,4 +82,3 @@ export const persistProfileContentMap = ({
     ].join(':'),
   });
 };
-

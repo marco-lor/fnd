@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const TEST_PROJECT_ID = 'fatin-test';
+const {PRODUCTION_PROJECT_ID} = require('./production-target');
 const DEPLOYMENT_PLANES = new Set([
   'firestore',
   'functions',
@@ -31,11 +31,11 @@ const guardBackendRelease = ({
 
   const plane = argv[0];
   const projectId = resolveProjectId(environment);
-  if (projectId !== TEST_PROJECT_ID) {
+  if (projectId !== PRODUCTION_PROJECT_ID) {
     writeError([
-      `BLOCKED: ${plane} deployment must target exactly ${TEST_PROJECT_ID}.`,
+      `BLOCKED: ${plane} deployment must target exactly ${PRODUCTION_PROJECT_ID}.`,
       `Received Firebase project: ${projectId || '<unset>'}.`,
-      'The production project fatins is never an allowed target from this repository.',
+      'Every other Firebase project is refused by this production repository.',
     ].join('\n'));
     return 1;
   }
@@ -49,7 +49,7 @@ if (require.main === module) {
 
 module.exports = {
   DEPLOYMENT_PLANES,
-  TEST_PROJECT_ID,
+  PRODUCTION_PROJECT_ID,
   guardBackendRelease,
   resolveProjectId,
   usage,

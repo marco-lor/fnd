@@ -18,7 +18,7 @@ const liveArguments = [
   '--confirm-project', 'fatin-test',
 ];
 
-test('parses a sorted, exact test-project control target', () => {
+test('parses a sorted, exact production control target', () => {
   const options = parseArguments(liveArguments);
   assert.equal(options.projectId, 'fatin-test');
   assert.equal(options.derivedOwnerMode, 'legacy');
@@ -31,7 +31,7 @@ test('parses a sorted, exact test-project control target', () => {
 
 test('refuses other projects, unknown operation kinds, and unconfirmed live access', () => {
   assert.throws(
-    () => parseArguments(liveArguments.map((value) => value === 'fatin-test' ? 'fatins' : value)),
+    () => parseArguments(liveArguments.map((value) => value === 'fatin-test' ? 'wrong-project' : value)),
     /accepts only project fatin-test/
   );
   assert.throws(

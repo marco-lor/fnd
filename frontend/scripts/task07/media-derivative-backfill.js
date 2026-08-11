@@ -11,10 +11,12 @@ const mediaPolicy = require('../../functions/src/mediaPolicy.json');
 const {
   createFirebaseCliAdcFile,
 } = require('../firebase-cli-admin-credential');
+const {
+  PRODUCTION_PROJECT_ID,
+  PRODUCTION_STORAGE_BUCKET,
+} = require('../production-target');
 
 const DEMO_PROJECT_ID = 'demo-fnd-perf';
-const LIVE_TEST_PROJECT_ID = 'fatin-test';
-const LIVE_TEST_BUCKET = 'fatin-test.firebasestorage.app';
 const REPORT_SCHEMA_VERSION = 4;
 const PLAN_VERSION = 4;
 const RECEIPT_COLLECTION = 'task07_media_backfill_receipts';
@@ -1399,10 +1401,10 @@ const parseLoopbackEmulatorHost = (value) => {
 };
 
 const assertSafeTarget = (options, env = process.env) => {
-  if (![DEMO_PROJECT_ID, LIVE_TEST_PROJECT_ID].includes(options.projectId)) {
+  if (![DEMO_PROJECT_ID, PRODUCTION_PROJECT_ID].includes(options.projectId)) {
     throw new TypeError(
       `Task 07 media backfill permits only ${DEMO_PROJECT_ID} or ` +
-      `${LIVE_TEST_PROJECT_ID}; production is always refused.`
+      `${PRODUCTION_PROJECT_ID}; every other live project is refused.`
     );
   }
   for (const variable of ['GCLOUD_PROJECT', 'GOOGLE_CLOUD_PROJECT']) {
@@ -1421,42 +1423,42 @@ const assertSafeTarget = (options, env = process.env) => {
   const functionsEmulator = parseLoopbackEmulatorHost(
     env.FUNCTIONS_EMULATOR_HOST
   );
-  if (options.projectId === LIVE_TEST_PROJECT_ID) {
+  if (options.projectId === PRODUCTION_PROJECT_ID) {
     if (env.FIRESTORE_EMULATOR_HOST ||
       env.FIREBASE_STORAGE_EMULATOR_HOST ||
       env.FUNCTIONS_EMULATOR_HOST) {
       throw new TypeError(
-        'Live fatin-test migration refuses all emulator host variables.'
+        `Live ${PRODUCTION_PROJECT_ID} migration refuses all emulator host variables.`
       );
     }
     if (!options.allowLiveProject ||
-      options.confirmProject !== LIVE_TEST_PROJECT_ID) {
+      options.confirmProject !== PRODUCTION_PROJECT_ID) {
       throw new TypeError(
-        'Live fatin-test access requires --allow-live-project and exact ' +
-        '--confirm-project fatin-test.'
+        `Live ${PRODUCTION_PROJECT_ID} access requires --allow-live-project and exact ` +
+        `--confirm-project ${PRODUCTION_PROJECT_ID}.`
       );
     }
     if (options.authMode !== 'firebase-cli') {
       throw new TypeError(
-        'Live fatin-test access requires --auth firebase-cli.'
+        `Live ${PRODUCTION_PROJECT_ID} access requires --auth firebase-cli.`
       );
     }
     if (!options.sourcesExplicit || !exactSourceKeys(options.sourceKeys)) {
       throw new TypeError(
-        'Live fatin-test access requires every supported source as an ' +
+        `Live ${PRODUCTION_PROJECT_ID} access requires every supported source as an ` +
         'explicit repeated --source.'
       );
     }
     if (!/^[A-Za-z0-9._:@-]{1,128}$/.test(options.catalogOwnerUid) ||
       options.confirmCatalogOwnerUid !== options.catalogOwnerUid) {
       throw new TypeError(
-        'Live fatin-test access requires --catalog-owner-uid and exact ' +
+        `Live ${PRODUCTION_PROJECT_ID} access requires --catalog-owner-uid and exact ` +
         '--confirm-catalog-owner-uid.'
       );
     }
     return {
       projectId: options.projectId,
-      storageBucket: LIVE_TEST_BUCKET,
+      storageBucket: PRODUCTION_STORAGE_BUCKET,
       live: true,
       concurrency: MIGRATION_CONCURRENCY,
     };
@@ -1488,8 +1490,8 @@ const assertSafeTarget = (options, env = process.env) => {
 const assertReadOnlyTarget = assertSafeTarget;
 
 const expectedStorageBucket = (projectId) => (
-  projectId === LIVE_TEST_PROJECT_ID ?
-    LIVE_TEST_BUCKET :
+  projectId === PRODUCTION_PROJECT_ID ?
+    PRODUCTION_STORAGE_BUCKET :
     `${projectId}.appspot.com`
 );
 
@@ -1581,9 +1583,9 @@ const assertApprovedReport = (report, options) => {
   assertCandidateCountBinding(report, options.expectedCandidates, {
     required: true,
   });
-  if (options.projectId === LIVE_TEST_PROJECT_ID && (
+  if (options.projectId === PRODUCTION_PROJECT_ID && (
     !exactSourceKeys(report.sourceKeys) ||
-    report.storageBucket !== LIVE_TEST_BUCKET ||
+    report.storageBucket !== PRODUCTION_STORAGE_BUCKET ||
     report.entries.some((entry) => (
       !SOURCE_KEY_SET.has(entry.sourceKey) ||
       (entry.ownerResolution === 'verified-global-fallback' &&
@@ -3121,8 +3123,8 @@ const printHelp = () => console.log([
   '    --approve-fingerprint <sha256> --report <reviewed-plan>',
   '    [--checkpoint <path>] [--resume]',
   '',
-  '  node scripts/task07/media-derivative-backfill.js --project fatin-test',
-  '    --auth firebase-cli --allow-live-project --confirm-project fatin-test',
+  `  node scripts/task07/media-derivative-backfill.js --project ${PRODUCTION_PROJECT_ID}`,
+  `    --auth firebase-cli --allow-live-project --confirm-project ${PRODUCTION_PROJECT_ID}`,
   '    --catalog-owner-uid <verified-webmaster-uid>',
   '    --confirm-catalog-owner-uid <same-uid>',
   ...SOURCE_KEYS.map((sourceKey) => `    --source ${sourceKey}`),
@@ -3131,9 +3133,9 @@ const printHelp = () => console.log([
   '',
   'Safety:',
   '  - Planning and verification are read-only and are the default.',
-  '  - Production projects are always refused.',
+  `  - Live access is allowed only for ${PRODUCTION_PROJECT_ID}.`,
   '  - Emulator behavior remains restricted to demo-fnd-perf loopback hosts.',
-  '  - Live access is hard-locked to fatin-test and its exact Storage bucket.',
+  `  - Live access is hard-locked to ${PRODUCTION_PROJECT_ID} and ${PRODUCTION_STORAGE_BUCKET}.`,
   '  - Live access requires Firebase CLI temporary ADC and every source.',
   '  - The confirmed webmaster is only a fallback for ownerless global media.',
   '  - Demo backfill execution also requires the loopback Functions emulator.',
@@ -3236,8 +3238,8 @@ module.exports = {
   DEFAULT_MAX_PAGES,
   DEFAULT_PAGE_SIZE,
   DEMO_PROJECT_ID,
-  LIVE_TEST_BUCKET,
-  LIVE_TEST_PROJECT_ID,
+  PRODUCTION_PROJECT_ID,
+  PRODUCTION_STORAGE_BUCKET,
   MAX_MAX_PAGES,
   MAX_PAGE_SIZE,
   MIGRATION_CONCURRENCY,

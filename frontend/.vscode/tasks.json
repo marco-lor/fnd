@@ -19,7 +19,7 @@
     {
       "label": "Start Emulators (FS/Storage/Functions/Hosting)",
       "type": "shell",
-      "command": "npx firebase emulators:start --only firestore,storage,functions,hosting --project fatin-test",
+      "command": "npx firebase emulators:start --only firestore,storage,functions,hosting --project demo-fnd-perf",
       "isBackground": true,
       "problemMatcher": []
     }

@@ -6,7 +6,7 @@ const {createRequire} = require('node:module');
 
 const {
   MIGRATION_CONCURRENCY,
-  LIVE_TEST_BUCKET,
+  PRODUCTION_STORAGE_BUCKET,
   PLAN_VERSION,
   POLICY_HASH,
   REPORT_SCHEMA_VERSION,
@@ -906,9 +906,9 @@ test('Firebase target preserves demo emulators and hard-locks live fatin-test', 
     concurrency: 1,
   });
   assert.throws(() => assertSafeTarget(
-    {...base, projectId: 'fatins'},
+    {...base, projectId: 'fatin-test'},
     emulatorEnv
-  ), /production is always refused/);
+  ), /Live fatin-test migration refuses all emulator/);
   assert.throws(() => assertSafeTarget(base, {
     ...emulatorEnv,
     FIREBASE_STORAGE_EMULATOR_HOST: 'storage.example.com:9199',
@@ -922,11 +922,11 @@ test('Firebase target preserves demo emulators and hard-locks live fatin-test', 
   const live = parseOptions(liveArgs());
   assert.deepEqual(assertSafeTarget(live, {}), {
     projectId: 'fatin-test',
-    storageBucket: LIVE_TEST_BUCKET,
+    storageBucket: PRODUCTION_STORAGE_BUCKET,
     live: true,
     concurrency: 1,
   });
-  assert.throws(() => assertSafeTarget({...live, confirmProject: 'fatins'}, {}),
+  assert.throws(() => assertSafeTarget({...live, confirmProject: 'wrong-project'}, {}),
     /exact --confirm-project fatin-test/);
   assert.throws(() => assertSafeTarget({...live, authMode: 'admin'}, {}),
     /--auth firebase-cli/);

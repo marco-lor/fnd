@@ -11,7 +11,9 @@ import {
   isPerformanceEnabled,
   recordPerfEvent,
 } from "./performance/runtime";
+import { installStaticChunkRecovery } from "./runtime/staticChunkRecovery";
 
+installStaticChunkRecovery();
 installPerformanceRuntime();
 
 const root = ReactDOM.createRoot(document.getElementById("root"));

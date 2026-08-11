@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-const TEST_PROJECT_ID = 'fatin-test';
 const args = process.argv.slice(2);
 const shouldWrite = args.includes('--write');
 const shouldShowHelp = args.includes('--help') || args.includes('-h');
@@ -29,12 +28,11 @@ const printHelp = () => {
     'Backfill Grigliata media folder fields.',
     '',
     'Usage:',
-    '  node scripts/backfill-grigliata-media-folders.js --project fatin-test [--auth admin|firebase-cli] [--write]',
+    '  node scripts/backfill-grigliata-media-folders.js [--project <project-id>] [--auth admin|firebase-cli] [--write]',
     '',
     'Default mode is a dry run. Pass --write to persist missing or invalid folder ids as an empty string.',
     'Default auth is admin, which uses Application Default Credentials or GOOGLE_APPLICATION_CREDENTIALS.',
     'Use --auth firebase-cli to reuse the local Firebase CLI login for REST writes.',
-    'This isolated repository refuses every project except fatin-test.',
   ].join('\n'));
 };
 
@@ -45,11 +43,6 @@ if (shouldShowHelp) {
 
 if (projectArgIndex >= 0 && !projectId) {
   console.error('Missing value for --project.');
-  process.exit(1);
-}
-
-if (projectId !== TEST_PROJECT_ID) {
-  console.error(`Blocked project "${projectId || '<unset>'}". This isolated repository accepts only ${TEST_PROJECT_ID}.`);
   process.exit(1);
 }
 

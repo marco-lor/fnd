@@ -5,26 +5,26 @@ const test = require('node:test');
 
 const {
   DEPLOYMENT_PLANES,
-  TEST_PROJECT_ID,
+  PRODUCTION_PROJECT_ID,
   guardBackendRelease,
   usage,
 } = require('./firebase-backend-release-guard');
 
-test('every deployment plane accepts only the isolated test project', () => {
+test('every deployment plane accepts only the production project', () => {
   for (const plane of DEPLOYMENT_PLANES) {
     assert.equal(guardBackendRelease({
       argv: [plane],
-      environment: {GCLOUD_PROJECT: TEST_PROJECT_ID},
+      environment: {GCLOUD_PROJECT: PRODUCTION_PROJECT_ID},
     }), 0);
 
     const messages = [];
     assert.equal(guardBackendRelease({
       argv: [plane],
-      environment: {GCLOUD_PROJECT: 'fatins'},
+      environment: {GCLOUD_PROJECT: 'wrong-project'},
       writeError: (message) => messages.push(message),
     }), 1);
     assert.match(messages.join('\n'), new RegExp(`BLOCKED: ${plane}`));
-    assert.match(messages.join('\n'), /fatins is never an allowed target/);
+    assert.match(messages.join('\n'), /Every other Firebase project is refused/);
   }
 });
 
@@ -33,7 +33,7 @@ test('unknown and missing planes are rejected as operator errors', () => {
     const messages = [];
     assert.equal(guardBackendRelease({
       argv,
-      environment: {GCLOUD_PROJECT: TEST_PROJECT_ID},
+      environment: {GCLOUD_PROJECT: PRODUCTION_PROJECT_ID},
       writeError: (message) => messages.push(message),
     }), 2);
     assert.deepEqual(messages, [usage]);
@@ -65,23 +65,54 @@ test('Firebase and npm wiring hard-bind every deploy to fatin-test', () => {
   assert.match(firebaseConfig.storage.predeploy[0], /firebase-backend-release-guard\.js"? storage$/);
   assert.match(firebaseConfig.functions[0].predeploy[0], /firebase-backend-release-guard\.js"? functions$/);
   assert.match(firebaseConfig.hosting.predeploy[0], /firebase-backend-release-guard\.js"? hosting$/);
-  assert.equal(firebaseConfig.hosting.site, TEST_PROJECT_ID);
+  assert.ok(firebaseConfig.functions[0].predeploy.some(
+    (command) => /production:verify-runtime-prerequisites/.test(command)
+  ));
+  assert.ok(firebaseConfig.hosting.predeploy.some(
+    (command) => /production:verify-runtime-prerequisites/.test(command)
+  ));
+  assert.equal(firebaseConfig.hosting.site, PRODUCTION_PROJECT_ID);
+
+  const staticHeaders = firebaseConfig.hosting.headers.find(
+    (entry) => entry.source === '/static/**'
+  );
+  const staticCacheControl = staticHeaders?.headers?.find(
+    (header) => header.key.toLowerCase() === 'cache-control'
+  )?.value;
+  assert.equal(staticCacheControl, 'public, max-age=0, must-revalidate');
+  assert.doesNotMatch(staticCacheControl, /immutable/i);
+
+  const fallbackRewrite = firebaseConfig.hosting.rewrites.at(-1);
+  assert.deepEqual(fallbackRewrite, {
+    source: '!/@(static)/**',
+    destination: '/index.html',
+  });
+  assert.equal(
+    firebaseConfig.hosting.rewrites.some((rewrite) => rewrite.source === '**'),
+    false
+  );
 
   for (const scriptName of [
     'fb:init',
-    'fb:emulators',
     'fb:deploy:rules',
     'fb:deploy:functions',
     'fb:deploy:all',
     'fb:deploy:hosting',
   ]) {
-    assert.match(packageJson.scripts[scriptName], /--project fatin-test/);
-    assert.doesNotMatch(packageJson.scripts[scriptName], /--project fatins(?:\s|$)/);
+    assert.match(packageJson.scripts[scriptName], /--project fatin-test(?:\s|$)/);
+    assert.doesNotMatch(packageJson.scripts[scriptName], /--project wrong-project/);
   }
+
+  assert.match(packageJson.scripts['fb:emulators'], /--project demo-fnd-perf/);
 
   assert.match(packageJson.scripts['grigliata:backfill-media-folders'], /--project fatin-test/);
   assert.match(packageJson.scripts['grigliata:backfill-media-folders'], /--auth firebase-cli/);
   assert.match(packageJson.scripts['images:backfill-cache'], /--project fatin-test/);
   assert.match(packageJson.scripts['images:backfill-cache'], /--bucket fatin-test\.firebasestorage\.app/);
   assert.match(packageJson.scripts['images:backfill-cache'], /--auth firebase-cli/);
+  assert.match(packageJson.scripts['appcheck:verify-production'], /--project fatin-test/);
+  assert.match(packageJson.scripts['appcheck:verify-production'], /--auth firebase-cli/);
+  assert.match(packageJson.scripts['users:verify-directory'], /--project fatin-test/);
+  assert.match(packageJson.scripts['users:verify-directory'], /--verify/);
+  assert.doesNotMatch(packageJson.scripts['users:verify-directory'], /--write/);
 });

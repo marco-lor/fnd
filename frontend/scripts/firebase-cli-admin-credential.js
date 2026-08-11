@@ -68,7 +68,7 @@ const createFirebaseCliAdcFile = async ({
   const refreshToken = options.tokens?.refresh_token || account.tokens?.refresh_token;
   if (!refreshToken) throw new Error('Firebase CLI account has no refresh token.');
 
-  const directory = fs.mkdtempSync(path.join(tempDirectory, 'fatin-test-firebase-cli-adc-'));
+  const directory = fs.mkdtempSync(path.join(tempDirectory, 'fatins-firebase-cli-adc-'));
   const filePath = path.join(directory, 'application-default-credentials.json');
   fs.writeFileSync(filePath, `${JSON.stringify({
     type: 'authorized_user',
