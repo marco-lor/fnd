@@ -242,6 +242,7 @@ test('legacy Admin root writers fail closed across drain and new-only scopes', (
   );
 });
 const {
+  collectArchivedOwnedMediaPaths,
   collectOwnedMediaPaths,
   parseOwnedMediaPath,
   planOwnedMediaCleanup,
@@ -1059,6 +1060,40 @@ test('owned-media parser accepts only canonical or unambiguous legacy owner path
     'spells',
     'spell-1'
   ), ['spells/spell_u1_Flare_image']);
+});
+
+test('account deletion discovers media retained only in both archive formats', () => {
+  const paths = collectArchivedOwnedMediaPaths('u1', {
+    rootFields: [
+      {field: 'imagePath', value: 'characters/Hero_u1_123'},
+      {field: 'inventory', value: {image: 'items/varie_u1_Rope_1'}},
+      {field: 'spells', value: {image: 'spells/spell_u1_Flare_image'}},
+      {field: 'tecniche', value: {video: 'tecnicas/videos/tecnica_u1_Dash_1'}},
+      {field: 'imageUrl', value: 'characters/Other_u12_123'},
+    ],
+    migrationDomains: [
+      {domain: 'shell', payload: {image: 'characters/Old_u1_999'}},
+      {domain: 'inventory', payload: [{image: 'items/varie_u1_Old_2'}]},
+      {
+        domain: 'personalContent',
+        payload: {
+          spells: {Old: {video: 'spells/videos/spell_u1_Old_2'}},
+          tecniche: {Old: {image: 'tecnicas/tecnica_u1_Old_2'}},
+        },
+      },
+      {domain: 'shell', payload: {image: 'characters/shared_catalog'}},
+    ],
+  });
+  assert.deepEqual(paths, [
+    'characters/Hero_u1_123',
+    'characters/Old_u1_999',
+    'items/varie_u1_Old_2',
+    'items/varie_u1_Rope_1',
+    'spells/spell_u1_Flare_image',
+    'spells/videos/spell_u1_Old_2',
+    'tecnicas/tecnica_u1_Old_2',
+    'tecnicas/videos/tecnica_u1_Dash_1',
+  ]);
 });
 
 test('profile shell budget projection excludes large compatibility aggregates', () => {

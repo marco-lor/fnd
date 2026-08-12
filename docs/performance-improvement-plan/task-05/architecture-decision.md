@@ -287,6 +287,22 @@ Before `new-only`, rollback is a stage switch; any future rollback after
 compaction must pause mutations, reverse-materialize, verify, and only then
 switch.
 
+Physical root compaction is a separate terminal `new-only` operation implemented
+by `frontend/scripts/task05/user-data-compaction.js`. It requires a clean global
+`new-only` configuration, complete schema-V2 state, no active deletion, and an
+exact approved dry-run fingerprint. For each user, one transaction archives
+every original root field under the dedicated
+`migration_state/user-data-v2/root_compaction_archives/{uid}` namespace and
+deletes only the declared migrated-field allowlist. The profile shell and
+`flags` remain. Per-field archive documents avoid the one-document size limit;
+source, shell, legacy-payload, field, and archive hashes make partial or
+conflicting archives fail closed. Execution is additionally bound to the exact
+completed global cutover attestation and its durably recorded sealed
+verification report. Account deletion recursively removes and verifies both
+Task 05 archive namespaces so full historical profiles do not outlive the
+account. See the
+[legacy-root compaction runbook](./legacy-root-compaction.md).
+
 ## Backup and deletion contract
 
 The backend V2 backup recursively enumerates every root collection, document,

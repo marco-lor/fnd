@@ -1,5 +1,10 @@
 # fatin-test User Data V2 activation record - 2026-08-01
 
+> Historical activation snapshot. The later global `new-only` rollout and
+> physical root compaction are recorded in
+> `frontend/FATIN_TEST_V2_ROLLOUT_20260801.md` and the
+> [legacy-root compaction runbook](./legacy-root-compaction.md).
+
 ## Outcome
 
 The isolated Firebase project fatin-test is active in new-read-dual-write mode.

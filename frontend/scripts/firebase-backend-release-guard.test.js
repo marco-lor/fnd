@@ -96,6 +96,7 @@ test('Firebase and npm wiring hard-bind every deploy to fatin-test', () => {
     'fb:init',
     'fb:deploy:rules',
     'fb:deploy:functions',
+    'fb:deploy:delete-user',
     'fb:deploy:all',
     'fb:deploy:hosting',
   ]) {

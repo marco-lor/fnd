@@ -33,21 +33,10 @@ rules, and behavior tests plus code review own that assurance.
 
 ### Direct-access debt ledger
 
-The current boundary snapshot contains 43 legacy production files (down from 50
-after Bazaar purchase, Home domains, inventory/equipment/resource controls, and
-Tecniche/Spell adoption). It is not a
-waiver for final acceptance. Each consumer migration removes its file entry in
-the same change; adding or changing a recognized direct expression fails CI.
-Changing the associated operation or payload context also fails CI. Review and
-behavior tests must still validate transaction and authorization semantics. The
-notable residual groups are:
-
-- Auth/Login and Character Creation;
-- Bazaar edit/comparison paths outside the migrated purchase command;
-- Home item-detail and parameter-table paths outside the migrated domain controls;
-- DM dashboard and its item/content overlays;
-- Combat and Grigliata resource integration;
-- Tecniche/Spell legacy side-editor paths.
+The current boundary snapshot contains zero explicitly tracked legacy
+production files. Adding or changing a recognized direct aggregate expression,
+operation, target, or mutation payload fails CI. Review and behavior tests still
+own transaction ordering, authorization semantics, and indirect helper behavior.
 
 Nested `users/{uid}/diceRolls` access is explicitly not an aggregate root access
 and remains permitted. The repository adapter and offline migration tooling are
@@ -101,4 +90,5 @@ visibility, derived equipment totals, or dice results.
   tampering, redacted restore planning, approval, idempotency, and target safety.
 - Boundary-checker tests own expression, operation, target, and payload-context
   drift; they do not replace transaction/authorization behavior review.
-- Browser checks are read-only on `/home`; Grigliata uses only the demo emulator.
+- Browser acceptance for the isolated `fatin-test` project covers `/home` and
+  Grigliata, with reversible mutations restored before completion.

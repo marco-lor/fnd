@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fnd.local/schemas/task05-user-data-compaction-report-v1.json",
+  "title": "FND Task 05 legacy-root compaction report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "mode",
+    "generatedAt",
+    "projectId",
+    "configFingerprint",
+    "cutoverEvidence",
+    "legacyRootFields",
+    "globalIssues",
+    "subjects",
+    "counts",
+    "planFingerprint"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "kind": { "const": "task05-user-data-legacy-root-compaction-plan" },
+    "mode": { "enum": ["dry-run", "verification"] },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "projectId": { "type": "string", "minLength": 1 },
+    "configFingerprint": { "$ref": "#/$defs/sha256" },
+    "cutoverEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cutoverIdHash",
+        "attestationFingerprint",
+        "verificationFingerprint",
+        "reportDigest",
+        "subjectsFingerprint",
+        "verifiedSubjects"
+      ],
+      "properties": {
+        "cutoverIdHash": { "$ref": "#/$defs/sha256" },
+        "attestationFingerprint": { "$ref": "#/$defs/sha256" },
+        "verificationFingerprint": { "$ref": "#/$defs/sha256" },
+        "reportDigest": { "$ref": "#/$defs/sha256" },
+        "subjectsFingerprint": { "$ref": "#/$defs/sha256" },
+        "verifiedSubjects": { "$ref": "#/$defs/count" }
+      }
+    },
+    "legacyRootFields": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "globalIssues": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/issue" }
+    },
+    "subjects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "subjectHash",
+          "sourceHash",
+          "legacyPayloadHash",
+          "archiveFingerprint",
+          "archiveDocuments",
+          "legacyFields",
+          "legacyFieldCount",
+          "currentState",
+          "v2CollectionCounts",
+          "v2StateDocuments",
+          "v2CollectionDocuments",
+          "issues"
+        ],
+        "properties": {
+          "subjectHash": { "$ref": "#/$defs/sha256" },
+          "sourceHash": { "$ref": "#/$defs/sha256" },
+          "legacyPayloadHash": { "$ref": "#/$defs/sha256" },
+          "archiveFingerprint": { "$ref": "#/$defs/sha256" },
+          "archiveDocuments": { "$ref": "#/$defs/count" },
+          "legacyFields": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          },
+          "legacyFieldCount": { "$ref": "#/$defs/count" },
+          "currentState": { "enum": ["pending", "compacted", "native-v2"] },
+          "v2CollectionCounts": { "$ref": "#/$defs/v2CollectionCounts" },
+          "v2StateDocuments": { "$ref": "#/$defs/count" },
+          "v2CollectionDocuments": { "$ref": "#/$defs/count" },
+          "issues": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/issue" }
+          }
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "users",
+        "pending",
+        "compacted",
+        "nativeV2",
+        "legacyFields",
+        "archiveDocuments",
+        "v2StateDocuments",
+        "v2CollectionDocuments",
+        "errors"
+      ],
+      "properties": {
+        "users": { "$ref": "#/$defs/count" },
+        "pending": { "$ref": "#/$defs/count" },
+        "compacted": { "$ref": "#/$defs/count" },
+        "nativeV2": { "$ref": "#/$defs/count" },
+        "legacyFields": { "$ref": "#/$defs/count" },
+        "archiveDocuments": { "$ref": "#/$defs/count" },
+        "v2StateDocuments": { "$ref": "#/$defs/count" },
+        "v2CollectionDocuments": { "$ref": "#/$defs/count" },
+        "errors": { "$ref": "#/$defs/count" }
+      }
+    },
+    "planFingerprint": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "count": { "type": "integer", "minimum": 0 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "v2CollectionCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inventory", "spells", "tecniche", "content_names"],
+      "properties": {
+        "inventory": { "$ref": "#/$defs/count" },
+        "spells": { "$ref": "#/$defs/count" },
+        "tecniche": { "$ref": "#/$defs/count" },
+        "content_names": { "$ref": "#/$defs/count" }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "code"],
+      "properties": {
+        "severity": { "const": "error" },
+        "code": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

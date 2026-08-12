@@ -2,7 +2,10 @@
 
 import {onCall, HttpsError, CallableRequest} from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
-import {collectOwnedMediaPaths} from "./userOwnedMediaCleanup";
+import {
+  collectArchivedOwnedMediaPaths,
+  collectOwnedMediaPaths,
+} from "./userOwnedMediaCleanup";
 import {legacyRootMutationBlockReason} from "./legacyRootMutationGate";
 import {isValidFirestoreDocumentId} from "./userDataV2";
 import {assertActiveCaller} from "./callerAuthorization";
@@ -44,6 +47,13 @@ export const deleteUser = onCall(
     const jobRef = db.doc(`user_deletion_jobs/${userToDeleteUid}`);
     const targetUserRef = db.doc(`users/${userToDeleteUid}`);
     const rolloutRef = db.doc("app_config/user_data_v2");
+    const migrationArchiveRef = db.doc(
+      `migration_state/user-data-v2/archives/${userToDeleteUid}`
+    );
+    const compactionArchiveRef = db.doc(
+      "migration_state/user-data-v2/root_compaction_archives/" +
+      userToDeleteUid
+    );
     let authorizedPendingJob = false;
 
     try {
@@ -152,6 +162,23 @@ export const deleteUser = onCall(
             snapshot.id
           ).forEach((path) => legacyOwnedPaths.add(path)))
       );
+      // Task 05 archives live outside users/{uid}. Inspect both generations
+      // before deleting them, including media removed from authoritative V2.
+      const [compactionArchiveFields, migrationArchiveDomains] =
+        await Promise.all([
+          compactionArchiveRef.collection("root_fields").get(),
+          migrationArchiveRef.collection("domains").get(),
+        ]);
+      collectArchivedOwnedMediaPaths(userToDeleteUid, {
+        rootFields: compactionArchiveFields.docs.map((snapshot) => ({
+          field: snapshot.get("field"),
+          value: snapshot.get("value"),
+        })),
+        migrationDomains: migrationArchiveDomains.docs.map((snapshot) => ({
+          domain: snapshot.get("domain"),
+          payload: snapshot.get("payload"),
+        })),
+      }).forEach((path) => legacyOwnedPaths.add(path));
       const bucket = admin.storage().bucket();
       const deleteAndVerifyOwnedMedia = async (): Promise<void> => {
         await bucket.deleteFiles({prefix: `users/${userToDeleteUid}/`});
@@ -178,20 +205,40 @@ export const deleteUser = onCall(
 
       // 6. Recursive deletion includes every current and future user
       // subcollection. The public directory projection is removed explicitly
-      // so completion does not depend on trigger delivery.
+      // so completion does not depend on trigger delivery. Task 05 migration
+      // and physical-compaction archives contain full historical user data
+      // outside users/{uid}; they share the deletion fence and must not outlive
+      // an account deletion.
       const directoryRef = db.doc(`user_directory/${userToDeleteUid}`);
+      const migrationArchiveRefs = [
+        migrationArchiveRef,
+        compactionArchiveRef,
+      ];
       const deleteAndVerifyFirestore = async (): Promise<void> => {
-        await db.recursiveDelete(targetUserRef);
+        await Promise.all([
+          db.recursiveDelete(targetUserRef),
+          ...migrationArchiveRefs.map((archiveRef) => (
+            db.recursiveDelete(archiveRef)
+          )),
+        ]);
         await directoryRef.delete();
-        const [remainingUser, remainingDirectory] = await db.getAll(
-          targetUserRef,
-          directoryRef
-        );
-        const remainingUserCollections = await targetUserRef.listCollections();
+        const [remainingUser, remainingDirectory, ...remainingArchives] =
+          await db.getAll(
+            targetUserRef,
+            directoryRef,
+            ...migrationArchiveRefs
+          );
+        const remainingCollections = await Promise.all([
+          targetUserRef.listCollections(),
+          ...migrationArchiveRefs.map((archiveRef) => (
+            archiveRef.listCollections()
+          )),
+        ]);
         if (
           remainingUser.exists ||
           remainingDirectory.exists ||
-          remainingUserCollections.length
+          remainingArchives.some((snapshot) => snapshot.exists) ||
+          remainingCollections.some((collections) => collections.length)
         ) {
           throw new Error("firestore-cleanup-not-verified");
         }

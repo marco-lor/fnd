@@ -8,8 +8,8 @@ rollback evidence.
 ## Current deployed state
 
 - Project: `fatin-test` only.
-- User Data: global `new-only`; 11 users verified; legacy drain completed and
-  removed; zero final errors or warnings.
+- User Data: global `new-only`; 11 users verified and physically compacted;
+  legacy drain completed and removed; zero final errors or warnings.
 - Hosting build: fixed User Data stage `new-only` with dynamic rollout config
   disabled.
 - Media: `v1-write` only. New eligible writes use canonical media, while reads
@@ -17,8 +17,7 @@ rollback evidence.
 - Media backfill: 180 of 180 receipts attached and verified.
 - Media `canonical-only`: deliberately not activated.
 - Production `fatins`: not changed by this rollout.
-- Git: all changes remain uncommitted and there is no remote in the isolated
-  repository.
+- Git: this record travels with the reviewed compaction commit on `main`.
 
 ## Cloud changes made
 
@@ -60,6 +59,50 @@ The guarded global cutover sequence was:
 
 Saved evidence is under `performance-results/task05-*`. That directory is
 ignored and must be preserved outside Git before workspace cleanup.
+
+## Physical root compaction - 2026-08-12
+
+The physical cleanup removed only the explicit migrated-field allowlist from
+`users/{uid}`. Identity, authorization, profile, avatar/media, creation, and
+server summary fields remain on each root. Every original root field was first
+archived transactionally under the separate
+`migration_state/user-data-v2/root_compaction_archives/{uid}` namespace.
+
+Sequence and evidence:
+
+1. Independent frozen-diff review returned no P0-P2 findings after its earlier
+   cutover-proof, credential cleanup, deletion-stage, count-binding, and
+   account-deletion archive findings were fixed.
+2. `functions:deleteUser` was deployed before any archive was created. The
+   Function now discovers owned media in both Task 05 archive formats and
+   recursively deletes and verifies both archives during account deletion.
+3. Live dry-run: 11 pending users, 128 historical allowlisted fields, 283
+   archive documents, 55 fixed state documents, 136 V2 collection documents,
+   zero errors.
+4. Exact approved fingerprint:
+   `ddb1e6087a6431c1dd06ff548112834e8eb1cff1477b1000d2f83804d6494c53`.
+5. Execution: 11 processed, complete `true`, zero errors.
+6. Final read-only verification after browser mutation/restore testing: 11
+   `compacted`, zero pending, zero subject/global issues, all 283 archive
+   documents verified, and unchanged V2 state/collection counts.
+
+The verification report's `legacyFields: 128` is the archived historical field
+inventory retained for stable approval and reconstruction. It does not mean
+those fields remain on current roots; every subject is classified `compacted`.
+
+Deployment and logged-in DM acceptance:
+
+- `deleteUser(europe-west8)` updated successfully; callable IAM postchecks were
+  clean at 38/38 west8, 5/5 west1, and 1/1 us-central1.
+- Hosting deployed successfully with `main.18633ba6.js` and
+  `route-grigliata.433c2146.chunk.js`.
+- Home, DM Dashboard, Tecniche/Spell, Bazaar, Combat, and Grigliata loaded from
+  the compacted data model.
+- Home HP persisted through `28 -> 27`, reload, and restoration to `28`.
+- Grigliata loaded the active dynamic-lighting video map, grid, seven lights,
+  walls, active viewer, and DM Gallery. Shared music persisted through
+  `muted -> enabled`, reload, and restoration to `muted`.
+- The final in-app Browser diagnostic log was empty.
 
 The Hosting build stage is fixed in
 `scripts/forced-release-environment.js` as:

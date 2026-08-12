@@ -97,6 +97,14 @@ test('user deletion publishes a drain-visible job before external cleanup', () =
   assert.ok(recursiveDelete > pendingJob);
   assert.ok(finalMediaSweep > authDelete);
   assert.ok(finalFirestoreSweep > authDelete);
+  assert.match(contents, /migration_state\/user-data-v2\/archives/);
+  assert.match(contents, /migration_state\/user-data-v2\/root_compaction_archives/);
+  assert.match(contents, /collection\("root_fields"\)\.get\(\)/);
+  assert.match(contents, /collection\("domains"\)\.get\(\)/);
+  assert.match(contents, /collectArchivedOwnedMediaPaths\(userToDeleteUid/);
+  assert.match(contents, /migrationArchiveRefs\.map\(\(archiveRef\) => \(/);
+  assert.match(contents, /remainingArchives\.some\(\(snapshot\) => snapshot\.exists\)/);
+  assert.match(contents, /archiveRef\.listCollections\(\)/);
   assert.match(contents, /if \(authorizedPendingJob\) \{/);
   assert.match(contents, /if \(!job\.exists \|\| job\.get\("stage"\) === "completed"\) return;/);
 });
