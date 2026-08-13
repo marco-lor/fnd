@@ -1,9 +1,9 @@
 # fatin-test V2 rollout record - 2026-08-01
 
-This file records the isolated `fatin-test` rollout. It is not an authorization
-to change `fatins`. All production replication must be separately reviewed,
-must regenerate fingerprints from production state, and must keep explicit
-rollback evidence.
+This file records the isolated `fatin-test` rollout. It did not authorize a
+production change. Production `fatins` was later aligned separately on
+2026-08-13 after its own review, backup, counts, fingerprints, and rollback
+evidence; no test-project identifiers or approvals were reused.
 
 ## Current deployed state
 
@@ -16,7 +16,8 @@ rollback evidence.
   retain legacy fallback.
 - Media backfill: 180 of 180 receipts attached and verified.
 - Media `canonical-only`: deliberately not activated.
-- Production `fatins`: not changed by this rollout.
+- Production `fatins`: separately aligned on 2026-08-13; shared runtime source,
+  rules, manifests, and tests now match apart from explicit environment bindings.
 - Git: this record travels with the reviewed V2 runtime-retirement commit on
   `main`.
 
@@ -35,6 +36,11 @@ rollback evidence.
    `functions:task07ProcessMediaUpload` in `europe-west8` for the bounded
    legacy-map backfill path.
 5. Deployed Hosting only after the hardened production build passed.
+6. On 2026-08-13, after production alignment, redeployed only
+   `functions:deleteUser` to carry the archive-equipment media cleanup fix.
+   App Check, all 11 directory records, the 77/77 active Function inventory,
+   and callable IAM policy (38/38 west8 and 5/5 west1) were reverified. Hosting
+   was not redeployed because no frontend runtime source changed.
 
 Never use a bare `firebase deploy` when reproducing this rollout.
 
@@ -136,9 +142,29 @@ surfaces that are outside User Data V1 retirement. `syncUserDirectory` remains
 as a shell-to-directory identity projection and no longer reads rollout state.
 
 The private rollout/cutover documents and offline Task 05 scripts remain for
-evidence, reconstruction, and later production replication. No Hosting or
+evidence, reconstruction, auditing, and guarded recovery. No Hosting or
 Functions runtime imports them, and Firestore rules permanently deny migrated
 fields on current user shells.
+
+## Production parity refresh - 2026-08-13
+
+The shared runtime was compared after the independently reviewed production
+release. `frontend/src`, `frontend/functions/src`, and `firestore.rules` are
+semantically identical between `fatins` and `fatin-test`; remaining repository
+differences are the intentional Firebase project/site/bucket, CORS, App Check,
+live-operation lock, and dated evidence bindings.
+
+The test project also received production's focused active-caller regression
+coverage and the account-deletion fix that discovers legacy equipped-item media
+retained only in root-compaction or Task 05 migration archives. Validation was:
+
+- Functions: 191/191 tests; clean 103-file build with no retired artifacts;
+- User Data tooling: 68/68 tests;
+- frontend: 135/135 suites, 1260/1260 tests, and successful production build;
+- performance/release harness: 313/313 tests and all release-safety checks;
+- Browser: authenticated Home V2 mutation/restore and reload, Bazaar nested
+  item/spell rendering, Tecniche/Spell, Combat, and Grigliata Tokens/Dice; zero
+  browser warnings or errors.
 
 ## Media V2 preparation sequence and evidence
 
@@ -232,11 +258,10 @@ production.
    fallback because Media remains `v1-write`.
 5. Report any error before planning the separate `canonical-only` step.
 
-## Production replication gates
+## Production replication outcome
 
-Before changing `fatins`: preserve a fresh export, use a maintenance window,
-apply the same reviewed code, deploy only explicit resources, regenerate every
-plan/count/fingerprint from production, execute each guarded stage separately,
-and verify after every write. The current operators intentionally hard-lock
-live execution to `fatin-test`; extend that protection deliberately rather
-than replacing project IDs by search-and-replace.
+The separately reviewed production rollout preserved a fresh export, used an
+idle Grigliata window, deployed only explicit resources, regenerated every
+plan/count/fingerprint from production, and verified after every write. The two
+repositories retain their own project hard locks; environment identifiers must
+never be aligned by search-and-replace.

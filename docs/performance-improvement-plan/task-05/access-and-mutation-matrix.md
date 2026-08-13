@@ -1,6 +1,6 @@
 # Task 05 access and mutation matrix
 
-Current as of 2026-08-12. `fatin-test` is `new-only`, its legacy root fields are
+Current as of 2026-08-13. `fatin-test` is `new-only`, its legacy root fields are
 physically compacted, and the runtime compatibility layer has been retired.
 This matrix describes the V2-only source, not the superseded activation build.
 
@@ -79,9 +79,9 @@ The following Task 05 runtime categories are intentionally absent:
 - client-side character-creation root transactions;
 - rollback bridge and legacy mutation gate.
 
-Offline migration/cutover/compaction/reconstruction scripts are retained so the
-same guarded sequence can later be run against `fatins`. They are not bundled
-into Hosting or exported from Functions.
+Offline migration/cutover/compaction/reconstruction scripts are retained for
+auditing, verification, and guarded recovery. They are not bundled into Hosting
+or exported from Functions.
 
 ## Verification ownership
 

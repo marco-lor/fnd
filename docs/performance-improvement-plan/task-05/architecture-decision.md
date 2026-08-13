@@ -1,5 +1,12 @@
 # ADR 05: versioned user domains and inventory instances
 
+> Historical design record. This ADR preserves the pre-rollout constraints and
+> authorization decision as originally accepted; its rollout status and
+> additive/no-compaction assumptions are superseded by the current
+> [access and mutation matrix](./access-and-mutation-matrix.md), the
+> [test activation record](./fatin-test-v2-activation-2026-08-01.md), and the
+> [legacy-root compaction runbook](./legacy-root-compaction.md).
+
 - Status: accepted for implementation; production rollout not authorized
 - Schema version: `2`
 - Rollout configuration: `app_config/user_data_v2`

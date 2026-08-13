@@ -23,12 +23,13 @@
   cutover, compaction, verification, and reconstruction tools remain as
   historical/production-replication evidence. They are not consulted by the
   webapp runtime;
-- production project `fatins` has not been changed by this test-project work.
+- production project `fatins` was later aligned independently on 2026-08-13;
+  no test-project approval, count, UID, or fingerprint was reused.
 
 There is no supported runtime switch back to V1 in this source revision. A
-production rollout must not copy the retirement commit until `fatins` has
-independently completed and verified its own `new-only` cutover, retention
-period, and physical compaction.
+production rollout was not permitted to copy the retirement commit until
+`fatins` independently completed and verified its own `new-only` cutover,
+retention period, and physical compaction; that guarded sequence is now complete.
 
 ## What happened on 2026-08-01
 
@@ -90,19 +91,19 @@ The current source-boundary contract is:
   recursively deletes those archives, and verifies their removal;
 - Firestore rules permanently reject migrated user-data fields on root shells.
 
-## Replicating on fatins
+## Production replication record
 
-The test-project counts, UIDs, fingerprints, and deployment identifiers must
-never be reused. Before applying this cleanup to `fatins`:
+The test-project counts, UIDs, fingerprints, and deployment identifiers were not
+reused. The production rollout satisfied the required sequence:
 
-1. preserve a fresh export and immutable cutover evidence;
-2. deploy the archive-aware account-deletion Function before creating any
+1. preserved a fresh export and immutable cutover evidence;
+2. deployed the archive-aware account-deletion Function before creating any
    compaction archive;
-3. run the legacy-compatible migration/cutover source through production's own
+3. ran the legacy-compatible migration/cutover source through production's own
    guarded `new-only` sequence;
-4. wait the separately approved rollback-retention period;
-5. regenerate production counts and fingerprints, compact, and verify;
-6. only then apply the V2-only runtime-retirement source and deploy explicit
+4. honored the separately approved rollback-retention decision;
+5. regenerated production counts and fingerprints, compacted, and verified;
+6. only then applied the V2-only runtime-retirement source and deployed explicit
    Functions, rules, and Hosting targets.
 
 The retained offline tools deliberately still understand historical rollout

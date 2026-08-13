@@ -137,7 +137,10 @@ export const collectArchivedOwnedMediaPaths = (
     // Profile paths can live in any retained shell field. The parser accepts
     // only paths owned by this uid and ignores shared or other-user media.
     add(value, "profile", "profile");
-    if (["inventory", "spells", "tecniche"].includes(String(field))) {
+    if (["inventory", "equipped"].includes(String(field))) {
+      add(value, "inventory", "legacy-root");
+    }
+    if (["spells", "tecniche"].includes(String(field))) {
       const scope = String(field) as OwnedMediaScope;
       add(value, scope, "legacy-root");
     }
@@ -145,7 +148,9 @@ export const collectArchivedOwnedMediaPaths = (
 
   (archives.migrationDomains ?? []).forEach(({domain, payload}) => {
     if (domain === "shell") add(payload, "profile", "profile");
-    if (domain === "inventory") add(payload, "inventory", "legacy-root");
+    if (["inventory", "equipment"].includes(String(domain))) {
+      add(payload, "inventory", "legacy-root");
+    }
     if (domain !== "personalContent" || !payload ||
       typeof payload !== "object" || Array.isArray(payload)) return;
     const personalContent = payload as Record<string, unknown>;

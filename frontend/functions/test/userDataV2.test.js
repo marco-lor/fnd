@@ -327,6 +327,7 @@ test('account deletion discovers media retained only in both archive formats', (
     rootFields: [
       {field: 'imagePath', value: 'characters/Hero_u1_123'},
       {field: 'inventory', value: {image: 'items/varie_u1_Rope_1'}},
+      {field: 'equipped', value: {image: 'items/varie_u1_Sword_1'}},
       {field: 'spells', value: {image: 'spells/spell_u1_Flare_image'}},
       {field: 'tecniche', value: {video: 'tecnicas/videos/tecnica_u1_Dash_1'}},
       {field: 'imageUrl', value: 'characters/Other_u12_123'},
@@ -334,6 +335,7 @@ test('account deletion discovers media retained only in both archive formats', (
     migrationDomains: [
       {domain: 'shell', payload: {image: 'characters/Old_u1_999'}},
       {domain: 'inventory', payload: [{image: 'items/varie_u1_Old_2'}]},
+      {domain: 'equipment', payload: {image: 'items/varie_u1_Shield_2'}},
       {
         domain: 'personalContent',
         payload: {
@@ -349,6 +351,8 @@ test('account deletion discovers media retained only in both archive formats', (
     'characters/Old_u1_999',
     'items/varie_u1_Old_2',
     'items/varie_u1_Rope_1',
+    'items/varie_u1_Shield_2',
+    'items/varie_u1_Sword_1',
     'spells/spell_u1_Flare_image',
     'spells/videos/spell_u1_Old_2',
     'tecnicas/tecnica_u1_Old_2',

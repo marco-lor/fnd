@@ -1,4 +1,4 @@
-<!-- LAST VERIFIED: 2026-08-12 -->
+<!-- LAST VERIFIED: 2026-08-13 -->
 
 # FND (Fantasy & Dragons)
 
@@ -61,7 +61,7 @@ the per-user storage contract.
 
 Task 05 migration, cutover-attestation, compaction, verification, and archive
 reconstruction utilities remain under `frontend/scripts/task05/`. They are
-offline operator tools for auditing and later production replication, not a
+offline operator tools for auditing, verification, and guarded recovery, not a
 runtime V1 data path.
 
 ## Functions and regions
@@ -150,14 +150,15 @@ intentional. For this retirement, deploy Functions before rules and Hosting,
 then smoke authenticated Home, DM, Bazaar (including nested spells), Combat,
 and Grigliata interactions.
 
-## Replicating the change to production
+## Production alignment invariant
 
-Do not copy only the deleted source files. Replicate the reviewed sequence:
+Production `fatins` completed the independently reviewed alignment on
+2026-08-13. The sequence was:
 
 1. prove the production V2 migration, new-only cutover attestation, and physical
    root compaction independently;
 2. deploy the archive-aware `deleteUser` path before creating compaction
-   archives or hold an equivalent deletion maintenance fence;
+   archives;
 3. apply the runtime, rules, manifest, harness, and documentation changes as one
    reviewed commit;
 4. run the clean Functions build and all local gates against the production
@@ -166,6 +167,10 @@ Do not copy only the deleted source files. Replicate the reviewed sequence:
    Task 07, and Grigliata compatibility endpoints;
 6. deploy Functions, then Firestore rules, then Hosting, and complete an
    authenticated manual smoke before accepting the release.
+
+The repositories intentionally retain different project, Hosting, bucket,
+CORS, App Check, live-operation lock, and dated evidence values. Runtime source,
+rules, manifests, and shared tests must otherwise remain aligned.
 
 The dated activation record and access matrix under
 `docs/performance-improvement-plan/task-05/` explain the historical counts and

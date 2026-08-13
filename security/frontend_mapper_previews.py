@@ -17,9 +17,9 @@ Default run:
 
 Outputs:
     fatin_test_public_resource_check/report.md
-    fatins_public_resource_check/report.json
-    fatins_public_resource_check/files/
-    fatins_public_resource_check/reconstructed_sources/
+    fatin_test_public_resource_check/report.json
+    fatin_test_public_resource_check/files/
+    fatin_test_public_resource_check/reconstructed_sources/
 """
 
 import argparse
@@ -40,7 +40,7 @@ from urllib.request import Request, urlopen
 # =========================
 
 DEFAULT_TARGET = "https://fatin-test.web.app"
-DEFAULT_OUTPUT_DIR = "fatins_public_resource_check"
+DEFAULT_OUTPUT_DIR = "fatin_test_public_resource_check"
 DEFAULT_PREVIEW_LINES = 10
 DEFAULT_PROBE_COMMON = True
 DEFAULT_ALLOW_CROSS_ORIGIN_ASSETS = False
