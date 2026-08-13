@@ -364,7 +364,7 @@ test('Task 05 user-domain and server-only collections reject every client write'
   }
 });
 
-test('Task 05 operator rollout config is private and remains server-owned', async () => {
+test('Task 05 historical rollout record is private and remains server-owned', async () => {
   const anonymous = environment.unauthenticatedContext().firestore();
   const player = environment.authenticatedContext('perf-player').firestore();
   const privileged = [
@@ -387,23 +387,10 @@ test('Task 05 operator rollout config is private and remains server-owned', asyn
   }
 });
 
-test('Task 05 new-only blocks legacy aggregates while preserving shell updates', async () => {
+test('Task 05 V2-only blocks legacy aggregates while preserving shell updates', async () => {
   const owner = environment.authenticatedContext('perf-player').firestore();
   const peer = environment.authenticatedContext('perf-peer-2').firestore();
   const newOwner = environment.authenticatedContext('task05-new-owner').firestore();
-
-  await environment.withSecurityRulesDisabled(async (context) => {
-    const adminFirestore = context.firestore();
-    await updateDoc(doc(adminFirestore, 'users/perf-player'), {modelVersion: 2});
-    await setDoc(doc(adminFirestore, 'app_config/user_data_v2'), {
-      schemaVersion: 2,
-      mode: 'new-only',
-      userOverrides: {
-        'perf-player': 'new-only',
-        'perf-peer-2': 'dual-write',
-      },
-    });
-  });
 
   try {
     await assertFails(updateDoc(doc(owner, 'users/perf-player'), {
@@ -420,75 +407,14 @@ test('Task 05 new-only blocks legacy aggregates while preserving shell updates',
       email: 'task05-new-owner@example.invalid',
       modelVersion: 2,
     }));
-
-    // The override is evaluated for the target user: a peer that remains in
-    // dual-write may still use the pre-cutover legacy mutation boundary.
-    await assertSucceeds(updateDoc(doc(peer, 'users/perf-peer-2'), {
+    await assertFails(updateDoc(doc(peer, 'users/perf-peer-2'), {
       'stats.hpCurrent': 43,
     }));
   } finally {
     await environment.withSecurityRulesDisabled(async (context) => {
       const adminFirestore = context.firestore();
-      await deleteDoc(doc(adminFirestore, 'app_config/user_data_v2'));
       await updateDoc(doc(adminFirestore, 'users/perf-player'), {
-        modelVersion: deleteField(),
         username: deleteField(),
-      });
-      await updateDoc(doc(adminFirestore, 'users/perf-peer-2'), {
-        'stats.hpCurrent': 45,
-      });
-    });
-  }
-});
-
-test('Task 05 legacy drain freezes only its explicit per-user mutation scope', async () => {
-  const owner = environment.authenticatedContext('perf-player').firestore();
-  const peer = environment.authenticatedContext('perf-peer-2').firestore();
-
-  await environment.withSecurityRulesDisabled(async (context) => {
-    const adminFirestore = context.firestore();
-    await updateDoc(doc(adminFirestore, 'users/perf-player'), {modelVersion: 2});
-    await setDoc(doc(adminFirestore, 'app_config/user_data_v2'), {
-      schemaVersion: 2,
-      mode: 'dual-write',
-      userOverrides: {'perf-player': 'dual-write'},
-      legacyDrain: {
-        users: {
-          'perf-player': {
-            drainId: 'drain_perf_player_001',
-            closedAt: Timestamp.fromMillis(1_750_000_000_000),
-          },
-        },
-      },
-    });
-  });
-
-  try {
-    await assertFails(updateDoc(doc(owner, 'users/perf-player'), {
-      'stats.hpCurrent': 42,
-    }));
-    await assertFails(updateDoc(doc(owner, 'users/perf-player'), {
-      'flags.characterCreationDone': false,
-    }));
-    await assertFails(updateDoc(doc(owner, 'users/perf-player'), {
-      beltCapacity: 4,
-    }));
-    await assertSucceeds(updateDoc(doc(owner, 'users/perf-player'), {
-      username: 'Task 05 drain shell update',
-    }));
-    await assertSucceeds(updateDoc(doc(peer, 'users/perf-peer-2'), {
-      'stats.hpCurrent': 42,
-    }));
-  } finally {
-    await environment.withSecurityRulesDisabled(async (context) => {
-      const adminFirestore = context.firestore();
-      await deleteDoc(doc(adminFirestore, 'app_config/user_data_v2'));
-      await updateDoc(doc(adminFirestore, 'users/perf-player'), {
-        modelVersion: deleteField(),
-        username: deleteField(),
-      });
-      await updateDoc(doc(adminFirestore, 'users/perf-peer-2'), {
-        'stats.hpCurrent': 45,
       });
     });
   }

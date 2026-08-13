@@ -5,11 +5,6 @@ import {
   planUserDirectoryMutation,
   userDirectoryProjectionDataMatches,
 } from "./userDirectoryProjection";
-import {reconcileLegacyUserDomains} from "./userDataBridge";
-import {
-  TASK06_BACKEND_CONFIG_PATH,
-  resolveTask06DerivedOwnerMode,
-} from "./userDerivedState";
 
 const REGION = "europe-west8";
 const USER_DIRECTORY_COLLECTION = "user_directory";
@@ -28,62 +23,35 @@ export const syncUserDirectory = onDocumentWritten(
     const afterData = event.data.after.exists
       ? event.data.after.data()
       : null;
+    if (planUserDirectoryMutation(beforeData, afterData).type === "none") {
+      return;
+    }
+
     const db = admin.firestore();
-    const task06ConfigRef = db.doc(TASK06_BACKEND_CONFIG_PATH);
     const sourceRef = db.collection("users").doc(event.params.uid);
     const targetRef = db.collection(USER_DIRECTORY_COLLECTION)
       .doc(event.params.uid);
-    const mutation = planUserDirectoryMutation(beforeData, afterData);
 
     // Events can be retried or delivered out of order. Resolve the current
-    // source and target together so every relevant event converges to the
-    // latest source state and retries do not create redundant writes.
-    const legacyOwnerActive = mutation.type === "none"
-      ? db.runTransaction(async (transaction) => {
-        const task06Config = await transaction.get(task06ConfigRef);
-        return resolveTask06DerivedOwnerMode(task06Config.data()) !==
-          "authoritative";
-      })
-      : db.runTransaction(async (transaction) => {
-      const [task06Config, sourceSnapshot, targetSnapshot] =
-        await transaction.getAll(
-          task06ConfigRef,
-          sourceRef,
-          targetRef
-        );
-      if (
-        resolveTask06DerivedOwnerMode(task06Config.data()) ===
-        "authoritative"
-      ) return false;
-
+    // source and target together so every event converges to the latest shell.
+    await db.runTransaction(async (transaction) => {
+      const [sourceSnapshot, targetSnapshot] = await transaction.getAll(
+        sourceRef,
+        targetRef
+      );
       if (!sourceSnapshot.exists) {
         if (targetSnapshot.exists) transaction.delete(targetRef);
-        return true;
+        return;
       }
 
       const projection = buildUserDirectoryProjection(sourceSnapshot.data());
       if (
         targetSnapshot.exists
         && userDirectoryProjectionDataMatches(targetSnapshot.data(), projection)
-      ) return true;
+      ) return;
 
-      // Full replacement guarantees that stale or accidentally-added private
-      // fields cannot survive a projection refresh.
+      // Full replacement guarantees stale private fields cannot survive.
       transaction.set(targetRef, projection);
-      return true;
     });
-
-    if (!await legacyOwnerActive) return;
-    const bridgeFence = await task06ConfigRef.get();
-    if (
-      resolveTask06DerivedOwnerMode(bridgeFence.data()) ===
-      "authoritative"
-    ) return;
-    await reconcileLegacyUserDomains(
-      event.params.uid,
-      beforeData,
-      afterData,
-      event.data.after.updateTime
-    );
   }
 );

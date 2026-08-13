@@ -89,6 +89,7 @@ const makeStream = (sessions = [], overrides = {}) => ({
 
 describe('GlobalGrigliataMusicPlayer', () => {
   let authState;
+  let userSettingsState;
   let streamHandlers;
   let subscribeToMusicStream;
   let unsubscribe;
@@ -128,7 +129,8 @@ describe('GlobalGrigliataMusicPlayer', () => {
     });
     authState = { user: { uid: 'user-1' }, userData: { settings: {} } };
     useAuth.mockImplementation(() => authState);
-    useUserSettings.mockReturnValue({ data: null });
+    userSettingsState = { data: { settings: {} } };
+    useUserSettings.mockImplementation(() => userSettingsState);
     unsubscribe = jest.fn();
     streamHandlers = null;
     subscribeToMusicStream = jest.fn((onMusicStream, onError) => {
@@ -357,9 +359,8 @@ describe('GlobalGrigliataMusicPlayer', () => {
     ]));
     expect(container.querySelectorAll('audio')).toHaveLength(0);
 
-    authState = {
-      user: { uid: 'user-1' },
-      userData: { settings: { grigliata_music_muted: true } },
+    userSettingsState = {
+      data: { settings: { grigliata_music_muted: true } },
     };
     rerender(candidatePlayer());
     await emitStream(makeStream([makeSession('muted')]));
@@ -368,7 +369,7 @@ describe('GlobalGrigliataMusicPlayer', () => {
     expect(subscribeToMusicStream).toHaveBeenCalledTimes(1);
   });
 
-  test('honors rollout-aware V2 mute settings when the legacy profile is stale', async () => {
+  test('honors canonical V2 mute settings independently of the shell profile', async () => {
     useUserSettings.mockReturnValue({
       data: { settings: { grigliata_music_muted: true } },
     });
@@ -478,9 +479,8 @@ describe('GlobalGrigliataMusicPlayer', () => {
     await waitFor(() => expect(playSpy).toHaveBeenCalledTimes(1));
     const audio = container.querySelector('audio');
 
-    authState = {
-      user: { uid: 'user-1' },
-      userData: { settings: { grigliata_music_muted: true } },
+    userSettingsState = {
+      data: { settings: { grigliata_music_muted: true } },
     };
     rerender(candidatePlayer());
     await waitFor(() => expect(container.querySelectorAll('audio')).toHaveLength(0));
@@ -508,9 +508,8 @@ describe('GlobalGrigliataMusicPlayer', () => {
   });
 
   test('loads no node while muted and computes the current offset after unmuting', async () => {
-    authState = {
-      user: { uid: 'user-1' },
-      userData: { settings: { grigliata_music_muted: true } },
+    userSettingsState = {
+      data: { settings: { grigliata_music_muted: true } },
     };
     const { container, rerender } = render(
       candidatePlayer()
@@ -519,7 +518,7 @@ describe('GlobalGrigliataMusicPlayer', () => {
     expect(container.querySelectorAll('audio')).toHaveLength(0);
     expect(playSpy).not.toHaveBeenCalled();
 
-    authState = { user: { uid: 'user-1' }, userData: { settings: {} } };
+    userSettingsState = { data: { settings: {} } };
     rerender(candidatePlayer());
 
     await waitFor(() => expect(playSpy).toHaveBeenCalledTimes(1));

@@ -11,7 +11,6 @@ const PRIMARY_CALLABLE_REGION = 'europe-west8';
 const CALLABLE_AUDIT_REGIONS = Object.freeze([
   'europe-west8',
   'europe-west1',
-  'us-central1',
 ]);
 
 module.exports = Object.freeze({

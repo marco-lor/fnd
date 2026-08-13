@@ -34,10 +34,7 @@ import {
   deriveResourceTotals,
   hashValue,
   isValidFirestoreDocumentId,
-  resolveUserDataRolloutStage,
-  writesLegacyUserProjection,
 } from "./userDataV2";
-import {isUserDataLegacyDrainFrozen} from "./userDataBridge";
 import {
   completeServerTelemetry,
   failServerTelemetry,
@@ -47,7 +44,6 @@ import {
 
 const REGION = "europe-west8";
 const TASK06_CONFIG_PATH = "app_config/task06_backend";
-const USER_DATA_CONFIG_PATH = "app_config/user_data_v2";
 const OPERATION_COLLECTION = "backend_operations";
 const WORK_COLLECTION = "backend_operation_work";
 const WORKER_PAGE_SIZE = BACKEND_OPERATION_PAGE_SIZE;
@@ -290,7 +286,6 @@ const processLevelUpSubject = async (input: {
   const db = admin.firestore();
   const userRef = db.doc(`users/${input.userId}`);
   const actorRef = db.doc(`users/${input.actorUid}`);
-  const rolloutRef = db.doc(USER_DATA_CONFIG_PATH);
   const progressionRef = db.doc(
     `users/${input.userId}/state/progression`
   );
@@ -304,7 +299,6 @@ const processLevelUpSubject = async (input: {
     const [
       operation,
       actor,
-      rollout,
       user,
       progression,
       resources,
@@ -313,7 +307,6 @@ const processLevelUpSubject = async (input: {
     ] = await transaction.getAll(
       input.operationRef,
       actorRef,
-      rolloutRef,
       userRef,
       progressionRef,
       resourcesRef,
@@ -332,9 +325,6 @@ const processLevelUpSubject = async (input: {
       incrementProgress(transaction, input.operationRef, "skipped");
       return "new";
     }
-    if (isUserDataLegacyDrainFrozen(rollout.data(), input.userId)) {
-      return "paused";
-    }
     if (!user.exists) {
       createSubject(transaction, subjectRef, "skipped", {
         reason: "missing-target",
@@ -345,9 +335,8 @@ const processLevelUpSubject = async (input: {
     const rootData = user.data() ?? {};
     const targetRole = asTrimmedString(rootData.role).toLowerCase();
     const progressionStats = asRecord(progression.get("stats"));
-    const rootStats = asRecord(rootData.stats);
     const fromLevel = Math.max(1, Math.trunc(asFiniteNumber(
-      progressionStats.level ?? rootStats.level,
+      progressionStats.level,
       1
     )));
     if (targetRole === "dm" || fromLevel >= 10) {
@@ -360,20 +349,17 @@ const processLevelUpSubject = async (input: {
     const toLevel = fromLevel + 1;
     const tokensGranted = getTokenGrantForLevel(toLevel);
     const currentTokens = asFiniteNumber(
-      progressionStats.combatTokensAvailable ??
-        rootStats.combatTokensAvailable
+      progressionStats.combatTokensAvailable
     );
     const nextProgressionStats = {
       ...progressionStats,
       level: toLevel,
       combatTokensAvailable: currentTokens + tokensGranted,
     };
-    const currentParametri = progression.get("Parametri") ??
-      rootData.Parametri;
+    const currentParametri = progression.get("Parametri");
     const nextParametri = deriveAnimaParameters({
       parametri: currentParametri,
-      altriParametri: progression.get("AltriParametri") ??
-        rootData.AltriParametri,
+      altriParametri: progression.get("AltriParametri"),
       level: toLevel,
       utils: utils.data(),
     });
@@ -396,27 +382,9 @@ const processLevelUpSubject = async (input: {
         },
       }, {merge: true});
     }
-    const rootUpdate: Record<string, unknown> = {
-      "summary.level": toLevel,
-    };
-    const rolloutStage = resolveUserDataRolloutStage(
-      rollout.data(),
-      input.userId
-    );
-    if (writesLegacyUserProjection(rolloutStage)) {
-      rootUpdate["stats.level"] = toLevel;
-      rootUpdate["stats.combatTokensAvailable"] =
-        currentTokens + tokensGranted;
-      rootUpdate.Parametri = nextParametri;
-      Object.entries(resourceTotals).forEach(([field, value]) => {
-        rootUpdate[`stats.${field}`] = value;
-      });
-    }
     transaction.update(
       userRef,
-      rootUpdate as admin.firestore.UpdateData<
-        admin.firestore.DocumentData
-      >
+      {"summary.level": toLevel}
     );
     transaction.create(eventRef, {
       from_level: fromLevel,
@@ -445,17 +413,15 @@ const processLockSubject = async (input: {
   const db = admin.firestore();
   const userRef = db.doc(`users/${input.userId}`);
   const actorRef = db.doc(`users/${input.actorUid}`);
-  const rolloutRef = db.doc(USER_DATA_CONFIG_PATH);
   const settingsRef = db.doc(`users/${input.userId}/state/settings`);
   const subjectRef = input.operationRef.collection("subjects").doc(
     hashValue(["settings", input.userId, input.field]).slice(0, 48)
   );
   return db.runTransaction(async (transaction) => {
-    const [operation, actor, rollout, user, settings, subject] =
+    const [operation, actor, user, settings, subject] =
       await transaction.getAll(
         input.operationRef,
         actorRef,
-        rolloutRef,
         userRef,
         settingsRef,
         subjectRef
@@ -472,9 +438,6 @@ const processLockSubject = async (input: {
       incrementProgress(transaction, input.operationRef, "skipped");
       return "new";
     }
-    if (isUserDataLegacyDrainFrozen(rollout.data(), input.userId)) {
-      return "paused";
-    }
     if (!user.exists) {
       createSubject(transaction, subjectRef, "skipped", {
         reason: "missing-target",
@@ -489,18 +452,6 @@ const processLockSubject = async (input: {
         [input.field]: input.value,
       },
     }, {merge: true});
-    const rolloutStage = resolveUserDataRolloutStage(
-      rollout.data(),
-      input.userId
-    );
-    if (writesLegacyUserProjection(rolloutStage)) {
-      transaction.set(userRef, {
-        settings: {
-          ...asRecord(user.get("settings")),
-          [input.field]: input.value,
-        },
-      }, {merge: true});
-    }
     createSubject(transaction, subjectRef, "succeeded");
     incrementProgress(transaction, input.operationRef, "succeeded");
     return "new";

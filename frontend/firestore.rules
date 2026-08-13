@@ -270,44 +270,7 @@ service cloud.firestore {
         ]);
     }
 
-    function isValidUserDataRolloutStage(stage) {
-      return stage in [
-        "legacy-read",
-        "shadow-verify",
-        "dual-write",
-        "new-read-dual-write",
-        "new-only"
-      ];
-    }
-
-    function isUserDataAggregateFrozen(userId) {
-      let configPath = /databases/$(database)/documents/app_config/user_data_v2;
-      let config = exists(configPath) ? get(configPath).data : {};
-      let overrides = mapOrEmpty(config, "userOverrides");
-      let globalStage = config.get("mode", config.get("stage", "legacy-read"));
-      let configured = overrides.get(userId, globalStage);
-      let stage = isValidUserDataRolloutStage(configured)
-        ? configured
-        : (isValidUserDataRolloutStage(globalStage) ? globalStage : "legacy-read");
-      let drain = mapOrEmpty(config, "legacyDrain");
-      let users = mapOrEmpty(drain, "users");
-      let drainFieldMalformed = config.keys().hasAny(["legacyDrain"])
-        && !(config.legacyDrain is map);
-      let usersFieldMalformed = drain.keys().hasAny(["users"])
-        && !(drain.users is map);
-      return stage == "new-only"
-        || drainFieldMalformed
-        || (
-          (
-            overrides.keys().hasAny([userId])
-            && isValidUserDataRolloutStage(overrides.get(userId, ""))
-          )
-            ? usersFieldMalformed || users.keys().hasAny([userId])
-            : drain.keys().hasAny(["global"])
-        );
-    }
-
-    function changesLegacyUserAggregate(nextData, existingData) {
+    function changesMigratedUserDataFields(nextData, existingData) {
       return nextData.diff(existingData).affectedKeys().hasAny([
         "stats",
         "Parametri",
@@ -334,35 +297,10 @@ service cloud.firestore {
       ]);
     }
 
-    function isAllowedUserDataRootMutation(userId, nextData, existingData) {
-      return !isUserDataAggregateFrozen(userId)
-        || (
-          existingData.get("modelVersion", 0) == 2
-          && nextData.get("modelVersion", 0) == 2
-          && !changesLegacyUserAggregate(nextData, existingData)
-        );
-    }
-
-    function stableMapField(nextMap, prevMap, fieldName) {
-      return nextMap.get(fieldName, null) == prevMap.get(fieldName, null);
-    }
-
-    function isCharacterCreationOpen(data) {
-      return mapOrEmpty(data, "flags").get("characterCreationDone", false) != true;
-    }
-
-    function hasStableStatsSystemFields(nextData, existingData) {
-      let nextStats = mapOrEmpty(nextData, "stats");
-      let existingStats = mapOrEmpty(existingData, "stats");
-      return stableMapField(nextStats, existingStats, "level")
-        && stableMapField(nextStats, existingStats, "hpTotal")
-        && stableMapField(nextStats, existingStats, "manaTotal")
-        && stableMapField(nextStats, existingStats, "essenzaTotal")
-        && stableMapField(nextStats, existingStats, "basePointsAvailable")
-        && stableMapField(nextStats, existingStats, "basePointsSpent")
-        && stableMapField(nextStats, existingStats, "combatTokensAvailable")
-        && stableMapField(nextStats, existingStats, "combatTokensSpent")
-        && stableMapField(nextStats, existingStats, "negativeBaseStatCount");
+    function isAllowedUserShellMutation(nextData, existingData) {
+      return existingData.get("modelVersion", 0) == 2
+        && nextData.get("modelVersion", 0) == 2
+        && !changesMigratedUserDataFields(nextData, existingData);
     }
 
     function hasStableUserIdentityAndRole(nextData, existingData) {
@@ -381,44 +319,21 @@ service cloud.firestore {
         ]);
     }
 
-    function isSafeOwnerUserCreate(userId) {
-      return request.auth.uid == userId
-        && !hasUserDeletionTombstone(userId)
-        && !request.resource.data.keys().hasAny([
-          "deletionState",
-          "deletionRequestedAt",
-          "deletionRequestedBy"
-        ])
-        && request.resource.data.get("role", null) == "player"
-        && request.resource.data.get("email", "") is string
-        && !request.resource.data.keys().hasAny(["roleUpdatedAt", "roleUpdatedBy"])
-        // A frozen/new-only scope requires server-owned V2-first account
-        // initialization. Direct client shell creation would leave the fixed
-        // domain documents absent and cannot participate in the frozen sweep.
-        && !isUserDataAggregateFrozen(userId);
-    }
-
     function isSafeOwnerUserUpdate(userId) {
       return isActiveSignedIn()
         && request.auth.uid == userId
         && resource.data.get("deletionState", null) != "pending"
-        && isAllowedUserDataRootMutation(
-          userId,
+        && isAllowedUserShellMutation(
           request.resource.data,
           resource.data
         )
-        && hasStableUserIdentityAndRole(request.resource.data, resource.data)
-        && (
-          isCharacterCreationOpen(resource.data)
-          || hasStableStatsSystemFields(request.resource.data, resource.data)
-        );
+        && hasStableUserIdentityAndRole(request.resource.data, resource.data);
     }
 
     function isSafePrivilegedUserUpdate(userId) {
       return isDMOrWebmaster()
         && resource.data.get("deletionState", null) != "pending"
-        && isAllowedUserDataRootMutation(
-          userId,
+        && isAllowedUserShellMutation(
           request.resource.data,
           resource.data
         )
@@ -1741,16 +1656,9 @@ service cloud.firestore {
     match /users/{userId} {
       // Owner read, plus webmaster read. (Note: players cannot read other users.)
       allow read: if isSignedIn() && (request.auth.uid == userId || isWebmaster() || isDM());
-      allow create: if isSignedIn()
-        && isSafeOwnerUserCreate(userId)
-        && hasValidOptionalTask07MediaReference(
-          request.resource.data,
-          "avatar",
-          userId,
-          userId,
-          null,
-          "users/" + userId
-        );
+      // Account initialization is server-owned so the shell and every fixed
+      // V2 state document are created as one reviewed model.
+      allow create: if false;
       allow update: if isSignedIn()
         && (
           isSafeOwnerUserUpdate(userId)
@@ -1798,8 +1706,8 @@ service cloud.firestore {
           && !referencesPendingNpc(resource.data);
       }
 
-      // Task 05 user-data domains. Clients retain the same private audience as
-      // the legacy aggregate, while every mutation remains server-owned.
+      // Task 05 V2 user-data domains. Clients retain the same private audience
+      // as the shell, while every mutation remains server-owned.
       match /state/{domainId} {
         allow get, list: if canReadPrivateUserDomain(userId)
           && domainId in [
@@ -1833,9 +1741,8 @@ service cloud.firestore {
     }
 
     match /app_config/user_data_v2 {
-      // The operator document contains per-user canary and drain identifiers.
-      // Players must use a future privacy-preserving effective-stage resolver;
-      // exposing this whole document would reveal every scoped UID.
+      // Historical cutover evidence can contain scoped UIDs and drain IDs.
+      // Runtime code no longer reads this document.
       allow read: if isDM() || isWebmaster();
       allow write: if false;
     }

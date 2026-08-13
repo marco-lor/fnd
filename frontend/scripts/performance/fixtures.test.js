@@ -50,6 +50,22 @@ test('fixture generation is stable and contains the required scale', () => {
     ))?.data,
     TASK07_MEDIA_CONTROL
   );
+  const playerShell = firstDocuments.find(({path: documentPath}) => (
+    documentPath === 'users/perf-player'
+  ))?.data;
+  assert.equal(playerShell.modelVersion, 2);
+  assert.equal(playerShell.summary.level, 5);
+  for (const legacyField of ['stats', 'Parametri', 'inventory', 'spells', 'tecniche', 'settings']) {
+    assert.equal(Object.hasOwn(playerShell, legacyField), false);
+  }
+  for (const stateDocument of ['progression', 'resources', 'settings', 'equipment', 'profileContent']) {
+    assert.ok(firstDocuments.some(({path: documentPath}) => (
+      documentPath === `users/perf-player/state/${stateDocument}`
+    )));
+  }
+  assert.equal(firstDocuments.filter(({path: documentPath}) => (
+    documentPath.startsWith('users/perf-player/inventory/')
+  )).length, 500);
   const musicStream = firstDocuments.find(({ path: documentPath }) => (
     documentPath === 'grigliata_music_stream/current'
   ))?.data;
@@ -174,7 +190,7 @@ test('emulator cleanup clears exact loopback services then the whole demo Storag
   ]);
 });
 
-test('fixture seeding suppresses bulk triggers and flushes sentinel work before verification', async () => {
+test('fixture seeding suppresses bulk triggers and flushes directory sentinel work before verification', async () => {
   const calls = [];
   const documents = [{ path: 'fixture/doc', data: { stable: true } }];
   const manifest = { version: FIXTURE_VERSION, hash: 'fixture-hash', documentCount: 1 };
@@ -196,7 +212,6 @@ test('fixture seeding suppresses bulk triggers and flushes sentinel work before 
     seedAccountsImpl: async () => calls.push('accounts:seed'),
     writeDocumentsImpl: async (received) => calls.push(`documents:seed:${received.length}`),
     seedStorageImpl: async () => calls.push('storage:seed'),
-    waitForDerivedStateImpl: async () => calls.push('derived:verify'),
     writeFixtureMetadataImpl: async (received) => calls.push(`metadata:write:${received.hash}`),
     verifyFixtureImpl: async () => {
       calls.push('fixture:verify');
@@ -211,7 +226,6 @@ test('fixture seeding suppresses bulk triggers and flushes sentinel work before 
     'accounts:seed',
     'documents:seed:1',
     'storage:seed',
-    'derived:verify',
     'metadata:write:fixture-hash',
     'triggers:enable',
     'functions:ready',

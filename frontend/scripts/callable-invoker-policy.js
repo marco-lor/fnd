@@ -253,13 +253,6 @@ const REQUIRED_CALLABLES_BY_REGION = Object.freeze({
       compatibilityAliasOf: null,
     }),
   ]),
-  'us-central1': Object.freeze([
-    Object.freeze({
-      logicalKey: 'spendCharacterPoint',
-      owner: 'progression-legacy',
-      compatibilityAliasOf: 'spendCharacterPointV2',
-    }),
-  ]),
 });
 
 const printHelp = () => console.log([
@@ -276,7 +269,7 @@ const printHelp = () => console.log([
   'Safety:',
   '  - Dry-run is the default and writes a deterministic local plan.',
   '  - --check is read-only and exits non-zero on any drift or blocker.',
-  '  - Read-only audit regions: europe-west8, europe-west1, us-central1.',
+  '  - Read-only audit regions: europe-west8, europe-west1.',
   `  - Writes remain hard-locked to ${PRODUCTION_PROJECT_ID}/${PRODUCTION_WRITE_REGION}.`,
   '  - Execution requires the exact current dry-run fingerprint.',
   '  - Only exact reviewed manifest callables for the selected region are managed.',

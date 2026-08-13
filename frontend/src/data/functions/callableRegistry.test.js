@@ -71,7 +71,6 @@ describe('Firebase callable registry', () => {
   test.each([
     ['deleteUser', 'europe-west8'],
     ['deleteGrigliataCustomToken', 'europe-west1'],
-    ['spendCharacterPoint', 'us-central1'],
     ['spendCharacterPointV2', 'europe-west8'],
   ])('uses the declared region for %s', async (logicalKey, region) => {
     const { app, getFunctions, registry } = loadRegistry();
@@ -93,7 +92,7 @@ describe('Firebase callable registry', () => {
       await registry.getCallable(logicalKey)({probe: true});
     }
 
-    expect(entries).toHaveLength(44);
+    expect(entries).toHaveLength(43);
     expect(getFunctions).toHaveBeenCalledTimes(
       callableManifest.supportedRegions.length
     );
@@ -111,11 +110,6 @@ describe('Firebase callable registry', () => {
       }));
     expect(callableManifest.callables.duplicateFoeWithAssetsV2.region)
       .toBe('europe-west8');
-    expect(callableManifest.callables.spendCharacterPoint)
-      .toEqual(expect.objectContaining({
-        region: 'us-central1',
-        compatibilityAliasOf: 'spendCharacterPointV2',
-      }));
     expect(callableManifest.callables.spendCharacterPointV2.region)
       .toBe('europe-west8');
     [

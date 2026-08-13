@@ -26,8 +26,11 @@ import {
   writeBatch,
 } from '../../performance/firestore';
 import { useAuth } from '../../AuthContext';
-import { USER_DATA_ROLLOUT_STAGES } from '../../data/userData/domainSchema';
-import { useUserSettings } from '../../data/userData/userDataHooks';
+import {
+  useProgression,
+  useResources,
+  useUserSettings,
+} from '../../data/userData/userDataHooks';
 import { auth, db } from '../firebaseConfig';
 import {
   deleteLegacyStoragePath,
@@ -37,9 +40,6 @@ import {
 import { hasMediaAsset } from '../common/MediaImage';
 import { hasCanonicalTask07MediaAssetId } from '../common/canonicalMediaAsset';
 import { getCallable } from '../../data/functions/callableRegistry';
-import {
-  TASK06_LOCAL_CANDIDATE,
-} from '../../data/functions/backendOperationClient';
 import {
   runWithDurableOperationIntent,
 } from '../../data/functions/backendOperationIntentStore';
@@ -658,11 +658,25 @@ export default function GrigliataPage() {
     return installGrigliataBenchmarkBridge();
   }, []);
 
-  const { user, userData, loading } = useAuth();
-  const {
-    data: userSettingsDomain,
-    stage: userDataRolloutStage,
-  } = useUserSettings();
+  const { user, userData: userShell, loading } = useAuth();
+  const { data: userProgressionDomain } = useProgression();
+  const { data: userResourcesDomain } = useResources();
+  const { data: userSettingsDomain } = useUserSettings();
+  const userData = useMemo(() => ({
+    ...(userShell || {}),
+    ...(userProgressionDomain || {}),
+    ...(userResourcesDomain || {}),
+    stats: {
+      ...(userProgressionDomain?.stats || {}),
+      ...(userResourcesDomain?.stats || {}),
+    },
+    settings: userSettingsDomain?.settings || {},
+  }), [
+    userProgressionDomain,
+    userResourcesDomain,
+    userSettingsDomain?.settings,
+    userShell,
+  ]);
   const task07MediaOperationOwner = useTask07MediaOperationOwner();
   const musicMediaMode = useTask07MediaReadMode({ purpose: 'music' });
   const canonicalOnlyMusic = musicMediaMode === 'canonical-only';
@@ -675,17 +689,17 @@ export default function GrigliataPage() {
   const currentImageUrl = typeof userData?.imageUrl === 'string' ? userData.imageUrl.trim() : '';
   const currentImagePath = typeof userData?.imagePath === 'string' ? userData.imagePath.trim() : '';
   const currentMediaCandidate = (
-    userData?.media && typeof userData.media === 'object'
-      ? userData.media
-      : (userData?.General?.media && typeof userData.General.media === 'object' ? userData.General.media : null)
+    userShell?.media && typeof userShell.media === 'object'
+      ? userShell.media
+      : null
   );
   const currentMedia = hasMediaAsset({ media: currentMediaCandidate }, {
     variant: 'thumbnail',
   }) ? currentMediaCandidate : null;
   const currentTokenLabel = currentCharacterId || currentUserEmail.split('@')[0] || 'Player';
   const userSettings = useMemo(() => (
-    userSettingsDomain?.settings || userData?.settings || {}
-  ), [userData?.settings, userSettingsDomain?.settings]);
+    userSettingsDomain?.settings || {}
+  ), [userSettingsDomain?.settings]);
   const persistedDrawColorKey = resolveGrigliataDrawColorKey(userSettings.grigliata_draw_color);
   const persistedInteractionSharingEnabled = userSettings[GRIGLIATA_SHARE_INTERACTIONS_FIELD] === true;
   const isMusicMuted = userSettings[GRIGLIATA_MUSIC_MUTED_FIELD] === true;
@@ -1086,12 +1100,6 @@ export default function GrigliataPage() {
       .map((token) => [token.tokenId, token])
   ), [currentUserId, currentUserToken, customUserTokens]);
   const deleteCustomTokenWithCandidateReceipt = useCallback(async ({ tokenId }) => {
-    if (
-      !TASK06_LOCAL_CANDIDATE
-      && userDataRolloutStage !== USER_DATA_ROLLOUT_STAGES.NEW_ONLY
-    ) {
-      return deleteGrigliataCustomTokenCallable({ tokenId });
-    }
     return runWithDurableOperationIntent({
       actorUid: currentUserId,
       kind: 'delete-custom-token',
@@ -1101,7 +1109,7 @@ export default function GrigliataPage() {
         operationId,
       }),
     });
-  }, [currentUserId, userDataRolloutStage]);
+  }, [currentUserId]);
   const {
     buildPlacementWritePayload,
     buildTurnOrderRemovalPlacementWrite,

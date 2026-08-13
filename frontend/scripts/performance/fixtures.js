@@ -12,6 +12,7 @@ const {
   writeJson,
 } = require('./common');
 const { buildUserDirectoryProjection } = require('../backfill-user-directory');
+const { buildUserV2Plan } = require('../task05/user-data-model');
 
 configureOwnedPerformanceEnvironment();
 assertPerformanceProject(projectId);
@@ -38,7 +39,7 @@ const initializeAdmin = () => {
   bucket = getStorage(app).bucket();
 };
 
-const FIXTURE_VERSION = 'fnd-performance-v2-task07-media';
+const FIXTURE_VERSION = 'fnd-performance-v2-task05-runtime-retired-task07-media';
 const FIXED_TIME = '2026-01-01T00:00:00.000Z';
 const PASSWORD = 'PerfTest!123';
 const BATCH_SIZE = 350;
@@ -303,11 +304,21 @@ const buildDocuments = () => {
   for (let index = 0; index < 200; index += 1) {
     const uid = index < accountDefinitions.length ? accountDefinitions[index].uid : `perf-user-${pad(index)}`;
     const userData = primaryAccounts.get(uid) || buildUser({ uid }, index);
-    add(`users/${uid}`, userData);
+    const v2Plan = buildUserV2Plan(uid, userData);
+    const fatalIssue = v2Plan.issues.find(({severity}) => severity === 'error');
+    if (fatalIssue) {
+      throw new Error(`Invalid V2 fixture projection for ${uid}: ${fatalIssue.code}`);
+    }
+    for (const document of v2Plan.documents) {
+      if (document.path === `users/${uid}` || primaryAccounts.has(uid)) {
+        add(document.path, document.data);
+      }
+    }
     // Bulk fixture writes intentionally suppress Functions triggers. Seed the
     // deterministic projection explicitly, then exercise the real trigger via
     // the readiness sentinel below.
-    add(`user_directory/${uid}`, buildUserDirectoryProjection(userData));
+    const shell = v2Plan.documents.find(({path: documentPath}) => documentPath === `users/${uid}`)?.data;
+    add(`user_directory/${uid}`, buildUserDirectoryProjection(shell));
   }
 
   add('utils/schema_pg', buildUser({ uid: 'schema', characterCreationDone: false }, 0));
@@ -685,20 +696,22 @@ const buildManifest = (documents) => {
 
 const waitForFunctionsReady = async () => {
   initializeAdmin();
-  // The demo Functions environment exports only the consolidated owner. Seed
-  // its fail-closed control document before creating the readiness sentinel.
+  // Seed the fail-closed Task 06 control document before creating the
+  // directory-projection readiness sentinel.
   await db.doc('app_config/task06_backend').set(TASK06_BACKEND_CONFIG);
   const readiness = db.doc('users/perf-function-readiness');
   const directory = db.doc('user_directory/perf-function-readiness');
-  const readinessData = {
+  let readinessData = {
     characterId: '  Émulator Sentinel  ',
     role: 'player',
-    Parametri: { Base: { Signal: { Base: 1, Anima: 0, Equip: 0, Mod: 0 } } },
-    stats: { level: 1 },
+    schemaVersion: 2,
+    summary: { level: 1 },
   };
-  const expectedDirectory = buildUserDirectoryProjection(readinessData);
+  let expectedDirectory = buildUserDirectoryProjection(readinessData);
   await readiness.set(readinessData);
   const deadline = Date.now() + 120_000;
+  let nextProbeAt = Date.now() + 3_000;
+  let probeRevision = 0;
   try {
     while (Date.now() < deadline) {
       const [snapshot, directorySnapshot] = await Promise.all([
@@ -707,15 +720,28 @@ const waitForFunctionsReady = async () => {
       ]);
       const projectedData = directorySnapshot.data();
       if (
-        snapshot.data()?.Parametri?.Base?.Signal?.Tot === 1
+        snapshot.exists
         && directorySnapshot.exists
         && JSON.stringify(normalizeCanonical(projectedData))
           === JSON.stringify(normalizeCanonical(expectedDirectory))
       ) return;
+      // The emulator's trigger-enable endpoint can return while the reloaded
+      // Functions worker is still becoming ready. Periodically change a
+      // projected shell field so a missed first event is retried naturally.
+      if (Date.now() >= nextProbeAt) {
+        probeRevision += 1;
+        readinessData = {
+          ...readinessData,
+          characterId: `Émulator Sentinel ${probeRevision}`,
+        };
+        expectedDirectory = buildUserDirectoryProjection(readinessData);
+        await readiness.set(readinessData);
+        nextProbeAt = Date.now() + 3_000;
+      }
       await delay(500);
     }
     throw new Error(
-      'Functions emulator did not process derived fields and the user directory readiness sentinel within 120 seconds.'
+      'Functions emulator did not process the user directory readiness sentinel within 120 seconds.'
     );
   } finally {
     await readiness.delete().catch(() => {});
@@ -728,34 +754,6 @@ const waitForFunctionsReady = async () => {
       throw new Error('User directory readiness projection was not deleted within 120 seconds.');
     }
   }
-};
-
-const waitForDerivedState = async () => {
-  let previousSignature = null;
-  let stableChecks = 0;
-  const deadline = Date.now() + 120_000;
-  while (Date.now() < deadline) {
-    const users = await db.collection('users').get();
-    const normalized = users.docs.map((snapshot) => ({
-      id: snapshot.id,
-      Parametri: snapshot.data().Parametri,
-      stats: snapshot.data().stats,
-    }));
-    const totalsValid = normalized.every(({ Parametri = {} }) => (
-      ['Base', 'Combattimento', 'Special'].every((section) => (
-        Object.values(Parametri[section] || {}).every((parameter = {}) => (
-          Number(parameter.Tot || 0) === ['Base', 'Anima', 'Equip', 'Mod']
-            .reduce((total, key) => total + Number(parameter[key] || 0), 0)
-        ))
-      ))
-    ));
-    const signature = sha256(JSON.stringify(normalizeCanonical(normalized)));
-    stableChecks = totalsValid && signature === previousSignature ? stableChecks + 1 : 0;
-    if (stableChecks >= 2) return;
-    previousSignature = signature;
-    await delay(1000);
-  }
-  throw new Error('Functions-derived fixture fields did not reach a stable state within 120 seconds.');
 };
 
 const readLiveDocuments = async (documents) => {
@@ -819,7 +817,6 @@ const runSeedFixture = async ({
   seedAccountsImpl = seedAccounts,
   writeDocumentsImpl = writeDocuments,
   seedStorageImpl = seedStorage,
-  waitForDerivedStateImpl = waitForDerivedState,
   writeFixtureMetadataImpl = writeFixtureMetadata,
   verifyFixtureImpl = verifyFixture,
   documents = buildDocuments(),
@@ -834,7 +831,6 @@ const runSeedFixture = async ({
     await seedAccountsImpl();
     await writeDocumentsImpl(documents);
     await seedStorageImpl();
-    await waitForDerivedStateImpl();
     await writeFixtureMetadataImpl(manifest);
   });
 

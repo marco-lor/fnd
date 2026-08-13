@@ -14,7 +14,6 @@ import {
   USER_SHELL_MAX_BYTES,
   USER_STATE_MAX_BYTES,
   UserDataCommandTargetPolicy,
-  UserDataRolloutStage,
   USER_DATA_OPERATION_TTL_DAYS,
   USER_DATA_SCHEMA_VERSION,
   applyConsumableCap,
@@ -25,9 +24,8 @@ import {
   buildAdminUserListItem,
   canListPrivateUserLabels,
   normalizeAdminUserListPagination,
-  buildLegacyDomainProjection,
+  buildInitialUserDomainProjection,
   buildConsumableRollPlan,
-  buildLegacyEquippedSnapshot,
   buildUserShellProjection,
   consumeActiveTurnEffects,
   canAccessCatalogItem,
@@ -48,26 +46,19 @@ import {
   operationReceiptId,
   operationRequestHash,
   parseCatalogPrice,
-  removeLegacyInventoryDocuments,
-  replaceLegacyInventorySnapshot,
   resolveResourceFields,
   resolveUserDataCommandTargetUid,
-  resolveUserDataRolloutStage,
   validateOperationId,
-  writesLegacyUserProjection,
-  updateLegacyInventoryQuantity,
 } from "./userDataV2";
 import {
   enqueueOwnedMediaCleanup,
   parseOwnedMediaPath,
   planOwnedMediaCleanup,
 } from "./userOwnedMediaCleanup";
-import {isUserDataLegacyDrainFrozen} from "./userDataBridge";
 import {
   hasUntrustedTask07InventoryMedia,
   mergeUntrustedInventorySnapshotPatch,
   preserveTrustedTask07PersonalContent,
-  stripTask07PersonalContentProjection,
   stripUntrustedTask07InventoryMedia,
 } from "./task07ServerBoundary";
 import {assertActiveCaller} from "./callerAuthorization";
@@ -148,8 +139,6 @@ interface IdempotentContext {
   actorUid: string;
   targetUid: string;
   receiptId: string;
-  rolloutStage: UserDataRolloutStage;
-  writeLegacy: boolean;
 }
 
 const fail = (
@@ -254,30 +243,12 @@ const runIdempotent = async (
       };
     }
 
-    const rolloutConfig = await transaction.get(
-      db.doc("app_config/user_data_v2")
-    );
-    const rolloutStage = resolveUserDataRolloutStage(
-      rolloutConfig.data(),
-      targetUid
-    );
-    if (isUserDataLegacyDrainFrozen(
-      rolloutConfig.data(),
-      targetUid
-    )) {
-      fail(
-        "unavailable",
-        "User data is temporarily frozen for the legacy drain. Retry later."
-      );
-    }
     const result = await work({
       db,
       transaction,
       actorUid,
       targetUid,
       receiptId,
-      rolloutStage,
-      writeLegacy: writesLegacyUserProjection(rolloutStage),
     });
     transaction.set(receiptRef, {
       schemaVersion: USER_DATA_SCHEMA_VERSION,
@@ -384,43 +355,11 @@ const inventoryDocument = (
     acquiredAt: FieldValue.serverTimestamp(),
     pricePaid: options.pricePaid,
     source: options.source,
-    migration: null,
-    legacyManaged: false,
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   };
   assertDocumentBudget(document, USER_ITEM_MAX_BYTES, "Inventory item");
   return document;
-};
-
-const legacyInventoryEntry = (
-  snapshot: UnknownRecord,
-  inventoryId: string,
-  pricePaid: number,
-  source: string,
-  quantity = 1
-): UnknownRecord => ({
-  ...snapshot,
-  ...(quantity > 1 ? {qty: quantity} : {}),
-  _instance: {
-    instanceId: inventoryId,
-    acquiredAt: Timestamp.now(),
-    pricePaid,
-    source,
-  },
-});
-
-const requireLegacyInventory = (
-  result: {ok: boolean; inventory?: unknown[]; reason?: string}
-): unknown[] => {
-  const inventory = result.inventory;
-  if (!result.ok || !inventory) {
-    fail(
-      "failed-precondition",
-      `Legacy inventory mapping failed: ${result.reason || "unknown"}.`
-    );
-  }
-  return inventory as unknown[];
 };
 
 type CharacterCreationAction =
@@ -508,7 +447,6 @@ export const task05CharacterCreation = onCall(
       assertPayloadSize(request.data);
       const db = admin.firestore();
       const userRef = db.doc(`users/${actorUid}`);
-      const rolloutRef = db.doc("app_config/user_data_v2");
       const schemaRef = db.doc("utils/schema_pg");
       const stateRefs = {
         progression: db.doc(`users/${actorUid}/state/progression`),
@@ -519,7 +457,6 @@ export const task05CharacterCreation = onCall(
       };
       return db.runTransaction(async (transaction) => {
         const [
-          rollout,
           schema,
           user,
           progression,
@@ -528,7 +465,6 @@ export const task05CharacterCreation = onCall(
           equipment,
           profileContent,
         ] = await transaction.getAll(
-          rolloutRef,
           schemaRef,
           userRef,
           stateRefs.progression,
@@ -537,9 +473,6 @@ export const task05CharacterCreation = onCall(
           stateRefs.equipment,
           stateRefs.profileContent
         );
-        if (isUserDataLegacyDrainFrozen(rollout.data(), actorUid)) {
-          fail("unavailable", "User data is temporarily frozen. Retry later.");
-        }
         if (user.get("deletionState") === "pending") {
           fail("failed-precondition", "The account is pending deletion.");
         }
@@ -564,7 +497,7 @@ export const task05CharacterCreation = onCall(
               asRecord(userData.flags).characterCreationDone === true,
           },
         };
-        const domains = buildLegacyDomainProjection(source);
+        const domains = buildInitialUserDomainProjection(source);
         if (!user.exists) {
           const stats = asRecord(source.stats);
           transaction.create(userRef, {
@@ -642,14 +575,8 @@ export const task05CharacterCreation = onCall(
             varie.get("races_extra")
           )[race]);
           const schemaParametri = asRecord(schema.get("Parametri"));
-          const currentParametri = asRecord(
-            progression.get("Parametri") ??
-              access.targetSnapshot.get("Parametri")
-          );
-          const currentStats = {
-            ...asRecord(access.targetSnapshot.get("stats")),
-            ...asRecord(progression.get("stats")),
-          };
+          const currentParametri = asRecord(progression.get("Parametri"));
+          const currentStats = asRecord(progression.get("stats"));
           const nextParametri = {
             ...currentParametri,
             Base: asRecord(schemaParametri.Base),
@@ -668,10 +595,7 @@ export const task05CharacterCreation = onCall(
             negativeBaseStatCount: 0,
           };
           const nextAltriParametri = {
-            ...asRecord(
-              progression.get("AltriParametri") ??
-                access.targetSnapshot.get("AltriParametri")
-            ),
+            ...asRecord(progression.get("AltriParametri")),
             Anima_1: "---",
           };
           context.transaction.set(progressionRef, {
@@ -680,15 +604,9 @@ export const task05CharacterCreation = onCall(
             AltriParametri: nextAltriParametri,
             stats: nextStats,
           }, {merge: true});
-          const rootUpdate: UnknownRecord = {race};
-          if (context.writeLegacy) {
-            rootUpdate.Parametri = nextParametri;
-            rootUpdate.AltriParametri = nextAltriParametri;
-            rootUpdate.stats = nextStats;
-          }
           context.transaction.update(
             access.targetSnapshot.ref,
-            asUpdateData(rootUpdate)
+            {race}
           );
           return {success: true, race};
         }
@@ -699,21 +617,13 @@ export const task05CharacterCreation = onCall(
             fail("invalid-argument", "A valid Anima shard is required.");
           }
           const nextAltriParametri = {
-            ...asRecord(
-              progression.get("AltriParametri") ??
-                access.targetSnapshot.get("AltriParametri")
-            ),
+            ...asRecord(progression.get("AltriParametri")),
             Anima_1: anima,
           };
           context.transaction.set(progressionRef, {
             ...stateMetadata(context.actorUid),
             AltriParametri: nextAltriParametri,
           }, {merge: true});
-          if (context.writeLegacy) {
-            context.transaction.update(access.targetSnapshot.ref, {
-              AltriParametri: nextAltriParametri,
-            });
-          }
           return {success: true, anima};
         }
 
@@ -753,7 +663,6 @@ export const task05CharacterCreation = onCall(
           characterId,
           flags: completedFlags,
           ...profile,
-          ...(context.writeLegacy ? {settings: nextSettings} : {}),
         });
         return {success: true, characterId};
       }
@@ -992,12 +901,9 @@ export const task05ConsumeTurnEffects = onCall(
           };
         }
         const canonicalActiveTurnEffects = resources.get("active_turn_effect");
-        const activeTurnEffectsSource = context.rolloutStage === "new-only" ?
-          canonicalActiveTurnEffects :
-          canonicalActiveTurnEffects ?? access.targetSnapshot.get("active_turn_effect");
         if (transitionState) {
           const resourceShield = asRecord(
-            asRecord(activeTurnEffectsSource).barriera
+            asRecord(canonicalActiveTurnEffects).barriera
           );
           if (
             resourceShield.totalTurns !== transitionState.currentShieldEffect.totalTurns ||
@@ -1009,7 +915,7 @@ export const task05ConsumeTurnEffects = onCall(
             );
           }
         }
-        const consumption = consumeActiveTurnEffects(activeTurnEffectsSource);
+        const consumption = consumeActiveTurnEffects(canonicalActiveTurnEffects);
         if (!consumption.changed && !transitionState) {
           return {success: true, changed: false};
         }
@@ -1040,19 +946,6 @@ export const task05ConsumeTurnEffects = onCall(
             };
           }
           context.transaction.set(resourcesRef, resourcesUpdate, {merge: true});
-          if (context.writeLegacy) {
-            const legacyUpdate: UnknownRecord = {
-              active_turn_effect: synchronizedEffects,
-            };
-            if (barrierExpired) {
-              legacyUpdate["stats.barrieraCurrent"] = 0;
-              legacyUpdate["stats.barrieraTotal"] = 0;
-            }
-            context.transaction.update(
-              access.targetSnapshot.ref,
-              asUpdateData(legacyUpdate)
-            );
-          }
         }
         if (transitionState && grigliataTransition) {
           const startedAt = grigliataTransition.preserveStartedAt &&
@@ -1133,31 +1026,20 @@ export const task05PurchaseItem = onCall(
         ? fail("failed-precondition", "Catalog price is invalid.")
         : parsedPrice;
       const resourceStats = asRecord(resourcesSnapshot.get("stats"));
-      const rootStats = asRecord(access.targetSnapshot.get("stats"));
-      const currentGold = asFiniteNumber(resourceStats.gold ?? rootStats.gold);
+      const currentGold = asFiniteNumber(resourceStats.gold);
       if (currentGold < price) {
         fail("resource-exhausted", "Insufficient gold.");
       }
       const nextGold = currentGold - price;
-      const currentInventory = Array.isArray(access.targetSnapshot.get("inventory"))
-        ? [...access.targetSnapshot.get("inventory")]
-        : [];
       const catalogVersion = catalogSnapshot.updateTime?.toMillis() ?? null;
       // A catalog attachment has one authoritative reference path. Copying it
       // into a user inventory snapshot would create an untracked second
-      // reference that cleanup cannot prove safe. Keep the compatibility
-      // legacy fields, but clean the complete Task 07 descriptor/CAS family.
+      // reference that cleanup cannot prove safe. Clean the complete Task 07
+      // descriptor/CAS family before copying the display snapshot.
       const snapshot = stripUntrustedTask07InventoryMedia({
         ...catalogData,
         id: itemId,
       });
-      currentInventory.push(legacyInventoryEntry(
-        snapshot,
-        inventoryId,
-        price,
-        "bazaar"
-      ));
-
       transaction.set(inventoryRef, inventoryDocument(snapshot, {
         catalogItemId: itemId,
         catalogVersion,
@@ -1169,13 +1051,6 @@ export const task05PurchaseItem = onCall(
         ...stateMetadata(actorUid),
         stats: {gold: nextGold},
       }, {merge: true});
-      if (context.writeLegacy) {
-        transaction.update(access.targetSnapshot.ref, {
-          "stats.gold": nextGold,
-          inventory: currentInventory,
-          modelVersion: USER_DATA_SCHEMA_VERSION,
-        });
-      }
       return {
         success: true,
         inventoryId,
@@ -1211,19 +1086,13 @@ export const task05AdjustGold = onCall(
       );
       const resources = await context.transaction.get(resourcesRef);
       const current = asFiniteNumber(
-        asRecord(resources.get("stats")).gold ??
-          asRecord(access.targetSnapshot.get("stats")).gold
+        asRecord(resources.get("stats")).gold
       );
       const next = Math.max(0, current + delta);
       context.transaction.set(resourcesRef, {
         ...stateMetadata(context.actorUid),
         stats: {gold: next},
       }, {merge: true});
-      if (context.writeLegacy) {
-        context.transaction.update(access.targetSnapshot.ref, {
-          "stats.gold": next,
-        });
-      }
       return {success: true, previousGold: current, newGold: next};
       }
     );
@@ -1261,8 +1130,7 @@ export const task05UpdateResource = onCall(
       );
       const resources = await context.transaction.get(resourcesRef);
       const fields = resolveResourceFields(resource);
-      const current = asRecord(resources.get("stats"))[fields.current] ??
-        asRecord(access.targetSnapshot.get("stats"))[fields.current];
+      const current = asRecord(resources.get("stats"))[fields.current];
       const next = applyResourceMutation(current, mode, request.data?.value);
       if (next === null) fail("invalid-argument", "Resource value must be finite.");
       const totalValue = request.data?.totalValue === undefined
@@ -1275,12 +1143,8 @@ export const task05UpdateResource = onCall(
         ...stateMetadata(context.actorUid),
         stats: {[fields.current]: next},
       };
-      const legacyUpdate: UnknownRecord = {
-        [`stats.${fields.current}`]: next,
-      };
       if (totalValue !== null) {
         asRecord(stateUpdate.stats)[fields.total] = totalValue;
-        legacyUpdate[`stats.${fields.total}`] = totalValue;
       }
       if (resource === "barriera" && totalValue !== null) {
         const remainingTurns = Math.trunc(asFiniteNumber(
@@ -1300,18 +1164,8 @@ export const task05UpdateResource = onCall(
         stateUpdate.active_turn_effect = {
           barriera: {remainingTurns, totalTurns},
         };
-        legacyUpdate["active_turn_effect.barriera"] = {
-          remainingTurns,
-          totalTurns,
-        };
       }
       context.transaction.set(resourcesRef, stateUpdate, {merge: true});
-      if (context.writeLegacy) {
-        context.transaction.update(
-          access.targetSnapshot.ref,
-          asUpdateData(legacyUpdate)
-        );
-      }
       return {
         success: true,
         resource,
@@ -1412,13 +1266,6 @@ export const task05UpdateGrigliataCharacterResources = onCall(
           updatedAt: FieldValue.serverTimestamp(),
           updatedBy: context.actorUid,
         }, {merge: true});
-        if (context.writeLegacy) {
-          context.transaction.update(access.targetSnapshot.ref, {
-            "stats.hpCurrent": nextResources.hpCurrent,
-            "stats.manaCurrent": nextResources.manaCurrent,
-            "stats.barrieraCurrent": nextResources.barrieraCurrent,
-          });
-        }
         return {
           success: true,
           backgroundId,
@@ -1500,10 +1347,8 @@ export const task05SetEquipment = onCall(
         inventoryById,
         slot,
         inventoryId,
-        parametri: progression.get("Parametri") ??
-          access.targetSnapshot.get("Parametri"),
-        level: asRecord(progression.get("stats")).level ??
-          asRecord(access.targetSnapshot.get("stats")).level,
+        parametri: progression.get("Parametri"),
+        level: asRecord(progression.get("stats")).level,
       });
       if (!transition.ok) {
         fail(
@@ -1531,8 +1376,7 @@ export const task05SetEquipment = onCall(
       }, {merge: true});
       const resourceTotals = deriveResourceTotals({
         parametri: transition.parametri,
-        level: asRecord(progression.get("stats")).level ??
-          asRecord(access.targetSnapshot.get("stats")).level,
+        level: asRecord(progression.get("stats")).level,
         utils: utils.data(),
       });
       if (Object.keys(resourceTotals).length) {
@@ -1540,22 +1384,6 @@ export const task05SetEquipment = onCall(
           ...stateMetadata(context.actorUid),
           stats: resourceTotals,
         }, {merge: true});
-      }
-      if (context.writeLegacy) {
-        const legacyUpdate: UnknownRecord = {
-          equipped: buildLegacyEquippedSnapshot(
-            transition.slots,
-            inventoryById
-          ),
-          Parametri: transition.parametri,
-        };
-        Object.entries(resourceTotals).forEach(([key, value]) => {
-          legacyUpdate[`stats.${key}`] = value;
-        });
-        context.transaction.update(
-          access.targetSnapshot.ref,
-          asUpdateData(legacyUpdate)
-        );
       }
       return {
         success: true,
@@ -1659,20 +1487,6 @@ export const task05MutateInventory = onCall(
             requestedBy: context.actorUid,
           });
         });
-        if (context.writeLegacy) {
-          const v2Documents = Object.fromEntries(inventorySnapshots.map(
-            (snapshot, index) => [inventoryIds[index], snapshot.data() ?? {}]
-          ));
-          const rootInventory = requireLegacyInventory(
-            removeLegacyInventoryDocuments(
-              access.targetSnapshot.get("inventory"),
-              v2Documents
-            )
-          );
-          context.transaction.update(access.targetSnapshot.ref, {
-            inventory: rootInventory,
-          });
-        }
         return {success: true, inventoryIds, removed: inventoryIds.length};
       }
 
@@ -1711,23 +1525,6 @@ export const task05MutateInventory = onCall(
             ? "player-custom"
             : "dm-custom",
         }));
-        if (context.writeLegacy) {
-          const rootInventory = Array.isArray(
-            access.targetSnapshot.get("inventory")
-          ) ? [...access.targetSnapshot.get("inventory")] : [];
-          rootInventory.push(legacyInventoryEntry(
-            snapshot,
-            inventoryId,
-            0,
-            access.targetUid === context.actorUid
-              ? "player-custom"
-              : "dm-custom",
-            quantity
-          ));
-          context.transaction.update(access.targetSnapshot.ref, {
-            inventory: rootInventory,
-          });
-        }
         return {success: true, inventoryId, quantity};
       }
 
@@ -1742,18 +1539,15 @@ export const task05MutateInventory = onCall(
         const catalogRef = context.db.doc(`items/${itemId}`);
         const catalog = await context.transaction.get(catalogRef);
         if (!catalog.exists) fail("not-found", "Catalog item not found.");
-        // Grants follow the same copy boundary as purchases: legacy media is
-        // retained for compatibility, while canonical ownership/CAS fields
-        // are stripped until this inventory target receives its own family.
+        // Grants follow the same copy boundary as purchases: canonical
+        // ownership/CAS fields are stripped until this inventory target
+        // receives its own family.
         const snapshot = stripUntrustedTask07InventoryMedia({
           ...(catalog.data() ?? {}),
           id: itemId,
         });
         const kind = inventoryKind(snapshot);
         const documentCount = kind === "varie" ? 1 : quantity;
-        const rootInventory = Array.isArray(access.targetSnapshot.get("inventory"))
-          ? [...access.targetSnapshot.get("inventory")]
-          : [];
         const inventoryIds: string[] = [];
         for (let index = 0; index < documentCount; index += 1) {
           const inventoryId = `grant_${hashValue([
@@ -1772,18 +1566,6 @@ export const task05MutateInventory = onCall(
               source: "dm-grant",
             })
           );
-          rootInventory.push(legacyInventoryEntry(
-            snapshot,
-            inventoryId,
-            0,
-            "dm-grant",
-            kind === "varie" ? quantity : 1
-          ));
-        }
-        if (context.writeLegacy) {
-          context.transaction.update(access.targetSnapshot.ref, {
-            inventory: rootInventory,
-          });
         }
         return {success: true, inventoryIds, quantity};
       }
@@ -1802,21 +1584,11 @@ export const task05MutateInventory = onCall(
       );
       if (!inventory.exists) fail("not-found", "Inventory item not found.");
 
-      const rootInventory = Array.isArray(access.targetSnapshot.get("inventory"))
-        ? [...access.targetSnapshot.get("inventory")]
-        : [];
-
       if (action === "remove") {
         const slots = asRecord(equipment.get("slots"));
         if (Object.values(slots).some((value) => value === inventoryId)) {
           fail("failed-precondition", "Unequip the item before removing it.");
         }
-        const nextLegacyInventory = context.writeLegacy
-          ? requireLegacyInventory(removeLegacyInventoryDocuments(
-            rootInventory,
-            {[inventoryId]: inventory.data() ?? {}}
-          ))
-          : rootInventory;
         context.transaction.delete(inventoryRef);
         enqueueOwnedMediaCleanup(context.transaction, context.db, {
           paths: planOwnedMediaCleanup({
@@ -1832,11 +1604,6 @@ export const task05MutateInventory = onCall(
           source: "inventory-remove",
           requestedBy: context.actorUid,
         });
-        if (context.writeLegacy) {
-          context.transaction.update(access.targetSnapshot.ref, {
-            inventory: nextLegacyInventory,
-          });
-        }
         return {success: true, inventoryId, removed: true};
       }
 
@@ -1847,25 +1614,12 @@ export const task05MutateInventory = onCall(
         if (inventory.get("kind") !== "varie") {
           fail("failed-precondition", "Only Varie stacks have a quantity.");
         }
-        const nextLegacyInventory = context.writeLegacy
-          ? requireLegacyInventory(updateLegacyInventoryQuantity(
-            rootInventory,
-            inventoryId,
-            inventory.data() ?? {},
-            quantity
-          ))
-          : rootInventory;
         context.transaction.update(inventoryRef, {
           quantity,
           revision: FieldValue.increment(1),
           updatedAt: FieldValue.serverTimestamp(),
           updatedBy: context.actorUid,
         });
-        if (context.writeLegacy) {
-          context.transaction.update(access.targetSnapshot.ref, {
-            inventory: nextLegacyInventory,
-          });
-        }
         return {success: true, inventoryId, quantity};
       }
 
@@ -1915,14 +1669,6 @@ export const task05MutateInventory = onCall(
         ...(inventory.data() ?? {}),
         ...inventoryUpdate,
       }, USER_ITEM_MAX_BYTES, "Inventory item");
-      const nextLegacyInventory = context.writeLegacy
-        ? requireLegacyInventory(replaceLegacyInventorySnapshot(
-          rootInventory,
-          inventoryId,
-          inventory.data() ?? {},
-          currentSnapshot
-        ))
-        : rootInventory;
       context.transaction.update(inventoryRef, inventoryUpdate);
       enqueueOwnedMediaCleanup(context.transaction, context.db, {
         paths: planOwnedMediaCleanup({
@@ -1938,11 +1684,6 @@ export const task05MutateInventory = onCall(
         source: "inventory-edit",
         requestedBy: context.actorUid,
       });
-      if (context.writeLegacy) {
-        context.transaction.update(access.targetSnapshot.ref, {
-          inventory: nextLegacyInventory,
-        });
-      }
       return {success: true, inventoryId, edited: true};
       }
     );
@@ -1985,9 +1726,6 @@ export const task05MutatePersonalContent = onCall(
       );
       const existing = await context.transaction.get(contentRef);
       const oldName = asTrimmedString(existing.get("displayName"));
-      const rootContent = {
-        ...asRecord(access.targetSnapshot.get(collectionName)),
-      };
 
       if (action === "delete") {
         if (!existing.exists) fail("not-found", "Personal content not found.");
@@ -2012,12 +1750,6 @@ export const task05MutatePersonalContent = onCall(
           source: `${kind}-delete`,
           requestedBy: context.actorUid,
         });
-        if (oldName) delete rootContent[oldName];
-        if (context.writeLegacy) {
-          context.transaction.update(access.targetSnapshot.ref, {
-            [collectionName]: rootContent,
-          });
-        }
         return {success: true, contentId, deleted: true};
       }
 
@@ -2068,7 +1800,6 @@ export const task05MutatePersonalContent = onCall(
           : 1,
         displayName: name,
         normalizedName: normalizeDisplayName(name),
-        legacyManaged: false,
         updatedAt: FieldValue.serverTimestamp(),
         updatedBy: context.actorUid,
       };
@@ -2099,22 +1830,9 @@ export const task05MutatePersonalContent = onCall(
         kind,
         exactName: name,
         contentId,
-        legacyManaged: false,
         updatedAt: FieldValue.serverTimestamp(),
       });
       if (oldReservation) context.transaction.delete(oldReservation);
-      if (oldName && oldName !== name) delete rootContent[oldName];
-      rootContent[name] = {
-        ...cloneWithoutUndefined(
-          stripTask07PersonalContentProjection(contentData)
-        ) as UnknownRecord,
-        id: contentId,
-      };
-      if (context.writeLegacy) {
-        context.transaction.update(access.targetSnapshot.ref, {
-          [collectionName]: rootContent,
-        });
-      }
       return {success: true, contentId, name};
       }
     );
@@ -2533,18 +2251,12 @@ export const task05UpdateSettings = onCall(
       const domainPatch: UnknownRecord = {
         ...stateMetadata(context.actorUid),
       };
-      const legacyPatch: UnknownRecord = {};
       ["parameterLocks", "paramLocks"].forEach((key) => {
         if (patch[key] === undefined) return;
         domainPatch[key] = asRecord(patch[key]);
-        legacyPatch[key] = asRecord(patch[key]);
       });
       if (patch.settings) {
         domainPatch.settings = asRecord(patch.settings);
-        legacyPatch.settings = {
-          ...asRecord(access.targetSnapshot.get("settings")),
-          ...asRecord(patch.settings),
-        };
       }
       if (hiddenPlacementSettings) {
         domainPatch.settings = hiddenPlacementSettings;
@@ -2562,7 +2274,6 @@ export const task05UpdateSettings = onCall(
       };
       if (Object.keys(grigliata).length) {
         domainPatch.grigliata = grigliata;
-        Object.assign(legacyPatch, grigliata);
       }
       context.transaction.set(settingsRef, domainPatch, {merge: true});
       if (placementState) {
@@ -2580,18 +2291,6 @@ export const task05UpdateSettings = onCall(
           if (placementState.deleteTokenProfile) {
             context.transaction.delete(placementState.tokenRef);
           }
-        }
-      }
-      if (context.writeLegacy) {
-        if (hiddenPlacementSettings) {
-          context.transaction.set(access.targetSnapshot.ref, {
-            settings: hiddenPlacementSettings,
-          }, {merge: true});
-        } else {
-          context.transaction.update(
-            access.targetSnapshot.ref,
-            asUpdateData(legacyPatch)
-          );
         }
       }
       return {
@@ -2636,12 +2335,6 @@ export const task05UpdateProfileContent = onCall(
         ...stateMetadata(context.actorUid),
         ...patch,
       }, {merge: true});
-      if (context.writeLegacy) {
-        context.transaction.update(
-          access.targetSnapshot.ref,
-          asUpdateData(patch)
-        );
-      }
       return {success: true, updatedFields: Object.keys(patch)};
       }
     );
@@ -2706,22 +2399,20 @@ export const task05UpdateProgression = onCall(
         ([key, value]) => [
           key,
           deepMergeRecords(
-            progression.get(key) ?? access.targetSnapshot.get(key),
+            progression.get(key),
             value
           ),
         ]
       ));
       const level = asRecord(mergedPatch.stats).level ??
-        asRecord(progression.get("stats")).level ??
-        asRecord(access.targetSnapshot.get("stats")).level;
+        asRecord(progression.get("stats")).level;
       const shouldRecomputeParameters = Boolean(
         patch.Parametri || patch.AltriParametri || statsPatch.level !== undefined
       );
       let resourceTotals: UnknownRecord = {};
       if (shouldRecomputeParameters) {
         const parametri = mergedPatch.Parametri ??
-          progression.get("Parametri") ??
-          access.targetSnapshot.get("Parametri");
+          progression.get("Parametri");
         const shouldRecomputeAnima = Boolean(
           patch.AltriParametri || statsPatch.level !== undefined
         );
@@ -2729,8 +2420,7 @@ export const task05UpdateProgression = onCall(
           ? deriveAnimaParameters({
             parametri,
             altriParametri: mergedPatch.AltriParametri ??
-              progression.get("AltriParametri") ??
-              access.targetSnapshot.get("AltriParametri"),
+              progression.get("AltriParametri"),
             level,
             utils: utils.data(),
           })
@@ -2759,22 +2449,6 @@ export const task05UpdateProgression = onCall(
       const rootUpdate: UnknownRecord = {};
       if (statsPatch.level !== undefined) {
         rootUpdate["summary.level"] = asFiniteNumber(level, 1);
-      }
-      if (context.writeLegacy) {
-        Object.assign(rootUpdate, Object.fromEntries(Object.entries(patch).map(
-          ([key, value]) => [
-            key,
-            deepMergeRecords(access.targetSnapshot.get(key), value),
-          ]
-        )));
-        if (mergedPatch.Parametri) rootUpdate.Parametri = mergedPatch.Parametri;
-        Object.entries(resourceTotals).forEach(([key, value]) => {
-          if (rootUpdate.stats) {
-            asRecord(rootUpdate.stats)[key] = value;
-          } else {
-            rootUpdate[`stats.${key}`] = value;
-          }
-        });
       }
       if (Object.keys(rootUpdate).length) {
         context.transaction.update(
@@ -2829,9 +2503,8 @@ export const task05PrepareConsumable = onCall(
       if (inventoryKind(snapshot) !== "consumabile") {
         fail("failed-precondition", "The inventory item is not consumable.");
       }
-      const rootStats = asRecord(access.targetSnapshot.get("stats"));
       const progressionStats = asRecord(progression.get("stats"));
-      const level = progressionStats.level ?? rootStats.level;
+      const level = progressionStats.level;
       const plan = buildConsumableRollPlan(
         snapshot,
         resource,
@@ -2928,9 +2601,6 @@ export const task05CommitConsumable = onCall(
         1
       )));
       const nextQuantity = quantity - 1;
-      const rootInventory = Array.isArray(access.targetSnapshot.get("inventory"))
-        ? [...access.targetSnapshot.get("inventory")]
-        : [];
       const slots = asRecord(equipment.get("slots"));
       const clearedSlots = Object.entries(slots)
         .filter(([, value]) => value === inventoryId)
@@ -2979,10 +2649,8 @@ export const task05CommitConsumable = onCall(
           inventoryById: remainingInventoryById,
           slot: clearedSlots[0],
           inventoryId: null,
-          parametri: progression.get("Parametri") ??
-            access.targetSnapshot.get("Parametri"),
-          level: asRecord(progression.get("stats")).level ??
-            asRecord(access.targetSnapshot.get("stats")).level,
+          parametri: progression.get("Parametri"),
+          level: asRecord(progression.get("stats")).level,
         });
         if (!equipmentTransition.ok) {
           fail(
@@ -2996,8 +2664,7 @@ export const task05CommitConsumable = onCall(
         }, {merge: true});
         derivedResourceTotals = deriveResourceTotals({
           parametri: equipmentTransition.parametri,
-          level: asRecord(progression.get("stats")).level ??
-            asRecord(access.targetSnapshot.get("stats")).level,
+          level: asRecord(progression.get("stats")).level,
           utils: utils.data(),
         });
         if (Object.keys(derivedResourceTotals).length) {
@@ -3008,20 +2675,6 @@ export const task05CommitConsumable = onCall(
         }
       }
 
-      let nextRootInventory = rootInventory;
-      if (context.writeLegacy) {
-        nextRootInventory = nextQuantity > 0
-          ? requireLegacyInventory(updateLegacyInventoryQuantity(
-            rootInventory,
-            inventoryId,
-            inventory.data() ?? {},
-            nextQuantity
-          ))
-          : requireLegacyInventory(removeLegacyInventoryDocuments(
-            rootInventory,
-            {[inventoryId]: inventory.data() ?? {}}
-          ));
-      }
       if (nextQuantity > 0) {
         context.transaction.update(inventoryRef, {
           quantity: nextQuantity,
@@ -3059,52 +2712,16 @@ export const task05CommitConsumable = onCall(
       if (resource === "hp" || resource === "mana") {
         const fields = resolveResourceFields(resource);
         const resourceStats = asRecord(resources.get("stats"));
-        const rootStats = asRecord(access.targetSnapshot.get("stats"));
         resourceValue = applyConsumableCap(
-          resourceStats[fields.current] ?? rootStats[fields.current],
+          resourceStats[fields.current],
           result.gain,
           derivedResourceTotals[fields.total] ??
-            resourceStats[fields.total] ?? rootStats[fields.total]
+            resourceStats[fields.total]
         );
         context.transaction.set(resourcesRef, {
           ...stateMetadata(context.actorUid),
           stats: {[fields.current]: resourceValue},
         }, {merge: true});
-      }
-      const rootUpdate: UnknownRecord = {inventory: nextRootInventory};
-      if (equipmentTransition) {
-        rootUpdate.equipped = buildLegacyEquippedSnapshot(
-          equipmentTransition.slots,
-          remainingInventoryById
-        );
-        rootUpdate.Parametri = equipmentTransition.parametri;
-      } else if (nextQuantity > 0 && clearedSlots.length) {
-        const legacyEquipped = {
-          ...asRecord(access.targetSnapshot.get("equipped")),
-        };
-        clearedSlots.forEach((slotKey) => {
-          legacyEquipped[slotKey] = {
-            ...asRecord(inventory.get("currentSnapshot")),
-            qty: nextQuantity,
-            _instance: {
-              ...asRecord(asRecord(legacyEquipped[slotKey])._instance),
-              instanceId: inventoryId,
-            },
-          };
-        });
-        rootUpdate.equipped = legacyEquipped;
-      }
-      if (resource === "hp" || resource === "mana") {
-        rootUpdate[`stats.${resolveResourceFields(resource).current}`] = resourceValue;
-      }
-      Object.entries(derivedResourceTotals).forEach(([key, value]) => {
-        rootUpdate[`stats.${key}`] = value;
-      });
-      if (context.writeLegacy) {
-        context.transaction.update(
-          access.targetSnapshot.ref,
-          asUpdateData(rootUpdate)
-        );
       }
       context.transaction.update(preparationRef, {
         committedAt: FieldValue.serverTimestamp(),

@@ -5,12 +5,12 @@
     {
       "id": "shell-user-profile-document",
       "kind": "document",
-      "queryKey": "users.aggregate.subscribe.v1",
+      "queryKey": "users.shell.subscribe.v2",
       "ownerTask": "Task 05",
-      "currentScope": "Dedicated Auth profile plus the actor-scoped shared legacy aggregate, compact shell, rollout resolution, and fixed V2 state documents",
+      "currentScope": "Compact identity, authorization, avatar, flags, and summary shell only; non-profile domains use fixed V2 state documents or collections",
       "targetOrdering": [],
       "cursor": { "version": 1, "status": "none", "fields": [] },
-      "realtimePolicy": "At most two root listeners per Auth UID: one dedicated session-resilient profile listener and one ref-counted actor-scoped aggregate listener; actor-scoped domains reattach on access-generation changes",
+      "realtimePolicy": "At most two compact-shell listeners per Auth UID: one dedicated session-resilient Auth listener and one ref-counted route profile listener; no migrated domain is composed from the root",
       "activation": "active",
       "sources": [{ "file": "data/userData/userDataRepository.js", "occurrence": 1 }]
     },

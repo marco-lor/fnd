@@ -7,8 +7,6 @@ const createIdleState = (scopeKey = null) => ({
   data: null,
   status: 'idle',
   error: null,
-  source: null,
-  stage: null,
   scopeKey,
 });
 
@@ -31,20 +29,16 @@ export const useUserDomain = (domain, requestedUid = null) => {
     let active = true;
     setState(createLoadingState(scopeKey));
     const unsubscribe = subscribeUserDomain(uid, domain, {
-      next: (data, metadata = {}) => setState((previous) => {
+      next: (data) => setState((previous) => {
         if (!active || previous.scopeKey !== scopeKey) return previous;
         if (
           previous.data === data
           && previous.status === 'fresh'
-          && previous.source === metadata.source
-          && previous.stage === metadata.stage
         ) return previous;
         return {
           data,
           status: data === null ? 'missing' : 'fresh',
           error: null,
-          source: metadata.source || null,
-          stage: metadata.stage || null,
           scopeKey,
         };
       }),
@@ -71,8 +65,6 @@ export const useUserDomain = (domain, requestedUid = null) => {
       data: visibleState.data,
       status: visibleState.status,
       error: visibleState.error,
-      source: visibleState.source,
-      stage: visibleState.stage,
       uid,
     };
   }, [scopeKey, state, uid]);

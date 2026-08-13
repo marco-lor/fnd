@@ -1,94 +1,98 @@
 # Task 05 access and mutation matrix
 
-This is the human-readable ownership inventory. The exact current set of direct
-frontend aggregate expressions is machine-locked in
-`frontend/scripts/task05/legacy-user-access-baseline.json`; CI fails on any new,
-changed, or stale entry. The baseline is migration debt and must reach zero
-outside `data/userData/userDataRepository.js` before `new-only`.
+Current as of 2026-08-12. `fatin-test` is `new-only`, its legacy root fields are
+physically compacted, and the runtime compatibility layer has been retired.
+This matrix describes the V2-only source, not the superseded activation build.
 
-The schema-V2 checker fingerprints each known direct aggregate expression with
-its Firestore operation, target, and mutation payload expressions/bindings. It
-is still a lightweight lexical guard: it does not prove transaction ordering,
-authorization semantics, or behavior hidden behind indirect helpers. Command,
-rules, and behavior tests plus code review own that assurance.
+The lexical boundary checker remains a guard against reintroducing direct
+aggregate-root access. It fingerprints the Firestore operation, target, and
+mutation expressions, but does not replace transaction, authorization, rules,
+or behavior tests.
 
 ## Data access matrix
 
-| Consumer group | Legacy fields / access | V2 domain/API | Migration rule |
+| Consumer | Root shell access | Canonical V2 access | Runtime fallback |
 |---|---|---|---|
-| Auth, Login, Character Creation | root shell, flags, race, initial schema, progression | shell repository; progression/settings/profile-content commands | Intentional maximum two root listeners per Auth UID: dedicated session-resilient Auth profile plus one shared actor-scoped aggregate; access-generation changes reattach ordinary domains without canceling Auth |
-| Rollout control plane | global stage, per-user overrides, drains, completion lock | private effective-stage resolver required for players | Raw config reads are DM/webmaster-only and all client writes are denied; player activation stays blocked until the resolver exists |
-| Home | stats, parameters, Anima, content | progression, resources, profileContent hooks | Compose only requested domains; no inventory listener in parent Home |
-| Home inventory/equipment/modals | `inventory`, `equipped`, parameter equipment deltas | inventory/equipment hooks and commands | Equipment stores inventory IDs; command recomputes effects |
-| Bazaar purchase | root gold plus inventory array | purchase command | Server reads catalog, writes one inventory doc plus resources |
-| Bazaar/DM catalog editors | full user list for labels/grants/edits | `user_directory`, inventory command | Labels never require private roots; grants are server-authorized |
-| DM dashboard/player panels | full users, locks, resources, personal content, inventory | directory plus explicit per-user domain hooks/commands | No unbounded full-profile directory read |
-| Tecniche/Spell | personal maps, mana, parameters | personal-content pages, progression/resources | Stable IDs; mana spend through resource command |
-| Combat | user list, resources, active effects | directory/resources and combat command | Cross-document changes remain transactional server-side |
-| Grigliata | preferences, selected-character stats, parameters, barrier resources | settings/progression/resources and board-aware commands | Unit/emulator only during battle; nested `diceRolls` is outside aggregate migration |
-| Navbar/media | avatar shell and user-owned paths | shell/profile command plus media cleanup queue | Metadata commit before cleanup; shared catalog media excluded |
-| Admin deletion | root, Auth, user subcollections, directory, Storage | deletion state machine | Fresh webmaster auth and pending tombstone are transactional; a post-Auth final sweep is verified before completion |
-| Functions derived state | broad root triggers | shared pure calculators and domain owner | Task 06 consolidates remaining trigger fan-out |
-| Backend maintenance | previous partial top-level JSON dump | recursive typed V2 export/restore | No document contents on stdout; live execute restore and protected control mutations are refused |
+| Auth/session | Dedicated `users/{uid}` shell subscription for identity, role, avatar, flags, and summary | None | None |
+| Character creation | Server reads/writes the shell as part of one canonical command | Initializes progression, resources, settings, equipment, and profile content | None; direct client shell creation is denied |
+| Home | Shell only through Auth/profile adapter | Progression, resources, profile content, inventory, and equipment hooks | None |
+| Bazaar | Shell only for authorization | Catalog plus purchase/inventory commands and V2 resources | None |
+| DM dashboard | Directory labels plus explicitly selected user shell | Explicit per-user V2 domain hooks and commands | None |
+| Tecniche/Spell | Shell identity only | Personal-content collections, progression, and resources | None |
+| Combat | Directory identity/labels | V2 resources and board-aware commands | None |
+| Grigliata | Shell identity/role/avatar | Settings, progression, resources, and board collections | None |
+| Navbar/media | Avatar/media metadata on shell | Media lifecycle callables and owned V2 documents | Legacy media read compatibility is Task 07, not User Data V1 |
+| Admin deletion | Requester/target shell and deletion checkpoint | Recursively deletes V2 subcollections and both Task 05 archive formats | None; rollout drain is no longer consulted |
+| Directory sync | Shell trigger reads only identity/label fields | Writes `user_directory` | None |
+| Offline migration tools | May read historical roots and private rollout evidence under explicit project/approval guards | Backfill, verify, compact, archive, and reconstruct | Not imported or deployed as runtime code |
 
-### Direct-access debt ledger
+Nested `users/{uid}/diceRolls` is not an aggregate root and remains outside the
+Task 05 migration boundary.
 
-The current boundary snapshot contains zero explicitly tracked legacy
-production files. Adding or changing a recognized direct aggregate expression,
-operation, target, or mutation payload fails CI. Review and behavior tests still
-own transaction ordering, authorization semantics, and indirect helper behavior.
+## Direct-access debt ledger
 
-Nested `users/{uid}/diceRolls` access is explicitly not an aggregate root access
-and remains permitted. The repository adapter and offline migration tooling are
-the only allowed aggregate roots after cleanup.
+The current production-source baseline is zero tracked legacy aggregate files
+outside `src/data/userData/userDataRepository.js`. That adapter may subscribe
+only to the compact shell; it cannot select a legacy stage, compose V1 domains,
+or compare shadow projections.
+
+The previous counts of 42 and 43 files were historical snapshots taken at
+different points in the migration. They are not current acceptance criteria.
+Any new recognized aggregate access, root migrated-field write, or retired
+adapter name fails the checked-in boundary/retirement tests.
 
 ## Mutation matrix
 
-| Command | Accepted input | Reads in transaction | Writes in transaction | Compatibility projection | Key failures |
-|---|---|---|---|---|---|
-| Purchase | operation ID, catalog item ID | actor/target shell, catalog, resources, receipt | receipt, one inventory doc, resources | legacy gold and acquired snapshot while dual-write | hidden/unauthorized item, invalid price, insufficient gold, replay hash mismatch |
-| Adjust gold | operation ID, target, signed delta | access, resources, receipt | resources, receipt | `stats.gold`; retains self-service clamp-at-zero behavior | unauthorized target, non-finite delta |
-| Update resource | operation ID, target, resource, action/value | access, resources, receipt | resources, receipt | matching legacy stat/effect | action-specific cap violation; no universal clamp |
-| Update progression | operation ID, target, allowlisted patch | access, progression, receipt | progression, shell `summary.level`, receipt | legacy stats/parameters | protected/unknown field, stale revision |
-| Inventory mutation | operation ID, target, action, inventory ID/data | access, inventory, equipment, receipt | O(1) inventory docs, equipment if removal requires it, receipt | legacy array | equipped removal, invalid quantity, oversized snapshot |
-| Equipment | operation ID, target, slot, inventory ID/null | access, inventory, equipment, progression, receipt | equipment, recomputed progression contributions, receipt | legacy equipped/parameter fields | incompatible slot, two-hand conflict, belt shrink conflict |
-| Personal content | operation ID, target, kind/action/name/data/content ID | access, content, old/new reservations, receipt | content, reservation swap, receipt | legacy name-keyed map | exact-name collision, invalid ID, oversized payload |
-| Settings | operation ID, target, allowlisted patch | access, settings, receipt | settings, receipt | legacy settings | owner changing DM lock or cross-user preference |
-| Profile content | operation ID, target, allowlisted patch | access, profileContent, receipt | profileContent, receipt | legacy maps | unauthorized/oversized patch |
-| Prepare consumable | operation ID, target, inventory ID, resource | access, inventory, progression, receipt | prepared receipt/result only | none | invalid item/effect/resource |
-| Commit consumable | prepare operation ID plus commit operation ID | prepared receipt, inventory, equipment, resources | resources, inventory decrement/delete, equipment cleanup, receipt | legacy resources/inventory/equipment | expired/already committed prepare, missing item, concurrent revision |
-| Grigliata resource action | operation ID, board context, target/action | board permissions/state and user resources | board docs plus resources | matching legacy resource fields | stale board revision, unauthorized owner |
-| Delete user | single document-ID target | requester role, rollout, target, deletion checkpoint | authorized pending tombstone and root marker in one transaction; recursive deletes outside it | directory/root cleanup | unauthorized caller, drain fence, cleanup verification, resume after partial external/Auth/Storage failure |
+| Command | Canonical reads | Canonical writes | Legacy projection | Principal failures |
+|---|---|---|---|---|
+| Purchase | actor/target shell, catalog, V2 resources, receipt | one inventory document, V2 resources, receipt | None | hidden item, invalid price, insufficient gold, replay mismatch |
+| Adjust gold | access, V2 resources, receipt | V2 resources, receipt | None | unauthorized target, non-finite delta |
+| Update resource | access, V2 resources, receipt | V2 resources, receipt | None | invalid action/cap or stale request |
+| Update progression | access, V2 progression, receipt | V2 progression, shell `summary.level`, receipt | None | protected field, stale revision |
+| Inventory mutation | access, V2 inventory/equipment, receipt | O(1) inventory documents, equipment if needed, receipt | None | equipped removal, invalid quantity, oversized snapshot |
+| Equipment | access, V2 inventory/equipment/progression, receipt | equipment and derived V2 progression, receipt | None | incompatible slot, two-hand/belt conflict |
+| Personal content | access, V2 content/reservations, receipt | content and reservation documents, receipt | None | name collision, invalid ID, oversized data |
+| Settings | access, V2 settings, receipt; optional board documents | V2 settings and atomic board state, receipt | None | unauthorized locks/preferences or stale board state |
+| Profile content | access, V2 profile content, receipt | V2 profile content, receipt | None | unauthorized or oversized patch |
+| Prepare/commit consumable | access, V2 inventory/progression/resources/equipment, receipts | V2 resources/inventory/equipment and receipts | None | invalid/expired/concurrent item state |
+| Character creation | target shell existence, catalog/equipment inputs | compact shell plus initial V2 fixed documents | None | existing target, invalid/oversized initial model |
+| Grigliata resource/turn action | board authorization/state and V2 resources | board documents, V2 resources, receipt | None | stale board revision or unauthorized owner |
+| Level up / parameter locks | authorized shell and V2 progression/settings | V2 domains plus shell summary where needed | None | unauthorized caller, stale/invalid request |
+| Delete custom token | canonical board/template state and operation receipt | canonical board/template deletion state | None | unauthorized or stale token context |
+| Delete user | requester/target shell, V2 documents, archive media references, checkpoint | pending tombstone, recursive deletion, cleanup verification | None | unauthorized caller or incomplete Auth/Storage/archive cleanup |
 
-All commands validate a canonical request hash against `user_operations`. A
-same-ID same-hash replay returns the stored result; a same-ID different-hash
-request fails. Client code never supplies authoritative catalog price,
-visibility, derived equipment totals, or dice results.
+All user-data commands bind an idempotent `operationId` to a canonical request
+hash. Replaying the same ID and hash returns the stored result; reusing an ID
+for a different request fails. Clients never supply authoritative prices,
+visibility, equipment totals, or dice outcomes.
 
-## Storage ownership
+## Retired runtime inventory
 
-| Asset | Canonical owner path | Delete policy |
-|---|---|---|
-| Avatar | user-scoped profile path recorded in shell | replace metadata, then queue old owned path |
-| Custom inventory media | user/inventory scoped path recorded on inventory doc | delete only after inventory commit and reference check |
-| Personal spell/technique media | user/content scoped path | stable content ID survives rename; cleanup after metadata commit |
-| Bazaar catalog media | catalog-owned/shared | never deleted by user/item cleanup |
-| Grigliata board media | board/session ownership | unchanged by Task 05 |
+The following Task 05 runtime categories are intentionally absent:
+
+- rollout-stage and effective-stage resolution in the browser or Functions;
+- legacy/shadow repository subscriptions and legacy normalizers;
+- dual-write context and legacy root projections;
+- V1 callable aliases for progression and Grigliata token deletion;
+- root-derived HP, mana, total-parameter, Anima, barrier-expiry, and bridge
+  triggers;
+- client-side character-creation root transactions;
+- rollback bridge and legacy mutation gate.
+
+Offline migration/cutover/compaction/reconstruction scripts are retained so the
+same guarded sequence can later be run against `fatins`. They are not bundled
+into Hosting or exported from Functions.
 
 ## Verification ownership
 
-- Repository/Auth runtime tests own selector identity, account switch, the
-  intentional two-root-listener ceiling, access-generation close/reattach,
-  paging, and legacy/V2 normalization.
-- Functions tests own authorization, idempotency, transactions, tamper rejection,
-  formula compatibility, and compatibility projections.
-- Rules/index emulator tests own role/path access and production query shapes.
-- Migration tests own deterministic IDs, partial users, interruption/resume,
-  pre-drain identity stabilization, size gates, archive immutability, reverse
-  materialization, completion-lock resume, and fresh-verification mismatch.
-- Backend tests own recursive traversal, Firestore type fidelity, manifest
-  tampering, redacted restore planning, approval, idempotency, and target safety.
-- Boundary-checker tests own expression, operation, target, and payload-context
-  drift; they do not replace transaction/authorization behavior review.
-- Browser acceptance for the isolated `fatin-test` project covers `/home` and
-  Grigliata, with reversible mutations restored before completion.
+- Repository/Auth tests own shell identity, subscription sharing, account
+  switching, V2 normalization, and absence of stage/fallback logic.
+- Functions tests own authorization, idempotency, atomic writes, formulas,
+  board transitions, and absence of root projections.
+- Rules/emulator tests own shell versus V2 path authorization and query shapes.
+- Migration tests own historical stages, deterministic IDs, drain/cutover
+  evidence, archives, compaction, and reconstruction.
+- Boundary and retirement tests prevent reintroduction of dormant runtime
+  files, exports, aliases, root triggers, and aggregate access.
+- Logged-in browser acceptance owns the deployed Home, Bazaar, DM, Combat, and
+  Grigliata interaction paths after release.

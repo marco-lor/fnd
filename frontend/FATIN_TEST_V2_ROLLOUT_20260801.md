@@ -10,14 +10,15 @@ rollback evidence.
 - Project: `fatin-test` only.
 - User Data: global `new-only`; 11 users verified and physically compacted;
   legacy drain completed and removed; zero final errors or warnings.
-- Hosting build: fixed User Data stage `new-only` with dynamic rollout config
-  disabled.
+- Hosting build: V2-only code with no User Data rollout-stage or dynamic-config
+  branch.
 - Media: `v1-write` only. New eligible writes use canonical media, while reads
   retain legacy fallback.
 - Media backfill: 180 of 180 receipts attached and verified.
 - Media `canonical-only`: deliberately not activated.
 - Production `fatins`: not changed by this rollout.
-- Git: this record travels with the reviewed compaction commit on `main`.
+- Git: this record travels with the reviewed V2 runtime-retirement commit on
+  `main`.
 
 ## Cloud changes made
 
@@ -26,9 +27,10 @@ rollback evidence.
    without changing its authorization decision.
 2. Did not replace the cloud index set: the nine deployed indexes were a
    superset of the seven checked-in indexes.
-3. Deployed the reviewed explicit Function selectors; post-deploy callable
-   checks were clean: 38/38 in `europe-west8`, 5/5 in `europe-west1`, and 1/1
-   in `us-central1`.
+3. Deployed the reviewed explicit Function selectors. After runtime retirement,
+   the callable manifest and postdeploy checks cover 38/38 in `europe-west8`
+   and 5/5 in `europe-west1`; the retired `spendCharacterPoint` alias in
+   `us-central1` is no longer deployed or client-addressable.
 4. Later deployed only
    `functions:task07ProcessMediaUpload` in `europe-west8` for the bounded
    legacy-map backfill path.
@@ -92,8 +94,10 @@ those fields remain on current roots; every subject is classified `compacted`.
 
 Deployment and logged-in DM acceptance:
 
-- `deleteUser(europe-west8)` updated successfully; callable IAM postchecks were
-  clean at 38/38 west8, 5/5 west1, and 1/1 us-central1.
+- `deleteUser(europe-west8)` updated successfully; at compaction time callable
+  IAM postchecks were clean at 38/38 west8, 5/5 west1, and the then-retained
+  1/1 us-central1 alias. The later runtime-retirement release removed that
+  alias.
 - Hosting deployed successfully with `main.18633ba6.js` and
   `route-grigliata.433c2146.chunk.js`.
 - Home, DM Dashboard, Tecniche/Spell, Bazaar, Combat, and Grigliata loaded from
@@ -104,13 +108,37 @@ Deployment and logged-in DM acceptance:
   `muted -> enabled`, reload, and restoration to `muted`.
 - The final in-app Browser diagnostic log was empty.
 
-The Hosting build stage is fixed in
-`scripts/forced-release-environment.js` as:
+The Hosting release environment in `scripts/forced-release-environment.js`
+now contains only build controls unrelated to User Data rollout:
 
 ```text
-REACT_APP_FND_USER_DATA_ROLLOUT_CONFIG=0
-REACT_APP_FND_USER_DATA_STAGE=new-only
+GENERATE_SOURCEMAP=false
+REACT_APP_FND_PERF=0
 ```
+
+## Runtime compatibility retirement - 2026-08-12
+
+After `new-only`, the rollback-retention period, and physical compaction were
+validated in the destructive test project, the active Task 05 compatibility
+plane was removed:
+
+- frontend legacy/shadow subscriptions, normalizers, comparison/projection
+  code, rollout config, and stage environment flags;
+- server rollout/drain reads, root fallbacks, dual writes, rollback bridge,
+  legacy callable handlers, and derived-root trigger fleet;
+- direct client character-creation root transactions;
+- the `spendCharacterPoint(us-central1)` compatibility callable and its client,
+  IAM, and release-manifest entries.
+
+Canonical V2 callables continue in `europe-west8`. Unrelated Grigliata and foe
+callables continue in `europe-west1`, including the Task 06/Task 07 compatibility
+surfaces that are outside User Data V1 retirement. `syncUserDirectory` remains
+as a shell-to-directory identity projection and no longer reads rollout state.
+
+The private rollout/cutover documents and offline Task 05 scripts remain for
+evidence, reconstruction, and later production replication. No Hosting or
+Functions runtime imports them, and Firestore rules permanently deny migrated
+fields on current user shells.
 
 ## Media V2 preparation sequence and evidence
 

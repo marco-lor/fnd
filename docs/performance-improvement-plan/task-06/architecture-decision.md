@@ -1,41 +1,43 @@
 # Task 06 architecture decision
 
-Date: 2026-07-23. Status: locally validated candidate for roadmap progression
-as of 2026-07-27; Task 07 may start. Nothing in this decision authorizes a
-Firebase deployment, a production rollout change, or performance-baseline
-acceptance.
+Original decision: 2026-07-23. Current amendment: 2026-08-12.
 
-## Decision
+> The original local consolidated-owner candidate is superseded. Task 05 is now
+> V2-only, the former user-root derived triggers are retired, and
+> `FND_TASK06_CONSOLIDATED_OWNER` no longer exists. This amended record is the
+> current Task 06 architecture; it does not by itself authorize a live config
+> mutation or deployment.
 
-Use one `europe-west8` owner for user-derived state and one server-owned,
-receipt-based operation framework for bounded bulk/destructive work. Retain the
-Python deployment as a dependency-light health service, with maintenance
-commands isolated behind explicit CLI entry points.
+## Current decision
 
-The local performance environment sets
-`FND_TASK06_CONSOLIDATED_OWNER=1`. In that demo-only environment, the Functions
-entry point omits these six compatibility triggers:
+Use V2 command transactions as the sole owners of character mutations and
+derived character state. Use the Task 06 receipt-backed operation framework for
+bounded bulk and destructive work. Retain the Python deployment as a
+dependency-light health service with maintenance commands available only
+through explicit local CLI entry points.
+
+Parameter totals, Anima effects, HP, and mana are derived inside the callable
+transaction that changes progression. The following root triggers are no
+longer source files or exports in any environment:
 
 - `updateHpTotal`
 - `updateManaTotal`
 - `updateTotParameters`
 - `updateAnimaModifier`
 - `expireBarriera`
-- `syncUserDirectory`
+- `syncUserDerivedState`
 
-It continues to export `syncUserDerivedState`, which owns field-level derived
-updates plus the user-directory projection. Without that environment variable,
-all compatibility exports remain present. This keeps normal source behavior
-unchanged until a separate production rollout is reviewed and deployed.
+`syncUserDirectory` remains independent and projects only identity/role shell
+changes. It never composes or derives migrated character domains.
 
 ## Control plane
 
-`app_config/task06_backend` has schema version 1:
+`app_config/task06_backend` remains the schema-versioned enablement plane for
+bounded operations. `enabledOperationKinds` is authoritative for these kinds:
 
 ```json
 {
   "schemaVersion": 1,
-  "derivedOwnerMode": "legacy | shadow | authoritative",
   "enabledOperationKinds": [
     "level-up-all",
     "set-parameter-locks",
@@ -47,10 +49,11 @@ unchanged until a separate production rollout is reviewed and deployed.
 }
 ```
 
-Missing, malformed, or wrong-version configuration resolves to `legacy` with
-no enabled operation kinds. The demo fixture explicitly seeds
-`authoritative` plus all known operation kinds before its first Functions
-readiness write.
+Existing deployed documents may still contain the historical
+`derivedOwnerMode` property. Runtime parsing preserves schema compatibility,
+but that property selects no Function export and cannot reactivate a root data
+plane. Do not use it as a rollout control. A missing, malformed, or wrong-version
+document enables no bounded operation kinds.
 
 Clients cannot read operation documents directly. Authenticated callables
 return a bounded view containing operation ID, kind, status, counters,
@@ -60,64 +63,55 @@ cursors, leases, and subject receipts remain server-only.
 ## Operation model
 
 - The caller supplies an 8-80 character operation ID.
-- The server hashes actor plus operation ID into a private receipt document and
-  binds it to an immutable kind/request hash.
+- The server hashes actor plus operation ID into a private receipt and binds it
+  to an immutable kind/request hash.
 - `backend_operations` stores status, phase, cursor, bounded progress, retry
   state, and a 30-day expiry.
 - `backend_operation_work` schedules one generation at a time. A Firestore
   create trigger claims a finite lease and processes at most one bounded page.
-- Per-subject receipts prevent already-completed work from running twice after
-  pause, retry, or replay.
-- A paused/failed cleanup can be resumed only after the current actor role and
-  enabled-kind configuration are revalidated.
-
-The rules deny every client read/write to operation, work, and receipt
-collections. TTL applies to operation roots, work items, and subjects.
+- Per-subject receipts prevent completed work from running twice after pause,
+  retry, or replay.
+- A paused or failed cleanup can resume only after current actor role and
+  operation-kind enablement are revalidated.
 
 ## Client operation intent durability
 
-Candidate-mode clients create the operation ID before calling the server and
-persist it in `sessionStorage` under `fnd.task06.operation-intents.v1`. The
-record contains only schema/kind, operation ID, an SHA-256 digest of canonical
-actor/kind/immutable-request input, and its timestamp; request payloads and
-actor IDs are not stored. Entries are bounded to 32 records, 64 KiB, and 30
-days.
+Clients create the operation ID before calling and keep bounded intent metadata
+in `sessionStorage` under `fnd.task06.operation-intents.v1`. Records contain
+schema/kind, operation ID, a SHA-256 digest of canonical actor/kind/immutable
+request input, and timestamp; request payloads and actor IDs are not stored.
+Entries are bounded to 32 records, 64 KiB, and 30 days.
 
 The same actor, kind, and immutable request reuses the same operation ID after
-a reload. The entry is written before the callable starts, retained after an
-ambiguous or rejected call, and cleared only after confirmed success.
-Synchronous duplicate submissions share the in-flight intent. Malformed,
-oversized, unavailable, or cryptographically unsupported storage fails closed
-instead of silently minting a second destructive operation. This behavior is
-enabled only by the local candidate switch; cross-tab and tab-close recovery
-remain production-hardening gates.
+a reload. The intent is written before the callable starts and cleared only
+after confirmed success. Malformed, oversized, unavailable, or
+cryptographically unsupported storage fails closed instead of minting a second
+destructive operation.
 
 ## Destructive fences
 
-NPC deletion first marks `echi_npcs/{npcId}.deletionState = "pending"`.
-Security rules then reject client edits/deletion of that NPC and reject public
-or private marker writes that reference it. The worker deletes marker pages,
-cleans the owned Storage path, verifies no references remain, and deletes the
-NPC root last.
+NPC deletion first sets `echi_npcs/{npcId}.deletionState = "pending"`. Rules
+then reject client edits/deletion and marker writes that reference it. The
+worker deletes marker pages, cleans owned Storage, verifies references, and
+deletes the root last.
 
-Encounter deletion first marks the root `status = "deleted"` and
-`deletionState = "pending"`. Rules preserve the existing query-compatible read
-audience but reject all client parent, participant, and log writes while the
-fence is active. The worker traverses descendant collections in bounded pages,
-verifies they are empty, and deletes the root last.
+Encounter deletion first sets `status = "deleted"` and
+`deletionState = "pending"`. Rules reject parent, participant, and log writes
+while the worker traverses descendants, verifies they are empty, and deletes
+the root last.
 
-The private-marker cleanup query requires the declared ascending
-collection-group index on `map_markers_private.npcId`. The index exists only in
-`firestore.indexes.json`; it has not been deployed or activated online.
+Custom-token deletion fences the template and instances before bounded
+placement and media cleanup. Foe duplication uses immutable receipts and owns
+partial-copy cleanup, including canonical Task 07 media families.
 
-## Non-decisions
+## Boundaries
 
-- No Firebase resource was deployed or changed online.
-- No production Task 06 config is created by this implementation.
-- No existing Grigliata callable is moved while the battle board is live.
-- The durable intent store is enabled only for the local performance candidate;
-  normal frontend behavior remains on the compatibility path.
-- No accepted performance baseline is rewritten. The fixture manifest changes
-  because its new Task 06 control document is part of the deterministic input;
-  a later authoritative candidate must earn a new compatible baseline.
-- `minInstances` remains disabled pending measured cold-start evidence.
+- Task 06 operation enablement is independent of Task 05 user-data routing;
+  there is no Task 05 runtime routing switch after retirement.
+- Existing Grigliata callables remain in `europe-west1`.
+- `duplicateFoeWithAssets(europe-west1)` remains a reviewed alias of the
+  canonical V2 endpoint and is not a user-data rollback path.
+- Task 07 legacy-media cleanup remains until its separate media-retention gate
+  is completed.
+- Deploying indexes, TTL policies, rules, Functions, or config requires its own
+  reviewed release evidence.

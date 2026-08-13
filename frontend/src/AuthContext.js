@@ -12,7 +12,7 @@ import { beginAsyncResourceOwner, withAsyncResourceOwner } from "./performance/r
 import { auth } from "./components/firebaseConfig";
 import { setRepositoryActor } from "./data/repositoryRuntime";
 import { buildTask07GeneratedFamilyPrefix } from "./data/media/mediaPaths";
-import { subscribeAuthProfileAggregate } from "./data/userData/userDataRepository";
+import { subscribeAuthProfile } from "./data/userData/userDataRepository";
 
 export const AuthContext = createContext(undefined);
 const AuthSessionContext = createContext(undefined);
@@ -181,7 +181,7 @@ export const projectShellProfile = (uid, userData) => ({
   role: normalizeStoredRole(userData?.role) || null,
   characterId: normalizeShellString(userData?.characterId),
   race: normalizeShellString(userData?.race),
-  level: normalizeShellLevel(userData?.summary?.level ?? userData?.stats?.level),
+  level: normalizeShellLevel(userData?.summary?.level),
   avatarUrl: normalizeShellString(userData?.imageUrl),
   avatarMedia: normalizeShellAvatarMedia(uid, userData?.media),
 });
@@ -347,7 +347,7 @@ export const AuthProvider = ({ children }) => {
       setProfileStatus("loading");
     }
 
-    userSnapshotUnsubscribe.current = subscribeAuthProfileAggregate(
+    userSnapshotUnsubscribe.current = subscribeAuthProfile(
       currentUser.uid,
       {
         next: (profileData) => {

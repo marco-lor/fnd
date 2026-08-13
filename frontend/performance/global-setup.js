@@ -44,13 +44,7 @@ const READINESS_HTTP_FUNCTIONS = new Set([
   'europe-west8-task07AbandonFoeMediaRetirement',
 ]);
 const READINESS_BACKGROUND_TRIGGERS = new Set([
-  'europe-west8-updateHpTotal',
-  'europe-west8-updateManaTotal',
-  'europe-west8-updateTotParameters',
-  'europe-west8-updateAnimaModifier',
-  'europe-west8-expireBarriera',
   'europe-west8-syncUserDirectory',
-  'europe-west8-syncUserDerivedState',
   'europe-west8-cleanupTask07RemovedBackgroundMedia',
   'europe-west8-cleanupTask07RemovedCatalogItemMedia',
   'europe-west8-cleanupTask07RemovedFoeMedia',

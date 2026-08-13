@@ -6,7 +6,6 @@ import {
   collectArchivedOwnedMediaPaths,
   collectOwnedMediaPaths,
 } from "./userOwnedMediaCleanup";
-import {legacyRootMutationBlockReason} from "./legacyRootMutationGate";
 import {isValidFirestoreDocumentId} from "./userDataV2";
 import {assertActiveCaller} from "./callerAuthorization";
 
@@ -46,7 +45,6 @@ export const deleteUser = onCall(
     const db = admin.firestore();
     const jobRef = db.doc(`user_deletion_jobs/${userToDeleteUid}`);
     const targetUserRef = db.doc(`users/${userToDeleteUid}`);
-    const rolloutRef = db.doc("app_config/user_data_v2");
     const migrationArchiveRef = db.doc(
       `migration_state/user-data-v2/archives/${userToDeleteUid}`
     );
@@ -62,10 +60,9 @@ export const deleteUser = onCall(
       // pre-transaction role read to authorize a destructive operation.
       const reqUserRef = db.doc(`users/${requestingUserUid}`);
       const initialization = await db.runTransaction(async (transaction) => {
-        const [requester, rollout, currentTarget, existingJob] =
+        const [requester, currentTarget, existingJob] =
           await Promise.all([
             transaction.get(reqUserRef),
-            transaction.get(rolloutRef),
             transaction.get(targetUserRef),
             transaction.get(jobRef),
           ]);
@@ -81,15 +78,6 @@ export const deleteUser = onCall(
           );
         }
         if (existingJob.get("stage") === "completed") return "completed";
-        if (legacyRootMutationBlockReason(
-          rollout.data(),
-          userToDeleteUid
-        ) === "legacy-drain") {
-          throw new HttpsError(
-            "unavailable",
-            "User deletion is paused for the legacy drain. Retry later."
-          );
-        }
         const existingCreatedAt = existingJob.get("createdAt");
         transaction.set(jobRef, {
           schemaVersion: 2,

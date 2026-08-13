@@ -80,7 +80,7 @@ describe('AuthProvider repository-runtime integration', () => {
     __resetRepositoryRuntimeForTests();
   });
 
-  test('profile access-scope changes preserve auth snapshots while ordinary aggregate listeners invalidate', async () => {
+  test('profile access-scope changes preserve auth snapshots while V2 domain listeners invalidate', async () => {
     const view = render(<AuthProvider><ProfileProbe /></AuthProvider>);
     act(() => authNext({ uid: 'user-1', email: 'hero@example.com' }));
     expect(physicalSubscriptions).toHaveLength(2);
@@ -89,16 +89,15 @@ describe('AuthProvider repository-runtime integration', () => {
 
     act(() => emitDocument('users/user-1', {
       role: 'players',
-      stats: { level: 2, gold: 10 },
+      summary: { level: 2 },
     }));
     expect(screen.getByTestId('profile-role')).toHaveTextContent('player');
     expect(authProfileSubscription.unsubscribe).not.toHaveBeenCalled();
     expect(initialDomainSubscription.unsubscribe).toHaveBeenCalledTimes(1);
     expect(physicalSubscriptions).toHaveLength(3);
 
-    act(() => emitDocument('users/user-1', {
-      role: 'players',
-      stats: { level: 2, gold: 10 },
+    act(() => emitDocument('users/user-1/state/resources', {
+      stats: { gold: 10 },
     }));
     expect(screen.getByTestId('resource-status')).toHaveTextContent('fresh');
     expect(screen.getByTestId('resource-gold')).toHaveTextContent('10');
@@ -106,7 +105,7 @@ describe('AuthProvider repository-runtime integration', () => {
 
     act(() => emitDocument('users/user-1', {
       role: 'dm',
-      stats: { level: 3, gold: 20 },
+      summary: { level: 3 },
     }));
 
     expect(screen.getByTestId('profile-status')).toHaveTextContent('fresh');
@@ -115,9 +114,8 @@ describe('AuthProvider repository-runtime integration', () => {
     expect(playerDomainSubscription.unsubscribe).toHaveBeenCalledTimes(1);
     expect(physicalSubscriptions).toHaveLength(4);
 
-    act(() => emitDocument('users/user-1', {
-      role: 'dm',
-      stats: { level: 3, gold: 20 },
+    act(() => emitDocument('users/user-1/state/resources', {
+      stats: { gold: 20 },
     }));
     expect(screen.getByTestId('resource-status')).toHaveTextContent('fresh');
     expect(screen.getByTestId('resource-gold')).toHaveTextContent('20');
