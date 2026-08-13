@@ -2,8 +2,6 @@ import * as admin from "firebase-admin";
 import {FieldValue} from "firebase-admin/firestore";
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
 import {backendOperationExpiry} from "./backendOperationCore";
-import {spendCharacterPointLegacyHandler} from "./spendCharacterPointLegacy";
-import {isUserDataLegacyDrainFrozen} from "./userDataBridge";
 import {
   asFiniteNumber,
   asRecord,
@@ -13,9 +11,7 @@ import {
   deriveResourceTotals,
   operationReceiptId,
   operationRequestHash,
-  resolveUserDataRolloutStage,
   validateOperationId,
-  writesLegacyUserProjection,
 } from "./userDataV2";
 
 interface SpendPointData {
@@ -27,7 +23,6 @@ interface SpendPointData {
 
 const MIN_BASE_VALUE = -1;
 const MAX_NEGATIVE_BASE_STATS = 4;
-const LEGACY_REGION = "us-central1";
 const CANONICAL_REGION = "europe-west8";
 
 const spendCharacterPointHandler = async (
@@ -57,7 +52,6 @@ const spendCharacterPointHandler = async (
   }
   const db = admin.firestore();
   const userRef = db.doc(`users/${actorUid}`);
-  const rolloutRef = db.doc("app_config/user_data_v2");
   const progressionRef = db.doc(`users/${actorUid}/state/progression`);
   const resourcesRef = db.doc(`users/${actorUid}/state/resources`);
   const utilsRef = db.doc("utils/varie");
@@ -69,10 +63,9 @@ const spendCharacterPointHandler = async (
     change,
   });
   const result = await db.runTransaction(async (transaction) => {
-    const [receipt, rollout, user, progression, resources, utils] =
+    const [receipt, user, progression, resources, utils] =
       await transaction.getAll(
         receiptRef,
-        rolloutRef,
         userRef,
         progressionRef,
         resourcesRef,
@@ -103,24 +96,10 @@ const spendCharacterPointHandler = async (
         replayed: true,
       };
     }
-    if (isUserDataLegacyDrainFrozen(rollout.data(), actorUid)) {
-      throw new HttpsError(
-        "unavailable",
-        "User data is temporarily frozen. Retry later."
-      );
-    }
-    const rootData = user.data() ?? {};
-    const stats = {
-      ...asRecord(rootData.stats),
-      ...asRecord(progression.get("stats")),
-    };
-    const currentParametri = progression.get("Parametri") ??
-      rootData.Parametri;
+    const stats = asRecord(progression.get("stats"));
+    const currentParametri = progression.get("Parametri");
     const parametri = deepMergeRecords({}, currentParametri);
-    const flags = {
-      ...asRecord(rootData.flags),
-      ...asRecord(progression.get("flags")),
-    };
+    const flags = asRecord(progression.get("flags"));
     const creationPhase = flags.characterCreationDone !== true;
     const firestoreKey = statType === "Combat"
       ? "Combattimento"
@@ -253,26 +232,6 @@ const spendCharacterPointHandler = async (
         updatedBy: actorUid,
       }, {merge: true});
     }
-    if (writesLegacyUserProjection(resolveUserDataRolloutStage(
-      rollout.data(),
-      actorUid
-    ))) {
-      const rootUpdate: admin.firestore.UpdateData<
-        admin.firestore.DocumentData
-      > = {
-        Parametri: nextParametri,
-        [`stats.${availableField}`]: nextStats[availableField],
-        [`stats.${spentField}`]: nextStats[spentField],
-      };
-      if (statType === "Base" && creationPhase) {
-        rootUpdate["stats.negativeBaseStatCount"] =
-          negativeBaseStatCount;
-      }
-      Object.entries(resourceTotals).forEach(([field, value]) => {
-        rootUpdate[`stats.${field}`] = value;
-      });
-      transaction.update(userRef, rootUpdate);
-    }
     const response = {success: true};
     transaction.create(receiptRef, {
       schemaVersion: 2,
@@ -293,11 +252,6 @@ const spendCharacterPointHandler = async (
     replayable: Boolean(suppliedOperationId),
   };
 };
-
-export const spendCharacterPoint = onCall(
-  {region: LEGACY_REGION},
-  spendCharacterPointLegacyHandler
-);
 
 export const spendCharacterPointV2 = onCall(
   {region: CANONICAL_REGION},

@@ -3,7 +3,11 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import GrigliataPage from './GrigliataPage';
 import { placementMutationIntentIdentity } from './useGrigliataPlacementActions';
 import { useAuth } from '../../AuthContext';
-import { useUserSettings } from '../../data/userData/userDataHooks';
+import {
+  useProgression,
+  useResources,
+  useUserSettings,
+} from '../../data/userData/userDataHooks';
 import { useShellLayout } from '../common/shellLayout';
 import {
   GRIGLIATA_LIVE_INTERACTION_STALE_MS,
@@ -292,6 +296,8 @@ jest.mock('../../AuthContext', () => ({
 }));
 
 jest.mock('../../data/userData/userDataHooks', () => ({
+  useProgression: jest.fn(),
+  useResources: jest.fn(),
   useUserSettings: jest.fn(),
 }));
 
@@ -1145,7 +1151,11 @@ describe('GrigliataPage', () => {
       },
       loading: false,
     });
-    useUserSettings.mockReturnValue({ data: null });
+    useProgression.mockImplementation(() => ({ data: useAuth()?.userData || null }));
+    useResources.mockImplementation(() => ({ data: useAuth()?.userData || null }));
+    useUserSettings.mockImplementation(() => ({
+      data: { settings: useAuth()?.userData?.settings || {} },
+    }));
     useShellLayout.mockReturnValue({
       topInset: 0,
     });
@@ -6732,8 +6742,8 @@ describe('GrigliataPage', () => {
 
   test('loads and saves DM-selected external character and custom token details', async () => {
     setManagerAuth();
-    setDocData('users/user-2', {
-      characterId: 'Bran',
+    setDocData('users/user-2', { characterId: 'Bran' });
+    setDocData('users/user-2/state/resources', {
       stats: {
         hpTotal: 20,
         hpCurrent: 28,
@@ -6872,8 +6882,8 @@ describe('GrigliataPage', () => {
 
   test('clears stale external details and blocks saving until the current external selection has loaded', async () => {
     setManagerAuth();
-    setDocData('users/user-2', {
-      characterId: 'Bran',
+    setDocData('users/user-2', { characterId: 'Bran' });
+    setDocData('users/user-2/state/resources', {
       stats: {
         hpTotal: 20,
         hpCurrent: 28,
@@ -7126,7 +7136,10 @@ describe('GrigliataPage', () => {
     });
 
     await waitFor(() => {
-      expect(mockDeleteGrigliataCustomTokenCallable).toHaveBeenCalledWith({ tokenId: 'token-2' });
+      expect(mockDeleteGrigliataCustomTokenCallable).toHaveBeenCalledWith({
+        tokenId: 'token-2',
+        operationId: expect.stringMatching(/^delete-custom-token-/),
+      });
     });
 
     confirmSpy.mockRestore();
@@ -7507,9 +7520,7 @@ describe('GrigliataPage', () => {
     await waitFor(() => {
       expect(mockDeleteGrigliataCustomTokenCallable).toHaveBeenCalledWith({
         tokenId: 'custom-instance-1',
-        ...(process.env.REACT_APP_FND_PERF === '1'
-          ? { operationId: expect.stringMatching(/^delete-custom-token-/) }
-          : {}),
+        operationId: expect.stringMatching(/^delete-custom-token-/),
       });
     });
 
@@ -7523,11 +7534,8 @@ describe('GrigliataPage', () => {
     expect(issuedClientDelete).toBe(false);
   });
 
-  test('uses the durable custom-token cleanup flow after the V2 new-only cutover', async () => {
-    useUserSettings.mockReturnValue({
-      data: null,
-      stage: 'new-only',
-    });
+  test('uses the durable canonical custom-token cleanup flow', async () => {
+    useUserSettings.mockReturnValue({ data: null });
     setCollectionData('grigliata_tokens', [{
       id: 'custom-instance-1',
       ownerUid: 'user-1',
@@ -7939,8 +7947,8 @@ describe('GrigliataPage', () => {
   test('resolves foe and external-player initiative rolls while excluding custom tokens', async () => {
     setManagerAuth();
     setDocData('utils/varie', { dadiAnimaByLevel: [null, 'd4', 'd6', 'd8'] });
-    setDocData('users/user-2', {
-      characterId: 'Mira',
+    setDocData('users/user-2', { characterId: 'Mira' });
+    setDocData('users/user-2/state/progression', {
       stats: { level: 3 },
       Parametri: { Base: { destrezza: { Tot: 2 } } },
     });
@@ -8449,7 +8457,7 @@ describe('GrigliataPage', () => {
     });
   });
 
-  test('uses rollout-aware V2 settings instead of a stale legacy preference', async () => {
+  test('uses canonical V2 settings for Grigliata preferences', async () => {
     useUserSettings.mockReturnValue({
       data: {
         settings: {
@@ -9872,7 +9880,7 @@ describe('GrigliataPage', () => {
 
     const defaultOnSnapshot = firestore.onSnapshot.getMockImplementation();
     firestore.onSnapshot.mockImplementation((target, observerOrNext, onError) => {
-      if (target?.path !== 'users/user-2') {
+      if (target?.path !== 'users/user-2/state/resources') {
         return defaultOnSnapshot(target, observerOrNext, onError);
       }
       const handlers = mockResolveSnapshotHandlers(observerOrNext, onError);
@@ -9901,7 +9909,10 @@ describe('GrigliataPage', () => {
     });
 
     await act(async () => {
-      pendingCharacterRead.resolve(mockCreateDocSnapshot('users/user-2', null));
+      pendingCharacterRead.resolve(mockCreateDocSnapshot(
+        'users/user-2/state/resources',
+        null
+      ));
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -11519,7 +11530,8 @@ describe('GrigliataPage', () => {
   test('hydrates a character shield effect on turn start without consuming it immediately', async () => {
     setManagerAuth();
     act(() => {
-      setDocData('users/user-2', {
+      setDocData('users/user-2', {});
+      setDocData('users/user-2/state/resources', {
         stats: {
           hpTotal: 12,
           hpCurrent: 12,

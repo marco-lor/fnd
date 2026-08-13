@@ -89,7 +89,6 @@ const assertTask06IntegrationTarget = ({
     mode: PERFORMANCE_ENVIRONMENT_MODE.STRICT,
   });
   env.FND_TASK06_INTEGRATION = '1';
-  env.FND_TASK06_CONSOLIDATED_OWNER = '1';
   return {
     projectId,
     emulatorHosts: {
@@ -138,7 +137,6 @@ const demoFunctionsEnvironment = (projectId = PERFORMANCE_PROJECT_ID) => [
   'FATINS_FIREBASE_MESSAGING_SENDER_ID=000000000000',
   'FATINS_FIREBASE_APP_ID=1:000000000000:web:performance',
   'FATINS_FIREBASE_MEASUREMENT_ID=',
-  'FND_TASK06_CONSOLIDATED_OWNER=1',
   '',
 ].join('\n');
 

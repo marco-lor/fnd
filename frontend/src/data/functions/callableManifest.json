@@ -2,8 +2,7 @@
   "schemaVersion": 1,
   "supportedRegions": [
     "europe-west8",
-    "europe-west1",
-    "us-central1"
+    "europe-west1"
   ],
   "callables": {
     "deleteUser": {
@@ -257,12 +256,6 @@
       "region": "europe-west1",
       "owner": "grigliata",
       "compatibilityAliasOf": null
-    },
-    "spendCharacterPoint": {
-      "functionId": "spendCharacterPoint",
-      "region": "us-central1",
-      "owner": "progression-legacy",
-      "compatibilityAliasOf": "spendCharacterPointV2"
     },
     "spendCharacterPointV2": {
       "functionId": "spendCharacterPointV2",

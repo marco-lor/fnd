@@ -44,7 +44,7 @@ const privatePolicy = (extraBindings = []) => ({
 
 const createManifest = () => ({
   schemaVersion: 1,
-  supportedRegions: [REGION, 'europe-west1', 'us-central1'],
+  supportedRegions: [REGION, 'europe-west1'],
   callables: Object.fromEntries(REQUIRED_CALLABLES.map((entry) => [
     entry.logicalKey,
     {
@@ -123,7 +123,6 @@ test('CLI is dry-run by default and is hard-locked to production', () => {
   assert.deepEqual(AUDIT_REGIONS, [
     'europe-west8',
     'europe-west1',
-    'us-central1',
   ]);
   assert.equal(parseArguments([
     '--project', PROJECT_ID,
@@ -188,10 +187,7 @@ test('execution requires exact project confirmation and plan fingerprint', () =>
 });
 
 test('manifest selection is exact and owner-validated in every audit region', () => {
-  const manifest = addRegionCallables(
-    addRegionCallables(createManifest(), 'europe-west1'),
-    'us-central1'
-  );
+  const manifest = addRegionCallables(createManifest(), 'europe-west1');
   const selected = selectManagedCallables(manifest);
   assert.equal(selected.length, 38);
   assert.deepEqual(
@@ -202,15 +198,11 @@ test('manifest selection is exact and owner-validated in every audit region', ()
     selectManagedCallables(manifest, 'europe-west1').map(({logicalKey}) => logicalKey),
     REQUIRED_CALLABLES_BY_REGION['europe-west1'].map(({logicalKey}) => logicalKey)
   );
-  assert.deepEqual(
-    selectManagedCallables(manifest, 'us-central1').map(({logicalKey}) => logicalKey),
-    ['spendCharacterPoint']
-  );
   manifest.callables.task05AdjustGold.owner = 'admin';
   assert.throws(() => selectManagedCallables(manifest), /unexpected owner/);
 });
 
-test('legacy-region plans are read-only and execution remains west8-only', async () => {
+test('secondary-region plans are read-only and execution remains west8-only', async () => {
   const region = 'europe-west1';
   const expected = REQUIRED_CALLABLES_BY_REGION[region];
   const policies = Object.fromEntries(expected.map(({logicalKey}) => [
@@ -423,6 +415,5 @@ test('Firebase Functions postdeploy runs every strict read-only IAM check', () =
   assert.deepEqual(functionsConfig.postdeploy, [
     'node "$PROJECT_DIR/scripts/callable-invoker-policy.js" --project fatins --region europe-west8 --check',
     'node "$PROJECT_DIR/scripts/callable-invoker-policy.js" --project fatins --region europe-west1 --check',
-    'node "$PROJECT_DIR/scripts/callable-invoker-policy.js" --project fatins --region us-central1 --check',
   ]);
 });

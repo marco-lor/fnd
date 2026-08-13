@@ -14,7 +14,6 @@ const ownedEnvironment = () => ({
   FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9099',
   STORAGE_EMULATOR_HOST: 'http://127.0.0.1:9199',
   FND_TASK06_INTEGRATION: '1',
-  FND_TASK06_CONSOLIDATED_OWNER: '1',
 });
 
 test('Task 06 sequence suppresses rule probes then runs Functions', async () => {
@@ -48,19 +47,10 @@ test('Task 06 sequence suppresses rule probes then runs Functions', async () => 
   ]);
 });
 
-test('Task 06 sequence refuses direct or unconsolidated execution', async () => {
+test('Task 06 sequence refuses direct execution', async () => {
   await assert.rejects(
     run({env: {...ownedEnvironment(), FND_TASK06_INTEGRATION: ''}}),
     /must run through npm run perf:functions-integration/
-  );
-  await assert.rejects(
-    run({
-      env: {
-        ...ownedEnvironment(),
-        FND_TASK06_CONSOLIDATED_OWNER: '',
-      },
-    }),
-    /consolidated demo owner is not enabled/
   );
 });
 
@@ -68,7 +58,7 @@ test('Task 06 diagnostic pattern filters only the Functions test file', () => {
   const calls = [];
   const env = {
     ...ownedEnvironment(),
-    [TASK06_FUNCTION_TEST_PATTERN_ENV]: 'derived state|lock-all',
+    [TASK06_FUNCTION_TEST_PATTERN_ENV]: 'V2 state|lock-all',
   };
   const spawnSyncImpl = (command, args, options) => {
     calls.push({args, command, options});
@@ -86,6 +76,6 @@ test('Task 06 diagnostic pattern filters only the Functions test file', () => {
   assert.deepEqual(calls[1].args.slice(0, 3), [
     '--test',
     '--test-name-pattern',
-    'derived state|lock-all',
+    'V2 state|lock-all',
   ]);
 });

@@ -27,12 +27,13 @@ const {
   configureOwnedPerformanceEnvironment,
 } = require('../../scripts/performance/common');
 const {
-  withBackgroundTriggersDisabled,
+  withBackgroundTriggersDisabled: withRawBackgroundTriggersDisabled,
 } = require('../../scripts/performance/emulator-control');
 
 const SCALE_USER_COUNT = 525;
-const OPERATION_ID = 'task06-scale-resume-0001';
+const OPERATION_ID = 'task06-scale-bounded-0001';
 const TOKEN_OPERATION_ID = 'task06-token-scale-0001';
+const TOKEN_TEMPLATE_ID = 'task06-delete-template';
 const TOKEN_INSTANCE_COUNT = 520;
 const PAGED_DELETE_COUNT = 101;
 const LOCK_OPERATION_ID = 'task06-lock-scale-0001';
@@ -51,17 +52,26 @@ const FOE_CANONICAL_REPAIRED_ID = 'task06-foe-canonical-repaired-0001';
 const FOE_ACTIVE_LEASE_ID = 'task06-foe-active-lease-0001';
 const FOE_CLEANUP_OWNER_ID = 'task06-foe-cleanup-owner-0001';
 const FOE_GATE_CLEANUP_ID = 'task06-foe-gate-cleanup-0001';
+const WORKER_READINESS_TIMEOUT_MS = 30_000;
+const CALLABLE_READINESS_TIMEOUT_MS = 180_000;
+const BACKGROUND_RUNTIME_READINESS_ATTEMPTS = 3;
+const CALLABLE_MANIFEST_PROBE_BATCH_SIZE = 10;
+const CALLABLE_READINESS_PROBES = Object.freeze([
+  {functionId: 'duplicateFoeWithAssets', region: 'europe-west1'},
+  {functionId: 'deleteGrigliataCustomToken', region: 'europe-west1'},
+  {functionId: 'getBackendOperationStatus', region: 'europe-west8'},
+]);
 const TERMINAL_STATUSES = new Set([
   'paused',
   'completed',
   'failed',
   'cleanup-pending',
 ]);
-const functionRegion = (functionId) => (
-  functionId === 'deleteGrigliataCustomToken'
-    ? 'europe-west1'
-    : 'europe-west8'
-);
+const functionRegion = (functionId) => {
+  const region = callableManifest.callables[functionId]?.region;
+  assert.ok(region, `Callable manifest is missing ${functionId}.`);
+  return region;
+};
 
 let app;
 let db;
@@ -70,35 +80,6 @@ let actor;
 const delay = (milliseconds) => new Promise((resolve) => {
   setTimeout(resolve, milliseconds);
 });
-
-const flattenLeaves = (value, prefix = '', output = {}) => {
-  if (
-    value === null
-    || typeof value !== 'object'
-    || Array.isArray(value)
-    || value instanceof Timestamp
-  ) {
-    output[prefix] = value;
-    return output;
-  }
-  const entries = Object.entries(value);
-  if (!entries.length) {
-    output[prefix] = value;
-    return output;
-  }
-  entries.forEach(([key, nested]) => {
-    flattenLeaves(nested, prefix ? `${prefix}.${key}` : key, output);
-  });
-  return output;
-};
-
-const changedLeafPaths = (beforeValue, afterValue) => {
-  const before = flattenLeaves(beforeValue);
-  const after = flattenLeaves(afterValue);
-  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
-    .filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]))
-    .sort();
-};
 
 const fetchWithDeadline = async (
   url,
@@ -155,7 +136,17 @@ const invokeCallable = async (functionId, data) => {
     },
     60_000
   );
-  const body = await response.json();
+  const bodyText = await response.text();
+  let body;
+  try {
+    body = JSON.parse(bodyText);
+  } catch (error) {
+    throw new Error(
+      `${functionId} returned non-callable HTTP ${response.status}: `
+      + bodyText.slice(0, 300),
+      {cause: error}
+    );
+  }
   if (!response.ok || body.error) {
     const error = new Error(
       `${functionId} failed with HTTP ${response.status}: `
@@ -204,23 +195,6 @@ const waitForOperation = async (
   );
 };
 
-const waitForDocument = async (
-  documentRef,
-  predicate,
-  timeoutMs = 60_000
-) => {
-  const deadline = Date.now() + timeoutMs;
-  let latest = null;
-  while (Date.now() < deadline) {
-    latest = await documentRef.get();
-    if (predicate(latest)) return latest;
-    await delay(100);
-  }
-  throw new Error(
-    `Document ${documentRef.path} did not reach the expected state.`
-  );
-};
-
 const probeCallable = async ({functionId, region}) => {
   const response = await fetchWithDeadline(
     `http://127.0.0.1:5001/${PERFORMANCE_PROJECT_ID}/`
@@ -255,6 +229,32 @@ const probeCallable = async ({functionId, region}) => {
   return {body, status: response.status};
 };
 
+const waitForCallableReadiness = async (
+  probes = CALLABLE_READINESS_PROBES,
+  timeoutMs = CALLABLE_READINESS_TIMEOUT_MS
+) => {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    let ready = true;
+    for (const probe of probes) {
+      try {
+        await probeCallable(probe);
+      } catch (error) {
+        lastError = error;
+        ready = false;
+        break;
+      }
+    }
+    if (ready) return;
+    await delay(250);
+  }
+  throw new Error(
+    `Task 06 callable endpoints did not register within ${timeoutMs} ms.`,
+    {cause: lastError}
+  );
+};
+
 const writeBatches = async (entries) => {
   for (let offset = 0; offset < entries.length; offset += 350) {
     const batch = db.batch();
@@ -265,24 +265,127 @@ const writeBatches = async (entries) => {
   }
 };
 
-const task05Config = (withDrain) => ({
-  schemaVersion: 2,
-  mode: 'new-only',
-  stage: 'new-only',
-  userOverrides: {
-    'task06-scale-0000': 'new-only',
-  },
-  ...(withDrain ? {
-    legacyDrain: {
-      users: {
-        'task06-scale-0000': {
-          drainId: 'task06_scale_drain_0001',
-          closedAt: Timestamp.fromMillis(1_750_000_000_000),
-        },
+const waitForBackendWorkerReadiness = async (
+  timeoutMs = WORKER_READINESS_TIMEOUT_MS
+) => {
+  const deadline = Date.now() + timeoutMs;
+  let attempt = 0;
+  while (Date.now() < deadline) {
+    attempt += 1;
+    const receiptId = [
+      'task06-worker-readiness',
+      process.pid,
+      Date.now(),
+      attempt,
+    ].join('-');
+    const operationRef = db.doc(`backend_operations/${receiptId}`);
+    const workRef = db.doc(
+      `backend_operation_work/${receiptId}-00000000`
+    );
+    const createdAt = Timestamp.now();
+    const batch = db.batch();
+    batch.create(operationRef, {
+      schemaVersion: 1,
+      operationId: receiptId,
+      actorUid: 'task06-worker-readiness',
+      kind: 'task06-worker-readiness',
+      requestHash: receiptId,
+      input: {},
+      status: 'pending',
+      phase: 'prepare',
+      cursor: '',
+      generation: 0,
+      attempt: 0,
+      retryable: false,
+      progress: {
+        planned: 0,
+        processed: 0,
+        succeeded: 0,
+        skipped: 0,
+        failed: 0,
       },
-    },
-  } : {}),
-});
+      createdAt,
+      updatedAt: createdAt,
+      expiresAt: Timestamp.fromMillis(Date.now() + 60_000),
+    });
+    batch.create(workRef, {
+      schemaVersion: 1,
+      receiptId,
+      generation: 0,
+      status: 'pending',
+      createdAt,
+      expiresAt: Timestamp.fromMillis(Date.now() + 60_000),
+    });
+    await batch.commit();
+
+    let ready = false;
+    const attemptDeadline = Math.min(deadline, Date.now() + 5_000);
+    try {
+      while (Date.now() < attemptDeadline) {
+        const [operation, work] = await Promise.all([
+          operationRef.get(),
+          workRef.get(),
+        ]);
+        if (
+          operation.get('status') === 'paused'
+          && operation.get('errorClass') === 'dependency'
+          && work.get('status') === 'completed'
+        ) {
+          ready = true;
+          break;
+        }
+        await delay(100);
+      }
+    } finally {
+      const cleanup = db.batch();
+      cleanup.delete(operationRef);
+      cleanup.delete(workRef);
+      await cleanup.commit();
+    }
+    if (ready) return;
+    await delay(200);
+  }
+  throw new Error(
+    `Task 06 worker did not register within ${timeoutMs} ms after re-enable.`
+  );
+};
+
+const waitForBackgroundRuntimeReadiness = async (
+  options = {},
+  attempts = BACKGROUND_RUNTIME_READINESS_ATTEMPTS
+) => {
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await waitForCallableReadiness();
+      await waitForBackendWorkerReadiness();
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts) break;
+      await withRawBackgroundTriggersDisabled(async () => {}, {
+        ...options,
+        projectId: PERFORMANCE_PROJECT_ID,
+      });
+    }
+  }
+  throw new Error(
+    `Task 06 background runtime did not recover after ${attempts} attempts.`,
+    {cause: lastError}
+  );
+};
+
+const withBackgroundTriggersDisabled = async (
+  operation,
+  options = {}
+) => {
+  const result = await withRawBackgroundTriggersDisabled(operation, {
+    ...options,
+    projectId: PERFORMANCE_PROJECT_ID,
+  });
+  await waitForBackgroundRuntimeReadiness(options);
+  return result;
+};
 
 const task06BackendConfig = () => ({
   schemaVersion: 1,
@@ -448,19 +551,20 @@ const seedCanonicalFoe = async ({
       mediaUpdatedAt,
     });
   }
-  await withBackgroundTriggersDisabled(async () => {
-    await Promise.all([
-      db.doc(`media_assets/${sourcePlan.assetId}`).set(manifest),
-      db.doc(`foes/${sourceFoeId}`).set(foeData),
-    ]);
-  }, {projectId: PERFORMANCE_PROJECT_ID});
+  await Promise.all([
+    db.doc(`media_assets/${sourcePlan.assetId}`).set(manifest),
+    db.doc(`foes/${sourceFoeId}`).set(foeData),
+  ]);
   return {sourcePlan, manifest, objects};
 };
 
 const actorDocument = () => ({
+  modelVersion: 2,
   role: 'dm',
   email: 'task06-integration-dm@example.test',
-  stats: {level: 1},
+  characterId: 'Task 06 Integration DM',
+  flags: {characterCreationDone: true},
+  summary: {level: 1},
 });
 
 const scaleUserEntries = () => Array.from(
@@ -468,11 +572,10 @@ const scaleUserEntries = () => Array.from(
   (_, index) => [
     `users/task06-scale-${String(index).padStart(4, '0')}`,
     {
+      modelVersion: 2,
       role: 'player',
-      stats: {
-        level: 1,
-        combatTokensAvailable: 0,
-      },
+      characterId: `Task 06 Scale ${String(index).padStart(4, '0')}`,
+      flags: {characterCreationDone: true},
       summary: {level: 1},
       ...(index === SCALE_USER_COUNT - 1
         ? {deletionState: 'pending'}
@@ -481,15 +584,132 @@ const scaleUserEntries = () => Array.from(
   ]
 );
 
+const customTokenFixtureEntries = (ownerUid) => [
+  [
+    `grigliata_tokens/${TOKEN_TEMPLATE_ID}`,
+    {
+      ownerUid,
+      tokenType: 'custom',
+      customTokenRole: 'template',
+      customTemplateId: TOKEN_TEMPLATE_ID,
+      label: 'Task 06 scale template',
+    },
+  ],
+  [
+    `grigliata_token_placements/task06-bg__${TOKEN_TEMPLATE_ID}`,
+    {
+      backgroundId: 'task06-bg',
+      tokenId: TOKEN_TEMPLATE_ID,
+      ownerUid,
+    },
+  ],
+  ...Array.from(
+    {length: TOKEN_INSTANCE_COUNT},
+    (_, index) => {
+      const instanceId =
+        `task06-delete-instance-${String(index).padStart(4, '0')}`;
+      return [
+        [
+          `grigliata_tokens/${instanceId}`,
+          {
+            ownerUid,
+            tokenType: 'custom',
+            customTokenRole: 'instance',
+            customTemplateId: TOKEN_TEMPLATE_ID,
+            label: instanceId,
+          },
+        ],
+        [
+          `grigliata_token_placements/task06-bg__${instanceId}`,
+          {
+            backgroundId: 'task06-bg',
+            tokenId: instanceId,
+            ownerUid,
+          },
+        ],
+      ];
+    }
+  ).flat(),
+];
+
+const RETIRED_ROOT_USER_ID = 'task06-v2-inert-root-user';
+const retiredRootDomainFixtureEntries = () => {
+  const shell = {
+    modelVersion: 2,
+    role: 'player',
+    characterId: 'Task 06 V2 Canonical',
+    email: 'task06-v2-canonical@example.test',
+    flags: {characterCreationDone: true},
+    summary: {level: 2},
+    sentinel: {preserve: true},
+  };
+  return [
+    [`users/${RETIRED_ROOT_USER_ID}`, shell],
+    [`users/${RETIRED_ROOT_USER_ID}/state/progression`, {
+      schemaVersion: 2,
+      revision: 7,
+      stats: {
+        level: 2,
+        basePointsAvailable: 4,
+        basePointsSpent: 0,
+        combatTokensAvailable: 3,
+        combatTokensSpent: 0,
+      },
+      AltriParametri: {},
+      Parametri: {
+        Combattimento: {
+          Salute: {Base: 2, Anima: 0, Tot: 2},
+          Disciplina: {Base: 1, Anima: 0, Tot: 1},
+        },
+      },
+    }],
+    [`users/${RETIRED_ROOT_USER_ID}/state/resources`, {
+      schemaVersion: 2,
+      revision: 5,
+      stats: {
+        hpTotal: 18,
+        hpCurrent: 18,
+        manaTotal: 12,
+        manaCurrent: 12,
+      },
+    }],
+    [`user_directory/${RETIRED_ROOT_USER_ID}`, {
+      schemaVersion: 1,
+      characterId: shell.characterId,
+      label: shell.characterId,
+      normalizedLabel: 'task 06 v2 canonical',
+      role: 'player',
+    }],
+  ];
+};
+
 const resetTask06ControlPlane = async () => {
-  await withBackgroundTriggersDisabled(async () => {
-    await writeBatches([
-      [`users/${actor.uid}`, actorDocument()],
-      ['app_config/task06_backend', task06BackendConfig()],
-      ['app_config/user_data_v2', task05Config(false)],
-      ['utils/varie', {}],
-    ]);
-  }, {projectId: PERFORMANCE_PROJECT_ID});
+  await writeBatches([
+    [`users/${actor.uid}`, actorDocument()],
+    ['app_config/task06_backend', task06BackendConfig()],
+    ['utils/varie', {}],
+  ]);
+};
+
+const seedLegacyFoeRecoveryReceipt = async ({
+  operationId,
+  sourceFoeId,
+  newFoeName,
+}) => {
+  const result = await invokeCallable('duplicateFoeWithAssetsV2', {
+    operationId,
+    sourceFoeId,
+    newFoeName,
+  });
+  assert.equal(result.replayed, false);
+  assert.equal(result.assets.main.path, '');
+  const operation = await operationDocument(operationId);
+  assert.equal(operation.get('status'), 'completed');
+  const [entry] = operation.get('assetManifest');
+  assert.ok(entry);
+  assert.equal(entry.sourceKnownPresent, false);
+  await db.doc(`foes/${result.newFoeId}`).delete();
+  return {operation, result};
 };
 
 before(async () => {
@@ -502,7 +722,6 @@ before(async () => {
   configureOwnedPerformanceEnvironment({
     mode: PERFORMANCE_ENVIRONMENT_MODE.STRICT,
   });
-  assert.equal(process.env.FND_TASK06_CONSOLIDATED_OWNER, '1');
   app = initializeApp({
     projectId: PERFORMANCE_PROJECT_ID,
     storageBucket: `${PERFORMANCE_PROJECT_ID}.appspot.com`,
@@ -513,9 +732,10 @@ before(async () => {
     await writeBatches([
       [`users/${actor.uid}`, actorDocument()],
       ['app_config/task06_backend', task06BackendConfig()],
-      ['app_config/user_data_v2', task05Config(false)],
       ['utils/varie', {}],
       ...scaleUserEntries(),
+      ...retiredRootDomainFixtureEntries(),
+      ...customTokenFixtureEntries(actor.uid),
     ]);
   }, {projectId: PERFORMANCE_PROJECT_ID});
 });
@@ -525,14 +745,12 @@ after(async () => {
 });
 
 test(
-  'authoritative derived state performs one root write and does not loop',
-  verifyAuthoritativeDerivedState
+  'retired legacy root domains stay inert while V2 state remains canonical',
+  verifyRetiredRootDomainsStayInert
 );
 
-test('bounded operation pauses, resumes above 500 subjects, and replays idempotently', async () => {
-  await withBackgroundTriggersDisabled(async () => {
-    await db.doc('app_config/user_data_v2').set(task05Config(true));
-  }, {projectId: PERFORMANCE_PROJECT_ID});
+test('bounded operation completes above 500 subjects and replays idempotently', async () => {
+  await resetTask06ControlPlane();
 
   const started = await invokeCallable('levelUpAll', {
     operationId: OPERATION_ID,
@@ -541,39 +759,30 @@ test('bounded operation pauses, resumes above 500 subjects, and replays idempote
   assert.equal(started.operation.operationId, OPERATION_ID);
   assert.equal(started.operation.kind, 'level-up-all');
 
-  const paused = await waitForOperation(OPERATION_ID, ['paused']);
-  assert.equal(paused.retryable, true);
-  assert.equal(paused.errorClass, 'dependency');
-  assert.ok(paused.progress.processed < SCALE_USER_COUNT + 1);
-
-  await db.doc('app_config/user_data_v2').set(task05Config(false));
-  const resumed = await invokeCallable('resumeBackendOperation', {
-    operationId: OPERATION_ID,
-  });
-  assert.equal(resumed.operationId, OPERATION_ID);
-  assert.equal(resumed.status, 'pending');
-
   const completed = await waitForOperation(OPERATION_ID, ['completed']);
   assert.equal(completed.retryable, false);
-  assert.equal(completed.progress.succeeded, SCALE_USER_COUNT - 1);
+  assert.equal(completed.progress.succeeded, SCALE_USER_COUNT);
   assert.equal(completed.progress.skipped, 2);
   assert.equal(
     completed.progress.processed,
-    SCALE_USER_COUNT + 1
+    SCALE_USER_COUNT + 2
   );
 
   const [
     firstProgression,
     lastProgression,
     pendingProgression,
+    retiredRootProgression,
   ] = await Promise.all([
     db.doc('users/task06-scale-0000/state/progression').get(),
     db.doc('users/task06-scale-0523/state/progression').get(),
     db.doc('users/task06-scale-0524/state/progression').get(),
+    db.doc(`users/${RETIRED_ROOT_USER_ID}/state/progression`).get(),
   ]);
   assert.equal(firstProgression.get('stats.level'), 2);
   assert.equal(lastProgression.get('stats.level'), 2);
   assert.equal(pendingProgression.exists, false);
+  assert.equal(retiredRootProgression.get('stats.level'), 3);
 
   const replay = await invokeCallable('levelUpAll', {
     operationId: OPERATION_ID,
@@ -582,7 +791,7 @@ test('bounded operation pauses, resumes above 500 subjects, and replays idempote
   assert.equal(replay.operation.status, 'completed');
   assert.equal(
     replay.operation.progress.succeeded,
-    SCALE_USER_COUNT - 1
+    SCALE_USER_COUNT
   );
   assert.equal(
     (await db.doc(
@@ -604,74 +813,20 @@ test('bounded operation pauses, resumes above 500 subjects, and replays idempote
   process.stdout.write(`${JSON.stringify({
     schemaVersion: 1,
     projectId: PERFORMANCE_PROJECT_ID,
-    consolidatedDerivedOwner: true,
+    v2CommandOwnership: true,
     operationId: OPERATION_ID,
     status: completed.status,
     progress: completed.progress,
     pendingActorRejected: true,
     pendingSubjectSkipped: true,
-    pauseResumeVerified: true,
+    boundedPagingVerified: true,
     idempotentReplayVerified: true,
   })}\n`);
 });
 
 test('custom-token deletion pages beyond 500 instances and replays safely', async () => {
   await resetTask06ControlPlane();
-  const templateId = 'task06-delete-template';
-  const instances = Array.from(
-    {length: TOKEN_INSTANCE_COUNT},
-    (_, index) => {
-      const instanceId =
-        `task06-delete-instance-${String(index).padStart(4, '0')}`;
-      return [
-        [
-          `grigliata_tokens/${instanceId}`,
-          {
-            ownerUid: actor.uid,
-            tokenType: 'custom',
-            customTokenRole: 'instance',
-            customTemplateId: templateId,
-            label: instanceId,
-          },
-        ],
-        [
-          `grigliata_token_placements/task06-bg__${instanceId}`,
-          {
-            backgroundId: 'task06-bg',
-            tokenId: instanceId,
-            ownerUid: actor.uid,
-          },
-        ],
-      ];
-    }
-  ).flat();
-
-  await withBackgroundTriggersDisabled(async () => {
-    await db.doc(`users/${actor.uid}`).update({
-      deletionState: FieldValue.delete(),
-    });
-    await writeBatches([
-      [
-        `grigliata_tokens/${templateId}`,
-        {
-          ownerUid: actor.uid,
-          tokenType: 'custom',
-          customTokenRole: 'template',
-          customTemplateId: templateId,
-          label: 'Task 06 scale template',
-        },
-      ],
-      [
-        `grigliata_token_placements/task06-bg__${templateId}`,
-        {
-          backgroundId: 'task06-bg',
-          tokenId: templateId,
-          ownerUid: actor.uid,
-        },
-      ],
-      ...instances,
-    ]);
-  }, {projectId: PERFORMANCE_PROJECT_ID});
+  const templateId = TOKEN_TEMPLATE_ID;
 
   let completed = null;
   for (let attempt = 0; attempt < 4 && !completed; attempt += 1) {
@@ -729,137 +884,66 @@ test('custom-token deletion pages beyond 500 instances and replays safely', asyn
   })}\n`);
 });
 
-async function verifyAuthoritativeDerivedState() {
-  const userId = 'task06-derived-user';
+async function verifyRetiredRootDomainsStayInert() {
+  const userId = RETIRED_ROOT_USER_ID;
   const userRef = db.doc(`users/${userId}`);
+  const progressionRef = db.doc(`users/${userId}/state/progression`);
+  const resourcesRef = db.doc(`users/${userId}/state/resources`);
   const directoryRef = db.doc(`user_directory/${userId}`);
-  const baseline = {
-    role: 'player',
-    characterId: 'Task 06 Derived',
-    email: 'task06-derived@example.test',
-    sentinel: {preserve: true},
-    stats: {
-      level: 2,
-      hpTotal: 18,
-      manaTotal: 12,
-    },
-    AltriParametri: {},
+
+  const [progressionBefore, resourcesBefore, directoryBefore] =
+    await Promise.all([
+      progressionRef.get(),
+      resourcesRef.get(),
+      directoryRef.get(),
+    ]);
+
+  const sourceWrite = await userRef.update({
     Parametri: {
       Combattimento: {
-        Salute: {Base: 2, Anima: 0, Tot: 2},
-        Disciplina: {Base: 1, Anima: 0, Tot: 1},
+        Salute: {Base: 99, Anima: 0, Tot: 99},
       },
     },
-  };
-  await writeBatches([
-    ['app_config/task06_backend', {
-      ...task06BackendConfig(),
-      derivedOwnerMode: 'legacy',
-    }],
-    ['app_config/user_data_v2', {
-      schemaVersion: 2,
-      mode: 'legacy-read',
-      stage: 'legacy-read',
-    }],
-    ['utils/varie', {}],
-    [`users/${userId}`, baseline],
-    [`user_directory/${userId}`, {
-      schemaVersion: 1,
-      characterId: baseline.characterId,
-      label: baseline.characterId,
-      normalizedLabel: 'task 06 derived',
-      role: 'player',
-    }],
-  ]);
-  await db.doc('app_config/task06_backend').set(task06BackendConfig());
-
-  const directoryBefore = await directoryRef.get();
-  const observedSnapshots = [];
-  let listenerError = null;
-  let resolveInitial;
-  let rejectInitial;
-  const initialSnapshot = new Promise((resolve, reject) => {
-    resolveInitial = resolve;
-    rejectInitial = reject;
+    stats: {hpTotal: 999, manaTotal: 999},
   });
-  let initialObserved = false;
-  const unsubscribe = userRef.onSnapshot(
-    (snapshot) => {
-      if (!initialObserved) {
-        initialObserved = true;
-        resolveInitial();
-      }
-      if (snapshot.exists && snapshot.updateTime) {
-        observedSnapshots.push({
-          data: snapshot.data(),
-          updateTime: snapshot.updateTime.toMillis(),
-        });
-      }
-    },
-    (error) => {
-      listenerError = error;
-      rejectInitial(error);
-    }
+  await delay(2_000);
+  const [rootAfter, progressionAfter, resourcesAfter, directoryAfter] =
+    await Promise.all([
+      userRef.get(),
+      progressionRef.get(),
+      resourcesRef.get(),
+      directoryRef.get(),
+    ]);
+  assert.equal(
+    rootAfter.updateTime.toMillis(),
+    sourceWrite.writeTime.toMillis(),
+    'a retired user-root trigger rewrote the source document'
   );
-
-  try {
-    await initialSnapshot;
-    const sourceWrite = await userRef.update({
-      'Parametri.Combattimento.Salute.Base': 3,
-    });
-
-    const derived = await waitForDocument(
-      userRef,
-      (snapshot) => snapshot.get('stats.hpTotal') === 23
-        && snapshot.get('stats.manaTotal') === 12
-        && snapshot.get('Parametri.Combattimento.Salute.Tot') === 3
-        && snapshot.get('Parametri.Combattimento.Disciplina.Tot') === 1
-    );
-    const settledUpdateTime = derived.updateTime.toMillis();
-    await delay(2_000);
-    const afterQuietWindow = await userRef.get();
-    assert.equal(afterQuietWindow.updateTime.toMillis(), settledUpdateTime);
-    assert.ifError(listenerError);
-    const uniqueSnapshots = [...new Map(
-      observedSnapshots.map((snapshot) => [
-        snapshot.updateTime,
-        snapshot,
-      ])
-    ).values()];
-    assert.equal(
-      uniqueSnapshots.length,
-      3,
-      'expected baseline, one source write, and exactly one derived root write'
-    );
-    const sourceSnapshot = uniqueSnapshots.find(({updateTime}) => (
-      updateTime === sourceWrite.writeTime.toMillis()
-    ));
-    const derivedSnapshot = uniqueSnapshots.find(({updateTime}) => (
-      updateTime === settledUpdateTime
-    ));
-    assert.ok(sourceSnapshot, 'source update snapshot was not observed');
-    assert.ok(derivedSnapshot, 'derived update snapshot was not observed');
-    assert.deepEqual(
-      changedLeafPaths(sourceSnapshot.data, derivedSnapshot.data),
-      [
-        'Parametri.Combattimento.Salute.Tot',
-        'stats.hpTotal',
-      ]
-    );
-    assert.equal(derivedSnapshot.data.sentinel.preserve, true);
-    const directoryAfter = await directoryRef.get();
-    assert.equal(
-      directoryAfter.updateTime.toMillis(),
-      directoryBefore.updateTime.toMillis()
-    );
-  } finally {
-    unsubscribe();
-    await db.doc('app_config/user_data_v2').set(task05Config(false));
-    const cleanup = db.batch();
-    cleanup.delete(userRef);
-    cleanup.delete(directoryRef);
-    await cleanup.commit();
-  }
+  assert.equal(rootAfter.get('stats.hpTotal'), 999);
+  assert.equal(rootAfter.get('Parametri.Combattimento.Salute.Tot'), 99);
+  assert.equal(rootAfter.get('sentinel.preserve'), true);
+  assert.deepEqual(progressionAfter.data(), progressionBefore.data());
+  assert.deepEqual(resourcesAfter.data(), resourcesBefore.data());
+  assert.equal(
+    progressionAfter.updateTime.toMillis(),
+    progressionBefore.updateTime.toMillis()
+  );
+  assert.equal(
+    resourcesAfter.updateTime.toMillis(),
+    resourcesBefore.updateTime.toMillis()
+  );
+  assert.equal(
+    directoryAfter.updateTime.toMillis(),
+    directoryBefore.updateTime.toMillis()
+  );
+  process.stdout.write(`${JSON.stringify({
+    schemaVersion: 2,
+    projectId: PERFORMANCE_PROJECT_ID,
+    legacyRootTriggerWrites: 0,
+    v2ProgressionUnchanged: true,
+    v2ResourcesUnchanged: true,
+    directoryUnchanged: true,
+  })}\n`);
 }
 
 test('lock-all uses bounded subjects and completes beyond the former batch ceiling', async () => {
@@ -944,21 +1028,19 @@ test('NPC and encounter cleanup remove indexed and nested descendants', async ()
       {kind: 'barrier'},
     ],
   ];
-  await withBackgroundTriggersDisabled(async () => {
-    await writeBatches([
-      [`echi_npcs/${npcId}`, {
-        nome: 'Task 06 cleanup NPC',
-        imagePath: npcMediaPath,
-        imageUrl: 'https://example.invalid/task06-cleanup.png',
-      }],
-      [`encounters/${encounterId}`, {status: 'active'}],
-      ...publicMarkers,
-      ...privateMarkers,
-      ...participants,
-      ...logs,
-      ...nestedEffects,
-    ]);
-  }, {projectId: PERFORMANCE_PROJECT_ID});
+  await writeBatches([
+    [`echi_npcs/${npcId}`, {
+      nome: 'Task 06 cleanup NPC',
+      imagePath: npcMediaPath,
+      imageUrl: 'https://example.invalid/task06-cleanup.png',
+    }],
+    [`encounters/${encounterId}`, {status: 'active'}],
+    ...publicMarkers,
+    ...privateMarkers,
+    ...participants,
+    ...logs,
+    ...nestedEffects,
+  ]);
 
   const npcStarted = await invokeCallable('deleteNpcV2', {
     operationId: NPC_OPERATION_ID,
@@ -1160,9 +1242,7 @@ test('foe duplication skips a missing optional legacy image and replays', async 
 
 test('foe duplication owns and atomically attaches a canonical media family', async () => {
   await resetTask06ControlPlane();
-  await withBackgroundTriggersDisabled(async () => {
-    await db.doc('utils/task07_media').set(task07FoeWriteConfig(actor.uid));
-  }, {projectId: PERFORMANCE_PROJECT_ID});
+  await db.doc('utils/task07_media').set(task07FoeWriteConfig(actor.uid));
   const sourceFoeId = 'task07-canonical-clone-source';
   const bucket = getStorage(app).bucket();
   const seeded = await seedCanonicalFoe({bucket, sourceFoeId});
@@ -1172,7 +1252,7 @@ test('foe duplication owns and atomically attaches a canonical media family', as
       sourceFoeId,
       newFoeName: 'Unsafe compatibility duplicate',
     }),
-    /Canonical foe media requires the resumable duplication callable/
+    /Media-bearing foes require canonical Task 07 duplication/
   );
 
   const completed = await invokeCallable('duplicateFoeWithAssetsV2', {
@@ -1259,9 +1339,7 @@ test('foe duplication owns and atomically attaches a canonical media family', as
 
 test('General-only canonical foe duplication normalizes and round-trips', async () => {
   await resetTask06ControlPlane();
-  await withBackgroundTriggersDisabled(async () => {
-    await db.doc('utils/task07_media').set(task07FoeWriteConfig(actor.uid));
-  }, {projectId: PERFORMANCE_PROJECT_ID});
+  await db.doc('utils/task07_media').set(task07FoeWriteConfig(actor.uid));
   const sourceFoeId = 'task07-general-canonical-clone-source';
   const bucket = getStorage(app).bucket();
   const seeded = await seedCanonicalFoe({
@@ -1323,9 +1401,7 @@ test('General-only canonical foe duplication normalizes and round-trips', async 
 
 test('General-only canonical duplication preserves a safe legacy rollback object', async () => {
   await resetTask06ControlPlane();
-  await withBackgroundTriggersDisabled(async () => {
-    await db.doc('utils/task07_media').set(task07FoeWriteConfig(actor.uid));
-  }, {projectId: PERFORMANCE_PROJECT_ID});
+  await db.doc('utils/task07_media').set(task07FoeWriteConfig(actor.uid));
   const sourceFoeId = 'task07-general-canonical-fallback-source';
   const legacyFallbackPath = `foes/${sourceFoeId}/legacy.png`;
   const bucket = getStorage(app).bucket();
@@ -1362,9 +1438,7 @@ test('General-only canonical duplication preserves a safe legacy rollback object
 
 test('General-only canonical foe retirement clears image aliases atomically', async () => {
   await resetTask06ControlPlane();
-  await withBackgroundTriggersDisabled(async () => {
-    await db.doc('utils/task07_media').set(task07FoeWriteConfig(actor.uid));
-  }, {projectId: PERFORMANCE_PROJECT_ID});
+  await db.doc('utils/task07_media').set(task07FoeWriteConfig(actor.uid));
   const sourceFoeId = 'task07-general-canonical-retire-source';
   const bucket = getStorage(app).bucket();
   const seeded = await seedCanonicalFoe({
@@ -1416,9 +1490,7 @@ test('General-only canonical foe retirement clears image aliases atomically', as
 
 test('terminal canonical copy failure retires only after cleanup and a fresh ID succeeds', async () => {
   await resetTask06ControlPlane();
-  await withBackgroundTriggersDisabled(async () => {
-    await db.doc('utils/task07_media').set(task07FoeWriteConfig(actor.uid));
-  }, {projectId: PERFORMANCE_PROJECT_ID});
+  await db.doc('utils/task07_media').set(task07FoeWriteConfig(actor.uid));
   const sourceFoeId = 'task07-canonical-terminal-source';
   const bucket = getStorage(app).bucket();
   const seeded = await seedCanonicalFoe({bucket, sourceFoeId});
@@ -1428,7 +1500,7 @@ test('terminal canonical copy failure retires only after cleanup and a fresh ID 
     newFoeName: 'Task 07 repaired duplicate',
   };
 
-  await withBackgroundTriggersDisabled(async () => {
+  await withRawBackgroundTriggersDisabled(async () => {
     await assert.rejects(
       invokeCallable('duplicateFoeWithAssetsV2', {
         ...request,
@@ -1499,6 +1571,7 @@ test('terminal canonical copy failure retires only after cleanup and a fresh ID 
     assert.equal((await manifestRef.get()).get('state'), 'deleted');
     assert.equal((await cleanupRef.get()).get('state'), 'complete');
   }, {projectId: PERFORMANCE_PROJECT_ID});
+  await waitForCallableReadiness();
 
   const repaired = await seedCanonicalFoe({bucket, sourceFoeId});
   const completed = await invokeCallable('duplicateFoeWithAssetsV2', {
@@ -1532,14 +1605,10 @@ test('active foe lease stays aborted while expired source drift cleans terminall
     spells: [],
     stats: {hpTotal: 10, manaTotal: 4},
   });
-  await assert.rejects(
-    invokeCallable('duplicateFoeWithAssetsV2', request),
-    (error) => {
-      assert.match(error.code, /UNAVAILABLE/i);
-      return true;
-    }
-  );
-  let operation = await operationDocument(FOE_ACTIVE_LEASE_ID);
+  let {operation} = await seedLegacyFoeRecoveryReceipt({
+    ...request,
+    operationId: FOE_ACTIVE_LEASE_ID,
+  });
   const leaseOwner = 'another-invocation';
   await operation.ref.update({
     status: 'running',
@@ -1547,6 +1616,8 @@ test('active foe lease stays aborted while expired source drift cleans terminall
     retryable: false,
     leaseOwner,
     leaseExpiresAt: Timestamp.fromMillis(Date.now() + 60_000),
+    result: FieldValue.delete(),
+    completedAt: FieldValue.delete(),
   });
 
   await assert.rejects(
@@ -1596,14 +1667,10 @@ test('cleanup-pending foe receipts remain owner-resumable without DM role', asyn
     spells: [],
     stats: {hpTotal: 10, manaTotal: 4},
   });
-  await assert.rejects(
-    invokeCallable('duplicateFoeWithAssetsV2', request),
-    (error) => {
-      assert.match(error.code, /UNAVAILABLE/i);
-      return true;
-    }
-  );
-  let operation = await operationDocument(FOE_CLEANUP_OWNER_ID);
+  let {operation} = await seedLegacyFoeRecoveryReceipt({
+    ...request,
+    operationId: FOE_CLEANUP_OWNER_ID,
+  });
   const [entry] = operation.get('assetManifest');
   const bucket = getStorage(app).bucket();
   await bucket.file(entry.destinationPath).save(Buffer.from('owned-copy'));
@@ -1615,6 +1682,8 @@ test('cleanup-pending foe receipts remain owner-resumable without DM role', asyn
       retryOperationAfterCleanup: FieldValue.delete(),
       leaseOwner: FieldValue.delete(),
       leaseExpiresAt: FieldValue.delete(),
+      result: FieldValue.delete(),
+      completedAt: FieldValue.delete(),
     }),
     db.doc(`users/${actor.uid}`).update({role: 'player'}),
   ]);
@@ -1667,17 +1736,20 @@ test('disabling the duplication gate cleans an existing receipt before retiremen
     spells: [],
     stats: {hpTotal: 10, manaTotal: 4},
   });
-  await assert.rejects(
-    invokeCallable('duplicateFoeWithAssetsV2', request),
-    (error) => {
-      assert.match(error.code, /UNAVAILABLE/i);
-      return true;
-    }
-  );
-  let operation = await operationDocument(FOE_GATE_CLEANUP_ID);
+  let {operation} = await seedLegacyFoeRecoveryReceipt({
+    ...request,
+    operationId: FOE_GATE_CLEANUP_ID,
+  });
   const [entry] = operation.get('assetManifest');
   const bucket = getStorage(app).bucket();
   await bucket.file(entry.destinationPath).save(Buffer.from('owned-copy'));
+  await operation.ref.update({
+    status: 'failed',
+    phase: 'copy-assets',
+    retryable: true,
+    result: FieldValue.delete(),
+    completedAt: FieldValue.delete(),
+  });
   const disabled = task06BackendConfig();
   disabled.enabledOperationKinds = disabled.enabledOperationKinds
     .filter((kind) => kind !== 'duplicate-foe');
@@ -1702,12 +1774,28 @@ test('disabling the duplication gate cleans an existing receipt before retiremen
 test('every callable manifest entry is reachable in its declared emulator region', async () => {
   const entries = Object.values(callableManifest.callables);
   const reached = [];
-  for (const entry of entries) {
-    reached.push({
-      functionId: entry.functionId,
-      region: entry.region,
-      probe: await probeCallable(entry),
-    });
+  for (
+    let offset = 0;
+    offset < entries.length;
+    offset += CALLABLE_MANIFEST_PROBE_BATCH_SIZE
+  ) {
+    const batch = entries.slice(
+      offset,
+      offset + CALLABLE_MANIFEST_PROBE_BATCH_SIZE
+    );
+    for (const entry of batch) {
+      reached.push({
+        functionId: entry.functionId,
+        region: entry.region,
+        probe: await probeCallable(entry),
+      });
+    }
+    if (offset + batch.length < entries.length) {
+      await withRawBackgroundTriggersDisabled(async () => {}, {
+        projectId: PERFORMANCE_PROJECT_ID,
+      });
+      await waitForCallableReadiness();
+    }
   }
   assert.equal(reached.length, entries.length);
   assert.deepEqual(
@@ -1736,13 +1824,11 @@ test('every callable manifest entry is reachable in its declared emulator region
   assert.deepEqual(
     reached
       .filter(({functionId}) => (
-        functionId === 'spendCharacterPoint'
-        || functionId === 'spendCharacterPointV2'
+        functionId === 'spendCharacterPointV2'
       ))
       .map(({functionId, region}) => `${functionId}:${region}`)
       .sort(),
     [
-      'spendCharacterPoint:us-central1',
       'spendCharacterPointV2:europe-west8',
     ]
   );

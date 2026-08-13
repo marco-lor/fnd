@@ -102,6 +102,65 @@ export const collectOwnedMediaPaths = (
   return [...result].sort();
 };
 
+export interface ArchivedRootField {
+  field: unknown;
+  value: unknown;
+}
+
+export interface ArchivedMigrationDomain {
+  domain: unknown;
+  payload: unknown;
+}
+
+/**
+ * Collect paths that may exist only in Task 05 archives. Account deletion must
+ * inspect both archive generations before erasing their last references.
+ */
+export const collectArchivedOwnedMediaPaths = (
+  uid: string,
+  archives: {
+    rootFields?: readonly ArchivedRootField[];
+    migrationDomains?: readonly ArchivedMigrationDomain[];
+  }
+): string[] => {
+  const result = new Set<string>();
+  const add = (
+    value: unknown,
+    scope: OwnedMediaScope,
+    entityId: string
+  ): void => {
+    collectOwnedMediaPaths(value, uid, scope, entityId)
+      .forEach((path) => result.add(path));
+  };
+
+  (archives.rootFields ?? []).forEach(({field, value}) => {
+    // Profile paths can live in any retained shell field. The parser accepts
+    // only paths owned by this uid and ignores shared or other-user media.
+    add(value, "profile", "profile");
+    if (["inventory", "equipped"].includes(String(field))) {
+      add(value, "inventory", "legacy-root");
+    }
+    if (["spells", "tecniche"].includes(String(field))) {
+      const scope = String(field) as OwnedMediaScope;
+      add(value, scope, "legacy-root");
+    }
+  });
+
+  (archives.migrationDomains ?? []).forEach(({domain, payload}) => {
+    if (domain === "shell") add(payload, "profile", "profile");
+    if (["inventory", "equipment"].includes(String(domain))) {
+      add(payload, "inventory", "legacy-root");
+    }
+    if (domain !== "personalContent" || !payload ||
+      typeof payload !== "object" || Array.isArray(payload)) return;
+    const personalContent = payload as Record<string, unknown>;
+    add(personalContent.spells, "spells", "legacy-root");
+    add(personalContent.tecniche, "tecniche", "legacy-root");
+  });
+
+  return [...result].sort();
+};
+
 export const planOwnedMediaCleanup = (input: {
   before: unknown;
   after: unknown;

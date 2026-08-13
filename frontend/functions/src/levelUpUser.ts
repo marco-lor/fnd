@@ -2,8 +2,6 @@ import {onCall, HttpsError, CallableRequest} from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import {FieldValue} from "firebase-admin/firestore";
 import {backendOperationExpiry, getTokenGrantForLevel} from "./backendOperationCore";
-import {levelUpUserLegacyHandler} from "./levelUpUserLegacy";
-import {isUserDataLegacyDrainFrozen} from "./userDataBridge";
 import {
   asFiniteNumber,
   asRecord,
@@ -13,9 +11,7 @@ import {
   isValidFirestoreDocumentId,
   operationReceiptId,
   operationRequestHash,
-  resolveUserDataRolloutStage,
   validateOperationId,
-  writesLegacyUserProjection,
 } from "./userDataV2";
 
 type Request = {
@@ -50,7 +46,6 @@ const levelUpUserOperationHandler = async (
     const db = admin.firestore();
     const callerRef = db.doc(`users/${actorUid}`);
     const userRef = db.doc(`users/${userId}`);
-    const rolloutRef = db.doc("app_config/user_data_v2");
     const progressionRef = db.doc(`users/${userId}/state/progression`);
     const resourcesRef = db.doc(`users/${userId}/state/resources`);
     const utilsRef = db.doc("utils/varie");
@@ -65,7 +60,6 @@ const levelUpUserOperationHandler = async (
       const [
         receipt,
         caller,
-        rollout,
         target,
         progression,
         resources,
@@ -73,7 +67,6 @@ const levelUpUserOperationHandler = async (
       ] = await transaction.getAll(
         receiptRef,
         callerRef,
-        rolloutRef,
         userRef,
         progressionRef,
         resourcesRef,
@@ -105,12 +98,6 @@ const levelUpUserOperationHandler = async (
           replayed: true,
         };
       }
-      if (isUserDataLegacyDrainFrozen(rollout.data(), userId)) {
-        throw new HttpsError(
-          "unavailable",
-          "User data is temporarily frozen. Retry later."
-        );
-      }
       if (!target.exists) {
         throw new HttpsError("not-found", "Target user not found");
       }
@@ -128,9 +115,8 @@ const levelUpUserOperationHandler = async (
         );
       }
       const progressionStats = asRecord(progression.get("stats"));
-      const rootStats = asRecord(targetData.stats);
       const fromLevel = Math.max(1, Math.trunc(asFiniteNumber(
-        progressionStats.level ?? rootStats.level,
+        progressionStats.level,
         1
       )));
       let response: Record<string, unknown>;
@@ -144,13 +130,11 @@ const levelUpUserOperationHandler = async (
         const toLevel = fromLevel + 1;
         const tokensGranted = getTokenGrantForLevel(toLevel);
         const currentTokens = asFiniteNumber(
-          progressionStats.combatTokensAvailable ??
-            rootStats.combatTokensAvailable
+          progressionStats.combatTokensAvailable
         );
         const nextParametri = deriveAnimaParameters({
-          parametri: progression.get("Parametri") ?? targetData.Parametri,
-          altriParametri: progression.get("AltriParametri") ??
-            targetData.AltriParametri,
+          parametri: progression.get("Parametri"),
+          altriParametri: progression.get("AltriParametri"),
           level: toLevel,
           utils: utils.data(),
         });
@@ -189,25 +173,7 @@ const levelUpUserOperationHandler = async (
             updatedBy: actorUid,
           }, {merge: true});
         }
-        const rootUpdate: admin.firestore.UpdateData<
-          admin.firestore.DocumentData
-        > = {
-          "summary.level": toLevel,
-        };
-        const rolloutStage = resolveUserDataRolloutStage(
-          rollout.data(),
-          userId
-        );
-        if (writesLegacyUserProjection(rolloutStage)) {
-          rootUpdate["stats.level"] = toLevel;
-          rootUpdate["stats.combatTokensAvailable"] =
-            currentTokens + tokensGranted;
-          rootUpdate.Parametri = nextParametri;
-          Object.entries(resourceTotals).forEach(([field, value]) => {
-            rootUpdate[`stats.${field}`] = value;
-          });
-        }
-        transaction.update(userRef, rootUpdate);
+        transaction.update(userRef, {"summary.level": toLevel});
         transaction.create(eventRef, {
           from_level: fromLevel,
           to_level: toLevel,
@@ -241,14 +207,5 @@ const levelUpUserOperationHandler = async (
 
 export const levelUpUser = onCall(
   {region: REGION},
-  async (request: CallableRequest<Request>) => {
-    const hasExplicitOperationId = Object.prototype.hasOwnProperty.call(
-      request.data ?? {},
-      "operationId"
-    );
-    if (!hasExplicitOperationId) {
-      return levelUpUserLegacyHandler(request);
-    }
-    return levelUpUserOperationHandler(request);
-  }
+  levelUpUserOperationHandler
 );

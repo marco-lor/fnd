@@ -111,9 +111,9 @@ const Avatar = ({ user, userData, className = '', imageClassName = '' }) => {
 
   return (
     <>
-      {userData?.stats?.level ? (
+      {userData?.summary?.level ? (
         <div className="absolute -bottom-1 -left-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-slate-950 bg-sky-500 text-xs font-semibold text-white shadow-lg">
-          {userData.stats.level}
+          {userData.summary.level}
         </div>
       ) : null}
       {hasAvatar ? (
@@ -360,7 +360,7 @@ const Navbar = () => {
     role: shellProfile.role,
     characterId: shellProfile.characterId,
     race: shellProfile.race,
-    stats: { level: shellProfile.level },
+    summary: { level: shellProfile.level },
     imageUrl: shellProfile.avatarUrl,
     media: shellProfile.avatarMedia || null,
   }) : null, [shellProfile]);

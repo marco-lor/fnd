@@ -11,15 +11,9 @@ import {
   validateBackendOperationId,
 } from "./backendOperationCore";
 import {
-  deleteGrigliataCustomTokenLegacyHandler,
-} from "./deleteGrigliataCustomTokenLegacy";
-import {isUserDataLegacyDrainFrozen} from "./userDataBridge";
-import {
   asFiniteNumber,
   asRecord,
   asTrimmedString,
-  resolveUserDataRolloutStage,
-  writesLegacyUserProjection,
 } from "./userDataV2";
 
 type DeleteGrigliataCustomTokenPayload = {
@@ -294,14 +288,12 @@ const task06DeleteGrigliataCustomTokenHandler = async (
     const settingsRef = db.doc(
       `users/${claim.ownerUid}/state/settings`
     );
-    const rolloutRef = db.doc("app_config/user_data_v2");
     const removeHiddenTokenIds = async (
       tokenIds: string[]
     ): Promise<void> => {
       const removedIds = new Set(tokenIds);
       await db.runTransaction(async (transaction) => {
-        const [rollout, owner, settings] = await transaction.getAll(
-          rolloutRef,
+        const [owner, settings] = await transaction.getAll(
           ownerRef,
           settingsRef
         );
@@ -309,16 +301,7 @@ const task06DeleteGrigliataCustomTokenHandler = async (
           !owner.exists ||
           owner.get("deletionState") === "pending"
         ) return;
-        if (isUserDataLegacyDrainFrozen(rollout.data(), claim.ownerUid)) {
-          throw new HttpsError(
-            "unavailable",
-            "User settings are temporarily frozen. Retry later."
-          );
-        }
-        const currentSettings = {
-          ...asRecord(owner.get("settings")),
-          ...asRecord(settings.get("settings")),
-        };
+        const currentSettings = asRecord(settings.get("settings"));
         const hidden = normalizeHiddenTokenIdsByBackground(
           currentSettings[HIDDEN_TOKEN_FIELD]
         );
@@ -350,17 +333,6 @@ const task06DeleteGrigliataCustomTokenHandler = async (
           updatedAt: FieldValue.serverTimestamp(),
           updatedBy: requesterUid,
         }, {merge: true});
-        if (writesLegacyUserProjection(resolveUserDataRolloutStage(
-          rollout.data(),
-          claim.ownerUid
-        ))) {
-          transaction.set(ownerRef, {
-            settings: {
-              ...asRecord(owner.get("settings")),
-              [HIDDEN_TOKEN_FIELD]: hidden,
-            },
-          }, {merge: true});
-        }
       });
     };
     const drainPlacementPages = async (
@@ -619,9 +591,5 @@ export const deleteGrigliataCustomToken = onCall<
   DeleteGrigliataCustomTokenPayload
 >(
   {region: REGION, timeoutSeconds: FUNCTION_TIMEOUT_SECONDS},
-  async (request) => (
-    asTrimmedString(request.data?.operationId)
-      ? task06DeleteGrigliataCustomTokenHandler(request)
-      : deleteGrigliataCustomTokenLegacyHandler(request)
-  )
+  task06DeleteGrigliataCustomTokenHandler
 );

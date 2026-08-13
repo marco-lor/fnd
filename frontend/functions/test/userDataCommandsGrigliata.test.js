@@ -189,7 +189,7 @@ test('Grigliata turn transitions require the exact stale-state preconditions', (
   });
 });
 
-test('settings callable owns canonical and rollout-gated legacy array sentinels', () => {
+test('settings callable owns canonical V2 array sentinels', () => {
   const source = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'userDataCommands.ts'),
     'utf8'
@@ -205,10 +205,7 @@ test('settings callable owns canonical and rollout-gated legacy array sentinels'
   );
   assert.match(source, /FieldValue\.arrayUnion\(hiddenPlacement\.tokenId\)/);
   assert.match(source, /FieldValue\.arrayRemove\(hiddenPlacement\.tokenId\)/);
-  assert.match(
-    source,
-    /if \(context\.writeLegacy\) \{[\s\S]*?hiddenPlacementSettings/
-  );
+  assert.doesNotMatch(callable, /writeLegacy/);
   assert.match(
     source,
     /access\.targetUid !== context\.actorUid[\s\S]*?access\.actorRole !== "dm"/
@@ -264,8 +261,9 @@ test('turn consumption owns the reviewed board transition in one idempotent tran
   );
   assert.match(
     callable,
-    /const activeTurnEffectsSource = context\.rolloutStage === "new-only" \?\s*canonicalActiveTurnEffects\s*:\s*canonicalActiveTurnEffects \?\? access\.targetSnapshot\.get\("active_turn_effect"\)/
+    /const consumption = consumeActiveTurnEffects\(canonicalActiveTurnEffects\)/
   );
+  assert.doesNotMatch(callable, /rolloutStage|targetSnapshot\.get\("active_turn_effect"\)/);
   assert.match(
     callable,
     /resourceShield\.totalTurns !== transitionState\.currentShieldEffect\.totalTurns \|\|[\s\S]*?resourceShield\.remainingTurns !== transitionState\.currentShieldEffect\.remainingTurns/

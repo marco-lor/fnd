@@ -1,5 +1,12 @@
 # fatins production V2 activation — 2026-08-08
 
+> Historical activation record, extended on 2026-08-13. The staged transitions,
+> legacy-preservation wording, 84-function inventory, and three-region callable
+> audit below describe the original 2026-08-08 activation. The current state is
+> `new-only` with physically compacted user roots and a V2-only User Data
+> runtime; see the 2026-08-13 completion section and the current
+> [access matrix](./access-and-mutation-matrix.md).
+
 ## Scope and immutable boundaries
 
 - Target repository/branch: `fnd` / `devs`.
@@ -162,3 +169,60 @@ write mode.
 
 All private reports, checkpoints, credentials, raw UIDs, API values, and backup
 contents remain ignored and are intentionally absent from this document.
+
+## 2026-08-13 physical compaction and runtime retirement
+
+Before the first new write, a fresh recursive production export was created,
+reopened, and validated under the ignored backup directory:
+
+- 35 root collections, 1,498 documents, and 60 subcollections;
+- 16,802,778 bytes;
+- canonical data hash
+  `f79aec440ff7e444a892d69e0b906fe7e8a9b36afca57af916d97b78e212b155`;
+- file SHA-256
+  `c53d88c7fb7fadd29b5d735ee857ad8016137bd35082495eabc1f090a90cebb6`.
+
+The archive-aware `deleteUser` Function was independently reviewed and deployed
+before any compaction archive was created. The exact completed cutover
+`fatins-global-20260808-ca5d83e` and its sealed clean verification bound a
+redacted 11-user compaction plan with fingerprint
+`ce40934cf364bfc44da04ec0bfa0f82f749faa23743a07bf1b4a84fad614b102`.
+Execution and a separate read-only verification both reported:
+
+- 11 compacted users and zero pending/native-V2 exceptions;
+- 128 archived legacy fields in 281 archive documents;
+- 55 fixed V2 state documents and 136 V2 collection documents, unchanged from
+  approval through verification;
+- zero global or subject errors.
+
+The production release permanently removed the dormant Task 05 legacy readers,
+normalizers, dual-write projections, rollback bridge, V1 callable handlers,
+root-derived triggers, and the old `us-central1` spend alias. Offline guarded
+migration, cutover, compaction, archive-verification, and reconstruction tools
+remain available but are not shipped as a runtime data plane. Task 07 legacy
+media compatibility remains intentionally separate and active pending Media V2.
+
+Independent compaction and final runtime reviews closed with no remaining
+findings. The release ran in the required Functions, Firestore rules, then
+Hosting order after the signed-in Browser showed an idle Grigliata board (one
+test viewer, no placed tokens, and an empty turn order). The aggregate Functions
+deployment updated retained exports but did not remove the seven missing-source
+exports; the postdeploy inventory gate caught this before the next plane. The
+operator then explicitly deleted only the six reviewed `europe-west8` root
+triggers and the reviewed `us-central1` spend alias, and converged the one
+retained callable that had exhausted a transient regional mutation quota.
+
+Final live evidence reported 77/77 Functions `ACTIVE`, one reviewed bundle hash,
+zero retired IDs, 38/38 managed `europe-west8` callables ready, and 5/5 managed
+`europe-west1` callables ready. Firestore rules compiled and released, and the
+production Hosting build released successfully. A fresh read-only compaction
+verification again reported 11 compacted users, zero pending users/errors,
+281 archive documents, unchanged 55/136 V2 document counts, and the exact
+approved fingerprint above.
+
+Signed-in Browser acceptance loaded Home (profile, parameters, resources,
+equipment, and inventory), Bazaar, personal techniques/spells, Combat, and
+Grigliata without a new warning or error. A reversible canonical Home mutation
+was exercised from `0` to `1` and restored to `0`; a subsequent reload confirmed
+the restored value persisted. Grigliata token and dice panels rendered while
+the board remained unmodified.

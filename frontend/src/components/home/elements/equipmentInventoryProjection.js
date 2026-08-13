@@ -1,4 +1,4 @@
-import { stableUserDataJson } from '../../../data/userData/legacyInventoryProjection';
+import { stableDataJson } from '../../../data/userData/stableDataJson';
 
 const stableInventoryId = (entry) => (
   entry?._task05?.inventoryId || entry?._instance?.instanceId || null
@@ -25,7 +25,7 @@ export const resolveEquippedInventoryIds = ({ inventory = [], equipped = {} } = 
     entry,
     inventoryId: stableInventoryId(entry),
     catalogId: catalogIdentity(entry),
-    snapshot: stableUserDataJson(comparableSnapshot(entry)),
+    snapshot: stableDataJson(comparableSnapshot(entry)),
   }));
   const usedIds = new Set();
 
@@ -38,7 +38,7 @@ export const resolveEquippedInventoryIds = ({ inventory = [], equipped = {} } = 
       ? candidates.find(({ inventoryId }) => inventoryId === requestedId && !usedIds.has(inventoryId))
       : null;
     if (!candidate && rawEntry && typeof rawEntry === 'object') {
-      const requestedSnapshot = stableUserDataJson(comparableSnapshot(rawEntry));
+      const requestedSnapshot = stableDataJson(comparableSnapshot(rawEntry));
       candidate = candidates.find(({ inventoryId, snapshot }) => (
         inventoryId && !usedIds.has(inventoryId) && snapshot === requestedSnapshot
       ));

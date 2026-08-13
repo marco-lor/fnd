@@ -479,7 +479,7 @@ export default function GlobalGrigliataMusicPlayer({
   const [projectedStreamReady, setProjectedStreamReady] = useState(false);
   const [blockedPlaybackSessionIds, setBlockedPlaybackSessionIds] = useState([]);
   const [endedPlaybackSessionKeys, setEndedPlaybackSessionKeys] = useState([]);
-  const userSettings = userSettingsDomain?.settings || userData?.settings || {};
+  const userSettings = userSettingsDomain?.settings || {};
   const isMusicMuted = userSettings[GRIGLIATA_MUSIC_MUTED_FIELD] === true;
   const userRole = typeof userData?.role === 'string' ? userData.role : '';
 

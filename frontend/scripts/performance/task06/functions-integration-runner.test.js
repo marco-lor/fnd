@@ -27,7 +27,6 @@ test('Task 06 integration accepts only the exact owned demo project', () => {
   const result = assertTask06IntegrationTarget({env});
   assert.equal(result.projectId, 'demo-fnd-perf');
   assert.equal(env.FND_TASK06_INTEGRATION, '1');
-  assert.equal(env.FND_TASK06_CONSOLIDATED_OWNER, '1');
 
   assert.throws(
     () => assertTask06IntegrationTarget({
@@ -90,10 +89,10 @@ test('Task 06 argument parser refuses unknown and live project arguments', () =>
   );
 });
 
-test('generated Functions environment enables consolidation only for demo', () => {
+test('generated Functions environment contains only owned demo Firebase settings', () => {
   const contents = demoFunctionsEnvironment();
   assert.match(contents, /FATINS_FIREBASE_PROJECT_ID=demo-fnd-perf/);
-  assert.match(contents, /FND_TASK06_CONSOLIDATED_OWNER=1/);
+  assert.doesNotMatch(contents, /FND_TASK06_CONSOLIDATED_OWNER/);
   assert.doesNotMatch(contents, /fatins/);
 });
 
@@ -132,7 +131,7 @@ test('temporary demo Functions environment restores an existing file', async () 
     );
     assert.equal(result, 'ok');
     assert.equal(fakeFs.writes.length, 2);
-    assert.match(fakeFs.writes[0].contents, /FND_TASK06_CONSOLIDATED_OWNER=1/);
+    assert.doesNotMatch(fakeFs.writes[0].contents, /FND_TASK06_CONSOLIDATED_OWNER/);
     assert.equal(fakeFs.writes[1].contents, 'existing=preserved\n');
   } finally {
     fs.rmSync(root, {recursive: true, force: true});

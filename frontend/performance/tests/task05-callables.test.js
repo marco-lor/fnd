@@ -2,7 +2,6 @@ const assert = require('node:assert/strict');
 const { after, before, test } = require('node:test');
 const { deleteApp, initializeApp } = require('firebase-admin/app');
 const {
-  FieldValue,
   Timestamp,
   getFirestore,
 } = require('firebase-admin/firestore');
@@ -136,16 +135,6 @@ const writeDocuments = async (documents) => {
   }
 };
 
-const setRollout = async (stage, userOverrides = {}, legacyDrain = null) => {
-  await db.doc('app_config/user_data_v2').set({
-    schemaVersion: 2,
-    stage,
-    userOverrides,
-    ...(legacyDrain ? {legacyDrain} : {}),
-    updatedAt: FieldValue.serverTimestamp(),
-  });
-};
-
 const stateDocument = (uid, data) => ({
   schemaVersion: 2,
   revision: 1,
@@ -170,23 +159,6 @@ const seedTask05State = async () => {
       deleteCollection('users/perf-peer-4/spells'),
       deleteCollection('users/perf-peer-4/content_names'),
       deleteCollection('users/perf-peer-5/inventory'),
-    ]);
-
-    await Promise.all([
-      db.doc('users/perf-new-player').update({
-        'stats.hpCurrent': 10,
-        'stats.hpTotal': 20,
-        'stats.manaCurrent': 5,
-        'stats.manaTotal': 10,
-        'stats.barrieraCurrent': 0,
-      }),
-      db.doc('users/perf-player').update({ 'stats.hpCurrent': 20 }),
-      db.doc('users/perf-peer-2').update({ 'stats.hpCurrent': 30 }),
-      db.doc('users/perf-peer-3').update({ 'stats.gold': 5 }),
-      db.doc('users/perf-peer-5').update({
-        'stats.hpCurrent': 5,
-        'stats.hpTotal': 20,
-      }),
     ]);
 
     const documents = [
@@ -305,7 +277,6 @@ const seedTask05State = async () => {
     ];
 
     await writeDocuments(documents);
-    await setRollout('new-only');
   });
 };
 
@@ -359,6 +330,8 @@ test('the admin user list paginates safe private fields without reading root agg
   await withBackgroundTriggersDisabled(async () => {
     await Promise.all([
       db.doc(`users/${extraUid}`).set({
+        modelVersion: 2,
+        summary: {level: 1},
         characterId: 'Task 05 Admin Extra',
         username: 'task05-admin-extra',
         email: 'task05-admin-extra@example.test',
@@ -432,7 +405,6 @@ test('Task 05 operation receipts replay exact requests and reject operationId ta
 });
 
 test('a resource mutation does not scan or rewrite a 500-document inventory', async () => {
-  await setRollout('new-only');
   const inventory = db.collection('users/perf-player/inventory');
   const before = await inventory.get();
   assert.equal(before.size, 500);
@@ -452,86 +424,48 @@ test('a resource mutation does not scan or rewrite a 500-document inventory', as
   assert.deepEqual(inventoryFingerprint(afterSnapshot), beforeFingerprint);
 });
 
-test('a scoped legacy drain rejects actor-only commands despite spoofed userId', async () => {
-  await setRollout('dual-write', {'perf-player': 'dual-write'}, {
-    users: {
-      'perf-player': {
-        drainId: 'drain_perf_player_001',
-        closedAt: Timestamp.fromMillis(Date.now()),
-      },
-    },
-  });
-  const token = await signIn('perf-player');
-  const before = await db.doc('users/perf-player/state/resources').get();
+test('actor-only consumable commands ignore a spoofed userId', async () => {
+  const token = await signIn('perf-peer-5');
+  const preparation = await callFunction('task05PrepareConsumable', {
+    operationId: operationId('actor-only-spoof'),
+    userId: 'perf-peer-2',
+    inventoryId: 'task05-consumable',
+    resource: 'hp',
+  }, {token});
 
-  await expectCallableError(
-    callFunction('task05UpdateResource', {
-      operationId: operationId('drain-reject'),
-      resource: 'hp',
-      mode: 'set',
-      value: 999,
-    }, {token}),
-    'unavailable'
+  assert.equal(preparation.inventoryId, 'task05-consumable');
+  assert.equal(preparation.resource, 'hp');
+  assert.equal(
+    (await db.doc(`user_operations/${preparation.preparationId}`).get())
+      .get('actorUid'),
+    'perf-peer-5'
   );
-  await expectCallableError(
-    callFunction('task05PurchaseItem', {
-      operationId: operationId('drain-spoof-purchase'),
-      userId: 'perf-peer-2',
-      itemId: 'task05-purchase-a',
-    }, {token}),
-    'unavailable'
+  assert.equal(
+    (await db.doc('users/perf-peer-2/inventory/task05-consumable').get()).exists,
+    false
   );
-  await expectCallableError(
-    callFunction('task05PrepareConsumable', {
-      operationId: operationId('drain-spoof-prepare'),
-      userId: 'perf-peer-2',
-      inventoryId: 'spoofed-inventory',
-      resource: 'hp',
-    }, {token}),
-    'unavailable'
-  );
-  await expectCallableError(
-    callFunction('task05CommitConsumable', {
-      operationId: operationId('drain-spoof-commit'),
-      userId: 'perf-peer-2',
-      preparationId: 'a'.repeat(48),
-    }, {token}),
-    'unavailable'
-  );
-
-  const after = await db.doc('users/perf-player/state/resources').get();
-  assert.equal(after.get('stats.hpCurrent'), before.get('stats.hpCurrent'));
 });
 
-test('a target-scoped command uses the requested target for the drain fence', async () => {
-  await setRollout('dual-write', {'perf-peer-2': 'dual-write'}, {
-    users: {
-      'perf-peer-2': {
-        drainId: 'drain_perf_peer_2_001',
-        closedAt: Timestamp.fromMillis(Date.now()),
-      },
-    },
-  });
+test('a privileged target-scoped command updates only the requested V2 domain', async () => {
   const dmToken = await signIn('perf-dm');
-  const before = await db.doc('users/perf-peer-2/state/resources').get();
+  const result = await callFunction('task05UpdateResource', {
+    operationId: operationId('target-v2-update'),
+    userId: 'perf-peer-2',
+    resource: 'hp',
+    mode: 'set',
+    value: 32,
+  }, {token: dmToken});
 
-  await expectCallableError(
-    callFunction('task05UpdateResource', {
-      operationId: operationId('target-drain-reject'),
-      userId: 'perf-peer-2',
-      resource: 'hp',
-      mode: 'set',
-      value: 999,
-    }, {token: dmToken}),
-    'unavailable'
-  );
-
-  const after = await db.doc('users/perf-peer-2/state/resources').get();
-  assert.equal(after.get('stats.hpCurrent'), before.get('stats.hpCurrent'));
+  const [root, resources] = await Promise.all([
+    db.doc('users/perf-peer-2').get(),
+    db.doc('users/perf-peer-2/state/resources').get(),
+  ]);
+  assert.equal(result.newValue, 32);
+  assert.equal(resources.get('stats.hpCurrent'), 32);
+  assert.equal(root.get('stats'), undefined);
 });
 
 test('progression rejects resource, unknown, and owner-protected stats', async () => {
-  await setRollout('new-only');
   const token = await signIn('perf-player');
 
   await expectCallableError(
@@ -558,7 +492,6 @@ test('progression rejects resource, unknown, and owner-protected stats', async (
 });
 
 test('concurrent Bazaar purchases cannot overspend one resource balance', async () => {
-  await setRollout('new-only');
   const token = await signIn('perf-peer-3');
   const results = await Promise.allSettled([
     callFunction('task05PurchaseItem', {
@@ -585,40 +518,48 @@ test('concurrent Bazaar purchases cannot overspend one resource balance', async 
   assert.equal(inventory.size, 1);
 });
 
-test('a per-user rollout override takes precedence over the global stage', async () => {
-  await setRollout('new-only', { 'perf-player': 'dual-write' });
+test('historical rollout records cannot reactivate root dual writes', async () => {
+  await db.doc('app_config/user_data_v2').set({
+    schemaVersion: 2,
+    stage: 'new-only',
+    userOverrides: {'perf-player': 'dual-write'},
+    updatedAt: FIXED_TIME,
+  });
   const [overriddenToken, globalToken] = await Promise.all([
     signIn('perf-player'),
     signIn('perf-peer-2'),
   ]);
 
-  await callFunction('task05UpdateResource', {
-    operationId: operationId('rollout-override'),
-    resource: 'hp',
-    mode: 'set',
-    value: 21,
-  }, { token: overriddenToken });
-  await callFunction('task05UpdateResource', {
-    operationId: operationId('rollout-global'),
-    resource: 'hp',
-    mode: 'set',
-    value: 31,
-  }, { token: globalToken });
+  try {
+    await callFunction('task05UpdateResource', {
+      operationId: operationId('rollout-override-inert'),
+      resource: 'hp',
+      mode: 'set',
+      value: 21,
+    }, {token: overriddenToken});
+    await callFunction('task05UpdateResource', {
+      operationId: operationId('rollout-global-inert'),
+      resource: 'hp',
+      mode: 'set',
+      value: 31,
+    }, {token: globalToken});
 
-  const [overriddenRoot, overriddenV2, globalRoot, globalV2] = await Promise.all([
-    db.doc('users/perf-player').get(),
-    db.doc('users/perf-player/state/resources').get(),
-    db.doc('users/perf-peer-2').get(),
-    db.doc('users/perf-peer-2/state/resources').get(),
-  ]);
-  assert.equal(overriddenRoot.get('stats.hpCurrent'), 21);
-  assert.equal(overriddenV2.get('stats.hpCurrent'), 21);
-  assert.equal(globalRoot.get('stats.hpCurrent'), 30);
-  assert.equal(globalV2.get('stats.hpCurrent'), 31);
+    const [overriddenRoot, overriddenV2, globalRoot, globalV2] = await Promise.all([
+      db.doc('users/perf-player').get(),
+      db.doc('users/perf-player/state/resources').get(),
+      db.doc('users/perf-peer-2').get(),
+      db.doc('users/perf-peer-2/state/resources').get(),
+    ]);
+    assert.equal(overriddenRoot.get('stats'), undefined);
+    assert.equal(overriddenV2.get('stats.hpCurrent'), 21);
+    assert.equal(globalRoot.get('stats'), undefined);
+    assert.equal(globalV2.get('stats.hpCurrent'), 31);
+  } finally {
+    await db.doc('app_config/user_data_v2').delete();
+  }
 });
 
 test('personal-content reservations reject duplicate exact names', async () => {
-  await setRollout('new-only');
   const token = await signIn('perf-peer-4');
   const first = await callFunction('task05MutatePersonalContent', {
     operationId: operationId('content-first'),
@@ -652,7 +593,6 @@ test('personal-content reservations reject duplicate exact names', async () => {
 });
 
 test('consumable prepare/commit is replay-safe, single-use, and expiry-aware', async () => {
-  await setRollout('new-only');
   const token = await signIn('perf-peer-5');
   const preparation = await callFunction('task05PrepareConsumable', {
     operationId: operationId('consume-prepare'),
@@ -705,7 +645,6 @@ test('consumable prepare/commit is replay-safe, single-use, and expiry-aware', a
 });
 
 test('the Grigliata character-resource callable is owner-scoped and server-authoritative', async () => {
-  await setRollout('new-only');
   const token = await signIn('perf-new-player');
   const result = await callFunction('task05UpdateGrigliataCharacterResources', {
     operationId: operationId('grigliata-resource'),
@@ -740,5 +679,5 @@ test('the Grigliata character-resource callable is owner-scoped and server-autho
   assert.equal(tokenDocument.get('label'), 'After callable');
   assert.equal(tokenDocument.get('ownerUid'), 'perf-new-player');
   assert.equal(tokenDocument.get('tokenType'), 'character');
-  assert.equal(root.get('stats.hpCurrent'), 10);
+  assert.equal(root.get('stats'), undefined);
 });

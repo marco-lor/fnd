@@ -12,38 +12,22 @@ import {
   onSnapshot,
   orderBy,
   query,
-  runTransaction,
   updateDoc,
 } from '../../performance/firestore';
-import { recordPerfEvent } from '../../performance/runtime';
 import {
   USER_DATA_COLLECTION_IDS,
   USER_DATA_DOMAINS,
-  USER_DATA_READ_SOURCES,
-  USER_DATA_ROLLOUT_DOCUMENT,
-  USER_DATA_ROLLOUT_STAGES,
   USER_DATA_STATE_DOCUMENT_IDS,
   isUserDataDomain,
-  normalizeUserDataRolloutStage,
-  resolveUserDataReadSource,
 } from './domainSchema';
 import {
-  normalizeLegacyUserAggregate,
+  normalizeUserShell,
   normalizeV2InventoryDocument,
   normalizeV2PersonalContentDocument,
   mapV2PersonalContentItems,
-  compareUserDomainValues,
   normalizeV2StateDocument,
   preserveUserDomainIdentity,
-  selectLegacyDomain,
-  selectLegacyProfile,
 } from './normalizers';
-
-const REMOTE_ROLLOUT_ENABLED = process.env.REACT_APP_FND_USER_DATA_ROLLOUT_CONFIG === '1';
-const LOCAL_STAGE = normalizeUserDataRolloutStage(
-  process.env.REACT_APP_FND_USER_DATA_STAGE,
-  USER_DATA_ROLLOUT_STAGES.LEGACY_READ
-);
 
 const asObserver = (observer) => {
   if (typeof observer === 'function') return { next: observer };
@@ -118,54 +102,6 @@ export const readUserOwnedDataDocument = async (uid, collectionId, entityId) => 
     : null;
 };
 
-export const prepareCharacterCreationMediaTarget = (uid, data) => {
-  const target = doc(db, 'users', validateUid(uid));
-  return runTransaction(db, async (transaction) => {
-    const current = await transaction.get(target);
-    if (current.exists()) return false;
-    if (!data || typeof data !== 'object' || Array.isArray(data)) {
-      throw new TypeError('Character Creation target data is required.');
-    }
-    transaction.set(target, data);
-    return true;
-  });
-};
-
-export const rollbackCharacterCreationMediaTarget = (uid) => {
-  const target = doc(db, 'users', validateUid(uid));
-  return runTransaction(db, async (transaction) => {
-    const current = await transaction.get(target);
-    if (!current.exists()) return false;
-    const data = current.data() || {};
-    const hasAttachedMedia = data.media
-      || (Number.isSafeInteger(data.task07MediaRevision)
-        && data.task07MediaRevision > 0);
-    if (hasAttachedMedia || data.flags?.characterCreationDone === true) {
-      return false;
-    }
-    transaction.delete(target);
-    return true;
-  });
-};
-
-export const finalizeCharacterCreationMediaTarget = (uid, patch) => {
-  const target = doc(db, 'users', validateUid(uid));
-  return runTransaction(db, async (transaction) => {
-    const current = await transaction.get(target);
-    if (!current.exists()) {
-      throw new Error('Character profile disappeared before completion.');
-    }
-    const data = current.data() || {};
-    transaction.update(target, {
-      ...patch,
-      flags: {
-        ...(data.flags || {}),
-        characterCreationDone: true,
-      },
-    });
-  });
-};
-
 const normalizeDocumentSnapshot = (snapshot) => (
   snapshot?.exists?.() ? snapshot.data() : null
 );
@@ -191,29 +127,16 @@ const listenToDocument = ({
   ),
 }, observer);
 
-export const subscribeLegacyUserAggregate = (uid, observer) => {
+// Auth owns this dedicated shell listener. Profile snapshots can change the
+// repository access scope (for example, player -> DM), so it remains outside
+// ordinary actor-scoped resources.
+export const subscribeAuthProfile = (uid, observer) => {
   const userId = validateUid(uid);
   return listenToDocument({
     target: doc(db, 'users', userId),
-    metricKey: 'users.aggregate.subscribe.v1',
-    instanceKey: `users:aggregate:${userId}`,
-    normalize: (snapshot) => normalizeLegacyUserAggregate(normalizeDocumentSnapshot(snapshot)),
-    observer,
-  });
-};
-
-// Auth owns this dedicated physical listener. Profile snapshots can change the
-// repository access scope (for example, player -> DM), which intentionally
-// invalidates ordinary actor-scoped resources. Keeping a separate, resilient
-// entry lets the authoritative profile listener observe the next snapshot
-// without weakening the scope of users:aggregate:${uid} subscriptions.
-export const subscribeAuthProfileAggregate = (uid, observer) => {
-  const userId = validateUid(uid);
-  return listenToDocument({
-    target: doc(db, 'users', userId),
-    metricKey: 'users.aggregate.subscribe.v1',
+    metricKey: 'users.shell.subscribe.v2',
     instanceKey: `users:auth-profile:${userId}`,
-    normalize: (snapshot) => normalizeLegacyUserAggregate(normalizeDocumentSnapshot(snapshot)),
+    normalize: (snapshot) => normalizeUserShell(normalizeDocumentSnapshot(snapshot)),
     observer,
     actorScoped: false,
     ownership: 'shell',
@@ -221,50 +144,20 @@ export const subscribeAuthProfileAggregate = (uid, observer) => {
 };
 
 export const subscribeUserShell = (uid, observer) => {
-  const normalizedObserver = asObserver(observer);
-  let previous;
-  return subscribeLegacyUserAggregate(uid, {
-    next: (aggregate) => {
-      const next = preserveUserDomainIdentity(previous, selectLegacyProfile(aggregate));
-      previous = next;
-      normalizedObserver.next?.(next);
-    },
-    error: normalizedObserver.error,
-  });
-};
-
-export const resolveUserDataRolloutDocumentStage = (data, uid) => {
-  if (!data || typeof data !== 'object') return USER_DATA_ROLLOUT_STAGES.LEGACY_READ;
-  const override = data.userOverrides?.[uid];
-  return normalizeUserDataRolloutStage(
-    override,
-    normalizeUserDataRolloutStage(data.mode ?? data.stage)
-  );
-};
-
-export const userDataRolloutInstanceKey = (uid) => (
-  `users:rollout:user-data-v2:${validateUid(uid)}`
-);
-
-export const subscribeUserDataRolloutStage = (uid, observer) => {
   const userId = validateUid(uid);
   const normalizedObserver = asObserver(observer);
-  if (!REMOTE_ROLLOUT_ENABLED) {
-    normalizedObserver.next?.(LOCAL_STAGE);
-    return () => {};
-  }
+  let previous;
   return listenToDocument({
-    target: doc(db, USER_DATA_ROLLOUT_DOCUMENT.collection, USER_DATA_ROLLOUT_DOCUMENT.id),
-    metricKey: 'users.rollout.subscribe.v2',
-    // Effective stages are UID-specific because the shared document can carry
-    // per-user overrides. Sharing this normalized listener across UIDs would
-    // leak the first subscriber's resolved stage to every later observer.
-    instanceKey: userDataRolloutInstanceKey(userId),
-    normalize: (snapshot) => snapshot?.exists?.() ? snapshot.data() : null,
+    target: doc(db, 'users', userId),
+    metricKey: 'users.shell.subscribe.v2',
+    instanceKey: `users:shell:${userId}`,
+    normalize: (snapshot) => normalizeUserShell(normalizeDocumentSnapshot(snapshot)),
     observer: {
-      next: (data) => normalizedObserver.next?.(
-        resolveUserDataRolloutDocumentStage(data, userId)
-      ),
+      next: (shell) => {
+        const next = preserveUserDomainIdentity(previous, shell);
+        previous = next;
+        normalizedObserver.next?.(next);
+      },
       error: normalizedObserver.error,
     },
   });
@@ -334,139 +227,15 @@ export const subscribeUserDomain = (uid, domain, observer) => {
   const userId = validateUid(uid);
   if (!isUserDataDomain(domain)) throw new TypeError(`Unsupported user-data domain: ${String(domain)}`);
   const normalizedObserver = asObserver(observer);
-  let activeSourceUnsubscribe = null;
-  let shadowUnsubscribe = null;
-  let shadowInventoryUnsubscribe = null;
-  let activeSource = null;
-  let activeStage = null;
   let previousValue;
-  let latestLegacy;
-  let latestLegacyAggregate;
-  let latestV2;
-  let latestV2Inventory;
-  let hasV2InventoryContext = false;
-  let lastShadowSignature = null;
-
-  const reportShadowComparison = () => {
-    if (latestLegacy === undefined || latestV2 === undefined) return;
-    if (domain === USER_DATA_DOMAINS.EQUIPMENT && !hasV2InventoryContext) return;
-    const comparison = compareUserDomainValues(latestLegacy, latestV2, {
-      domain,
-      legacyInventory: latestLegacyAggregate?.inventory,
-      v2Inventory: latestV2Inventory,
-    });
-    const { legacy: legacySummary, v2: v2Summary } = comparison;
-    const signature = `${legacySummary.count}:${legacySummary.hash}:${v2Summary.count}:${v2Summary.hash}`;
-    if (signature === lastShadowSignature) return;
-    lastShadowSignature = signature;
-    recordPerfEvent({
-      category: 'user-data',
-      metric: 'shadow-domain-mismatch',
-      value: comparison.valueMismatch ? 1 : 0,
-      tags: {
-        domain,
-        countMismatch: comparison.countMismatch ? 'true' : 'false',
-        valueMismatch: comparison.valueMismatch ? 'true' : 'false',
-      },
-    });
-  };
-
-  const configureShadowVerification = (stage) => {
-    const shouldVerify = stage === USER_DATA_ROLLOUT_STAGES.SHADOW_VERIFY
-      && domain !== USER_DATA_DOMAINS.PROFILE;
-    if (!shouldVerify) {
-      shadowUnsubscribe?.();
-      shadowInventoryUnsubscribe?.();
-      shadowUnsubscribe = null;
-      shadowInventoryUnsubscribe = null;
-      latestLegacy = undefined;
-      latestLegacyAggregate = undefined;
-      latestV2 = undefined;
-      latestV2Inventory = undefined;
-      hasV2InventoryContext = false;
-      lastShadowSignature = null;
-      return;
-    }
-    if (shadowUnsubscribe) return;
-    shadowUnsubscribe = subscribeV2Domain(userId, domain, {
-      next: (value) => {
-        latestV2 = value;
-        reportShadowComparison();
-      },
-      error: (error) => recordPerfEvent({
-        category: 'user-data',
-        metric: 'shadow-domain-error',
-        value: 1,
-        tags: { domain, code: error?.code || 'unknown' },
-      }),
-    });
-    if (domain === USER_DATA_DOMAINS.EQUIPMENT) {
-      shadowInventoryUnsubscribe = subscribeV2Domain(userId, USER_DATA_DOMAINS.INVENTORY, {
-        next: (value) => {
-          latestV2Inventory = value;
-          hasV2InventoryContext = true;
-          reportShadowComparison();
-        },
-        error: (error) => recordPerfEvent({
-          category: 'user-data',
-          metric: 'shadow-domain-error',
-          value: 1,
-          tags: { domain: USER_DATA_DOMAINS.INVENTORY, code: error?.code || 'unknown' },
-        }),
-      });
-    }
-  };
-
-  const switchSource = (stage) => {
-    configureShadowVerification(stage);
-    const nextSource = domain === USER_DATA_DOMAINS.PROFILE
-      ? USER_DATA_READ_SOURCES.LEGACY
-      : resolveUserDataReadSource(stage);
-    if (nextSource === activeSource && stage === activeStage) return;
-    activeSourceUnsubscribe?.();
-    activeSource = nextSource;
-    activeStage = stage;
-    previousValue = undefined;
-
-    const sourceObserver = {
-      next: (value) => {
-        if (activeSource === USER_DATA_READ_SOURCES.LEGACY) {
-          latestLegacy = value;
-          reportShadowComparison();
-        }
-        const next = preserveUserDomainIdentity(previousValue, value);
-        previousValue = next;
-        normalizedObserver.next?.(next, { source: activeSource, stage });
-      },
-      error: normalizedObserver.error,
-    };
-    if (nextSource === USER_DATA_READ_SOURCES.V2) {
-      activeSourceUnsubscribe = subscribeV2Domain(userId, domain, sourceObserver);
-    } else {
-      activeSourceUnsubscribe = subscribeLegacyUserAggregate(userId, {
-        next: (aggregate) => {
-          latestLegacyAggregate = aggregate;
-          sourceObserver.next(selectLegacyDomain(aggregate, domain));
-        },
-        error: sourceObserver.error,
-      });
-    }
-  };
-
-  const rolloutUnsubscribe = subscribeUserDataRolloutStage(userId, {
-    next: switchSource,
+  return subscribeV2Domain(userId, domain, {
+    next: (value) => {
+      const next = preserveUserDomainIdentity(previousValue, value);
+      previousValue = next;
+      normalizedObserver.next?.(next);
+    },
     error: normalizedObserver.error,
   });
-
-  return () => {
-    rolloutUnsubscribe?.();
-    activeSourceUnsubscribe?.();
-    shadowUnsubscribe?.();
-    shadowInventoryUnsubscribe?.();
-    activeSourceUnsubscribe = null;
-    shadowUnsubscribe = null;
-    shadowInventoryUnsubscribe = null;
-  };
 };
 
 export const subscribeUserProgression = (uid, observer) => subscribeUserDomain(uid, USER_DATA_DOMAINS.PROGRESSION, observer);

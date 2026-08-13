@@ -316,6 +316,8 @@ before(async () => {
       }
     }
     await setDoc(doc(firestore, `users/${USERS.owner.uid}`), {
+      modelVersion: 2,
+      summary: {level: 1},
       role: USERS.owner.role,
       deletionState: null,
       displayName: 'Task 07 owner',

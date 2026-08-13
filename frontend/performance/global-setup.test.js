@@ -12,10 +12,7 @@ const invocation = (name) => `Beginning execution of "${name}"`;
 
 test('seed trigger summary allows only bounded readiness activity', () => {
   const summary = summarizeTriggerActivityText([
-    invocation('europe-west8-updateTotParameters'),
-    invocation('europe-west8-updateTotParameters'),
     invocation('europe-west8-syncUserDirectory'),
-    invocation('europe-west8-syncUserDerivedState'),
     invocation('europe-west8-cleanupTask07RemovedBackgroundMedia'),
     invocation('europe-west8-cleanupTask07RemovedCatalogItemMedia'),
     invocation('europe-west8-cleanupTask07RemovedFoeMedia'),
@@ -32,12 +29,10 @@ test('seed trigger summary allows only bounded readiness activity', () => {
     invocation('europe-west8-task07AbandonFoeMediaRetirement'),
   ].join('\n'));
 
-  assert.equal(summary.backgroundInvocations, 11);
+  assert.equal(summary.backgroundInvocations, 8);
   assert.equal(summary.cleanupInvocations, 0);
   assert.deepEqual(summary.counts, {
-    'europe-west8-updateTotParameters': 2,
     'europe-west8-syncUserDirectory': 1,
-    'europe-west8-syncUserDerivedState': 1,
     'europe-west8-cleanupTask07RemovedBackgroundMedia': 1,
     'europe-west8-cleanupTask07RemovedCatalogItemMedia': 1,
     'europe-west8-cleanupTask07RemovedFoeMedia': 1,
@@ -80,10 +75,26 @@ test('seed trigger summary rejects non-sentinel background activity', () => {
   );
 });
 
+test('seed trigger summary rejects every retired user-root trigger', () => {
+  for (const trigger of [
+    'europe-west8-updateHpTotal',
+    'europe-west8-updateManaTotal',
+    'europe-west8-updateTotParameters',
+    'europe-west8-updateAnimaModifier',
+    'europe-west8-expireBarriera',
+    'europe-west8-syncUserDerivedState',
+  ]) {
+    assert.throws(
+      () => summarizeTriggerActivityText(invocation(trigger)),
+      new RegExp(`unexpected background triggers: ${trigger}`)
+    );
+  }
+});
+
 test('seed trigger summary rejects an unexpected background invocation storm', () => {
   const contents = Array.from(
     { length: 51 },
-    () => invocation('europe-west8-updateTotParameters')
+    () => invocation('europe-west8-syncUserDirectory')
   ).join('\n');
   assert.throws(
     () => summarizeTriggerActivityText(contents),

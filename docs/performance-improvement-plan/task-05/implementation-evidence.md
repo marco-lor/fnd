@@ -1,5 +1,11 @@
 # Task 05 implementation evidence
 
+> Historical pre-activation evidence from 2026-07-23. The 43-file aggregate
+> baseline and rollout gates below describe that candidate, not the current
+> source. Production `fatins` is now V2-only, compacted, and at a zero-file runtime
+> legacy baseline; see [the current matrix](./access-and-mutation-matrix.md) and
+> [the production activation record](./fatins-production-v2-activation-2026-08-08.md).
+
 Date: 2026-07-23. This file records repository-local evidence plus a read-only
 browser smoke of `/home`. No Firebase deployment, administrative production
 migration/backup read, backfill, archive, restore, rollout change, or live
@@ -82,7 +88,7 @@ Grigliata navigation was performed.
     while live dry-run and loopback `demo-*` execution retain their safe gates;
   - no private document printing.
 
-## Commands and results
+## Historical commands and results
 
 Focused security/restore validation from the repository root:
 
@@ -114,8 +120,10 @@ npm run perf:test
 159 tests passed, including migration, cutover, boundary, and npm-start tests
 
 npm run perf:check-user-data-boundaries
-43 legacy files / 87 references / 155 operation associations locked, plus one
-stage-gated adapter; no new direct access
+Historical result: 43 legacy files / 87 references / 155 operation
+associations locked, plus one stage-gated adapter; no new direct access. The
+current result is zero tracked legacy production files outside the compact
+shell adapter.
 
 npm run perf:check-query-contracts
 56 listeners, 10 repository query shapes, 6 composite indexes verified
@@ -159,7 +167,11 @@ locally because exact resume requires it; the checkpoint directory is ignored
 and must not be published. Full backup files necessarily contain private data in
 typed form and are written only under ignored local backup paths.
 
-## Gates still requiring environment evidence
+## Historical gates (superseded)
+
+The following list records what still remained on 2026-07-23. It must not be
+used as the current rollout checklist; the guarded cutover, physical compaction,
+runtime retirement, and newer validation evidence supersede it.
 
 - Reduce the 43-file legacy aggregate baseline as each consumer moves to domain
   hooks/commands; it must be zero outside the adapter before `new-only`.

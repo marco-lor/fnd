@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { useAuthSession } from '../../AuthContext';
-import { USER_DATA_DOMAINS, USER_DATA_ROLLOUT_STAGES } from './domainSchema';
+import { USER_DATA_DOMAINS } from './domainSchema';
 import { useUserDomain } from './userDataHooks';
 import { subscribeUserDomain } from './userDataRepository';
 
@@ -23,15 +23,11 @@ const DomainProbe = ({ domain }) => {
       <span data-testid="uid">{state.uid || 'none'}</span>
       <span data-testid="status">{state.status}</span>
       <span data-testid="value">{state.data?.secret || state.data?.stats?.gold || 'none'}</span>
-      <span data-testid="source">{state.source || 'none'}</span>
     </div>
   );
 };
 
-const emit = (index, data) => act(() => subscriptions[index].observer.next(data, {
-  source: 'legacy',
-  stage: USER_DATA_ROLLOUT_STAGES.LEGACY_READ,
-}));
+const emit = (index, data) => act(() => subscriptions[index].observer.next(data));
 
 describe('useUserDomain subscription identity', () => {
   beforeEach(() => {

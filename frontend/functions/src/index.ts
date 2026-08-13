@@ -9,20 +9,9 @@
  */
 
 import * as admin from "firebase-admin";
-import {updateHpTotal as legacyUpdateHpTotal} from "./updateHpTotal";
-import {updateManaTotal as legacyUpdateManaTotal} from "./updateManaTotal";
-import {
-  updateTotParameters as legacyUpdateTotParameters,
-} from "./updateTotParameters";
-import {
-  spendCharacterPoint,
-  spendCharacterPointV2,
-} from "./spendCharacterPoint";
+import {spendCharacterPointV2} from "./spendCharacterPoint";
 // Import the delete user function
 import {deleteUser} from "./deleteUser";
-import {
-  updateAnimaModifier as legacyUpdateAnimaModifier,
-} from "./updateAnimaModifier";
 import {levelUpAll} from "./levelUpAll";
 import {levelUpUser} from "./levelUpUser";
 import {updateUserRole} from "./updateUserRole";
@@ -30,17 +19,13 @@ import {
   duplicateFoeWithAssets,
   duplicateFoeWithAssetsV2,
 } from "./duplicateFoeWithAssets";
-import {expireBarriera as legacyExpireBarriera} from "./expireBarriera";
 import {cleanupGrigliataMusicTrack} from "./cleanupGrigliataMusicTrack";
 import {deleteGrigliataCustomToken} from "./deleteGrigliataCustomToken";
 import {spawnGrigliataCustomTokenInstance} from "./spawnGrigliataCustomTokenInstance";
 import {spawnGrigliataFoeToken} from "./spawnGrigliataFoeTokenV2";
 import {updateGrigliataCustomTokenTemplate} from "./updateGrigliataCustomTokenTemplate";
 import {clientFirebaseConfig} from "./clientFirebaseConfig";
-import {
-  syncUserDirectory as legacySyncUserDirectory,
-} from "./syncUserDirectory";
-import {syncUserDerivedState} from "./syncUserDerivedState";
+import {syncUserDirectory} from "./syncUserDirectory";
 import {
   deleteEncounterV2,
   deleteNpcV2,
@@ -112,7 +97,6 @@ import {
   syncTask07MusicStreamFromSession,
   syncTask07MusicStreamFromTrack,
 } from "./grigliataMusicStream";
-import {usesDemoConsolidatedOwner} from "./demoConsolidatedOwner";
 import {
   sweepTask07FoeMediaOperations,
   task07AbandonFoeMediaRetirement,
@@ -122,38 +106,15 @@ import {
 
 admin.initializeApp();
 
-// The demo-only consolidated candidate exports one authoritative user-derived
-// trigger. Normal builds keep every legacy export so an online rollout cannot
-// change trigger availability until a separately reviewed deployment.
-const usesConsolidatedDerivedOwner = usesDemoConsolidatedOwner();
-const updateHpTotal = usesConsolidatedDerivedOwner ?
-  undefined : legacyUpdateHpTotal;
-const updateManaTotal = usesConsolidatedDerivedOwner ?
-  undefined : legacyUpdateManaTotal;
-const updateTotParameters = usesConsolidatedDerivedOwner ?
-  undefined : legacyUpdateTotParameters;
-const updateAnimaModifier = usesConsolidatedDerivedOwner ?
-  undefined : legacyUpdateAnimaModifier;
-const expireBarriera = usesConsolidatedDerivedOwner ?
-  undefined : legacyExpireBarriera;
-const syncUserDirectory = usesConsolidatedDerivedOwner ?
-  undefined : legacySyncUserDirectory;
-
 // Ri-esporta le funzioni affinché Firebase le distribuisca tutte.
 export {
-  updateHpTotal,
-  updateManaTotal,
-  updateTotParameters,
-  spendCharacterPoint,
   spendCharacterPointV2,
   deleteUser,
-  updateAnimaModifier,
   levelUpAll,
   levelUpUser,
   updateUserRole,
   duplicateFoeWithAssets,
   duplicateFoeWithAssetsV2,
-  expireBarriera,
   cleanupGrigliataMusicTrack,
   deleteGrigliataCustomToken,
   spawnGrigliataCustomTokenInstance,
@@ -161,7 +122,6 @@ export {
   updateGrigliataCustomTokenTemplate,
   clientFirebaseConfig,
   syncUserDirectory,
-  syncUserDerivedState,
   setAllParameterLocks,
   deleteNpcV2,
   deleteEncounterV2,

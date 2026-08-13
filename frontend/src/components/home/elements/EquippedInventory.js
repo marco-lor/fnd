@@ -15,7 +15,7 @@ import {
   useResources,
 } from '../../../data/userData/userDataHooks';
 import { setEquipment } from '../../../data/userData/userDataCommands';
-import { stableUserDataJson } from '../../../data/userData/legacyInventoryProjection';
+import { stableDataJson } from '../../../data/userData/stableDataJson';
 import { buildAvailableEquipmentInventory } from './equipmentInventoryProjection';
 import MediaImage from '../../common/MediaImage';
 import useCatalogItemsById from '../../../data/useCatalogItemsById';
@@ -137,10 +137,10 @@ const EquippedInventory = () => {
       if (!value || typeof value !== 'object') return value;
       const requestedId = value?._instance?.instanceId;
       if (requestedId && inventoryById[requestedId]) return inventoryById[requestedId];
-      const serialized = stableUserDataJson(comparableSnapshot(value));
+      const serialized = stableDataJson(comparableSnapshot(value));
       let candidate = candidates.find((entry) => {
         const id = entry?._task05?.inventoryId || entry?._instance?.instanceId;
-        return !usedIds.has(id) && stableUserDataJson(comparableSnapshot(entry)) === serialized;
+        return !usedIds.has(id) && stableDataJson(comparableSnapshot(entry)) === serialized;
       });
       if (!candidate) {
         const catalogId = value.id || value.itemId;

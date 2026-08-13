@@ -8,7 +8,6 @@ import { useResources } from '../../data/userData/userDataHooks';
 import { acquireItem } from './elements/acquireItem';
 import { createUserOperationId } from '../../data/userData/userDataCommands';
 import PurchaseConfirmModal from './elements/PurchaseConfirmModal';
-import { USER_DATA_ROLLOUT_STAGES } from '../../data/userData/domainSchema';
 
 jest.mock('../../AuthContext', () => ({
   useAuth: jest.fn(),
@@ -133,7 +132,6 @@ describe('Bazaar layout', () => {
     useResources.mockReturnValue({
       data: { stats: { gold: 100 } },
       status: 'fresh',
-      stage: USER_DATA_ROLLOUT_STAGES.LEGACY_READ,
     });
     useShellLayout.mockReturnValue({
       topInset: 96,
@@ -237,11 +235,10 @@ describe('Bazaar layout', () => {
   });
 
   test.each([
-    ['an unresolved rollout stage', { data: null, status: 'loading', stage: null }],
+    ['loading resources', { data: null, status: 'loading' }],
     ['a missing V2 resources document', {
       data: null,
       status: 'missing',
-      stage: USER_DATA_ROLLOUT_STAGES.NEW_READ_DUAL_WRITE,
     }],
   ])('disables purchase without falling back to legacy gold for %s', async (_label, resourceState) => {
     useResources.mockReturnValue(resourceState);

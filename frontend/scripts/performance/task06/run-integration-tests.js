@@ -76,10 +76,6 @@ const run = async ({
     env,
     mode: PERFORMANCE_ENVIRONMENT_MODE.STRICT,
   });
-  if (env.FND_TASK06_CONSOLIDATED_OWNER !== '1') {
-    throw new Error('Task 06 consolidated demo owner is not enabled.');
-  }
-
   // Rules create server-only work records as probes. Suppress Functions while
   // that isolated rules environment is active, then re-enable the worker for
   // the bounded-operation integration scenario.

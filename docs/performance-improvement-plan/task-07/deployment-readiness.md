@@ -136,10 +136,11 @@ npm.cmd run fb:deploy:hosting
 
 That command is documented for a later authorized release; it must not be run
 as part of local validation. Its Hosting predeploy builds the production bundle
-from the exact checkout and forces Task 05 user-data routing to `legacy-read`.
-Do not set the obsolete Task 07 build flag, change bucket CORS, or widen a
-rollout control. Smoke ordinary non-battle routes and legacy create/edit/delete
-flows after an authorized Hosting release.
+from the exact checkout. After the 2026-08-12 Task 05 retirement there is no
+frontend user-data routing override: user data remains server-enforced V2-only.
+Do not set the obsolete Task 07 build flag, change bucket CORS, or widen a media
+rollout control. Smoke ordinary non-battle routes and current V2
+create/edit/delete flows after an authorized Hosting release.
 
 ## Activation is a separate change
 

@@ -53,7 +53,7 @@ const setCommonDomainState = () => {
   useResources.mockReturnValue({ data: { stats: { manaCurrent: 5 } }, status: 'fresh', uid });
 };
 
-describe('EquippedInventory rollout readiness', () => {
+describe('EquippedInventory V2 readiness', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     useAuthSession.mockReturnValue({ user: { uid } });
