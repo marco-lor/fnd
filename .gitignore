@@ -39,4 +39,5 @@ frontend/functions/node_modules/
 # OS/editor noise
 .DS_Store
 Thumbs.db
+.codex/
 security/fatins_public_resource_check/
