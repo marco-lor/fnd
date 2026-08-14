@@ -41,6 +41,7 @@ const READINESS_HTTP_FUNCTIONS = new Set([
   'europe-west1-clientFirebaseConfig',
   'europe-west8-task07PrepareMediaUpload',
   'europe-west8-task07GetMediaStatus',
+  'europe-west8-task07ResolveCharacterMedia',
   'europe-west8-task07AttachMediaAsset',
   'europe-west8-task07PrepareFoeMediaRetirement',
   'europe-west8-task07CommitFoeMediaRetirement',

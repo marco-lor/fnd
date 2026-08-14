@@ -19,6 +19,10 @@ const duplicateFoeSource = readFileSync(join(
   __dirname,
   "../src/duplicateFoeWithAssets.ts"
 ), "utf8");
+const spawnFoeTokenSource = readFileSync(join(
+  __dirname,
+  "../src/spawnGrigliataFoeTokenV2.ts"
+), "utf8");
 
 test("processor code never offers promoted canonical paths to deletion", () => {
   assert.doesNotMatch(
@@ -75,6 +79,46 @@ test(`reference-removal triggers retry transient delivery failures`, () => {
     lifecycleSource,
     /const referenceRemovalTrigger[\s\S]*?retry:\s*true/
   );
+});
+
+test("generated temporary copies are durably recorded and swept", () => {
+  assert.match(
+    processorSource,
+    /pendingTemporaryPaths = await deleteTask07TemporaryPathsBestEffort\([\s\S]*?temporaryPaths: pendingTemporaryPaths/
+  );
+  assert.match(
+    processorSource,
+    /attemptSuffix = `-\$\{claimed\.attempt\}`[\s\S]*?\.tmp-\$\{eventId\}/
+  );
+  assert.match(
+    processorSource,
+    /snapshot\.get\("cleanupTemporaryPaths"\)[\s\S]*?\.\.\.input\.temporaryPaths/
+  );
+  assert.match(
+    processorSource,
+    /current\.get\("cleanupTemporaryPaths"\)[\s\S]*?\.\.\.promoted\.temporaryPaths/
+  );
+  assert.match(
+    processorSource,
+    /task07TemporaryCleanupFields\(cleanupTemporaryPaths, now\)/
+  );
+  assert.match(
+    processorSource,
+    /processTask07TemporaryCleanup\(claimed\.plan\.assetId\)/
+  );
+  assert.match(
+    spawnFoeTokenSource,
+    /task07TemporaryCleanupFields\([\s\S]*?cleanupTemporaryPaths[\s\S]*?processTask07TemporaryCleanup\(/
+  );
+  assert.match(
+    spawnFoeTokenSource,
+    /pendingTemporaryPaths = await deleteTask07TemporaryPathsBestEffort\([\s\S]*?temporaryPaths: pendingTemporaryPaths/
+  );
+  assert.match(
+    spawnFoeTokenSource,
+    /pendingTemporaryPaths = processed\.objects\.map\([\s\S]*?uploadTask07GeneratedSet\(/
+  );
+  assert.match(lifecycleSource, /await sweepTask07TemporaryCleanup\(\)/);
 });
 
 test("reference-removal transactions fence delayed reattachments", () => {

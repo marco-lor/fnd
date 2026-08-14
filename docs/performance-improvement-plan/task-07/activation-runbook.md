@@ -106,6 +106,68 @@ to trust a missing or stale `functions/lib` contract:
 npm --prefix functions run build
 ```
 
+## 0. Canonical staging-object hygiene
+
+The media processor promotes generated files through `.tmp-<eventId>` copies.
+The reviewed runtime records and retries deletion of those copies, but an older
+release may have left staging copies behind. They are not legacy media and are
+not renderer inputs. Discover them before taking the cutover baseline:
+
+```powershell
+$TemporaryDiscovery = "performance-results/task07-media-temporary-discovery-$DateTag.json"
+
+node scripts/task07/media-temporary-object-cleanup.js `
+  --project $ProjectId --confirm-project $ProjectId `
+  --allow-live-project --auth firebase-cli `
+  --report $TemporaryDiscovery
+```
+
+If `counts.candidates` is zero, require `complete: true` and archive the report.
+If it is nonzero, do not delete from an unbound discovery. Record the count,
+rerun with `--expected-candidates <exact count>`, and independently review every
+entry. Each eligible entry must be a `.tmp-` generation with a byte-identical,
+manifest-bound canonical final, or a residue whose manifest is `deleted`, final
+is absent, and cleanup ledger is exactly `complete`. Any other missing final,
+checksum/metadata mismatch, uncommitted manifest, or identity issue blocks
+cleanup.
+
+```powershell
+$TemporaryCount = '<exact candidates from discovery>'
+
+node scripts/task07/media-temporary-object-cleanup.js `
+  --project $ProjectId --confirm-project $ProjectId `
+  --allow-live-project --auth firebase-cli `
+  --expected-candidates $TemporaryCount `
+  --report $TemporaryDiscovery
+```
+
+The second accepted category is a temp copy whose manifest is already
+`deleted`, canonical final is absent, and cleanup ledger is exactly `complete`.
+This closes residue left by an older cleanup release without treating a
+missing live final as safe. Every other missing-final case blocks.
+
+Execute only the exact reviewed bound plan, writing the result to a different
+file:
+
+```powershell
+$TemporaryFingerprint = '<exact fingerprint from the reviewed bound plan>'
+$TemporaryExecution = "performance-results/task07-media-temporary-execution-$DateTag.json"
+
+node scripts/task07/media-temporary-object-cleanup.js `
+  --project $ProjectId --confirm-project $ProjectId `
+  --allow-live-project --auth firebase-cli `
+  --expected-candidates $TemporaryCount `
+  --execute --approved-report $TemporaryDiscovery `
+  --approve-fingerprint $TemporaryFingerprint `
+  --report $TemporaryExecution
+```
+
+The command deletes only the reviewed temporary object generations and
+re-verifies every canonical final. Require `deleted == $TemporaryCount` and
+zero remaining temporary objects. This is destructive and not a substitute
+for the target-environment backup. Take the activation baseline inventory only
+after this hygiene step finishes.
+
 ## 1. Baseline and preservation inventory
 
 Confirm the web application is healthy in `v1-write`, then take a read-only
@@ -378,6 +440,11 @@ atomicity.
    The final comparison must still report zero missing and changed pre-existing
    objects. Any additions must map to reviewed canonical browser-test writes or
    pending retention-window cleanup; unexplained additions fail acceptance.
+8. Run `media-temporary-object-cleanup.js` once more with
+   `--expected-candidates 0`. The only accepted final state is a complete report
+   with zero temporary objects. If a residue appears, freeze writes, create a
+   new count-bound plan, obtain a new independent review, execute only that
+   fingerprint, and repeat the final audit and inventory.
 
 Archive the before/after/final inventories, approved/final audits, control plan,
 control result, browser evidence, deployment release IDs (if any), reviewed

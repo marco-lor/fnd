@@ -21,6 +21,7 @@ import {
   task07MediaTargetFields,
 } from "./mediaAssetLifecycleCore";
 import {task07ProcessMediaUpload} from "./mediaAssetProcessor";
+import {sweepTask07TemporaryCleanup} from "./mediaTemporaryCleanup";
 import {
   attachTask07ReadyAssetTransaction,
   task07CanonicalRootRetirementPatch,
@@ -1212,6 +1213,7 @@ export const sweepTask07MediaOrphans = onSchedule(
     retryCount: 0,
   },
   async () => {
+    await sweepTask07TemporaryCleanup();
     await enqueueExpiredAssets();
     await sweepDueCleanupQueue();
   }
