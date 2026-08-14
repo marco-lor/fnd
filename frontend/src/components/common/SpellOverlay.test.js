@@ -70,6 +70,31 @@ describe('SpellOverlay preview ownership', () => {
 });
 
 describe('SpellOverlay save state', () => {
+  test('mints a distinct persistent identity for every newly added spell', () => {
+    const firstClose = jest.fn();
+    const firstRender = render(
+      <SpellOverlay schema={{}} onClose={firstClose} />
+    );
+    fireEvent.change(screen.getByPlaceholderText('Spell Name *'), {
+      target: {value: 'First spell'},
+    });
+    fireEvent.click(screen.getByRole('button', {name: 'Save Spell'}));
+    const firstId = firstClose.mock.calls[0][0].spellData.task07MediaEntryId;
+    firstRender.unmount();
+
+    const secondClose = jest.fn();
+    render(<SpellOverlay schema={{}} onClose={secondClose} />);
+    fireEvent.change(screen.getByPlaceholderText('Spell Name *'), {
+      target: {value: 'Second spell'},
+    });
+    fireEvent.click(screen.getByRole('button', {name: 'Save Spell'}));
+    const secondId = secondClose.mock.calls[0][0].spellData.task07MediaEntryId;
+
+    expect(firstId).toMatch(/^n_[A-Za-z0-9._-]{1,127}$/);
+    expect(secondId).toMatch(/^n_[A-Za-z0-9._-]{1,127}$/);
+    expect(secondId).not.toBe(firstId);
+  });
+
   test('shows a spinner and disables actions while a spell is saving', () => {
     const onClose = jest.fn();
     const { rerender } = render(
@@ -99,5 +124,41 @@ describe('SpellOverlay save state', () => {
 
     fireEvent.click(saveButton);
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  test('reports explicit media removal separately from an unchanged save', () => {
+    const onClose = jest.fn();
+    render(
+      <SpellOverlay
+        mode="edit"
+        schema={{}}
+        initialData={{
+          Nome: 'Canonical spell',
+          media: {assetId: `m_${'a'.repeat(40)}`},
+          videoMedia: {assetId: `m_${'b'.repeat(40)}`},
+          task07MediaEntryId: 'spell-entry',
+        }}
+        onClose={onClose}
+      />
+    );
+    expect(screen.getByAltText('Preview')).toBeInTheDocument();
+    expect(screen.getByLabelText('Spell video preview')).toBeInTheDocument();
+
+    const removeButtons = screen.getAllByRole('button', {name: '×'});
+    fireEvent.click(removeButtons[0]);
+    fireEvent.click(screen.getByRole('button', {name: 'Save Spell'}));
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Conferma Sovrascrittura',
+    }));
+
+    expect(onClose).toHaveBeenCalledWith(expect.objectContaining({
+      imageFile: null,
+      videoFile: null,
+      imageRemoved: true,
+      videoRemoved: false,
+      spellData: expect.objectContaining({
+        task07MediaEntryId: 'spell-entry',
+      }),
+    }));
   });
 });

@@ -36,6 +36,7 @@ const OWNER_UID = "perf-player";
 const DM_UID = "perf-dm";
 const OPERATION_ID = "task07-callable-avatar-0001";
 const FOE_ID = "task07-callable-retirement-foe";
+const NESTED_FOE_ID = "task07-callable-nested-crash-gap-foe";
 const FOE_MEDIA_OPERATION_ID = "task07-callable-foe-media-0001";
 const FOE_ABANDON_OPERATION_ID = "task07-callable-foe-abandon-0001";
 const CALL_TIMEOUT_MS = 120_000;
@@ -52,6 +53,7 @@ let originalUserMediaFields;
 let originalFoe = null;
 let assetId = null;
 let foeAssetId = null;
+const nestedAssetIds = [];
 const foeReceiptIds = [];
 
 class CallableInvocationError extends Error {
@@ -224,6 +226,12 @@ after(async () => {
     }
     if (originalFoe) await db.doc(`foes/${FOE_ID}`).set(originalFoe);
     else await db.doc(`foes/${FOE_ID}`).delete().catch(() => {});
+    await db.doc(`foes/${NESTED_FOE_ID}`).delete().catch(() => {});
+    for (const nestedAssetId of nestedAssetIds) {
+      await db.doc(`media_assets/${nestedAssetId}`).delete().catch(() => {});
+      await db.doc(`media_asset_cleanup/${nestedAssetId}`)
+        .delete().catch(() => {});
+    }
   }
   if (bucket && assetId) {
     await bucket.deleteFiles({prefix: `media_assets/v1/signed-in/${OWNER_UID}/${assetId}/`})
@@ -236,6 +244,15 @@ after(async () => {
       .catch(() => {});
     await bucket.file(`media_uploads/${DM_UID}/${foeAssetId}/source`)
       .delete({ignoreNotFound: true}).catch(() => {});
+  }
+  if (bucket) {
+    for (const nestedAssetId of nestedAssetIds) {
+      await bucket.deleteFiles({
+        prefix: `media_assets/v1/dm-only/${DM_UID}/${nestedAssetId}/`,
+      }).catch(() => {});
+      await bucket.file(`media_uploads/${DM_UID}/${nestedAssetId}/source`)
+        .delete({ignoreNotFound: true}).catch(() => {});
+    }
   }
   if (bucket) {
     await bucket.deleteFiles({prefix: `foes/task07-operations/${DM_UID}/`})
@@ -490,5 +507,116 @@ test("foe retirement abandons safely, commits atomically, and replays", {
   assert.equal(
     (await db.doc(`foes/${FOE_ID}`).get()).get("task07MediaRevision"),
     2
+  );
+});
+
+test("nested removal trigger closes the browser crash gap and permits re-add", {
+  timeout: 240_000,
+}, async () => {
+  await db.doc("utils/task07_media").set({
+    schemaVersion: 1,
+    policyVersion: 1,
+    mode: "v1-write",
+    enabledPurposes: ["foe"],
+    enabledRoles: ["dm"],
+    enabledUids: [DM_UID],
+  });
+  const credential = await signInWithEmailAndPassword(
+    auth,
+    `${DM_UID}@example.test`,
+    PASSWORD
+  );
+  token = await credential.user.getIdToken();
+
+  const entryId = "task07-crash-gap-technique";
+  const nestedTarget = {
+    schemaVersion: 1,
+    kind: "foe-technique",
+    entryId,
+    entryKey: null,
+    entryIndex: 0,
+    slot: "media",
+  };
+  const technique = {
+    name: "Crash-safe technique",
+    task07MediaEntryId: entryId,
+  };
+  const foeRef = db.doc(`foes/${NESTED_FOE_ID}`);
+  await foeRef.set({
+    name: "Nested crash-gap fixture",
+    tecniche: [technique],
+    spells: [],
+    task07EmbeddedMedia: {},
+  });
+
+  const attachNested = async ({operationId, expectedRevision, seed}) => {
+    const source = buildDeterministicPng({width: 32, height: 32, seed});
+    const prepared = await callFunction("task07PrepareMediaUpload", {
+      ownerUid: DM_UID,
+      entityId: NESTED_FOE_ID,
+      operationId,
+      kind: "foe",
+      nestedTarget,
+      previousAssetId: null,
+      sourceContentType: "image/png",
+      sourceBytes: source.byteLength,
+    });
+    nestedAssetIds.push(prepared.upload.assetId);
+    await uploadSource(prepared.upload, source);
+    await waitForReady(prepared.upload.assetId);
+    const attached = await callFunction("task07AttachMediaAsset", {
+      assetId: prepared.upload.assetId,
+      expectedRevision,
+    });
+    return {assetId: prepared.upload.assetId, attached};
+  };
+
+  const first = await attachNested({
+    operationId: "task07_nested_crash_gap_first_0001",
+    expectedRevision: 0,
+    seed: 710,
+  });
+  assert.equal(first.attached.revision, 1);
+
+  // This is the exact browser crash window: the parent removal commits, but
+  // no task07RetireMediaAsset callable is sent afterward.
+  await foeRef.update({tecniche: []});
+  const deadline = Date.now() + 90_000;
+  let observed = null;
+  while (Date.now() < deadline) {
+    const [foe, manifest, cleanup] = await Promise.all([
+      foeRef.get(),
+      db.doc(`media_assets/${first.assetId}`).get(),
+      db.doc(`media_asset_cleanup/${first.assetId}`).get(),
+    ]);
+    observed = {foe, manifest, cleanup};
+    if (manifest.get("state") === "superseded" && cleanup.exists &&
+      foe.get(`task07EmbeddedMedia.${entryId}.media`) === undefined) break;
+    await delay(250);
+  }
+  assert.equal(observed.manifest.get("state"), "superseded");
+  assert.equal(observed.cleanup.get("state"), "pending");
+  assert.equal(
+    observed.foe.get(`task07EmbeddedMedia.${entryId}.media`),
+    undefined
+  );
+  assert.equal(
+    observed.foe.get(`task07EmbeddedMedia.${entryId}.task07MediaRevision`),
+    2
+  );
+
+  await foeRef.update({tecniche: [technique]});
+  const second = await attachNested({
+    operationId: "task07_nested_crash_gap_second_0001",
+    expectedRevision: 2,
+    seed: 711,
+  });
+  assert.equal(second.attached.revision, 3);
+  assert.notEqual(second.assetId, first.assetId);
+  assert.equal(
+    (await foeRef.get()).get(
+      `task07EmbeddedMedia.${entryId}.media.assetId`
+    ),
+    second.assetId
   );
 });

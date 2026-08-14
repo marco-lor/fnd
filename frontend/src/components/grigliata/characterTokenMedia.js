@@ -10,6 +10,16 @@ const AVATAR_VARIANTS = Object.freeze([
   'thumbnail2x',
   'card',
 ]);
+const TOKEN_VARIANTS = Object.freeze([
+  'thumbnail',
+  'thumbnail2x',
+  'card',
+  'card2x',
+]);
+const VARIANTS_BY_KIND = Object.freeze({
+  avatar: AVATAR_VARIANTS,
+  token: TOKEN_VARIANTS,
+});
 
 const normalizeString = (value) => (
   typeof value === 'string' ? value.trim() : ''
@@ -35,14 +45,17 @@ const sanitizeDescriptor = (value, expectedPath) => {
   return descriptor;
 };
 
-export const sanitizeTask07CharacterAvatarMedia = (
+export const sanitizeTask07PlacedTokenMedia = (
   value,
   expectedOwnerUid
 ) => {
   const ownerUid = normalizeString(expectedOwnerUid);
+  const kind = normalizeString(value?.kind);
+  const expectedVariants = VARIANTS_BY_KIND[kind];
   if (
     !ownerUid
-    || !isTask07ReadyCanonicalMedia(value, ['avatar'])
+    || !expectedVariants
+    || !isTask07ReadyCanonicalMedia(value, [kind])
     || normalizeString(value.ownerUid) !== ownerUid
     || value.audience !== 'signed-in'
     || !/^[1-9][0-9]*$/.test(String(value.generation || ''))
@@ -60,7 +73,7 @@ export const sanitizeTask07CharacterAvatarMedia = (
   if (!original) return null;
 
   const variants = {};
-  AVATAR_VARIANTS.forEach((variant) => {
+  expectedVariants.forEach((variant) => {
     const descriptor = sanitizeDescriptor(
       value?.variants?.[variant],
       `${prefix}/${variant}`
@@ -73,7 +86,7 @@ export const sanitizeTask07CharacterAvatarMedia = (
     schemaVersion: 1,
     contractVersion: 1,
     assetId: value.assetId,
-    kind: 'avatar',
+    kind,
     state: 'ready',
     generation: String(value.generation),
     audience: 'signed-in',
@@ -83,7 +96,15 @@ export const sanitizeTask07CharacterAvatarMedia = (
   };
 };
 
-export const normalizeTask07CharacterMediaResponse = (value) => {
+export const sanitizeTask07CharacterAvatarMedia = (
+  value,
+  expectedOwnerUid
+) => {
+  const media = sanitizeTask07PlacedTokenMedia(value, expectedOwnerUid);
+  return media?.kind === 'avatar' ? media : null;
+};
+
+export const normalizeTask07PlacedTokenMediaResponse = (value) => {
   const response = value?.data && typeof value.data === 'object'
     ? value.data
     : value;
@@ -94,9 +115,19 @@ export const normalizeTask07CharacterMediaResponse = (value) => {
   return Object.fromEntries(entries.flatMap((entry) => {
     const tokenId = normalizeString(entry?.tokenId);
     const ownerUid = normalizeString(entry?.media?.ownerUid);
-    const media = sanitizeTask07CharacterAvatarMedia(entry?.media, ownerUid);
+    const media = sanitizeTask07PlacedTokenMedia(entry?.media, ownerUid);
     return isSafeTokenId(tokenId) && media ? [[tokenId, media]] : [];
   }));
+};
+
+export const normalizeTask07CharacterMediaResponse = (value) => {
+  const response = value?.data && typeof value.data === 'object'
+    ? value.data
+    : value;
+  const normalized = normalizeTask07PlacedTokenMediaResponse(response);
+  return Object.fromEntries(Object.entries(normalized).filter(([, media]) => (
+    media.kind === 'avatar'
+  )));
 };
 
 const invokeResolver = async (payload) => {
@@ -112,4 +143,20 @@ export const resolveTask07CharacterCanonicalMedia = async (
   if (!normalizedTokenIds.length) return {};
   const result = await invoke({ tokenIds: normalizedTokenIds });
   return normalizeTask07CharacterMediaResponse(result);
+};
+
+export const resolveTask07PlacedCanonicalMedia = async ({
+  backgroundId,
+  tokenIds,
+}, { invoke = invokeResolver } = {}) => {
+  const normalizedBackgroundId = normalizeString(backgroundId);
+  const normalizedTokenIds = normalizeTask07CharacterTokenIds(tokenIds);
+  if (!isSafeTokenId(normalizedBackgroundId) || !normalizedTokenIds.length) {
+    return {};
+  }
+  const result = await invoke({
+    backgroundId: normalizedBackgroundId,
+    tokenIds: normalizedTokenIds,
+  });
+  return normalizeTask07PlacedTokenMediaResponse(result);
 };

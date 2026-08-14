@@ -1,7 +1,9 @@
 import * as admin from "firebase-admin";
 import {FieldValue, Timestamp} from "firebase-admin/firestore";
 import {
+  asTask07NestedMediaTarget,
   asStoredTask07MediaUploadPlan,
+  isTask07PreviousMediaPlanCompatible,
   isTask07MediaRequestAuthorized,
   MediaUploadPlan,
   scanTask07MediaTargetReferences,
@@ -52,6 +54,96 @@ export type ReadyTask07GeneratedMedia = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === "object" && !Array.isArray(value));
+
+const NESTED_ENTRY_ID_FIELD = "task07MediaEntryId";
+
+type NestedTargetResolution = {
+  binding?: admin.firestore.DocumentData;
+  conflict: boolean;
+  entry?: admin.firestore.DocumentData;
+  entryIndex?: number;
+  entryKey?: string;
+};
+
+const resolveNestedTarget = (
+  data: admin.firestore.DocumentData | undefined,
+  plan: MediaUploadPlan
+): NestedTargetResolution => {
+  const nested = plan.nestedTarget;
+  if (!nested) return {conflict: false, entry: data};
+  const root = isRecord(data) ? data : {};
+  const registryValue = root.task07EmbeddedMedia;
+  const registry = isRecord(registryValue) ? registryValue : {};
+  const rawBinding = registry[nested.entryId];
+  const binding = isRecord(rawBinding) ? rawBinding : {};
+  const bindingKind = binding.targetKind;
+  const bindingConflict = (registryValue !== undefined &&
+      registryValue !== null && !isRecord(registryValue)) ||
+    (rawBinding !== undefined && rawBinding !== null &&
+      !isRecord(rawBinding)) ||
+    (bindingKind !== undefined && bindingKind !== nested.kind);
+  if (nested.kind === "catalog-item-spell") {
+    const general = isRecord(root.General) ? root.General : {};
+    const spells = isRecord(general.spells) ? general.spells : {};
+    const matches = Object.entries(spells).filter(([, value]) =>
+      isRecord(value) && value[NESTED_ENTRY_ID_FIELD] === nested.entryId
+    );
+    if (matches.length > 1) return {conflict: true};
+    if (matches.length === 1) {
+      return {
+        binding,
+        conflict: bindingConflict,
+        entryKey: matches[0][0],
+        entry: matches[0][1] as admin.firestore.DocumentData,
+      };
+    }
+    const entry = spells[nested.entryKey || ""];
+    if (!isRecord(entry)) return {binding, conflict: bindingConflict};
+    const storedEntryId = entry[NESTED_ENTRY_ID_FIELD];
+    if (storedEntryId !== undefined && storedEntryId !== nested.entryId) {
+      return {conflict: true};
+    }
+    return {
+      binding,
+      conflict: bindingConflict || (storedEntryId !== undefined &&
+        typeof storedEntryId !== "string"),
+      entryKey: nested.entryKey || undefined,
+      entry: entry as admin.firestore.DocumentData,
+    };
+  }
+
+  const collectionField = nested.kind === "foe-technique" ?
+    "tecniche" : "spells";
+  const entries = Array.isArray(root[collectionField]) ?
+    root[collectionField] as unknown[] : [];
+  const matches = entries
+    .map((entry, index) => ({entry, index}))
+    .filter(({entry}) => isRecord(entry) &&
+      entry[NESTED_ENTRY_ID_FIELD] === nested.entryId);
+  if (matches.length > 1) return {conflict: true};
+  if (matches.length === 1) {
+    return {
+      binding,
+      conflict: bindingConflict,
+      entryIndex: matches[0].index,
+      entry: matches[0].entry as admin.firestore.DocumentData,
+    };
+  }
+  const entry = nested.entryIndex === null ? undefined :
+    entries[nested.entryIndex];
+  if (!isRecord(entry)) return {binding, conflict: bindingConflict};
+  const storedEntryId = entry[NESTED_ENTRY_ID_FIELD];
+  if (storedEntryId !== undefined && storedEntryId !== nested.entryId) {
+    return {conflict: true};
+  }
+  return {
+    binding,
+    conflict: bindingConflict || (storedEntryId !== undefined &&
+      typeof storedEntryId !== "string"),
+    entryIndex: nested.entryIndex ?? undefined,
+    entry: entry as admin.firestore.DocumentData,
+  };
+};
 
 const legacyImageReferenceFrom = (
   value: unknown
@@ -165,11 +257,24 @@ export const task07MediaTargetDataForPlan = (
   data: admin.firestore.DocumentData | undefined,
   plan: MediaUploadPlan
 ): admin.firestore.DocumentData | undefined => {
+  if (plan.nestedTarget) {
+    const resolution = resolveNestedTarget(data, plan);
+    return resolution.binding || {};
+  }
   if (plan.targetKind !== "common-technique") return data;
   const root = isRecord(data) ? data : {};
   return isRecord(root[plan.entityId]) ?
     root[plan.entityId] as admin.firestore.DocumentData :
     undefined;
+};
+
+export const task07NestedMediaTargetEntryExists = (
+  data: admin.firestore.DocumentData | undefined,
+  plan: MediaUploadPlan
+): boolean => {
+  if (!plan.nestedTarget) return true;
+  const resolution = resolveNestedTarget(data, plan);
+  return !resolution.conflict && Boolean(resolution.entry);
 };
 
 const rootTargetRevision = (
@@ -241,6 +346,16 @@ export const task07MediaTargetState = (
   data: admin.firestore.DocumentData | undefined,
   plan: MediaUploadPlan
 ): Task07FoeCanonicalMediaState => {
+  if (plan.nestedTarget) {
+    const resolution = resolveNestedTarget(data, plan);
+    if (resolution.conflict) {
+      return {assetId: null, revision: 0, conflict: true};
+    }
+    if (!resolution.entry &&
+      (!resolution.binding || Object.keys(resolution.binding).length === 0)) {
+      return {assetId: null, revision: 0, conflict: false};
+    }
+  }
   if (plan.targetKind === "foe" &&
     task07MediaTargetFields(plan).slot === "media") {
     return task07FoeCanonicalMediaStateFromTarget(data);
@@ -266,6 +381,16 @@ const attachmentMatchesTargetSlot = (input: {
   }
   const expectedSlot = task07MediaTargetFields(input.plan).slot;
   const storedSlot = input.asset.get("attachment.targetSlot");
+  const storedNestedTarget = input.asset.get("attachment.nestedTarget");
+  if (input.plan.nestedTarget) {
+    const nested = asTask07NestedMediaTarget(storedNestedTarget);
+    if (!nested ||
+      nested.kind !== input.plan.nestedTarget.kind ||
+      nested.entryId !== input.plan.nestedTarget.entryId ||
+      nested.slot !== input.plan.nestedTarget.slot) return false;
+  } else if (storedNestedTarget !== undefined && storedNestedTarget !== null) {
+    return false;
+  }
   // Version-one primary attachments created before personal video slots were
   // introduced have no targetSlot. Keep only that exact compatibility case.
   return storedSlot === expectedSlot ||
@@ -293,7 +418,14 @@ export const validateTask07MediaTarget = (input: {
   if (!targetData) {
     throw new Task07TargetAdapterError(
       "failed-precondition",
-      "Common technique media target is missing."
+      "Media target entry is missing."
+    );
+  }
+  if (input.plan.nestedTarget &&
+    !task07NestedMediaTargetEntryExists(data, input.plan)) {
+    throw new Task07TargetAdapterError(
+      "failed-precondition",
+      "Media target entry is missing."
     );
   }
   if (data.deletionState === "pending" ||
@@ -399,7 +531,7 @@ export const task07MediaValueFromReadyManifest = (
 export const task07TargetAttachmentPatch = (input: {
   current?: admin.firestore.DocumentData;
   media: Record<string, unknown>;
-  normalizeFoeCanonicalRoot?: boolean;
+  normalizeCanonicalRoot?: boolean;
   plan: MediaUploadPlan;
   revision: number;
   timestamp: Timestamp;
@@ -407,6 +539,60 @@ export const task07TargetAttachmentPatch = (input: {
   const original = input.media.original as StoredTask07MediaObject;
   const fields = task07MediaTargetFields(input.plan);
   const current = input.current || {};
+  if (input.plan.nestedTarget) {
+    const resolution = resolveNestedTarget(current, input.plan);
+    if (resolution.conflict || !resolution.entry) {
+      throw new Task07TargetAdapterError(
+        "failed-precondition",
+        "Nested media target is missing or has conflicting identity."
+      );
+    }
+    const nextEntry = {
+      ...resolution.entry,
+      [NESTED_ENTRY_ID_FIELD]: input.plan.nestedTarget.entryId,
+    };
+    const nextBinding = {
+      ...(resolution.binding || {}),
+      targetKind: input.plan.nestedTarget.kind,
+      [fields.mediaField]: input.media,
+      [fields.revisionField]: input.revision,
+      [fields.updatedAtField]: input.timestamp,
+    };
+    const registry = isRecord(current.task07EmbeddedMedia) ?
+      current.task07EmbeddedMedia : {};
+    if (input.plan.nestedTarget.kind === "catalog-item-spell") {
+      const general = isRecord(current.General) ? current.General : {};
+      const spells = isRecord(general.spells) ? general.spells : {};
+      return {
+        General: {
+          ...general,
+          spells: {...spells, [resolution.entryKey || ""]: nextEntry},
+        },
+        task07EmbeddedMedia: {
+          ...registry,
+          [input.plan.nestedTarget.entryId]: nextBinding,
+        },
+      };
+    }
+    const collectionField = input.plan.nestedTarget.kind === "foe-technique" ?
+      "tecniche" : "spells";
+    const entries = Array.isArray(current[collectionField]) ?
+      [...current[collectionField]] : [];
+    if (resolution.entryIndex === undefined) {
+      throw new Task07TargetAdapterError(
+        "failed-precondition",
+        "Nested media target index is missing."
+      );
+    }
+    entries[resolution.entryIndex] = nextEntry;
+    return {
+      [collectionField]: entries,
+      task07EmbeddedMedia: {
+        ...registry,
+        [input.plan.nestedTarget.entryId]: nextBinding,
+      },
+    };
+  }
   if (input.plan.targetKind === "common-technique") {
     const currentEntry = task07MediaTargetDataForPlan(current, input.plan);
     if (!currentEntry) {
@@ -415,17 +601,22 @@ export const task07TargetAttachmentPatch = (input: {
         "Common technique media target is missing."
       );
     }
-    return {
-      [input.plan.entityId]: {
-        ...currentEntry,
-        [fields.mediaField]: input.media,
-        [fields.revisionField]: input.revision,
-        [fields.updatedAtField]: input.timestamp,
-      },
-    };
+    const nextEntry = {...currentEntry};
+    if (isRecord(currentEntry.General)) {
+      const nextGeneral = {...currentEntry.General};
+      nextGeneral[fields.mediaField] = FieldValue.delete();
+      nextGeneral[fields.revisionField] = FieldValue.delete();
+      nextGeneral[fields.updatedAtField] = FieldValue.delete();
+      nextEntry.General = nextGeneral;
+    }
+    nextEntry[fields.mediaField] = input.media;
+    nextEntry[fields.revisionField] = input.revision;
+    nextEntry[fields.updatedAtField] = input.timestamp;
+    return {[input.plan.entityId]: nextEntry};
   }
+  const normalizesCanonicalRoot = input.normalizeCanonicalRoot === true;
   const normalizesFoeCanonicalRoot = Boolean(
-    input.normalizeFoeCanonicalRoot &&
+    normalizesCanonicalRoot &&
     input.plan.targetKind === "foe" && fields.slot === "media"
   );
   const currentGeneral = normalizesFoeCanonicalRoot &&
@@ -442,6 +633,16 @@ export const task07TargetAttachmentPatch = (input: {
     [fields.revisionField]: input.revision,
     [fields.updatedAtField]: input.timestamp,
   };
+  const canonicalGeneral = isRecord(current.General) ? current.General : null;
+  if (normalizesCanonicalRoot && canonicalGeneral && [
+    fields.mediaField,
+    fields.revisionField,
+    fields.updatedAtField,
+  ].some((field) => hasOwn(canonicalGeneral, field))) {
+    patch[`General.${fields.mediaField}`] = FieldValue.delete();
+    patch[`General.${fields.revisionField}`] = FieldValue.delete();
+    patch[`General.${fields.updatedAtField}`] = FieldValue.delete();
+  }
   if (normalizesFoeCanonicalRoot) {
     patch.imagePath = preservedLegacyImageReference?.imagePath || original.path;
     patch.imageUrl = preservedLegacyImageReference?.imageUrl || "";
@@ -478,13 +679,45 @@ export const task07TargetAttachmentPatch = (input: {
     patch.downloadUrl = FieldValue.delete();
     patch["General.media"] = FieldValue.delete();
     patch["General.mediaUpdatedAt"] = FieldValue.delete();
-    patch["General.task07MediaRevision"] =
-      FieldValue.delete();
+    patch["General.task07MediaRevision"] = FieldValue.delete();
     patch["General.imagePath"] = FieldValue.delete();
     patch["General.imageUrl"] = FieldValue.delete();
     patch["General.image_url"] = FieldValue.delete();
     patch["General.url"] = FieldValue.delete();
     patch["General.downloadUrl"] = FieldValue.delete();
+  }
+  return patch;
+};
+
+export const task07CanonicalRootRetirementPatch = (input: {
+  current: admin.firestore.DocumentData;
+  plan: MediaUploadPlan;
+  revision: number;
+  timestamp: Timestamp;
+}): admin.firestore.UpdateData<admin.firestore.DocumentData> => {
+  if (input.plan.nestedTarget ||
+    input.plan.targetKind === "common-technique") {
+    throw new Task07TargetAdapterError(
+      "invalid-argument",
+      "Canonical root retirement plan is invalid."
+    );
+  }
+  const fields = task07MediaTargetFields(input.plan);
+  const patch: admin.firestore.UpdateData<admin.firestore.DocumentData> = {
+    [fields.mediaField]: FieldValue.delete(),
+    [fields.revisionField]: input.revision + 1,
+    [fields.updatedAtField]: input.timestamp,
+  };
+  const canonicalGeneral = isRecord(input.current.General) ?
+    input.current.General : null;
+  if (canonicalGeneral && [
+    fields.mediaField,
+    fields.revisionField,
+    fields.updatedAtField,
+  ].some((field) => hasOwn(canonicalGeneral, field))) {
+    patch[`General.${fields.mediaField}`] = FieldValue.delete();
+    patch[`General.${fields.revisionField}`] = FieldValue.delete();
+    patch[`General.${fields.updatedAtField}`] = FieldValue.delete();
   }
   return patch;
 };
@@ -535,10 +768,85 @@ export const task07CommonTechniqueRetirementPatch = (input: {
   }
   const fields = task07MediaTargetFields(input.plan);
   const nextEntry = {...currentEntry};
-  delete nextEntry[fields.mediaField];
+  nextEntry[fields.mediaField] = FieldValue.delete();
+  if (isRecord(currentEntry.General)) {
+    const nextGeneral = {...currentEntry.General};
+    nextGeneral[fields.mediaField] = FieldValue.delete();
+    nextGeneral[fields.revisionField] = FieldValue.delete();
+    nextGeneral[fields.updatedAtField] = FieldValue.delete();
+    nextEntry.General = nextGeneral;
+  }
   nextEntry[fields.revisionField] = input.revision + 1;
   nextEntry[fields.updatedAtField] = input.timestamp;
   return {[input.plan.entityId]: nextEntry};
+};
+
+export const task07NestedMediaRetirementPatch = (input: {
+  current: admin.firestore.DocumentData;
+  plan: MediaUploadPlan;
+  revision: number;
+  timestamp: Timestamp;
+}): admin.firestore.UpdateData<admin.firestore.DocumentData> => {
+  if (!input.plan.nestedTarget) {
+    throw new Task07TargetAdapterError(
+      "invalid-argument",
+      "Nested media retirement plan is invalid."
+    );
+  }
+  const resolution = resolveNestedTarget(input.current, input.plan);
+  if (resolution.conflict || !resolution.binding) {
+    throw new Task07TargetAdapterError(
+      "failed-precondition",
+      "Nested media binding is missing or has conflicting identity."
+    );
+  }
+  const fields = task07MediaTargetFields(input.plan);
+  const nextBinding = {...(resolution.binding || {})};
+  delete nextBinding[fields.mediaField];
+  nextBinding.targetKind = input.plan.nestedTarget.kind;
+  nextBinding[fields.revisionField] = input.revision + 1;
+  nextBinding[fields.updatedAtField] = input.timestamp;
+  const registry = isRecord(input.current.task07EmbeddedMedia) ?
+    input.current.task07EmbeddedMedia : {};
+  if (input.plan.nestedTarget.kind === "catalog-item-spell") {
+    const general = isRecord(input.current.General) ? input.current.General : {};
+    const spells = isRecord(general.spells) ? general.spells : {};
+    return {
+      ...(resolution.entry ? {
+        General: {
+          ...general,
+          spells: {
+            ...spells,
+            [resolution.entryKey || ""]: {
+              ...resolution.entry,
+              [NESTED_ENTRY_ID_FIELD]: input.plan.nestedTarget.entryId,
+            },
+          },
+        },
+      } : {}),
+      task07EmbeddedMedia: {
+        ...registry,
+        [input.plan.nestedTarget.entryId]: nextBinding,
+      },
+    };
+  }
+  const collectionField = input.plan.nestedTarget.kind === "foe-technique" ?
+    "tecniche" : "spells";
+  const entries = Array.isArray(input.current[collectionField]) ?
+    [...input.current[collectionField]] : [];
+  if (resolution.entry && resolution.entryIndex !== undefined) {
+    entries[resolution.entryIndex] = {
+      ...resolution.entry,
+      [NESTED_ENTRY_ID_FIELD]: input.plan.nestedTarget.entryId,
+    };
+  }
+  return {
+    ...(resolution.entry ? {[collectionField]: entries} : {}),
+    task07EmbeddedMedia: {
+      ...registry,
+      [input.plan.nestedTarget.entryId]: nextBinding,
+    },
+  };
 };
 
 export const assertTask07TargetDocumentBudget = (input: {
@@ -548,6 +856,7 @@ export const assertTask07TargetDocumentBudget = (input: {
 }): void => {
   if (![
     "user-inventory", "user-technique", "common-technique", "user-spell",
+    "catalog-item-spell", "foe-technique", "foe-spell",
   ].includes(input.plan.targetKind)) return;
   const budget = evaluateDocumentBudget(
     {...input.current, ...input.patch},
@@ -639,9 +948,14 @@ export const attachTask07ReadyAssetTransaction = async (input: {
   }
   const assetRef = input.db.doc(`media_assets/${input.assetId}`);
   const controlRef = input.db.doc("utils/task07_media");
+  const actorRef = input.db.doc(`users/${input.actorUid}`);
   const nowMs = input.nowMs ?? Date.now();
   return input.db.runTransaction(async (transaction) => {
-    const [asset, control] = await transaction.getAll(assetRef, controlRef);
+    const [asset, control, actor] = await transaction.getAll(
+      assetRef,
+      controlRef,
+      actorRef
+    );
     const plan = asStoredTask07MediaUploadPlan(asset.get("plan"));
     if (!asset.exists || !plan || plan.assetId !== input.assetId) {
       throw new Task07TargetAdapterError(
@@ -649,13 +963,18 @@ export const attachTask07ReadyAssetTransaction = async (input: {
         "Media asset not found."
       );
     }
-    if (plan.actorUid !== input.actorUid ||
+    const actorRole = typeof actor.get("role") === "string" ?
+      actor.get("role").trim().toLowerCase() : "";
+    if (!actor.exists || actor.get("deletionState") === "pending" ||
+      actorRole !== input.actorRole.trim().toLowerCase() ||
+      plan.actorUid !== input.actorUid ||
       !isTask07MediaRequestAuthorized({
         kind: plan.kind,
         actorUid: input.actorUid,
         ownerUid: plan.ownerUid,
         referenceScope: plan.referenceScope,
-        actorRole: input.actorRole,
+        actorRole,
+        targetKind: plan.targetKind,
       })) {
       throw new Task07TargetAdapterError(
         "permission-denied",
@@ -665,7 +984,7 @@ export const attachTask07ReadyAssetTransaction = async (input: {
     if (!task07MediaWritesV1ForActor({
       control: control.data(),
       purpose: plan.kind,
-      role: input.actorRole,
+      role: actorRole,
       uid: input.actorUid,
     })) {
       throw new Task07TargetAdapterError(
@@ -710,7 +1029,7 @@ export const attachTask07ReadyAssetTransaction = async (input: {
     if (currentState.conflict) {
       throw new Task07TargetAdapterError(
         "failed-precondition",
-        "Foe media bindings conflict."
+        "Media target bindings conflict."
       );
     }
     const revision = currentState.revision;
@@ -734,10 +1053,13 @@ export const attachTask07ReadyAssetTransaction = async (input: {
     const previous = previousRef ?
       await transaction.get(previousRef) :
       null;
+    const previousPlan = previous ?
+      asStoredTask07MediaUploadPlan(previous.get("plan")) : null;
     if (previousRef && (
       !previous ||
       !previous.exists ||
       previous.get("state") !== "attached" ||
+      !isTask07PreviousMediaPlanCompatible(plan, previousPlan) ||
       !attachmentMatchesTargetSlot({
         asset: previous,
         referencePath,
@@ -753,7 +1075,7 @@ export const attachTask07ReadyAssetTransaction = async (input: {
     const targetPatch = task07TargetAttachmentPatch({
       current: target.data() || {},
       media,
-      normalizeFoeCanonicalRoot: true,
+      normalizeCanonicalRoot: true,
       plan,
       revision: revision + 1,
       timestamp,
@@ -773,6 +1095,7 @@ export const attachTask07ReadyAssetTransaction = async (input: {
       attachment: {
         referencePath,
         targetSlot,
+        ...(plan.nestedTarget ? {nestedTarget: plan.nestedTarget} : {}),
         revision: revision + 1,
         attachedAt: timestamp,
       },

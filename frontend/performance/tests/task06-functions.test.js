@@ -558,6 +558,164 @@ const seedCanonicalFoe = async ({
   return {sourcePlan, manifest, objects};
 };
 
+const seedCanonicalNestedFoeMedia = async ({bucket, sourceFoeId}) => {
+  const mediaFreeTechniqueEntryId = 'task07-source-media-free-technique';
+  const retiredSpellEntryId = 'task07-source-retired-spell';
+  const nestedTarget = {
+    schemaVersion: 1,
+    kind: 'foe-technique',
+    entryId: 'task07-source-technique',
+    entryKey: null,
+    entryIndex: 0,
+    slot: 'media',
+  };
+  const originalBuffer = Buffer.from('task07-nested-foe-original');
+  const sourcePlan = buildTask07MediaUploadPlan({
+    actorUid: actor.uid,
+    ownerUid: actor.uid,
+    entityId: sourceFoeId,
+    operationId: 'task07_foe_nested_source_0001',
+    kind: 'foe',
+    nestedTarget,
+    sourceContentType: 'image/png',
+    sourceBytes: originalBuffer.byteLength,
+  });
+  const storagePlan = buildGeneratedMediaStoragePlan({
+    kind: 'foe',
+    audienceScope: sourcePlan.audienceScope,
+    ownerKey: sourcePlan.ownerKey,
+    assetId: sourcePlan.assetId,
+    sourceGeneration: '9',
+  });
+  const objects = [
+    {role: 'original', path: storagePlan.originalPath, buffer: originalBuffer},
+    ...Object.entries(storagePlan.variants).map(([role, path], index) => ({
+      role,
+      path,
+      buffer: Buffer.from(`task07-nested-${role}-${index}`),
+    })),
+  ];
+  const descriptors = new Map();
+  for (let index = 0; index < objects.length; index += 1) {
+    const object = objects[index];
+    const checksum = String(index + 5).repeat(64).slice(0, 64);
+    const contentType = object.role === 'original'
+      ? 'image/png'
+      : 'image/webp';
+    await bucket.file(object.path).save(object.buffer, {
+      resumable: false,
+      metadata: {
+        contentType,
+        cacheControl: MEDIA_PRIVATE_CACHE_CONTROL,
+        contentDisposition: 'inline',
+        metadata: {
+          ...buildTask07PrivateStorageMetadata({
+            assetId: sourcePlan.assetId,
+            entityId: sourceFoeId,
+            kind: 'foe',
+            ownerUid: actor.uid,
+            role: object.role,
+          }),
+          task07Checksum: checksum,
+        },
+      },
+    });
+    const [metadata] = await bucket.file(object.path).getMetadata();
+    descriptors.set(object.role, {
+      path: object.path,
+      contentType,
+      bytes: object.buffer.byteLength,
+      width: object.role === 'original' ? 640 : 96,
+      height: object.role === 'original' ? 480 : 96,
+      durationMs: null,
+      orientationDegrees: 0,
+      checksum,
+      role: object.role,
+      generation: String(metadata.generation),
+      cacheControl: String(metadata.cacheControl || ''),
+    });
+  }
+  const manifest = {
+    schemaVersion: MEDIA_SCHEMA_VERSION,
+    policyVersion: MEDIA_CONTRACT_VERSION,
+    assetId: sourcePlan.assetId,
+    generation: '9',
+    state: 'attached',
+    purpose: 'foe',
+    audience: sourcePlan.audienceScope,
+    ownerUid: actor.uid,
+    actorUid: actor.uid,
+    targetKind: nestedTarget.kind,
+    targetId: sourceFoeId,
+    previousAssetId: null,
+    requestHash: sourcePlan.requestHash,
+    plan: sourcePlan,
+    generated: {
+      generation: '9',
+      original: descriptors.get('original'),
+      variants: Object.fromEntries(
+        [...descriptors.entries()].filter(([role]) => role !== 'original')
+      ),
+    },
+    attachment: {
+      referencePath: `foes/${sourceFoeId}`,
+      targetSlot: 'media',
+      nestedTarget,
+      revision: 1,
+      attachedAt: Timestamp.now(),
+    },
+    retention: {},
+    error: {code: null, retryable: false, attempts: 1},
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+  };
+  const media = task07MediaValueFromReadyManifest(manifest, sourcePlan);
+  const foeRef = db.doc(`foes/${sourceFoeId}`);
+  const current = await foeRef.get();
+  assert.equal(current.exists, true);
+  const batch = db.batch();
+  batch.set(db.doc(`media_assets/${sourcePlan.assetId}`), manifest);
+  batch.update(foeRef, {
+    tecniche: [{
+      name: 'Task 07 nested technique',
+      description: 'Canonical embedded fixture',
+      task07MediaEntryId: nestedTarget.entryId,
+    }, {
+      name: 'Task 07 media-free technique',
+      description: 'Persistent identity without a media binding',
+      task07MediaEntryId: mediaFreeTechniqueEntryId,
+    }],
+    spells: [{
+      name: 'Task 07 retired spell',
+      description: 'Persistent identity with a retired binding',
+      task07MediaEntryId: retiredSpellEntryId,
+    }],
+    task07EmbeddedMedia: {
+      ...(current.get('task07EmbeddedMedia') || {}),
+      [nestedTarget.entryId]: {
+        targetKind: nestedTarget.kind,
+        media,
+        task07MediaRevision: 1,
+        mediaUpdatedAt: Timestamp.now(),
+      },
+      [retiredSpellEntryId]: {
+        targetKind: 'foe-spell',
+        task07MediaRevision: 2,
+        mediaUpdatedAt: Timestamp.now(),
+      },
+    },
+  });
+  await batch.commit();
+  return {
+    sourcePlan,
+    manifest,
+    nestedTarget,
+    mediaFreeTechniqueEntryId,
+    retiredSpellEntryId,
+    objects,
+  };
+};
+
 const actorDocument = () => ({
   modelVersion: 2,
   role: 'dm',
@@ -1246,6 +1404,10 @@ test('foe duplication owns and atomically attaches a canonical media family', as
   const sourceFoeId = 'task07-canonical-clone-source';
   const bucket = getStorage(app).bucket();
   const seeded = await seedCanonicalFoe({bucket, sourceFoeId});
+  const nestedSeeded = await seedCanonicalNestedFoeMedia({
+    bucket,
+    sourceFoeId,
+  });
 
   await assert.rejects(
     invokeCallable('duplicateFoeWithAssets', {
@@ -1270,8 +1432,25 @@ test('foe duplication owns and atomically attaches a canonical media family', as
     completed.assets.canonicalMain.assetId,
     seeded.sourcePlan.assetId
   );
+  assert.equal(completed.assets.canonicalNested.length, 1);
+  assert.equal(
+    completed.assets.canonicalNested[0].sourceAssetId,
+    nestedSeeded.sourcePlan.assetId
+  );
+  assert.notEqual(
+    completed.assets.canonicalNested[0].assetId,
+    nestedSeeded.sourcePlan.assetId
+  );
 
-  const [source, duplicate, destinationManifest, sourceManifest] =
+  const nestedResult = completed.assets.canonicalNested[0];
+  const [
+    source,
+    duplicate,
+    destinationManifest,
+    sourceManifest,
+    nestedDestinationManifest,
+    nestedSourceManifest,
+  ] =
     await Promise.all([
       db.doc(`foes/${sourceFoeId}`).get(),
       db.doc(`foes/${completed.newFoeId}`).get(),
@@ -1279,6 +1458,8 @@ test('foe duplication owns and atomically attaches a canonical media family', as
         `media_assets/${completed.assets.canonicalMain.assetId}`
       ).get(),
       db.doc(`media_assets/${seeded.sourcePlan.assetId}`).get(),
+      db.doc(`media_assets/${nestedResult.assetId}`).get(),
+      db.doc(`media_assets/${nestedSeeded.sourcePlan.assetId}`).get(),
     ]);
   assert.equal(duplicate.exists, true);
   assert.equal(duplicate.get('name'), 'Task 07 canonical duplicate');
@@ -1304,19 +1485,87 @@ test('foe duplication owns and atomically attaches a canonical media family', as
   );
   assert.equal(source.get('media.assetId'), seeded.sourcePlan.assetId);
   assert.equal(sourceManifest.get('state'), 'attached');
+  const duplicateTechnique = duplicate.get('tecniche')[0];
+  assert.notEqual(
+    duplicateTechnique.task07MediaEntryId,
+    nestedSeeded.nestedTarget.entryId
+  );
+  assert.equal(duplicateTechnique.imagePath, undefined);
+  assert.equal(duplicateTechnique.imageUrl, undefined);
+  assert.equal(
+    duplicate.get(
+      `task07EmbeddedMedia.${duplicateTechnique.task07MediaEntryId}`
+    ).media.assetId,
+    nestedResult.assetId
+  );
+  assert.equal(
+    duplicate.get(
+      `task07EmbeddedMedia.${duplicateTechnique.task07MediaEntryId}`
+    ).targetKind,
+    'foe-technique'
+  );
+  assert.equal(nestedDestinationManifest.get('state'), 'attached');
+  assert.equal(
+    nestedDestinationManifest.get('attachment.referencePath'),
+    `foes/${completed.newFoeId}`
+  );
+  assert.deepEqual(
+    nestedDestinationManifest.get('attachment.nestedTarget'),
+    nestedResult.nestedTarget
+  );
+  assert.equal(
+    nestedDestinationManifest.get('clone.sourceAssetId'),
+    nestedSeeded.sourcePlan.assetId
+  );
+  assert.equal(nestedSourceManifest.get('state'), 'attached');
+  assert.equal(
+    source.get(
+      `task07EmbeddedMedia.${nestedSeeded.nestedTarget.entryId}.media.assetId`
+    ),
+    nestedSeeded.sourcePlan.assetId
+  );
+  const duplicateMediaFreeTechnique = duplicate.get('tecniche')[1];
+  assert.notEqual(
+    duplicateMediaFreeTechnique.task07MediaEntryId,
+    nestedSeeded.mediaFreeTechniqueEntryId
+  );
+  assert.match(
+    duplicateMediaFreeTechnique.task07MediaEntryId,
+    /^n_[a-f0-9]{40}$/
+  );
+  assert.equal(
+    duplicate.get(
+      `task07EmbeddedMedia.${duplicateMediaFreeTechnique.task07MediaEntryId}`
+    ),
+    undefined
+  );
+  const duplicateRetiredSpell = duplicate.get('spells')[0];
+  assert.notEqual(
+    duplicateRetiredSpell.task07MediaEntryId,
+    nestedSeeded.retiredSpellEntryId
+  );
+  assert.match(duplicateRetiredSpell.task07MediaEntryId, /^n_[a-f0-9]{40}$/);
+  assert.equal(
+    duplicate.get(
+      `task07EmbeddedMedia.${duplicateRetiredSpell.task07MediaEntryId}`
+    ),
+    undefined
+  );
 
   const generated = destinationManifest.get('generated');
   const destinationObjects = [
     generated.original,
     ...Object.values(generated.variants),
+    nestedDestinationManifest.get('generated.original'),
+    ...Object.values(nestedDestinationManifest.get('generated.variants')),
   ];
-  assert.equal(destinationObjects.length, 5);
+  assert.equal(destinationObjects.length, 10);
   for (const object of destinationObjects) {
     const [metadata] = await bucket.file(object.path).getMetadata();
-    assert.equal(
-      metadata.metadata.task07AssetId,
-      completed.assets.canonicalMain.assetId
-    );
+    assert.ok([
+      completed.assets.canonicalMain.assetId,
+      nestedResult.assetId,
+    ].includes(metadata.metadata.task07AssetId));
     assert.equal(metadata.metadata.task07EntityId, completed.newFoeId);
     assert.equal(metadata.metadata.task07OwnerUid, actor.uid);
     assert.equal(

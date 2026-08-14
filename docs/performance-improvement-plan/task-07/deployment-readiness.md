@@ -2,6 +2,13 @@
 
 Date: 2026-07-31
 
+> Historical record. The inactive/default-off release described here was
+> completed before the 2026-08-01 fatin-test `v1-write` rollout. It is not the
+> current Media V2 activation procedure. Use `activation-runbook.md` for the
+> active canonical audit, full Storage preservation inventory, transaction-
+> fenced `canonical-only` switch, browser acceptance, and safe `v1-write`
+> rollback. Preserve the body below as evidence of the earlier release gate.
+
 This document separates two operations that have different risk:
 
 1. **Deploying Hosting while Task 07 remains inactive.** This is the safe

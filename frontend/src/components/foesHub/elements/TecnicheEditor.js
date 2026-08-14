@@ -1,15 +1,21 @@
 import React from 'react';
-import MediaImage from '../../common/MediaImage';
+import MediaImage, {hasMediaAsset} from '../../common/MediaImage';
 import useObjectUrl from '../../common/useObjectUrl';
+import {mintTask07EmbeddedMediaEntryId} from '../../../data/media/embeddedMediaProjection';
 
 const ensureArray = (v) => Array.isArray(v) ? v : [];
 
 const EditorImagePreview = ({ item, label }) => {
   const previewUrl = useObjectUrl(item?.imageFile || null);
   const src = previewUrl || item?.imageUrl || '';
-  return src ? (
+  const hasPreview = Boolean(previewUrl || hasMediaAsset(item, {
+    variant: 'thumbnail',
+  }));
+  return hasPreview ? (
     <MediaImage
+      media={previewUrl ? {imageUrl: previewUrl} : item}
       src={src}
+      mediaPurpose={previewUrl ? '' : 'foe'}
       variant="thumbnail"
       alt={label}
       width={80}
@@ -28,7 +34,15 @@ const TecnicheEditor = ({ value = [], onChange }) => {
     const next = list.map((it, i) => i === idx ? { ...it, ...patch } : it);
     onChange(next);
   };
-  const addItem = () => onChange([...(list || []), { name: '', description: '', danni: '', effetti: '', imageUrl: '', imagePath: '' }]);
+  const addItem = () => onChange([...(list || []), {
+    task07MediaEntryId: mintTask07EmbeddedMediaEntryId(),
+    name: '',
+    description: '',
+    danni: '',
+    effetti: '',
+    imageUrl: '',
+    imagePath: '',
+  }]);
   const removeItem = (idx) => onChange(list.filter((_, i) => i !== idx));
 
   return (
@@ -39,7 +53,7 @@ const TecnicheEditor = ({ value = [], onChange }) => {
       ) : (
         <div className="space-y-3">
           {list.map((it, idx) => (
-            <div key={idx} className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
+            <div key={it.task07MediaEntryId || idx} className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-3">
               <div className="flex items-start gap-3">
                 <div className="w-20 h-20 rounded-lg overflow-hidden border border-slate-700/60 bg-slate-800/60 flex items-center justify-center shrink-0">
                   <EditorImagePreview item={it} label={it.name || 'tecnica'} />
@@ -56,7 +70,7 @@ const TecnicheEditor = ({ value = [], onChange }) => {
                         const f = e.target.files?.[0] || null;
                         setItem(idx, { imageFile: f || null, removeImage: !f && !it.imageUrl });
                       }} className="block text-sm text-slate-200 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-600/80 file:text-white hover:file:bg-indigo-600" />
-                      {(it.imageFile || it.imageUrl) && (
+                      {(it.imageFile || hasMediaAsset(it, {variant: 'thumbnail'})) && (
                         <button type="button" className="px-2 py-1 rounded-md border border-red-400/40 text-red-200 hover:bg-red-500/10 text-[12px]" onClick={() => setItem(idx, { imageFile: null, removeImage: true, imageUrl: '' })}>Remove</button>
                       )}
                     </div>

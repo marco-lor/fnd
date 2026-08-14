@@ -5639,7 +5639,7 @@ describe('GrigliataPage', () => {
     consoleErrorSpy.mockRestore();
   });
 
-  test('reads canonical media from a visible peer character profile without copying it into placement state', async () => {
+  test('reads canonical media from a visible peer placement without copying it into placement state', async () => {
     const assetId = `m_${'d'.repeat(40)}`;
     const thumbnailPath = `media_assets/v1/signed-in/user-2/${assetId}/1/thumbnail`;
     const originalPath = `media_assets/v1/signed-in/user-2/${assetId}/1/original`;
@@ -5724,12 +5724,198 @@ describe('GrigliataPage', () => {
       expect(screen.getByTestId('board-token-media-paths')).toHaveTextContent(thumbnailPath);
     });
     expect(mockTask07ResolveCharacterMediaCallable).toHaveBeenCalledWith({
+      backgroundId: 'map-1',
       tokenIds: ['user-2'],
     });
     expect(firestore.setDoc.mock.calls.some(([target, payload]) => (
       target?.path === 'grigliata_token_placements/map-1__user-2'
       && Object.prototype.hasOwnProperty.call(payload || {}, 'media')
     ))).toBe(false);
+  });
+
+  test('renders canonical media for another owner custom token without reading its private profile', async () => {
+    const assetId = `m_${'e'.repeat(40)}`;
+    const thumbnailPath = `media_assets/v1/signed-in/user-2/${assetId}/9/thumbnail`;
+    mockTask07ResolveCharacterMediaCallable.mockResolvedValueOnce({
+      data: {
+        schemaVersion: 1,
+        entries: [{
+          tokenId: 'custom-instance-2',
+          media: {
+            schemaVersion: 1,
+            contractVersion: 1,
+            assetId,
+            kind: 'token',
+            state: 'ready',
+            generation: '9',
+            audience: 'signed-in',
+            ownerUid: 'user-2',
+            original: {
+              path: `media_assets/v1/signed-in/user-2/${assetId}/9/original`,
+              generation: '10',
+              bytes: 4,
+              contentType: 'image/png',
+              width: 512,
+              height: 512,
+            },
+            variants: {
+              thumbnail: {
+                path: thumbnailPath,
+                generation: '11',
+                bytes: 4,
+                contentType: 'image/webp',
+                width: 96,
+                height: 96,
+              },
+            },
+          },
+        }],
+      },
+    });
+    setCollectionData('grigliata_tokens', []);
+    setCollectionData('grigliata_token_placements', [{
+      id: 'map-1__custom-instance-2',
+      backgroundId: 'map-1',
+      tokenId: 'custom-instance-2',
+      ownerUid: 'user-2',
+      tokenType: 'custom',
+      label: 'Peer custom',
+      imageUrl: 'https://legacy.example/custom.png',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    }]);
+
+    render(<GrigliataPage />);
+
+    await waitFor(() => {
+      expect(mockTask07ResolveCharacterMediaCallable).toHaveBeenCalledWith({
+        backgroundId: 'map-1',
+        tokenIds: ['custom-instance-2'],
+      });
+      expect(screen.getByTestId('board-token-media-paths')).toHaveTextContent(
+        thumbnailPath
+      );
+    });
+    expect(firestore.onSnapshot.mock.calls.some(([target]) => (
+      target?.kind === 'query'
+      && target?.base?.path === 'grigliata_tokens'
+      && target?.constraints?.some?.((constraint) => (
+        constraint.field === '__name__'
+        && constraint.value?.includes?.('custom-instance-2')
+      ))
+    ))).toBe(false);
+  });
+
+  test('retains peer token media during refresh and retries one transient resolver failure', async () => {
+    const createTokenMedia = (assetCharacter, generation) => {
+      const assetId = `m_${assetCharacter.repeat(40)}`;
+      return {
+        schemaVersion: 1,
+        contractVersion: 1,
+        assetId,
+        kind: 'token',
+        state: 'ready',
+        generation,
+        audience: 'signed-in',
+        ownerUid: 'user-2',
+        original: {
+          path: `media_assets/v1/signed-in/user-2/${assetId}/${generation}/original`,
+          generation: String(Number(generation) + 1),
+          bytes: 4,
+          contentType: 'image/png',
+          width: 512,
+          height: 512,
+        },
+        variants: {
+          thumbnail: {
+            path: `media_assets/v1/signed-in/user-2/${assetId}/${generation}/thumbnail`,
+            generation: String(Number(generation) + 2),
+            bytes: 4,
+            contentType: 'image/webp',
+            width: 96,
+            height: 96,
+          },
+        },
+      };
+    };
+    const initialMedia = createTokenMedia('f', '20');
+    const refreshedMedia = createTokenMedia('a', '30');
+    const placement = {
+      id: 'map-1__custom-instance-2',
+      backgroundId: 'map-1',
+      tokenId: 'custom-instance-2',
+      ownerUid: 'user-2',
+      tokenType: 'custom',
+      label: 'Peer custom',
+      imageUrl: 'https://legacy.example/initial.png',
+      col: 2,
+      row: 2,
+      isVisibleToPlayers: true,
+      isDead: false,
+      statuses: [],
+    };
+    mockTask07ResolveCharacterMediaCallable
+      .mockResolvedValueOnce({
+        data: {
+          schemaVersion: 1,
+          entries: [{ tokenId: placement.tokenId, media: initialMedia }],
+        },
+      })
+      .mockRejectedValueOnce(new Error('temporary resolver failure'))
+      .mockResolvedValueOnce({
+        data: {
+          schemaVersion: 1,
+          entries: [{ tokenId: placement.tokenId, media: refreshedMedia }],
+        },
+      });
+    setCollectionData('grigliata_tokens', []);
+    setCollectionData('grigliata_token_placements', [placement]);
+
+    render(<GrigliataPage />);
+
+    const initialThumbnailPath = initialMedia.variants.thumbnail.path;
+    const refreshedThumbnailPath = refreshedMedia.variants.thumbnail.path;
+    await waitFor(() => {
+      expect(screen.getByTestId('board-token-media-paths')).toHaveTextContent(
+        initialThumbnailPath
+      );
+    });
+
+    await act(async () => {
+      setCollectionData('grigliata_token_placements', [{
+        ...placement,
+        imageUrl: 'https://legacy.example/refreshed.png',
+      }]);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockTask07ResolveCharacterMediaCallable).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId('board-token-media-paths')).toHaveTextContent(
+      initialThumbnailPath
+    );
+
+    await act(async () => {
+      jest.advanceTimersByTime(499);
+      await Promise.resolve();
+    });
+    expect(mockTask07ResolveCharacterMediaCallable).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      jest.advanceTimersByTime(1);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(mockTask07ResolveCharacterMediaCallable).toHaveBeenCalledTimes(3);
+      expect(screen.getByTestId('board-token-media-paths')).toHaveTextContent(
+        refreshedThumbnailPath
+      );
+    });
   });
 
   test('caps visible peer character profile reads at six deterministic 10-id queries', async () => {

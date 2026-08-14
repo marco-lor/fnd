@@ -4,6 +4,7 @@ import ReactDOM from "react-dom";
 import useObjectUrl from "./useObjectUrl";
 import MediaImage from "./MediaImage";
 import MediaVideo from "./MediaVideo";
+import {mintTask07EmbeddedMediaEntryId} from "../../data/media/embeddedMediaProjection";
 
 /**
  * Generic, storage-agnostic spell form.
@@ -166,6 +167,11 @@ export function SpellOverlay({
        "TPC Mentale":{ ...(s["TPC Mentale"] || {}) },
        "Tipo Base":  s["Tipo Base"] || "",
      };
+     cleaned.task07MediaEntryId =
+       typeof initialData?.task07MediaEntryId === 'string'
+         && initialData.task07MediaEntryId.trim()
+         ? initialData.task07MediaEntryId.trim()
+         : mintTask07EmbeddedMediaEntryId();
 
      // Clean Mod Params safely
      if (s["Mod Params"]?.Base) {
@@ -213,13 +219,24 @@ export function SpellOverlay({
        spellData: cleanSpell(),
        imageFile,
        videoFile,
+       imageRemoved,
+       videoRemoved,
      });
      onClose({
        spellData: cleanSpell(),
        imageFile, // Pass the File object, not the preview URL
        videoFile, // Pass the File object, not the preview URL
+       imageRemoved,
+       videoRemoved,
      });
-   }, [onClose, cleanSpell, imageFile, videoFile]); // Dependencies for dispatchSave
+   }, [
+     onClose,
+     cleanSpell,
+     imageFile,
+     videoFile,
+     imageRemoved,
+     videoRemoved,
+   ]); // Dependencies for dispatchSave
 
   /* ---------- tiny helpers ---------- */
     const selectOrText = useCallback((opts, val, changeFn, placeholder = "") => {

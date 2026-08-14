@@ -37,6 +37,9 @@ import {
 } from "./duplicateFoeStorage";
 import {
   assessCanonicalOnlyFoeDuplication,
+  canonicalFoeClonePlanBudgetIssue,
+  classifyFoeNestedEntryIdentities,
+  duplicateFoeNestedEntryId,
   foeDuplicationControlFenceMatches,
   stripTask07MediaFromDuplicatedFoe,
 } from "./duplicateFoeWithAssetsCore";
@@ -63,6 +66,7 @@ import {
 } from "./mediaAssetClone";
 import {
   task07MediaTargetMayReferenceAsset,
+  Task07NestedMediaTarget,
 } from "./mediaAssetLifecycleCore";
 import {
   MEDIA_CONTRACTS,
@@ -110,6 +114,7 @@ type DuplicateClaim = {
   source: Record<string, unknown>;
   newFoeId: string;
   clone: Task07FoeMediaClonePlan | null;
+  nestedClones: Task07FoeMediaClonePlan[];
   attempt: number;
   retryOperationAfterCleanup: boolean;
   errorClass: string;
@@ -125,6 +130,7 @@ type OwnedCleanupInput = {
   invocationId: string;
   manifest: ManifestEntry[];
   clone: Task07FoeMediaClonePlan | null;
+  nestedClones: Task07FoeMediaClonePlan[];
   newFoeId: string;
   attempt: number;
   errorClass: string;
@@ -146,6 +152,25 @@ const OPERATION_COLLECTION = "backend_operations";
 const LEGACY_REGION = "europe-west1";
 const CANONICAL_REGION = "europe-west8";
 const DUPLICATE_FUNCTION_TIMEOUT_SECONDS = 60;
+
+const actorSnapshotIsActiveDm = (
+  actor: admin.firestore.DocumentSnapshot
+): boolean => Boolean(
+  actor.exists &&
+  actor.get("role") === "dm" &&
+  actor.get("deletionState") !== "pending"
+);
+
+const assertBoundedCanonicalFoeClones = (
+  clones: Task07FoeMediaClonePlan[]
+): void => {
+  if (canonicalFoeClonePlanBudgetIssue(clones)) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Foe canonical media exceeds the safe duplication limit."
+    );
+  }
+};
 
 const safeName = (value: unknown, fallback: string): string => (
   asTrimmedString(value)
@@ -263,6 +288,21 @@ const storedCanonicalCloneFromData = (
     asTrimmedString(destinationPlan.entityId) !== newFoeId ||
     !pathsAreBounded) return null;
   return value as Task07FoeMediaClonePlan;
+};
+
+const storedCanonicalClonesFromData = (
+  value: unknown,
+  newFoeId: string
+): Task07FoeMediaClonePlan[] | null => {
+  if (value === null || value === undefined) return [];
+  if (!Array.isArray(value)) return null;
+  const clones = value.map((entry) =>
+    storedCanonicalCloneFromData(entry, newFoeId));
+  if (clones.some((entry) => !entry)) return null;
+  const typed = clones as Task07FoeMediaClonePlan[];
+  const assetIds = new Set(typed.map(({destinationAssetId}) =>
+    destinationAssetId));
+  return assetIds.size === typed.length ? typed : null;
 };
 
 const copyManifestEntry = async (
@@ -543,6 +583,107 @@ const loadFoeMediaClonePlan = async (input: {
   }
 };
 
+type NestedFoeIdentitySubject = {
+  sourceNestedTarget: Task07NestedMediaTarget;
+  destinationNestedTarget: Task07NestedMediaTarget;
+  sourceAssetId: string | null;
+};
+
+type NestedFoeCloneSubject = NestedFoeIdentitySubject & {
+  sourceAssetId: string;
+};
+
+const nestedFoeIdentitySubjects = (input: {
+  source: Record<string, unknown>;
+  receiptId: string;
+}): NestedFoeIdentitySubject[] => {
+  const plan = classifyFoeNestedEntryIdentities(input.source);
+  if (plan.issue) {
+    throw new Task07MediaClonePlanError(
+      plan.issue,
+      "Nested foe media identity or registry binding is invalid."
+    );
+  }
+  return plan.entries.map((entry) => {
+    const destinationEntryId = duplicateFoeNestedEntryId({
+      receiptId: input.receiptId,
+      kind: entry.kind,
+      sourceEntryId: entry.sourceEntryId,
+    });
+    return {
+      sourceAssetId: entry.sourceAssetId,
+      sourceNestedTarget: {
+        schemaVersion: 1,
+        kind: entry.kind,
+        entryId: entry.sourceEntryId,
+        entryKey: null,
+        entryIndex: entry.entryIndex,
+        slot: "media",
+      },
+      destinationNestedTarget: {
+        schemaVersion: 1,
+        kind: entry.kind,
+        entryId: destinationEntryId,
+        entryKey: null,
+        entryIndex: entry.entryIndex,
+        slot: "media",
+      },
+    };
+  });
+};
+
+const nestedFoeCloneSubjects = (input: {
+  source: Record<string, unknown>;
+  receiptId: string;
+}): NestedFoeCloneSubject[] => nestedFoeIdentitySubjects(input)
+  .filter((subject): subject is NestedFoeCloneSubject =>
+    Boolean(subject.sourceAssetId));
+
+const loadFoeNestedMediaClonePlans = async (input: {
+  transaction: admin.firestore.Transaction;
+  db: admin.firestore.Firestore;
+  actorUid: string;
+  receiptId: string;
+  sourceFoeId: string;
+  destinationFoeId: string;
+  source: Record<string, unknown>;
+}): Promise<Task07FoeMediaClonePlan[]> => {
+  try {
+    const subjects = nestedFoeCloneSubjects({
+      source: input.source,
+      receiptId: input.receiptId,
+    });
+    const manifests = subjects.length ? await input.transaction.getAll(
+      ...subjects.map(({sourceAssetId}) =>
+        input.db.doc(`media_assets/${sourceAssetId}`))
+    ) : [];
+    return subjects.map((subject, index) => {
+      const plan = buildTask07FoeMediaClonePlan({
+        actorUid: input.actorUid,
+        backendReceiptId: input.receiptId,
+        destinationFoeId: input.destinationFoeId,
+        sourceFoeId: input.sourceFoeId,
+        source: input.source,
+        sourceManifest: manifests[index]?.data() ?? null,
+        sourceNestedTarget: subject.sourceNestedTarget,
+        destinationNestedTarget: subject.destinationNestedTarget,
+      });
+      if (!plan) {
+        throw new Task07MediaClonePlanError(
+          "source-manifest-invalid",
+          "Nested foe canonical media clone plan is unavailable."
+        );
+      }
+      return plan;
+    });
+  } catch (error) {
+    if (error instanceof Task07MediaClonePlanError) {
+      throw new HttpsError("failed-precondition", error.message);
+    }
+    throw error;
+  }
+};
+
 const canonicalManifestMatches = (
   data: admin.firestore.DocumentData | undefined,
   clone: Task07FoeMediaClonePlan
@@ -737,17 +878,27 @@ const runOwnedDuplicateCleanup = async (
   }
 
   let canonicalCleanup: CanonicalCleanupOutcome = {
-    cleanupComplete: false,
+    cleanupComplete: true,
     forceTerminal: false,
   };
   try {
-    canonicalCleanup = await settleCanonicalCloneCleanup({
-      db: input.db,
-      clone: input.clone,
-      code: input.errorClass,
-      retryable: input.retryOperationAfterCleanup,
-      attempt: input.attempt,
-    });
+    const results = [];
+    for (const clone of [
+      ...(input.clone ? [input.clone] : []),
+      ...input.nestedClones,
+    ]) {
+      results.push(await settleCanonicalCloneCleanup({
+        db: input.db,
+        clone,
+        code: input.errorClass,
+        retryable: input.retryOperationAfterCleanup,
+        attempt: input.attempt,
+      }));
+    }
+    canonicalCleanup = {
+      cleanupComplete: results.every(({cleanupComplete}) => cleanupComplete),
+      forceTerminal: results.some(({forceTerminal}) => forceTerminal),
+    };
   } catch {
     canonicalCleanup = {
       cleanupComplete: false,
@@ -947,6 +1098,7 @@ const duplicateFoeHandler = async (
         source: {},
         newFoeId: asTrimmedString(operation.get("newFoeId")),
         clone: null as Task07FoeMediaClonePlan | null,
+        nestedClones: [],
         attempt: Number(operation.get("attempt") || 1),
         retryOperationAfterCleanup: false,
         errorClass: "",
@@ -973,9 +1125,16 @@ const duplicateFoeHandler = async (
       rawStoredClone,
       storedNewFoeId
     );
+    const rawStoredNestedClones = operation.exists ?
+      operation.get("canonicalNestedMediaClones") : undefined;
+    const storedNestedClones = storedCanonicalClonesFromData(
+      rawStoredNestedClones,
+      storedNewFoeId
+    );
     const cleanupCanComplete = Boolean(
       storedManifest &&
-      (rawStoredClone === null || rawStoredClone === undefined || storedClone)
+      (rawStoredClone === null || rawStoredClone === undefined || storedClone) &&
+      storedNestedClones
     );
     const storedRetryAfterCleanup = resolveRetryOperationAfterCleanup(
       operation.exists ? operation.get("retryOperationAfterCleanup") : true
@@ -1004,6 +1163,7 @@ const duplicateFoeHandler = async (
         source: {},
         newFoeId: storedNewFoeId,
         clone: storedClone,
+        nestedClones: storedNestedClones ?? [],
         attempt: storedAttempt,
         retryOperationAfterCleanup,
         errorClass,
@@ -1052,16 +1212,13 @@ const duplicateFoeHandler = async (
       );
     }
 
-    if (operation.exists && Boolean(rawStoredClone) &&
+    if (operation.exists && (Boolean(rawStoredClone) ||
+      Boolean((storedNestedClones || []).length)) &&
       !task07WritesEnabled) {
       return claimCleanup("task07-disabled", false);
     }
 
-    const actorIsActiveDm = Boolean(
-      actor.exists &&
-      actor.get("role") === "dm" &&
-      actor.get("deletionState") !== "pending"
-    );
+    const actorIsActiveDm = actorSnapshotIsActiveDm(actor);
     if (!operation.exists && !actorIsActiveDm) {
       throw new HttpsError(
         "permission-denied",
@@ -1095,8 +1252,18 @@ const duplicateFoeHandler = async (
       );
     }
     let clone: Task07FoeMediaClonePlan | null;
+    let nestedClones: Task07FoeMediaClonePlan[];
     try {
       clone = await loadFoeMediaClonePlan({
+        transaction,
+        db,
+        actorUid,
+        receiptId,
+        sourceFoeId,
+        destinationFoeId: newFoeId,
+        source: sourceData,
+      });
+      nestedClones = await loadFoeNestedMediaClonePlans({
         transaction,
         db,
         actorUid,
@@ -1111,7 +1278,7 @@ const duplicateFoeHandler = async (
       }
       throw error;
     }
-    if (clone && !task07WritesEnabled) {
+    if ((clone || nestedClones.length) && !task07WritesEnabled) {
       if (operation.exists) {
         return claimCleanup("task07-disabled", false);
       }
@@ -1123,7 +1290,8 @@ const duplicateFoeHandler = async (
     if (canonicalOnly) {
       const assessment = assessCanonicalOnlyFoeDuplication(
         sourceData,
-        Boolean(clone)
+        Boolean(clone),
+        nestedClones.length > 0
       );
       if (!assessment.allowed) {
         if (operation.exists) {
@@ -1146,19 +1314,20 @@ const duplicateFoeHandler = async (
       }
       manifest = [];
     }
-    const cloneManifestRef = clone ?
-      db.doc(`media_assets/${clone.destinationAssetId}`) : null;
-    const cloneCleanupRef = clone ?
-      db.doc(`media_asset_cleanup/${clone.destinationAssetId}`) : null;
+    const clones = [...(clone ? [clone] : []), ...nestedClones];
+    assertBoundedCanonicalFoeClones(clones);
+    const cloneManifestRefs = clones.map(({destinationAssetId}) =>
+      db.doc(`media_assets/${destinationAssetId}`));
+    const cloneCleanupRefs = clones.map(({destinationAssetId}) =>
+      db.doc(`media_asset_cleanup/${destinationAssetId}`));
     const newFoeRef = db.doc(`foes/${newFoeId}`);
     const existingTarget = await transaction.get(newFoeRef);
-    const cloneSnapshots = cloneManifestRef && cloneCleanupRef ?
-      await transaction.getAll(
-        cloneManifestRef,
-        cloneCleanupRef
-      ) : [];
-    const cloneManifest = cloneSnapshots[0];
-    const cloneCleanup = cloneSnapshots[1];
+    const cloneSnapshots = clones.length ? await transaction.getAll(
+      ...cloneManifestRefs,
+      ...cloneCleanupRefs
+    ) : [];
+    const cloneManifests = cloneSnapshots.slice(0, clones.length);
+    const cloneCleanups = cloneSnapshots.slice(clones.length);
     if (existingTarget.exists) {
       if (operation.exists) {
         return claimCleanup("target-already-bound", false);
@@ -1168,7 +1337,7 @@ const duplicateFoeHandler = async (
         "Foe duplication target already exists."
       );
     }
-    if (clone && cloneCleanup?.exists) {
+    if (cloneCleanups.some((snapshot) => snapshot.exists)) {
       if (operation.exists) {
         return claimCleanup("canonical-cleanup-started", false);
       }
@@ -1177,11 +1346,11 @@ const duplicateFoeHandler = async (
         "Canonical media cleanup has already started for this operation."
       );
     }
-    if (clone && cloneManifest?.exists && (
-      !canonicalManifestMatches(cloneManifest.data(), clone) ||
+    if (cloneManifests.some((snapshot, index) => snapshot.exists && (
+      !canonicalManifestMatches(snapshot.data(), clones[index]) ||
       !["intent", "processing", "failed", "ready"]
-        .includes(asTrimmedString(cloneManifest.get("state")))
-    )) {
+        .includes(asTrimmedString(snapshot.get("state")))
+    ))) {
       if (operation.exists) {
         return claimCleanup("canonical-identity-conflict", false);
       }
@@ -1196,6 +1365,10 @@ const duplicateFoeHandler = async (
         rawStoredClone,
         clone
       )) {
+      return claimCleanup("canonical-plan-drift", false);
+    }
+    if (operation.exists && rawStoredNestedClones !== undefined &&
+      hashValue(rawStoredNestedClones) !== hashValue(nestedClones)) {
       return claimCleanup("canonical-plan-drift", false);
     }
     if (!actorIsActiveDm) {
@@ -1213,6 +1386,7 @@ const duplicateFoeHandler = async (
       transaction.update(operationRef, {
         schemaVersion: 2,
         canonicalMediaClone: clone,
+        canonicalNestedMediaClones: nestedClones,
         task07ControlHash,
         task07Mode,
         status: "running",
@@ -1222,7 +1396,10 @@ const duplicateFoeHandler = async (
         attempt,
         leaseOwner: invocationId,
         leaseExpiresAt,
-        "progress.planned": manifest.length + (clone?.entries.length || 0),
+        "progress.planned": manifest.length + clones.reduce(
+          (total, current) => total + current.entries.length,
+          0
+        ),
         updatedAt: now,
       });
     } else {
@@ -1239,6 +1416,7 @@ const duplicateFoeHandler = async (
         newFoeId,
         assetManifest: manifest,
         canonicalMediaClone: clone,
+        canonicalNestedMediaClones: nestedClones,
         status: "running",
         phase: "copy-assets",
         retryable: false,
@@ -1246,7 +1424,10 @@ const duplicateFoeHandler = async (
         leaseOwner: invocationId,
         leaseExpiresAt,
         progress: {
-          planned: manifest.length + (clone?.entries.length || 0),
+          planned: manifest.length + clones.reduce(
+            (total, current) => total + current.entries.length,
+            0
+          ),
           processed: 0,
           succeeded: 0,
           skipped: 0,
@@ -1257,25 +1438,27 @@ const duplicateFoeHandler = async (
         expiresAt: backendOperationExpiry(),
       });
     }
-    if (clone && cloneManifestRef) {
-      if (!cloneManifest?.exists) {
-        transaction.create(cloneManifestRef, buildTask07MediaCloneManifest({
-          clone,
+    clones.forEach((currentClone, index) => {
+      const manifestRef = cloneManifestRefs[index];
+      const manifestSnapshot = cloneManifests[index];
+      if (!manifestSnapshot?.exists) {
+        transaction.create(manifestRef, buildTask07MediaCloneManifest({
+          clone: currentClone,
           now,
           leaseExpiresAt,
           cleanupAfter,
           attempt,
         }));
-      } else if (cloneManifest.get("state") !== "ready") {
-        transaction.update(cloneManifestRef, task07MediaCloneProcessingPatch({
-          clone,
+      } else if (manifestSnapshot.get("state") !== "ready") {
+        transaction.update(manifestRef, task07MediaCloneProcessingPatch({
+          clone: currentClone,
           now,
           leaseExpiresAt,
           cleanupAfter,
           attempt,
         }));
       }
-    }
+    });
     return {
       mode: "execute",
       result: {},
@@ -1283,6 +1466,7 @@ const duplicateFoeHandler = async (
       source: sourceData,
       newFoeId,
       clone,
+      nestedClones,
       attempt,
       retryOperationAfterCleanup: true,
       errorClass: "",
@@ -1310,6 +1494,7 @@ const duplicateFoeHandler = async (
       invocationId,
       manifest: claim.manifest,
       clone: claim.clone,
+      nestedClones: claim.nestedClones,
       newFoeId: claim.newFoeId,
       attempt: claim.attempt,
       errorClass: claim.errorClass,
@@ -1326,7 +1511,7 @@ const duplicateFoeHandler = async (
 
   let legacyManifest = claim.manifest;
   let copied: CopyResult[];
-  let canonicalResult: Task07CanonicalCloneResult | null = null;
+  const canonicalResults = new Map<string, Task07CanonicalCloneResult>();
   let legacyActualCopies = 0;
   let canonicalActualCopies = 0;
   try {
@@ -1351,20 +1536,28 @@ const duplicateFoeHandler = async (
         return result;
       }
     );
-    if (claim.clone) {
-      canonicalResult = await copyTask07CanonicalMediaFamily({
-        clone: claim.clone,
-        concurrency: BACKEND_OPERATION_STORAGE_CONCURRENCY,
-        onCopy: () => {
-          canonicalActualCopies += 1;
-        },
-      });
-      const clone = claim.clone;
-      const result = canonicalResult;
+    const allClones = [
+      ...(claim.clone ? [claim.clone] : []),
+      ...claim.nestedClones,
+    ];
+    if (allClones.length) {
+      for (const clone of allClones) {
+        canonicalResults.set(
+          clone.destinationAssetId,
+          await copyTask07CanonicalMediaFamily({
+            clone,
+            concurrency: BACKEND_OPERATION_STORAGE_CONCURRENCY,
+            onCopy: () => {
+              canonicalActualCopies += 1;
+            },
+          })
+        );
+      }
       await db.runTransaction(async (transaction) => {
-        const [operation, sourceSnapshot, task07Config] =
+        const [operation, actor, sourceSnapshot, task07Config] =
           await transaction.getAll(
             operationRef,
+            actorRef,
             sourceRef,
             task07ConfigRef
           );
@@ -1377,6 +1570,12 @@ const duplicateFoeHandler = async (
           role: "dm",
           uid: actorUid,
         });
+        if (!actorSnapshotIsActiveDm(actor)) {
+          throw new HttpsError(
+            "permission-denied",
+            "Only active DMs can duplicate foes."
+          );
+        }
         if (!sourceSnapshot.exists) {
           throw new HttpsError(
             "aborted",
@@ -1392,10 +1591,18 @@ const duplicateFoeHandler = async (
           destinationFoeId: claim.newFoeId,
           source: sourceSnapshot.data() ?? {},
         });
-        const cloneManifestRef = db.doc(
-          `media_assets/${clone.destinationAssetId}`
-        );
-        const cloneManifest = await transaction.get(cloneManifestRef);
+        const currentNestedClones = await loadFoeNestedMediaClonePlans({
+          transaction,
+          db,
+          actorUid,
+          receiptId,
+          sourceFoeId,
+          destinationFoeId: claim.newFoeId,
+          source: sourceSnapshot.data() ?? {},
+        });
+        const cloneManifestRefs = allClones.map(({destinationAssetId}) =>
+          db.doc(`media_assets/${destinationAssetId}`));
+        const cloneManifests = await transaction.getAll(...cloneManifestRefs);
         if (!operation.exists ||
           operation.get("requestHash") !== requestHash ||
           operation.get("status") !== "running" ||
@@ -1413,40 +1620,55 @@ const duplicateFoeHandler = async (
             hashValue(sourceSnapshot.data()) ||
           !task07FoeMediaClonePlansMatch(
             operation.get("canonicalMediaClone"),
-            clone
+            claim.clone
           ) ||
-          !task07FoeMediaClonePlansMatch(currentClone, clone) ||
-          !cloneManifest.exists ||
-          !canonicalManifestMatches(cloneManifest.data(), clone)) {
+          hashValue(operation.get("canonicalNestedMediaClones")) !==
+            hashValue(claim.nestedClones) ||
+          !task07FoeMediaClonePlansMatch(currentClone, claim.clone) ||
+          hashValue(currentNestedClones) !== hashValue(claim.nestedClones) ||
+          cloneManifests.some((manifest, index) =>
+            !manifest.exists ||
+            !canonicalManifestMatches(manifest.data(), allClones[index]))) {
           throw new HttpsError(
             "aborted",
             "Foe duplication lost its canonical media fence."
           );
         }
-        if (cloneManifest.get("state") === "ready") {
-          if (hashValue(cloneManifest.get("generated")) !==
-            hashValue(result.generated)) {
+        cloneManifests.forEach((cloneManifest, index) => {
+          const clone = allClones[index];
+          const result = canonicalResults.get(clone.destinationAssetId);
+          if (!result) {
             throw new HttpsError(
               "failed-precondition",
-              "Canonical media ready checkpoint conflicts with Storage."
+              "Canonical media copy result is unavailable."
             );
           }
-        } else if (["intent", "processing", "failed"].includes(
-          asTrimmedString(cloneManifest.get("state"))
-        )) {
-          transaction.update(cloneManifestRef, task07MediaCloneReadyPatch({
-            clone,
-            result,
-            now: Timestamp.now(),
-            cleanupAfter: cloneRetentionExpiry(),
-            attempt: claim.attempt,
-          }));
-        } else {
-          throw new HttpsError(
-            "failed-precondition",
-            "Canonical media manifest cannot be finalized."
-          );
-        }
+          if (cloneManifest.get("state") === "ready") {
+            if (hashValue(cloneManifest.get("generated")) !==
+              hashValue(result.generated)) {
+              throw new HttpsError(
+                "failed-precondition",
+                "Canonical media ready checkpoint conflicts with Storage."
+              );
+            }
+          } else if (["intent", "processing", "failed"].includes(
+            asTrimmedString(cloneManifest.get("state"))
+          )) {
+            transaction.update(cloneManifestRefs[index],
+              task07MediaCloneReadyPatch({
+                clone,
+                result,
+                now: Timestamp.now(),
+                cleanupAfter: cloneRetentionExpiry(),
+                attempt: claim.attempt,
+              }));
+          } else {
+            throw new HttpsError(
+              "failed-precondition",
+              "Canonical media manifest cannot be finalized."
+            );
+          }
+        });
         transaction.update(operationRef, {
           phase: "commit",
           leaseExpiresAt: duplicateLeaseExpiry(),
@@ -1464,6 +1686,7 @@ const duplicateFoeHandler = async (
         invocationId,
         manifest: legacyManifest,
         clone: claim.clone,
+        nestedClones: claim.nestedClones,
         newFoeId: claim.newFoeId,
         attempt: claim.attempt,
         cleanupCanComplete: true,
@@ -1487,16 +1710,46 @@ const duplicateFoeHandler = async (
   }
   const source = claim.source;
   const mainCopy = copyByKey(copied, "main");
-  const sourceTecniche = Array.isArray(source.tecniche)
-    ? source.tecniche
+  const nestedIdentities = nestedFoeIdentitySubjects({source, receiptId});
+  const hasCanonicalClone = Boolean(claim.clone || claim.nestedClones.length);
+  const copyableSource = stripTask07MediaFromDuplicatedFoe(source, {
+    canonicalClone: hasCanonicalClone,
+  });
+  if (!hasCanonicalClone && nestedIdentities.length) {
+    delete copyableSource.task07EmbeddedMedia;
+  }
+  const sourceTecniche = Array.isArray(copyableSource.tecniche)
+    ? copyableSource.tecniche
     : [];
-  const sourceSpells = Array.isArray(source.spells) ? source.spells : [];
+  const sourceSpells = Array.isArray(copyableSource.spells) ?
+    copyableSource.spells : [];
+  const nestedCloneAt = (
+    kind: "foe-technique" | "foe-spell",
+    index: number
+  ): Task07FoeMediaClonePlan | undefined => claim.nestedClones.find(
+    ({destinationPlan}) => destinationPlan.nestedTarget?.kind === kind &&
+      destinationPlan.nestedTarget.entryIndex === index
+  );
+  const nestedIdentityAt = (
+    kind: "foe-technique" | "foe-spell",
+    index: number
+  ): NestedFoeIdentitySubject | undefined => nestedIdentities.find(
+    ({destinationNestedTarget}) =>
+      destinationNestedTarget.kind === kind &&
+      destinationNestedTarget.entryIndex === index
+  );
   const newTecniche: Record<string, unknown>[] = sourceTecniche.map(
     (raw, index) => {
     const entry = asRecord(raw);
-    const copy = copyByKey(copied, `tecnica:${index}`);
-    return {
+    const identity = nestedIdentityAt("foe-technique", index);
+    const identifiedEntry = identity ? {
       ...entry,
+      task07MediaEntryId: identity.destinationNestedTarget.entryId,
+    } : entry;
+    const copy = copyByKey(copied, `tecnica:${index}`);
+    if (nestedCloneAt("foe-technique", index)) return identifiedEntry;
+    return {
+      ...identifiedEntry,
       imagePath: copy.path,
       imageUrl: copy.url,
     };
@@ -1505,9 +1758,15 @@ const duplicateFoeHandler = async (
   const newSpells: Record<string, unknown>[] = sourceSpells.map(
     (raw, index) => {
     const entry = asRecord(raw);
-    const copy = copyByKey(copied, `spell:${index}`);
-    return {
+    const identity = nestedIdentityAt("foe-spell", index);
+    const identifiedEntry = identity ? {
       ...entry,
+      task07MediaEntryId: identity.destinationNestedTarget.entryId,
+    } : entry;
+    const copy = copyByKey(copied, `spell:${index}`);
+    if (nestedCloneAt("foe-spell", index)) return identifiedEntry;
+    return {
+      ...identifiedEntry,
       imagePath: copy.path,
       imageUrl: copy.url,
     };
@@ -1515,12 +1774,12 @@ const duplicateFoeHandler = async (
   );
   const sourceStats = asRecord(source.stats);
   const payload = {
-    ...stripTask07MediaFromDuplicatedFoe(source, {
-      canonicalClone: Boolean(claim.clone),
-    }),
+    ...copyableSource,
     name: newFoeName,
-    imagePath: mainCopy.path,
-    imageUrl: mainCopy.url,
+    ...(!claim.clone ? {
+      imagePath: mainCopy.path,
+      imageUrl: mainCopy.url,
+    } : {}),
     tecniche: newTecniche,
     spells: newSpells,
     stats: {
@@ -1535,13 +1794,23 @@ const duplicateFoeHandler = async (
     newFoeId: claim.newFoeId,
     assets: {
       main: {path: mainCopy.path, url: mainCopy.url},
-      ...(claim.clone && canonicalResult ? {
+      ...(claim.clone && canonicalResults.get(claim.clone.destinationAssetId) ? {
         canonicalMain: {
           sourceAssetId: claim.clone.sourceAssetId,
           assetId: claim.clone.destinationAssetId,
-          originalPath: canonicalResult.generated.original.path,
+          originalPath: canonicalResults.get(
+            claim.clone.destinationAssetId
+          )?.generated.original.path,
         },
       } : {}),
+      canonicalNested: claim.nestedClones.map((nestedClone) => ({
+        sourceAssetId: nestedClone.sourceAssetId,
+        assetId: nestedClone.destinationAssetId,
+        nestedTarget: nestedClone.destinationPlan.nestedTarget,
+        originalPath: canonicalResults.get(
+          nestedClone.destinationAssetId
+        )?.generated.original.path,
+      })),
       tecniche: newTecniche.map((entry) => ({
         name: asTrimmedString(asRecord(entry).name),
         path: asTrimmedString(asRecord(entry).imagePath),
@@ -1554,14 +1823,26 @@ const duplicateFoeHandler = async (
       })),
     },
   };
-  const plannedCopies = legacyManifest.length +
-    (claim.clone?.entries.length || 0);
+  const allClones = [
+    ...(claim.clone ? [claim.clone] : []),
+    ...claim.nestedClones,
+  ];
+  const plannedCopies = legacyManifest.length + allClones.reduce(
+    (total, clone) => total + clone.entries.length,
+    0
+  );
   const succeededCopies = copied.filter(
     ({outcome}) => outcome === "copied"
-  ).length + (canonicalResult?.copied || 0);
+  ).length + [...canonicalResults.values()].reduce(
+    (total, current) => total + current.copied,
+    0
+  );
   const skippedCopies = copied.filter(
     ({outcome}) => outcome !== "copied"
-  ).length + (canonicalResult?.reused || 0);
+  ).length + [...canonicalResults.values()].reduce(
+    (total, current) => total + current.reused,
+    0
+  );
   const processedCopies = succeededCopies + skippedCopies;
   if (processedCopies !== plannedCopies) {
     throw new HttpsError(
@@ -1572,9 +1853,10 @@ const duplicateFoeHandler = async (
   let finalizedReplay = false;
   try {
     finalizedReplay = await db.runTransaction(async (transaction) => {
-      const [operation, sourceSnapshot, task07Config] =
+      const [operation, actor, sourceSnapshot, task07Config] =
         await transaction.getAll(
           operationRef,
+          actorRef,
           sourceRef,
           task07ConfigRef
         );
@@ -1592,10 +1874,11 @@ const duplicateFoeHandler = async (
       ) return true;
       if (
         !operation.exists ||
+        !actorSnapshotIsActiveDm(actor) ||
         operation.get("requestHash") !== requestHash ||
         operation.get("status") !== "running" ||
         operation.get("phase") !==
-          (claim.clone ? "commit" : "copy-assets") ||
+          (allClones.length ? "commit" : "copy-assets") ||
         operation.get("leaseOwner") !== invocationId ||
         !foeDuplicationControlFenceMatches({
           storedControlHash: operation.get("task07ControlHash"),
@@ -1614,13 +1897,7 @@ const duplicateFoeHandler = async (
         );
       }
       const targetRef = db.doc(`foes/${claim.newFoeId}`);
-      if (claim.clone) {
-        if (!canonicalResult) {
-          throw new HttpsError(
-            "failed-precondition",
-            "Canonical media copy result is unavailable."
-          );
-        }
+      if (allClones.length) {
         const currentClone = await loadFoeMediaClonePlan({
           transaction,
           db,
@@ -1630,21 +1907,36 @@ const duplicateFoeHandler = async (
           destinationFoeId: claim.newFoeId,
           source: sourceSnapshot.data() ?? {},
         });
-        const cloneManifestRef = db.doc(
-          `media_assets/${claim.clone.destinationAssetId}`
-        );
-        const cloneManifest = await transaction.get(cloneManifestRef);
+        const currentNestedClones = await loadFoeNestedMediaClonePlans({
+          transaction,
+          db,
+          actorUid,
+          receiptId,
+          sourceFoeId,
+          destinationFoeId: claim.newFoeId,
+          source: sourceSnapshot.data() ?? {},
+        });
+        const cloneManifestRefs = allClones.map(({destinationAssetId}) =>
+          db.doc(`media_assets/${destinationAssetId}`));
+        const cloneManifests = await transaction.getAll(...cloneManifestRefs);
         const target = await transaction.get(targetRef);
         if (!task07FoeMediaClonePlansMatch(currentClone, claim.clone) ||
           !task07FoeMediaClonePlansMatch(
             operation.get("canonicalMediaClone"),
             claim.clone
           ) ||
-          !cloneManifest.exists ||
-          !canonicalManifestMatches(cloneManifest.data(), claim.clone) ||
-          cloneManifest.get("state") !== "ready" ||
-          hashValue(cloneManifest.get("generated")) !==
-            hashValue(canonicalResult.generated) ||
+          hashValue(currentNestedClones) !== hashValue(claim.nestedClones) ||
+          hashValue(operation.get("canonicalNestedMediaClones")) !==
+            hashValue(claim.nestedClones) ||
+          cloneManifests.some((manifest, index) => {
+            const clone = allClones[index];
+            const cloneResult = canonicalResults.get(clone.destinationAssetId);
+            return !cloneResult || !manifest.exists ||
+              !canonicalManifestMatches(manifest.data(), clone) ||
+              manifest.get("state") !== "ready" ||
+              hashValue(manifest.get("generated")) !==
+                hashValue(cloneResult.generated);
+          }) ||
           target.exists) {
           throw new HttpsError(
             "aborted",
@@ -1652,23 +1944,34 @@ const duplicateFoeHandler = async (
           );
         }
         const timestamp = Timestamp.now();
-        const attachment = buildTask07NewTargetAttachment({
-          assetData: cloneManifest.data() ?? {},
-          plan: claim.clone.destinationPlan,
-          targetData: payload,
-          timestamp,
+        let attachedTargetData: admin.firestore.DocumentData = payload;
+        const attachments = allClones.map((clone, index) => {
+          const attachment = buildTask07NewTargetAttachment({
+            assetData: cloneManifests[index].data() ?? {},
+            plan: clone.destinationPlan,
+            targetData: attachedTargetData,
+            timestamp,
+          });
+          attachedTargetData = attachment.targetData;
+          return attachment;
         });
-        transaction.create(targetRef, attachment.targetData);
-        transaction.update(cloneManifestRef, {
-          state: "attached",
-          attachment: {
-            referencePath: attachment.referencePath,
-            targetSlot: attachment.targetSlot,
-            revision: attachment.revision,
-            attachedAt: timestamp,
-          },
-          "retention.cleanupAfter": FieldValue.delete(),
-          updatedAt: timestamp,
+        transaction.create(targetRef, attachedTargetData);
+        attachments.forEach((attachment, index) => {
+          const clone = allClones[index];
+          transaction.update(cloneManifestRefs[index], {
+            state: "attached",
+            attachment: {
+              referencePath: attachment.referencePath,
+              targetSlot: attachment.targetSlot,
+              ...(clone.destinationPlan.nestedTarget ? {
+                nestedTarget: clone.destinationPlan.nestedTarget,
+              } : {}),
+              revision: attachment.revision,
+              attachedAt: timestamp,
+            },
+            "retention.cleanupAfter": FieldValue.delete(),
+            updatedAt: timestamp,
+          });
         });
       } else {
         transaction.create(targetRef, payload);
@@ -1702,6 +2005,7 @@ const duplicateFoeHandler = async (
         invocationId,
         manifest: legacyManifest,
         clone: claim.clone,
+        nestedClones: claim.nestedClones,
         newFoeId: claim.newFoeId,
         attempt: claim.attempt,
         cleanupCanComplete: true,
@@ -1723,7 +2027,7 @@ const duplicateFoeHandler = async (
   }
   completeServerTelemetry(telemetry, {
     copies: legacyActualCopies + canonicalActualCopies,
-    writes: claim.clone ? 3 : 2,
+    writes: allClones.length ? 2 + allClones.length : 2,
     replayed: replayed || finalizedReplay,
   });
   return {

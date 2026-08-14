@@ -1,6 +1,8 @@
 import {
   normalizeTask07CharacterMediaResponse,
+  normalizeTask07PlacedTokenMediaResponse,
   resolveTask07CharacterCanonicalMedia,
+  resolveTask07PlacedCanonicalMedia,
 } from './characterTokenMedia';
 
 const avatarMedia = (ownerUid = 'peer-1') => {
@@ -33,6 +35,21 @@ const avatarMedia = (ownerUid = 'peer-1') => {
     imageUrl: 'https://legacy.example/root.png',
   };
 };
+
+const tokenMedia = (ownerUid = 'peer-2') => ({
+  ...avatarMedia(ownerUid),
+  assetId: `m_${'b'.repeat(40)}`,
+  kind: 'token',
+  original: {
+    ...avatarMedia(ownerUid).original,
+    path: `media_assets/v1/signed-in/${ownerUid}/m_${'b'.repeat(40)}/7/original`,
+  },
+  variants: Object.fromEntries(Object.entries(avatarMedia(ownerUid).variants)
+    .map(([variant, descriptor]) => [variant, {
+      ...descriptor,
+      path: `media_assets/v1/signed-in/${ownerUid}/m_${'b'.repeat(40)}/7/${variant}`,
+    }])),
+});
 
 describe('Task 07 character-token canonical media resolver', () => {
   test('deduplicates bounded token IDs and unwraps the callable response', async () => {
@@ -107,5 +124,32 @@ describe('Task 07 character-token canonical media resolver', () => {
       schemaVersion: 2,
       entries: [{ tokenId: 'token-1', media: base }],
     })).toEqual({});
+  });
+
+  test('resolves sanitized avatar and custom-token media for visible placements', async () => {
+    const invoke = jest.fn().mockResolvedValue({
+      data: {
+        schemaVersion: 1,
+        entries: [
+          {tokenId: 'character-1', media: avatarMedia('character-1')},
+          {tokenId: 'custom-1', media: tokenMedia('custom-owner')},
+        ],
+      },
+    });
+
+    await expect(resolveTask07PlacedCanonicalMedia({
+      backgroundId: 'map-1',
+      tokenIds: ['character-1', 'custom-1'],
+    }, {invoke})).resolves.toEqual(expect.objectContaining({
+      'character-1': expect.objectContaining({kind: 'avatar'}),
+      'custom-1': expect.objectContaining({kind: 'token'}),
+    }));
+    expect(invoke).toHaveBeenCalledWith({
+      backgroundId: 'map-1',
+      tokenIds: ['character-1', 'custom-1'],
+    });
+    expect(JSON.stringify(normalizeTask07PlacedTokenMediaResponse(
+      await invoke.mock.results[0].value
+    ))).not.toContain('https://');
   });
 });

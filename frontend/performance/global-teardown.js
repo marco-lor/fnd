@@ -22,6 +22,17 @@ const {
   removePerformanceFirebaseConfig,
 } = require('../scripts/performance/emulators');
 
+const TEARDOWN_TRIGGER_CONTROL_TIMEOUT_MS = 180_000;
+
+const reenableBackgroundTriggers = ({
+  lifecycleProjectId = projectId,
+  setBackgroundTriggersEnabledImpl = setBackgroundTriggersEnabled,
+  timeoutMs = TEARDOWN_TRIGGER_CONTROL_TIMEOUT_MS,
+} = {}) => setBackgroundTriggersEnabledImpl(true, {
+  projectId: lifecycleProjectId,
+  timeoutMs,
+});
+
 const collectTeardownEvidence = ({
   healthReport,
   emulatorLogPath,
@@ -163,7 +174,7 @@ module.exports = async () => {
   } finally {
     if (demoProjectValidated) {
       try {
-        await setBackgroundTriggersEnabled(true, { projectId });
+        await reenableBackgroundTriggers();
       } catch (error) {
         errors.push(error);
       }
@@ -183,3 +194,5 @@ module.exports = async () => {
 };
 
 module.exports.collectTeardownEvidence = collectTeardownEvidence;
+module.exports.reenableBackgroundTriggers = reenableBackgroundTriggers;
+module.exports.TEARDOWN_TRIGGER_CONTROL_TIMEOUT_MS = TEARDOWN_TRIGGER_CONTROL_TIMEOUT_MS;

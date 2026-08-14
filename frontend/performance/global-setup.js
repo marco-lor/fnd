@@ -27,17 +27,21 @@ const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
 const STARTUP_TIMEOUT_MS = 240_000;
 const STARTUP_REQUEST_TIMEOUT_MS = 10_000;
 const STARTUP_INTERVAL_MS = 500;
-const FIXTURE_SEED_TIMEOUT_MS = 120_000;
+const FIXTURE_SEED_TIMEOUT_MS = 300_000;
 const TASK07_CALLABLES_TIMEOUT_MS = 240_000;
 const SECURITY_RULES_TIMEOUT_MS = 120_000;
 const DIRECTORY_QUERY_TIMEOUT_MS = 30_000;
-const MAX_SEED_BACKGROUND_INVOCATIONS = 50;
+// Includes the reviewed Task 07 callable fixtures that run before measurement
+// triggers are disabled. The allowlist below still rejects any other trigger,
+// and teardown requires zero growth throughout the measurement window.
+const MAX_SEED_BACKGROUND_INVOCATIONS = 150;
 const TASK07_MEDIA_INTEGRATION_ENABLED =
   process.env.FND_TASK07_MEDIA_INTEGRATION === '1';
 const READINESS_HTTP_FUNCTIONS = new Set([
   'europe-west1-clientFirebaseConfig',
   'europe-west8-task07PrepareMediaUpload',
   'europe-west8-task07GetMediaStatus',
+  'europe-west8-task07ResolveCharacterMedia',
   'europe-west8-task07AttachMediaAsset',
   'europe-west8-task07PrepareFoeMediaRetirement',
   'europe-west8-task07CommitFoeMediaRetirement',
@@ -45,6 +49,8 @@ const READINESS_HTTP_FUNCTIONS = new Set([
 ]);
 const READINESS_BACKGROUND_TRIGGERS = new Set([
   'europe-west8-syncUserDirectory',
+  'europe-west8-cleanupLegacyRemovedFoeMedia',
+  'europe-west8-cleanupLegacyRemovedUserMedia',
   'europe-west8-cleanupTask07RemovedBackgroundMedia',
   'europe-west8-cleanupTask07RemovedCatalogItemMedia',
   'europe-west8-cleanupTask07RemovedFoeMedia',

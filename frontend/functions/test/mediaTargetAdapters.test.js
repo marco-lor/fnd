@@ -3,17 +3,27 @@ const assert = require("node:assert/strict");
 
 const {
   buildTask07MediaUploadPlan,
+  isTask07MediaRequestAuthorized,
+  isTask07MediaRetirementAuthorized,
 } = require("../lib/mediaAssetLifecycleCore");
 const {
   assertTask07TargetDocumentBudget,
   buildTask07NewTargetAttachment,
+  task07CanonicalRootRetirementPatch,
   task07CommonTechniqueRetirementPatch,
   task07FoeCanonicalMediaStateFromTarget,
   task07FoeCanonicalRetirementPatch,
   task07MediaTargetState,
+  task07NestedMediaTargetEntryExists,
+  task07NestedMediaRetirementPatch,
   task07TargetAttachmentPatch,
   validateTask07MediaTarget,
 } = require("../lib/mediaTargetAdapters");
+const {DocumentMask} = require("@google-cloud/firestore/build/src/document");
+
+const mergeMaskPaths = (value) => new Set(
+  DocumentMask.fromObject(value).toProto().fieldPaths || []
+);
 
 const buildPlan = ({
   kind,
@@ -21,6 +31,7 @@ const buildPlan = ({
   operationId,
   referenceScope,
   commonTechnique = false,
+  nestedTarget,
 }) => buildTask07MediaUploadPlan({
   actorUid: "owner-a",
   ownerUid: "owner-a",
@@ -30,7 +41,154 @@ const buildPlan = ({
   sourceContentType: kind.endsWith("-video") ? "video/mp4" : "image/png",
   sourceBytes: 1024,
   ...(commonTechnique ? {commonTechnique: true} : {}),
+  ...(nestedTarget ? {nestedTarget} : {}),
   ...(referenceScope ? {referenceScope} : {}),
+});
+
+test("nested catalog spell media attaches through a frozen parent registry", () => {
+  const nestedTarget = {
+    schemaVersion: 1,
+    kind: "catalog-item-spell",
+    entryId: "spell-entry-1",
+    entryKey: "Afferra",
+    entryIndex: null,
+    slot: "media",
+  };
+  const plan = buildPlan({
+    kind: "spell",
+    entityId: "item-1",
+    operationId: "nested_catalog_1234",
+    referenceScope: "global-catalog",
+    nestedTarget,
+  });
+  const current = {
+    General: {spells: {Afferra: {Nome: "Afferra", image_url: "legacy/a"}}},
+  };
+  const timestamp = {marker: "timestamp"};
+  const media = {assetId: plan.assetId, original: {path: "canonical/a"}};
+  const patch = task07TargetAttachmentPatch({
+    current,
+    media,
+    plan,
+    revision: 1,
+    timestamp,
+  });
+
+  assert.equal(
+    patch.General.spells.Afferra.task07MediaEntryId,
+    nestedTarget.entryId
+  );
+  assert.equal(patch.General.spells.Afferra.media, undefined);
+  assert.deepEqual(patch.task07EmbeddedMedia[nestedTarget.entryId], {
+    targetKind: "catalog-item-spell",
+    media,
+    task07MediaRevision: 1,
+    mediaUpdatedAt: timestamp,
+  });
+  assert.deepEqual(task07MediaTargetState({...current, ...patch}, plan), {
+    assetId: plan.assetId,
+    revision: 1,
+    conflict: false,
+  });
+
+  const renamed = {
+    ...current,
+    ...patch,
+    General: {
+      ...patch.General,
+      spells: {Presa: patch.General.spells.Afferra},
+    },
+  };
+  assert.deepEqual(task07MediaTargetState(renamed, plan), {
+    assetId: plan.assetId,
+    revision: 1,
+    conflict: false,
+  });
+  const retired = task07NestedMediaRetirementPatch({
+    current: renamed,
+    plan,
+    revision: 1,
+    timestamp,
+  });
+  assert.equal(retired.General.spells.Presa.task07MediaEntryId, "spell-entry-1");
+  assert.equal(retired.task07EmbeddedMedia["spell-entry-1"].media, undefined);
+  assert.equal(
+    retired.task07EmbeddedMedia["spell-entry-1"].task07MediaRevision,
+    2
+  );
+});
+
+test("nested foe targets survive reordering and reject duplicate identities", () => {
+  const nestedTarget = {
+    schemaVersion: 1,
+    kind: "foe-technique",
+    entryId: "foe-tech-1",
+    entryKey: null,
+    entryIndex: 0,
+    slot: "media",
+  };
+  const plan = buildPlan({
+    kind: "foe",
+    entityId: "foe-1",
+    operationId: "nested_foe_12345",
+    nestedTarget,
+  });
+  const timestamp = {marker: "timestamp"};
+  const media = {assetId: plan.assetId, original: {path: "canonical/t"}};
+  const current = {tecniche: [{Nome: "First"}, {Nome: "Second"}]};
+  const patch = task07TargetAttachmentPatch({
+    current,
+    media,
+    plan,
+    revision: 1,
+    timestamp,
+  });
+  const reordered = {
+    ...current,
+    ...patch,
+    tecniche: [patch.tecniche[1], patch.tecniche[0]],
+  };
+  assert.deepEqual(task07MediaTargetState(reordered, plan), {
+    assetId: plan.assetId,
+    revision: 1,
+    conflict: false,
+  });
+  const duplicated = {
+    ...reordered,
+    tecniche: [reordered.tecniche[1], {...reordered.tecniche[1]}],
+  };
+  assert.equal(task07MediaTargetState(duplicated, plan).conflict, true);
+
+  const removed = {...reordered, tecniche: []};
+  assert.equal(task07NestedMediaTargetEntryExists(removed, plan), false);
+  assert.deepEqual(task07MediaTargetState(removed, plan), {
+    assetId: plan.assetId,
+    revision: 1,
+    conflict: false,
+  });
+  const retiredAfterRemoval = task07NestedMediaRetirementPatch({
+    current: removed,
+    plan,
+    revision: 1,
+    timestamp,
+  });
+  assert.equal(retiredAfterRemoval.task07EmbeddedMedia["foe-tech-1"].media,
+    undefined);
+  assert.deepEqual(retiredAfterRemoval.tecniche, undefined);
+});
+
+test("catalog spell lifecycle is manager-only while foe nesting keeps manager ownership", () => {
+  const base = {
+    kind: "spell",
+    actorUid: "owner-a",
+    ownerUid: "owner-a",
+    referenceScope: "global-catalog",
+    targetKind: "catalog-item-spell",
+  };
+  assert.equal(isTask07MediaRequestAuthorized({...base, actorRole: "player"}), false);
+  assert.equal(isTask07MediaRequestAuthorized({...base, actorRole: "dm"}), true);
+  assert.equal(isTask07MediaRetirementAuthorized({...base, actorRole: "player"}), false);
+  assert.equal(isTask07MediaRetirementAuthorized({...base, actorRole: "webmaster"}), true);
 });
 
 const targetSnapshot = (path, data = {}) => {
@@ -150,6 +308,166 @@ test("personal art and video attachment patches use independent CAS slots", () =
   });
 });
 
+test("root attachment and retirement normalize General canonical fallbacks", () => {
+  const item = buildPlan({
+    kind: "item",
+    operationId: "catalog_general_media_1234",
+    referenceScope: "global-catalog",
+  });
+  const video = buildPlan({
+    kind: "technique-video",
+    operationId: "personal_general_video_1234",
+  });
+  const previousAssetId = `m_${"a".repeat(40)}`;
+  const timestamp = {marker: "timestamp"};
+  const current = {
+    task07MediaRevision: 4,
+    General: {
+      label: "preserved",
+      media: {assetId: previousAssetId},
+      task07MediaRevision: 4,
+      mediaUpdatedAt: {marker: "old"},
+    },
+  };
+  assert.deepEqual(task07MediaTargetState(current, item), {
+    assetId: previousAssetId,
+    revision: 4,
+    conflict: false,
+  });
+
+  const media = {assetId: item.assetId, original: {path: "canonical/item"}};
+  const patch = task07TargetAttachmentPatch({
+    current,
+    media,
+    normalizeCanonicalRoot: true,
+    plan: item,
+    revision: 5,
+    timestamp,
+  });
+  assert.equal(patch.media, media);
+  assert.equal(patch.task07MediaRevision, 5);
+  for (const field of [
+    "General.media",
+    "General.task07MediaRevision",
+    "General.mediaUpdatedAt",
+  ]) {
+    assert.equal(Object.hasOwn(patch, field), true, field);
+  }
+  assert.deepEqual(task07MediaTargetState({
+    media,
+    task07MediaRevision: 5,
+    General: {label: "preserved"},
+  }, item), {
+    assetId: item.assetId,
+    revision: 5,
+    conflict: false,
+  });
+
+  const retired = task07CanonicalRootRetirementPatch({
+    current: {
+      General: current.General,
+      media,
+      task07MediaRevision: 5,
+    },
+    plan: item,
+    revision: 5,
+    timestamp,
+  });
+  assert.equal(retired.task07MediaRevision, 6);
+  assert.equal(retired.mediaUpdatedAt, timestamp);
+  for (const field of [
+    "media",
+    "General.media",
+    "General.task07MediaRevision",
+    "General.mediaUpdatedAt",
+  ]) {
+    assert.equal(Object.hasOwn(retired, field), true, field);
+  }
+
+  const retiredVideo = task07CanonicalRootRetirementPatch({
+    current: {
+      General: {
+        videoMedia: {assetId: video.assetId},
+        task07VideoMediaRevision: 2,
+      },
+    },
+    plan: video,
+    revision: 2,
+    timestamp,
+  });
+  assert.equal(retiredVideo.task07VideoMediaRevision, 3);
+  for (const field of [
+    "videoMedia",
+    "General.videoMedia",
+    "General.task07VideoMediaRevision",
+    "General.videoMediaUpdatedAt",
+  ]) {
+    assert.equal(Object.hasOwn(retiredVideo, field), true, field);
+  }
+});
+
+test("common technique mutations normalize General canonical fallbacks", () => {
+  const plan = buildPlan({
+    kind: "technique",
+    entityId: "tecnica-general",
+    operationId: "common_general_media_1234",
+    commonTechnique: true,
+  });
+  const previousAssetId = `m_${"b".repeat(40)}`;
+  const timestamp = {marker: "timestamp"};
+  const current = {
+    "tecnica-general": {
+      label: "Tecnica General",
+      task07MediaRevision: 2,
+      General: {
+        label: "preserved",
+        media: {assetId: previousAssetId},
+        task07MediaRevision: 2,
+        mediaUpdatedAt: {marker: "old"},
+      },
+    },
+  };
+  const media = {assetId: plan.assetId, original: {path: "canonical/common"}};
+  const patch = task07TargetAttachmentPatch({
+    current,
+    media,
+    plan,
+    revision: 3,
+    timestamp,
+  });
+  assert.equal(patch["tecnica-general"].General.label, "preserved");
+  assert.equal(patch["tecnica-general"].media, media);
+  assert.equal(patch["tecnica-general"].task07MediaRevision, 3);
+  const attachmentMask = mergeMaskPaths(patch);
+  for (const path of [
+    "`tecnica-general`.media.assetId",
+    "`tecnica-general`.General.media",
+    "`tecnica-general`.General.task07MediaRevision",
+    "`tecnica-general`.General.mediaUpdatedAt",
+  ]) {
+    assert.equal(attachmentMask.has(path), true, path);
+  }
+
+  const retired = task07CommonTechniqueRetirementPatch({
+    current: {...current, ...patch},
+    plan,
+    revision: 3,
+    timestamp,
+  });
+  assert.equal(retired["tecnica-general"].General.label, "preserved");
+  assert.equal(Object.hasOwn(retired["tecnica-general"], "media"), true);
+  assert.equal(retired["tecnica-general"].task07MediaRevision, 4);
+  const retirementMask = mergeMaskPaths(retired);
+  for (const path of [
+    "`tecnica-general`.media",
+    "`tecnica-general`.General.media",
+    "`tecnica-general`.General.task07MediaRevision",
+    "`tecnica-general`.General.mediaUpdatedAt",
+  ]) {
+    assert.equal(retirementMask.has(path), true, path);
+  }
+});
+
 test("common technique patches preserve legacy fields and sibling entries", () => {
   const art = buildPlan({
     kind: "technique",
@@ -209,7 +527,7 @@ test("common technique patches preserve legacy fields and sibling entries", () =
     revision: 3,
     timestamp,
   });
-  assert.equal(Object.hasOwn(retired["tecnica-a"], "media"), false);
+  assert.equal(Object.hasOwn(retired["tecnica-a"], "media"), true);
   assert.equal(retired["tecnica-a"].image_url, "legacy/tecnica-a.png");
   assert.equal(retired["tecnica-a"].video_url, "legacy/tecnica-a.mp4");
   assert.equal(retired["tecnica-a"].videoMedia.assetId, video.assetId);
@@ -309,7 +627,7 @@ test("foe replacement normalizes nested media and legacy aliases only", () => {
       imageUrl: "https://legacy.example/foe.png",
     },
     media,
-    normalizeFoeCanonicalRoot: true,
+    normalizeCanonicalRoot: true,
     plan: foe,
     revision: 5,
     timestamp,
@@ -358,7 +676,7 @@ test("foe replacement promotes a General legacy fallback when root is absent", (
       },
     },
     media,
-    normalizeFoeCanonicalRoot: true,
+    normalizeCanonicalRoot: true,
     plan: foe,
     revision: 3,
     timestamp,
@@ -398,7 +716,7 @@ test("foe replacement keeps root image aliases authoritative", () => {
       General: generalFallback,
     },
     media,
-    normalizeFoeCanonicalRoot: true,
+    normalizeCanonicalRoot: true,
     plan: foe,
     revision: 4,
     timestamp,
@@ -417,7 +735,7 @@ test("foe replacement keeps root image aliases authoritative", () => {
       General: generalFallback,
     },
     media,
-    normalizeFoeCanonicalRoot: true,
+    normalizeCanonicalRoot: true,
     plan: foe,
     revision: 4,
     timestamp,
@@ -436,7 +754,7 @@ test("foe replacement keeps root image aliases authoritative", () => {
       General: generalFallback,
     },
     media,
-    normalizeFoeCanonicalRoot: true,
+    normalizeCanonicalRoot: true,
     plan: foe,
     revision: 4,
     timestamp,
@@ -468,7 +786,7 @@ test("foe replacement does not promote General canonical-only aliases", () => {
       assetId: foe.assetId,
       original: {path: newOriginalPath},
     },
-    normalizeFoeCanonicalRoot: true,
+    normalizeCanonicalRoot: true,
     plan: foe,
     revision: 5,
     timestamp,
@@ -612,17 +930,20 @@ test("map attachment keeps legacy dimensions together with its legacy source", (
       assetType: "image",
     },
     media,
-    normalizeFoeCanonicalRoot: true,
+    normalizeCanonicalRoot: true,
     plan: map,
     revision: 4,
     timestamp,
   });
 
-  assert.deepEqual(patch, {
-    media,
-    task07MediaRevision: 4,
-    mediaUpdatedAt: timestamp,
-  });
+  assert.equal(patch.media, media);
+  assert.equal(patch.task07MediaRevision, 4);
+  assert.equal(patch.mediaUpdatedAt, timestamp);
+  assert.deepEqual(Object.keys(patch).sort(), [
+    "media",
+    "task07MediaRevision",
+    "mediaUpdatedAt",
+  ].sort());
   assert.equal(Object.hasOwn(patch, "imageWidth"), false);
   assert.equal(Object.hasOwn(patch, "imagePath"), false);
 });

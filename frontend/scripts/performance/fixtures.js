@@ -40,6 +40,7 @@ const initializeAdmin = () => {
 };
 
 const FIXTURE_VERSION = 'fnd-performance-v2-task05-runtime-retired-task07-media';
+const FUNCTIONS_READINESS_TIMEOUT_MS = 180_000;
 const FIXED_TIME = '2026-01-01T00:00:00.000Z';
 const PASSWORD = 'PerfTest!123';
 const BATCH_SIZE = 350;
@@ -530,6 +531,7 @@ const buildDocuments = () => {
   }));
   add('grigliata_wall_state/perf-map', { backgroundId: 'perf-map', walls, updatedAt: FIXED_TIME });
   add('grigliata_background_lighting/perf-map', {
+    backgroundId: 'perf-map',
     lights: Array.from({ length: 10 }, (_, index) => ({ id: `light-${index}`, x: 200 + index * 300, y: 500, brightRadiusSquares: 3, dimRadiusSquares: 6 })),
     darknessSources: Array.from({ length: 10 }, (_, index) => ({ id: `dark-${index}`, x: 200 + index * 300, y: 1500, radiusSquares: 4 })),
     updatedAt: FIXED_TIME,
@@ -694,7 +696,9 @@ const buildManifest = (documents) => {
   };
 };
 
-const waitForFunctionsReady = async () => {
+const waitForFunctionsReady = async (
+  timeoutMs = FUNCTIONS_READINESS_TIMEOUT_MS
+) => {
   initializeAdmin();
   // Seed the fail-closed Task 06 control document before creating the
   // directory-projection readiness sentinel.
@@ -709,7 +713,7 @@ const waitForFunctionsReady = async () => {
   };
   let expectedDirectory = buildUserDirectoryProjection(readinessData);
   await readiness.set(readinessData);
-  const deadline = Date.now() + 120_000;
+  const deadline = Date.now() + timeoutMs;
   let nextProbeAt = Date.now() + 3_000;
   let probeRevision = 0;
   try {
@@ -741,17 +745,19 @@ const waitForFunctionsReady = async () => {
       await delay(500);
     }
     throw new Error(
-      'Functions emulator did not process the user directory readiness sentinel within 120 seconds.'
+      `Functions emulator did not process the user directory readiness sentinel within ${timeoutMs} ms.`
     );
   } finally {
     await readiness.delete().catch(() => {});
-    const deletionDeadline = Date.now() + 120_000;
+    const deletionDeadline = Date.now() + timeoutMs;
     while (Date.now() < deletionDeadline) {
       if (!(await directory.get()).exists) break;
       await delay(500);
     }
     if ((await directory.get()).exists) {
-      throw new Error('User directory readiness projection was not deleted within 120 seconds.');
+      throw new Error(
+        `User directory readiness projection was not deleted within ${timeoutMs} ms.`
+      );
     }
   }
 };

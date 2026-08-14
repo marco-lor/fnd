@@ -21,11 +21,15 @@ import {
   task07MediaTargetFields,
 } from "./mediaAssetLifecycleCore";
 import {task07ProcessMediaUpload} from "./mediaAssetProcessor";
+import {sweepTask07TemporaryCleanup} from "./mediaTemporaryCleanup";
 import {
   attachTask07ReadyAssetTransaction,
+  task07CanonicalRootRetirementPatch,
   task07CommonTechniqueRetirementPatch,
   task07FoeCanonicalRetirementPatch,
   task07MediaTargetState,
+  task07NestedMediaTargetEntryExists,
+  task07NestedMediaRetirementPatch,
   Task07TargetAdapterError,
   validateTask07MediaTarget,
 } from "./mediaTargetAdapters";
@@ -54,6 +58,7 @@ const CLEANUP_SWEEP_MAX_SCAN_PAGES = 10;
 type PrepareMediaUploadRequest = {
   ownerUid?: string;
   entityId?: string;
+  nestedTarget?: unknown;
   referenceScope?: string;
   previousAssetId?: string | null;
   operationId?: string;
@@ -171,6 +176,7 @@ export const task07PrepareMediaUpload = onCall(
           actorUid: actor.uid,
           ownerUid: request.data?.ownerUid || actor.uid,
           entityId: request.data?.entityId,
+          nestedTarget: request.data?.nestedTarget,
           referenceScope: request.data?.referenceScope,
           previousAssetId: request.data?.previousAssetId,
           operationId: request.data?.operationId,
@@ -193,6 +199,7 @@ export const task07PrepareMediaUpload = onCall(
       ownerUid: plan.ownerUid,
       referenceScope: plan.referenceScope,
       actorRole: actor.role,
+      targetKind: plan.targetKind,
     })) {
       fail("permission-denied", "Media scope is not authorized.");
     }
@@ -425,15 +432,36 @@ export const task07RetireMediaAsset = onCall(
         ownerUid: plan.ownerUid,
         referenceScope: plan.referenceScope,
         actorRole: actor.role,
+        targetKind: plan.targetKind,
       })) {
         fail("permission-denied", "Media retirement is not authorized.");
       }
-      if (manifest.get("state") === "superseded") return;
-      if (manifest.get("state") !== "attached") {
-        fail("failed-precondition", "Only attached media can be retired.");
-      }
+      const manifestState = manifest.get("state");
       const referencePath = task07MediaReferencePath(plan);
       const targetRef = db.doc(referencePath);
+      if (plan.nestedTarget && [
+        "superseded", "cleanup-pending", "deleted",
+      ].includes(manifestState)) {
+        const target = await transaction.get(targetRef);
+        if (!target.exists) return;
+        const targetBinding = mediaBindingFromTarget(target.data(), plan);
+        if (targetBinding.conflict) {
+          fail("failed-precondition", "Media target changed.");
+        }
+        if (targetBinding.assetId !== assetId) return;
+        const now = Timestamp.now();
+        transaction.update(targetRef, task07NestedMediaRetirementPatch({
+          current: target.data() || {},
+          plan,
+          revision: targetBinding.revision,
+          timestamp: now,
+        }));
+        return;
+      }
+      if (manifestState === "superseded") return;
+      if (manifestState !== "attached") {
+        fail("failed-precondition", "Only attached media can be retired.");
+      }
       const target = await transaction.get(targetRef);
       const targetBinding = mediaBindingFromTarget(target.data(), plan);
       if (targetBinding.conflict || targetBinding.assetId !== assetId) {
@@ -448,7 +476,14 @@ export const task07RetireMediaAsset = onCall(
       );
       const targetUpdate: admin.firestore.UpdateData<
         admin.firestore.DocumentData
-      > = plan.targetKind === "foe" && targetFields.slot === "media" ?
+      > = plan.nestedTarget ?
+        task07NestedMediaRetirementPatch({
+          current: target.data() || {},
+          plan,
+          revision: targetBinding.revision,
+          timestamp: now,
+        }) :
+        plan.targetKind === "foe" && targetFields.slot === "media" ?
         task07FoeCanonicalRetirementPatch({
           revision: targetBinding.revision,
           timestamp: now,
@@ -460,12 +495,13 @@ export const task07RetireMediaAsset = onCall(
             revision: targetBinding.revision,
             timestamp: now,
           }) :
-        {
-          [targetFields.mediaField]: FieldValue.delete(),
-          [targetFields.revisionField]: targetBinding.revision + 1,
-          [targetFields.updatedAtField]: now,
-        };
-      if (plan.targetKind !== "foe") {
+        task07CanonicalRootRetirementPatch({
+          current: target.data() || {},
+          plan,
+          revision: targetBinding.revision,
+          timestamp: now,
+        });
+      if (!plan.nestedTarget && plan.targetKind !== "foe") {
         if ([
           "profile", "npc", "grigliata-token", "grigliata-background",
         ].includes(plan.targetKind)) {
@@ -524,6 +560,7 @@ export const task07RetryMediaCleanup = onCall(
           ownerUid: plan.ownerUid,
           referenceScope: plan.referenceScope,
           actorRole: actor.role,
+          targetKind: plan.targetKind,
         })) {
         fail("permission-denied", "Media cleanup retry is not authorized.");
       }
@@ -680,17 +717,21 @@ const processCleanup = async (assetId: string): Promise<boolean> => {
       db.doc(task07MediaReferencePath(plan))
     );
     const referenceScan = scanTask07MediaTargetReferences(reference.data());
-    const commonTargetState = plan.targetKind === "common-technique" ?
+    const scopedTargetState = plan.targetKind === "common-technique" ||
+      Boolean(plan.nestedTarget) ?
       task07MediaTargetState(reference.data(), plan) :
       null;
-    const mayReferenceAsset = commonTargetState ?
-      commonTargetState.conflict || commonTargetState.assetId === assetId :
-      task07MediaTargetMayReferenceAsset(reference.data(), assetId);
+    const nestedEntryExists = plan.nestedTarget ?
+      task07NestedMediaTargetEntryExists(reference.data(), plan) : true;
+    const mayReferenceAsset = plan.nestedTarget && !nestedEntryExists ?
+      false : scopedTargetState ?
+        scopedTargetState.conflict || scopedTargetState.assetId === assetId :
+        task07MediaTargetMayReferenceAsset(reference.data(), assetId);
     if (mayReferenceAsset) {
       const attempts = Number(queue.get("attempts") || 0) + 1;
       const deadLetter = attempts >= MEDIA_CLEANUP_MAX_AUTO_ATTEMPTS;
-      const malformed = commonTargetState ?
-        commonTargetState.conflict :
+      const malformed = scopedTargetState ?
+        scopedTargetState.conflict :
         Object.values(referenceScan).some((scan) => scan.malformed);
       transaction.update(queueRef, {
         state: deadLetter ? "dead-letter" : "retry",
@@ -814,13 +855,54 @@ export const cleanupTask07MediaAsset = onDocumentWritten(
   }
 );
 
-const mediaAssetIdsByTargetSlot = (
+export const mediaAssetIdsByTargetSlot = (
   data: admin.firestore.DocumentData | undefined
 ): Record<"media" | "videoMedia", string[]> => {
   const scan = scanTask07MediaTargetReferences(data);
+  const registry = data?.task07EmbeddedMedia;
+  const entryIds = new Set<string>();
+  const collectEntryId = (entry: unknown): void => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return;
+    const entryId = asString(
+      (entry as Record<string, unknown>).task07MediaEntryId
+    );
+    if (/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(entryId)) {
+      entryIds.add(entryId);
+    }
+  };
+  const catalogSpells = data?.General?.spells;
+  if (catalogSpells && typeof catalogSpells === "object" &&
+    !Array.isArray(catalogSpells)) {
+    Object.values(catalogSpells).forEach(collectEntryId);
+  }
+  const techniques = data?.tecniche;
+  const spells = data?.spells;
+  if (Array.isArray(techniques)) techniques.forEach(collectEntryId);
+  if (Array.isArray(spells)) spells.forEach(collectEntryId);
+  const embedded = registry && typeof registry === "object" &&
+    !Array.isArray(registry) ?
+    Object.entries(registry as Record<string, unknown>)
+      .filter(([entryId]) => entryIds.has(entryId))
+      .map(([, binding]) => binding) : [];
+  const embeddedAssetIds = (slot: "media" | "videoMedia") => embedded
+    .flatMap((binding) => {
+      if (!binding || typeof binding !== "object" || Array.isArray(binding)) {
+        return [];
+      }
+      const descriptor = (binding as Record<string, unknown>)[slot];
+      if (!descriptor || typeof descriptor !== "object" ||
+        Array.isArray(descriptor)) return [];
+      const assetId = asString(
+        (descriptor as Record<string, unknown>).assetId
+      );
+      return /^m_[a-f0-9]{40}$/.test(assetId) ? [assetId] : [];
+    });
   return {
-    media: scan.media.assetIds,
-    videoMedia: scan.videoMedia.assetIds,
+    media: [...new Set([...scan.media.assetIds, ...embeddedAssetIds("media")])],
+    videoMedia: [...new Set([
+      ...scan.videoMedia.assetIds,
+      ...embeddedAssetIds("videoMedia"),
+    ])],
   };
 };
 
@@ -840,19 +922,55 @@ const stageRemovedReferences = async (input: {
   const db = admin.firestore();
   for (const {assetId: removedAssetId, slot} of removed) {
     const ref = assetRef(db, removedAssetId);
+    const currentTargetRef = db.doc(input.referencePath);
     await db.runTransaction(async (transaction) => {
-      const manifest = await transaction.get(ref);
+      const [manifest, currentTarget] = await transaction.getAll(
+        ref,
+        currentTargetRef
+      );
       const plan = asStoredTask07MediaUploadPlan(manifest.get("plan"));
       if (!manifest.exists || !plan ||
         task07MediaReferencePath(plan) !== input.referencePath ||
         task07MediaTargetFields(plan).slot !== slot ||
         manifest.get("state") !== "attached") return;
+      const currentTargetReferences = mediaAssetIdsByTargetSlot(
+        currentTarget.data()
+      );
+      // Firestore delivery is at-least-once and can arrive out of order. Never
+      // supersede an asset that a later write has reattached to this target.
+      if (currentTargetReferences[slot].includes(removedAssetId)) return;
       const now = Timestamp.now();
       const cleanupAfter = Timestamp.fromMillis(
         Date.now() +
         MEDIA_CONTRACTS[plan.kind].retention.supersededGraceHours *
         60 * 60 * 1000
       );
+      if (plan.nestedTarget && currentTarget.exists) {
+        const currentBinding = mediaBindingFromTarget(
+          currentTarget.data(),
+          plan
+        );
+        const entryStillExists = task07NestedMediaTargetEntryExists(
+          currentTarget.data(),
+          plan
+        );
+        // The browser persists the parent entry removal before issuing the
+        // retirement callable. If it closes in that gap, the document trigger
+        // owns clearing the exact orphaned registry slot. A reattached entry or
+        // a replacement asset is fenced by the current transactional read.
+        if (!entryStillExists && !currentBinding.conflict &&
+          currentBinding.assetId === removedAssetId) {
+          transaction.update(
+            currentTargetRef,
+            task07NestedMediaRetirementPatch({
+              current: currentTarget.data() || {},
+              plan,
+              revision: currentBinding.revision,
+              timestamp: now,
+            })
+          );
+        }
+      }
       transaction.update(ref, {
         state: "superseded",
         retention: {supersededAt: now, cleanupAfter},
@@ -1095,6 +1213,7 @@ export const sweepTask07MediaOrphans = onSchedule(
     retryCount: 0,
   },
   async () => {
+    await sweepTask07TemporaryCleanup();
     await enqueueExpiredAssets();
     await sweepDueCleanupQueue();
   }

@@ -411,6 +411,7 @@ const normalizeInput = ({
   expectedRevision,
   previousAssetId = null,
   referenceScope = null,
+  nestedTarget = null,
 }) => {
   const normalizedKind = normalizeRequired(kind, 'media kind');
   if (!KIND_PATTERN.test(normalizedKind)) {
@@ -455,6 +456,37 @@ const normalizeInput = ({
       'Task 07 media reference scope is too long.'
     );
   }
+  let normalizedNestedTarget = null;
+  if (nestedTarget != null) {
+    const catalog = nestedTarget?.kind === 'catalog-item-spell';
+    const foe = nestedTarget?.kind === 'foe-technique'
+      || nestedTarget?.kind === 'foe-spell';
+    if (nestedTarget?.schemaVersion !== 1
+      || typeof nestedTarget.entryId !== 'string'
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(nestedTarget.entryId)
+      || !['media', 'videoMedia'].includes(nestedTarget.slot)
+      || (!catalog && !foe)
+      || (catalog && (typeof nestedTarget.entryKey !== 'string'
+        || !nestedTarget.entryKey.trim()
+        || nestedTarget.entryIndex !== null))
+      || (foe && (nestedTarget.entryKey !== null
+        || !Number.isSafeInteger(nestedTarget.entryIndex)
+        || nestedTarget.entryIndex < 0
+        || nestedTarget.entryIndex > 99
+        || nestedTarget.slot !== 'media'))) {
+      throw new Task07MediaOperationReceiptError(
+        'Task 07 nested media target is invalid.'
+      );
+    }
+    normalizedNestedTarget = {
+      schemaVersion: 1,
+      kind: nestedTarget.kind,
+      entryId: nestedTarget.entryId,
+      entryKey: catalog ? nestedTarget.entryKey.trim() : null,
+      entryIndex: foe ? nestedTarget.entryIndex : null,
+      slot: nestedTarget.slot,
+    };
+  }
 
   return {
     actorUid: normalizedActorUid,
@@ -469,6 +501,7 @@ const normalizeInput = ({
       type: file.type.trim().toLowerCase(),
     },
     kind: normalizedKind,
+    nestedTarget: normalizedNestedTarget,
     ownerUid: normalizedOwnerUid,
     previousAssetId: normalizedPreviousAssetId,
     referenceScope: normalizedReferenceScope,
@@ -517,6 +550,7 @@ export const runWithTask07MediaOperationReceipt = async ({
   expectedRevision,
   previousAssetId = null,
   referenceScope = null,
+  nestedTarget = null,
   invoke,
   signal,
   storage,
@@ -539,6 +573,7 @@ export const runWithTask07MediaOperationReceipt = async ({
     expectedRevision,
     previousAssetId,
     referenceScope,
+    nestedTarget,
   });
   const {
     expectedRevision: requestedExpectedRevision,

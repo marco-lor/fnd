@@ -16,6 +16,7 @@ import {
   Task07MediaClonePlanError,
 } from "./mediaAssetCloneCore";
 import {
+  deleteTask07TemporaryPathsBestEffort,
   uploadTask07GeneratedSet,
 } from "./mediaAssetProcessor";
 import {
@@ -23,6 +24,10 @@ import {
   Task07ProcessorError,
 } from "./mediaAssetProcessorCore";
 import {createTask07DefaultMediaTransformer} from "./mediaProcessorRuntime";
+import {
+  processTask07TemporaryCleanup,
+  task07TemporaryCleanupFields,
+} from "./mediaTemporaryCleanup";
 import {
   buildTask07PrivateStorageMetadata,
   MEDIA_CONTRACTS,
@@ -385,6 +390,7 @@ const failOwnedOperation = async (input: {
   code: string;
   retryable: boolean;
   attempt: number;
+  temporaryPaths?: readonly string[];
 }): Promise<void> => {
   await input.db.runTransaction(async (transaction) => {
     const manifestRef = input.db.doc(
@@ -421,6 +427,11 @@ const failOwnedOperation = async (input: {
       manifest.data(),
       input.plan
     )) {
+      const cleanupTemporaryPaths = [
+        ...(Array.isArray(manifest.get("cleanupTemporaryPaths")) ?
+          manifest.get("cleanupTemporaryPaths") as unknown[] : []),
+        ...(input.temporaryPaths || []),
+      ].filter((path): path is string => typeof path === "string");
       transaction.update(manifestRef, {
         state: input.retryable ? "failed" : "rejected",
         processing: FieldValue.delete(),
@@ -429,6 +440,8 @@ const failOwnedOperation = async (input: {
           retryable: input.retryable,
           attempts: input.attempt,
         },
+        ...(cleanupTemporaryPaths.length ?
+          task07TemporaryCleanupFields(cleanupTemporaryPaths, now) : {}),
         ...(input.retryable ? {} : {
           retention: {cleanupAfter: now},
         }),
@@ -488,6 +501,7 @@ const spawnHandler = async (
   );
   const controlRef = db.doc(TASK07_CONFIG_PATH);
   let ownedPlan: Task07FoeTokenMediaRegenerationPlan | null = null;
+  let pendingTemporaryPaths: string[] = [];
   let attempt = 1;
   try {
     const claim = await db.runTransaction(async (
@@ -815,12 +829,19 @@ const spawnHandler = async (
         source: sourceBuffer,
         transformer: createTask07DefaultMediaTransformer(),
       });
+      const promotionEventId = invocationId
+        .replace(/[^A-Za-z0-9_-]/g, "_")
+        .slice(0, 96);
+      pendingTemporaryPaths = processed.objects.map(
+        ({path}) => `${path}.tmp-${promotionEventId}`
+      );
       const promoted = await uploadTask07GeneratedSet({
         assetId: claim.plan.destinationPlan.assetId,
-        eventId: invocationId.replace(/[^A-Za-z0-9_-]/g, "_"),
+        eventId: promotionEventId,
         objects: processed.objects,
         plan: claim.plan.destinationPlan,
       });
+      pendingTemporaryPaths = promoted.temporaryPaths;
       await db.runTransaction(async (transaction) => {
         const [operation, source] = await transaction.getAll(
           operationRef,
@@ -864,6 +885,16 @@ const spawnHandler = async (
           original: promoted.original,
           variants: promoted.variants,
         };
+        const timestamp = Timestamp.now();
+        const cleanupTemporaryPaths = [
+          ...(Array.isArray(manifest.get("cleanupTemporaryPaths")) ?
+            manifest.get("cleanupTemporaryPaths") as unknown[] : []),
+          ...promoted.temporaryPaths,
+        ].filter((path): path is string => typeof path === "string");
+        const temporaryCleanupFields = task07TemporaryCleanupFields(
+          cleanupTemporaryPaths,
+          timestamp
+        );
         if (manifest.get("state") === "ready") {
           if (hashValue(manifest.get("generated")) !== hashValue(generated)) {
             throw new HttpsError(
@@ -871,6 +902,10 @@ const spawnHandler = async (
               "Canonical token outputs conflict with their checkpoint."
             );
           }
+          transaction.update(manifestRef, {
+            ...temporaryCleanupFields,
+            updatedAt: timestamp,
+          });
         } else if (["processing", "failed"].includes(
           asTrimmedString(manifest.get("state"))
         )) {
@@ -885,9 +920,10 @@ const spawnHandler = async (
             },
             generated,
             processing: FieldValue.delete(),
+            ...temporaryCleanupFields,
             error: {code: null, retryable: false, attempts: attempt},
             retention: {cleanupAfter: retentionExpiry()},
-            updatedAt: Timestamp.now(),
+            updatedAt: timestamp,
           });
         } else {
           throw new HttpsError(
@@ -901,6 +937,10 @@ const spawnHandler = async (
           updatedAt: Timestamp.now(),
         });
       });
+      await processTask07TemporaryCleanup(
+        claim.plan.destinationPlan.assetId
+      ).catch(() => undefined);
+      pendingTemporaryPaths = [];
       manifestReady = true;
     }
 
@@ -1045,6 +1085,9 @@ const spawnHandler = async (
     return {...result, operationId: input.operationId, replayed: false};
   } catch (error) {
     const retryable = retryableError(error);
+    pendingTemporaryPaths = await deleteTask07TemporaryPathsBestEffort(
+      pendingTemporaryPaths
+    );
     if (ownedPlan) {
       await failOwnedOperation({
         db,
@@ -1057,6 +1100,7 @@ const spawnHandler = async (
           asTrimmedString(asRecord(error).code) || "spawn-failed",
         retryable,
         attempt,
+        temporaryPaths: pendingTemporaryPaths,
       }).catch(() => undefined);
     }
     throw callableError(error);

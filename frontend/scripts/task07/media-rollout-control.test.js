@@ -4,11 +4,13 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const mediaPolicy = require('../../functions/src/mediaPolicy.json');
 const {
+  CANONICAL_AUDIT_VERSION,
   PRODUCTION_STORAGE_BUCKET,
   PLAN_VERSION,
   POLICY_HASH,
   REPORT_SCHEMA_VERSION,
   SOURCE_KEYS,
+  canonicalHash,
   computePlanFingerprint,
 } = require('./media-derivative-backfill');
 const {
@@ -16,7 +18,8 @@ const {
   LEGACY_CONTROL,
   V1_WRITE_CONTROL,
   assertApprovedPlan,
-  assertFreshVerification,
+  assertCanonicalBindingSnapshotsFresh,
+  assertFreshCanonicalAudit,
   assertMusicActivationCoverage,
   assertMusicStreamActivationReady,
   assertRuntimeCoverageFresh,
@@ -28,7 +31,7 @@ const {
   evaluateMusicStreamReadiness,
   evaluateTokenCoverage,
   parseArguments,
-  validateVerificationReport,
+  validateCanonicalAuditReport,
   waitForMusicStreamActivationReady,
 } = require('./media-rollout-control');
 
@@ -40,6 +43,13 @@ const canonicalMedia = (seed) => ({
   assetId: `m_${seed.repeat(40).slice(0, 40)}`,
   original: {path: `media_assets/${seed}/original`},
 });
+const firebaseStorageUrl = (
+  objectPath,
+  bucket = PRODUCTION_STORAGE_BUCKET
+) => (
+  `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/` +
+  `${encodeURIComponent(objectPath)}?alt=media`
+);
 
 const completeRuntimeProof = {
   schemaVersion: 1,
@@ -98,12 +108,10 @@ const tokenCoverageFixture = (runtimeProof = completeRuntimeProof) => (
       id: 'placement-character',
       tokenId: 'character-token',
       ownerUid: 'character-owner',
-      imagePath: 'characters/character-owner.png',
     }, {
       id: 'placement-custom',
       tokenId: 'custom-instance',
       ownerUid: 'custom-owner',
-      imagePath: 'grigliata/tokens/custom.png',
     }, {
       id: 'placement-foe',
       tokenId: 'foe-token',
@@ -124,44 +132,75 @@ const baseArgs = (extra = []) => [
   ...extra,
 ];
 
-const verifiedEntry = ({
-  receiptId = 'r_verified',
+const auditedEntry = ({
   sourceKey = 'catalog-items',
   targetPath = '',
-} = {}) => ({
-  receiptId,
-  sourceKey,
-  subjectHash: 'a'.repeat(64),
-  assetId: `m_${'b'.repeat(40)}`,
-  previousAssetId: null,
-  targetPath: targetPath || (
-    sourceKey === 'catalog-items' ? 'items/item' : 'users/user'
-  ),
-  targetSlot: 'media',
-  receiptState: 'attached',
-  proofs: {
-    generatedObjectsPresent: true,
-    legacySourceUnchanged: true,
-    legacyGeneralImageUrlUnchanged: true,
-    itemOriginalGenerated: true,
-    itemCardGenerated: true,
-    itemCard2xGenerated: true,
+} = {}) => {
+  const resolvedTarget = targetPath || (
+    sourceKey === 'catalog-items' ? 'items/item' :
+      sourceKey === 'music-tracks' ?
+        'grigliata_music_tracks/track' :
+        ['custom-token-templates', 'foe-tokens'].includes(sourceKey) ?
+          `grigliata_tokens/${sourceKey}` :
+          'users/user'
+  );
+  const seed = canonicalHash({sourceKey, resolvedTarget});
+  const assetId = `m_${seed.slice(0, 40)}`;
+  const core = {
+    sourceKey,
+    kind: sourceKey === 'music-tracks' ? 'music' :
+      ['custom-token-templates', 'foe-tokens'].includes(sourceKey) ?
+        'token' : 'item',
+    commonTechnique: false,
+    referenceScope: sourceKey === 'catalog-items' ? 'global-catalog' : null,
+    entityId: resolvedTarget.split('/').at(-1),
+    ownerUid: UID,
+    ownerResolution: 'explicit',
+    ownerRole: 'webmaster',
+    ownerVersion: '9:000000001',
+    targetPath: resolvedTarget,
+    targetVersion: '10:000000001',
+    targetSlot: 'media',
+    targetRevision: 1,
+    targetFingerprint: 'a'.repeat(64),
+    assetId,
+    manifestPath: `media_assets/${assetId}`,
+    manifestVersion: '11:000000002',
+    manifestFingerprint: 'b'.repeat(64),
+    descriptorFingerprint: 'c'.repeat(64),
+    objectProofs: [{
+      role: 'original',
+      path: `media_assets/v1/signed-in/${UID}/${assetId}/1/original`,
+      descriptorFingerprint: 'd'.repeat(64),
+      objectFingerprint: 'e'.repeat(64),
+      validationErrors: [],
+      verified: true,
+    }],
+    legacySources: [],
     placementReferenceCount: sourceKey === 'foe-tokens' ? 1 : null,
-    placementReferenceHash: sourceKey === 'foe-tokens' ? 'd'.repeat(64) : null,
-    sourceFoeFingerprint: sourceKey === 'foe-tokens' ? 'e'.repeat(64) : null,
-  },
-  inspectionHash: 'c'.repeat(64),
-  status: 'verified',
-  issues: [],
-});
+    placementReferenceHash: sourceKey === 'foe-tokens' ?
+      'f'.repeat(64) : null,
+    sourceFoeFingerprint: sourceKey === 'foe-tokens' ?
+      '1'.repeat(64) : null,
+  };
+  const auditHash = canonicalHash(core);
+  return {
+    auditId: `a_${auditHash.slice(0, 40)}`,
+    ...core,
+    auditHash,
+    status: 'verified',
+    issues: [],
+  };
+};
 
-const verificationReport = (entries = [verifiedEntry()]) => {
+const canonicalAuditReport = (entries = [auditedEntry()]) => {
   const report = {
     schemaVersion: REPORT_SCHEMA_VERSION,
     planVersion: PLAN_VERSION,
     policyVersion: mediaPolicy.policyVersion,
     policyHash: POLICY_HASH,
-    operation: 'verify',
+    operation: 'canonical-audit',
+    canonicalAuditVersion: CANONICAL_AUDIT_VERSION,
     projectId: 'fatins',
     storageBucket: PRODUCTION_STORAGE_BUCKET,
     sourceKeys: [...SOURCE_KEYS],
@@ -174,7 +213,7 @@ const verificationReport = (entries = [verifiedEntry()]) => {
       pageSize: 25,
       maxPages: 20,
       concurrency: 1,
-      pagesBySource: {receipts: 1},
+      pagesBySource: Object.fromEntries(SOURCE_KEYS.map((key) => [key, 1])),
       truncatedSources: [],
     },
     counts: {
@@ -197,7 +236,7 @@ test('CLI is dry-run by default and hard-locks the isolated project', () => {
   assert.equal(options.execute, false);
   assert.equal(options.authMode, 'firebase-cli');
   assert.throws(() => parseArguments([
-    '--project', 'fatin-test', '--mode', 'legacy',
+    '--project', 'wrong-project', '--mode', 'legacy',
   ]), /accepts only project fatins/);
   assert.throws(() => parseArguments(baseArgs([
     '--mode', 'derivative-read',
@@ -213,8 +252,8 @@ test('CLI is dry-run by default and hard-locks the isolated project', () => {
 test('canonical-only CLI binds reviewed verification and execution hashes', () => {
   const options = parseArguments(baseArgs([
     '--mode', 'canonical-only',
-    '--verification-report', 'verification.json',
-    '--verification-fingerprint', 'd'.repeat(64),
+    '--canonical-audit-report', 'canonical-audit.json',
+    '--canonical-audit-fingerprint', 'd'.repeat(64),
     '--expected-candidates', '7',
   ]));
   assert.equal(options.expectedCandidates, 7);
@@ -277,29 +316,27 @@ test('control contracts are exact v1-write, canonical-only, and legacy', () => {
   assert.equal(controlKind({mode: 'v1-write'}), 'malformed');
 });
 
-test('zero-error all-source verification binds every immutable proof', () => {
-  const report = verificationReport();
-  const evidence = validateVerificationReport({
+test('zero-error active audit binds every immutable proof and version', () => {
+  const report = canonicalAuditReport();
+  const evidence = validateCanonicalAuditReport({
     report,
     fingerprint: report.planFingerprint,
     expectedCandidates: 1,
     webmasterUid: UID,
   });
-  assert.equal(evidence.verifiedReceipts, 1);
+  assert.equal(evidence.auditedTargets, 1);
   assert.deepEqual(evidence.sourceKeys, SOURCE_KEYS);
   assert.match(evidence.proofHash, /^[a-f0-9]{64}$/);
-  for (const proof of [
-    'generatedObjectsPresent',
-    'legacySourceUnchanged',
-    'legacyGeneralImageUrlUnchanged',
-    'itemOriginalGenerated',
-    'itemCardGenerated',
-    'itemCard2xGenerated',
+  for (const breakEntry of [
+    (entry) => { entry.objectProofs[0].verified = false; },
+    (entry) => { entry.targetVersion = ''; },
+    (entry) => { entry.manifestVersion = ''; },
+    (entry) => { entry.descriptorFingerprint = ''; },
   ]) {
-    const brokenEntry = verifiedEntry();
-    brokenEntry.proofs[proof] = false;
-    const broken = verificationReport([brokenEntry]);
-    assert.throws(() => validateVerificationReport({
+    const brokenEntry = auditedEntry();
+    breakEntry(brokenEntry);
+    const broken = canonicalAuditReport([brokenEntry]);
+    assert.throws(() => validateCanonicalAuditReport({
       report: broken,
       fingerprint: broken.planFingerprint,
       expectedCandidates: 1,
@@ -308,7 +345,40 @@ test('zero-error all-source verification binds every immutable proof', () => {
   }
 });
 
-test('token activation proves relational paths, root receipts, and nested non-rendering', () => {
+test('transaction fence rejects target, manifest, or owner version drift', () => {
+  const report = canonicalAuditReport();
+  const evidence = validateCanonicalAuditReport({
+    report,
+    fingerprint: report.planFingerprint,
+    expectedCandidates: 1,
+    webmasterUid: UID,
+  });
+  const snapshots = evidence.bindingDocuments.map((binding) => {
+    const [seconds, nanoseconds] = binding.version.split(':').map(Number);
+    return {
+      exists: true,
+      ref: {path: binding.path},
+      updateTime: {seconds, nanoseconds},
+    };
+  });
+  assert.deepEqual(
+    evidence.bindingDocuments.filter(({type}) => type === 'owner'),
+    [{type: 'owner', path: `users/${UID}`, version: '9:000000001'}]
+  );
+  assert.equal(assertCanonicalBindingSnapshotsFresh({
+    bindings: evidence.bindingDocuments,
+    snapshots,
+  }), true);
+  assert.throws(() => assertCanonicalBindingSnapshotsFresh({
+    bindings: evidence.bindingDocuments,
+    snapshots: snapshots.map((snapshot, index) => index === 0 ? {
+      ...snapshot,
+      updateTime: {seconds: 99, nanoseconds: 0},
+    } : snapshot),
+  }), /changed after audit/);
+});
+
+test('token activation proves relational paths, audited roots, and nested non-rendering', () => {
   const coverage = tokenCoverageFixture();
   assert.deepEqual(coverage.issues, []);
   assert.deepEqual(coverage.counts, {
@@ -323,27 +393,28 @@ test('token activation proves relational paths, root receipts, and nested non-re
     nestedFoeLegacyOccurrences: 1,
     nestedFoeLegacyUniquePaths: 1,
   });
-  const report = verificationReport([
-    verifiedEntry({
-      receiptId: 'r_custom',
+  const report = canonicalAuditReport([
+    auditedEntry({
       sourceKey: 'custom-token-templates',
+      targetPath: 'grigliata_tokens/custom-template',
     }),
-    verifiedEntry({receiptId: 'r_foe', sourceKey: 'foe-tokens'}),
+    auditedEntry({
+      sourceKey: 'foe-tokens',
+      targetPath: 'grigliata_tokens/foe-token',
+    }),
   ]);
-  report.entries[0].targetPath = 'grigliata_tokens/custom-template';
-  report.entries[1].targetPath = 'grigliata_tokens/foe-token';
   const evidence = assertTokenActivationCoverage({
     coverage,
-    verificationReport: report,
+    auditReport: report,
   });
   assert.equal(evidence.counts.nestedFoeLegacyOccurrences, 1);
   assert.match(evidence.relationshipHash, /^[a-f0-9]{64}$/);
   assert.match(evidence.placementReferenceHash, /^[a-f0-9]{64}$/);
-  assert.match(evidence.receiptTargetsHash, /^[a-f0-9]{64}$/);
+  assert.match(evidence.auditTargetsHash, /^[a-f0-9]{64}$/);
   assert.match(evidence.runtimeProofHash, /^[a-f0-9]{64}$/);
 });
 
-test('token activation fails closed on runtime or receipt coverage gaps', () => {
+test('token activation fails closed on runtime or audit coverage gaps', () => {
   const runtimeBlocked = tokenCoverageFixture({
     ...completeRuntimeProof,
     characterTokensResolveUserCanonical: false,
@@ -351,21 +422,71 @@ test('token activation fails closed on runtime or receipt coverage gaps', () => 
   assert.ok(runtimeBlocked.issues.includes(
     'token-runtime-relational-proof-missing'
   ));
+
+  const stalePlacement = evaluateTokenCoverage({
+    runtimeProof: completeRuntimeProof,
+    storageContext: {
+      expectedBucket: PRODUCTION_STORAGE_BUCKET,
+      allowLoopback: false,
+    },
+    tokens: [{
+      id: 'placed-foe',
+      tokenType: 'foe',
+      ownerUid: 'dm-one',
+      imageUrl: firebaseStorageUrl('foes/current.png'),
+      media: canonicalMedia('d'),
+    }],
+    placements: [{
+      id: 'map-one__placed-foe',
+      backgroundId: 'map-one',
+      tokenId: 'placed-foe',
+      ownerUid: 'dm-one',
+      imageUrl: firebaseStorageUrl('foes/stale.png'),
+    }],
+  });
+  assert.ok(stalePlacement.issues.includes('placement-token-path-mismatch'));
+  const foreignPlacement = evaluateTokenCoverage({
+    runtimeProof: completeRuntimeProof,
+    storageContext: {
+      expectedBucket: PRODUCTION_STORAGE_BUCKET,
+      allowLoopback: false,
+    },
+    tokens: [{
+      id: 'placed-foe',
+      tokenType: 'foe',
+      ownerUid: 'dm-one',
+      imageUrl: firebaseStorageUrl('foes/current.png'),
+      media: canonicalMedia('e'),
+    }],
+    placements: [{
+      id: 'map-one__placed-foe',
+      backgroundId: 'map-one',
+      tokenId: 'placed-foe',
+      ownerUid: 'dm-one',
+      imageUrl: firebaseStorageUrl(
+        'foes/stale.png',
+        'foreign-project.firebasestorage.app'
+      ),
+    }],
+  });
+  assert.ok(foreignPlacement.issues.includes(
+    'placement-media-reference-invalid'
+  ));
   assert.throws(() => assertTokenActivationCoverage({
     coverage: runtimeBlocked,
-    verificationReport: verificationReport([]),
+    auditReport: canonicalAuditReport([]),
   }), /token coverage is blocked/);
 
   const coverage = tokenCoverageFixture();
   assert.throws(() => assertTokenActivationCoverage({
     coverage,
-    verificationReport: verificationReport([
-      verifiedEntry({sourceKey: 'custom-token-templates'}),
+    auditReport: canonicalAuditReport([
+      auditedEntry({sourceKey: 'custom-token-templates'}),
     ]),
-  }), /token-receipt-coverage-mismatch/);
+  }), /token-audit-coverage-mismatch/);
 });
 
-test('music activation binds every current track to one verified receipt', () => {
+test('music activation binds every current track to one audited target', () => {
   const tracks = Array.from({length: 7}, (_, index) => ({
     id: `track-${index + 1}`,
     createdBy: 'dm-one',
@@ -373,33 +494,32 @@ test('music activation binds every current track to one verified receipt', () =>
     media: canonicalMedia(String(index + 1)),
   }));
   const coverage = evaluateMusicCoverage({tracks});
-  const report = verificationReport(tracks.map((track, index) => (
-    verifiedEntry({
-      receiptId: `r_music_${index + 1}`,
+  const report = canonicalAuditReport(tracks.map((track) => (
+    auditedEntry({
       sourceKey: 'music-tracks',
       targetPath: `grigliata_music_tracks/${track.id}`,
     })
   )));
   const evidence = assertMusicActivationCoverage({
     coverage,
-    verificationReport: report,
+    auditReport: report,
   });
   assert.deepEqual(evidence.counts, {tracks: 7, canonicalTracks: 7});
   assert.match(evidence.relationshipHash, /^[a-f0-9]{64}$/);
-  assert.match(evidence.receiptTargetsHash, /^[a-f0-9]{64}$/);
+  assert.match(evidence.auditTargetsHash, /^[a-f0-9]{64}$/);
 
-  const missingReceipt = verificationReport(report.entries.slice(1));
+  const missingReceipt = canonicalAuditReport(report.entries.slice(1));
   assert.throws(() => assertMusicActivationCoverage({
     coverage,
-    verificationReport: missingReceipt,
-  }), /music-receipt-coverage-mismatch/);
+    auditReport: missingReceipt,
+  }), /music-audit-coverage-mismatch/);
   assert.throws(() => assertMusicActivationCoverage({
     coverage: evaluateMusicCoverage({
       tracks: tracks.map((track, index) => (
         index === 0 ? {...track, media: null} : track
       )),
     }),
-    verificationReport: report,
+    auditReport: report,
   }), /music-track-canonical-missing/);
 });
 
@@ -485,14 +605,12 @@ test('post-activation music stream is canonical v2 and legacy-free', async () =>
 
 test('transaction-time runtime proof rejects placement or music drift', () => {
   const tokenCoverage = tokenCoverageFixture();
-  const tokenReport = verificationReport([
-    verifiedEntry({
-      receiptId: 'r_custom',
+  const tokenReport = canonicalAuditReport([
+    auditedEntry({
       sourceKey: 'custom-token-templates',
       targetPath: 'grigliata_tokens/custom-template',
     }),
-    verifiedEntry({
-      receiptId: 'r_foe',
+    auditedEntry({
       sourceKey: 'foe-tokens',
       targetPath: 'grigliata_tokens/foe-token',
     }),
@@ -504,19 +622,18 @@ test('transaction-time runtime proof rejects placement or music drift', () => {
     media: canonicalMedia('9'),
   }];
   const musicCoverage = evaluateMusicCoverage({tracks});
-  const musicReport = verificationReport([verifiedEntry({
-    receiptId: 'r_music',
+  const musicReport = canonicalAuditReport([auditedEntry({
     sourceKey: 'music-tracks',
     targetPath: 'grigliata_music_tracks/track-one',
   })]);
   const verificationEvidence = {
     tokenCoverage: assertTokenActivationCoverage({
       coverage: tokenCoverage,
-      verificationReport: tokenReport,
+      auditReport: tokenReport,
     }),
     musicCoverage: assertMusicActivationCoverage({
       coverage: musicCoverage,
-      verificationReport: musicReport,
+      auditReport: musicReport,
     }),
   };
   assert.doesNotThrow(() => assertRuntimeCoverageFresh({
@@ -555,9 +672,14 @@ test('transaction-time runtime proof rejects placement or music drift', () => {
   }), /changed after approval/);
 });
 
-test('verification rejects source, count, owner, fingerprint, and freshness drift', () => {
-  const report = verificationReport();
+test('active audit rejects source, count, owner, fingerprint, and freshness drift', () => {
+  const report = canonicalAuditReport();
+  assert.notEqual(computePlanFingerprint({
+    ...report,
+    canonicalAuditVersion: CANONICAL_AUDIT_VERSION + 1,
+  }), report.planFingerprint);
   const cases = [
+    {...report, canonicalAuditVersion: CANONICAL_AUDIT_VERSION + 1},
     {...report, sourceKeys: SOURCE_KEYS.slice(1)},
     {...report, expectedCandidates: 2},
     {...report, catalogOwnerUid: 'other'},
@@ -565,29 +687,49 @@ test('verification rejects source, count, owner, fingerprint, and freshness drif
   ];
   for (const value of cases) {
     value.planFingerprint = computePlanFingerprint(value);
-    assert.throws(() => validateVerificationReport({
+    assert.throws(() => validateCanonicalAuditReport({
       report: value,
       fingerprint: value.planFingerprint,
       expectedCandidates: 1,
       webmasterUid: UID,
     }), /zero-error, all-source/);
   }
-  assert.throws(() => validateVerificationReport({
+  assert.throws(() => validateCanonicalAuditReport({
     report,
     fingerprint: 'f'.repeat(64),
     expectedCandidates: 1,
     webmasterUid: UID,
   }), /zero-error, all-source/);
-  assert.equal(assertFreshVerification({reviewed: report, fresh: report}), report);
-  assert.throws(() => assertFreshVerification({
+  assert.equal(assertFreshCanonicalAudit({reviewed: report, fresh: report}), report);
+  assert.throws(() => assertFreshCanonicalAudit({
     reviewed: report,
     fresh: {...report, entries: []},
   }), /stale/);
 });
 
-test('fingerprinted control plans bind current state and verification evidence', () => {
-  const report = verificationReport();
-  const evidence = validateVerificationReport({
+test('active audit accepts global ownership bound by the attached manifest', () => {
+  const original = auditedEntry();
+  const {auditId, auditHash, status, issues, ...core} = original;
+  const attachedCore = {...core, ownerResolution: 'attached-manifest'};
+  const attachedHash = canonicalHash(attachedCore);
+  const report = canonicalAuditReport([{
+    auditId: `a_${attachedHash.slice(0, 40)}`,
+    ...attachedCore,
+    auditHash: attachedHash,
+    status,
+    issues,
+  }]);
+  assert.doesNotThrow(() => validateCanonicalAuditReport({
+    report,
+    fingerprint: report.planFingerprint,
+    expectedCandidates: 1,
+    webmasterUid: UID,
+  }));
+});
+
+test('fingerprinted control plans bind current state and canonical evidence', () => {
+  const report = canonicalAuditReport();
+  const evidence = validateCanonicalAuditReport({
     report,
     fingerprint: report.planFingerprint,
     expectedCandidates: 1,
@@ -596,10 +738,14 @@ test('fingerprinted control plans bind current state and verification evidence',
   const plan = buildPlan({
     projectId: 'fatins',
     mode: 'canonical-only',
-    snapshot: {exists: false, data: null, updateTime: null},
+    snapshot: {
+      exists: true,
+      data: V1_WRITE_CONTROL,
+      updateTime: '2026-08-01T00:00:00.000Z',
+    },
     verificationEvidence: evidence,
   });
-  assert.equal(plan.beforeKind, 'legacy');
+  assert.equal(plan.beforeKind, 'v1-write');
   assert.deepEqual(plan.afterControl, CANONICAL_ONLY_CONTROL);
   assert.doesNotThrow(() => assertApprovedPlan({
     approved: plan,
@@ -613,14 +759,14 @@ test('fingerprinted control plans bind current state and verification evidence',
   }), /no longer matches/);
   const rollback = buildPlan({
     projectId: 'fatins',
-    mode: 'legacy',
+    mode: 'v1-write',
     snapshot: {
       exists: true,
       data: CANONICAL_ONLY_CONTROL,
       updateTime: '2026-08-01T00:00:00.000Z',
     },
   });
-  assert.deepEqual(rollback.afterControl, LEGACY_CONTROL);
+  assert.deepEqual(rollback.afterControl, V1_WRITE_CONTROL);
   assert.equal(rollback.verificationEvidence, null);
   const writeStage = buildPlan({
     projectId: 'fatins',
@@ -635,20 +781,32 @@ test('control plan refuses malformed and already-selected control states', () =>
   assert.throws(() => buildPlan({
     projectId: 'fatins',
     mode: 'canonical-only',
+    snapshot: {exists: false, data: null, updateTime: null},
+    verificationEvidence: {auditedTargets: 1},
+  }), /exact active v1-write/);
+  assert.throws(() => buildPlan({
+    projectId: 'fatins',
+    mode: 'canonical-only',
+    snapshot: {exists: true, data: LEGACY_CONTROL, updateTime: null},
+    verificationEvidence: {auditedTargets: 1},
+  }), /exact active v1-write/);
+  assert.throws(() => buildPlan({
+    projectId: 'fatins',
+    mode: 'canonical-only',
     snapshot: {exists: true, data: {mode: 'v1-write'}, updateTime: null},
-    verificationEvidence: {verifiedReceipts: 1},
+    verificationEvidence: {auditedTargets: 1},
   }), /malformed/);
   assert.throws(() => buildPlan({
     projectId: 'fatins',
     mode: 'canonical-only',
     snapshot: {exists: true, data: CANONICAL_ONLY_CONTROL, updateTime: null},
-    verificationEvidence: {verifiedReceipts: 1},
+    verificationEvidence: {auditedTargets: 1},
   }), /already canonical-only/);
   assert.throws(() => buildPlan({
     projectId: 'fatins',
     mode: 'legacy',
     snapshot: {exists: false, data: null, updateTime: null},
-  }), /already legacy/);
+  }), /legacy rollback is not supported/);
   assert.throws(() => buildPlan({
     projectId: 'fatins',
     mode: 'v1-write',
@@ -658,7 +816,7 @@ test('control plan refuses malformed and already-selected control states', () =>
       updateTime: null,
     },
   }), /already v1-write/);
-  assert.throws(() => buildPlan({
+  const safeReadRollback = buildPlan({
     projectId: 'fatins',
     mode: 'v1-write',
     snapshot: {
@@ -666,5 +824,19 @@ test('control plan refuses malformed and already-selected control states', () =>
       data: CANONICAL_ONLY_CONTROL,
       updateTime: null,
     },
-  }), /only from exact legacy/);
+  });
+  assert.equal(safeReadRollback.beforeKind, 'canonical-only');
+  assert.deepEqual(safeReadRollback.afterControl, V1_WRITE_CONTROL);
+  assert.throws(() => buildPlan({
+    projectId: 'fatins',
+    mode: 'v1-write',
+    snapshot: {
+      exists: true,
+      data: {
+        ...CANONICAL_ONLY_CONTROL,
+        enabledUids: ['partial'],
+      },
+      updateTime: null,
+    },
+  }), /canonical-only rollback state/);
 });

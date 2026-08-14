@@ -1,9 +1,8 @@
 // DM Foes Hub: create, list, expand, edit, delete foes in Firestore "foes" collection
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { auth, db } from '../firebaseConfig';
 import {
-  addDoc,
   collection,
   deleteDoc,
   doc,
@@ -32,6 +31,16 @@ import {
 } from '../../data/functions/backendOperationIntentStore';
 import { isTask07MediaV1WriteEnabled } from '../../data/media/mediaFeatureFlags';
 import useTask07MediaOperationOwner from '../../data/media/useTask07MediaOperationOwner';
+import {
+  buildTask07NestedMediaTarget,
+  task07EmbeddedMediaBinding,
+  withoutTask07EmbeddedMediaProjection,
+  withTask07EmbeddedMedia,
+} from '../../data/media/embeddedMediaProjection';
+import {
+  runTask07EmbeddedOperationSequence,
+  task07EmbeddedFileFingerprint,
+} from '../../data/media/embeddedMediaRetry';
 import MediaImage, { hasMediaAsset } from '../common/MediaImage';
 import {
   buildCanonicalFoeClientPayload,
@@ -75,6 +84,20 @@ const FoeRow = ({ foe, onEdit, onDelete, onDuplicate }) => {
   const params = useMemo(() => computeParamTotals(foe?.Parametri || {}), [foe?.Parametri]);
   const hpTxt = `${Number(foe?.stats?.hpCurrent ?? foe?.stats?.hpTotal ?? 0)}/${Number(foe?.stats?.hpTotal ?? 0)}`;
   const manaTxt = `${Number(foe?.stats?.manaCurrent ?? foe?.stats?.manaTotal ?? 0)}/${Number(foe?.stats?.manaTotal ?? 0)}`;
+  const renderedTechniques = useMemo(
+    () => (Array.isArray(foe?.tecniche) ? foe.tecniche : [])
+      .map((entry) => withTask07EmbeddedMedia(
+        foe,
+        entry,
+        'foe-technique'
+      )),
+    [foe]
+  );
+  const renderedSpells = useMemo(
+    () => (Array.isArray(foe?.spells) ? foe.spells : [])
+      .map((entry) => withTask07EmbeddedMedia(foe, entry, 'foe-spell')),
+    [foe]
+  );
   return (
     <div className="rounded-xl border border-white/10 bg-white/5 overflow-hidden">
       <div
@@ -164,11 +187,11 @@ const FoeRow = ({ foe, onEdit, onDelete, onDuplicate }) => {
             <div className="mt-3 text-[12px] text-slate-300">{foe.notes}</div>
           )}
           {/* Tecniche */}
-          {Array.isArray(foe?.tecniche) && foe.tecniche.length > 0 && (
+          {renderedTechniques.length > 0 && (
             <div className="mt-4 rounded-xl border border-fuchsia-700/40 bg-fuchsia-900/10 p-3">
               <SectionTitle>Tecniche</SectionTitle>
               <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
-                {foe.tecniche.map((t, i) => (
+                {renderedTechniques.map((t, i) => (
                   <div key={i} className="flex items-start gap-3 rounded-lg border border-slate-700/50 bg-slate-900/40 p-3">
                     <div className="w-14 h-14 rounded-md overflow-hidden border border-slate-700/60 bg-slate-800/60 shrink-0 flex items-center justify-center">
                       {hasMediaAsset(t, { variant: 'thumbnail' }) ? (
@@ -204,11 +227,11 @@ const FoeRow = ({ foe, onEdit, onDelete, onDuplicate }) => {
             </div>
           )}
           {/* Spells */}
-          {Array.isArray(foe?.spells) && foe.spells.length > 0 && (
+          {renderedSpells.length > 0 && (
             <div className="mt-4 rounded-xl border border-sky-700/40 bg-sky-900/10 p-3">
               <SectionTitle>Spells</SectionTitle>
               <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
-                {foe.spells.map((s, i) => (
+                {renderedSpells.map((s, i) => (
                   <div key={i} className="flex items-start gap-3 rounded-lg border border-slate-700/50 bg-slate-900/40 p-3">
                     <div className="w-14 h-14 rounded-md overflow-hidden border border-slate-700/60 bg-slate-800/60 shrink-0 flex items-center justify-center">
                       {hasMediaAsset(s, { variant: 'thumbnail' }) ? (
@@ -266,6 +289,9 @@ const FoesHub = () => {
   const [dupBusy, setDupBusy] = useState(false);
   const [dupError, setDupError] = useState('');
   const pendingFoeRetirementRef = useRef(null);
+  const pendingFoeCreateRef = useRef(null);
+  const completedNestedOperationsRef = useRef(new Set());
+  const completedRootUploadRef = useRef(null);
 
   // Subscribe foes
   useEffect(() => {
@@ -298,7 +324,7 @@ const FoesHub = () => {
     })();
   }, []);
 
-  const newFoeFromSchema = () => {
+  const newFoeFromSchema = useCallback(() => {
     const p = deepClone(schema?.Parametri || {});
     const st = deepClone(schema?.stats || {});
     // Minimal defaults
@@ -315,15 +341,21 @@ const FoesHub = () => {
       spells: deepClone(schema?.spells || {}),
       inventory: [],
     };
-  };
+  }, [schema]);
 
   const handleCreate = () => {
+    pendingFoeCreateRef.current = null;
+    completedNestedOperationsRef.current.clear();
+    completedRootUploadRef.current = null;
     setEditing(null);
     setModalError('');
     setModalOpen(true);
   };
 
   const handleEdit = (foe) => {
+    pendingFoeCreateRef.current = null;
+    completedNestedOperationsRef.current.clear();
+    completedRootUploadRef.current = null;
     setEditing(foe);
     setModalError('');
     setModalOpen(true);
@@ -376,10 +408,60 @@ const FoesHub = () => {
       setBusy(true);
       setError('');
       setModalError('');
-      const { imageFile, removeImage, originalImageUrl, originalImagePath } = options;
-      const currentFoe = editing?.id
-        ? foes.find((foe) => foe.id === editing.id) || null
+      const {
+        imageFile: requestedImageFile,
+        removeImage,
+        originalImageUrl,
+        originalImagePath,
+      } = options;
+      const pendingFoeAtAttemptStart = !editing?.id
+        ? pendingFoeCreateRef.current
         : null;
+      const foeRef = editing?.id
+        ? doc(db, 'foes', editing.id)
+        : pendingFoeAtAttemptStart?.ref || doc(collection(db, 'foes'));
+      const parentExistedAtAttemptStart = Boolean(
+        editing?.id || pendingFoeAtAttemptStart?.ref
+      );
+      let parentSnapshotAtAttemptStart = null;
+      let currentFoe = null;
+      if (parentExistedAtAttemptStart) {
+        const current = await getDoc(foeRef);
+        if (!current.exists()) {
+          if (pendingFoeAtAttemptStart?.ref) {
+            pendingFoeCreateRef.current = null;
+            completedNestedOperationsRef.current.clear();
+            completedRootUploadRef.current = null;
+          }
+          throw new Error('The foe no longer exists. Reopen the form.');
+        }
+        parentSnapshotAtAttemptStart = current.data();
+        currentFoe = {id: current.id, ...parentSnapshotAtAttemptStart};
+        if (pendingFoeAtAttemptStart?.ref) {
+          pendingFoeCreateRef.current = {ref: foeRef, data: currentFoe};
+        }
+      }
+      const rootUploadKey = requestedImageFile
+        ? task07EmbeddedFileFingerprint(requestedImageFile)
+        : null;
+      const rootMediaAlreadyCommitted = Boolean(
+        rootUploadKey
+        && completedRootUploadRef.current === rootUploadKey
+        && hasMediaAsset(currentFoe)
+      );
+      const imageFile = rootMediaAlreadyCommitted ? null : requestedImageFile;
+      const nestedEntries = [
+        ...(Array.isArray(foeData?.tecniche) ? foeData.tecniche : []),
+        ...(Array.isArray(foeData?.spells) ? foeData.spells : []),
+      ];
+      const hasNestedImageUpload = nestedEntries.some((entry) => entry?.imageFile);
+      const task07NestedWriteEnabled = hasNestedImageUpload && (
+        await isTask07MediaV1WriteEnabled({
+          purpose: 'foe',
+          role: 'dm',
+          uid: auth.currentUser?.uid || '',
+        })
+      );
       const task07WriteEnabled = Boolean(imageFile && !removeImage) && (
         await isTask07MediaV1WriteEnabled({
           purpose: 'foe',
@@ -401,7 +483,7 @@ const FoesHub = () => {
       }
 
       // Keep File references for nested items; we'll replace arrays after upload
-      const canonicalEdit = Boolean(editing?.id) && (
+      const canonicalEdit = parentExistedAtAttemptStart && (
         imageSave.binding.status !== 'none'
         || imageSave.mode === 'canonical-upload'
         || imageSave.mode === 'canonical-remove'
@@ -419,18 +501,59 @@ const FoesHub = () => {
         hpCurrent: hpTotal,
         manaCurrent: manaTotal,
       };
+      const embeddedRegistry = currentFoe?.task07EmbeddedMedia
+        || editing?.task07EmbeddedMedia;
+      if (embeddedRegistry && typeof embeddedRegistry === 'object') {
+        basePayload.task07EmbeddedMedia = embeddedRegistry;
+      }
 
-      const uploadEntryImage = async (folder, entry) => {
-        let eUrl = entry.imageUrl || '';
-        let ePath = entry.imagePath || '';
-        if (entry.imageFile) {
-          const safe = (entry.name || folder).toString().trim().replace(/\s+/g, '_').slice(0, 40) || folder;
+      const nestedMediaOperations = [];
+
+      const uploadEntryImage = async (folder, entry, entryIndex) => {
+        const persistentEntry = withoutTask07EmbeddedMediaProjection(entry);
+        let eUrl = persistentEntry.imageUrl || '';
+        let ePath = persistentEntry.imagePath || '';
+        const targetKind = folder === 'tecniche'
+          ? 'foe-technique'
+          : 'foe-spell';
+        const target = buildTask07NestedMediaTarget({
+          parent: currentFoe || editing || {},
+          entry: persistentEntry,
+          entityId: foeRef.id,
+          targetKind,
+          entryIndex,
+        });
+        const binding = task07EmbeddedMediaBinding(
+          currentFoe || editing || {},
+          {...persistentEntry, task07MediaEntryId: target.entryId},
+          targetKind
+        );
+        if (persistentEntry.imageFile && task07NestedWriteEnabled) {
+          nestedMediaOperations.push({
+            action: 'upload',
+            entry: {...persistentEntry, task07MediaEntryId: target.entryId},
+            entryIndex,
+            file: persistentEntry.imageFile,
+            targetKind,
+          });
+          eUrl = normalizeImageUrl(eUrl);
+        } else if (persistentEntry.imageFile) {
+          const safe = (persistentEntry.name || folder).toString().trim().replace(/\s+/g, '_').slice(0, 40) || folder;
           const fname = `${safe}_${Date.now()}`;
           const path = `foes/${folder}/${fname}`;
-          ({ downloadUrl: eUrl } = await uploadLegacyImage(path, entry.imageFile));
+          ({ downloadUrl: eUrl } = await uploadLegacyImage(
+            path,
+            persistentEntry.imageFile
+          ));
           uploadedLegacyPaths.add(path);
           ePath = path;
-        } else if (entry.removeImage) {
+        } else if (persistentEntry.removeImage) {
+          if (binding?.media?.assetId) {
+            nestedMediaOperations.push({
+              action: 'retire',
+              assetId: binding.media.assetId,
+            });
+          }
           eUrl = '';
           ePath = '';
         } else {
@@ -438,7 +561,109 @@ const FoesHub = () => {
           eUrl = normalizeImageUrl(eUrl);
         }
         // Persist only relevant fields
-        return { name: entry.name || '', description: entry.description || '', danni: entry.danni || '', effetti: entry.effetti || '', imageUrl: eUrl, imagePath: ePath };
+        return {
+          name: persistentEntry.name || '',
+          description: persistentEntry.description || '',
+          danni: persistentEntry.danni || '',
+          effetti: persistentEntry.effetti || '',
+          imageUrl: eUrl,
+          imagePath: ePath,
+          ...(persistentEntry.task07MediaEntryId || task07NestedWriteEnabled || binding
+            ? {task07MediaEntryId: target.entryId}
+            : {}),
+        };
+      };
+
+      const commitNestedMediaOperations = async () => {
+        if (nestedMediaOperations.length === 0) return;
+        const actorUid = auth.currentUser?.uid || '';
+        const {
+          runTask07NestedMediaWriter,
+        } = await import(
+          /* webpackChunkName: "feature-task07-media" */
+          '../../data/media/embeddedMedia'
+        );
+        const {
+          getTask07MediaStatus,
+          retireTask07MediaAsset,
+        } = await import(
+          /* webpackChunkName: "feature-task07-media" */
+          '../../data/media/mediaPipeline'
+        );
+        const retiredAssets = new Set();
+        await runTask07EmbeddedOperationSequence({
+          completedKeys: completedNestedOperationsRef.current,
+          operations: nestedMediaOperations,
+          parentId: foeRef.id,
+          execute: async (operation) => {
+          if (operation.action === 'retire') {
+            if (retiredAssets.has(operation.assetId)) return;
+            retiredAssets.add(operation.assetId);
+            try {
+              await retireTask07MediaAsset(operation.assetId);
+            } catch (retirementError) {
+              const status = await getTask07MediaStatus(operation.assetId)
+                .catch(() => null);
+              if (!status || status.attached === true
+                || !['superseded', 'deleted'].includes(status.state)) {
+                throw retirementError;
+              }
+            }
+            return;
+          }
+          const lease = task07MediaOperationOwner.start(
+            'Nested foe media upload was replaced.'
+          );
+          try {
+            return await runTask07NestedMediaWriter({
+              actorUid,
+              role: 'dm',
+              ownerUid: actorUid,
+              entityId: foeRef.id,
+              parent: currentFoe || editing || {},
+              entry: operation.entry,
+              targetKind: operation.targetKind,
+              entryIndex: operation.entryIndex,
+              kind: 'foe',
+              file: operation.file,
+              signal: lease.signal,
+            });
+          } finally {
+            lease.release();
+          }
+          },
+        });
+      };
+
+      const queueRemovedNestedBindings = (withTec, withSp) => {
+        const retainedByKind = new Map([
+          ['foe-technique', new Set(withTec
+            .map((entry) => entry?.task07MediaEntryId)
+            .filter(Boolean))],
+          ['foe-spell', new Set(withSp
+            .map((entry) => entry?.task07MediaEntryId)
+            .filter(Boolean))],
+        ]);
+        [
+          ['foe-technique', currentFoe?.tecniche],
+          ['foe-spell', currentFoe?.spells],
+        ].forEach(([targetKind, entries]) => (
+          Array.isArray(entries) ? entries : []
+        ).forEach((entry) => {
+          if (retainedByKind.get(targetKind)
+            ?.has(entry?.task07MediaEntryId)) return;
+          const binding = task07EmbeddedMediaBinding(
+            currentFoe || {},
+            entry,
+            targetKind
+          );
+          if (binding?.media?.assetId) {
+            nestedMediaOperations.push({
+              action: 'retire',
+              assetId: binding.media.assetId,
+            });
+          }
+        }));
       };
 
       const cleanupReplacedEntryImages = async (withTec, withSp) => {
@@ -476,17 +701,15 @@ const FoesHub = () => {
 
       if (imageSave.mode === 'canonical-upload') {
         const actorUid = auth.currentUser?.uid || '';
-        const foeRef = editing?.id
-          ? doc(db, 'foes', editing.id)
-          : doc(collection(db, 'foes'));
         const withTec = Array.isArray(basePayload.tecniche)
-          ? await Promise.all(basePayload.tecniche.map((entry) => uploadEntryImage('tecniche', entry)))
+          ? await Promise.all(basePayload.tecniche.map((entry, index) => uploadEntryImage('tecniche', entry, index)))
           : [];
         const withSp = Array.isArray(basePayload.spells)
-          ? await Promise.all(basePayload.spells.map((entry) => uploadEntryImage('spells', entry)))
+          ? await Promise.all(basePayload.spells.map((entry, index) => uploadEntryImage('spells', entry, index)))
           : [];
         basePayload.tecniche = withTec;
         basePayload.spells = withSp;
+        queueRemovedNestedBindings(withTec, withSp);
 
         const {
           describeTask07ConsumerOutcome,
@@ -540,19 +763,37 @@ const FoesHub = () => {
               previousAssetId: receiptPreviousAssetId,
               expectedRevision: receiptExpectedRevision,
               prepareEntity: async () => {
-                if (editing?.id) {
+                if (parentExistedAtAttemptStart) {
                   await updateDoc(foeRef, payload);
+                  if (pendingFoeAtAttemptStart?.ref) {
+                    pendingFoeCreateRef.current = {
+                      ref: foeRef,
+                      data: {...currentFoe, ...payload, id: foeRef.id},
+                    };
+                  }
                 } else {
                   await setDoc(foeRef, {
                     ...payload,
                     created_at: serverTimestamp(),
                   });
+                  pendingFoeCreateRef.current = {ref: foeRef, data: payload};
                 }
                 mediaMetadataCommitted = true;
               },
               ...(editing?.id ? {} : {
                 rollbackPreparedEntity: async () => {
-                  await deleteDoc(foeRef);
+                  if (parentExistedAtAttemptStart) {
+                    await setDoc(foeRef, parentSnapshotAtAttemptStart);
+                    pendingFoeCreateRef.current = {
+                      ref: foeRef,
+                      data: {id: foeRef.id, ...parentSnapshotAtAttemptStart},
+                    };
+                  } else {
+                    await deleteDoc(foeRef);
+                    pendingFoeCreateRef.current = null;
+                    completedNestedOperationsRef.current.clear();
+                    completedRootUploadRef.current = null;
+                  }
                   mediaMetadataCommitted = false;
                 },
               }),
@@ -562,9 +803,16 @@ const FoesHub = () => {
         } finally {
           operationLease.release();
         }
+        if (!task07ConsumerNeedsAttention(outcome)) {
+          completedRootUploadRef.current = rootUploadKey;
+        }
 
         await cleanupReplacedEntryImages(withTec, withSp);
+        await commitNestedMediaOperations();
 
+        pendingFoeCreateRef.current = null;
+        completedNestedOperationsRef.current.clear();
+        completedRootUploadRef.current = null;
         setModalOpen(false);
         setEditing(null);
         if (task07ConsumerNeedsAttention(outcome)) {
@@ -714,15 +962,16 @@ const FoesHub = () => {
       const withTec = storedRecoveryPayload
         ? storedRecoveryPayload.tecniche || []
         : Array.isArray(basePayload.tecniche)
-          ? await Promise.all(basePayload.tecniche.map((t) => uploadEntryImage('tecniche', t)))
+          ? await Promise.all(basePayload.tecniche.map((t, index) => uploadEntryImage('tecniche', t, index)))
           : [];
       const withSp = storedRecoveryPayload
         ? storedRecoveryPayload.spells || []
         : Array.isArray(basePayload.spells)
-          ? await Promise.all(basePayload.spells.map((s) => uploadEntryImage('spells', s)))
+          ? await Promise.all(basePayload.spells.map((s, index) => uploadEntryImage('spells', s, index)))
           : [];
       basePayload.tecniche = withTec;
       basePayload.spells = withSp;
+      queueRemovedNestedBindings(withTec, withSp);
 
       const payload = storedRecoveryPayload || {
         ...basePayload,
@@ -734,9 +983,8 @@ const FoesHub = () => {
         recoveryMarker.reconciliation.payload = payload;
       }
 
-      let docId = editing?.id;
+      let docId = editing?.id || pendingFoeCreateRef.current?.ref?.id;
       if (docId) {
-        const foeRef = doc(db, 'foes', docId);
         if (recoveryMarker) {
           await persistFoeRecoveryWithMarker({
             marker: recoveryMarker,
@@ -754,10 +1002,18 @@ const FoesHub = () => {
           await updateDoc(foeRef, payload);
         }
         mediaMetadataCommitted = true;
+        if (!editing?.id && pendingFoeCreateRef.current) {
+          pendingFoeCreateRef.current.data = {
+            ...currentFoe,
+            ...payload,
+            id: foeRef.id,
+          };
+        }
       } else {
-        const added = await addDoc(collection(db, 'foes'), { ...payload, created_at: serverTimestamp() });
-        docId = added.id;
+        await setDoc(foeRef, {...payload, created_at: serverTimestamp()});
+        docId = foeRef.id;
         mediaMetadataCommitted = true;
+        pendingFoeCreateRef.current = {ref: foeRef, data: payload};
       }
 
       // If we uploaded/replaced or removed, delete the original image from storage
@@ -779,7 +1035,11 @@ const FoesHub = () => {
       } catch (e) {
         console.warn('cleanup old foe image failed', e);
       }
+      await commitNestedMediaOperations();
 
+      pendingFoeCreateRef.current = null;
+      completedNestedOperationsRef.current.clear();
+      completedRootUploadRef.current = null;
       setModalOpen(false);
       setEditing(null);
     } catch (e) {
@@ -851,8 +1111,24 @@ const FoesHub = () => {
     }
   };
 
-  // Initial foe for modal
-  const initialForModal = editing ? editing : newFoeFromSchema();
+  // The parent registry is authoritative for embedded media. Project it into
+  // editor entries so canonical-only images remain previewable and removable
+  // without copying descriptors into the persisted nested arrays.
+  const initialForModal = useMemo(() => editing ? {
+    ...editing,
+    tecniche: (Array.isArray(editing.tecniche) ? editing.tecniche : [])
+      .map((entry) => withTask07EmbeddedMedia(
+        editing,
+        entry,
+        'foe-technique'
+      )),
+    spells: (Array.isArray(editing.spells) ? editing.spells : [])
+      .map((entry) => withTask07EmbeddedMedia(
+        editing,
+        entry,
+        'foe-spell'
+      )),
+  } : newFoeFromSchema(), [editing, newFoeFromSchema]);
 
   return (
     <div className="p-4 md:p-6 lg:p-8 text-white">
@@ -906,6 +1182,9 @@ const FoesHub = () => {
           }
         }
         pendingFoeRetirementRef.current = null;
+        pendingFoeCreateRef.current = null;
+        completedNestedOperationsRef.current.clear();
+        completedRootUploadRef.current = null;
         setModalOpen(false);
         setEditing(null);
         setModalError('');

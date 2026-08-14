@@ -133,6 +133,9 @@ const stripTask07References = (
   const output: UnknownRecord = {};
   seen.set(value, output);
   Object.entries(value).forEach(([key, entry]) => {
+    if (key === "task07EmbeddedMedia" || key === "task07MediaEntryId") {
+      return;
+    }
     const next = stripTask07References(entry, seen);
     if (next !== REMOVED) output[key] = next;
   });

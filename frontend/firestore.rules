@@ -1778,6 +1778,15 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    function hasNoTask07EmbeddedMedia(data) {
+      return !data.keys().hasAny(["task07EmbeddedMedia"]);
+    }
+
+    function task07EmbeddedMediaUnchanged(data, existingData) {
+      return data.get("task07EmbeddedMedia", null)
+        == existingData.get("task07EmbeddedMedia", null);
+    }
+
     match /legacy_media_cleanup/{cleanupId} {
       // Reference-removal receipts contain private Storage paths and are
       // created, retried, and settled exclusively by Cloud Functions.
@@ -1824,6 +1833,7 @@ service cloud.firestore {
     match /items/{docId} {
       allow read: if true;
       allow create: if isDMOrWebmaster()
+        && hasNoTask07EmbeddedMedia(request.resource.data)
         && hasValidOptionalTask07MediaReference(
           request.resource.data,
           "item",
@@ -1833,6 +1843,10 @@ service cloud.firestore {
           "items/" + docId
         );
       allow update: if isDMOrWebmaster()
+        && task07EmbeddedMediaUnchanged(
+          request.resource.data,
+          resource.data
+        )
         && (
           task07MediaAssetIdsUnchanged(
             request.resource.data,
@@ -1878,6 +1892,7 @@ service cloud.firestore {
     match /foes/{foeId} {
       allow get, list: if isDM();
       allow create: if isDM()
+        && hasNoTask07EmbeddedMedia(request.resource.data)
         && hasValidOptionalTask07MediaReference(
           request.resource.data,
           "foe",
@@ -1888,6 +1903,10 @@ service cloud.firestore {
         )
         && hasNoTask07FoeGeneralServerFields(request.resource.data);
       allow update: if isDM()
+        && task07EmbeddedMediaUnchanged(
+          request.resource.data,
+          resource.data
+        )
         && task07MediaReferencesUnchanged(
           request.resource.data,
           resource.data

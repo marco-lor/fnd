@@ -78,6 +78,7 @@ export const prepareTask07MediaUpload = async (input, {
     entityId: input.entityId,
     operationId: input.operationId,
     kind: input.kind,
+    ...(input.nestedTarget ? { nestedTarget: input.nestedTarget } : {}),
     sourceContentType: input.sourceContentType,
     sourceBytes: input.sourceBytes,
     ...(input.referenceScope ? { referenceScope: input.referenceScope } : {}),
@@ -279,11 +280,34 @@ const validatePipelineInput = (input) => {
   if (typeof input.kind !== 'string' || !input.kind.trim()) {
     throw new TypeError('Task 07 media pipeline requires a media kind.');
   }
-  if (input.kind === 'item' && !TASK07_ITEM_REFERENCE_SCOPES.includes(input.referenceScope)) {
+  const nestedCatalogSpell = input.nestedTarget?.kind === 'catalog-item-spell';
+  if ((input.kind === 'item' || nestedCatalogSpell)
+    && !TASK07_ITEM_REFERENCE_SCOPES.includes(input.referenceScope)) {
     throw new TypeError('Task 07 item media requires an explicit referenceScope.');
   }
-  if (input.kind !== 'item' && input.referenceScope != null && input.referenceScope !== '') {
+  if (input.kind !== 'item' && !nestedCatalogSpell
+    && input.referenceScope != null && input.referenceScope !== '') {
     throw new TypeError('Task 07 referenceScope is supported only for item media.');
+  }
+  if (input.nestedTarget != null) {
+    const target = input.nestedTarget;
+    const catalog = target?.kind === 'catalog-item-spell';
+    const foe = target?.kind === 'foe-technique' || target?.kind === 'foe-spell';
+    if (target?.schemaVersion !== 1
+      || typeof target.entryId !== 'string'
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(target.entryId)
+      || !['media', 'videoMedia'].includes(target.slot)
+      || (!catalog && !foe)
+      || (catalog && (typeof target.entryKey !== 'string'
+        || !target.entryKey.trim()
+        || target.entryIndex !== null))
+      || (foe && (target.entryKey !== null
+        || !Number.isSafeInteger(target.entryIndex)
+        || target.entryIndex < 0
+        || target.entryIndex > 99
+        || target.slot !== 'media'))) {
+      throw new TypeError('Task 07 nested media target is invalid.');
+    }
   }
   if (
     input.expectedRevision != null
@@ -312,6 +336,7 @@ export const runTask07MediaPipeline = async (input, {
     entityId,
     operationId,
     kind,
+    nestedTarget,
     referenceScope,
     previousAssetId = null,
     expectedRevision,
@@ -344,6 +369,7 @@ export const runTask07MediaPipeline = async (input, {
       entityId,
       operationId: operationId.trim(),
       kind,
+      nestedTarget,
       sourceContentType: file.type,
       sourceBytes: file.size,
       referenceScope,

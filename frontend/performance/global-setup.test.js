@@ -5,7 +5,11 @@ const {
   summarizeTriggerActivityText,
   waitForEmulators,
 } = require('./global-setup');
-const { collectTeardownEvidence } = require('./global-teardown');
+const {
+  collectTeardownEvidence,
+  reenableBackgroundTriggers,
+  TEARDOWN_TRIGGER_CONTROL_TIMEOUT_MS,
+} = require('./global-teardown');
 const playwrightConfig = require('./playwright.config');
 
 const invocation = (name) => `Beginning execution of "${name}"`;
@@ -13,6 +17,8 @@ const invocation = (name) => `Beginning execution of "${name}"`;
 test('seed trigger summary allows only bounded readiness activity', () => {
   const summary = summarizeTriggerActivityText([
     invocation('europe-west8-syncUserDirectory'),
+    invocation('europe-west8-cleanupLegacyRemovedFoeMedia'),
+    invocation('europe-west8-cleanupLegacyRemovedUserMedia'),
     invocation('europe-west8-cleanupTask07RemovedBackgroundMedia'),
     invocation('europe-west8-cleanupTask07RemovedCatalogItemMedia'),
     invocation('europe-west8-cleanupTask07RemovedFoeMedia'),
@@ -23,16 +29,19 @@ test('seed trigger summary allows only bounded readiness activity', () => {
     invocation('europe-west1-clientFirebaseConfig'),
     invocation('europe-west8-task07PrepareMediaUpload'),
     invocation('europe-west8-task07GetMediaStatus'),
+    invocation('europe-west8-task07ResolveCharacterMedia'),
     invocation('europe-west8-task07AttachMediaAsset'),
     invocation('europe-west8-task07PrepareFoeMediaRetirement'),
     invocation('europe-west8-task07CommitFoeMediaRetirement'),
     invocation('europe-west8-task07AbandonFoeMediaRetirement'),
   ].join('\n'));
 
-  assert.equal(summary.backgroundInvocations, 8);
+  assert.equal(summary.backgroundInvocations, 10);
   assert.equal(summary.cleanupInvocations, 0);
   assert.deepEqual(summary.counts, {
     'europe-west8-syncUserDirectory': 1,
+    'europe-west8-cleanupLegacyRemovedFoeMedia': 1,
+    'europe-west8-cleanupLegacyRemovedUserMedia': 1,
     'europe-west8-cleanupTask07RemovedBackgroundMedia': 1,
     'europe-west8-cleanupTask07RemovedCatalogItemMedia': 1,
     'europe-west8-cleanupTask07RemovedFoeMedia': 1,
@@ -43,6 +52,7 @@ test('seed trigger summary allows only bounded readiness activity', () => {
     'europe-west1-clientFirebaseConfig': 1,
     'europe-west8-task07PrepareMediaUpload': 1,
     'europe-west8-task07GetMediaStatus': 1,
+    'europe-west8-task07ResolveCharacterMedia': 1,
     'europe-west8-task07AttachMediaAsset': 1,
     'europe-west8-task07PrepareFoeMediaRetirement': 1,
     'europe-west8-task07CommitFoeMediaRetirement': 1,
@@ -75,6 +85,25 @@ test('seed trigger summary rejects non-sentinel background activity', () => {
   );
 });
 
+test('teardown re-enables triggers with the bounded heavy-runtime timeout', async () => {
+  const calls = [];
+  await reenableBackgroundTriggers({
+    lifecycleProjectId: 'demo-fnd-perf',
+    setBackgroundTriggersEnabledImpl: async (enabled, options) => {
+      calls.push({ enabled, options });
+    },
+  });
+
+  assert.equal(TEARDOWN_TRIGGER_CONTROL_TIMEOUT_MS, 180_000);
+  assert.deepEqual(calls, [{
+    enabled: true,
+    options: {
+      projectId: 'demo-fnd-perf',
+      timeoutMs: TEARDOWN_TRIGGER_CONTROL_TIMEOUT_MS,
+    },
+  }]);
+});
+
 test('seed trigger summary rejects every retired user-root trigger', () => {
   for (const trigger of [
     'europe-west8-updateHpTotal',
@@ -93,12 +122,12 @@ test('seed trigger summary rejects every retired user-root trigger', () => {
 
 test('seed trigger summary rejects an unexpected background invocation storm', () => {
   const contents = Array.from(
-    { length: 51 },
+    { length: 151 },
     () => invocation('europe-west8-syncUserDirectory')
   ).join('\n');
   assert.throws(
     () => summarizeTriggerActivityText(contents),
-    /produced 51 background invocations/
+    /produced 151 background invocations/
   );
 });
 

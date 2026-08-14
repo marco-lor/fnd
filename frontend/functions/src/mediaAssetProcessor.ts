@@ -25,6 +25,10 @@ import {
   validateTask07StagingMetadata,
 } from "./mediaAssetProcessorCore";
 import {createTask07DefaultMediaTransformer} from "./mediaProcessorRuntime";
+import {
+  processTask07TemporaryCleanup,
+  task07TemporaryCleanupFields,
+} from "./mediaTemporaryCleanup";
 
 const TASK07_PRODUCTION_PROJECT_ID = "fatins";
 const TASK07_PRODUCTION_STORAGE_REGION = "europe-central2";
@@ -326,10 +330,13 @@ export const uploadTask07GeneratedSet = async (input: {
         variants[object.role] = uploaded.get(object.path);
       }
     });
+    const pendingTemporaryPaths = await deleteTask07TemporaryPathsBestEffort(
+      temporaryPaths
+    );
     return {
       original,
       variants,
-      temporaryPaths,
+      temporaryPaths: pendingTemporaryPaths,
       finalPaths,
     };
   } catch (error) {
@@ -341,15 +348,25 @@ export const uploadTask07GeneratedSet = async (input: {
   }
 };
 
-const deletePaths = async (paths: readonly string[]): Promise<void> => {
+export const deleteTask07TemporaryPathsBestEffort = async (
+  paths: readonly string[]
+): Promise<string[]> => {
   const bucket = getStorage().bucket();
-  await Promise.all(paths.map(async (path) => {
+  const failures = await Promise.all(paths.map(async (path) => {
     try {
       await bucket.file(path).delete({ignoreNotFound: true});
+      return null;
     } catch {
-      // Cleanup is retried by the ledger/sweeper; never replace the root error.
+      // The manifest records generated temporary paths for the scheduled
+      // cleanup worker. Never replace the processor's root error here.
+      return path;
     }
   }));
+  return failures.filter((path): path is string => Boolean(path));
+};
+
+const deletePaths = async (paths: readonly string[]): Promise<void> => {
+  await deleteTask07TemporaryPathsBestEffort(paths);
 };
 
 const markFailure = async (input: {
@@ -372,6 +389,11 @@ const markFailure = async (input: {
       String(snapshot.get("generation")) !== input.sourceGeneration ||
       Number(snapshot.get("error.attempts")) !== input.attempt) return;
     const now = Timestamp.now();
+    const cleanupTemporaryPaths = [
+      ...(Array.isArray(snapshot.get("cleanupTemporaryPaths")) ?
+        snapshot.get("cleanupTemporaryPaths") as unknown[] : []),
+      ...input.temporaryPaths,
+    ].filter((path): path is string => typeof path === "string");
     const manifestUpdate: admin.firestore.UpdateData<
       admin.firestore.DocumentData
     > = {
@@ -382,7 +404,7 @@ const markFailure = async (input: {
         retryable: input.retryable,
         attempts: input.attempt,
       },
-      cleanupTemporaryPaths: [...new Set(input.temporaryPaths)],
+      ...task07TemporaryCleanupFields(cleanupTemporaryPaths, now),
       updatedAt: now,
     };
     if (!input.retryable) manifestUpdate.retention = {cleanupAfter: now};
@@ -452,7 +474,9 @@ export const task07ProcessMediaUpload = onObjectFinalized(
         transformer: createTask07DefaultMediaTransformer(),
         legacyMapBackfill: claimed.legacyMapBackfill,
       });
-      const eventId = event.id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 96);
+      const attemptSuffix = `-${claimed.attempt}`;
+      const eventId = `${event.id.replace(/[^A-Za-z0-9_-]/g, "_")
+        .slice(0, 96 - attemptSuffix.length)}${attemptSuffix}`;
       temporaryPaths.push(...result.objects.map(
         ({path}) => `${path}.tmp-${eventId}`
       ));
@@ -472,6 +496,12 @@ export const task07ProcessMediaUpload = onObjectFinalized(
           Number(current.get("error.attempts")) !== claimed.attempt) {
           throw new Task07ProcessorError("processor-claim-lost", true);
         }
+        const now = Timestamp.now();
+        const cleanupTemporaryPaths = [
+          ...(Array.isArray(current.get("cleanupTemporaryPaths")) ?
+            current.get("cleanupTemporaryPaths") as unknown[] : []),
+          ...promoted.temporaryPaths,
+        ].filter((path): path is string => typeof path === "string");
         transaction.update(ref, {
           schemaVersion: MEDIA_SCHEMA_VERSION,
           policyVersion: MEDIA_CONTRACT_VERSION,
@@ -487,7 +517,7 @@ export const task07ProcessMediaUpload = onObjectFinalized(
             variants: promoted.variants,
           },
           processing: FieldValue.delete(),
-          cleanupTemporaryPaths: FieldValue.delete(),
+          ...task07TemporaryCleanupFields(cleanupTemporaryPaths, now),
           error: {
             code: null,
             retryable: false,
@@ -503,16 +533,20 @@ export const task07ProcessMediaUpload = onObjectFinalized(
           updatedAt: FieldValue.serverTimestamp(),
         });
       });
-      await deletePaths(temporaryPaths);
+      await processTask07TemporaryCleanup(claimed.plan.assetId)
+        .catch(() => undefined);
       // The ready manifest is the commit point. Staging cleanup after that
       // point is best-effort and must not turn a successful commit into a
       // processor failure with ambiguous ownership of canonical outputs.
       await sourceFile.delete({ignoreNotFound: true}).catch(() => undefined);
     } catch (error) {
-      await deletePaths(task07ProcessorFailureCleanupPaths({
-        temporaryPaths,
-        promotedPaths: finalPaths,
-      }));
+      const pendingTemporaryPaths =
+        await deleteTask07TemporaryPathsBestEffort(
+          task07ProcessorFailureCleanupPaths({
+            temporaryPaths,
+            promotedPaths: finalPaths,
+          })
+        );
       const processorError = error instanceof Task07ProcessorError ?
         error :
         new Task07ProcessorError("processor-internal-failure", true);
@@ -524,7 +558,7 @@ export const task07ProcessMediaUpload = onObjectFinalized(
         code: processorError.code,
         retryable,
         sourceGeneration,
-        temporaryPaths,
+        temporaryPaths: pendingTemporaryPaths,
       });
       if (!retryable) {
         await sourceFile.delete({ignoreNotFound: true}).catch(() => undefined);
